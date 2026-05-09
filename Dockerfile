@@ -115,6 +115,7 @@ COPY --from=builder /out/openvibely /openvibely
 COPY --from=builder /tmp /tmp
 
 ENV PORT=3001 \
+    OPENVIBELY_APP_DATA_DIR=/data \
     DATABASE_PATH=/data/openvibely.db \
     PROJECT_REPO_ROOT=/data/repos \
     ENVIRONMENT=production \

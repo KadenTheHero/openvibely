@@ -191,7 +191,7 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 		switch req.Operation {
 		case llmcontracts.OperationDirect:
 			if openAIDirectClientEnabled(req.Agent) {
-				output, usage, err := a.adapter.CallDirect(req.Ctx, req.Message, req.Attachments, req.Agent, req.DisableTools)
+				output, usage, err := a.adapter.CallDirect(req.Ctx, req.Message, req.Attachments, req.Agent, req.WorkDir, req.DisableTools)
 				if shouldFallbackOpenAI(req.Agent, err) {
 					if req.DisableTools {
 						return canonicalResult(output, output, usage, err)

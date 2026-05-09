@@ -411,6 +411,11 @@ func (h *Handler) CreateProject(c echo.Context) error {
 			}
 		}
 	}
+	if h.memorySvc != nil {
+		if err := h.memorySvc.EnsureProject(c.Request().Context(), p.ID); err != nil {
+			log.Printf("[handler] CreateProject warning: memory setup failed project=%s: %v", p.ID, err)
+		}
+	}
 	log.Printf("[handler] CreateProject success id=%s, redirecting to tasks", p.ID)
 	redirectURL := "/tasks?project_id=" + p.ID
 	if isHTMX(c) {

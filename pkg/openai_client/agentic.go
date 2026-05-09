@@ -46,6 +46,9 @@ type AgenticOptions struct {
 	WorkDir          string // working directory for tool execution
 	MaxTurns         int    // max agentic loop iterations (0 means no limit)
 	DisableTools     bool   // when true, no tools are sent (chat orchestrator mode)
+	// SkipDefaultTools suppresses built-in local tools while still allowing
+	// ExtraTools (for example request-scoped runtime tools) to be sent.
+	SkipDefaultTools bool
 	ReasoningEffort  string
 	ReasoningSummary string // reasoning summary mode (e.g. auto, concise, detailed, none)
 	// AutoCompaction enables client-side Codex-style history compaction for
@@ -135,7 +138,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	var tools []ToolDefinition
 	if !opts.DisableTools {
-		tools = DefaultTools()
+		if !opts.SkipDefaultTools {
+			tools = DefaultTools()
+		}
 		if len(opts.ExtraTools) > 0 {
 			tools = append(tools, opts.ExtraTools...)
 		}

@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -91,6 +92,44 @@ func TestComposeRuntimeToolFilter_PlanBlocksActionToolsAndMutations(t *testing.T
 	}
 }
 
+func TestTaskStreamingRuntimeToolComposition_AllowsScopedFilesRuntimeTools(t *testing.T) {
+	rt := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_files"}},
+		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if name == "list_files" {
+				return "[]", true, false, nil
+			}
+			return "", false, false, nil
+		},
+		Filter: func(name string) (bool, bool) {
+			if name == "list_files" {
+				return true, true
+			}
+			return false, false
+		},
+		SkipDefaultTools: true,
+	}
+
+	extraTools := runtimeAnthropicTools(rt)
+	if len(extraTools) != 1 || extraTools[0].Name != "list_files" {
+		t.Fatalf("runtimeAnthropicTools() = %#v, want list_files", extraTools)
+	}
+
+	exec := composeRuntimeToolExecutor(nil, rt)
+	out, isError, err := exec(context.Background(), "list_files", json.RawMessage(`{}`))
+	if err != nil || isError || out != "[]" {
+		t.Fatalf("runtime executor = (%q, %v, %v), want non-error [] nil", out, isError, err)
+	}
+
+	filter := composeRuntimeToolFilter(nil, rt, false, models.ChatModeOrchestrate)
+	if !filter("list_files") {
+		t.Fatalf("expected runtime scoped file tool to be allowed")
+	}
+	if filter("Read") || filter("Bash") {
+		t.Fatalf("expected default tools to be hidden when SkipDefaultTools is true")
+	}
+}
+
 func TestShouldSkipDefaultToolsForChatMode(t *testing.T) {
 	rt := &llmcontracts.RuntimeTools{
 		Definitions: []llmcontracts.RuntimeToolDefinition{
@@ -109,6 +148,19 @@ func TestShouldSkipDefaultToolsForChatMode(t *testing.T) {
 	}
 	if shouldSkipDefaultToolsForChatMode(false, models.ChatModeOrchestrate, nil) {
 		t.Fatalf("did not expect skip without runtime tools")
+	}
+}
+
+func TestDirectRuntimeToolsDoNotRequestSkippingDefaultsByDefault(t *testing.T) {
+	rt := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "write_file"}},
+	}
+	if rt.SkipDefaultTools {
+		t.Fatalf("runtime tools should not skip defaults unless explicitly requested")
+	}
+	rt.SkipDefaultTools = true
+	if !rt.SkipDefaultTools {
+		t.Fatalf("expected explicit skip-default flag to be settable for scoped tool sessions")
 	}
 }
 

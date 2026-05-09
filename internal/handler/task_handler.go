@@ -214,9 +214,9 @@ func (h *Handler) CreateTask(c echo.Context) error {
 					RepeatInterval: repeatInterval,
 					Enabled:        true,
 				}
-					if sched.RepeatType == "" {
-						sched.RepeatType = models.RepeatDaily
-					}
+				if sched.RepeatType == "" {
+					sched.RepeatType = models.RepeatDaily
+				}
 				// For recurring schedules with a past RunAt, compute the next future occurrence immediately
 				if sched.RepeatType != models.RepeatOnce && !runAt.After(time.Now().UTC()) {
 					nextRun := sched.ComputeNextRun(time.Now().UTC())
@@ -443,12 +443,16 @@ func (h *Handler) resolveTaskChangesDiffOutput(ctx context.Context, task *models
 	if task.WorktreeBranch != "" {
 		executions, _ := h.execRepo.ListByTaskChronological(ctx, task.ID)
 
-		// For merged tasks, only preserved execution diff is available.
-		if task.MergeStatus == models.MergeStatusMerged {
+		// Active tasks with an existing worktree should prefer live diff even if
+		// merge_status is stale from a previous run/follow-up.
+		isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
+
+		// For non-active merged tasks, only preserved execution diff is available.
+		if !isActive && task.MergeStatus == models.MergeStatusMerged {
 			return latestNonEmptyDiff(executions)
 		}
 
-		// For unmerged tasks with an existing worktree, prefer live diff.
+		// For active/unmerged tasks with an existing worktree, prefer live diff.
 		if task.WorktreePath != "" {
 			if _, err := os.Stat(task.WorktreePath); err == nil {
 				project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
@@ -510,15 +514,19 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(c.Request().Context(), taskID)
 		}
 
-		// If merged, always show preserved diff from execution (live diff would be empty)
-		if task.MergeStatus == models.MergeStatusMerged {
+		// Active tasks with an existing worktree should prefer live diff even if
+		// merge_status is stale from a previous run/follow-up.
+		isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
+
+		// For non-active merged tasks, show the preserved execution diff.
+		if !isActive && task.MergeStatus == models.MergeStatusMerged {
 			diffOutput := latestNonEmptyDiff(executions)
 			return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
 				diffOutput, task, nil, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(),
 			))
 		}
 
-		// For unmerged tasks, show live diff if worktree still exists
+		// For active/unmerged tasks, show live diff if worktree still exists
 		if task.WorktreePath != "" {
 			if _, err := os.Stat(task.WorktreePath); err == nil {
 				project, _ := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
@@ -535,6 +543,9 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 						diffOutput = service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
 					}
 					fileStats := service.GetWorktreeFileStats(project.RepoPath, task.WorktreeBranch, targetBranch)
+					if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
+						fileStats = service.GetWorktreeFileStatsWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
+					}
 					if strings.TrimSpace(diffOutput) == "" &&
 						task.Status != models.StatusRunning &&
 						task.Status != models.StatusQueued &&

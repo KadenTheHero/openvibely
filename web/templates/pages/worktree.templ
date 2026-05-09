@@ -2,6 +2,8 @@ package pages
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -202,7 +204,7 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 							</svg>
 						</div>
 						<ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52 border border-base-300">
-							if showMergeOptions && (task.MergeStatus != models.MergeStatusMerged || task.Status == models.StatusFailed) {
+								if showMergeOptions && (task.MergeStatus != models.MergeStatusMerged || task.Status == models.StatusFailed || strings.TrimSpace(diffOutput) != "") {
 								<li class="menu-title"><span>Local</span></li>
 								<li>
 									<button

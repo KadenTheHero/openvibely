@@ -348,7 +348,15 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		}, err
 
 	case llmcontracts.OperationDirect:
-		output, tokens, err := a.callDirect(ctx, req.Message, req.Attachments, agent, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter, req.DisableTools)
+		rt := llmcontracts.RuntimeToolsFromContext(ctx)
+		extraTools = append(extraTools, runtimeAnthropicTools(rt)...)
+		toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
+		toolFilter = composeRuntimeToolFilter(toolFilter, rt, false, models.ChatModeOrchestrate)
+		if rt != nil && len(rt.Definitions) > 0 {
+			req.DisableTools = false
+		}
+		skipDefaultTools := rt != nil && rt.SkipDefaultTools
+		output, tokens, err := a.callDirect(ctx, req.Message, req.Attachments, agent, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter, req.DisableTools, skipDefaultTools)
 		return llmcontracts.AgentResult{
 			Output:     output,
 			Usage:      llmusage.FromTotal(tokens),
@@ -361,7 +369,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 }
 
 // callDirect calls the Anthropic API using OAuth tokens.
-func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, disableTools bool) (string, int, error) {
+func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, disableTools bool, skipDefaultTools bool) (string, int, error) {
 	log.Printf("[anthropic] callDirect model=%s max_tokens=%d workDir=%s attachments=%d disable_tools=%v", agent.Model, anthropicAgenticOutputBudget, workDir, len(attachments), disableTools)
 
 	client, err := a.getClient(ctx, agent)
@@ -382,7 +390,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		WorkDir:          workDir,
 		Attachments:      mcAttachments,
 		DisableTools:     disableTools,
-		SkipDefaultTools: false,
+		SkipDefaultTools: skipDefaultTools,
 		AutoCompaction:   true,
 		WebSearchEnabled: true,
 		ExtraTools:       extraTools,
@@ -512,12 +520,18 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	sw := llmstream.NewWriter(execID, "", a.execRepo, ctx, 500*time.Millisecond)
 	defer sw.Stop()
 
+	rt := llmcontracts.RuntimeToolsFromContext(ctx)
+	extraTools = append(extraTools, runtimeAnthropicTools(rt)...)
+	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
+	toolFilter = composeRuntimeToolFilter(toolFilter, rt, false, models.ChatModeOrchestrate)
+	skipDefaultTools := rt != nil && rt.SkipDefaultTools
+
 	inThinking := false
 	opts := &anthropicclient.AgenticOptions{
 		Model:        agent.Model,
 		MaxTokens:    anthropicAgenticOutputBudget,
 		BudgetTokens: anthropicThinkingBudgetTokens(agent.ReasoningEffort), EnableThinking: true,
-		SkipDefaultTools: false,
+		SkipDefaultTools: skipDefaultTools,
 		System:           llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
 		WorkDir:          workDir,
 		Attachments:      mcAttachments,

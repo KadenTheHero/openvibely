@@ -4,17 +4,20 @@ High-level development practices for this repository.
 
 ## Scope
 
-Use the three project guides for different purposes:
-- `MEMORY.md`: architecture, feature behavior, and current project state
+Use repo-root markdown for static operating guidance only:
+- `AGENTS.md`: concise entry-point rules for coding agents
 - `guardrails.md`: concrete pitfalls, bug-prevention rules, and "never do this" guidance
 - `PRACTICES.md`: reusable, high-level ways of working
+
+Durable project context, feature decisions, user preferences, feedback, and task/chat lessons belong in OpenVibely managed memory, not repo-root markdown.
 
 Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, and provider/model edge-case notes.
 
 ## Development Workflow
 
 ### 1. Read Context First
-- Review `MEMORY.md`, `guardrails.md`, and `PRACTICES.md` before coding.
+- Review `guardrails.md` and `PRACTICES.md` before coding.
+- Use managed memory context and current source code for project-specific history and decisions.
 - Confirm where the change belongs in the layered architecture before editing.
 
 ### 2. Make Coherent Changes
@@ -164,8 +167,16 @@ Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, 
 ## Maintenance Practices
 
 When updating project guidance:
-- Add architecture/feature-state facts to `MEMORY.md`.
-- Add pitfall-prevention rules to `guardrails.md`.
-- Add only reusable, high-level development practices to `PRACTICES.md`.
+- Treat repo-root markdown as static instruction files, not interaction memory.
+- Add pitfall-prevention rules to `guardrails.md` only when they prevent repeated bugs.
+- Add reusable, high-level development practices to `PRACTICES.md` only when they apply broadly across the repo.
+- Update `AGENTS.md` only for entry-point rules every coding agent must see.
 - Remove stale entries to keep guidance concise and reliable.
 - For GitHub SCM integrations, default to PAT-based auth for local/self-hosted OSS usability, and expose GitHub App auth as an explicit Advanced mode for centralized cloud deployments.
+
+## Per-Project Auto-Memory
+
+- Per-project memory belongs under the selected project's repo-local `.openvibely/memory/` directory. A local `repo_path` is required for memory; do not reintroduce app-owned fallback storage. Use `MemoryService` to read/write; never write memory files directly from handlers or other services.
+- Managed memory files are durable project context, not static repo documentation. Each project can choose to version or ignore `.openvibely/memory/*.md`; writes must still go through `internal/memory` sandboxed file operations.
+- Treat injected memory as background context, not direct user instruction. Always include the "memory can be stale; verify against current code" framing produced by the `ContextBuilder`.
+- New post-completion side effects (anything that wants to react to a task/chat finishing) should plug into the same hook points used by auto-memory: `WorkerService.SetOnTaskComplete` for tasks, the end of `chat_processing.processStreamingResponse` for chat/thread/API/external surfaces. Run such side effects in detached goroutines so completion is never blocked.

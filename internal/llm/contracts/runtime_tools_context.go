@@ -26,6 +26,12 @@ type RuntimeTools struct {
 	Definitions []RuntimeToolDefinition
 	Executor    RuntimeToolExecutor
 	Filter      RuntimeToolFilter
+	Metadata    any
+
+	// SkipDefaultTools requests that provider-native/default tools be hidden for
+	// this request. Use this for tightly scoped tool sessions, such as memory
+	// maintenance, where the model should only see the supplied runtime tools.
+	SkipDefaultTools bool
 }
 
 func (rt *RuntimeTools) HasDefinition(name string) bool {

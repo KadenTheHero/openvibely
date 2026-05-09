@@ -175,10 +175,20 @@ func taskDisplayOrderDesc(a models.Task, b models.Task) bool {
 }
 
 func (r *TaskRepo) GetByID(ctx context.Context, id string) (*models.Task, error) {
-	var t models.Task
-	err := r.db.QueryRowContext(ctx,
+	return r.getOne(ctx,
 		`SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at
-		 FROM tasks WHERE id = ?`, id).
+		 FROM tasks WHERE id = ?`, id)
+}
+
+func (r *TaskRepo) GetByProjectAndTitle(ctx context.Context, projectID, title string) (*models.Task, error) {
+	return r.getOne(ctx,
+		`SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at
+		 FROM tasks WHERE project_id = ? AND title = ? LIMIT 1`, projectID, title)
+}
+
+func (r *TaskRepo) getOne(ctx context.Context, query string, args ...any) (*models.Task, error) {
+	var t models.Task
+	err := r.db.QueryRowContext(ctx, query, args...).
 		Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
 			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt)
 	if err == sql.ErrNoRows {

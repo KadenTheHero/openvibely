@@ -27,6 +27,11 @@ func agentPluginsJSON(plugins []string) string {
 	return string(b)
 }
 
+func agentToolConfigJSON(config models.AgentToolConfig) string {
+	b, _ := json.Marshal(config)
+	return string(b)
+}
+
 func agentSkillsJSON(skills []models.SkillConfig) string {
 	b, _ := json.Marshal(skills)
 	return string(b)
@@ -64,8 +69,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 						data-agent-description={ agent.Description }
 						data-agent-system-prompt={ agent.SystemPrompt }
 						data-agent-model={ agent.Model }
-						data-agent-tools={ agentToolsJSON(agent.Tools) }
-						data-agent-plugins={ agentPluginsJSON(agent.Plugins) }
+							data-agent-tools={ agentToolsJSON(agent.Tools) }
+							data-agent-tool-config={ agentToolConfigJSON(agent.ToolConfig) }
+							data-agent-plugins={ agentPluginsJSON(agent.Plugins) }
 						data-agent-skills={ agentSkillsJSON(agent.Skills) }
 						data-agent-mcp-servers={ agentMCPJSON(agent.MCPServers) }
 						data-search-card
@@ -178,14 +184,45 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 								</div>
 							</div>
 							<div class="divider text-sm opacity-50">Allowed Tools</div>
-							<div class="flex flex-wrap gap-2 mb-3" id="agent_tools_checkboxes">
-								for _, tool := range models.AllAgentTools {
-									<label class="label cursor-pointer gap-1 px-2 py-1 border border-base-300 rounded-lg">
-										<input type="checkbox" class="checkbox checkbox-sm agent-tool-checkbox" value={ tool }/>
-										<span class="label-text text-sm">{ tool }</span>
-									</label>
-								}
-							</div>
+								<div class="flex flex-wrap gap-2 mb-3" id="agent_tools_checkboxes">
+									for _, tool := range models.AllAgentTools {
+										<label class="label cursor-pointer gap-1 px-2 py-1 border border-base-300 rounded-lg">
+											<input type="checkbox" class="checkbox checkbox-sm agent-tool-checkbox" value={ tool } onchange="updateScopedFilesControlsVisibility()"/>
+											<span class="label-text text-sm">{ tool }</span>
+										</label>
+									}
+								</div>
+								<div id="scoped_files_config" class="hidden border border-base-300 rounded-lg p-3 mb-3 bg-base-200/30">
+									<p class="text-sm font-medium mb-1">Scoped Files</p>
+									<p class="text-xs opacity-60 mb-3">Restrict file tools to a project-relative directory.</p>
+									<div class="form-control mb-3">
+										<label class="label"><span class="label-text text-sm">Directory</span></label>
+										<input type="text" id="scoped_files_directory" class="input input-bordered input-sm" placeholder=".openvibely/memory" value=".openvibely/memory" aria-describedby="scoped_files_directory_error" oninput="validateScopedFilesDirectoryInput()" onblur="validateScopedFilesDirectoryInput()"/>
+										<p id="scoped_files_directory_error" class="hidden text-xs text-error mt-1"></p>
+									</div>
+									<div class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
+										<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-2 py-1">
+											<input type="checkbox" id="scoped_files_perm_read" class="checkbox checkbox-sm" checked/>
+											<span class="label-text text-sm">Read</span>
+										</label>
+										<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-2 py-1">
+											<input type="checkbox" id="scoped_files_perm_write" class="checkbox checkbox-sm" checked/>
+											<span class="label-text text-sm">Write</span>
+										</label>
+										<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-2 py-1">
+											<input type="checkbox" id="scoped_files_perm_delete" class="checkbox checkbox-sm"/>
+											<span class="label-text text-sm">Delete</span>
+										</label>
+									</div>
+										<label class="label cursor-pointer gap-2 justify-start">
+											<input type="checkbox" id="scoped_files_skip_default_tools" class="checkbox checkbox-sm"/>
+											<span class="label-text text-sm">Disable default repo tools for this agent</span>
+										</label>
+										<label class="label cursor-pointer gap-2 justify-start">
+											<input type="checkbox" id="scoped_files_use_runtime_worktree" class="checkbox checkbox-sm" checked/>
+											<span class="label-text text-sm">Use runtime task worktrees</span>
+										</label>
+								</div>
 						</div>
 
 						<div data-agent-section-panel="plugins" class="h-full overflow-y-auto pr-1 hidden">
@@ -228,8 +265,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							</div>
 						</div>
 					</div>
-					<input type="hidden" id="agent_tools_json" name="tools_json"/>
-					<input type="hidden" id="agent_plugins_json" name="plugins_json"/>
+						<input type="hidden" id="agent_tools_json" name="tools_json"/>
+						<input type="hidden" id="agent_tool_config_json" name="tool_config_json"/>
+						<input type="hidden" id="agent_plugins_json" name="plugins_json"/>
 					<input type="hidden" id="agent_skills_json" name="skills_json"/>
 					<input type="hidden" id="agent_mcp_servers_json" name="mcp_servers_json"/>
 
@@ -333,12 +371,103 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			select.value = hasOption ? requested : 'inherit';
 		}
 
-		function setAgentTools(tools) {
-			const allowed = Array.isArray(tools) ? tools : [];
-			document.querySelectorAll('.agent-tool-checkbox').forEach(cb => {
-				cb.checked = allowed.includes(cb.value);
-			});
-		}
+			function setAgentTools(tools) {
+				const allowed = Array.isArray(tools) ? tools : [];
+				document.querySelectorAll('.agent-tool-checkbox').forEach(cb => {
+					cb.checked = allowed.includes(cb.value);
+				});
+				updateScopedFilesControlsVisibility();
+			}
+
+			function scopedFilesSelected() {
+				const cb = Array.from(document.querySelectorAll('.agent-tool-checkbox')).find(item => item.value === 'ScopedFiles');
+				return Boolean(cb && cb.checked);
+			}
+
+				function updateScopedFilesControlsVisibility() {
+					const panel = document.getElementById('scoped_files_config');
+					if (!panel) return;
+					const selected = scopedFilesSelected();
+					panel.classList.toggle('hidden', !selected);
+					if (selected) {
+						validateScopedFilesDirectoryInput();
+					} else {
+						setScopedFilesDirectoryError('');
+					}
+				}
+
+				function getScopedFilesDirectoryError(value) {
+					const raw = String(value || '').trim();
+					if (!raw) return '';
+					if (raw.startsWith('/') || raw.startsWith('\\\\') || raw.startsWith('~')) {
+						return 'Use a project-relative directory, for example .openvibely/memory or docs.';
+					}
+					const normalized = raw.replaceAll('\\\\', '/');
+					const parts = normalized.split('/').filter(part => part && part !== '.');
+					let depth = 0;
+					for (const part of parts) {
+						if (part === '..') {
+							if (depth === 0) {
+								return 'Directory must stay inside the project, for example .openvibely/memory or docs.';
+							}
+							depth -= 1;
+						} else {
+							depth += 1;
+						}
+					}
+					return '';
+				}
+
+				function setScopedFilesDirectoryError(message) {
+					const input = document.getElementById('scoped_files_directory');
+					const error = document.getElementById('scoped_files_directory_error');
+					if (!input || !error) return;
+					const text = String(message || '').trim();
+					input.classList.toggle('input-error', Boolean(text));
+					input.setAttribute('aria-invalid', text ? 'true' : 'false');
+					error.textContent = text;
+					error.classList.toggle('hidden', !text);
+				}
+
+				function validateScopedFilesDirectoryInput() {
+					const input = document.getElementById('scoped_files_directory');
+					if (!input || !scopedFilesSelected()) {
+						setScopedFilesDirectoryError('');
+						return true;
+					}
+					const message = getScopedFilesDirectoryError(input.value);
+					setScopedFilesDirectoryError(message);
+					return !message;
+				}
+
+				function setAgentToolConfig(config) {
+					const normalized = config && typeof config === 'object' ? config : {};
+					const scoped = Array.isArray(normalized.scoped_files) && normalized.scoped_files.length > 0 ? normalized.scoped_files[0] : {};
+					const permissions = Array.isArray(scoped.permissions) ? scoped.permissions : [];
+					document.getElementById('scoped_files_directory').value = scoped.directory || '.openvibely/memory';
+					validateScopedFilesDirectoryInput();
+					document.getElementById('scoped_files_perm_read').checked = permissions.length === 0 || permissions.includes('read');
+					document.getElementById('scoped_files_perm_write').checked = permissions.length === 0 || permissions.includes('write');
+					document.getElementById('scoped_files_perm_delete').checked = permissions.includes('delete');
+					document.getElementById('scoped_files_skip_default_tools').checked = Boolean(normalized.skip_default_tools);
+					document.getElementById('scoped_files_use_runtime_worktree').checked = !Boolean(normalized.disable_runtime_worktree);
+				}
+
+				function buildAgentToolConfig() {
+					if (!scopedFilesSelected()) return {};
+					const permissions = [];
+					if (document.getElementById('scoped_files_perm_read').checked) permissions.push('read');
+					if (document.getElementById('scoped_files_perm_write').checked) permissions.push('write');
+					if (document.getElementById('scoped_files_perm_delete').checked) permissions.push('delete');
+					return {
+						scoped_files: [{
+							directory: document.getElementById('scoped_files_directory').value || '.openvibely/memory',
+							permissions: permissions.length > 0 ? permissions : ['read'],
+						}],
+						skip_default_tools: document.getElementById('scoped_files_skip_default_tools').checked,
+						disable_runtime_worktree: !document.getElementById('scoped_files_use_runtime_worktree').checked,
+					};
+				}
 
 		function refreshSelectedPluginsFromDOM() {
 			const ids = [];
@@ -995,9 +1124,10 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			document.getElementById('agent_name').value = '';
 			document.getElementById('agent_description').value = '';
 			document.getElementById('agent_system_prompt').value = '';
-			setAgentModelSelection('inherit');
-			setAgentTools([]);
-			selectedPluginIDs = [];
+				setAgentModelSelection('inherit');
+				setAgentToolConfig({});
+				setAgentTools([]);
+				selectedPluginIDs = [];
 			resetGeneratedState();
 			setAgentSection('details');
 			loadPluginState(false);
@@ -1019,10 +1149,11 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			document.getElementById('agent_name').value = el.dataset.agentName || '';
 			document.getElementById('agent_description').value = el.dataset.agentDescription || '';
 			document.getElementById('agent_system_prompt').value = el.dataset.agentSystemPrompt || '';
-			setAgentModelSelection(el.dataset.agentModel || 'inherit');
-			setAgentTools(JSON.parse(el.dataset.agentTools || '[]'));
+				setAgentModelSelection(el.dataset.agentModel || 'inherit');
+				setAgentToolConfig(JSON.parse(el.dataset.agentToolConfig || '{}'));
+				setAgentTools(JSON.parse(el.dataset.agentTools || '[]'));
 
-			selectedPluginIDs = JSON.parse(el.dataset.agentPlugins || '[]');
+				selectedPluginIDs = JSON.parse(el.dataset.agentPlugins || '[]');
 			generatedSkillsState = JSON.parse(el.dataset.agentSkills || '[]');
 			generatedMCPServersState = JSON.parse(el.dataset.agentMcpServers || '[]');
 			updateGeneratedSummary();
@@ -1037,8 +1168,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			document.getElementById('agent_name').value = data.name || '';
 			document.getElementById('agent_description').value = data.description || '';
 			document.getElementById('agent_system_prompt').value = data.system_prompt || '';
-			setAgentModelSelection(data.model || 'inherit');
-			setAgentTools(data.tools || []);
+				setAgentModelSelection(data.model || 'inherit');
+				setAgentToolConfig(data.tool_config || {});
+				setAgentTools(data.tools || []);
 			if (Array.isArray(data.plugins) && data.plugins.length > 0) {
 				selectedPluginIDs = Array.from(new Set(data.plugins.map(x => String(x).trim()).filter(Boolean))).sort();
 				renderPluginCatalog();
@@ -1090,27 +1222,51 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			}
 		}
 
-		function serializeAgentFormData() {
-			const tools = [];
-			document.querySelectorAll('.agent-tool-checkbox:checked').forEach(cb => tools.push(cb.value));
-			document.getElementById('agent_tools_json').value = JSON.stringify(tools);
+			function serializeAgentFormData() {
+				validateScopedFilesDirectoryInput();
+				const tools = [];
+				document.querySelectorAll('.agent-tool-checkbox:checked').forEach(cb => tools.push(cb.value));
+				document.getElementById('agent_tools_json').value = JSON.stringify(tools);
+				document.getElementById('agent_tool_config_json').value = JSON.stringify(buildAgentToolConfig());
 
-			refreshSelectedPluginsFromDOM();
-			document.getElementById('agent_plugins_json').value = JSON.stringify(selectedPluginIDs);
-			document.getElementById('agent_skills_json').value = JSON.stringify(generatedSkillsState || []);
-			document.getElementById('agent_mcp_servers_json').value = JSON.stringify(generatedMCPServersState || []);
-		}
-
-		setTimeout(() => {
-			const form = document.getElementById('agent_form');
-			if (form && !window._agentFormSubmitHooked) {
-				window._agentFormSubmitHooked = true;
-				form.addEventListener('submit', () => serializeAgentFormData());
+				refreshSelectedPluginsFromDOM();
+				document.getElementById('agent_plugins_json').value = JSON.stringify(selectedPluginIDs);
+				document.getElementById('agent_skills_json').value = JSON.stringify(generatedSkillsState || []);
+				document.getElementById('agent_mcp_servers_json').value = JSON.stringify(generatedMCPServersState || []);
 			}
-			if (document.querySelector('[data-agent-section-tab]') && document.querySelector('[data-agent-section-panel]')) {
-				setAgentSection(activeAgentSection);
-			}
-		}, 0);
-		</script>
+			document.body.addEventListener('htmx:responseError', function(event) {
+				if (!event.detail || !event.detail.target || event.detail.target.id !== 'agents-container') return;
+				const xhr = event.detail.xhr;
+				if (!xhr || xhr.status !== 400) return;
+				const message = String(xhr.responseText || '').trim();
+				if (!message.toLowerCase().includes('directory')) return;
+				event.preventDefault();
+				setAgentSection('details');
+				setScopedFilesDirectoryError(message);
+				const modal = document.getElementById('agent_modal');
+				if (modal && !modal.open) modal.showModal();
+				const input = document.getElementById('scoped_files_directory');
+				if (input) input.focus();
+			});
+			setTimeout(() => {
+				const form = document.getElementById('agent_form');
+				if (form && !window._agentFormSubmitHooked) {
+					window._agentFormSubmitHooked = true;
+					form.addEventListener('submit', (event) => {
+						if (!validateScopedFilesDirectoryInput()) {
+							event.preventDefault();
+							event.stopPropagation();
+							setAgentSection('details');
+							const input = document.getElementById('scoped_files_directory');
+							if (input) input.focus();
+							return false;
+						}
+						serializeAgentFormData();
+					});
+				}
+				if (document.querySelector('[data-agent-section-tab]') && document.querySelector('[data-agent-section-panel]')) {
+					setAgentSection(activeAgentSection);
+				}
+			}, 0);		</script>
 	</div>
 }

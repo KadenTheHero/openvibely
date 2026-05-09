@@ -1,6 +1,6 @@
 # OpenVibely - Guardrails
 
-Problems encountered during development and how to prevent them. For project context and architecture, see `MEMORY.md`.
+Problems encountered during development and how to prevent them. Use current source code and managed memory for project context.
 
 ## TOKEN-WASTING RULES — READ FIRST, VIOLATING THESE WASTES MONEY
 
@@ -415,3 +415,14 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 ## Repo Workflow
 
 - For simple docs-only file creation, create directly — no build/test needed
+
+## Auto-Memory Pitfall Prevention
+
+- Memory storage MUST live under the selected project's repo-local `.openvibely/memory/` directory. Do not reintroduce app-owned `memory/projects/<project_id>/` fallback storage or `OPENVIBELY_MEMORY_ROOT`.
+- Always validate memory file paths via `PathResolver.ResolveSafe(projectID, rel)`. It rejects absolute paths, parent traversal, and symlink escapes. Never trust raw paths from extraction prompts/tools.
+- Always run user/extraction text through `memory.Redact` before persisting. `FileStore.WriteFile` does this automatically; do not bypass it.
+- Always use `FileStore.WithProjectLock(projectID, fn)` for multi-step memory writes (extraction, consolidation, index rewrite). Concurrent extractions otherwise race on `MEMORY.md`.
+- The Schedule page's "Memory Consolidation" entry uses a real system-created task assigned to the built-in Memory Consolidator agent plus a normal row in `schedules`. Do not reintroduce a separate memory schedule card/table or hidden scheduler interception path.
+- When changing `pages.Schedule` or `pages.ScheduleContent` template signatures, update all three callers: `internal/handler/project_handler.go ViewSchedule`, `internal/handler/task_handler.go` (HTMX-mode schedule fragment), and any test fixtures that render the page directly.
+- Avoid unwanted legacy terminology in memory product UI, routes, DB names, or code identifiers. Use `Memory Consolidation` / `memory_consolidation` instead.
+- Don't add JSONL transcript storage for memory — OpenVibely's existing DB executions/tasks tables are the transcript source.

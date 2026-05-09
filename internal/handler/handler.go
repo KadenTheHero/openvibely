@@ -57,6 +57,7 @@ type Handler struct {
 	taskChangesMergeOptionsEnabled *bool
 	projectFolderPicker            ProjectFolderPicker
 	webhookRepo                    *repository.WebhookRepo
+	memorySvc                      *service.MemoryService
 	authCfg                        *auth.Config
 
 	loginFailuresMu     sync.Mutex
@@ -222,6 +223,13 @@ func (h *Handler) SetWebhookRepo(repo *repository.WebhookRepo) {
 	h.webhookRepo = repo
 }
 
+// SetMemoryService wires the auto-memory service so handlers can read/write
+// per-project memory metadata, render the memory consolidation card on the
+// Schedule page, and trigger "Run Now" passes.
+func (h *Handler) SetMemoryService(svc *service.MemoryService) {
+	h.memorySvc = svc
+}
+
 // getCurrentProjectID resolves the current project ID from the query param.
 // If project_id is provided and valid, it uses GetByID to verify it exists.
 // Otherwise it falls back to listing all projects and using the first one.
@@ -305,6 +313,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Tasks (project-scoped via ?project_id= query param)
 	e.GET("/tasks", h.ListTasks)
 	e.GET("/schedule", h.ViewSchedule)
+	// Memory subsystem routes (model-backed auto-memory).
+	e.POST("/memory/consolidate", h.RunMemoryConsolidationNow)
+	e.POST("/memory/settings", h.UpdateMemorySettings)
 	e.POST("/tasks", h.CreateTask)
 	e.POST("/tasks/move-completed", h.MoveCompletedActiveToCompleted)
 	e.DELETE("/tasks/completed", h.DeleteAllCompletedTasks)

@@ -365,6 +365,71 @@ func TestHandler_ListAgents_IncludesGenerateUI(t *testing.T) {
 	}
 }
 
+func TestHandler_AgentsPage_IncludesRealtimeScopedDirectoryValidation(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetAgentRepo(repository.NewAgentRepo(db))
+
+	req := httptest.NewRequest(http.MethodGet, "/agents?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "id=\"scoped_files_directory_error\"") {
+		t.Fatalf("expected scoped directory inline error element")
+	}
+	if !strings.Contains(body, "oninput=\"validateScopedFilesDirectoryInput()\"") {
+		t.Fatalf("expected Directory field to validate while typing")
+	}
+	if !strings.Contains(body, "function getScopedFilesDirectoryError(value)") {
+		t.Fatalf("expected client-side scoped directory validation helper")
+	}
+	if !strings.Contains(body, "addEventListener('submit', (event)") {
+		t.Fatalf("expected submit handler to block invalid scoped directory before HTMX save")
+	}
+}
+
+func TestHandler_CreateAgent_RejectsUnsafeScopedFilesDirectory(t *testing.T) {
+	unsafeDirectories := []string{"../secrets", `..\\secrets`, "/tmp/secrets", "~/secrets", "C:/secrets"}
+	for _, directory := range unsafeDirectories {
+		t.Run(directory, func(t *testing.T) {
+			h, e, _, db := setupTestHandlerWithDB(t)
+			h.SetAgentRepo(repository.NewAgentRepo(db))
+
+			config, err := json.Marshal(models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: directory, Permissions: []string{"read"}}}})
+			if err != nil {
+				t.Fatalf("marshal tool config: %v", err)
+			}
+
+			form := url.Values{}
+			form.Set("name", "agent-a")
+			form.Set("description", "first agent")
+			form.Set("system_prompt", "do work")
+			form.Set("model", "inherit")
+			form.Set("tools_json", `["ScopedFiles"]`)
+			form.Set("tool_config_json", string(config))
+			form.Set("plugins_json", `[]`)
+			form.Set("skills_json", `[]`)
+			form.Set("mcp_servers_json", `[]`)
+
+			req := httptest.NewRequest(http.MethodPost, "/agents", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(strings.ToLower(rec.Body.String()), "project-relative directory") {
+				t.Fatalf("expected scoped directory validation error, got %s", rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestHandler_GenerateAgent_FallbackWithoutLLM(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetAgentRepo(repository.NewAgentRepo(db))
@@ -1783,5 +1848,39 @@ func TestHandler_UninstallPlugin_ErrorReturnsBadRequest(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(rec.Body.String()), "not installed") {
 		t.Fatalf("expected not installed error, got %s", rec.Body.String())
+	}
+}
+
+func TestHandler_CreateAgent_RejectsInvalidScopedFilesDirectory(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetAgentRepo(repository.NewAgentRepo(db))
+
+	cases := []string{"/tmp/outside", "../outside", ".."}
+	for _, dir := range cases {
+		t.Run(dir, func(t *testing.T) {
+			form := url.Values{}
+			form.Set("name", "scoped-agent")
+			form.Set("description", "scoped")
+			form.Set("system_prompt", "work")
+			form.Set("model", "inherit")
+			form.Set("tools_json", `["ScopedFiles"]`)
+			form.Set("tool_config_json", fmt.Sprintf(`{"scoped_files":[{"directory":%q,"permissions":["read"]}]}`, dir))
+			form.Set("plugins_json", `[]`)
+			form.Set("skills_json", `[]`)
+			form.Set("mcp_servers_json", `[]`)
+
+			req := httptest.NewRequest(http.MethodPost, "/agents", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+			body := strings.ToLower(rec.Body.String())
+			if !strings.Contains(body, "project-relative") && !strings.Contains(body, "inside the project") {
+				t.Fatalf("expected scoped directory validation error, got %s", rec.Body.String())
+			}
+		})
 	}
 }

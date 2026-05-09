@@ -37,6 +37,10 @@ type LLMCaller interface {
 	CallModel(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (output, textOnly string, tokens int, err error)
 }
 
+type memoryTaskRunner interface {
+	RecallContext(ctx context.Context, projectID string, query MemoryRecallQuery) string
+}
+
 type LLMService struct {
 	llmConfigRepo         *repository.LLMConfigRepo
 	execRepo              *repository.ExecutionRepo
@@ -50,6 +54,7 @@ type LLMService struct {
 	worktreeSvc           *WorktreeService
 	telegramSvc           *TelegramService
 	slackSvc              *SlackService
+	memoryTaskRunner      memoryTaskRunner
 	llmCaller             LLMCaller
 	providerAdapters      map[models.LLMProvider]ProviderAdapter
 	routing               *agentRoutingStrategy
@@ -112,6 +117,13 @@ func (s *LLMService) SetSlackService(ss *SlackService) {
 // SetFileChangeBroadcaster sets the file change broadcaster for real-time file change updates.
 func (s *LLMService) SetFileChangeBroadcaster(fcb *events.FileChangeBroadcaster) {
 	s.fileChangeBroadcaster = fcb
+}
+
+// SetMemoryTaskRunner wires project memory recall into task execution. Scheduled
+// memory consolidation still runs as a normal scheduled task; agent definitions
+// decide their own scoped-file tools and runtime worktree behavior.
+func (s *LLMService) SetMemoryTaskRunner(runner memoryTaskRunner) {
+	s.memoryTaskRunner = runner
 }
 
 // SetAgentRepo sets the agent repository for resolving agent definitions on tasks.
@@ -217,6 +229,17 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 	}
 	log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s status -> running", task.ID)
 
+	var agentDef *models.Agent
+	if task.AgentDefinitionID != nil && s.agentRepo != nil {
+		if ad, adErr := s.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
+			agentDef = ad
+			log.Printf("[agent-svc] ExecuteTaskWithAgent using agent definition=%s (%s)", ad.Name, ad.ID)
+		}
+	}
+
+	var runtimeTools *llmcontracts.RuntimeTools
+	scopedFilesWorkDir := ""
+
 	// Create execution record
 	exec := &models.Execution{
 		TaskID:        task.ID,
@@ -279,8 +302,13 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 		}
 	}
 
-	// Set up git worktree for task isolation (if repo supports it and it's not a chat task)
-	if s.worktreeSvc != nil && repoDir != "" && task.Category != models.CategoryChat && IsGitRepo(repoDir) {
+	useRuntimeWorktree := agentDef == nil || !agentDef.ToolConfig.DisableRuntimeWorktree
+
+	// Set up git worktree for task isolation when enabled for this agent.
+	// Built-in agents that intentionally write directly to project-owned scoped
+	// directories, such as memory consolidation, disable runtime worktrees in
+	// their agent config.
+	if useRuntimeWorktree && s.worktreeSvc != nil && repoDir != "" && task.Category != models.CategoryChat && IsGitRepo(repoDir) {
 		wtPath, wtBranch, wtErr := s.worktreeSvc.SetupWorktree(ctx, &task, repoDir)
 		if wtErr != nil {
 			log.Printf("[agent-svc] ExecuteTaskWithAgent worktree setup failed (using main repo): %v", wtErr)
@@ -323,10 +351,56 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 		}
 	}
 
-	// Load project instructions (AGENTS.md) from the working directory
+	if agentDef != nil && len(agentDef.ToolConfig.ScopedFiles) > 0 {
+		// Scoped Files directories are configured project-relative and resolved
+		// against the effective execution root. Agents using runtime worktrees get
+		// scoped access inside the worktree; agents that disable runtime worktrees
+		// operate directly on the project repo.
+		scopedFilesRoot := workDir
+		if scopedFilesRoot == "" {
+			scopedFilesRoot = repoDir
+		}
+		preparedWorkDir, rt, prepErr := buildScopedFilesRuntimeTools(ctx, task.ProjectID, scopedFilesRoot, agentDef.ToolConfig)
+		if prepErr != nil {
+			errMsg := fmt.Sprintf("preparing scoped file tools: %v", prepErr)
+			log.Printf("[agent-svc] ExecuteTaskWithAgent scoped files prep failed task=%s: %v", task.ID, prepErr)
+			if completeErr := s.execRepo.Complete(ctx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); completeErr != nil {
+				log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution after scoped files prep failure: %v", completeErr)
+			}
+			if statusErr := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusFailed); statusErr != nil {
+				log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after scoped files prep failure: %v", statusErr)
+			}
+			exec.Status = models.ExecFailed
+			exec.ErrorMessage = errMsg
+			return exec, fmt.Errorf("preparing scoped file tools: %w", prepErr)
+		}
+		runtimeTools = rt
+		scopedFilesWorkDir = preparedWorkDir
+		if agentDef.ToolConfig.SkipDefaultTools && scopedFilesWorkDir != "" {
+			workDir = scopedFilesWorkDir
+			repoDir = ""
+			log.Printf("[agent-svc] ExecuteTaskWithAgent using scoped files workDir=%s", workDir)
+		}
+	}
+
+	// Load project instructions (AGENTS.md) from the working directory.
 	projectInstructions := loadProjectInstructions(workDir)
 	if projectInstructions != "" {
 		log.Printf("[agent-svc] ExecuteTaskWithAgent loaded AGENTS.md (%d bytes) from %s", len(projectInstructions), workDir)
+	}
+	if runtimeTools == nil && s.memoryTaskRunner != nil && task.ProjectID != "" {
+		mem := s.memoryTaskRunner.RecallContext(ctx, task.ProjectID, MemoryRecallQuery{
+			Surface: "task",
+			Title:   task.Title,
+			Prompt:  task.Prompt,
+		})
+		if mem != "" {
+			if projectInstructions == "" {
+				projectInstructions = mem
+			} else {
+				projectInstructions = mem + "\n" + projectInstructions
+			}
+		}
 	}
 
 	// Start background diff snapshot broadcaster (if file change broadcaster is configured)
@@ -336,18 +410,16 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 		go s.broadcastDiffSnapshots(ctx, task.ID, exec.ID, workDir, repoDir, task.WorktreeBranch, task.MergeTargetBranch, stopDiffBroadcast)
 	}
 
-	// Resolve agent definition if set
-	var agentDef *models.Agent
-	if task.AgentDefinitionID != nil && s.agentRepo != nil {
-		if ad, adErr := s.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
-			agentDef = ad
-			log.Printf("[agent-svc] ExecuteTaskWithAgent using agent definition=%s (%s)", ad.Name, ad.ID)
+	// Call the LLM
+	callCtx := ctx
+	if runtimeTools != nil {
+		callCtx = llmcontracts.WithRuntimeTools(callCtx, runtimeTools)
+		if runtimeTools.SkipDefaultTools {
+			projectInstructions = ""
 		}
 	}
-
-	// Call the LLM
 	start := time.Now()
-	output, textOnlyOutput, tokensUsed, err := s.callLLM(ctx, task.Prompt, attachments, agent, exec.ID, workDir, projectInstructions, agentDef)
+	output, textOnlyOutput, tokensUsed, err := s.callLLM(callCtx, task.Prompt, attachments, agent, exec.ID, workDir, projectInstructions, agentDef)
 	durationMs := time.Since(start).Milliseconds()
 
 	// Stop diff snapshot broadcaster

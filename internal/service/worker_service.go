@@ -37,6 +37,19 @@ type WorkerService struct {
 
 	// Test observability: tasks are sent here on Submit so tests can verify submissions
 	submitted chan models.Task
+
+	// onTaskComplete, when set, is invoked after every task completion
+	// (success or failure) so subsystems like auto-memory can record the
+	// interaction. Errors thrown by the callback are logged but never
+	// affect task status.
+	onTaskComplete func(task models.Task, executionErr error)
+}
+
+// SetOnTaskComplete registers a callback invoked after every task completion.
+// Use this to wire auto-memory extraction or any other post-completion side
+// effect that should not block the worker pool.
+func (w *WorkerService) SetOnTaskComplete(fn func(task models.Task, executionErr error)) {
+	w.onTaskComplete = fn
 }
 
 func NewWorkerService(llmSvc *LLMService, numWorkers int, projectRepo *repository.ProjectRepo) *WorkerService {
@@ -222,6 +235,19 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 		log.Printf("[worker] task failed task=%s %q: %v", task.ID, task.Title, err)
 	} else {
 		log.Printf("[worker] task completed task=%s %q", task.ID, task.Title)
+	}
+
+	if w.onTaskComplete != nil {
+		// Run the post-completion hook in a goroutine so memory extraction
+		// (or any other heavy callback) never blocks worker dispatch.
+		go func(t models.Task, runErr error) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[worker] onTaskComplete panic for task=%s: %v", t.ID, r)
+				}
+			}()
+			w.onTaskComplete(t, runErr)
+		}(task, err)
 	}
 
 	// Task finished, slot freed — dispatch next queued task

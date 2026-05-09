@@ -59,6 +59,61 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 	}
 }
 
+func TestSchedulerService_CheckDueTasks_SubmitsMemoryConsolidationTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	ctx := context.Background()
+
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "System: Memory Consolidation",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    "Run scheduled memory consolidation for this project.",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	now := time.Now().UTC()
+	sched := &models.Schedule{
+		TaskID:         task.ID,
+		RunAt:          now.Add(-1 * time.Minute),
+		RepeatType:     models.RepeatDaily,
+		RepeatInterval: 1,
+		Enabled:        true,
+	}
+	if err := scheduleRepo.Create(ctx, sched); err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+
+	svc.checkDueTasks(ctx)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != task.ID {
+			t.Errorf("expected submitted task ID=%s, got %s", task.ID, submitted.ID)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected memory consolidation task to be submitted through normal worker path")
+	}
+
+	updated, err := scheduleRepo.GetByID(ctx, sched.ID)
+	if err != nil {
+		t.Fatalf("reload schedule: %v", err)
+	}
+	if updated.LastRun == nil {
+		t.Fatal("expected LastRun to be set")
+	}
+	if updated.NextRun == nil || !updated.NextRun.After(now) {
+		t.Fatalf("expected future NextRun, got %v", updated.NextRun)
+	}
+}
+
 func TestSchedulerService_CheckDueTasks_SkipsRunningTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	scheduleRepo := repository.NewScheduleRepo(db)

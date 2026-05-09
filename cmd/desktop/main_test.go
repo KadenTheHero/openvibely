@@ -76,6 +76,22 @@ func TestRunDesktopStartFailure(t *testing.T) {
 	}
 }
 
+func TestLoadDesktopConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.env"
+	if err := os.WriteFile(path, []byte("OPENVIBELY_APP_DATA_DIR=/tmp/shared-openvibely\n"), 0o644); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+	t.Setenv("OPENVIBELY_DESKTOP_CONFIG_FILE", path)
+	unsetEnv(t, "OPENVIBELY_APP_DATA_DIR")
+
+	loadDesktopConfigFile()
+
+	if got := os.Getenv("OPENVIBELY_APP_DATA_DIR"); got != "/tmp/shared-openvibely" {
+		t.Fatalf("OPENVIBELY_APP_DATA_DIR=%q", got)
+	}
+}
+
 func TestSetDesktopOAuthDefaults(t *testing.T) {
 	t.Run("defaults oauth redirect mode to auto when unset", func(t *testing.T) {
 		unsetEnv(t, "OAUTH_REDIRECT_MODE")

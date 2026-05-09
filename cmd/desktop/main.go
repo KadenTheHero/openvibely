@@ -25,11 +25,12 @@ type desktopStarter func(context.Context, *config.Config) (*desktopBackend, erro
 type desktopLauncher func(baseURL string, onShutdown func()) error
 
 func main() {
+	log.SetOutput(os.Stderr)
 	setDesktopOAuthDefaults()
+	loadDesktopConfigFile()
 
 	cfg := config.LoadWithMode(config.ModeDesktop)
 
-	log.SetOutput(os.Stderr)
 	log.Println("[desktop] starting OpenVibely desktop app...")
 
 	if err := runDesktop(cfg, startDesktopBackend, launchNativeWindow); err != nil {
@@ -41,6 +42,22 @@ func setDesktopOAuthDefaults() {
 	if strings.TrimSpace(os.Getenv("OAUTH_REDIRECT_MODE")) == "" {
 		_ = os.Setenv("OAUTH_REDIRECT_MODE", "auto")
 	}
+}
+
+func loadDesktopConfigFile() {
+	path := config.DesktopConfigFilePath()
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	if err := config.LoadEnvFile(path); err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("[desktop] config file not found at %s; using defaults", path)
+			return
+		}
+		log.Printf("[desktop] error loading config file %s: %v", path, err)
+		return
+	}
+	log.Printf("[desktop] loaded config file %s", path)
 }
 
 func runDesktop(cfg *config.Config, start desktopStarter, launch desktopLauncher) error {

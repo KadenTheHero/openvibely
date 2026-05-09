@@ -38,6 +38,7 @@ type Config struct {
 	SlackBotToken                 string
 	AppBaseURL                    string
 	ProjectRepoRoot               string
+	AppDataDir                    string
 	EnableLocalRepoPath           bool
 	EnableTaskChangesMergeOptions bool
 	AuthEnabled                   bool
@@ -57,19 +58,24 @@ func Load() *Config {
 func LoadWithMode(mode RuntimeMode) *Config {
 	// Resolve defaults that differ by mode.
 	defaultPort := "3001"
+	defaultAppDataDir := ""
 	defaultDBPath := "./openvibely.db"
 	defaultRepoRoot := "./repos"
 	defaultEnableLocalRepo := false
 
 	if mode == ModeDesktop {
 		// Desktop mode: use OS app-data directory for writable storage.
-		dataDir := desktopDataDir()
-		defaultDBPath = filepath.Join(dataDir, "openvibely.db")
-		defaultRepoRoot = filepath.Join(dataDir, "repos")
+		defaultAppDataDir = desktopDataDir()
 		// Ephemeral port — let OS pick; 0 means the server will bind to a random free port.
 		defaultPort = "0"
 		// Desktop users always have access to local paths.
 		defaultEnableLocalRepo = true
+	}
+
+	appDataDir := getEnv("OPENVIBELY_APP_DATA_DIR", defaultAppDataDir)
+	if appDataDir != "" {
+		defaultDBPath = filepath.Join(appDataDir, "openvibely.db")
+		defaultRepoRoot = filepath.Join(appDataDir, "repos")
 	}
 
 	enableLocalRepo := ResolveEnableLocalRepoPath(os.Getenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH"))
@@ -94,6 +100,7 @@ func LoadWithMode(mode RuntimeMode) *Config {
 		SlackBotToken:                 getEnv("SLACK_BOT_TOKEN", ""),
 		AppBaseURL:                    ResolveAppBaseURL(getEnv("APP_BASE_URL", "")),
 		ProjectRepoRoot:               getEnv("PROJECT_REPO_ROOT", defaultRepoRoot),
+		AppDataDir:                    appDataDir,
 		EnableLocalRepoPath:           enableLocalRepo,
 		EnableTaskChangesMergeOptions: ResolveEnableTaskChangesMergeOptions(os.Getenv("OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS")),
 		AuthEnabled:                   ResolveAuthEnabled(os.Getenv("AUTH_ENABLED"), os.Getenv("AUTH_USERNAME"), os.Getenv("AUTH_PASSWORD")),
@@ -149,13 +156,14 @@ func ResolveEnableLocalRepoPath(explicitValue string) bool {
 }
 
 // ResolveEnableTaskChangesMergeOptions resolves merge-options visibility in the
-// Task Changes tab from OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS only.
-// Unset or invalid values default to false.
+// Task Changes tab from OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS.
+// Unset or invalid values default to true so local merge/review workflows remain
+// available unless explicitly disabled.
 func ResolveEnableTaskChangesMergeOptions(explicitValue string) bool {
 	if v, ok := parseEnvBool(explicitValue); ok {
 		return v
 	}
-	return false
+	return true
 }
 
 func parseEnvBool(value string) (bool, bool) {

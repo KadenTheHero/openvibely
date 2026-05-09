@@ -65,6 +65,54 @@ type streamingResponseParams struct {
 	Surface          chatcontrol.Surface // chat entry point (web/api/telegram/slack)
 }
 
+func chatMemoryRecallSurface(params streamingResponseParams) string {
+	if params.IsTaskFollowup {
+		return "task_followup"
+	}
+	if params.Surface != "" {
+		return string(params.Surface)
+	}
+	return "chat"
+}
+
+func chatMemoryRecallTitle(params streamingResponseParams) string {
+	if params.TaskID != "" {
+		return "Task thread follow-up"
+	}
+	if params.IsTaskFollowup {
+		return "Task follow-up"
+	}
+	return "Chat message"
+}
+
+func chatMemoryRecallHistory(history []models.Execution) string {
+	if len(history) == 0 {
+		return ""
+	}
+	start := len(history) - 6
+	if start < 0 {
+		start = 0
+	}
+	var b strings.Builder
+	for _, e := range history[start:] {
+		if strings.TrimSpace(e.PromptSent) != "" {
+			fmt.Fprintf(&b, "user: %s\n", truncateChatMemoryRecall(e.PromptSent, 800))
+		}
+		if strings.TrimSpace(e.Output) != "" {
+			fmt.Fprintf(&b, "assistant: %s\n", truncateChatMemoryRecall(e.Output, 800))
+		}
+	}
+	return b.String()
+}
+
+func truncateChatMemoryRecall(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
+}
+
 // processStreamingResponse is the shared goroutine that handles LLM streaming for
 // both chat and task follow-up messages. This function runs asynchronously in a
 // background goroutine, allowing the HTTP handler to return immediately.
@@ -83,6 +131,26 @@ type streamingResponseParams struct {
 // function since we're in a background goroutine. Failed completions leave tasks
 // stuck in "running" status, which is why error logging is critical.
 func (h *Handler) processStreamingResponse(params streamingResponseParams) {
+	// Inject project memory context into the SystemContext when memory is
+	// wired and enabled. This is the single point that benefits chat (web),
+	// API chat, task threads/followups, Telegram/Slack chat, and review
+	// chat — all of which funnel through this function.
+	if h.memorySvc != nil && params.ProjectID != "" {
+		mem := h.memorySvc.RecallContext(context.Background(), params.ProjectID, service.MemoryRecallQuery{
+			Surface:       chatMemoryRecallSurface(params),
+			Title:         chatMemoryRecallTitle(params),
+			Prompt:        params.Message,
+			RecentContext: chatMemoryRecallHistory(params.ChatHistory),
+			AgentContext:  params.SystemContext,
+		})
+		if mem != "" {
+			if params.SystemContext == "" {
+				params.SystemContext = mem
+			} else {
+				params.SystemContext = mem + "\n" + params.SystemContext
+			}
+		}
+	}
 	timeout := chatProcessingTimeout
 
 	// Enforce per-project and per-model worker constraints for task follow-ups only.
@@ -273,6 +341,11 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			CompletedOutput: output,
 		})
 	}
+
+	// Auto-memory extraction. Runs in a detached goroutine
+	// so chat completion is never blocked. Skipped silently when memory is
+	// not wired or disabled for the project.
+	h.enqueueMemoryExtractionForChat(params, output)
 }
 
 func (h *Handler) resolveTaskAgentDefinitionForTask(ctx context.Context, taskID string, current *models.Agent) *models.Agent {

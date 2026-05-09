@@ -103,9 +103,9 @@ type Task struct {
 	MergeStatus       MergeStatus  `json:"merge_status"`
 	BaseBranch        string       `json:"base_branch"`      // Git branch this task should base its worktree on (from parent lineage)
 	BaseCommitSHA     string       `json:"base_commit_sha"`  // Git commit SHA to base worktree on (from parent lineage)
-	LineageDepth      int          `json:"lineage_depth"`     // Depth in chain: 0 = root, 1 = child, 2 = grandchild, etc.
-	CreatedVia        string       `json:"created_via"`       // Origin: "web", "telegram", etc.
-	TelegramChatID    int64        `json:"telegram_chat_id"`  // Telegram chat ID for sending completion notifications
+	LineageDepth      int          `json:"lineage_depth"`    // Depth in chain: 0 = root, 1 = child, 2 = grandchild, etc.
+	CreatedVia        string       `json:"created_via"`      // Origin: "web", "telegram", etc.
+	TelegramChatID    int64        `json:"telegram_chat_id"` // Telegram chat ID for sending completion notifications
 	CreatedAt         time.Time    `json:"created_at"`
 	UpdatedAt         time.Time    `json:"updated_at"`
 }

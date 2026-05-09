@@ -648,6 +648,48 @@ func TestWorktreeFileStats(t *testing.T) {
 	}
 }
 
+func TestGetWorktreeFileStatsWithUncommittedIncludesLiveWorktreeChanges(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	worktreePath := filepath.Join(t.TempDir(), "live-worktree")
+
+	cmd := exec.Command("git", "branch", "live-stats", defaultBranch)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create branch: %v output=%s", err, string(out))
+	}
+	cmd = exec.Command("git", "worktree", "add", worktreePath, "live-stats")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("add worktree: %v output=%s", err, string(out))
+	}
+
+	if err := os.WriteFile(filepath.Join(worktreePath, "README.md"), []byte("# Live\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "untracked.txt"), []byte("new\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stats := GetWorktreeFileStatsWithUncommitted(repoDir, "live-stats", defaultBranch, worktreePath)
+	foundModified := false
+	foundAdded := false
+	for _, stat := range stats {
+		if stat.Path == "README.md" && stat.Status == "modified" {
+			foundModified = true
+		}
+		if stat.Path == "untracked.txt" && stat.Status == "added" {
+			foundAdded = true
+		}
+	}
+	if !foundModified {
+		t.Fatalf("expected live README.md modification in stats, got %+v", stats)
+	}
+	if !foundAdded {
+		t.Fatalf("expected live untracked.txt addition in stats, got %+v", stats)
+	}
+}
+
 func TestWorktreeRepo_UpdateAndClear(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)
@@ -1686,5 +1728,64 @@ func TestGetWorktreeDiffWithUncommitted(t *testing.T) {
 	}
 	if strings.Contains(diff, "uncommitted.txt") {
 		t.Error("should not show untracked files when worktree path is empty")
+	}
+}
+
+func TestGetWorktreeDiffUsesCurrentTargetTreeNotStaleMergeBase(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	defaultBranch := GetCurrentBranch(repoDir)
+	if defaultBranch == "" {
+		defaultBranch = GetDefaultBranch(repoDir)
+	}
+
+	// Simulate an older task branch with a large historical change.
+	runGit("checkout", "-b", "task/stale-base")
+	if err := os.WriteFile(filepath.Join(repoDir, "large-feature.txt"), []byte("large feature\n"), 0644); err != nil {
+		t.Fatalf("write large feature: %v", err)
+	}
+	runGit("add", "large-feature.txt")
+	runGit("commit", "-m", "large task change")
+
+	// Target advances with an equivalent squashed version of that old change.
+	runGit("checkout", defaultBranch)
+	if err := os.WriteFile(filepath.Join(repoDir, "large-feature.txt"), []byte("large feature\n"), 0644); err != nil {
+		t.Fatalf("write squashed large feature: %v", err)
+	}
+	runGit("add", "large-feature.txt")
+	runGit("commit", "-m", "squash large task change")
+
+	// The task branch adds only a small follow-up after the target already has
+	// the old large change. A merge-base diff would still show large-feature.txt;
+	// the Changes UI should show only the current net difference.
+	runGit("checkout", "task/stale-base")
+	if err := os.WriteFile(filepath.Join(repoDir, "followup.txt"), []byte("small followup\n"), 0644); err != nil {
+		t.Fatalf("write followup: %v", err)
+	}
+	runGit("add", "followup.txt")
+	runGit("commit", "-m", "small followup")
+
+	diff := GetWorktreeDiff(repoDir, "task/stale-base", defaultBranch)
+	if strings.Contains(diff, "large-feature.txt") {
+		t.Fatalf("expected stale historical change to be omitted from current target-tree diff, got:\n%s", diff)
+	}
+	if !strings.Contains(diff, "followup.txt") || !strings.Contains(diff, "small followup") {
+		t.Fatalf("expected follow-up change in diff, got:\n%s", diff)
+	}
+
+	stats := GetWorktreeFileStats(repoDir, "task/stale-base", defaultBranch)
+	if len(stats) != 1 {
+		t.Fatalf("expected one current file stat, got %#v", stats)
+	}
+	if stats[0].Path != "followup.txt" {
+		t.Fatalf("expected file stats to omit stale historical change, got %#v", stats)
 	}
 }

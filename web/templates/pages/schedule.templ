@@ -506,12 +506,12 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 															onclick="openTaskDialog(this.dataset.taskId)"
 															ondragstart="handleScheduleDragStart(event)"
 														>
-															<div class="font-semibold truncate leading-tight">{ occurrence.Task.Task.Title }</div>
-															if occurrence.Task.Schedule != nil && occurrence.Task.Schedule.RepeatType.IsSubDaily() {
-																<div class="opacity-60 leading-tight">{ formatRepeatLabel(occurrence.Task.Schedule.RepeatType, occurrence.Task.Schedule.RepeatInterval) }</div>
-															} else {
-																<div class="opacity-60 leading-tight">{ formatTime(&occurrence.OccurrenceTime) }</div>
-															}
+														<div class="font-semibold truncate leading-tight">{ occurrence.Task.Task.Title }</div>
+														if occurrence.Task.Schedule != nil && occurrence.Task.Schedule.RepeatType.IsSubDaily() {
+															<div class="opacity-60 leading-tight">{ formatRepeatLabel(occurrence.Task.Schedule.RepeatType, occurrence.Task.Schedule.RepeatInterval) }</div>
+														} else {
+															<div class="opacity-60 leading-tight">{ formatTime(&occurrence.OccurrenceTime) }</div>
+														}
 														</div>
 													}
 												</div>

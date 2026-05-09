@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,8 +16,34 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+type fakeMemoryTaskRunner struct {
+	memoryContext string
+}
+
+func (f *fakeMemoryTaskRunner) RecallContext(ctx context.Context, projectID string, query MemoryRecallQuery) string {
+	return f.memoryContext
+}
+
 type captureProviderAdapter struct {
 	lastReq llmcontracts.AgentRequest
+}
+
+type runtimeToolWritingLLMCaller struct {
+	workDir string
+}
+
+func (c *runtimeToolWritingLLMCaller) CallModel(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
+	c.workDir = workDir
+	rt := llmcontracts.RuntimeToolsFromContext(ctx)
+	if rt == nil || rt.Executor == nil {
+		return "", "", 0, fmt.Errorf("missing runtime tools")
+	}
+	payload, _ := json.Marshal(map[string]string{"file_path": "scoped.txt", "content": "from scoped runtime"})
+	_, _, _, err := rt.Executor(ctx, "write_file", payload)
+	if err != nil {
+		return "", "", 0, err
+	}
+	return "scoped task response", "scoped task response", 10, nil
 }
 
 func (c *captureProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
@@ -418,6 +446,294 @@ func TestLLMService_ExecuteTask_UsesAssignedAgent(t *testing.T) {
 	}
 	if mock.LastCall().Agent.ID != customAgent.ID {
 		t.Errorf("expected callLLM to receive custom agent %s, got %s", customAgent.ID, mock.LastCall().Agent.ID)
+	}
+}
+
+func TestLLMService_ExecuteTask_MemoryConsolidationUsesNormalExecutionPath(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	agentRepo := repository.NewAgentRepo(db)
+	svc.SetAgentRepo(agentRepo)
+	memoryRunner := &fakeMemoryTaskRunner{}
+	svc.SetMemoryTaskRunner(memoryRunner)
+	mock := &testutil.MockLLMCaller{Response: "memory task response", TextOnly: "memory task response", Tokens: 10}
+	svc.SetLLMCaller(mock)
+
+	repoPath := t.TempDir()
+	agentDef := &models.Agent{
+		Name:         "Memory Consolidator",
+		SystemKind:   models.AgentSystemKindMemoryConsolidator,
+		SystemPrompt: "Consolidate memory",
+		Model:        "inherit",
+		Tools:        []string{models.AgentToolScopedFiles},
+		ToolConfig: models.AgentToolConfig{
+			ScopedFiles:            []models.ScopedFilesConfig{{Directory: ".openvibely/memory", Permissions: []string{"read", "write", "delete"}}},
+			SkipDefaultTools:       true,
+			DisableRuntimeWorktree: true,
+		},
+	}
+	if err := agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+	agent, _ := llmConfigRepo.GetDefault(ctx)
+	agent.Provider = models.ProviderTest
+	projectRepo := repository.NewProjectRepo(db)
+	project, err := projectRepo.GetByID(ctx, "default")
+	if err != nil {
+		t.Fatalf("get default project: %v", err)
+	}
+	if project == nil {
+		project = &models.Project{ID: "default", Name: "Default"}
+	}
+	project.RepoPath = repoPath
+	if err := projectRepo.Update(ctx, project); err != nil {
+		t.Fatalf("update project repo path: %v", err)
+	}
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "System: Memory Consolidation",
+		Category:          models.CategoryScheduled,
+		Status:            models.StatusPending,
+		Prompt:            "Run scheduled memory consolidation for this project.",
+		AgentDefinitionID: &agentDef.ID,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil {
+		t.Fatal("expected execution")
+	}
+	last := mock.LastCall()
+	if last.Prompt != task.Prompt {
+		t.Fatalf("expected scheduled task prompt, got %q", last.Prompt)
+	}
+	wantWorkDir := filepath.Join(repoPath, ".openvibely", "memory")
+	if last.WorkDir != wantWorkDir {
+		t.Fatalf("expected scoped memory workdir %q, got %q", wantWorkDir, last.WorkDir)
+	}
+	execs, err := execRepo.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list executions: %v", err)
+	}
+	if len(execs) != 1 {
+		t.Fatalf("expected one execution, got %d", len(execs))
+	}
+	if execs[0].PromptSent != task.Prompt {
+		t.Fatalf("expected execution prompt to be scheduled task prompt, got %q", execs[0].PromptSent)
+	}
+	if execs[0].Output != "memory task response" {
+		t.Fatalf("expected execution output to be model response, got %q", execs[0].Output)
+	}
+}
+
+func TestLLMService_ExecuteTask_MemoryConsolidationSkipsRuntimeWorktree(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	ctx := context.Background()
+
+	repoPath := createTestGitRepo(t)
+	project := &models.Project{Name: "Memory Repo", RepoPath: repoPath}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	agentRepo := repository.NewAgentRepo(db)
+	agentDef := &models.Agent{
+		Name:         "Memory Consolidator",
+		SystemKind:   models.AgentSystemKindMemoryConsolidator,
+		SystemPrompt: "Consolidate memory",
+		Model:        "inherit",
+		Tools:        []string{models.AgentToolScopedFiles},
+		ToolConfig: models.AgentToolConfig{
+			ScopedFiles:            []models.ScopedFilesConfig{{Directory: ".openvibely/memory", Permissions: []string{"read", "write", "delete"}}},
+			SkipDefaultTools:       true,
+			DisableRuntimeWorktree: true,
+		},
+	}
+	if err := agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetAgentRepo(agentRepo)
+	svc.SetWorktreeService(NewWorktreeService(taskRepo, projectRepo, settingsRepo))
+	svc.SetMemoryTaskRunner(&fakeMemoryTaskRunner{})
+	mock := &testutil.MockLLMCaller{Response: "memory task response", TextOnly: "memory task response", Tokens: 10}
+	svc.SetLLMCaller(mock)
+
+	agent, _ := llmConfigRepo.GetDefault(ctx)
+	agent.Provider = models.ProviderTest
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "System: Memory Consolidation",
+		Category:          models.CategoryScheduled,
+		Status:            models.StatusPending,
+		Prompt:            "Run scheduled memory consolidation for this project.",
+		AgentDefinitionID: &agentDef.ID,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil {
+		t.Fatal("expected execution")
+	}
+	wantWorkDir := filepath.Join(repoPath, ".openvibely", "memory")
+	if got := mock.LastCall().WorkDir; got != wantWorkDir {
+		t.Fatalf("expected memory consolidator to write directly to repo memory dir %q, got %q", wantWorkDir, got)
+	}
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updated.WorktreePath != "" || updated.WorktreeBranch != "" {
+		t.Fatalf("memory consolidator should not create runtime worktree, got path=%q branch=%q", updated.WorktreePath, updated.WorktreeBranch)
+	}
+}
+
+func TestLLMService_ExecuteTask_ScopedFilesAgentUsesRuntimeWorktreeByDefault(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	ctx := context.Background()
+
+	repoPath := createTestGitRepo(t)
+	project := &models.Project{Name: "Scoped Repo", RepoPath: repoPath}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	agentRepo := repository.NewAgentRepo(db)
+	agentDef := &models.Agent{
+		Name:         "Scoped Docs Agent",
+		SystemPrompt: "Edit scoped docs",
+		Model:        "inherit",
+		Tools:        []string{models.AgentToolScopedFiles},
+		ToolConfig: models.AgentToolConfig{
+			ScopedFiles: []models.ScopedFilesConfig{{Directory: "docs", Permissions: []string{"read", "write"}}},
+		},
+	}
+	if err := agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetAgentRepo(agentRepo)
+	svc.SetWorktreeService(NewWorktreeService(taskRepo, projectRepo, settingsRepo))
+	svc.SetMemoryTaskRunner(&fakeMemoryTaskRunner{})
+	caller := &runtimeToolWritingLLMCaller{}
+	svc.SetLLMCaller(caller)
+
+	agent, _ := llmConfigRepo.GetDefault(ctx)
+	agent.Provider = models.ProviderTest
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Scoped Docs Task",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		Prompt:            "Update docs.",
+		AgentDefinitionID: &agentDef.ID,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil {
+		t.Fatal("expected execution")
+	}
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updated.WorktreePath == "" || updated.WorktreeBranch == "" {
+		t.Fatalf("expected generic scoped-files agent to use runtime worktree by default")
+	}
+	if got := caller.workDir; got != updated.WorktreePath {
+		t.Fatalf("expected agent process workdir to stay on runtime worktree root %q when default tools are enabled, got %q", updated.WorktreePath, got)
+	}
+	if _, err := os.Stat(filepath.Join(updated.WorktreePath, "docs", "scoped.txt")); err != nil {
+		t.Fatalf("expected scoped file write to land inside runtime worktree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoPath, "docs", "scoped.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected project repo docs to remain untouched, stat err=%v", err)
+	}
+}
+
+func TestLLMService_ExecuteTask_IncludesProjectMemoryContext(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+	memoryRunner := &fakeMemoryTaskRunner{memoryContext: "Recalled from your persistent memory system:\n\n- Provider guidance applies here.\n\nSources: provider_architecture.md"}
+	svc.SetMemoryTaskRunner(memoryRunner)
+
+	agent, _ := llmConfigRepo.GetDefault(ctx)
+	agent.Provider = models.ProviderTest
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Provider task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+		Prompt:    "Use provider architecture guidance.",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	capture := &captureProviderAdapter{}
+	svc.providerAdapters[models.ProviderTest] = capture
+
+	_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+
+	last := capture.lastReq
+	if !strings.Contains(last.ProjectInstructions, "Recalled from your persistent memory system:") {
+		t.Fatalf("expected project memory in project instructions, got %q", last.ProjectInstructions)
+	}
+	if !strings.Contains(last.ProjectInstructions, "Sources: provider_architecture.md") {
+		t.Fatalf("expected memory sources in project instructions, got %q", last.ProjectInstructions)
+	}
+	if last.Message != task.Prompt {
+		t.Fatalf("expected task prompt unchanged, got %q", last.Message)
 	}
 }
 
@@ -1150,5 +1466,85 @@ func TestLLMService_CallAgentDirectStreamingDetailed_PluginScopingByAgentDef(t *
 	}
 	if capture.lastReq.AgentDefinition != nil {
 		t.Fatalf("expected nil AgentDefinition for follow-up without agent def, got %+v", capture.lastReq.AgentDefinition)
+	}
+}
+
+func TestLLMService_ExecuteTask_ScopedFilesPrepFailureCompletesExecution(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetAgentRepo(agentRepo)
+	svc.SetLLMCaller(&testutil.MockLLMCaller{Response: "should not run", TextOnly: "should not run", Tokens: 1})
+
+	project, err := projectRepo.GetByID(ctx, "default")
+	if err != nil {
+		t.Fatalf("get default project: %v", err)
+	}
+	if project == nil {
+		project = &models.Project{ID: "default", Name: "Default"}
+	}
+	project.RepoPath = t.TempDir()
+	if err := projectRepo.Update(ctx, project); err != nil {
+		t.Fatalf("update project repo path: %v", err)
+	}
+
+	agentDef := &models.Agent{
+		Name:         "Bad scoped agent",
+		SystemPrompt: "Use scoped files",
+		Model:        "inherit",
+		Tools:        []string{models.AgentToolScopedFiles},
+		ToolConfig: models.AgentToolConfig{
+			ScopedFiles: []models.ScopedFilesConfig{{Directory: "../escape", Permissions: []string{"read"}}},
+		},
+	}
+	if err := agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+
+	agent, _ := llmConfigRepo.GetDefault(ctx)
+	agent.Provider = models.ProviderTest
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Bad scoped files",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		Prompt:            "Try scoped files",
+		AgentDefinitionID: &agentDef.ID,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err == nil {
+		t.Fatal("expected scoped files prep error")
+	}
+	if exec == nil {
+		t.Fatal("expected failed execution to be returned")
+	}
+	if exec.Status != models.ExecFailed {
+		t.Fatalf("expected returned execution failed, got %s", exec.Status)
+	}
+
+	execs, err := execRepo.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list executions: %v", err)
+	}
+	if len(execs) != 1 {
+		t.Fatalf("expected one execution, got %d", len(execs))
+	}
+	if execs[0].Status != models.ExecFailed {
+		t.Fatalf("expected persisted execution failed, got %s", execs[0].Status)
+	}
+	if !strings.Contains(execs[0].ErrorMessage, "preparing scoped file tools") {
+		t.Fatalf("expected scoped files error message, got %q", execs[0].ErrorMessage)
 	}
 }

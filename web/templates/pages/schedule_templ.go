@@ -783,7 +783,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 					var templ_7745c5c3_Var26 string
 					templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(occurrence.Task.Task.Title)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 509, Col: 93}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 509, Col: 92}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 					if templ_7745c5c3_Err != nil {
@@ -801,7 +801,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 						var templ_7745c5c3_Var27 string
 						templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(formatRepeatLabel(occurrence.Task.Schedule.RepeatType, occurrence.Task.Schedule.RepeatInterval))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 511, Col: 151}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 511, Col: 150}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 						if templ_7745c5c3_Err != nil {
@@ -819,7 +819,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 						var templ_7745c5c3_Var28 string
 						templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(formatTime(&occurrence.OccurrenceTime))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 513, Col: 94}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 513, Col: 93}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 						if templ_7745c5c3_Err != nil {

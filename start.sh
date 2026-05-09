@@ -2,8 +2,24 @@
 set -euo pipefail
 
 PORT="${PORT:-3001}"
-DATABASE_PATH="${DATABASE_PATH:-./openvibely.db}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Load .env before resolving runtime defaults so OPENVIBELY_APP_DATA_DIR can
+# make local server and desktop share DB/repos/memory when desired.
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    echo -e "\033[0;32m[openvibely]\033[0m Loading .env"
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
+RUNTIME_DIR="${OPENVIBELY_APP_DATA_DIR:-${OPENVIBELY_RUNTIME_DIR:-$SCRIPT_DIR/.openvibely}}"
+if [ -n "${OPENVIBELY_APP_DATA_DIR:-}" ]; then
+    DATABASE_PATH="${DATABASE_PATH:-$RUNTIME_DIR/openvibely.db}"
+    PROJECT_REPO_ROOT="${PROJECT_REPO_ROOT:-$RUNTIME_DIR/repos}"
+else
+    DATABASE_PATH="${DATABASE_PATH:-./openvibely.db}"
+fi
 BIN_DIR="$SCRIPT_DIR/bin"
 BINARY="$BIN_DIR/openvibely"
 LOG_DIR="$SCRIPT_DIR/logs"
@@ -97,21 +113,13 @@ log "Building..."
 mkdir -p "$BIN_DIR"
 go build -ldflags="-s -w" -o "$BINARY" ./cmd/server
 
-# Load .env if it exists
-if [ -f "$SCRIPT_DIR/.env" ]; then
-    log "Loading .env"
-    set -a
-    source "$SCRIPT_DIR/.env"
-    set +a
-fi
-
 # Verify port is free after shutdown
 if lsof -ti:"$PORT" &>/dev/null; then
     err "Port $PORT is still in use by another process. Cannot start."
     exit 1
 fi
 
-export PORT DATABASE_PATH ENVIRONMENT OPENVIBELY_ENABLE_LOCAL_REPO_PATH OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS AUTH_ENABLED AUTH_USERNAME AUTH_PASSWORD AUTH_SESSION_SECRET
+export PORT DATABASE_PATH PROJECT_REPO_ROOT ENVIRONMENT OPENVIBELY_APP_DATA_DIR OPENVIBELY_ENABLE_LOCAL_REPO_PATH OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS AUTH_ENABLED AUTH_USERNAME AUTH_PASSWORD AUTH_SESSION_SECRET
 
 # APP_BASE_URL controls hosted OAuth callback URLs.
 # Leave unset for local development (uses localhost callback listeners).
@@ -127,7 +135,7 @@ if [ -n "${OAUTH_REDIRECT_MODE:-}" ]; then
     export OAUTH_REDIRECT_MODE
 fi
 
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" "$RUNTIME_DIR"
 
 log "Starting OpenVibely on http://localhost:$PORT"
 if [ -n "${APP_BASE_URL:-}" ]; then
@@ -136,6 +144,7 @@ else
     log "App base URL: not set (OAuth callbacks use localhost)"
 fi
 log "Database: $DATABASE_PATH"
+log "Repos: ${PROJECT_REPO_ROOT:-./repos}"
 log "Logs: $LOG_FILE"
 log "Press Ctrl+C to stop"
 echo ""

@@ -2125,6 +2125,53 @@ func TestSendAgentic_DisableToolsWithExtraTools(t *testing.T) {
 	}
 }
 
+func TestSendAgentic_SkipDefaultToolsUsesOnlyExtraTools(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var reqBody map[string]any
+		_ = json.Unmarshal(body, &reqBody)
+
+		tools, ok := reqBody["tools"].([]any)
+		if !ok || len(tools) != 1 {
+			t.Fatalf("expected exactly one extra tool, got %#v", reqBody["tools"])
+		}
+		tool, _ := tools[0].(map[string]any)
+		if tool["name"] != "memory_read" {
+			t.Fatalf("expected only runtime tool, got %#v", tool)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"Done.\"}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	client := NewWithAPIKey("sk-test")
+	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
+		Model:            "gpt-5.3-codex",
+		SkipDefaultTools: true,
+		ExtraTools: []ToolDefinition{
+			{
+				Type:        "function",
+				Name:        "memory_read",
+				Description: "Read memory",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if resp.Text != "Done." {
+		t.Errorf("Text = %q", resp.Text)
+	}
+}
+
 func TestOpenAIModelSupportsWebSearch(t *testing.T) {
 	tests := []struct {
 		model    string

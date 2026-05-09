@@ -18,14 +18,14 @@ func NewAgentRepo(db *sql.DB) *AgentRepo {
 	return &AgentRepo{db: db}
 }
 
-const agentColumns = `id, name, description, system_prompt, model, tools, plugins, mcp_servers, skills, created_at, updated_at`
+const agentColumns = `id, name, description, system_prompt, model, tools, tool_config, plugins, mcp_servers, skills, system_kind, created_at, updated_at`
 
 func scanAgent(row interface{ Scan(dest ...any) error }) (*models.Agent, error) {
 	var a models.Agent
-	var toolsJSON, pluginsJSON, mcpJSON, skillsJSON string
+	var toolsJSON, toolConfigJSON, pluginsJSON, mcpJSON, skillsJSON string
 	err := row.Scan(&a.ID, &a.Name, &a.Description, &a.SystemPrompt,
-		&a.Model, &toolsJSON, &pluginsJSON, &mcpJSON, &skillsJSON,
-		&a.CreatedAt, &a.UpdatedAt)
+		&a.Model, &toolsJSON, &toolConfigJSON, &pluginsJSON, &mcpJSON, &skillsJSON,
+		&a.SystemKind, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -37,6 +37,12 @@ func scanAgent(row interface{ Scan(dest ...any) error }) (*models.Agent, error) 
 	if a.Tools == nil {
 		a.Tools = []string{}
 	}
+	if strings.TrimSpace(toolConfigJSON) != "" && strings.TrimSpace(toolConfigJSON) != "{}" {
+		if err := json.Unmarshal([]byte(toolConfigJSON), &a.ToolConfig); err != nil {
+			return nil, fmt.Errorf("unmarshaling tool_config: %w", err)
+		}
+	}
+	normalizeAgentToolConfig(&a)
 	if pluginsJSON != "" && pluginsJSON != "[]" {
 		if err := json.Unmarshal([]byte(pluginsJSON), &a.Plugins); err != nil {
 			return nil, fmt.Errorf("unmarshaling plugins: %w", err)
@@ -70,6 +76,15 @@ func marshalJSON(v any) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+func normalizeAgentToolConfig(a *models.Agent) {
+	if a == nil {
+		return
+	}
+	if len(a.ToolConfig.ScopedFiles) == 0 {
+		a.ToolConfig.SkipDefaultTools = false
+	}
 }
 
 func (r *AgentRepo) List(ctx context.Context) ([]models.Agent, error) {
@@ -115,10 +130,27 @@ func (r *AgentRepo) GetByName(ctx context.Context, name string) (*models.Agent, 
 	return a, nil
 }
 
+func (r *AgentRepo) GetBySystemKind(ctx context.Context, systemKind string) (*models.Agent, error) {
+	a, err := scanAgent(r.db.QueryRowContext(ctx,
+		`SELECT `+agentColumns+` FROM agents WHERE system_kind = ? ORDER BY created_at ASC LIMIT 1`, systemKind))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting agent by system kind: %w", err)
+	}
+	return a, nil
+}
+
 func (r *AgentRepo) Create(ctx context.Context, a *models.Agent) error {
+	normalizeAgentToolConfig(a)
 	toolsJSON, err := marshalJSON(a.Tools)
 	if err != nil {
 		return fmt.Errorf("marshaling tools: %w", err)
+	}
+	toolConfigJSON, err := marshalJSON(a.ToolConfig)
+	if err != nil {
+		return fmt.Errorf("marshaling tool_config: %w", err)
 	}
 	pluginsJSON, err := marshalJSON(a.Plugins)
 	if err != nil {
@@ -133,11 +165,11 @@ func (r *AgentRepo) Create(ctx context.Context, a *models.Agent) error {
 		return fmt.Errorf("marshaling skills: %w", err)
 	}
 	err = r.db.QueryRowContext(ctx,
-		`INSERT INTO agents (id, name, description, system_prompt, model, tools, plugins, mcp_servers, skills)
-		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO agents (id, name, description, system_prompt, model, tools, tool_config, plugins, mcp_servers, skills, system_kind)
+		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 RETURNING id, created_at, updated_at`,
 		a.Name, a.Description, a.SystemPrompt, a.Model,
-		toolsJSON, pluginsJSON, mcpJSON, skillsJSON).
+		toolsJSON, toolConfigJSON, pluginsJSON, mcpJSON, skillsJSON, a.SystemKind).
 		Scan(&a.ID, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("creating agent: %w", err)
@@ -146,9 +178,14 @@ func (r *AgentRepo) Create(ctx context.Context, a *models.Agent) error {
 }
 
 func (r *AgentRepo) Update(ctx context.Context, a *models.Agent) error {
+	normalizeAgentToolConfig(a)
 	toolsJSON, err := marshalJSON(a.Tools)
 	if err != nil {
 		return fmt.Errorf("marshaling tools: %w", err)
+	}
+	toolConfigJSON, err := marshalJSON(a.ToolConfig)
+	if err != nil {
+		return fmt.Errorf("marshaling tool_config: %w", err)
 	}
 	pluginsJSON, err := marshalJSON(a.Plugins)
 	if err != nil {
@@ -164,11 +201,11 @@ func (r *AgentRepo) Update(ctx context.Context, a *models.Agent) error {
 	}
 	_, err = r.db.ExecContext(ctx,
 		`UPDATE agents SET name = ?, description = ?, system_prompt = ?,
-		 model = ?, tools = ?, plugins = ?, mcp_servers = ?, skills = ?,
+		 model = ?, tools = ?, tool_config = ?, plugins = ?, mcp_servers = ?, skills = ?, system_kind = ?,
 		 updated_at = datetime('now')
 		 WHERE id = ?`,
 		a.Name, a.Description, a.SystemPrompt, a.Model,
-		toolsJSON, pluginsJSON, mcpJSON, skillsJSON, a.ID)
+		toolsJSON, toolConfigJSON, pluginsJSON, mcpJSON, skillsJSON, a.SystemKind, a.ID)
 	if err != nil {
 		return fmt.Errorf("updating agent: %w", err)
 	}

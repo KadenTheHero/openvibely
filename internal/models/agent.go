@@ -26,8 +26,22 @@ type SkillConfig struct {
 	Content     string `json:"content"`         // the skill instruction body
 }
 
+// ScopedFilesConfig grants project-relative filesystem access constrained to a
+// directory and explicit permissions.
+type ScopedFilesConfig struct {
+	Directory   string   `json:"directory"`
+	Permissions []string `json:"permissions"`
+}
+
+// AgentToolConfig stores structured configuration for parameterized tools.
+type AgentToolConfig struct {
+	ScopedFiles            []ScopedFilesConfig `json:"scoped_files,omitempty"`
+	SkipDefaultTools       bool                `json:"skip_default_tools,omitempty"`
+	DisableRuntimeWorktree bool                `json:"disable_runtime_worktree,omitempty"`
+}
+
 // Agent is a named configuration that wraps a system prompt, tool restrictions,
-// skills, and MCP servers. Tasks can be assigned to an agent.
+// skills, MCP servers, and parameterized tool config. Tasks can be assigned to an agent.
 type Agent struct {
 	ID           string            `json:"id"`
 	Name         string            `json:"name"`
@@ -35,8 +49,10 @@ type Agent struct {
 	SystemPrompt string            `json:"system_prompt"`
 	Model        string            `json:"model"` // inherit, sonnet, haiku, opus
 	Tools        []string          `json:"tools"`
+	ToolConfig   AgentToolConfig   `json:"tool_config"`
 	Plugins      []string          `json:"plugins"` // plugin IDs: "plugin@marketplace"
 	MCPServers   []MCPServerConfig `json:"mcp_servers"`
+	SystemKind   string            `json:"system_kind,omitempty"`
 	Skills       []SkillConfig     `json:"skills"`
 	CreatedAt    time.Time         `json:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at"`
@@ -91,7 +107,12 @@ type PluginRuntimeMCP struct {
 }
 
 // AllAgentTools is the set of tool names an agent can allow.
+const (
+	AgentSystemKindMemoryConsolidator = "memory_consolidator"
+	AgentToolScopedFiles              = "ScopedFiles"
+)
+
 var AllAgentTools = []string{
 	"Read", "Write", "Edit", "Bash", "Glob", "Grep",
-	"WebFetch", "WebSearch", "NotebookEdit",
+	"WebFetch", "WebSearch", "NotebookEdit", AgentToolScopedFiles,
 }

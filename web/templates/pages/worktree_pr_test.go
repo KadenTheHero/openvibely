@@ -99,7 +99,7 @@ func TestTaskChangesWorktreeContent_LocalAndGitHubSections(t *testing.T) {
 	}
 }
 
-func TestTaskChangesWorktreeContent_MergedStatusHidesLocalSection(t *testing.T) {
+func TestTaskChangesWorktreeContent_MergedStatusWithoutDiffHidesLocalSection(t *testing.T) {
 	task := &models.Task{
 		ID:             "task-1",
 		WorktreeBranch: "task/feature",
@@ -107,11 +107,11 @@ func TestTaskChangesWorktreeContent_MergedStatusHidesLocalSection(t *testing.T) 
 		Status:         models.StatusCompleted,
 	}
 	var buf bytes.Buffer
-	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, true).Render(context.Background(), &buf); err != nil {
+	if err := TaskChangesWorktreeContent("", task, nil, nil, nil, true).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()
-	// When merged, local merge options should not appear even with flag on
+	// When merged and no diff remains, local merge options should not appear even with flag on.
 	if strings.Contains(out, "/worktree/merge") {
 		t.Fatal("did not expect merge endpoint actions when already merged")
 	}
@@ -158,5 +158,25 @@ func TestWorktreeInfoPanel_LocalSectionHeader(t *testing.T) {
 	}
 	if !strings.Contains(out, "Merge commit") {
 		t.Fatal("expected Merge commit option in worktree info panel")
+	}
+}
+
+func TestTaskChangesWorktreeContent_MergedStatusWithDiffShowsLocalSection(t *testing.T) {
+	task := &models.Task{
+		ID:             "task-1",
+		WorktreeBranch: "task/feature",
+		MergeStatus:    models.MergeStatusMerged,
+		Status:         models.StatusCompleted,
+	}
+	var buf bytes.Buffer
+	if err := TaskChangesWorktreeContent("diff --git a/file.txt b/file.txt", task, nil, nil, nil, true).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "/worktree/merge") {
+		t.Fatal("expected merge endpoint actions when merge_status is stale but diff still exists")
+	}
+	if !strings.Contains(out, "Local") {
+		t.Fatal("expected Local section header when merge_status is stale but diff still exists")
 	}
 }

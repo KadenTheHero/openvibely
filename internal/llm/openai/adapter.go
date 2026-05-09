@@ -171,6 +171,12 @@ func composeRuntimeToolExecutor(base func(context.Context, string, json.RawMessa
 func composeRuntimeToolFilter(base func(string) bool, rt *llmcontracts.RuntimeTools, isTaskFollowup bool, chatMode models.ChatMode) func(string) bool {
 	runtimeNames := runtimeToolNameSet(rt)
 	return func(name string) bool {
+		if rt != nil && rt.Filter != nil {
+			allow, handled := rt.Filter(name)
+			if handled {
+				return allow
+			}
+		}
 		isActionTool := isRuntimeTool(runtimeNames, name)
 
 		if !isTaskFollowup {
@@ -192,12 +198,6 @@ func composeRuntimeToolFilter(base func(string) bool, rt *llmcontracts.RuntimeTo
 		}
 
 		if isActionTool {
-			if rt != nil && rt.Filter != nil {
-				allow, handled := rt.Filter(name)
-				if handled {
-					return allow
-				}
-			}
 			return true
 		}
 
@@ -292,7 +292,7 @@ func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.Execution
 }
 
 // CallDirect makes a non-streaming OpenAI API call.
-func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, disableTools bool) (string, llmcontracts.Usage, error) {
+func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, disableTools bool) (string, llmcontracts.Usage, error) {
 	log.Printf("[openai-adapter] CallDirect model=%s output_budget=%d attachments=%d auth_method=%s disable_tools=%v", agent.Model, openAIDirectOutputBudget, len(attachments), agent.AuthMethod, disableTools)
 
 	client, err := a.getClient(ctx, agent)
@@ -311,6 +311,33 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 	oaAttachments, err := convertAttachments(attachments)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
+	}
+
+	rt := llmcontracts.RuntimeToolsFromContext(ctx)
+	if rt != nil && len(rt.Definitions) > 0 && !disableTools {
+		effectiveWorkDir := workDir
+		if effectiveWorkDir == "" {
+			effectiveWorkDir = "."
+		}
+		resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
+			Model:            agent.Model,
+			MaxOutputTokens:  openAIDirectOutputBudget,
+			System:           applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt("", effectiveWorkDir), agent),
+			ReasoningEffort:  reasoningEffort(agent.ReasoningEffort),
+			ReasoningSummary: "auto",
+			WorkDir:          effectiveWorkDir,
+			Attachments:      oaAttachments,
+			ExtraTools:       runtimeOpenAITools(rt),
+			ToolExecutor:     composeRuntimeToolExecutor(nil, rt),
+			ToolFilter:       composeRuntimeToolFilter(nil, rt, true, models.ChatModeOrchestrate),
+			SkipDefaultTools: rt.SkipDefaultTools,
+		})
+		if err != nil {
+			log.Printf("[openai-adapter] CallDirect agentic error: %v", err)
+			return "", llmusage.FromTotal(0), wrapAuthScopeError(agent, err)
+		}
+		usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
+		return resp.Text, usage, nil
 	}
 
 	resp, err := client.Send(ctx, fullPrompt, &openaiclient.SendOptions{
@@ -361,8 +388,12 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	if effectiveWorkDir == "" {
 		effectiveWorkDir = "."
 	}
+	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildOpenAIRuntime(ctx, effectiveWorkDir, agentDef)
 	defer cleanupRuntime()
+	extraTools = append(extraTools, runtimeOpenAITools(rt)...)
+	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
+	toolFilter = composeRuntimeToolFilter(toolFilter, rt, true, models.ChatModeOrchestrate)
 
 	sw := llmstream.NewWriter(execID, "", a.execRepo, ctx, 500*time.Millisecond)
 	defer sw.Stop()
@@ -572,8 +603,12 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	if effectiveWorkDir == "" {
 		effectiveWorkDir = "."
 	}
+	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildOpenAIRuntime(ctx, effectiveWorkDir, agentDef)
 	defer cleanupRuntime()
+	extraTools = append(extraTools, runtimeOpenAITools(rt)...)
+	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
+	toolFilter = composeRuntimeToolFilter(toolFilter, rt, true, models.ChatModeOrchestrate)
 
 	sw := llmstream.NewWriter(execID, "", a.execRepo, ctx, 500*time.Millisecond)
 	defer sw.Stop()

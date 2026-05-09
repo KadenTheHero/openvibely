@@ -21,6 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/handler"
+	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
@@ -249,6 +250,51 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	worktreeSvc.SetGitHubService(githubSvc)
 	schedulerSvc.SetWorktreeService(worktreeSvc)
 
+	// Auto-memory subsystem (Claude-style per-project memory). Each project
+	// stores memory under its configured local repo path at .openvibely/memory.
+	memoryResolver, mrErr := memory.NewPathResolver("", "")
+	if mrErr != nil {
+		log.Printf("[memory] path resolver init failed (memory subsystem disabled): %v", mrErr)
+	}
+	var memorySvc *service.MemoryService
+	if memoryResolver != nil {
+		memoryRepo := repository.NewMemoryRepo(db)
+		memoryStore := memory.NewFileStore(memoryResolver)
+		memorySvc = service.NewMemoryService(memoryRepo, taskRepo, scheduleRepo, agentRepo, llmConfigRepo, projectRepo, execRepo, llmSvc, memoryStore, memoryResolver)
+		// Seed per-project memory state for any existing projects.
+		if existing, lerr := projectRepo.List(context.Background()); lerr == nil {
+			for _, p := range existing {
+				if err := memorySvc.EnsureProject(context.Background(), p.ID); err != nil {
+					log.Printf("[memory] ensure project %s: %v", p.ID, err)
+				}
+			}
+		}
+		llmSvc.SetMemoryTaskRunner(memorySvc)
+
+		// After every task completion, kick off an extraction pass. The
+		// hook runs in a detached goroutine inside the worker; here we just
+		// build the bounded Interaction from the in-memory task struct.
+		// The memory service performs model-backed, tool-driven extraction
+		// when a project/default model is configured.
+		workerSvc.SetOnTaskComplete(func(t models.Task, runErr error) {
+			if t.AgentDefinitionID != nil {
+				if ad, adErr := agentRepo.GetByID(context.Background(), *t.AgentDefinitionID); adErr == nil && ad != nil && ad.SystemKind == models.AgentSystemKindMemoryConsolidator {
+					return
+				}
+			}
+			cancelled := runErr != nil && strings.Contains(strings.ToLower(runErr.Error()), "cancel")
+			memorySvc.EnqueueExtraction(memory.Interaction{
+				ProjectID:  t.ProjectID,
+				SourceKind: memory.SourceTask,
+				SourceID:   t.ID,
+				Title:      t.Title,
+				UserText:   t.Prompt,
+				Cancelled:  cancelled,
+			})
+		})
+		log.Printf("[memory] repo-local memory enabled")
+	}
+
 	// Telegram Bot (optional - starts if token is configured via env or saved in DB)
 	telegramToken := cfg.TelegramToken
 	if telegramToken == "" {
@@ -386,6 +432,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetGitHubService(githubSvc)
 	h.SetSlackService(slackSvc)
 	h.SetWebhookRepo(webhookRepo)
+	if memorySvc != nil {
+		h.SetMemoryService(memorySvc)
+	}
 	h.SetLocalRepoPathEnabled(cfg.EnableLocalRepoPath)
 	h.SetTaskChangesMergeOptionsEnabled(cfg.EnableTaskChangesMergeOptions)
 	h.SetAuthConfig(authCfg)

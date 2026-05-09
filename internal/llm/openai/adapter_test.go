@@ -74,6 +74,55 @@ func TestToolSecondaryInfo_WebSearchFindInPageDetail(t *testing.T) {
 	}
 }
 
+func TestRuntimeToolFilter_SkipDefaultToolsAllowsOnlyRuntimeTools(t *testing.T) {
+	rt := &llmcontracts.RuntimeTools{
+		SkipDefaultTools: true,
+		Definitions: []llmcontracts.RuntimeToolDefinition{
+			{Name: "read_file"},
+		},
+		Filter: func(name string) (bool, bool) {
+			if name == "read_file" {
+				return true, true
+			}
+			return false, true
+		},
+	}
+	filter := composeRuntimeToolFilter(nil, rt, true, models.ChatModeOrchestrate)
+	if !filter("read_file") {
+		t.Fatalf("expected runtime scoped file tool to be allowed")
+	}
+	if filter("bash") {
+		t.Fatalf("expected default tool to be blocked by runtime filter")
+	}
+}
+
+func TestTaskStreamingRuntimeToolComposition_AllowsScopedFilesRuntimeTools(t *testing.T) {
+	rt := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{
+			{Name: "list_files"},
+		},
+		Filter: func(name string) (bool, bool) {
+			if name == "list_files" {
+				return true, true
+			}
+			return false, true
+		},
+	}
+
+	extraTools := runtimeOpenAITools(rt)
+	if len(extraTools) != 1 || extraTools[0].Name != "list_files" {
+		t.Fatalf("expected runtime tool definition to be exposed, got %#v", extraTools)
+	}
+
+	filter := composeRuntimeToolFilter(nil, rt, true, models.ChatModeOrchestrate)
+	if !filter("list_files") {
+		t.Fatalf("expected task streaming runtime filter to allow managed memory tool")
+	}
+	if filter("bash") {
+		t.Fatalf("expected task streaming runtime filter to block default tools when runtime filter handles them")
+	}
+}
+
 func TestApplyOpenAIOAuthSystemPrompt_OAuthAppendsWorkingSection(t *testing.T) {
 	agent := models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth}
 	base := "base system prompt"

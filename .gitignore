@@ -4,9 +4,18 @@
 # Runtime-generated artifacts (attachments, managed repos, local app state)
 uploads/
 repos/
-.openvibely/
 .worktrees/
 logs/
+
+# Local OpenVibely runtime state. Project memory can be versioned per repo by
+# committing root .openvibely/memory/*.md files. Nested runtime state, caches,
+# and logs remain ignored.
+**/.openvibely/
+!/.openvibely/
+/.openvibely/*
+!/.openvibely/memory/
+/.openvibely/memory/*
+!/.openvibely/memory/*.md
 
 # Local SQLite runtime files
 openvibely.db

@@ -297,6 +297,51 @@ func normalizeAgentModel(model string, allowed map[string]struct{}) string {
 	return "inherit"
 }
 
+func agentToolsInclude(tools []string, tool string) bool {
+	for _, existing := range tools {
+		if existing == tool {
+			return true
+		}
+	}
+	return false
+}
+
+func validateScopedFilesDirectory(directory string) (string, error) {
+	directory = strings.TrimSpace(directory)
+	if directory == "" {
+		return ".openvibely/memory", nil
+	}
+	normalizedInput := strings.ReplaceAll(directory, "\\", "/")
+	if filepath.IsAbs(directory) || strings.HasPrefix(normalizedInput, "/") || strings.HasPrefix(normalizedInput, "~") || (len(normalizedInput) >= 2 && normalizedInput[1] == ':') {
+		return "", fmt.Errorf("Directory must be a project-relative directory")
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(normalizedInput))
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("Directory must stay inside the project-relative directory scope")
+	}
+	return cleaned, nil
+}
+
+func normalizeAndValidateAgentToolConfig(agent *models.Agent) error {
+	if agent == nil {
+		return nil
+	}
+	if !agentToolsInclude(agent.Tools, models.AgentToolScopedFiles) {
+		agent.ToolConfig.ScopedFiles = nil
+		agent.ToolConfig.SkipDefaultTools = false
+		agent.ToolConfig.DisableRuntimeWorktree = false
+		return nil
+	}
+	for i := range agent.ToolConfig.ScopedFiles {
+		directory, err := validateScopedFilesDirectory(agent.ToolConfig.ScopedFiles[i].Directory)
+		if err != nil {
+			return err
+		}
+		agent.ToolConfig.ScopedFiles[i].Directory = directory
+	}
+	return nil
+}
+
 func normalizeAgentTools(tools []string) []string {
 	toolNameMap := make(map[string]string, len(models.AllAgentTools))
 	for _, tool := range models.AllAgentTools {
@@ -1483,6 +1528,15 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 		agent.Tools = []string{}
 	}
 	agent.Tools = normalizeAgentTools(agent.Tools)
+	if toolConfigJSON := c.FormValue("tool_config_json"); toolConfigJSON != "" {
+		if err := json.Unmarshal([]byte(toolConfigJSON), &agent.ToolConfig); err != nil {
+			log.Printf("[handler] CreateAgent error parsing tool_config: %v", err)
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid tool configuration")
+		}
+	}
+	if err := normalizeAndValidateAgentToolConfig(&agent); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 
 	// Parse selected plugins from JSON hidden field
 	if pluginsJSON := c.FormValue("plugins_json"); pluginsJSON != "" {
@@ -1560,6 +1614,15 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 		}
 	}
 	existing.Tools = normalizeAgentTools(existing.Tools)
+	if toolConfigJSON := c.FormValue("tool_config_json"); toolConfigJSON != "" {
+		if err := json.Unmarshal([]byte(toolConfigJSON), &existing.ToolConfig); err != nil {
+			log.Printf("[handler] UpdateAgent error parsing tool_config: %v", err)
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid tool configuration")
+		}
+	}
+	if err := normalizeAndValidateAgentToolConfig(existing); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 	if pluginsJSON := c.FormValue("plugins_json"); pluginsJSON != "" {
 		if err := json.Unmarshal([]byte(pluginsJSON), &existing.Plugins); err != nil {
 			log.Printf("[handler] UpdateAgent error parsing plugins: %v", err)

@@ -40,8 +40,8 @@ func TestResolveEnableTaskChangesMergeOptions(t *testing.T) {
 	}{
 		{name: "explicit true", explicit: "true", want: true},
 		{name: "explicit false", explicit: "false", want: false},
-		{name: "unset defaults false", explicit: "", want: false},
-		{name: "invalid defaults false", explicit: "maybe", want: false},
+		{name: "unset defaults true", explicit: "", want: true},
+		{name: "invalid defaults true", explicit: "maybe", want: true},
 		{name: "numeric true", explicit: "1", want: true},
 		{name: "numeric false", explicit: "0", want: false},
 	}
@@ -148,7 +148,7 @@ func TestResolveAuthSessionTTL(t *testing.T) {
 
 func TestLoadWithMode_ServerDefaults(t *testing.T) {
 	// Clear env vars that would override defaults.
-	for _, k := range []string{"PORT", "DATABASE_PATH", "PROJECT_REPO_ROOT", "OPENVIBELY_ENABLE_LOCAL_REPO_PATH"} {
+	for _, k := range []string{"PORT", "DATABASE_PATH", "PROJECT_REPO_ROOT", "OPENVIBELY_APP_DATA_DIR", "OPENVIBELY_ENABLE_LOCAL_REPO_PATH"} {
 		prev := os.Getenv(k)
 		os.Unsetenv(k)
 		defer os.Setenv(k, prev)
@@ -174,7 +174,7 @@ func TestLoadWithMode_ServerDefaults(t *testing.T) {
 
 func TestLoadWithMode_DesktopDefaults(t *testing.T) {
 	// Clear env vars that would override defaults.
-	for _, k := range []string{"PORT", "DATABASE_PATH", "PROJECT_REPO_ROOT", "OPENVIBELY_ENABLE_LOCAL_REPO_PATH"} {
+	for _, k := range []string{"PORT", "DATABASE_PATH", "PROJECT_REPO_ROOT", "OPENVIBELY_APP_DATA_DIR", "OPENVIBELY_ENABLE_LOCAL_REPO_PATH"} {
 		prev := os.Getenv(k)
 		os.Unsetenv(k)
 		defer os.Setenv(k, prev)
@@ -207,6 +207,56 @@ func TestLoadWithMode_DesktopDefaults(t *testing.T) {
 	// Desktop mode enables local repo paths by default.
 	if !cfg.EnableLocalRepoPath {
 		t.Fatal("expected desktop default EnableLocalRepoPath=true")
+	}
+}
+
+func TestLoadWithMode_AppDataDirRootsServerAndDesktopStorage(t *testing.T) {
+	dataDir := t.TempDir()
+	for _, k := range []string{"PORT", "DATABASE_PATH", "PROJECT_REPO_ROOT", "OPENVIBELY_APP_DATA_DIR", "OPENVIBELY_ENABLE_LOCAL_REPO_PATH"} {
+		prev := os.Getenv(k)
+		os.Unsetenv(k)
+		defer os.Setenv(k, prev)
+	}
+	os.Setenv("OPENVIBELY_APP_DATA_DIR", dataDir)
+
+	serverCfg := LoadWithMode(ModeServer)
+	desktopCfg := LoadWithMode(ModeDesktop)
+
+	wantDB := filepath.Join(dataDir, "openvibely.db")
+	wantRepos := filepath.Join(dataDir, "repos")
+	for name, cfg := range map[string]*Config{"server": serverCfg, "desktop": desktopCfg} {
+		if cfg.AppDataDir != dataDir {
+			t.Fatalf("%s AppDataDir=%q want %q", name, cfg.AppDataDir, dataDir)
+		}
+		if cfg.DatabasePath != wantDB {
+			t.Fatalf("%s DatabasePath=%q want %q", name, cfg.DatabasePath, wantDB)
+		}
+		if cfg.ProjectRepoRoot != wantRepos {
+			t.Fatalf("%s ProjectRepoRoot=%q want %q", name, cfg.ProjectRepoRoot, wantRepos)
+		}
+	}
+}
+
+func TestLoadWithMode_AppDataDirDoesNotOverrideExplicitStoragePaths(t *testing.T) {
+	dataDir := t.TempDir()
+	for _, k := range []string{"DATABASE_PATH", "PROJECT_REPO_ROOT", "OPENVIBELY_APP_DATA_DIR"} {
+		prev := os.Getenv(k)
+		os.Unsetenv(k)
+		defer os.Setenv(k, prev)
+	}
+	os.Setenv("OPENVIBELY_APP_DATA_DIR", dataDir)
+	os.Setenv("DATABASE_PATH", "/custom/openvibely.db")
+	os.Setenv("PROJECT_REPO_ROOT", "/custom/repos")
+
+	cfg := LoadWithMode(ModeDesktop)
+	if cfg.AppDataDir != dataDir {
+		t.Fatalf("AppDataDir=%q want %q", cfg.AppDataDir, dataDir)
+	}
+	if cfg.DatabasePath != "/custom/openvibely.db" {
+		t.Fatalf("expected explicit DB path, got %s", cfg.DatabasePath)
+	}
+	if cfg.ProjectRepoRoot != "/custom/repos" {
+		t.Fatalf("expected explicit repo root, got %s", cfg.ProjectRepoRoot)
 	}
 }
 

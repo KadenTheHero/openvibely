@@ -658,12 +658,16 @@ func (ws *WorktreeService) CleanupWorktree(ctx context.Context, task *models.Tas
 	return nil
 }
 
-// GetWorktreeDiff returns the diff between the worktree branch and the target branch.
+// GetWorktreeDiff returns the current tree diff between the target branch and
+// worktree branch. Use a direct two-dot/tree comparison rather than a
+// merge-base comparison so the Changes UI reflects the branch's net difference
+// from the current target branch after target advances, rebases, or squash
+// merges.
 func GetWorktreeDiff(repoDir string, branchName string, targetBranch string) string {
 	if branchName == "" || targetBranch == "" {
 		return ""
 	}
-	cmd := exec.Command("git", "diff", targetBranch+"..."+branchName)
+	cmd := exec.Command("git", "diff", targetBranch, branchName)
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -790,13 +794,31 @@ func GetWorktreeFileStats(repoDir string, branchName string, targetBranch string
 	if branchName == "" || targetBranch == "" {
 		return nil
 	}
-	cmd := exec.Command("git", "diff", "--name-status", targetBranch+"..."+branchName)
+	cmd := exec.Command("git", "diff", "--name-status", targetBranch, branchName)
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
 		return nil
 	}
+	return parseWorktreeFileStats(out)
+}
 
+func GetWorktreeFileStatsWithUncommitted(repoDir string, branchName string, targetBranch string, worktreePath string) []WorktreeFileStat {
+	stats := GetWorktreeFileStats(repoDir, branchName, targetBranch)
+	if worktreePath == "" {
+		return stats
+	}
+
+	cmd := exec.Command("git", "status", "--short", "--untracked-files=all")
+	cmd.Dir = worktreePath
+	out, err := cmd.Output()
+	if err != nil {
+		return stats
+	}
+	return mergeWorktreeFileStats(stats, parseGitStatusFileStats(out))
+}
+
+func parseWorktreeFileStats(out []byte) []WorktreeFileStat {
 	var stats []WorktreeFileStat
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
@@ -806,18 +828,59 @@ func GetWorktreeFileStats(repoDir string, branchName string, targetBranch string
 		if len(parts) != 2 {
 			continue
 		}
-		status := "modified"
-		switch parts[0] {
-		case "A":
-			status = "added"
-		case "D":
-			status = "deleted"
-		case "M":
-			status = "modified"
-		}
-		stats = append(stats, WorktreeFileStat{Path: parts[1], Status: status})
+		stats = append(stats, WorktreeFileStat{Path: parts[1], Status: gitStatusToWorktreeFileStatus(parts[0])})
 	}
 	return stats
+}
+
+func parseGitStatusFileStats(out []byte) []WorktreeFileStat {
+	var stats []WorktreeFileStat
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		code := strings.TrimSpace(line[:2])
+		path := strings.TrimSpace(line[3:])
+		if code == "" || path == "" {
+			continue
+		}
+		if idx := strings.Index(path, " -> "); idx >= 0 {
+			path = strings.TrimSpace(path[idx+4:])
+		}
+		stats = append(stats, WorktreeFileStat{Path: path, Status: gitStatusToWorktreeFileStatus(code)})
+	}
+	return stats
+}
+
+func gitStatusToWorktreeFileStatus(code string) string {
+	if strings.Contains(code, "D") {
+		return "deleted"
+	}
+	if strings.Contains(code, "A") || strings.Contains(code, "?") {
+		return "added"
+	}
+	return "modified"
+}
+
+func mergeWorktreeFileStats(base []WorktreeFileStat, overlay []WorktreeFileStat) []WorktreeFileStat {
+	if len(overlay) == 0 {
+		return base
+	}
+	merged := make([]WorktreeFileStat, 0, len(base)+len(overlay))
+	index := make(map[string]int, len(base)+len(overlay))
+	for _, stat := range base {
+		index[stat.Path] = len(merged)
+		merged = append(merged, stat)
+	}
+	for _, stat := range overlay {
+		if i, ok := index[stat.Path]; ok {
+			merged[i] = stat
+			continue
+		}
+		index[stat.Path] = len(merged)
+		merged = append(merged, stat)
+	}
+	return merged
 }
 
 // getGlobalMergeTarget returns the global default merge target branch.

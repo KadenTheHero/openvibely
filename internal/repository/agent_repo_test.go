@@ -34,6 +34,7 @@ func TestAgentRepo_CreateAndReadWithoutColorColumn(t *testing.T) {
 				Command: []string{"npx", "-y", "@playwright/mcp"},
 			},
 		},
+		SystemKind: "test_system",
 	}
 
 	if err := repo.Create(ctx, agent); err != nil {
@@ -61,5 +62,56 @@ func TestAgentRepo_CreateAndReadWithoutColorColumn(t *testing.T) {
 	}
 	if len(stored.MCPServers) != 1 {
 		t.Fatalf("expected 1 MCP server, got %d", len(stored.MCPServers))
+	}
+	if stored.SystemKind != "test_system" {
+		t.Fatalf("expected system_kind to round-trip, got %q", stored.SystemKind)
+	}
+}
+
+func TestAgentRepo_RoundTripsScopedFilesToolConfig(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+
+	agent := &models.Agent{
+		Name:         "Scoped Files Agent",
+		SystemPrompt: "Work inside a restricted directory.",
+		Model:        "inherit",
+		Tools:        []string{models.AgentToolScopedFiles},
+		ToolConfig: models.AgentToolConfig{
+			ScopedFiles: []models.ScopedFilesConfig{{
+				Directory:   "docs",
+				Permissions: []string{"read", "write"},
+			}},
+			SkipDefaultTools:       true,
+			DisableRuntimeWorktree: true,
+		},
+	}
+	if err := repo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	stored, err := repo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if len(stored.Tools) != 1 || stored.Tools[0] != models.AgentToolScopedFiles {
+		t.Fatalf("expected ScopedFiles tool, got %v", stored.Tools)
+	}
+	if !stored.ToolConfig.SkipDefaultTools {
+		t.Fatal("expected scoped files config to disable default tools")
+	}
+	if !stored.ToolConfig.DisableRuntimeWorktree {
+		t.Fatal("expected scoped files config to disable runtime worktrees")
+	}
+	if len(stored.ToolConfig.ScopedFiles) != 1 {
+		t.Fatalf("expected one scoped files config, got %d", len(stored.ToolConfig.ScopedFiles))
+	}
+	scope := stored.ToolConfig.ScopedFiles[0]
+	if scope.Directory != "docs" {
+		t.Fatalf("expected docs scope, got %q", scope.Directory)
+	}
+	if len(scope.Permissions) != 2 || scope.Permissions[0] != "read" || scope.Permissions[1] != "write" {
+		t.Fatalf("expected read/write permissions, got %v", scope.Permissions)
 	}
 }
