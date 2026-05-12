@@ -206,11 +206,19 @@ func composeRuntimeToolFilter(base func(string) bool, rt *llmcontracts.RuntimeTo
 			return true
 		}
 
+		if rt != nil && rt.SkipDefaultTools {
+			return false
+		}
+
 		if base != nil {
 			return base(name)
 		}
 		return true
 	}
+}
+
+func composeTaskRuntimeToolFilter(base func(string) bool, rt *llmcontracts.RuntimeTools) func(string) bool {
+	return composeRuntimeToolFilter(base, rt, true, models.ChatModeOrchestrate)
 }
 
 func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, isTaskFollowup bool, chatMode models.ChatMode) string {
@@ -523,7 +531,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	extraTools = append(extraTools, runtimeAnthropicTools(rt)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
-	toolFilter = composeRuntimeToolFilter(toolFilter, rt, false, models.ChatModeOrchestrate)
+	toolFilter = composeTaskRuntimeToolFilter(toolFilter, rt)
 	skipDefaultTools := rt != nil && rt.SkipDefaultTools
 
 	inThinking := false

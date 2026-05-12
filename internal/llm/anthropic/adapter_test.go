@@ -92,6 +92,27 @@ func TestComposeRuntimeToolFilter_PlanBlocksActionToolsAndMutations(t *testing.T
 	}
 }
 
+func TestComposeTaskRuntimeToolFilter_AllowsDefaultToolsWithoutRuntimeTools(t *testing.T) {
+	base := func(name string) bool {
+		switch name {
+		case "read_file", "list_files", "grep_search", "bash":
+			return true
+		default:
+			return false
+		}
+	}
+
+	filter := composeTaskRuntimeToolFilter(base, nil)
+	for _, name := range []string{"read_file", "list_files", "grep_search", "bash"} {
+		if !filter(name) {
+			t.Fatalf("expected task tool %q to remain allowed without runtime action tools", name)
+		}
+	}
+	if filter("unknown_tool") {
+		t.Fatalf("expected base filter denial to be preserved")
+	}
+}
+
 func TestTaskStreamingRuntimeToolComposition_AllowsScopedFilesRuntimeTools(t *testing.T) {
 	rt := &llmcontracts.RuntimeTools{
 		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_files"}},
@@ -121,7 +142,7 @@ func TestTaskStreamingRuntimeToolComposition_AllowsScopedFilesRuntimeTools(t *te
 		t.Fatalf("runtime executor = (%q, %v, %v), want non-error [] nil", out, isError, err)
 	}
 
-	filter := composeRuntimeToolFilter(nil, rt, false, models.ChatModeOrchestrate)
+	filter := composeTaskRuntimeToolFilter(nil, rt)
 	if !filter("list_files") {
 		t.Fatalf("expected runtime scoped file tool to be allowed")
 	}

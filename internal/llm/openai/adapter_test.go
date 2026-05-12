@@ -98,6 +98,7 @@ func TestRuntimeToolFilter_SkipDefaultToolsAllowsOnlyRuntimeTools(t *testing.T) 
 
 func TestTaskStreamingRuntimeToolComposition_AllowsScopedFilesRuntimeTools(t *testing.T) {
 	rt := &llmcontracts.RuntimeTools{
+		SkipDefaultTools: true,
 		Definitions: []llmcontracts.RuntimeToolDefinition{
 			{Name: "list_files"},
 		},
@@ -105,7 +106,7 @@ func TestTaskStreamingRuntimeToolComposition_AllowsScopedFilesRuntimeTools(t *te
 			if name == "list_files" {
 				return true, true
 			}
-			return false, true
+			return false, false
 		},
 	}
 

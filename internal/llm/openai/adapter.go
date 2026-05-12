@@ -201,6 +201,10 @@ func composeRuntimeToolFilter(base func(string) bool, rt *llmcontracts.RuntimeTo
 			return true
 		}
 
+		if rt != nil && rt.SkipDefaultTools {
+			return false
+		}
+
 		if base != nil {
 			return base(name)
 		}

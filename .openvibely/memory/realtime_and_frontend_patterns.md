@@ -2,7 +2,7 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-05-09
+updated: 2026-05-12
 source: manual_conversion
 source_id: repo_root_MEMORY_md
 confidence: high
@@ -23,10 +23,13 @@ Task Changes rendering safety:
 - Files above auto-load threshold render `Load diff` placeholders when still loadable; beyond single-file/total budgets render non-loadable placeholders with reason text.
 - Diff parsing synthesizes a fallback hunk when diff content lines exist without explicit `@@` header.
 - Live diff refreshes are gated by active-tab checks. Task-detail file-change listeners/SSE handlers are explicitly rebound with cleanup so HTMX swaps do not accumulate stale listeners or leave SSE running after navigation.
+- Task completion on the detail page should update in place through live update/HTMX/SSE mechanisms; avoid hard/full browser refreshes after completion so active tab, scroll position, and context remain stable.
+- Task-thread SSE completion should finish dynamically in place: force the final streamed render, clear streaming indicators/state, and avoid post-stream `htmx.ajax()` reconciliation/refreshes of either `#task-thread-view` or the whole task shell.
 - Thread tab content is also lazy-loaded via `GET /tasks/:id/thread`; heavy execution transcripts should not be pre-rendered in hidden tabs.
 
 Chat/frontend rendering:
 - For streaming chat and tool cards, batch DOM rendering with `requestAnimationFrame` and force final flush on completion.
+- Active chat/task-thread streaming should use smart autoscroll: only pin to bottom while the viewport is already at/near bottom; if the user scrolls up to read earlier streamed output, do not force-scroll back down until they return to the bottom or initiate a new send.
 - Avoid expensive full-container reprocessing on polling refreshes; use content signatures and incremental cleaning.
 - Chat/thread markdown rendering escapes raw HTML-like tags outside fenced/inline code before `marked.parse` so malformed model outputs do not break DOM.
 - Plan-mode read-only repo exploration tool cards (`read_file`, `list_files`, `grep_search`) should remain visible in assistant bubble rendering during live streams and refreshes.
