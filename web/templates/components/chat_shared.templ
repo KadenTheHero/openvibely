@@ -1497,6 +1497,14 @@ templ ChatAutoScrollScript() {
 			},
 			scrollToBottom: function(element, smooth) {
 				if (!element) return;
+				// Stamp a deadline so the ChatScrollTracker scroll handler can
+				// recognise the resulting scroll events as programmatic — even
+				// when they overlap the 350ms _userInteracting window after a
+				// recent wheel/touch. Smooth scrolling fires many scroll events
+				// over ~300ms, so the deadline covers a generous animation window.
+				var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+				var holdMs = smooth ? 700 : 250;
+				window._chatAutoScrollProgrammaticUntil = now + holdMs;
 				element.scrollTo({
 					top: element.scrollHeight,
 					behavior: smooth ? 'smooth' : 'auto'
@@ -1603,6 +1611,7 @@ templ ChatAutoScrollScript() {
 					var currentTop = self.element.scrollTop;
 					var isNear = window.chatAutoScroll.isNearBottom(self.element);
 					var movedUp = currentTop < self._lastScrollTop;
+					var movedDown = currentTop > self._lastScrollTop;
 					self._lastScrollTop = currentTop;
 
 					if (!self._userInteracting) {
@@ -1610,15 +1619,31 @@ templ ChatAutoScrollScript() {
 						return;
 					}
 
-					if (isNear) {
-						// User actively scrolled back to (or past) the bottom — resume auto-scroll.
-						self.userScrolledUp = false;
+					// Even within the _userInteracting window, ignore scroll
+					// events produced by chatAutoScroll.scrollToBottom — its
+					// smooth-scroll animation fires many scroll events that
+					// would otherwise be misattributed to the user.
+					var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+					if (window._chatAutoScrollProgrammaticUntil && now < window._chatAutoScrollProgrammaticUntil) {
 						return;
 					}
 
 					if (movedUp) {
-						// User scrolled away from the bottom — pin viewport, pause auto-scroll.
+						// User scrolling up while interacting is always pause intent —
+						// even if the viewport is still inside the near-bottom 100px band.
+						// Otherwise a streamed chunk arriving during the small upward
+						// movement would race the user across the threshold and yank
+						// the viewport back down.
 						self.userScrolledUp = true;
+						return;
+					}
+
+					if (movedDown && isNear) {
+						// User actively scrolled back DOWN to (or past) the bottom —
+						// resume auto-scroll. Note we require movedDown to avoid
+						// clearing intent during user-initiated upward motion that
+						// briefly stays inside the near-bottom band.
+						self.userScrolledUp = false;
 					}
 				};
 

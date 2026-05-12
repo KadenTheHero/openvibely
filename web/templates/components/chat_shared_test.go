@@ -1506,6 +1506,67 @@ func TestChatScrollTracker_ScrollHandlerRespectsUserInteractionFlag(t *testing.T
 	}
 }
 
+// TestChatScrollTracker_UserScrollUpFromNearBottomPausesAutoScroll verifies that
+// when the user starts to scroll up while still inside the "near bottom" 100px
+// threshold, the tracker pauses auto-scroll IMMEDIATELY — without waiting for
+// the viewport to cross the threshold. Otherwise a streamed chunk arriving
+// during the small upward movement would race the user across the threshold
+// and yank the viewport back down. The bug fix prioritises movedUp over isNear
+// so that user scroll-up is a strict pause signal.
+func TestChatScrollTracker_UserScrollUpFromNearBottomPausesAutoScroll(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	}
+	content := buf.String()
+
+	// movedUp must set userScrolledUp = true regardless of isNear so that
+	// scrolling up while still near the bottom is honoured as pause intent.
+	if !strings.Contains(content, "if (movedUp) {") {
+		t.Fatal("scroll handler must branch on movedUp")
+	}
+	if !strings.Contains(content, "// User scrolling up while interacting is always pause intent") {
+		t.Error("scroll handler must treat any user-driven scroll-up as pause intent, even when still near the bottom")
+	}
+
+	// The handler must not early-return to clear userScrolledUp purely because
+	// the viewport is still inside the near-bottom band — the user might be
+	// actively moving up through it.
+	if strings.Contains(content, "if (isNear) {\n\t\t\t\t\t\t// User actively scrolled back to (or past) the bottom — resume auto-scroll.\n\t\t\t\t\t\tself.userScrolledUp = false;\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\n\t\t\t\t\tif (movedUp) {") {
+		t.Fatal("scroll handler must not clear userScrolledUp on isNear before checking movedUp; this is the regression that yanks the viewport back during streaming")
+	}
+}
+
+// TestChatScrollTracker_ProgrammaticScrollDoesNotResetUserIntent verifies that
+// scrolls produced by chatAutoScroll.scrollToBottom never reset userScrolledUp,
+// even if they happen during the 350ms _userInteracting window after a recent
+// wheel/touch. The auto-scroll utility stamps a programmatic-until deadline so
+// the scroll handler can ignore stream-driven scroll events.
+func TestChatScrollTracker_ProgrammaticScrollDoesNotResetUserIntent(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	}
+	content := buf.String()
+
+	// scrollToBottom must stamp a deadline so subsequent scroll events from
+	// the same call (especially during smooth animation) can be filtered out.
+	if !strings.Contains(content, "window._chatAutoScrollProgrammaticUntil") {
+		t.Error("chatAutoScroll.scrollToBottom must stamp a programmatic-until deadline so the scroll handler can ignore stream-driven scroll events")
+	}
+
+	// The scroll handler must consult that deadline before mutating user intent.
+	if !strings.Contains(content, "now < window._chatAutoScrollProgrammaticUntil") {
+		t.Error("scroll handler must early-return for events inside the programmatic scrollToBottom window so streams cannot reset userScrolledUp")
+	}
+
+	// Smooth scrolls fire multiple scroll events over ~300ms; the deadline
+	// must extend well past the animation to avoid mid-animation misclassification.
+	if !strings.Contains(content, "smooth ? 600") && !strings.Contains(content, "smooth ? 700") && !strings.Contains(content, "smooth ? 800") {
+		t.Error("programmatic-until deadline for smooth scrollToBottom should cover the smooth-scroll animation window (>= ~600ms)")
+	}
+}
+
 // TestChatScrollTracker_DestroyRemovesAllListeners ensures the new touch and
 // keyboard listeners are torn down by destroy() to prevent leaks across morph
 // swaps that recreate the tracker.
