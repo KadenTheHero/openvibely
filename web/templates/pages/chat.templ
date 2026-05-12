@@ -815,9 +815,10 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						var runRender = function() {
 							renderScheduled = false;
 							if (!force && textBuffer.length === lastRenderedLength) return;
+							var shouldScroll = !tracker || tracker.shouldAutoScroll();
 							window.renderStreamingContent(contentDiv, textBuffer);
 							lastRenderedLength = textBuffer.length;
-							if (!tracker || tracker.shouldAutoScroll()) {
+							if (shouldScroll) {
 								requestAnimationFrame(function() {
 									if (chatMessages && window.chatAutoScroll) {
 										window.chatAutoScroll.scrollToBottom(chatMessages, false);

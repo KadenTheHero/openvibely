@@ -1459,117 +1459,67 @@ func TestInitThreadStreaming_FindsStreamingDotsByID(t *testing.T) {
 	}
 }
 
-// TestChatScrollTracker_ScrollHandlerRespectsUserInteractionFlag verifies the
-// regression fix for the streaming auto-scroll bug: the scroll handler must
-// only mutate userScrolledUp when the change is driven by an actual user
-// interaction (wheel/touch/keyboard/scrollbar drag). Programmatic stream-driven
-// scrolls land near the bottom; if the handler reset userScrolledUp purely on
-// scroll position, every streamed chunk would yank the viewport back down even
-// after the user scrolled up to read earlier output.
-func TestChatScrollTracker_ScrollHandlerRespectsUserInteractionFlag(t *testing.T) {
+// TestChatScrollTracker_UsesPinnedToBottomState verifies the scroll tracker uses
+// the current viewport position as the source of truth. Programmatic/content
+// growth scroll events and user scrollbar drags both update the same simple
+// pinned state, avoiding fragile interaction-window heuristics.
+func TestChatScrollTracker_UsesPinnedToBottomState(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
 	}
 	content := buf.String()
 
-	// The scroll handler must early-return when there is no active user interaction.
-	if !strings.Contains(content, "if (!self._userInteracting) {") {
-		t.Error("scroll handler must short-circuit on programmatic/content-driven scroll events")
+	if strings.Contains(content, "_chatAutoScrollProgrammaticUntil") {
+		t.Error("ChatScrollTracker should not use a global programmatic-scroll deadline; it can suppress real user scrolls during continuous streaming")
 	}
-
-	// _markUserInteracting must exist and use a meaningful interaction window so
-	// momentum scrolling and smooth-scroll animations stay attributed to the user.
-	if !strings.Contains(content, "_markUserInteracting: function") {
-		t.Error("ChatScrollTracker must expose _markUserInteracting helper")
+	if strings.Contains(content, "_userInteracting") || strings.Contains(content, "_markUserInteracting") {
+		t.Error("ChatScrollTracker should not depend on user-interaction windows to detect scroll intent")
 	}
-	if !strings.Contains(content, "_INTERACT_MS") {
-		t.Error("ChatScrollTracker must define an interaction window constant")
+	if !strings.Contains(content, "self.userScrolledUp = !window.chatAutoScroll.isNearBottom(self.element)") {
+		t.Error("scroll handler must derive userScrolledUp directly from whether the viewport is near the bottom")
 	}
-
-	// Touch-driven scrolling (mobile/tablet) must mark user interaction so the
-	// scroll handler treats it as user-driven, not programmatic.
-	if !strings.Contains(content, "addEventListener('touchstart'") ||
-		!strings.Contains(content, "addEventListener('touchmove'") ||
-		!strings.Contains(content, "addEventListener('touchend'") {
-		t.Error("ChatScrollTracker must register touch listeners to detect mobile scroll intent")
-	}
-
-	// Keyboard navigation (PageUp/Down, Arrow keys, Home/End, Space) must mark
-	// user interaction when the scroll element or a descendant has focus.
-	if !strings.Contains(content, "addEventListener('keydown'") {
-		t.Error("ChatScrollTracker must register a keydown listener for keyboard scroll nav")
-	}
-	if !strings.Contains(content, "PageUp") || !strings.Contains(content, "PageDown") ||
-		!strings.Contains(content, "ArrowUp") || !strings.Contains(content, "ArrowDown") {
-		t.Error("ChatScrollTracker keydown handler must recognize standard scroll keys")
+	if !strings.Contains(content, "return !this.userScrolledUp && window.chatAutoScroll.isNearBottom(this.element)") {
+		t.Error("shouldAutoScroll must require both pinned state and current near-bottom position")
 	}
 }
 
-// TestChatScrollTracker_UserScrollUpFromNearBottomPausesAutoScroll verifies that
-// when the user starts to scroll up while still inside the "near bottom" 100px
-// threshold, the tracker pauses auto-scroll IMMEDIATELY — without waiting for
-// the viewport to cross the threshold. Otherwise a streamed chunk arriving
-// during the small upward movement would race the user across the threshold
-// and yank the viewport back down. The bug fix prioritises movedUp over isNear
-// so that user scroll-up is a strict pause signal.
-func TestChatScrollTracker_UserScrollUpFromNearBottomPausesAutoScroll(t *testing.T) {
+// TestStreamingRenderSnapshotsPinnedStateBeforeDomGrowth verifies streaming
+// renderers decide whether to scroll before rendering new content. Checking
+// after DOM growth breaks large conversations because adding content can move a
+// previously pinned viewport outside the near-bottom threshold.
+func TestStreamingRenderSnapshotsPinnedStateBeforeDomGrowth(t *testing.T) {
 	var buf bytes.Buffer
-	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
-		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	if err := ChatBubbleStreaming("Assistant", "exec-id", "chat-messages", "", false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render new-message streaming script: %v", err)
+	}
+	if err := _initThreadStreamingScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render thread streaming script: %v", err)
 	}
 	content := buf.String()
 
-	// movedUp must set userScrolledUp = true regardless of isNear so that
-	// scrolling up while still near the bottom is honoured as pause intent.
-	if !strings.Contains(content, "if (movedUp) {") {
-		t.Fatal("scroll handler must branch on movedUp")
+	if count := strings.Count(content, "var shouldScroll = !tracker || tracker.shouldAutoScroll();"); count < 2 {
+		t.Fatalf("expected streaming renderers to snapshot shouldScroll before DOM render, found %d", count)
 	}
-	if !strings.Contains(content, "// User scrolling up while interacting is always pause intent") {
-		t.Error("scroll handler must treat any user-driven scroll-up as pause intent, even when still near the bottom")
+	textScrollIdx := strings.Index(content, "var shouldScroll = !tracker || tracker.shouldAutoScroll();")
+	textRenderIdx := strings.Index(content, "window.renderStreamingContent(container, textBuffer)")
+	if textScrollIdx == -1 || textRenderIdx == -1 || textScrollIdx > textRenderIdx {
+		t.Error("new-message streaming renderer must compute shouldScroll before renderStreamingContent")
 	}
 
-	// The handler must not early-return to clear userScrolledUp purely because
-	// the viewport is still inside the near-bottom band — the user might be
-	// actively moving up through it.
-	if strings.Contains(content, "if (isNear) {\n\t\t\t\t\t\t// User actively scrolled back to (or past) the bottom — resume auto-scroll.\n\t\t\t\t\t\tself.userScrolledUp = false;\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\n\t\t\t\t\tif (movedUp) {") {
-		t.Fatal("scroll handler must not clear userScrolledUp on isNear before checking movedUp; this is the regression that yanks the viewport back during streaming")
+	resumeRenderIdx := strings.Index(content, "window.renderStreamingContent(container, cumulativeContent)")
+	if resumeRenderIdx == -1 {
+		t.Fatal("resume streaming renderer must call renderStreamingContent")
+	}
+	resumeScrollIdx := strings.LastIndex(content[:resumeRenderIdx], "var shouldScroll = !tracker || tracker.shouldAutoScroll();")
+	if resumeScrollIdx == -1 || resumeScrollIdx > resumeRenderIdx {
+		t.Error("resume streaming renderer must compute shouldScroll before renderStreamingContent")
 	}
 }
 
-// TestChatScrollTracker_ProgrammaticScrollDoesNotResetUserIntent verifies that
-// scrolls produced by chatAutoScroll.scrollToBottom never reset userScrolledUp,
-// even if they happen during the 350ms _userInteracting window after a recent
-// wheel/touch. The auto-scroll utility stamps a programmatic-until deadline so
-// the scroll handler can ignore stream-driven scroll events.
-func TestChatScrollTracker_ProgrammaticScrollDoesNotResetUserIntent(t *testing.T) {
-	var buf bytes.Buffer
-	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
-		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
-	}
-	content := buf.String()
-
-	// scrollToBottom must stamp a deadline so subsequent scroll events from
-	// the same call (especially during smooth animation) can be filtered out.
-	if !strings.Contains(content, "window._chatAutoScrollProgrammaticUntil") {
-		t.Error("chatAutoScroll.scrollToBottom must stamp a programmatic-until deadline so the scroll handler can ignore stream-driven scroll events")
-	}
-
-	// The scroll handler must consult that deadline before mutating user intent.
-	if !strings.Contains(content, "now < window._chatAutoScrollProgrammaticUntil") {
-		t.Error("scroll handler must early-return for events inside the programmatic scrollToBottom window so streams cannot reset userScrolledUp")
-	}
-
-	// Smooth scrolls fire multiple scroll events over ~300ms; the deadline
-	// must extend well past the animation to avoid mid-animation misclassification.
-	if !strings.Contains(content, "smooth ? 600") && !strings.Contains(content, "smooth ? 700") && !strings.Contains(content, "smooth ? 800") {
-		t.Error("programmatic-until deadline for smooth scrollToBottom should cover the smooth-scroll animation window (>= ~600ms)")
-	}
-}
-
-// TestChatScrollTracker_DestroyRemovesAllListeners ensures the new touch and
-// keyboard listeners are torn down by destroy() to prevent leaks across morph
-// swaps that recreate the tracker.
+// TestChatScrollTracker_DestroyRemovesAllListeners ensures the scroll listener
+// is torn down by destroy() to prevent leaks across morph swaps that recreate
+// the tracker.
 func TestChatScrollTracker_DestroyRemovesAllListeners(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
@@ -1578,13 +1528,6 @@ func TestChatScrollTracker_DestroyRemovesAllListeners(t *testing.T) {
 	content := buf.String()
 
 	required := []string{
-		"removeEventListener('wheel'",
-		"removeEventListener('touchstart'",
-		"removeEventListener('touchmove'",
-		"removeEventListener('touchend'",
-		"removeEventListener('pointerdown'",
-		"removeEventListener('pointerup'",
-		"removeEventListener('keydown'",
 		"removeEventListener('scroll'",
 	}
 	for _, r := range required {

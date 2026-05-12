@@ -377,10 +377,11 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						var runRender = function() {
 							renderScheduled = false;
 							if (!force && textBuffer.length === lastRenderedLength) return;
+							var shouldScroll = !tracker || tracker.shouldAutoScroll();
 							window.renderStreamingContent(container, textBuffer);
 							lastRenderedLength = textBuffer.length;
-							// Auto-scroll if tracker allows it (Rule 2: auto-scroll unless user scrolled up)
-							if (!tracker || tracker.shouldAutoScroll()) {
+							// Auto-scroll only if the viewport was pinned before this render grew the DOM.
+							if (shouldScroll) {
 								requestAnimationFrame(function() {
 									var chatMessages = document.getElementById(messagesId);
 									if (chatMessages) {
@@ -689,9 +690,10 @@ templ _initThreadStreamingScript() {
 					var runRender = function() {
 						renderScheduled = false;
 						if (!force && cumulativeContent.length === lastRenderedLength) return;
+						var shouldScroll = !tracker || tracker.shouldAutoScroll();
 						window.renderStreamingContent(container, cumulativeContent);
 						lastRenderedLength = cumulativeContent.length;
-						if (!tracker || tracker.shouldAutoScroll()) {
+						if (shouldScroll) {
 							requestAnimationFrame(function() {
 								var cm = document.getElementById(messagesId);
 								if (cm && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(cm, false);
@@ -1493,18 +1495,10 @@ templ ChatAutoScrollScript() {
 			isNearBottom: function(element) {
 				if (!element) return false;
 				var threshold = 100;
-				return element.scrollHeight - element.scrollTop - element.clientHeight < threshold;
+				return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
 			},
 			scrollToBottom: function(element, smooth) {
 				if (!element) return;
-				// Stamp a deadline so the ChatScrollTracker scroll handler can
-				// recognise the resulting scroll events as programmatic — even
-				// when they overlap the 350ms _userInteracting window after a
-				// recent wheel/touch. Smooth scrolling fires many scroll events
-				// over ~300ms, so the deadline covers a generous animation window.
-				var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-				var holdMs = smooth ? 700 : 250;
-				window._chatAutoScrollProgrammaticUntil = now + holdMs;
 				element.scrollTo({
 					top: element.scrollHeight,
 					behavior: smooth ? 'smooth' : 'auto'
@@ -1519,179 +1513,50 @@ templ ChatAutoScrollScript() {
 		// Alias for backward compatibility (task thread used a separate namespace)
 		window.threadAutoScroll = window.chatAutoScroll;
 
-		// ScrollTracker: distinguishes between user-initiated scroll events and programmatic/content-driven ones
-		// - User-initiated: wheel, touch, keyboard nav, pointer drag on scrollbar → sets userScrolledUp flag
-		// - Content-driven: programmatic scrollTo, content growth → does NOT set flag
-		// - Flag is reset only when: (1) user sends message via resetOnUserSend(),
-		//   or (2) the user themselves scrolls back to/near the bottom (active interaction).
-		// Programmatic scrollToBottom() landing near bottom must NOT clear userScrolledUp,
-		// otherwise streamed chunks would yank the viewport back even after the user scrolled up.
+		// ChatScrollTracker keeps one piece of state: whether the user is pinned to
+		// the bottom. Streaming code snapshots shouldAutoScroll() before rendering a
+		// chunk, then scrolls only if the viewport was pinned before content growth.
 		window.ChatScrollTracker = function(element) {
 			this.element = element;
 			this.userScrolledUp = false;
-			this._userInteracting = false;
-			this._userInteractTimeout = null;
-			this._lastScrollTop = element ? element.scrollTop : 0;
 			this._handlers = {};
 			this._init();
 		};
 
 		window.ChatScrollTracker.prototype = {
-			// Window during which scroll events are still considered user-driven
-			// after the last wheel/touch/keydown event. Long enough to cover smooth
-			// scroll animations and trackpad momentum, short enough that the next
-			// programmatic stream-driven scroll is not mis-attributed to the user.
-			_INTERACT_MS: 350,
-
-			_markUserInteracting: function() {
-				this._userInteracting = true;
-				if (this._userInteractTimeout) clearTimeout(this._userInteractTimeout);
-				var self = this;
-				this._userInteractTimeout = setTimeout(function() {
-					self._userInteracting = false;
-				}, this._INTERACT_MS);
-			},
-
 			_init: function() {
 				var self = this;
 				if (!this.element) return;
 
-				// Detect user interaction: wheel events (mouse wheel, trackpad)
-				this._handlers.wheel = function() {
-					self._markUserInteracting();
-				};
-
-				// Detect user interaction: touch (mobile/tablet scrolling)
-				this._handlers.touchstart = function() {
-					self._markUserInteracting();
-				};
-				this._handlers.touchmove = function() {
-					self._markUserInteracting();
-				};
-				this._handlers.touchend = function() {
-					// Keep flag set for momentum after touch release
-					self._markUserInteracting();
-				};
-
-				// Detect user interaction: keyboard navigation that scrolls the area
-				// (Page Up/Down, Arrow Up/Down, Home/End, Space). Only counts when
-				// the scroll element (or a descendant) actually has focus, so typing
-				// in unrelated inputs is ignored.
-				this._handlers.keydown = function(e) {
-					if (!self.element) return;
-					var active = document.activeElement;
-					if (active && active !== self.element && !self.element.contains(active)) return;
-					var k = e.key;
-					if (k === 'PageUp' || k === 'PageDown' ||
-						k === 'ArrowUp' || k === 'ArrowDown' ||
-						k === 'Home' || k === 'End' ||
-						k === ' ' || k === 'Spacebar') {
-						self._markUserInteracting();
-					}
-				};
-
-				// Detect user interaction: pointer drag on scrollbar gutter
-				this._handlers.pointerdown = function(e) {
-					var rect = self.element.getBoundingClientRect();
-					// Check if pointer is within ~20px of the right edge (approximate scrollbar width)
-					if (e.clientX > rect.right - 20) {
-						self._markUserInteracting();
-					}
-				};
-				this._handlers.pointerup = function() {
-					// Refresh the interaction window so any settling scroll is attributed to the user
-					if (self._userInteracting) self._markUserInteracting();
-				};
-
-				// Scroll handler: only mutate userScrolledUp when the change is
-				// driven by an actual user interaction. Programmatic scrolls
-				// (stream auto-scroll, resetOnUserSend, content growth) must not
-				// flip the flag in either direction.
 				this._handlers.scroll = function() {
-					var currentTop = self.element.scrollTop;
-					var isNear = window.chatAutoScroll.isNearBottom(self.element);
-					var movedUp = currentTop < self._lastScrollTop;
-					var movedDown = currentTop > self._lastScrollTop;
-					self._lastScrollTop = currentTop;
-
-					if (!self._userInteracting) {
-						// Programmatic / content-driven scroll: leave intent alone.
-						return;
-					}
-
-					// Even within the _userInteracting window, ignore scroll
-					// events produced by chatAutoScroll.scrollToBottom — its
-					// smooth-scroll animation fires many scroll events that
-					// would otherwise be misattributed to the user.
-					var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-					if (window._chatAutoScrollProgrammaticUntil && now < window._chatAutoScrollProgrammaticUntil) {
-						return;
-					}
-
-					if (movedUp) {
-						// User scrolling up while interacting is always pause intent —
-						// even if the viewport is still inside the near-bottom 100px band.
-						// Otherwise a streamed chunk arriving during the small upward
-						// movement would race the user across the threshold and yank
-						// the viewport back down.
-						self.userScrolledUp = true;
-						return;
-					}
-
-					if (movedDown && isNear) {
-						// User actively scrolled back DOWN to (or past) the bottom —
-						// resume auto-scroll. Note we require movedDown to avoid
-						// clearing intent during user-initiated upward motion that
-						// briefly stays inside the near-bottom band.
-						self.userScrolledUp = false;
-					}
+					self.userScrolledUp = !window.chatAutoScroll.isNearBottom(self.element);
 				};
 
-				// Attach event listeners
-				this.element.addEventListener('wheel', this._handlers.wheel, { passive: true });
-				this.element.addEventListener('touchstart', this._handlers.touchstart, { passive: true });
-				this.element.addEventListener('touchmove', this._handlers.touchmove, { passive: true });
-				this.element.addEventListener('touchend', this._handlers.touchend, { passive: true });
-				this.element.addEventListener('pointerdown', this._handlers.pointerdown, { passive: true });
-				this.element.addEventListener('pointerup', this._handlers.pointerup, { passive: true });
-				this.element.addEventListener('keydown', this._handlers.keydown);
 				this.element.addEventListener('scroll', this._handlers.scroll, { passive: true });
+				this.userScrolledUp = !window.chatAutoScroll.isNearBottom(this.element);
 			},
 
-			// Check if auto-scroll should be enabled (i.e., user hasn't manually scrolled up)
 			shouldAutoScroll: function() {
-				return !this.userScrolledUp;
+				if (!this.element) return true;
+				return !this.userScrolledUp && window.chatAutoScroll.isNearBottom(this.element);
 			},
 
-			// Reset the flag when user sends a message (Rule 1)
 			resetOnUserSend: function() {
 				this.userScrolledUp = false;
-				// Also immediately scroll to bottom when user sends
 				if (this.element) {
 					window.chatAutoScroll.scrollToBottom(this.element, false);
-					this._lastScrollTop = this.element.scrollTop;
 				}
 			},
 
-			// Scroll to bottom if flag allows it
 			autoScroll: function() {
 				if (this.shouldAutoScroll() && this.element) {
 					window.chatAutoScroll.scrollToBottom(this.element, true);
 				}
 			},
 
-			// Clean up event listeners
 			destroy: function() {
 				if (!this.element) return;
-				this.element.removeEventListener('wheel', this._handlers.wheel);
-				this.element.removeEventListener('touchstart', this._handlers.touchstart);
-				this.element.removeEventListener('touchmove', this._handlers.touchmove);
-				this.element.removeEventListener('touchend', this._handlers.touchend);
-				this.element.removeEventListener('pointerdown', this._handlers.pointerdown);
-				this.element.removeEventListener('pointerup', this._handlers.pointerup);
-				this.element.removeEventListener('keydown', this._handlers.keydown);
 				this.element.removeEventListener('scroll', this._handlers.scroll);
-				if (this._userInteractTimeout) clearTimeout(this._userInteractTimeout);
 			}
 		};
 
