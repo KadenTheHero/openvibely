@@ -386,10 +386,21 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						removeChatEventSource(execId, eventSource);
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
-							// Refresh the entire chat view to get final state (re-enables polling)
-							// Server-side rendering will handle tool markers display
+							// Refresh just the thread view (#task-thread-view) to get final
+							// server-rendered state (tool markers, status indicator, re-enabled
+							// polling) WITHOUT swapping the entire #task-detail-content. Swapping
+							// the whole task detail container would tear down breadcrumb, tab
+							// nav, every tab panel, and every task-detail script — which the
+							// user perceives as a hard page refresh: it forces them back to the
+							// Thread tab and resets scroll/Changes/Details state. Targeting
+							// #task-thread-view keeps the surrounding tabs intact and still gives
+							// the thread its final rendered output.
 							setTimeout(function() {
-								htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
+								var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
+								if (!taskIdMatch || !taskIdMatch[1]) return;
+								var threadView = document.getElementById('task-thread-view');
+								if (!threadView) return;
+								htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread', {target: '#task-thread-view', swap: 'outerHTML'});
 							}, 500);
 						} else {
 							// Always evaluate plan-completion first so prompt visibility updates
@@ -437,8 +448,13 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						removeChatEventSource(execId, eventSource);
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
+							// Refresh just the thread view; see 'done' handler for rationale.
 							setTimeout(function() {
-								htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
+								var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
+								if (!taskIdMatch || !taskIdMatch[1]) return;
+								var threadView = document.getElementById('task-thread-view');
+								if (!threadView) return;
+								htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread', {target: '#task-thread-view', swap: 'outerHTML'});
 							}, 1000);
 						} else {
 							// Clear streaming flag and re-evaluate plan prompt on error.
@@ -460,8 +476,13 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						removeChatEventSource(execId, eventSource);
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
+							// Refresh just the thread view; see 'done' handler for rationale.
 							setTimeout(function() {
-								htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
+								var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
+								if (!taskIdMatch || !taskIdMatch[1]) return;
+								var threadView = document.getElementById('task-thread-view');
+								if (!threadView) return;
+								htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread', {target: '#task-thread-view', swap: 'outerHTML'});
 							}, 1000);
 						} else {
 							window._chatStreamInProgress = false;
@@ -633,8 +654,16 @@ templ _initThreadStreamingScript() {
 					removeThreadEventSource(eventSource);
 					window._taskThreadStreamingActive = false;
 					if (pauseTarget) {
+						// Refresh just the thread view, not the entire task-detail-content.
+						// Swapping the whole detail container looks like a hard refresh to
+						// the user (resets active tab, scroll, Changes/Details state). Targeting
+						// #task-thread-view keeps the surrounding tabs intact.
 						setTimeout(function() {
-							htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
+							var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
+							if (!taskIdMatch || !taskIdMatch[1]) return;
+							var threadView = document.getElementById('task-thread-view');
+							if (!threadView) return;
+							htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread', {target: '#task-thread-view', swap: 'outerHTML'});
 						}, 500);
 					} else {
 						var bubble = container.closest('.chat-bubble-assistant-msg');
@@ -660,8 +689,13 @@ templ _initThreadStreamingScript() {
 					removeThreadEventSource(eventSource);
 					window._taskThreadStreamingActive = false;
 					if (pauseTarget) {
+						// Refresh just the thread view; see 'done' handler for rationale.
 						setTimeout(function() {
-							htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
+							var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
+							if (!taskIdMatch || !taskIdMatch[1]) return;
+							var threadView = document.getElementById('task-thread-view');
+							if (!threadView) return;
+							htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread', {target: '#task-thread-view', swap: 'outerHTML'});
 						}, 1000);
 					}
 				});
@@ -675,8 +709,13 @@ templ _initThreadStreamingScript() {
 					removeThreadEventSource(eventSource);
 					window._taskThreadStreamingActive = false;
 					if (pauseTarget) {
+						// Refresh just the thread view; see 'done' handler for rationale.
 						setTimeout(function() {
-							htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
+							var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
+							if (!taskIdMatch || !taskIdMatch[1]) return;
+							var threadView = document.getElementById('task-thread-view');
+							if (!threadView) return;
+							htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread', {target: '#task-thread-view', swap: 'outerHTML'});
 						}, 1000);
 					}
 				};

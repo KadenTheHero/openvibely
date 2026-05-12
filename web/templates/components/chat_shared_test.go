@@ -72,6 +72,90 @@ func TestChatLoadingDots_RendersThreeDotsAndSizeVariants(t *testing.T) {
 	}
 }
 
+// TestChatBubbleStreaming_ThreadDoneRefreshesOnlyThreadView verifies that when
+// a thread's SSE stream ends (task finished), the post-stream refresh targets
+// only the #task-thread-view, not the entire #task-detail-content. Swapping the
+// whole task-detail-content was perceived by users as a hard page refresh: it
+// reset the active tab, scroll position, and the Changes/Details tab state.
+// Regression: see "Task page hard refresh after task completion".
+func TestChatBubbleStreaming_ThreadDoneRefreshesOnlyThreadView(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatBubbleStreaming("assistant", "exec-id", "task-thread-messages", "task-thread-view", true).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("Failed to render thread ChatBubbleStreaming: %v", err)
+	}
+	content := buf.String()
+
+	// Must NOT swap the whole task-detail-content (that's the hard-refresh feel).
+	if strings.Contains(content, "'#task-detail-content'") || strings.Contains(content, `"#task-detail-content"`) {
+		t.Error("thread streaming bubble must not target #task-detail-content for post-stream refresh (causes hard-refresh UX)")
+	}
+	if strings.Contains(content, "?tab=chat") {
+		t.Error("thread streaming bubble must not refresh via ?tab=chat full-detail swap (resets active tab/scroll)")
+	}
+
+	// Must refresh just the #task-thread-view via /tasks/:id/thread.
+	if !strings.Contains(content, "'#task-thread-view'") {
+		t.Error("thread streaming bubble must target #task-thread-view for post-stream refresh")
+	}
+	if !strings.Contains(content, "/thread'") {
+		t.Error("thread streaming bubble must use /tasks/:id/thread endpoint for post-stream refresh")
+	}
+}
+
+// TestChatBubbleStreaming_NeverTargetsTaskDetailContent ensures NO streaming
+// bubble (thread or non-thread) issues a post-stream HTMX swap targeting
+// #task-detail-content. That swap was the source of the perceived hard refresh
+// after task completion.
+func TestChatBubbleStreaming_NeverTargetsTaskDetailContent(t *testing.T) {
+	cases := []struct {
+		name           string
+		messagesID     string
+		pauseTargetID  string
+		isThread       bool
+	}{
+		{"thread", "task-thread-messages", "task-thread-view", true},
+		{"chat", "chat-messages", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			err := ChatBubbleStreaming("assistant", "exec-id", tc.messagesID, tc.pauseTargetID, tc.isThread).Render(context.Background(), &buf)
+			if err != nil {
+				t.Fatalf("Failed to render ChatBubbleStreaming: %v", err)
+			}
+			content := buf.String()
+			if strings.Contains(content, "'#task-detail-content'") || strings.Contains(content, `"#task-detail-content"`) {
+				t.Error("streaming bubble must not target #task-detail-content for any post-stream refresh (causes hard-refresh UX)")
+			}
+			if strings.Contains(content, "?tab=chat") {
+				t.Error("streaming bubble must not refresh via ?tab=chat full-detail swap")
+			}
+		})
+	}
+}
+
+// TestInitThreadStreamingScript_RefreshesOnlyThreadView verifies the resume
+// SSE handler (used after a morph swap re-renders the thread) refreshes only
+// the thread view, not the full task-detail-content.
+func TestInitThreadStreamingScript_RefreshesOnlyThreadView(t *testing.T) {
+	var buf bytes.Buffer
+	err := _initThreadStreamingScript().Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("Failed to render _initThreadStreamingScript: %v", err)
+	}
+	content := buf.String()
+	if strings.Contains(content, "'#task-detail-content'") || strings.Contains(content, `"#task-detail-content"`) {
+		t.Error("resume thread stream script must not target #task-detail-content (hard-refresh UX)")
+	}
+	if strings.Contains(content, "?tab=chat") {
+		t.Error("resume thread stream script must not refresh via ?tab=chat full-detail swap")
+	}
+	if !strings.Contains(content, "'#task-thread-view'") {
+		t.Error("resume thread stream script must target #task-thread-view for post-stream refresh")
+	}
+}
+
 // TestChatBubbleStreamingScrollBehavior verifies streaming bubble has correct scroll behavior
 func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 	var buf bytes.Buffer
@@ -1287,7 +1371,7 @@ func TestChatBubbleStreaming_ErrorClearsPlanStreamingFlag(t *testing.T) {
 	if errIdx == -1 {
 		t.Fatal("ChatBubbleStreaming must have an error event listener")
 	}
-	errEnd := errIdx + 1200
+	errEnd := errIdx + 2000
 	if errEnd > len(content) {
 		errEnd = len(content)
 	}
@@ -1304,7 +1388,7 @@ func TestChatBubbleStreaming_ErrorClearsPlanStreamingFlag(t *testing.T) {
 	if oeIdx == -1 {
 		t.Fatal("ChatBubbleStreaming must have an onerror handler")
 	}
-	oeEnd := oeIdx + 1200
+	oeEnd := oeIdx + 2000
 	if oeEnd > len(content) {
 		oeEnd = len(content)
 	}

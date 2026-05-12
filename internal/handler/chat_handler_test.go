@@ -3106,7 +3106,7 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 	// The handler body with isThread branch can be ~1200 chars.
 	errIdx := strings.Index(body, "eventSource.addEventListener('error'")
 	require.NotEqual(t, -1, errIdx, "streaming bubble must have error event listener")
-	errEnd := errIdx + 1200
+	errEnd := errIdx + 2000
 	if errEnd > len(body) {
 		errEnd = len(body)
 	}
@@ -3120,7 +3120,7 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 	// onerror handler too
 	oeIdx := strings.Index(body, "eventSource.onerror")
 	require.NotEqual(t, -1, oeIdx, "streaming bubble must have onerror handler")
-	oeEnd := oeIdx + 1200
+	oeEnd := oeIdx + 2000
 	if oeEnd > len(body) {
 		oeEnd = len(body)
 	}
