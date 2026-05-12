@@ -861,6 +861,126 @@ func TestMergeBranch_ReturnsErrorWhenAutoCommitFails(t *testing.T) {
 	}
 }
 
+func TestMergeBranch_UnrelatedDirtyTargetFileCanMerge(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Dirty Target",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+
+	if err := os.WriteFile(filepath.Join(wtPath, "task_change.txt"), []byte("task change\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "task change"); err != nil {
+		t.Fatal(err)
+	}
+
+	dirtyPath := filepath.Join(repoDir, "local_dirty.txt")
+	if err := os.WriteFile(dirtyPath, []byte("do not touch\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ws.MergeBranch(ctx, task, repoDir, "merge")
+	if err != nil {
+		t.Fatalf("expected non-overlapping dirty target file to be allowed, got %v result=%#v", err, result)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("expected successful merge, got %#v", result)
+	}
+	if got, readErr := os.ReadFile(dirtyPath); readErr != nil || string(got) != "do not touch\n" {
+		t.Fatalf("expected dirty target file to remain untouched, got %q err=%v", got, readErr)
+	}
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.MergeStatus != models.MergeStatusMerged {
+		t.Fatalf("expected merge_status=merged, got %q", updated.MergeStatus)
+	}
+}
+
+func TestMergeBranch_OverlappingDirtyTargetFileFails(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Overlapping Dirty Target",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+
+	sharedPath := filepath.Join(wtPath, "README.md")
+	if err := os.WriteFile(sharedPath, []byte("# Task branch change\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "task changes README"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Local dirty change\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ws.MergeBranch(ctx, task, repoDir, "merge")
+	if err == nil {
+		t.Fatal("expected Git to reject merge that would overwrite local dirty changes")
+	}
+	if result == nil || !strings.Contains(strings.ToLower(result.ErrorMessage), "would be overwritten") {
+		t.Fatalf("expected overwrite warning from git, got result=%#v err=%v", result, err)
+	}
+	if got, readErr := os.ReadFile(filepath.Join(repoDir, "README.md")); readErr != nil || string(got) != "# Local dirty change\n" {
+		t.Fatalf("expected local dirty file to remain untouched, got %q err=%v", got, readErr)
+	}
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.MergeStatus != models.MergeStatusFailed {
+		t.Fatalf("expected merge_status=failed, got %q", updated.MergeStatus)
+	}
+}
+
 func TestMergeBranch_FastForward(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -900,6 +1020,16 @@ func TestMergeBranch_FastForward(t *testing.T) {
 	}
 	if !result.Success {
 		t.Errorf("expected ff merge success: %s", result.ErrorMessage)
+	}
+	if !IsBranchTipMergedInto(repoDir, branchName, defaultBranch) {
+		t.Fatalf("expected task branch tip to be merged into %s after app fast-forward merge", defaultBranch)
+	}
+	dbTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task after ff merge: %v", err)
+	}
+	if dbTask.MergeStatus != models.MergeStatusMerged {
+		t.Fatalf("expected merge status merged after app fast-forward merge, got %q", dbTask.MergeStatus)
 	}
 }
 
@@ -1095,6 +1225,202 @@ func TestMergeBranch_FastForward_SequentialMergesRebaseConflictPreserved(t *test
 	}
 	if strings.Contains(string(statusOut), "UU ") {
 		t.Fatalf("expected task B worktree conflicts to be aborted after failed auto-rebase, got: %s", string(statusOut))
+	}
+}
+
+func TestMergeBranch_SquashAllowsUnrelatedStagedUserChanges(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Squash With User Staged File",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+
+	if err := os.WriteFile(filepath.Join(wtPath, "task_squash.txt"), []byte("task squash\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "task squash change"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(repoDir, "user_staged.txt"), []byte("user staged\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stageCmd := exec.Command("git", "add", "user_staged.txt")
+	stageCmd.Dir = repoDir
+	if out, err := stageCmd.CombinedOutput(); err != nil {
+		t.Fatalf("stage user file: %v\n%s", err, out)
+	}
+
+	result, err := ws.MergeBranch(ctx, task, repoDir, "squash")
+	if err != nil {
+		t.Fatalf("expected squash merge to allow unrelated staged user file, got %v result=%#v", err, result)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("expected successful squash merge, got %#v", result)
+	}
+
+	showCmd := exec.Command("git", "show", "--name-only", "--pretty=format:", "HEAD")
+	showCmd.Dir = repoDir
+	showOut, err := showCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedInCommit := string(showOut)
+	if !strings.Contains(changedInCommit, "task_squash.txt") {
+		t.Fatalf("expected squash commit to contain task file, got %q", changedInCommit)
+	}
+	if strings.Contains(changedInCommit, "user_staged.txt") {
+		t.Fatalf("expected squash commit not to include unrelated staged user file, got %q", changedInCommit)
+	}
+
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = repoDir
+	statusOut, err := statusCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(statusOut), "A  user_staged.txt") {
+		t.Fatalf("expected unrelated user file to remain staged, status=%q", statusOut)
+	}
+}
+
+func TestMergeBranch_SquashCommitFailureMarksMergeFailedAndDoesNotUseHardReset(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Squash Commit Failure",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+
+	if err := os.WriteFile(filepath.Join(wtPath, "squash_hook_failure.txt"), []byte("squash commit should fail\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "commit before failing squash hook"); err != nil {
+		t.Fatal(err)
+	}
+
+	hookPath := filepath.Join(repoDir, ".git", "hooks", "pre-commit")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\necho blocked squash commit >&2\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ws.MergeBranch(ctx, task, repoDir, "squash")
+	if err == nil {
+		t.Fatal("expected squash commit failure")
+	}
+	if result == nil || !strings.Contains(result.ErrorMessage, "blocked squash commit") {
+		t.Fatalf("expected squash commit failure details, got %#v", result)
+	}
+
+	dbTask, dbErr := taskRepo.GetByID(ctx, task.ID)
+	if dbErr != nil {
+		t.Fatal(dbErr)
+	}
+	if dbTask.MergeStatus != models.MergeStatusFailed {
+		t.Fatalf("expected merge_status=failed after squash commit failure, got %q", dbTask.MergeStatus)
+	}
+
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = repoDir
+	statusOut, statusErr := statusCmd.Output()
+	if statusErr != nil {
+		t.Fatalf("git status after failed squash commit: %v", statusErr)
+	}
+	if strings.TrimSpace(string(statusOut)) != "?? .worktrees/" {
+		t.Fatalf("expected failed squash cleanup to leave only managed worktree entry, status=%q", statusOut)
+	}
+
+	serviceSource, readErr := os.ReadFile("worktree_service.go")
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(serviceSource), "reset\", \"--hard") {
+		t.Fatal("merge cleanup must not use git reset --hard")
+	}
+}
+
+func TestResolveConflictsWithAI_NoActiveConflictsClearsStaleConflictStatus(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	ws.SetLLMService(&LLMService{})
+
+	task := &models.Task{
+		ProjectID:   "default",
+		Title:       "Stale Conflict",
+		Category:    models.CategoryActive,
+		Status:      models.StatusPending,
+		MergeStatus: models.MergeStatusConflict,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if err := taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ws.ResolveConflictsWithAI(ctx, task, repoDir)
+	if err == nil {
+		t.Fatal("expected stale conflict resolution to fail when no active conflicts exist")
+	}
+	if result == nil || !strings.Contains(result.ErrorMessage, "no active merge conflicts") {
+		t.Fatalf("expected no-conflicts error message, got %#v", result)
+	}
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("expected stale conflict status to reset to pending, got %q", updated.MergeStatus)
 	}
 }
 

@@ -352,6 +352,182 @@ func TestHandler_GetTaskChanges_PendingMergeStatusButMergedBranchShowsPreservedD
 	}
 }
 
+// TestHandler_GetTaskChanges_FastForwardMergedBranchHidesMergeOptions
+// reproduces the stale-state bug where a task branch that is already reachable
+// from the target branch keeps surfacing local merge options on the Changes tab.
+// After the fix, the changes-tab response must NOT include local /worktree/merge
+// endpoint actions, and stale merge_status is back-filled to "merged" when found.
+func TestHandler_GetTaskChanges_FastForwardMergedBranchHidesMergeOptions(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+	h.SetTaskChangesMergeOptionsEnabled(true) // ensure merge options would render if not suppressed
+
+	ctx := context.Background()
+
+	repoDir := createHandlerTestGitRepo(t)
+	mainBranch := gitCurrentBranch(t, repoDir)
+	taskBranch := "task/0f7ee252-smart-scrolling"
+
+		// Create a task branch with a commit, then fast-forward main onto it.
+	runGit(t, repoDir, "checkout", "-b", taskBranch)
+	testFile := filepath.Join(repoDir, "scrolling.txt")
+	if err := os.WriteFile(testFile, []byte("smart scrolling change\n"), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGit(t, repoDir, "add", "scrolling.txt")
+	runGit(t, repoDir, "commit", "-m", "implement smart scrolling")
+	runGit(t, repoDir, "checkout", mainBranch)
+	runGit(t, repoDir, "merge", "--ff-only", taskBranch)
+
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "FF-Merged Project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	agents, _ := llmConfigRepo.List(ctx)
+	var agentID string
+	if len(agents) > 0 {
+		agentID = agents[0].ID
+	}
+
+	// Worktree path doesn't need to exist for this test path; the handler
+	// reconciles via IsBranchMerged on the project repo.
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Implement smart scrolling for active task thread streaming",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		WorktreePath:      t.TempDir(),
+		WorktreeBranch:    taskBranch,
+		MergeTargetBranch: mainBranch,
+		MergeStatus:       models.MergeStatusPending, // stale stored state despite branch ancestry
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	exec := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: agentID,
+		Status:        models.ExecCompleted,
+		PromptSent:    "smart scrolling regression",
+	}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	preservedDiff := "diff --git a/scrolling.txt b/scrolling.txt\n+smart scrolling change"
+	if err := execRepo.UpdateDiffOutput(ctx, exec.ID, preservedDiff); err != nil {
+		t.Fatalf("update diff output: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+
+	if err := h.GetTaskChanges(c); err != nil {
+		t.Fatalf("GetTaskChanges failed: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+
+	// Local merge actions must be hidden because the branch is already merged.
+	if strings.Contains(body, "/worktree/merge") {
+		t.Fatalf("expected local /worktree/merge actions to be hidden after fast-forward merge, body=%s", body)
+	}
+	// The already-merged banner should explain the suppressed actions.
+	if !strings.Contains(body, "already merged") {
+		t.Fatalf("expected an already-merged banner in changes-tab response, body=%s", body)
+	}
+	// Preserved diff content should still render so the user can review what was merged.
+	if !strings.Contains(body, "smart scrolling change") {
+		t.Fatalf("expected preserved diff content in changes-tab response, body=%s", body)
+	}
+
+	// Stale merge_status should have been back-filled.
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("re-fetch task: %v", err)
+	}
+	if updated.MergeStatus != models.MergeStatusMerged {
+		t.Fatalf("expected merge_status to be back-filled to merged, got %s", updated.MergeStatus)
+	}
+}
+
+// TestHandler_MergeTaskBranch_RejectsAlreadyMergedBranch ensures that an
+// in-flight merge POST (e.g. from a stale changes-tab UI) is rejected with 409
+// when the branch is already merged into its target.
+func TestHandler_MergeTaskBranch_RejectsAlreadyMergedBranch(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+	h.SetTaskChangesMergeOptionsEnabled(true)
+
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	mainBranch := gitCurrentBranch(t, repoDir)
+	taskBranch := "task/already-merged"
+
+	runGit(t, repoDir, "checkout", "-b", taskBranch)
+	if err := os.WriteFile(filepath.Join(repoDir, "x.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatalf("write x: %v", err)
+	}
+	runGit(t, repoDir, "add", "x.txt")
+	runGit(t, repoDir, "commit", "-m", "x change")
+	runGit(t, repoDir, "checkout", mainBranch)
+	runGit(t, repoDir, "merge", "--ff-only", taskBranch)
+
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Already Merged Project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskRepo := repository.NewTaskRepo(db, nil)
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Already merged",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		WorktreePath:      t.TempDir(),
+		WorktreeBranch:    taskBranch,
+		MergeTargetBranch: mainBranch,
+		MergeStatus:       models.MergeStatusPending,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	form := "merge_type=merge&merge_source=changes_tab"
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+
+	if err := h.MergeTaskBranch(c); err != nil {
+		t.Fatalf("MergeTaskBranch returned error: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 Conflict for already-merged branch, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("re-fetch task: %v", err)
+	}
+	if updated.MergeStatus != models.MergeStatusMerged {
+		t.Fatalf("expected merge_status back-filled to merged after rejection, got %s", updated.MergeStatus)
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)

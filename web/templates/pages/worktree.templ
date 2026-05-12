@@ -2,7 +2,6 @@ package pages
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
@@ -180,7 +179,12 @@ templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat)
 }
 
 // TaskChangesWorktreeContent renders the changes tab for worktree-based tasks.
-templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, showMergeOptions bool) {
+//
+// branchAlreadyMerged is true when the task's worktree branch is already merged
+// into its target branch in git (e.g. via a manual fast-forward outside the
+// app). When true, local merge actions are suppressed regardless of the stored
+// merge_status, because re-running a merge would be redundant.
+templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, showMergeOptions bool, branchAlreadyMerged bool) {
 	<div class="card bg-base-100 shadow-sm border border-base-300">
 		<div class="card-body">
 			// Worktree branch info header
@@ -204,7 +208,7 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 							</svg>
 						</div>
 						<ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52 border border-base-300">
-								if showMergeOptions && (task.MergeStatus != models.MergeStatusMerged || task.Status == models.StatusFailed || strings.TrimSpace(diffOutput) != "") {
+									if showMergeOptions && !branchAlreadyMerged && task.MergeStatus != models.MergeStatusMerged && task.MergeStatus != models.MergeStatusConflict {
 								<li class="menu-title"><span>Local</span></li>
 								<li>
 									<button
@@ -272,6 +276,19 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 							}
 						</ul>
 					</div>
+				</div>
+			}
+
+			// Already-merged banner: show when the task branch has been merged
+			// into its target branch in git (auto-merge or external manual merge).
+			if branchAlreadyMerged {
+				<div class="alert alert-success py-2 mb-4">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+					</svg>
+					<span class="text-xs">
+						Branch <code class="bg-base-200 px-1 rounded">{ task.WorktreeBranch }</code> is already merged into <code class="bg-base-200 px-1 rounded">{ mergeTargetDisplay(task) }</code>. Showing preserved diff.
+					</span>
 				</div>
 			}
 

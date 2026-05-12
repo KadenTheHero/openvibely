@@ -408,6 +408,16 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 		}
 	}
 
+	var stagedBeforeSquash map[string]bool
+	if mergeType == "squash" {
+		var err error
+		stagedBeforeSquash, err = StagedPaths(repoDir)
+		if err != nil {
+			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+			return &MergeResult{ErrorMessage: fmt.Sprintf("checking staged files before squash: %s", err.Error())}, fmt.Errorf("checking staged files before squash: %w", err)
+		}
+	}
+
 	// Checkout target branch in the main repo
 	checkoutCmd := exec.Command("git", "checkout", targetBranch)
 	checkoutCmd.Dir = repoDir
@@ -449,12 +459,28 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 		return &MergeResult{ErrorMessage: mergeErrMsg}, fmt.Errorf("merge failed: %w", mergeErr)
 	}
 
-	// For squash merge, we need to commit
+	// For squash merge, commit only the paths introduced by the squash result.
+	// This allows unrelated user-staged changes to remain staged without being
+	// accidentally included in the app-created squash commit.
 	if mergeType == "squash" {
-		commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("Squash merge task: %s", task.Title))
+		squashPaths, pathErr := SquashMergePaths(repoDir, stagedBeforeSquash)
+		if pathErr != nil {
+			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+			return &MergeResult{ErrorMessage: fmt.Sprintf("checking squash merge paths: %s", pathErr.Error())}, fmt.Errorf("checking squash merge paths: %w", pathErr)
+		}
+		commitArgs := append([]string{"commit", "-m", fmt.Sprintf("Squash merge task: %s", task.Title), "--only", "--"}, squashPaths...)
+		commitCmd := exec.Command("git", commitArgs...)
 		commitCmd.Dir = repoDir
 		if out, err := commitCmd.CombinedOutput(); err != nil {
-			log.Printf("[worktree] squash commit output: %s", string(out))
+			commitErrMsg := strings.TrimSpace(string(out))
+			if commitErrMsg == "" {
+				commitErrMsg = err.Error()
+			}
+			if resetErr := ResetSquashMergeChanges(repoDir); resetErr != nil {
+				commitErrMsg = fmt.Sprintf("%s; additionally failed to restore squash merge changes: %v", commitErrMsg, resetErr)
+			}
+			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+			return &MergeResult{ErrorMessage: fmt.Sprintf("squash commit failed: %s", commitErrMsg)}, fmt.Errorf("squash commit failed: %w", err)
 		}
 	}
 
@@ -509,6 +535,67 @@ func AbortRebase(repoDir string) error {
 	return err
 }
 
+func gitOutput(repoDir string, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repoDir
+	return cmd.CombinedOutput()
+}
+
+func StagedPaths(repoDir string) (map[string]bool, error) {
+	out, err := gitOutput(repoDir, "diff", "--name-only", "--cached")
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	paths := make(map[string]bool)
+	for _, path := range strings.Fields(string(out)) {
+		paths[path] = true
+	}
+	return paths, nil
+}
+
+func SquashMergePaths(repoDir string, stagedBefore map[string]bool) ([]string, error) {
+	stagedAfter, err := StagedPaths(repoDir)
+	if err != nil {
+		return nil, err
+	}
+	var changed []string
+	for path := range stagedAfter {
+		if stagedBefore[path] {
+			continue
+		}
+		changed = append(changed, path)
+	}
+	if len(changed) == 0 {
+		return nil, fmt.Errorf("squash merge produced no staged changes")
+	}
+	return changed, nil
+}
+
+// ResetSquashMergeChanges restores only files changed by a failed squash merge
+// attempt. Unlike `git reset --hard`, this does not reset the whole target
+// checkout.
+func ResetSquashMergeChanges(repoDir string) error {
+	changedOut, err := gitOutput(repoDir, "diff", "--name-only", "--cached")
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(changedOut)))
+	}
+	changed := strings.Fields(string(changedOut))
+	if len(changed) == 0 {
+		return nil
+	}
+
+	args := append([]string{"restore", "--staged", "--worktree", "--source=HEAD", "--"}, changed...)
+	if out, err := gitOutput(repoDir, args...); err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// ActiveConflictFiles returns files with active merge conflicts in the given repository.
+func ActiveConflictFiles(repoDir string) []string {
+	return detectConflicts(repoDir)
+}
+
 // detectConflicts returns a list of files with merge conflicts.
 func detectConflicts(repoDir string) []string {
 	cmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
@@ -540,7 +627,8 @@ func (ws *WorktreeService) ResolveConflictsWithAI(ctx context.Context, task *mod
 
 	conflictFiles := detectConflicts(repoDir)
 	if len(conflictFiles) == 0 {
-		return &MergeResult{Success: true}, nil
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending)
+		return &MergeResult{ErrorMessage: "no active merge conflicts found"}, fmt.Errorf("no active merge conflicts found")
 	}
 
 	// Build a prompt describing the conflicts
@@ -578,14 +666,25 @@ func (ws *WorktreeService) ResolveConflictsWithAI(ctx context.Context, task *mod
 		}, nil
 	}
 
-	// Commit the resolution
+	// Commit the resolution. Both staging and committing must succeed before the
+	// task can be considered merged.
 	addCmd := exec.Command("git", "add", "-A")
 	addCmd.Dir = repoDir
-	addCmd.Run()
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		return &MergeResult{ErrorMessage: fmt.Sprintf("staging resolved conflicts failed: %s", strings.TrimSpace(string(out)))}, fmt.Errorf("staging resolved conflicts: %w", err)
+	}
 
 	commitCmd := exec.Command("git", "commit", "--no-edit")
 	commitCmd.Dir = repoDir
-	commitCmd.Run()
+	if out, err := commitCmd.CombinedOutput(); err != nil {
+		commitErrMsg := strings.TrimSpace(string(out))
+		if commitErrMsg == "" {
+			commitErrMsg = err.Error()
+		}
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		return &MergeResult{ErrorMessage: fmt.Sprintf("committing resolved merge failed: %s", commitErrMsg)}, fmt.Errorf("committing resolved merge: %w", err)
+	}
 
 	_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusMerged)
 
@@ -921,6 +1020,11 @@ func (ws *WorktreeService) GetCleanupPolicy(ctx context.Context) string {
 
 // IsBranchMerged checks if a branch has been fully merged into the target branch.
 // Returns true if the branch is merged (no unique commits), false otherwise.
+//
+// NOTE: A missing branch is treated as merged here so cleanup logic can
+// reclaim worktrees whose branches were manually deleted post-merge. Callers
+// that need to distinguish "branch is provably merged in git right now" from
+// "branch is missing" should use IsBranchTipMergedInto instead.
 func IsBranchMerged(repoDir string, branchName string, targetBranch string) bool {
 	if branchName == "" || targetBranch == "" {
 		return false
@@ -942,6 +1046,32 @@ func IsBranchMerged(repoDir string, branchName string, targetBranch string) bool
 
 	// Exit code 0 means ancestor (merged), non-zero means not merged
 	return err == nil
+}
+
+// IsBranchTipMergedInto reports whether `branchName` exists in the repo and
+// its tip commit is an ancestor of `targetBranch` (i.e. the branch has been
+// merged into the target). Unlike IsBranchMerged, a missing branch returns
+// false so UI reconciliation does not falsely hide merge actions for tasks
+// whose worktree branch was never actually created.
+func IsBranchTipMergedInto(repoDir string, branchName string, targetBranch string) bool {
+	if branchName == "" || targetBranch == "" {
+		return false
+	}
+	if !IsGitRepo(repoDir) {
+		return false
+	}
+
+	// Branch must exist locally to be considered merged-in-git.
+	if err := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", branchName).Run(); err != nil {
+		return false
+	}
+	// Target branch must also exist; otherwise we can't compare ancestry.
+	if err := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", targetBranch).Run(); err != nil {
+		return false
+	}
+
+	cmd := exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", branchName, targetBranch)
+	return cmd.Run() == nil
 }
 
 // HandlePostExecution handles worktree operations after task execution completes.

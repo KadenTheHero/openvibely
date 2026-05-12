@@ -432,6 +432,52 @@ func latestNonEmptyDiff(executions []models.Execution) string {
 	return ""
 }
 
+// reconcileAlreadyMergedBranch detects task branches that are already
+// reachable from their target branch while stored merge_status is stale. When
+// such a stale state is found, it back-fills `tasks.merge_status = merged` so
+// the rest of the UI does not keep offering local merge actions for an
+// already-merged branch. Returns true when the branch is currently merged into
+// the resolved target branch.
+//
+// Active tasks (running/queued) are skipped because their worktree is in use
+// and the branch may legitimately match the target tip mid-execution.
+func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models.Task) bool {
+	if task == nil || task.WorktreeBranch == "" {
+		return false
+	}
+	if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
+		return false
+	}
+
+	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
+	if err != nil || project == nil || project.RepoPath == "" {
+		return false
+	}
+
+	targetBranch := task.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = service.GetDefaultBranch(project.RepoPath)
+	}
+	if targetBranch == "" {
+		return false
+	}
+
+	if !service.IsBranchTipMergedInto(project.RepoPath, task.WorktreeBranch, targetBranch) {
+		return false
+	}
+
+	// Branch is merged in git. Back-fill stale merge_status so future
+	// renders/handlers do not need to repeat the git probe.
+	if task.MergeStatus != models.MergeStatusMerged {
+		if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusMerged); err != nil {
+			log.Printf("[handler] reconcileAlreadyMergedBranch: failed to update merge_status for task %s: %v", task.ID, err)
+		} else {
+			task.MergeStatus = models.MergeStatusMerged
+		}
+	}
+	return true
+}
+
 // resolveTaskChangesDiffOutput resolves the diff payload used by the Changes UI.
 // It mirrors GetTaskChanges behavior so per-file lazy loads match full-page output.
 func (h *Handler) resolveTaskChangesDiffOutput(ctx context.Context, task *models.Task) string {
@@ -504,14 +550,20 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 	// For merged tasks, show the preserved diff from execution (live diff would be empty)
 	// For pending/conflict tasks, show live diff if worktree still exists
 	if task.WorktreeBranch != "" {
-		executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
+		ctx := c.Request().Context()
+		// Detect branches that are already reachable from the target and back-fill
+		// stale merge_status so the merge actions in the changes-tab dropdown stay
+		// in sync with reality.
+		branchAlreadyMerged := h.reconcileAlreadyMergedBranch(ctx, task)
+
+		executions, _ := h.execRepo.ListByTaskChronological(ctx, taskID)
 		var reviewComments []models.ReviewComment
 		if h.reviewCommentRepo != nil {
-			reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
+			reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
 		}
 		var taskPR *models.TaskPullRequest
 		if h.taskPullRequestRepo != nil {
-			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(c.Request().Context(), taskID)
+			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
 		}
 
 		// Active tasks with an existing worktree should prefer live diff even if
@@ -522,14 +574,14 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 		if !isActive && task.MergeStatus == models.MergeStatusMerged {
 			diffOutput := latestNonEmptyDiff(executions)
 			return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-				diffOutput, task, nil, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(),
+				diffOutput, task, nil, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(), branchAlreadyMerged,
 			))
 		}
 
 		// For active/unmerged tasks, show live diff if worktree still exists
 		if task.WorktreePath != "" {
 			if _, err := os.Stat(task.WorktreePath); err == nil {
-				project, _ := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
+				project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 				if project != nil && project.RepoPath != "" {
 					targetBranch := task.MergeTargetBranch
 					if targetBranch == "" {
@@ -549,7 +601,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 					if strings.TrimSpace(diffOutput) == "" &&
 						task.Status != models.StatusRunning &&
 						task.Status != models.StatusQueued &&
-						service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch) {
+						(branchAlreadyMerged || service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch)) {
 						if preservedDiff := latestNonEmptyDiff(executions); preservedDiff != "" {
 							diffOutput = preservedDiff
 							fileStats = nil
@@ -557,7 +609,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 					}
 
 					return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-						diffOutput, task, fileStats, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(),
+						diffOutput, task, fileStats, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(), branchAlreadyMerged,
 					))
 				}
 			}
@@ -567,7 +619,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 		for i := len(executions) - 1; i >= 0; i-- {
 			if executions[i].DiffOutput != "" {
 				return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-					executions[i].DiffOutput, task, nil, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(),
+					executions[i].DiffOutput, task, nil, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(), branchAlreadyMerged,
 				))
 			}
 		}

@@ -53,14 +53,42 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "task changes merge options are disabled")
 	}
 
-	if h.worktreeSvc == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
-	}
-
 	// Get the repo path from the project
 	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
 	if err != nil || project == nil || project.RepoPath == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
+	}
+
+	// Defense-in-depth: if the branch is already merged into its target,
+	// back-fill merge_status and reject the redundant merge request instead
+	// of attempting it.
+	// Performed before the worktreeSvc check so a stale UI cannot drive
+	// duplicate merges even on installs where the worktree service is missing.
+	targetBranch := task.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = service.GetDefaultBranch(project.RepoPath)
+	}
+	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 {
+		msg := "A merge conflict is already active. Resolve conflicts or abort the merge before trying another merge."
+		if isHTMX(c) {
+			setHTMXToast(c, msg, "failed")
+		}
+		return c.String(http.StatusConflict, msg)
+	}
+	if targetBranch != "" && service.IsBranchTipMergedInto(project.RepoPath, task.WorktreeBranch, targetBranch) {
+		if task.MergeStatus != models.MergeStatusMerged {
+			_ = h.taskRepo.UpdateMergeStatus(c.Request().Context(), task.ID, models.MergeStatusMerged)
+			task.MergeStatus = models.MergeStatusMerged
+		}
+		msg := fmt.Sprintf("Branch %s is already merged into %s", task.WorktreeBranch, targetBranch)
+		if isHTMX(c) {
+			setHTMXToast(c, msg, "info")
+		}
+		return c.String(http.StatusConflict, msg)
+	}
+
+	if h.worktreeSvc == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
 	}
 
 	mergeType := c.FormValue("merge_type")
@@ -96,10 +124,6 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
 
 	// Set response headers to trigger changes tab refresh and show success message
-	targetBranch := task.MergeTargetBranch
-	if targetBranch == "" && project != nil && project.RepoPath != "" {
-		targetBranch = service.GetDefaultBranch(project.RepoPath)
-	}
 	if targetBranch == "" {
 		targetBranch = "main"
 	}
@@ -238,11 +262,26 @@ func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
 	result, resolveErr := h.worktreeSvc.ResolveConflictsWithAI(c.Request().Context(), task, project.RepoPath)
 	if resolveErr != nil {
 		log.Printf("[handler] ResolveTaskConflicts error: %v", resolveErr)
+		errMessage := "Failed to resolve merge conflicts"
+		if result != nil && result.ErrorMessage != "" {
+			errMessage = result.ErrorMessage
+		} else if resolveErr.Error() != "" {
+			errMessage = resolveErr.Error()
+		}
+		if isHTMX(c) {
+			setHTMXToast(c, errMessage, "failed")
+		}
+		return c.String(http.StatusBadRequest, errMessage)
 	}
 
 	if result != nil && !result.Success {
-		// Abort the merge
-		service.AbortMerge(project.RepoPath)
+		msg := "AI could not resolve all conflicts. Resolve conflicts manually or abort the merge."
+		if result.ErrorMessage != "" {
+			msg = result.ErrorMessage
+		}
+		if isHTMX(c) {
+			setHTMXToast(c, msg, "failed")
+		}
 	}
 
 	task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
@@ -262,7 +301,13 @@ func (h *Handler) AbortTaskMerge(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
 	}
 
-	service.AbortMerge(project.RepoPath)
+	if abortErr := service.AbortMerge(project.RepoPath); abortErr != nil {
+		errMessage := fmt.Sprintf("Failed to abort merge: %v", abortErr)
+		if isHTMX(c) {
+			setHTMXToast(c, errMessage, "failed")
+		}
+		return c.String(http.StatusBadRequest, errMessage)
+	}
 	_ = h.taskRepo.UpdateMergeStatus(c.Request().Context(), taskID, models.MergeStatusPending)
 
 	task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
@@ -310,6 +355,10 @@ func (h *Handler) renderWorktreeInfo(c echo.Context, task *models.Task) error {
 	// Resolve project repo path for file stats
 	var fileStats []service.WorktreeFileStat
 	if task.WorktreeBranch != "" {
+		// Detect already-merged branches so the worktree panel does not keep
+		// rendering a "Merge to <target>" button for an already-merged branch.
+		h.reconcileAlreadyMergedBranch(c.Request().Context(), task)
+
 		project, _ := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
 		if project != nil && project.RepoPath != "" {
 			targetBranch := task.MergeTargetBranch
@@ -333,7 +382,11 @@ func (h *Handler) GetTaskChangesWorktree(c echo.Context) error {
 
 	// If task has a worktree branch, show worktree diff instead of execution diff
 	if task.WorktreeBranch != "" {
-		project, _ := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
+		ctx := c.Request().Context()
+		// Detect already-merged branches so the changes-tab dropdown does not
+		// keep offering redundant merge actions.
+		branchAlreadyMerged := h.reconcileAlreadyMergedBranch(ctx, task)
+		project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 		if project != nil && project.RepoPath != "" {
 			targetBranch := task.MergeTargetBranch
 			if targetBranch == "" {
@@ -342,17 +395,27 @@ func (h *Handler) GetTaskChangesWorktree(c echo.Context) error {
 			diffOutput := service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
 			fileStats := service.GetWorktreeFileStats(project.RepoPath, task.WorktreeBranch, targetBranch)
 
+			// If live diff is empty because the branch was already merged, fall
+			// back to the preserved execution diff.
+			if branchAlreadyMerged && strings.TrimSpace(diffOutput) == "" {
+				executions, _ := h.execRepo.ListByTaskChronological(ctx, taskID)
+				if preservedDiff := latestNonEmptyDiff(executions); preservedDiff != "" {
+					diffOutput = preservedDiff
+					fileStats = nil
+				}
+			}
+
 			var reviewComments []models.ReviewComment
 			if h.reviewCommentRepo != nil {
-				reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
+				reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
 			}
 			var taskPR *models.TaskPullRequest
 			if h.taskPullRequestRepo != nil {
-				taskPR, _ = h.taskPullRequestRepo.GetByTaskID(c.Request().Context(), taskID)
+				taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
 			}
 
 			return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-				diffOutput, task, fileStats, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(),
+				diffOutput, task, fileStats, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(), branchAlreadyMerged,
 			))
 		}
 	}

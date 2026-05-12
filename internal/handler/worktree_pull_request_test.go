@@ -371,7 +371,7 @@ func TestHandler_GetTaskChanges_ShowsMergeOptionsWhenFlagEnabled(t *testing.T) {
 	}
 }
 
-func TestHandler_GetTaskChanges_ShowsMergeOptionsForFailedMergedTask(t *testing.T) {
+func TestHandler_GetTaskChanges_HidesMergeOptionsForFailedMergedTask(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	h.SetTaskChangesMergeOptionsEnabled(true)
 	ctx := context.Background()
@@ -408,11 +408,14 @@ func TestHandler_GetTaskChanges_ShowsMergeOptionsForFailedMergedTask(t *testing.
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "Merge commit") {
-		t.Fatalf("expected merge options to be rendered for failed merged task, body=%s", body)
+	if strings.Contains(body, "/worktree/merge") || strings.Contains(body, "Merge commit") {
+		t.Fatalf("did not expect local merge options for already-merged failed task, body=%s", body)
 	}
-	if !strings.Contains(body, "Local") {
-		t.Fatalf("expected Local section header for failed merged task, body=%s", body)
+	if strings.Contains(body, "Local") {
+		t.Fatalf("did not expect Local section header for already-merged failed task, body=%s", body)
+	}
+	if !strings.Contains(body, "GitHub") {
+		t.Fatalf("expected GitHub section to remain available for already-merged failed task, body=%s", body)
 	}
 }
 

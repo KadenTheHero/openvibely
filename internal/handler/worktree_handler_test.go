@@ -425,6 +425,96 @@ func TestHandler_MergeTaskBranch_Conflict_ReturnsHTMXToast(t *testing.T) {
 	}
 }
 
+func TestHandler_MergeTaskBranch_ActiveConflictBlocksDuplicateMerge(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	repoDir := t.TempDir()
+	mustRun := func(name string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(name, args...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s %v failed: %v\n%s", name, args, err, out)
+		}
+	}
+	mustRunOutput := func(name string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command(name, args...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s %v failed: %v\n%s", name, args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	mustRun("git", "init")
+	mustRun("git", "config", "user.email", "test@example.com")
+	mustRun("git", "config", "user.name", "Test User")
+	defaultBranch := mustRunOutput("git", "branch", "--show-current")
+	if defaultBranch == "" {
+		defaultBranch = "main"
+	}
+
+	conflictFile := filepath.Join(repoDir, "conflict.txt")
+	if err := os.WriteFile(conflictFile, []byte("base\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mustRun("git", "add", "conflict.txt")
+	mustRun("git", "commit", "-m", "base")
+
+	worktreeBranch := "task/active-conflict"
+	mustRun("git", "checkout", "-b", worktreeBranch)
+	if err := os.WriteFile(conflictFile, []byte("branch\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mustRun("git", "add", "conflict.txt")
+	mustRun("git", "commit", "-m", "branch")
+
+	mustRun("git", "checkout", defaultBranch)
+	if err := os.WriteFile(conflictFile, []byte("target\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mustRun("git", "add", "conflict.txt")
+	mustRun("git", "commit", "-m", "target")
+	mergeCmd := exec.Command("git", "merge", "--no-ff", worktreeBranch)
+	mergeCmd.Dir = repoDir
+	if out, err := mergeCmd.CombinedOutput(); err == nil {
+		t.Fatalf("expected manual setup merge to conflict, got success: %s", out)
+	}
+
+	project := &models.Project{Name: "Test Project", Description: "Test", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Active Conflict",
+		Prompt:            "test",
+		Category:          models.CategoryActive,
+		Status:            models.StatusCompleted,
+		WorktreeBranch:    worktreeBranch,
+		MergeTargetBranch: defaultBranch,
+		MergeStatus:       models.MergeStatusConflict,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	form := url.Values{"merge_type": {"merge"}}
+	req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", form)
+	req.Header.Set("HX-Request", "true")
+	rec := worktreeExecute(e, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 while active conflict exists, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "merge conflict is already active") {
+		t.Fatalf("expected active conflict message, got %s", rec.Body.String())
+	}
+}
+
 func TestHandler_MergeTaskBranch_ChangesTabDisabled_ReturnsForbidden(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	h.SetTaskChangesMergeOptionsEnabled(false)
