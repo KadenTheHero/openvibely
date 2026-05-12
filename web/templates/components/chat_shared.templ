@@ -287,14 +287,68 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					if (pauseTarget) {
 						window._taskThreadStreamingActive = true;
 						var pollingEl = document.getElementById(pauseTarget);
-						if (pollingEl) {
+							if (pollingEl) {
+								if (!pollingEl.hasAttribute('data-paused-hx-trigger')) {
+									pollingEl.setAttribute('data-paused-hx-trigger', pollingEl.getAttribute('hx-trigger') || '');
+								}
+								if (!pollingEl.hasAttribute('data-paused-hx-get')) {
+									pollingEl.setAttribute('data-paused-hx-get', pollingEl.getAttribute('hx-get') || '');
+								}
+								pollingEl.removeAttribute('hx-trigger');
+								pollingEl.removeAttribute('hx-get');
+								htmx.process(pollingEl);
+							}
+						}
+
+						function stopThreadPolling() {
+							if (!pauseTarget) return;
+							var pollingEl = document.getElementById(pauseTarget);
+							if (!pollingEl) return;
+							pollingEl.setAttribute('data-task-active', 'false');
 							pollingEl.removeAttribute('hx-trigger');
 							pollingEl.removeAttribute('hx-get');
-							htmx.process(pollingEl);
+							if (typeof htmx !== 'undefined') htmx.process(pollingEl);
 						}
-					}
 
-					// Get or create page-level tracker for this chat container
+						function restoreThreadPollingFallback() {
+							if (!pauseTarget) return;
+							var pollingEl = document.getElementById(pauseTarget);
+							if (!pollingEl || pollingEl.getAttribute('data-task-active') === 'false') return;
+							var pausedTrigger = pollingEl.getAttribute('data-paused-hx-trigger');
+							var pausedGet = pollingEl.getAttribute('data-paused-hx-get');
+							if (pausedTrigger) pollingEl.setAttribute('hx-trigger', pausedTrigger);
+							if (pausedGet) pollingEl.setAttribute('hx-get', pausedGet);
+							if (typeof htmx !== 'undefined') htmx.process(pollingEl);
+						}
+
+						function showThreadTerminalStatus(status) {
+							stopThreadPolling();
+							var form = document.getElementById('task-thread-form');
+							if (form) {
+								var textarea = document.getElementById('task-message-input');
+								if (textarea) textarea.setAttribute('placeholder', 'Type your message... (Enter to send, Shift+Enter for new line)');
+								var cancelButton = form.querySelector('button[title="Cancel running task"]');
+								if (cancelButton) cancelButton.remove();
+							}
+							var messages = document.getElementById(messagesId);
+							if (!messages || document.getElementById('task-thread-terminal-status')) return;
+							var wrap = document.createElement('div');
+							wrap.id = 'task-thread-terminal-status';
+							wrap.className = 'flex items-center justify-center gap-2 py-2';
+							var inner = document.createElement('div');
+							inner.className = 'flex items-center gap-2 text-sm opacity-70 ' + (status === 'failed' ? 'text-error' : 'text-success');
+							var icon = document.createElement('span');
+							icon.setAttribute('aria-hidden', 'true');
+							icon.textContent = status === 'failed' ? '✕' : '✓';
+							var text = document.createElement('span');
+							text.textContent = 'Task ' + (status === 'failed' ? 'failed' : 'completed');
+							inner.appendChild(icon);
+							inner.appendChild(text);
+							wrap.appendChild(inner);
+							messages.appendChild(wrap);
+						}
+
+						// Get or create page-level tracker for this chat container
 					var chatMessages = document.getElementById(messagesId);
 					var tracker = null;
 					var trackerKey = 'scrollTracker_' + messagesId;
@@ -386,22 +440,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						removeChatEventSource(execId, eventSource);
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
-							// Refresh just the thread view (#task-thread-view) to get final
-							// server-rendered state (tool markers, status indicator, re-enabled
-							// polling) WITHOUT swapping the entire #task-detail-content. Swapping
-							// the whole task detail container would tear down breadcrumb, tab
-							// nav, every tab panel, and every task-detail script — which the
-							// user perceives as a hard page refresh: it forces them back to the
-							// Thread tab and resets scroll/Changes/Details state. Targeting
-							// #task-thread-view keeps the surrounding tabs intact and still gives
-							// the thread its final rendered output.
-							setTimeout(function() {
-								var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
-								if (!taskIdMatch || !taskIdMatch[1]) return;
-								var threadView = document.getElementById('task-thread-view');
-								if (!threadView) return;
-								htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread', {target: '#task-thread-view', swap: 'outerHTML'});
-							}, 500);
+							showThreadTerminalStatus('completed');
 						} else {
 							// Always evaluate plan-completion first so prompt visibility updates
 							// even if post-render transforms throw.
@@ -448,14 +487,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						removeChatEventSource(execId, eventSource);
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
-							// Refresh just the thread view; see 'done' handler for rationale.
-							setTimeout(function() {
-								var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
-								if (!taskIdMatch || !taskIdMatch[1]) return;
-								var threadView = document.getElementById('task-thread-view');
-								if (!threadView) return;
-								htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread', {target: '#task-thread-view', swap: 'outerHTML'});
-							}, 1000);
+							showThreadTerminalStatus('failed');
 						} else {
 							// Clear streaming flag and re-evaluate plan prompt on error.
 							// The evaluator scans DOM for latest completed bubble; an error
@@ -476,14 +508,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						removeChatEventSource(execId, eventSource);
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
-							// Refresh just the thread view; see 'done' handler for rationale.
-							setTimeout(function() {
-								var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
-								if (!taskIdMatch || !taskIdMatch[1]) return;
-								var threadView = document.getElementById('task-thread-view');
-								if (!threadView) return;
-								htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread', {target: '#task-thread-view', swap: 'outerHTML'});
-							}, 1000);
+							restoreThreadPollingFallback();
 						} else {
 							window._chatStreamInProgress = false;
 							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
@@ -580,14 +605,68 @@ templ _initThreadStreamingScript() {
 				if (pauseTarget) {
 					window._taskThreadStreamingActive = true;
 					var pollingEl = document.getElementById(pauseTarget);
-					if (pollingEl) {
+						if (pollingEl) {
+							if (!pollingEl.hasAttribute('data-paused-hx-trigger')) {
+								pollingEl.setAttribute('data-paused-hx-trigger', pollingEl.getAttribute('hx-trigger') || '');
+							}
+							if (!pollingEl.hasAttribute('data-paused-hx-get')) {
+								pollingEl.setAttribute('data-paused-hx-get', pollingEl.getAttribute('hx-get') || '');
+							}
+							pollingEl.removeAttribute('hx-trigger');
+							pollingEl.removeAttribute('hx-get');
+							if (typeof htmx !== 'undefined') htmx.process(pollingEl);
+						}
+					}
+
+					function stopThreadPolling() {
+						if (!pauseTarget) return;
+						var pollingEl = document.getElementById(pauseTarget);
+						if (!pollingEl) return;
+						pollingEl.setAttribute('data-task-active', 'false');
 						pollingEl.removeAttribute('hx-trigger');
 						pollingEl.removeAttribute('hx-get');
 						if (typeof htmx !== 'undefined') htmx.process(pollingEl);
 					}
-				}
 
-				// Get or reuse page-level tracker
+					function restoreThreadPollingFallback() {
+						if (!pauseTarget) return;
+						var pollingEl = document.getElementById(pauseTarget);
+						if (!pollingEl || pollingEl.getAttribute('data-task-active') === 'false') return;
+						var pausedTrigger = pollingEl.getAttribute('data-paused-hx-trigger');
+						var pausedGet = pollingEl.getAttribute('data-paused-hx-get');
+						if (pausedTrigger) pollingEl.setAttribute('hx-trigger', pausedTrigger);
+						if (pausedGet) pollingEl.setAttribute('hx-get', pausedGet);
+						if (typeof htmx !== 'undefined') htmx.process(pollingEl);
+					}
+
+					function showThreadTerminalStatus(status) {
+						stopThreadPolling();
+						var form = document.getElementById('task-thread-form');
+						if (form) {
+							var textarea = document.getElementById('task-message-input');
+							if (textarea) textarea.setAttribute('placeholder', 'Type your message... (Enter to send, Shift+Enter for new line)');
+							var cancelButton = form.querySelector('button[title="Cancel running task"]');
+							if (cancelButton) cancelButton.remove();
+						}
+						var messages = document.getElementById(messagesId);
+						if (!messages || document.getElementById('task-thread-terminal-status')) return;
+						var wrap = document.createElement('div');
+						wrap.id = 'task-thread-terminal-status';
+						wrap.className = 'flex items-center justify-center gap-2 py-2';
+						var inner = document.createElement('div');
+						inner.className = 'flex items-center gap-2 text-sm opacity-70 ' + (status === 'failed' ? 'text-error' : 'text-success');
+						var icon = document.createElement('span');
+						icon.setAttribute('aria-hidden', 'true');
+						icon.textContent = status === 'failed' ? '✕' : '✓';
+						var text = document.createElement('span');
+						text.textContent = 'Task ' + (status === 'failed' ? 'failed' : 'completed');
+						inner.appendChild(icon);
+						inner.appendChild(text);
+						wrap.appendChild(inner);
+						messages.appendChild(wrap);
+					}
+
+					// Get or reuse page-level tracker
 				var chatMessages = document.getElementById(messagesId);
 				var tracker = null;
 				var trackerKey = 'scrollTracker_' + messagesId;
@@ -654,17 +733,7 @@ templ _initThreadStreamingScript() {
 					removeThreadEventSource(eventSource);
 					window._taskThreadStreamingActive = false;
 					if (pauseTarget) {
-						// Refresh just the thread view, not the entire task-detail-content.
-						// Swapping the whole detail container looks like a hard refresh to
-						// the user (resets active tab, scroll, Changes/Details state). Targeting
-						// #task-thread-view keeps the surrounding tabs intact.
-						setTimeout(function() {
-							var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
-							if (!taskIdMatch || !taskIdMatch[1]) return;
-							var threadView = document.getElementById('task-thread-view');
-							if (!threadView) return;
-							htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread', {target: '#task-thread-view', swap: 'outerHTML'});
-						}, 500);
+						showThreadTerminalStatus('completed');
 					} else {
 						var bubble = container.closest('.chat-bubble-assistant-msg');
 						if (bubble && window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
@@ -689,14 +758,7 @@ templ _initThreadStreamingScript() {
 					removeThreadEventSource(eventSource);
 					window._taskThreadStreamingActive = false;
 					if (pauseTarget) {
-						// Refresh just the thread view; see 'done' handler for rationale.
-						setTimeout(function() {
-							var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
-							if (!taskIdMatch || !taskIdMatch[1]) return;
-							var threadView = document.getElementById('task-thread-view');
-							if (!threadView) return;
-							htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread', {target: '#task-thread-view', swap: 'outerHTML'});
-						}, 1000);
+						showThreadTerminalStatus('failed');
 					}
 				});
 
@@ -709,14 +771,7 @@ templ _initThreadStreamingScript() {
 					removeThreadEventSource(eventSource);
 					window._taskThreadStreamingActive = false;
 					if (pauseTarget) {
-						// Refresh just the thread view; see 'done' handler for rationale.
-						setTimeout(function() {
-							var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
-							if (!taskIdMatch || !taskIdMatch[1]) return;
-							var threadView = document.getElementById('task-thread-view');
-							if (!threadView) return;
-							htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread', {target: '#task-thread-view', swap: 'outerHTML'});
-						}, 1000);
+						restoreThreadPollingFallback();
 					}
 				};
 			});

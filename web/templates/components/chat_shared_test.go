@@ -72,13 +72,11 @@ func TestChatLoadingDots_RendersThreeDotsAndSizeVariants(t *testing.T) {
 	}
 }
 
-// TestChatBubbleStreaming_ThreadDoneRefreshesOnlyThreadView verifies that when
-// a thread's SSE stream ends (task finished), the post-stream refresh targets
-// only the #task-thread-view, not the entire #task-detail-content. Swapping the
-// whole task-detail-content was perceived by users as a hard page refresh: it
-// reset the active tab, scroll position, and the Changes/Details tab state.
-// Regression: see "Task page hard refresh after task completion".
-func TestChatBubbleStreaming_ThreadDoneRefreshesOnlyThreadView(t *testing.T) {
+// TestChatBubbleStreaming_ThreadCompletionDoesNotRefresh verifies that when
+// a thread's SSE stream ends (task finished), the already-streamed content is
+// finalized in place instead of issuing any HTMX refresh. Swapping even the
+// thread view can reset visible context; completion should be dynamic.
+func TestChatBubbleStreaming_ThreadCompletionDoesNotRefresh(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatBubbleStreaming("assistant", "exec-id", "task-thread-messages", "task-thread-view", true).Render(context.Background(), &buf)
 	if err != nil {
@@ -86,20 +84,26 @@ func TestChatBubbleStreaming_ThreadDoneRefreshesOnlyThreadView(t *testing.T) {
 	}
 	content := buf.String()
 
-	// Must NOT swap the whole task-detail-content (that's the hard-refresh feel).
+	if strings.Contains(content, "htmx.ajax") {
+		t.Error("thread completion must not issue a post-stream HTMX refresh")
+	}
 	if strings.Contains(content, "'#task-detail-content'") || strings.Contains(content, `"#task-detail-content"`) {
-		t.Error("thread streaming bubble must not target #task-detail-content for post-stream refresh (causes hard-refresh UX)")
+		t.Error("thread completion must not target #task-detail-content (hard-refresh UX)")
 	}
 	if strings.Contains(content, "?tab=chat") {
-		t.Error("thread streaming bubble must not refresh via ?tab=chat full-detail swap (resets active tab/scroll)")
+		t.Error("thread completion must not refresh via ?tab=chat full-detail swap")
 	}
-
-	// Must refresh just the #task-thread-view via /tasks/:id/thread.
-	if !strings.Contains(content, "'#task-thread-view'") {
-		t.Error("thread streaming bubble must target #task-thread-view for post-stream refresh")
+	if strings.Contains(content, "'/tasks/' + taskIdMatch[1] + '/thread'") {
+		t.Error("thread completion must not refresh the thread endpoint after streaming")
 	}
-	if !strings.Contains(content, "/thread'") {
-		t.Error("thread streaming bubble must use /tasks/:id/thread endpoint for post-stream refresh")
+	if !strings.Contains(content, "showThreadTerminalStatus('completed')") {
+		t.Error("thread completion should show terminal status dynamically")
+	}
+	if !strings.Contains(content, "stopThreadPolling()") {
+		t.Error("thread completion should stop thread polling dynamically")
+	}
+	if !strings.Contains(content, "restoreThreadPollingFallback()") {
+		t.Error("transport errors should restore polling as a fallback")
 	}
 }
 
@@ -135,24 +139,32 @@ func TestChatBubbleStreaming_NeverTargetsTaskDetailContent(t *testing.T) {
 	}
 }
 
-// TestInitThreadStreamingScript_RefreshesOnlyThreadView verifies the resume
-// SSE handler (used after a morph swap re-renders the thread) refreshes only
-// the thread view, not the full task-detail-content.
-func TestInitThreadStreamingScript_RefreshesOnlyThreadView(t *testing.T) {
+// TestInitThreadStreamingScript_CompletionDoesNotRefresh verifies the resume
+// SSE handler also finalizes in place and does not refresh the thread view.
+func TestInitThreadStreamingScript_CompletionDoesNotRefresh(t *testing.T) {
 	var buf bytes.Buffer
 	err := _initThreadStreamingScript().Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("Failed to render _initThreadStreamingScript: %v", err)
 	}
 	content := buf.String()
+	if strings.Contains(content, "htmx.ajax") {
+		t.Error("resume thread stream script must not issue a post-stream HTMX refresh")
+	}
 	if strings.Contains(content, "'#task-detail-content'") || strings.Contains(content, `"#task-detail-content"`) {
 		t.Error("resume thread stream script must not target #task-detail-content (hard-refresh UX)")
 	}
 	if strings.Contains(content, "?tab=chat") {
 		t.Error("resume thread stream script must not refresh via ?tab=chat full-detail swap")
 	}
-	if !strings.Contains(content, "'#task-thread-view'") {
-		t.Error("resume thread stream script must target #task-thread-view for post-stream refresh")
+	if strings.Contains(content, "'/tasks/' + taskIdMatch[1] + '/thread'") {
+		t.Error("resume thread stream script must not refresh the thread endpoint after streaming")
+	}
+	if !strings.Contains(content, "showThreadTerminalStatus('completed')") {
+		t.Error("resume completion should show terminal status dynamically")
+	}
+	if !strings.Contains(content, "restoreThreadPollingFallback()") {
+		t.Error("resume transport errors should restore polling as a fallback")
 	}
 }
 
