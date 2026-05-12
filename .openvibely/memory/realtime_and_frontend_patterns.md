@@ -29,7 +29,7 @@ Task Changes rendering safety:
 
 Chat/frontend rendering:
 - For streaming chat and tool cards, batch DOM rendering with `requestAnimationFrame` and force final flush on completion.
-- Active chat/task-thread streaming should use smart autoscroll: only pin to bottom while the viewport is already at/near bottom; if the user scrolls up to read earlier streamed output, do not force-scroll back down until they return to the bottom or initiate a new send.
+- Active chat/task-thread streaming should use shared smart autoscroll behavior, e.g. the common `ChatScrollTracker` path when present: only pin to bottom while the viewport is already at/near bottom; if the user scrolls up to read earlier streamed output, do not force-scroll back down until they return to the bottom or initiate a new send. Avoid one-surface-only fixes for scroll behavior that should apply to both `/chat` and task threads.
 - Avoid expensive full-container reprocessing on polling refreshes; use content signatures and incremental cleaning.
 - Chat/thread markdown rendering escapes raw HTML-like tags outside fenced/inline code before `marked.parse` so malformed model outputs do not break DOM.
 - Plan-mode read-only repo exploration tool cards (`read_file`, `list_files`, `grep_search`) should remain visible in assistant bubble rendering during live streams and refreshes.

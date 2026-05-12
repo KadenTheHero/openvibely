@@ -1458,3 +1458,77 @@ func TestInitThreadStreaming_FindsStreamingDotsByID(t *testing.T) {
 		t.Error("_initThreadStreaming must check data-raw-content for content presence")
 	}
 }
+
+// TestChatScrollTracker_ScrollHandlerRespectsUserInteractionFlag verifies the
+// regression fix for the streaming auto-scroll bug: the scroll handler must
+// only mutate userScrolledUp when the change is driven by an actual user
+// interaction (wheel/touch/keyboard/scrollbar drag). Programmatic stream-driven
+// scrolls land near the bottom; if the handler reset userScrolledUp purely on
+// scroll position, every streamed chunk would yank the viewport back down even
+// after the user scrolled up to read earlier output.
+func TestChatScrollTracker_ScrollHandlerRespectsUserInteractionFlag(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	}
+	content := buf.String()
+
+	// The scroll handler must early-return when there is no active user interaction.
+	if !strings.Contains(content, "if (!self._userInteracting) {") {
+		t.Error("scroll handler must short-circuit on programmatic/content-driven scroll events")
+	}
+
+	// _markUserInteracting must exist and use a meaningful interaction window so
+	// momentum scrolling and smooth-scroll animations stay attributed to the user.
+	if !strings.Contains(content, "_markUserInteracting: function") {
+		t.Error("ChatScrollTracker must expose _markUserInteracting helper")
+	}
+	if !strings.Contains(content, "_INTERACT_MS") {
+		t.Error("ChatScrollTracker must define an interaction window constant")
+	}
+
+	// Touch-driven scrolling (mobile/tablet) must mark user interaction so the
+	// scroll handler treats it as user-driven, not programmatic.
+	if !strings.Contains(content, "addEventListener('touchstart'") ||
+		!strings.Contains(content, "addEventListener('touchmove'") ||
+		!strings.Contains(content, "addEventListener('touchend'") {
+		t.Error("ChatScrollTracker must register touch listeners to detect mobile scroll intent")
+	}
+
+	// Keyboard navigation (PageUp/Down, Arrow keys, Home/End, Space) must mark
+	// user interaction when the scroll element or a descendant has focus.
+	if !strings.Contains(content, "addEventListener('keydown'") {
+		t.Error("ChatScrollTracker must register a keydown listener for keyboard scroll nav")
+	}
+	if !strings.Contains(content, "PageUp") || !strings.Contains(content, "PageDown") ||
+		!strings.Contains(content, "ArrowUp") || !strings.Contains(content, "ArrowDown") {
+		t.Error("ChatScrollTracker keydown handler must recognize standard scroll keys")
+	}
+}
+
+// TestChatScrollTracker_DestroyRemovesAllListeners ensures the new touch and
+// keyboard listeners are torn down by destroy() to prevent leaks across morph
+// swaps that recreate the tracker.
+func TestChatScrollTracker_DestroyRemovesAllListeners(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	}
+	content := buf.String()
+
+	required := []string{
+		"removeEventListener('wheel'",
+		"removeEventListener('touchstart'",
+		"removeEventListener('touchmove'",
+		"removeEventListener('touchend'",
+		"removeEventListener('pointerdown'",
+		"removeEventListener('pointerup'",
+		"removeEventListener('keydown'",
+		"removeEventListener('scroll'",
+	}
+	for _, r := range required {
+		if !strings.Contains(content, r) {
+			t.Errorf("destroy() must call %s to clean up listeners", r)
+		}
+	}
+}
