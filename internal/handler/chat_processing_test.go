@@ -353,6 +353,67 @@ func TestProcessStreamingResponse_TaskFollowupFailedMarkerMarksTaskFailed(t *tes
 	}
 }
 
+func TestResolveWorktreeWorkDir_SyncsExistingWorktreeFromTargetBeforeFollowup(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Stale Followup Project", RepoPath: repoDir}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task := createTask(t, h, project.ID, "Stale worktree followup", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+	})
+
+	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+	wtPath, wtBranch, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("setup worktree: %v", err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+
+	mainOnlyPath := filepath.Join(repoDir, "main-only.txt")
+	if err := os.WriteFile(mainOnlyPath, []byte("new main change\n"), 0644); err != nil {
+		t.Fatalf("write main-only file: %v", err)
+	}
+	cmd := exec.Command("git", "add", "main-only.txt")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add main-only: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "main advanced")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit main-only: %v\n%s", err, out)
+	}
+
+	if _, err := os.Stat(filepath.Join(wtPath, "main-only.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected stale worktree to not have main-only.txt before followup sync, stat err=%v", err)
+	}
+
+	workDir, err := h.resolveWorktreeWorkDir(ctx, task)
+	if err != nil {
+		t.Fatalf("resolve worktree workdir: %v", err)
+	}
+	if workDir != wtPath {
+		t.Fatalf("expected workDir %q, got %q", wtPath, workDir)
+	}
+	if _, err := os.Stat(filepath.Join(wtPath, "main-only.txt")); err != nil {
+		t.Fatalf("expected followup worktree sync to include main-only.txt: %v", err)
+	}
+
+	defaultBranch := service.GetDefaultBranch(repoDir)
+	cmd = exec.Command("git", "merge-base", "--is-ancestor", defaultBranch, "HEAD")
+	cmd.Dir = wtPath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("expected %s to be ancestor of synced worktree HEAD: %v\n%s", defaultBranch, err, out)
+	}
+}
+
 func TestProcessStreamingResponse_TaskFollowupWithOnlyPreexistingDiffCompletes(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil

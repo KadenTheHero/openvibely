@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-05-11
-source: thread
-source_id: a19496c4905c3efc4db7b1941a7528ca
+updated: 2026-05-13
+source: consolidation
+source_id: memory_consolidation_2026_05_13
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -22,3 +22,5 @@ Do not add legacy compatibility, aliases, migrations, or helper wrappers for bad
 Prefer product-correct defaults over mechanically convenient defaults. For UI and workflow changes, optimize for clarity, reversibility, user intent, and useful behavior rather than merely making tests pass or minimizing implementation effort.
 
 When drafting reusable coding-agent context or instructions, favor generalized patterns and broad behavioral rules over narrow, specific examples. The user values useful improvisation, but it must be constrained by explicit assumption discipline rather than unsupported product or architecture guesses.
+
+Long model prompts should be readable const templates with dynamic context interpolated, not assembled through chains of `WriteString` calls. Keep prompt text easy to review against external provider prompt shapes.

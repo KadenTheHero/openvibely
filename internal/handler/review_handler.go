@@ -184,7 +184,13 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 	priorHistory := filterChatHistory(priorExecs, exec.ID)
 	systemContext := buildThreadSystemContext(task.Title, len(priorHistory) > 0, "")
 	personalityContext := h.getPersonalityContext(c.Request().Context(), task.ProjectID)
-	workDir := h.resolveWorktreeWorkDir(c.Request().Context(), task)
+	workDir, workDirErr := h.resolveWorktreeWorkDir(c.Request().Context(), task)
+	if workDirErr != nil {
+		h.completeWithFailure(c.Request().Context(), exec.ID, taskID, workDirErr.Error(), 0)
+		setHTMXToast(c, workDirErr.Error(), "failed")
+		c.Response().Header().Set("HX-Redirect", fmt.Sprintf("/tasks/%s?tab=chat", taskID))
+		return c.NoContent(http.StatusOK)
+	}
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && h.agentRepo != nil {
 		if ad, adErr := h.agentRepo.GetByID(c.Request().Context(), *task.AgentDefinitionID); adErr == nil && ad != nil {

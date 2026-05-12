@@ -769,29 +769,36 @@ func (h *Handler) resolveWorkDir(ctx context.Context, projectID string) string {
 // resolveWorktreeWorkDir resolves the working directory for a task followup,
 // preferring the task's git worktree. Falls back to project repo path for
 // non-git projects, chat tasks, or when worktree service is unavailable.
-func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task) string {
+func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task) (string, error) {
 	project, err := h.projectSvc.GetByID(ctx, task.ProjectID)
 	if err != nil || project == nil || project.RepoPath == "" {
-		return ""
+		return "", nil
 	}
 	repoDir := project.RepoPath
 
 	if task.Category == models.CategoryChat || !service.IsGitRepo(repoDir) {
-		return repoDir
+		return repoDir, nil
 	}
 
 	if h.worktreeSvc == nil {
-		return repoDir
+		return repoDir, nil
 	}
 
-	wtPath, _, wtErr := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	wtPath, wtBranch, wtErr := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
 	if wtErr != nil {
 		log.Printf("[handler] resolveWorktreeWorkDir worktree setup failed for task %s, using main repo: %v", task.ID, wtErr)
-		return repoDir
+		return repoDir, nil
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+
+	if syncErr := h.worktreeSvc.SyncWorktreeFromMainAtStart(ctx, task, repoDir); syncErr != nil {
+		log.Printf("[handler] resolveWorktreeWorkDir startup worktree sync failed for task %s: %v", task.ID, syncErr)
+		return "", syncErr
 	}
 
 	log.Printf("[handler] resolveWorktreeWorkDir task=%s using worktree path=%s", task.ID, wtPath)
-	return wtPath
+	return wtPath, nil
 }
 
 // processChatTaskCreations handles task creation markers from AI responses.
@@ -1141,7 +1148,12 @@ func (h *Handler) processChatSendToTask(ctx context.Context, execID, projectID, 
 		priorHistory := filterChatHistory(priorExecs, exec.ID)
 		systemContext := buildThreadSystemContext(task.Title, len(priorHistory) > 0, "")
 		pCtx := h.getPersonalityContext(ctx, task.ProjectID)
-		workDir := h.resolveWorktreeWorkDir(ctx, task)
+		workDir, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
+		if workDirErr != nil {
+			h.completeWithFailure(ctx, exec.ID, task.ID, workDirErr.Error(), 0)
+			results = append(results, fmt.Sprintf("- Failed to prepare worktree for task \"%s\": %v", task.Title, workDirErr))
+			continue
+		}
 		var agentDef *models.Agent
 		if task.AgentDefinitionID != nil && h.agentRepo != nil {
 			if ad, adErr := h.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
