@@ -1,17 +1,37 @@
 package components
 
 import (
-	"strings"
-	"path/filepath"
 	"fmt"
+	"path/filepath"
+	"strconv"
+	"strings"
+
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-// DiffFile represents a single file's diff
+// DiffFile represents a single file's diff.
+//
+// Status describes the high-level change kind:
+//   - "added"     : file was created in this diff
+//   - "deleted"   : file was removed in this diff
+//   - "renamed"   : file was moved/renamed (OldPath != Path)
+//   - "copied"    : file was copied
+//   - "modified"  : file was modified in place (default fallback)
+//
+// IsBinary is true when git reported the change as a binary diff
+// ("Binary files ... differ"). Such files have no textual hunks.
+//
+// SimilarityIndex captures the percent value from a "similarity index N%"
+// header line (0 when not present). A pure rename with no content change has
+// SimilarityIndex == 100 and no hunks; the UI surfaces this explicitly
+// instead of rendering an empty hunk table.
 type DiffFile struct {
-	Path    string
-	OldPath string
-	Hunks   []DiffHunk
+	Path            string
+	OldPath         string
+	Hunks           []DiffHunk
+	Status          string
+	IsBinary        bool
+	SimilarityIndex int
 }
 
 // DiffHunk represents a contiguous chunk of changes
@@ -50,7 +70,12 @@ type DiffFileRenderMeta struct {
 	BlockedReason   string
 }
 
-// ParseDiffOutput parses unified diff output into structured DiffFile data
+// ParseDiffOutput parses unified diff output into structured DiffFile data.
+//
+// The parser recognizes Git's extended file-header lines so that moved,
+// renamed, copied, added, deleted, and binary files are classified
+// explicitly and surfaced to the UI even when they contain no textual
+// hunks (for example a pure rename with similarity index 100%).
 func ParseDiffOutput(diffOutput string) []DiffFile {
 	if diffOutput == "" {
 		return nil
@@ -74,21 +99,25 @@ func ParseDiffOutput(diffOutput string) []DiffFile {
 				}
 				files = append(files, *currentFile)
 			}
-			parts := strings.SplitN(line, " b/", 2)
-			path := ""
-			if len(parts) == 2 {
-				path = parts[1]
+			oldPath, newPath := parseDiffGitHeader(line)
+			currentFile = &DiffFile{
+				Path:    newPath,
+				OldPath: oldPath,
+				Status:  "modified",
 			}
-			currentFile = &DiffFile{Path: path}
 			continue
 		}
 
 		// Old file path
 		if strings.HasPrefix(line, "--- ") {
 			if currentFile != nil {
-				old := strings.TrimPrefix(line, "--- ")
-				old = strings.TrimPrefix(old, "a/")
-				currentFile.OldPath = old
+				old := parseGitPath(strings.TrimPrefix(line, "--- "), "a/")
+				if old == "/dev/null" {
+					currentFile.Status = "added"
+					currentFile.OldPath = ""
+				} else {
+					currentFile.OldPath = old
+				}
 			}
 			continue
 		}
@@ -96,9 +125,13 @@ func ParseDiffOutput(diffOutput string) []DiffFile {
 		// New file path
 		if strings.HasPrefix(line, "+++ ") {
 			if currentFile != nil {
-				newPath := strings.TrimPrefix(line, "+++ ")
-				newPath = strings.TrimPrefix(newPath, "b/")
-				if newPath != "/dev/null" {
+				newPath := parseGitPath(strings.TrimPrefix(line, "+++ "), "b/")
+				if newPath == "/dev/null" {
+					currentFile.Status = "deleted"
+					// Preserve currentFile.Path (which was set from "b/path"
+					// or from "rename from"/"--- a/..." parsing) so the
+					// deleted file's name is still shown in the UI.
+				} else {
 					currentFile.Path = newPath
 				}
 			}
@@ -116,7 +149,58 @@ func ParseDiffOutput(diffOutput string) []DiffFile {
 			continue
 		}
 
-		// Skip binary file notices, index lines, mode lines
+		// Extended file-header lines (no hunk content).
+		if currentFile != nil && currentHunk == nil {
+			switch {
+			case strings.HasPrefix(line, "new file mode"):
+				currentFile.Status = "added"
+				continue
+			case strings.HasPrefix(line, "deleted file mode"):
+				currentFile.Status = "deleted"
+				continue
+			case strings.HasPrefix(line, "rename from "):
+				currentFile.Status = "renamed"
+				currentFile.OldPath = parseGitPath(strings.TrimPrefix(line, "rename from "), "")
+				continue
+			case strings.HasPrefix(line, "rename to "):
+				currentFile.Status = "renamed"
+				currentFile.Path = parseGitPath(strings.TrimPrefix(line, "rename to "), "")
+				continue
+			case strings.HasPrefix(line, "copy from "):
+				currentFile.Status = "copied"
+				currentFile.OldPath = parseGitPath(strings.TrimPrefix(line, "copy from "), "")
+				continue
+			case strings.HasPrefix(line, "copy to "):
+				currentFile.Status = "copied"
+				currentFile.Path = parseGitPath(strings.TrimPrefix(line, "copy to "), "")
+				continue
+			case strings.HasPrefix(line, "similarity index "):
+				sim := strings.TrimPrefix(line, "similarity index ")
+				sim = strings.TrimSuffix(strings.TrimSpace(sim), "%")
+				var v int
+				if _, err := fmt.Sscanf(sim, "%d", &v); err == nil {
+					currentFile.SimilarityIndex = v
+				}
+				continue
+			case strings.HasPrefix(line, "dissimilarity index "):
+				continue
+			case strings.HasPrefix(line, "Binary files"):
+				currentFile.IsBinary = true
+				// Refine status from "/dev/null" markers when present.
+				// Examples:
+				//   "Binary files /dev/null and b/x differ"   -> added
+				//   "Binary files a/x and /dev/null differ"   -> deleted
+				rest := strings.TrimPrefix(line, "Binary files ")
+				if strings.HasPrefix(rest, "/dev/null") {
+					currentFile.Status = "added"
+				} else if strings.Contains(rest, "and /dev/null differ") {
+					currentFile.Status = "deleted"
+				}
+				continue
+			}
+		}
+
+		// Skip binary file notices, index lines, mode lines inside hunks too.
 		if strings.HasPrefix(line, "index ") ||
 			strings.HasPrefix(line, "new file") ||
 			strings.HasPrefix(line, "deleted file") ||
@@ -185,6 +269,63 @@ func ParseDiffOutput(diffOutput string) []DiffFile {
 	}
 
 	return files
+}
+
+// parseDiffGitHeader extracts old and new paths from a "diff --git a/X b/Y"
+// header line. It also handles Git's quoted path form, e.g.
+// `diff --git "a/old\tname" "b/new\tname"`.
+func parseDiffGitHeader(line string) (oldPath, newPath string) {
+	rest := strings.TrimPrefix(line, "diff --git ")
+	parts, ok := splitDiffGitPaths(rest)
+	if !ok {
+		return "", rest
+	}
+	return parseGitPath(parts[0], "a/"), parseGitPath(parts[1], "b/")
+}
+
+func splitDiffGitPaths(rest string) ([2]string, bool) {
+	var parts [2]string
+	if strings.HasPrefix(rest, "\"") {
+		first, tail, ok := scanQuotedGitPath(rest)
+		if !ok {
+			return parts, false
+		}
+		second, tail, ok := scanQuotedGitPath(strings.TrimLeft(tail, " "))
+		if !ok || strings.TrimSpace(tail) != "" {
+			return parts, false
+		}
+		parts[0], parts[1] = first, second
+		return parts, true
+	}
+
+	pieces := strings.SplitN(rest, " b/", 2)
+	if len(pieces) != 2 {
+		return parts, false
+	}
+	parts[0], parts[1] = pieces[0], "b/"+pieces[1]
+	return parts, true
+}
+
+func scanQuotedGitPath(s string) (path string, rest string, ok bool) {
+	quoted, err := strconv.QuotedPrefix(s)
+	if err != nil {
+		return "", "", false
+	}
+	path, err = strconv.Unquote(quoted)
+	if err != nil {
+		return "", "", false
+	}
+	return path, s[len(quoted):], true
+}
+
+func parseGitPath(path string, prefix string) string {
+	path = strings.TrimSpace(path)
+	if strings.HasPrefix(path, "\"") {
+		if unquoted, err := strconv.Unquote(path); err == nil {
+			path = unquoted
+		}
+	}
+	return strings.TrimPrefix(path, prefix)
 }
 
 func parseHunkHeader(header string) (int, int) {
@@ -1153,31 +1294,55 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 	</div>
 }
 
+templ diffFileHeader(f DiffFile, idx int, defaultExpanded bool, splitChevron bool) {
+	<div
+		class="bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2 cursor-pointer select-none hover:bg-base-300/50 transition-colors"
+		onclick={ templ.ComponentScript{Call: fmt.Sprintf("toggleDiffFile(%d)", idx)} }
+		data-diff-toggle={ fmt.Sprintf("%d", idx) }
+		data-diff-status={ diffFileStatusValue(f.Status) }
+	>
+		<svg
+			if splitChevron {
+				id={ fmt.Sprintf("diff-chevron-split-%d", idx) }
+			} else {
+				id={ fmt.Sprintf("diff-chevron-%d", idx) }
+			}
+			xmlns="http://www.w3.org/2000/svg"
+			class={ "h-4 w-4 opacity-60 transition-transform duration-200", templ.KV("rotate-90", defaultExpanded) }
+			fill="none"
+			viewBox="0 0 24 24"
+			stroke="currentColor"
+		>
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+		</svg>
+		<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+		</svg>
+		<span class={ diffFileStatusBadgeClass(f.Status), "shrink-0" } title={ diffFileStatusLabel(f.Status) }>{ diffFileStatusLabel(f.Status) }</span>
+		if f.IsBinary {
+			<span class="badge badge-ghost badge-sm shrink-0" title="Binary file">Binary</span>
+		}
+		<span class="font-mono text-sm font-medium truncate" title={ diffFileDisplayPath(f) }>{ diffFileDisplayPath(f) }</span>
+		<span class="text-xs opacity-50 ml-auto shrink-0">
+			{ diffStats(f) }
+		</span>
+	</div>
+}
+
+templ diffFileEmptyBody(f DiffFile) {
+	<div class="p-6 bg-base-100 text-center">
+		<div class="text-sm font-medium mb-1">{ diffFileSummaryText(f) }</div>
+		if (f.Status == "renamed" || f.Status == "copied") && f.OldPath != "" && f.OldPath != f.Path {
+			<div class="text-xs opacity-60 font-mono break-all">
+				{ f.OldPath } → { f.Path }
+			</div>
+		}
+	</div>
+}
+
 templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID string, commentMap map[string][]models.ReviewComment) {
 	<div id={ fmt.Sprintf("diff-file-%d", idx) } class="card bg-base-100 border border-base-300 overflow-hidden">
-		<div
-			class="bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2 cursor-pointer select-none hover:bg-base-300/50 transition-colors"
-			onclick={ templ.ComponentScript{Call: fmt.Sprintf("toggleDiffFile(%d)", idx)} }
-			data-diff-toggle={ fmt.Sprintf("%d", idx) }
-		>
-			<svg
-				id={ fmt.Sprintf("diff-chevron-%d", idx) }
-				xmlns="http://www.w3.org/2000/svg"
-				class={ "h-4 w-4 opacity-60 transition-transform duration-200", templ.KV("rotate-90", defaultExpanded) }
-				fill="none"
-				viewBox="0 0 24 24"
-				stroke="currentColor"
-			>
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-			</svg>
-			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-			</svg>
-			<span class="font-mono text-sm font-medium">{ f.Path }</span>
-			<span class="text-xs opacity-50 ml-auto">
-				{ diffStats(f) }
-			</span>
-		</div>
+		@diffFileHeader(f, idx, defaultExpanded, false)
 		<div
 			id={ fmt.Sprintf("diff-body-%d", idx) }
 			class="overflow-hidden transition-all duration-300 ease-in-out"
@@ -1185,9 +1350,12 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 				style="max-height: 0;"
 			}
 		>
-			<div class="overflow-x-auto">
-				<table class="diff-table w-full text-xs font-mono border-collapse">
-					for _, hunk := range f.Hunks {
+			if !diffHasTextualContent(f) {
+				@diffFileEmptyBody(f)
+			} else {
+				<div class="overflow-x-auto">
+					<table class="diff-table w-full text-xs font-mono border-collapse">
+						for _, hunk := range f.Hunks {
 						<tr class="diff-hunk-header">
 							<td colspan="3" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
 						</tr>
@@ -1215,40 +1383,40 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 									<span class="diff-marker select-none opacity-50 inline-block w-4">{ lineMarker(line.Type) }</span>{ line.Content }
 								</td>
 							</tr>
-							if lineHasComment(commentMap, f.Path, line) {
-								for _, comment := range getLineComments(commentMap, f.Path, line) {
-									<tr
-										class="review-inline-comment"
-										data-comment-id={ comment.ID }
-										data-file-path={ f.Path }
-										data-line-num={ fmt.Sprintf("%d", lineNumForReview(line)) }
-										data-line-type={ lineTypeForDiff(line.Type) }
-										data-review-layout="inline"
-									>
-										<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>
-										<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>
-										<td class="p-0 bg-warning/15">
-											<div class="review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text" data-comment-id={ comment.ID } onclick="startEditReviewComment(event)">
-												<span class="review-inline-comment-bar"></span>
-												<button type="button" class="btn btn-circle btn-ghost btn-xs review-delete-btn" onclick="deleteReviewComment(event)" aria-label="Delete review comment">
-													<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-												</button>
-												<p class="review-comment-text whitespace-pre-wrap break-words">{ comment.CommentText }</p>
-											</div>
-										</td>
-									</tr>
+								if lineHasComment(commentMap, f.Path, line) {
+									for _, comment := range getLineComments(commentMap, f.Path, line) {
+										<tr
+											class="review-inline-comment"
+											data-comment-id={ comment.ID }
+											data-file-path={ f.Path }
+											data-line-num={ fmt.Sprintf("%d", lineNumForReview(line)) }
+											data-line-type={ lineTypeForDiff(line.Type) }
+											data-review-layout="inline"
+										>
+											<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>
+											<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>
+											<td class="p-0 bg-warning/15">
+												<div class="review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text" data-comment-id={ comment.ID } onclick="startEditReviewComment(event)">
+													<span class="review-inline-comment-bar"></span>
+													<button type="button" class="btn btn-circle btn-ghost btn-xs review-delete-btn" onclick="deleteReviewComment(event)" aria-label="Delete review comment">
+														<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+													</button>
+													<p class="review-comment-text whitespace-pre-wrap break-words">{ comment.CommentText }</p>
+												</div>
+											</td>
+										</tr>
+									}
 								}
 							}
 						}
-					}
-				</table>
-			</div>
+					</table>
+				</div>
+			}
 		</div>
 	</div>
 }
 
-templ diffViewerContent(metas []DiffFileRenderMeta) {
-	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) }>
+templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) }>
 		<!-- Toolbar -->
 		<div class="flex items-center justify-between mb-4">
 			<div class="flex items-center gap-2">
@@ -1457,29 +1625,7 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {
 
 templ inlineDiffFile(f DiffFile, idx int, defaultExpanded bool) {
 	<div id={ fmt.Sprintf("diff-file-%d", idx) } class="card bg-base-100 border border-base-300 overflow-hidden">
-		<div
-			class="bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2 cursor-pointer select-none hover:bg-base-300/50 transition-colors"
-			onclick={ templ.ComponentScript{Call: fmt.Sprintf("toggleDiffFile(%d)", idx)} }
-			data-diff-toggle={ fmt.Sprintf("%d", idx) }
-		>
-			<svg
-				id={ fmt.Sprintf("diff-chevron-%d", idx) }
-				xmlns="http://www.w3.org/2000/svg"
-				class={ "h-4 w-4 opacity-60 transition-transform duration-200", templ.KV("rotate-90", defaultExpanded) }
-				fill="none"
-				viewBox="0 0 24 24"
-				stroke="currentColor"
-			>
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-			</svg>
-			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-			</svg>
-			<span class="font-mono text-sm font-medium">{ f.Path }</span>
-			<span class="text-xs opacity-50 ml-auto">
-				{ diffStats(f) }
-			</span>
-		</div>
+		@diffFileHeader(f, idx, defaultExpanded, false)
 		<div
 			id={ fmt.Sprintf("diff-body-%d", idx) }
 			class="overflow-hidden transition-all duration-300 ease-in-out"
@@ -1487,61 +1633,43 @@ templ inlineDiffFile(f DiffFile, idx int, defaultExpanded bool) {
 				style="max-height: 0;"
 			}
 		>
-			<div class="overflow-x-auto">
-				<table class="diff-table w-full text-xs font-mono border-collapse">
-					for _, hunk := range f.Hunks {
-						<tr class="diff-hunk-header">
-							<td colspan="3" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
-						</tr>
-						for _, line := range hunk.Lines {
-							<tr class={ inlineLineClass(line.Type) }>
-								<td class="diff-line-num text-right px-2 py-0 select-none opacity-40 w-12 border-r border-base-300">
-									if line.OldNum > 0 {
-										{ fmt.Sprintf("%d", line.OldNum) }
-									}
-								</td>
-								<td class="diff-line-num text-right px-2 py-0 select-none opacity-40 w-12 border-r border-base-300">
-									if line.NewNum > 0 {
-										{ fmt.Sprintf("%d", line.NewNum) }
-									}
-								</td>
-								<td class="diff-line-content px-3 py-0 whitespace-pre-wrap break-all">
-									<span class="diff-marker select-none opacity-50 inline-block w-4">{ lineMarker(line.Type) }</span>{ line.Content }
-								</td>
+			if !diffHasTextualContent(f) {
+				@diffFileEmptyBody(f)
+			} else {
+				<div class="overflow-x-auto">
+					<table class="diff-table w-full text-xs font-mono border-collapse">
+						for _, hunk := range f.Hunks {
+							<tr class="diff-hunk-header">
+								<td colspan="3" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
 							</tr>
+							for _, line := range hunk.Lines {
+								<tr class={ inlineLineClass(line.Type) }>
+									<td class="diff-line-num text-right px-2 py-0 select-none opacity-40 w-12 border-r border-base-300">
+										if line.OldNum > 0 {
+											{ fmt.Sprintf("%d", line.OldNum) }
+										}
+									</td>
+									<td class="diff-line-num text-right px-2 py-0 select-none opacity-40 w-12 border-r border-base-300">
+										if line.NewNum > 0 {
+											{ fmt.Sprintf("%d", line.NewNum) }
+										}
+									</td>
+									<td class="diff-line-content px-3 py-0 whitespace-pre-wrap break-all">
+										<span class="diff-marker select-none opacity-50 inline-block w-4">{ lineMarker(line.Type) }</span>{ line.Content }
+									</td>
+								</tr>
+							}
 						}
-					}
-				</table>
-			</div>
+					</table>
+				</div>
+			}
 		</div>
 	</div>
 }
 
 templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID string, commentMap map[string][]models.ReviewComment) {
 	<div id={ fmt.Sprintf("diff-file-split-%d", idx) } class="card bg-base-100 border border-base-300 overflow-hidden">
-		<div
-			class="bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2 cursor-pointer select-none hover:bg-base-300/50 transition-colors"
-			onclick={ templ.ComponentScript{Call: fmt.Sprintf("toggleDiffFile(%d)", idx)} }
-			data-diff-toggle={ fmt.Sprintf("%d", idx) }
-		>
-			<svg
-				id={ fmt.Sprintf("diff-chevron-split-%d", idx) }
-				xmlns="http://www.w3.org/2000/svg"
-				class={ "h-4 w-4 opacity-60 transition-transform duration-200", templ.KV("rotate-90", defaultExpanded) }
-				fill="none"
-				viewBox="0 0 24 24"
-				stroke="currentColor"
-			>
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-			</svg>
-			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-			</svg>
-			<span class="font-mono text-sm font-medium">{ f.Path }</span>
-			<span class="text-xs opacity-50 ml-auto">
-				{ diffStats(f) }
-			</span>
-		</div>
+		@diffFileHeader(f, idx, defaultExpanded, true)
 		<div
 			id={ fmt.Sprintf("diff-body-split-%d", idx) }
 			class="overflow-hidden transition-all duration-300 ease-in-out"
@@ -1549,27 +1677,30 @@ templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 				style="max-height: 0;"
 			}
 		>
-			<div class="overflow-x-auto">
-				<table class="diff-table w-full text-xs font-mono border-collapse">
-					<colgroup>
-						<col style="width: 40px"/>
-						<col style="width: 50%"/>
-						<col style="width: 40px"/>
-						<col style="width: 50%"/>
-					</colgroup>
-					for _, hunk := range f.Hunks {
-						<tr class="diff-hunk-header">
-							<td colspan="4" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
-						</tr>
-						for _, pair := range buildSplitLines(hunk.Lines) {
-							<tr
-								class="diff-review-line"
-								data-file-path={ f.Path }
-								data-line-num={ fmt.Sprintf("%d", lineNumForReview(pair.Right)) }
-								data-line-type={ lineTypeForDiff(pair.Right.Type) }
-								data-review-layout="split"
-								data-review-side="right"
-							>
+			if !diffHasTextualContent(f) {
+				@diffFileEmptyBody(f)
+			} else {
+				<div class="overflow-x-auto">
+					<table class="diff-table w-full text-xs font-mono border-collapse">
+						<colgroup>
+							<col style="width: 40px"/>
+							<col style="width: 50%"/>
+							<col style="width: 40px"/>
+							<col style="width: 50%"/>
+						</colgroup>
+						for _, hunk := range f.Hunks {
+							<tr class="diff-hunk-header">
+								<td colspan="4" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
+							</tr>
+							for _, pair := range buildSplitLines(hunk.Lines) {
+								<tr
+									class="diff-review-line"
+									data-file-path={ f.Path }
+									data-line-num={ fmt.Sprintf("%d", lineNumForReview(pair.Right)) }
+									data-line-type={ lineTypeForDiff(pair.Right.Type) }
+									data-review-layout="split"
+									data-review-side="right"
+								>
 								<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300", splitCellBg(pair.Left.Type) }>
 									if pair.Left.Type != "empty" && pair.Left.OldNum > 0 {
 										{ fmt.Sprintf("%d", pair.Left.OldNum) }
@@ -1596,64 +1727,43 @@ templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 									}
 								</td>
 							</tr>
-							if pair.Right.Type != "empty" && lineHasComment(commentMap, f.Path, pair.Right) {
-								for _, comment := range getLineComments(commentMap, f.Path, pair.Right) {
-									<tr
-										class="review-inline-comment"
-										data-comment-id={ comment.ID }
-										data-file-path={ f.Path }
-										data-line-num={ fmt.Sprintf("%d", lineNumForReview(pair.Right)) }
-										data-line-type={ lineTypeForDiff(pair.Right.Type) }
-										data-review-layout="split"
-									>
-										<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>
-										<td class="diff-line-content px-3 py-0 border-r border-base-300 bg-base-200"></td>
-										<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>
-										<td class="p-0 bg-warning/15">
-											<div class="review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text" data-comment-id={ comment.ID } onclick="startEditReviewComment(event)">
-												<span class="review-inline-comment-bar"></span>
-												<button type="button" class="btn btn-circle btn-ghost btn-xs review-delete-btn" onclick="deleteReviewComment(event)" aria-label="Delete review comment">
-													<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-												</button>
-												<p class="review-comment-text whitespace-pre-wrap break-words">{ comment.CommentText }</p>
-											</div>
-										</td>
-									</tr>
+								if pair.Right.Type != "empty" && lineHasComment(commentMap, f.Path, pair.Right) {
+									for _, comment := range getLineComments(commentMap, f.Path, pair.Right) {
+										<tr
+											class="review-inline-comment"
+											data-comment-id={ comment.ID }
+											data-file-path={ f.Path }
+											data-line-num={ fmt.Sprintf("%d", lineNumForReview(pair.Right)) }
+											data-line-type={ lineTypeForDiff(pair.Right.Type) }
+											data-review-layout="split"
+										>
+											<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>
+											<td class="diff-line-content px-3 py-0 border-r border-base-300 bg-base-200"></td>
+											<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>
+											<td class="p-0 bg-warning/15">
+												<div class="review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text" data-comment-id={ comment.ID } onclick="startEditReviewComment(event)">
+													<span class="review-inline-comment-bar"></span>
+													<button type="button" class="btn btn-circle btn-ghost btn-xs review-delete-btn" onclick="deleteReviewComment(event)" aria-label="Delete review comment">
+														<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+													</button>
+													<p class="review-comment-text whitespace-pre-wrap break-words">{ comment.CommentText }</p>
+												</div>
+											</td>
+										</tr>
+									}
 								}
 							}
 						}
-					}
-				</table>
-			</div>
+					</table>
+				</div>
+			}
 		</div>
 	</div>
 }
 
 templ splitDiffFile(f DiffFile, idx int, defaultExpanded bool) {
 	<div id={ fmt.Sprintf("diff-file-split-%d", idx) } class="card bg-base-100 border border-base-300 overflow-hidden">
-		<div
-			class="bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2 cursor-pointer select-none hover:bg-base-300/50 transition-colors"
-			onclick={ templ.ComponentScript{Call: fmt.Sprintf("toggleDiffFile(%d)", idx)} }
-			data-diff-toggle={ fmt.Sprintf("%d", idx) }
-		>
-			<svg
-				id={ fmt.Sprintf("diff-chevron-split-%d", idx) }
-				xmlns="http://www.w3.org/2000/svg"
-				class={ "h-4 w-4 opacity-60 transition-transform duration-200", templ.KV("rotate-90", defaultExpanded) }
-				fill="none"
-				viewBox="0 0 24 24"
-				stroke="currentColor"
-			>
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-			</svg>
-			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-			</svg>
-			<span class="font-mono text-sm font-medium">{ f.Path }</span>
-			<span class="text-xs opacity-50 ml-auto">
-				{ diffStats(f) }
-			</span>
-		</div>
+		@diffFileHeader(f, idx, defaultExpanded, true)
 		<div
 			id={ fmt.Sprintf("diff-body-split-%d", idx) }
 			class="overflow-hidden transition-all duration-300 ease-in-out"
@@ -1661,47 +1771,51 @@ templ splitDiffFile(f DiffFile, idx int, defaultExpanded bool) {
 				style="max-height: 0;"
 			}
 		>
-			<div class="overflow-x-auto">
-				<table class="diff-table w-full text-xs font-mono border-collapse">
-					<colgroup>
-						<col style="width: 40px"/>
-						<col style="width: 50%"/>
-						<col style="width: 40px"/>
-						<col style="width: 50%"/>
-					</colgroup>
-					for _, hunk := range f.Hunks {
-						<tr class="diff-hunk-header">
-							<td colspan="4" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
-						</tr>
-						for _, pair := range buildSplitLines(hunk.Lines) {
-							<tr>
-								<!-- Left side (old) -->
-								<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300", splitCellBg(pair.Left.Type) }>
-									if pair.Left.Type != "empty" && pair.Left.OldNum > 0 {
-										{ fmt.Sprintf("%d", pair.Left.OldNum) }
-									}
-								</td>
-								<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all border-r border-base-300", splitCellBg(pair.Left.Type) }>
-									if pair.Left.Type != "empty" {
-										{ pair.Left.Content }
-									}
-								</td>
-								<!-- Right side (new) -->
-								<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300", splitCellBg(pair.Right.Type) }>
-									if pair.Right.Type != "empty" && pair.Right.NewNum > 0 {
-										{ fmt.Sprintf("%d", pair.Right.NewNum) }
-									}
-								</td>
-								<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all", splitCellBg(pair.Right.Type) }>
-									if pair.Right.Type != "empty" {
-										{ pair.Right.Content }
-									}
-								</td>
+			if !diffHasTextualContent(f) {
+				@diffFileEmptyBody(f)
+			} else {
+				<div class="overflow-x-auto">
+					<table class="diff-table w-full text-xs font-mono border-collapse">
+						<colgroup>
+							<col style="width: 40px"/>
+							<col style="width: 50%"/>
+							<col style="width: 40px"/>
+							<col style="width: 50%"/>
+						</colgroup>
+						for _, hunk := range f.Hunks {
+							<tr class="diff-hunk-header">
+								<td colspan="4" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
 							</tr>
+							for _, pair := range buildSplitLines(hunk.Lines) {
+								<tr>
+									<!-- Left side (old) -->
+									<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300", splitCellBg(pair.Left.Type) }>
+										if pair.Left.Type != "empty" && pair.Left.OldNum > 0 {
+											{ fmt.Sprintf("%d", pair.Left.OldNum) }
+										}
+									</td>
+									<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all border-r border-base-300", splitCellBg(pair.Left.Type) }>
+										if pair.Left.Type != "empty" {
+											{ pair.Left.Content }
+										}
+									</td>
+									<!-- Right side (new) -->
+									<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300", splitCellBg(pair.Right.Type) }>
+										if pair.Right.Type != "empty" && pair.Right.NewNum > 0 {
+											{ fmt.Sprintf("%d", pair.Right.NewNum) }
+										}
+									</td>
+									<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all", splitCellBg(pair.Right.Type) }>
+										if pair.Right.Type != "empty" {
+											{ pair.Right.Content }
+										}
+									</td>
+								</tr>
+							}
 						}
-					}
-				</table>
-			</div>
+					</table>
+				</div>
+			}
 		</div>
 	</div>
 }
@@ -1790,6 +1904,98 @@ func lineMarker(lineType string) string {
 	default:
 		return " "
 	}
+}
+
+func diffFileStatusValue(status string) string {
+	switch status {
+	case "added", "deleted", "renamed", "copied", "modified":
+		return status
+	default:
+		return "modified"
+	}
+}
+
+// diffFileStatusLabel returns a short human label for a DiffFile.Status value.
+// Unknown or empty statuses fall back to "Modified" so the badge is always
+// populated.
+func diffFileStatusLabel(status string) string {
+	switch diffFileStatusValue(status) {
+	case "added":
+		return "Added"
+	case "deleted":
+		return "Deleted"
+	case "renamed":
+		return "Renamed"
+	case "copied":
+		return "Copied"
+	default:
+		return "Modified"
+	}
+}
+
+// diffFileStatusBadgeClass returns the DaisyUI badge class for a status.
+func diffFileStatusBadgeClass(status string) string {
+	switch diffFileStatusValue(status) {
+	case "added":
+		return "badge badge-success badge-sm"
+	case "deleted":
+		return "badge badge-error badge-sm"
+	case "renamed":
+		return "badge badge-info badge-sm"
+	case "copied":
+		return "badge badge-info badge-sm badge-outline"
+	default:
+		return "badge badge-ghost badge-sm"
+	}
+}
+
+// diffHasTextualContent reports whether the file has any non-empty hunks.
+// Pure renames with similarity index 100% and binary changes have no
+// textual content; the UI substitutes an explicit placeholder body for them.
+func diffHasTextualContent(f DiffFile) bool {
+	for _, h := range f.Hunks {
+		if len(h.Lines) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// diffFileSummaryText returns a one-line description of the file change for
+// use in the body when there are no textual hunks (pure rename, binary
+// add/delete, empty file add).
+func diffFileSummaryText(f DiffFile) string {
+	switch {
+	case f.IsBinary && f.Status == "added":
+		return "Binary file added."
+	case f.IsBinary && f.Status == "deleted":
+		return "Binary file deleted."
+	case f.IsBinary:
+		return "Binary file changed."
+	case f.Status == "renamed" && f.OldPath != "" && f.OldPath != f.Path:
+		if f.SimilarityIndex == 100 {
+			return fmt.Sprintf("File renamed from %s with no content changes.", f.OldPath)
+		}
+		return fmt.Sprintf("File renamed from %s.", f.OldPath)
+	case f.Status == "copied" && f.OldPath != "" && f.OldPath != f.Path:
+		return fmt.Sprintf("File copied from %s.", f.OldPath)
+	case f.Status == "added":
+		return "Empty file added."
+	case f.Status == "deleted":
+		return "Empty file deleted."
+	default:
+		return "No textual changes."
+	}
+}
+
+// diffFileDisplayPath returns the path string shown in the file header.
+// For renames/copies we render "old → new" so the move is visible at a
+// glance instead of only displaying the new path.
+func diffFileDisplayPath(f DiffFile) string {
+	if (f.Status == "renamed" || f.Status == "copied") && f.OldPath != "" && f.OldPath != f.Path {
+		return f.OldPath + " → " + f.Path
+	}
+	return f.Path
 }
 
 func diffFileName(path string) string {
@@ -1897,12 +2103,16 @@ templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view st
 		id={ diffFileCardID(meta.Index, view) }
 		class="card bg-base-100 border border-base-300 overflow-hidden"
 	>
-		<div class="bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2">
+		<div class="bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2" data-diff-status={ diffFileStatusValue(meta.File.Status) }>
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
 			</svg>
-			<span class="font-mono text-sm font-medium">{ meta.File.Path }</span>
-			<span class="text-xs opacity-50 ml-auto">
+			<span class={ diffFileStatusBadgeClass(meta.File.Status), "shrink-0" } title={ diffFileStatusLabel(meta.File.Status) }>{ diffFileStatusLabel(meta.File.Status) }</span>
+			if meta.File.IsBinary {
+				<span class="badge badge-ghost badge-sm shrink-0" title="Binary file">Binary</span>
+			}
+			<span class="font-mono text-sm font-medium truncate" title={ diffFileDisplayPath(meta.File) }>{ diffFileDisplayPath(meta.File) }</span>
+			<span class="text-xs opacity-50 ml-auto shrink-0">
 				{ diffStats(meta.File) }
 			</span>
 		</div>

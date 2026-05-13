@@ -186,6 +186,390 @@ new file mode 100644
 	}
 }
 
+func TestParseDiffOutput_PureRename_NoContentChange(t *testing.T) {
+	diff := `diff --git a/old.txt b/renamed.txt
+similarity index 100%
+rename from old.txt
+rename to renamed.txt
+`
+	files := ParseDiffOutput(diff)
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	f := files[0]
+	if f.Status != "renamed" {
+		t.Errorf("expected status=renamed, got %q", f.Status)
+	}
+	if f.OldPath != "old.txt" {
+		t.Errorf("expected OldPath=old.txt, got %q", f.OldPath)
+	}
+	if f.Path != "renamed.txt" {
+		t.Errorf("expected Path=renamed.txt, got %q", f.Path)
+	}
+	if f.SimilarityIndex != 100 {
+		t.Errorf("expected SimilarityIndex=100, got %d", f.SimilarityIndex)
+	}
+	if diffHasTextualContent(f) {
+		t.Errorf("expected no textual content for pure rename")
+	}
+}
+
+func TestParseDiffOutput_QuotedRenamePath(t *testing.T) {
+	diff := "diff --git \"a/old\\tname.txt\" \"b/new\\tname.txt\"\n" +
+		"similarity index 100%\n" +
+		"rename from \"old\\tname.txt\"\n" +
+		"rename to \"new\\tname.txt\"\n"
+	files := ParseDiffOutput(diff)
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	f := files[0]
+	if f.Status != "renamed" {
+		t.Errorf("expected status=renamed, got %q", f.Status)
+	}
+	if f.OldPath != "old\tname.txt" {
+		t.Errorf("expected decoded OldPath, got %q", f.OldPath)
+	}
+	if f.Path != "new\tname.txt" {
+		t.Errorf("expected decoded Path, got %q", f.Path)
+	}
+}
+
+func TestParseDiffOutput_RenameWithContentChange(t *testing.T) {
+	diff := `diff --git a/old.txt b/sub/new.txt
+similarity index 76%
+rename from old.txt
+rename to sub/new.txt
+index b3c5a95..b421ba1 100644
+--- a/old.txt
++++ b/sub/new.txt
+@@ -3,3 +3,4 @@ line2
+ line3
+ line4
+ line5
++appended
+`
+	files := ParseDiffOutput(diff)
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	f := files[0]
+	if f.Status != "renamed" {
+		t.Errorf("expected status=renamed, got %q", f.Status)
+	}
+	if f.OldPath != "old.txt" || f.Path != "sub/new.txt" {
+		t.Errorf("unexpected paths Old=%q New=%q", f.OldPath, f.Path)
+	}
+	if f.SimilarityIndex != 76 {
+		t.Errorf("expected SimilarityIndex=76, got %d", f.SimilarityIndex)
+	}
+	if !diffHasTextualContent(f) {
+		t.Errorf("expected textual content for rename+edit")
+	}
+	addCount := 0
+	for _, h := range f.Hunks {
+		for _, l := range h.Lines {
+			if l.Type == "add" {
+				addCount++
+			}
+		}
+	}
+	if addCount != 1 {
+		t.Errorf("expected 1 addition in rename+edit, got %d", addCount)
+	}
+}
+
+func TestParseDiffOutput_DeletedFile(t *testing.T) {
+	diff := `diff --git a/b.txt b/b.txt
+deleted file mode 100644
+index 8616c68..0000000
+--- a/b.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-to-delete
+`
+	files := ParseDiffOutput(diff)
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	f := files[0]
+	if f.Status != "deleted" {
+		t.Errorf("expected status=deleted, got %q", f.Status)
+	}
+	if f.Path != "b.txt" {
+		t.Errorf("expected Path=b.txt (preserved through +++ /dev/null), got %q", f.Path)
+	}
+	if f.OldPath != "b.txt" {
+		t.Errorf("expected OldPath=b.txt, got %q", f.OldPath)
+	}
+}
+
+func TestParseDiffOutput_DeletedBinaryFile(t *testing.T) {
+	diff := `diff --git a/img.bin b/img.bin
+deleted file mode 100644
+index 2f80ba2..0000000
+Binary files a/img.bin and /dev/null differ
+`
+	files := ParseDiffOutput(diff)
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	f := files[0]
+	if f.Status != "deleted" {
+		t.Errorf("expected status=deleted, got %q", f.Status)
+	}
+	if !f.IsBinary {
+		t.Error("expected IsBinary=true")
+	}
+	if diffHasTextualContent(f) {
+		t.Error("expected no textual hunks for deleted binary")
+	}
+	if f.Path != "img.bin" {
+		t.Errorf("expected Path=img.bin, got %q", f.Path)
+	}
+}
+
+func TestParseDiffOutput_AddedBinaryFile(t *testing.T) {
+	diff := `diff --git a/img.bin b/img.bin
+new file mode 100644
+index 0000000..2f80ba2
+Binary files /dev/null and b/img.bin differ
+`
+	files := ParseDiffOutput(diff)
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	f := files[0]
+	if f.Status != "added" {
+		t.Errorf("expected status=added, got %q", f.Status)
+	}
+	if !f.IsBinary {
+		t.Error("expected IsBinary=true")
+	}
+}
+
+func TestParseDiffOutput_NewFile_StatusAdded(t *testing.T) {
+	diff := `diff --git a/d.txt b/d.txt
+new file mode 100644
+index 0000000..a1ea743
+--- /dev/null
++++ b/d.txt
+@@ -0,0 +1 @@
++fresh file
+`
+	files := ParseDiffOutput(diff)
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	f := files[0]
+	if f.Status != "added" {
+		t.Errorf("expected status=added, got %q", f.Status)
+	}
+	if f.OldPath != "" {
+		t.Errorf("expected empty OldPath for added file, got %q", f.OldPath)
+	}
+	if f.Path != "d.txt" {
+		t.Errorf("expected Path=d.txt, got %q", f.Path)
+	}
+}
+
+func TestParseDiffOutput_PlainModification_StatusModified(t *testing.T) {
+	diff := `diff --git a/main.go b/main.go
+index abc1234..def5678 100644
+--- a/main.go
++++ b/main.go
+@@ -1,2 +1,2 @@
+ package main
+-x
++y
+`
+	files := ParseDiffOutput(diff)
+	if len(files) != 1 || files[0].Status != "modified" {
+		t.Fatalf("expected single modified file, got %#v", files)
+	}
+	if files[0].OldPath != "main.go" {
+		t.Errorf("expected OldPath=main.go, got %q", files[0].OldPath)
+	}
+}
+
+func TestParseDiffOutput_MixedAddDeleteRename(t *testing.T) {
+	diff := `diff --git a/b.txt b/b.txt
+deleted file mode 100644
+index 8616c68..0000000
+--- a/b.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-to-delete
+diff --git a/d.txt b/d.txt
+new file mode 100644
+index 0000000..a1ea743
+--- /dev/null
++++ b/d.txt
+@@ -0,0 +1 @@
++fresh file
+diff --git a/a.txt b/renamed_a.txt
+similarity index 100%
+rename from a.txt
+rename to renamed_a.txt
+`
+	files := ParseDiffOutput(diff)
+	if len(files) != 3 {
+		t.Fatalf("expected 3 files, got %d", len(files))
+	}
+	if got := files[0].Status; got != "deleted" {
+		t.Errorf("files[0] status=%q want deleted", got)
+	}
+	if got := files[1].Status; got != "added" {
+		t.Errorf("files[1] status=%q want added", got)
+	}
+	if got := files[2].Status; got != "renamed" {
+		t.Errorf("files[2] status=%q want renamed", got)
+	}
+	if files[2].OldPath != "a.txt" || files[2].Path != "renamed_a.txt" {
+		t.Errorf("rename paths wrong: Old=%q New=%q", files[2].OldPath, files[2].Path)
+	}
+}
+
+func TestParseDiffOutput_CopyDetection(t *testing.T) {
+	diff := `diff --git a/src.txt b/dst.txt
+similarity index 100%
+copy from src.txt
+copy to dst.txt
+`
+	files := ParseDiffOutput(diff)
+	if len(files) != 1 || files[0].Status != "copied" {
+		t.Fatalf("expected single copied file, got %#v", files)
+	}
+	if files[0].OldPath != "src.txt" || files[0].Path != "dst.txt" {
+		t.Errorf("paths wrong: Old=%q New=%q", files[0].OldPath, files[0].Path)
+	}
+}
+
+func TestDiffFileDisplayPath_RenameShowsArrow(t *testing.T) {
+	f := DiffFile{Status: "renamed", OldPath: "old.txt", Path: "new.txt"}
+	if got := diffFileDisplayPath(f); got != "old.txt → new.txt" {
+		t.Errorf("expected arrow display, got %q", got)
+	}
+}
+
+func TestDiffFileDisplayPath_ModifiedShowsOnlyPath(t *testing.T) {
+	f := DiffFile{Status: "modified", OldPath: "x.txt", Path: "x.txt"}
+	if got := diffFileDisplayPath(f); got != "x.txt" {
+		t.Errorf("expected plain path, got %q", got)
+	}
+}
+
+func TestDiffFileStatusValue_NormalizesUnknownStatus(t *testing.T) {
+	if got := diffFileStatusValue(""); got != "modified" {
+		t.Errorf("expected empty status to normalize to modified, got %q", got)
+	}
+	if got := diffFileStatusValue("unexpected"); got != "modified" {
+		t.Errorf("expected unknown status to normalize to modified, got %q", got)
+	}
+	if got := diffFileStatusValue("deleted"); got != "deleted" {
+		t.Errorf("expected known status to be preserved, got %q", got)
+	}
+}
+
+func TestDiffViewer_RenameRendersBadgeAndOldArrowNew(t *testing.T) {
+	diff := `diff --git a/old.txt b/new.txt
+similarity index 100%
+rename from old.txt
+rename to new.txt
+`
+	var buf bytes.Buffer
+	err := DiffViewer(diff).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	body := buf.String()
+	if !strings.Contains(body, "Renamed") {
+		t.Error("expected 'Renamed' status badge in rename diff render")
+	}
+	if !strings.Contains(body, "old.txt → new.txt") {
+		t.Error("expected 'old.txt → new.txt' display path in rename render")
+	}
+	if !strings.Contains(body, "File renamed from old.txt with no content changes.") {
+		t.Error("expected placeholder summary for pure rename")
+	}
+	if !strings.Contains(body, `data-diff-status="renamed"`) {
+		t.Error("expected data-diff-status=renamed on file header")
+	}
+	// No mis-rendered hunk header in a pure rename.
+	if strings.Contains(body, "diff-hunk-header") {
+		t.Error("did not expect any diff-hunk-header rows for pure rename body")
+	}
+}
+
+func TestDiffViewer_DeletedFileRendersDeletedBadge(t *testing.T) {
+	diff := `diff --git a/b.txt b/b.txt
+deleted file mode 100644
+index 8616c68..0000000
+--- a/b.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-to-delete
+`
+	var buf bytes.Buffer
+	err := DiffViewer(diff).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	body := buf.String()
+	if !strings.Contains(body, "Deleted") {
+		t.Error("expected 'Deleted' status badge for deleted file")
+	}
+	if !strings.Contains(body, "b.txt") {
+		t.Error("expected deleted file name in render")
+	}
+	if !strings.Contains(body, `data-diff-status="deleted"`) {
+		t.Error("expected data-diff-status=deleted")
+	}
+}
+
+func TestDiffViewer_DeletedBinaryFileShowsPlaceholder(t *testing.T) {
+	diff := `diff --git a/img.bin b/img.bin
+deleted file mode 100644
+index 2f80ba2..0000000
+Binary files a/img.bin and /dev/null differ
+`
+	var buf bytes.Buffer
+	err := DiffViewer(diff).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	body := buf.String()
+	if !strings.Contains(body, "Deleted") {
+		t.Error("expected Deleted badge for binary delete")
+	}
+	if !strings.Contains(body, "Binary") {
+		t.Error("expected Binary badge")
+	}
+	if !strings.Contains(body, "Binary file deleted.") {
+		t.Error("expected binary-file-deleted placeholder text")
+	}
+}
+
+func TestDiffViewer_AddedFileRendersAddedBadge(t *testing.T) {
+	diff := `diff --git a/d.txt b/d.txt
+new file mode 100644
+index 0000000..a1ea743
+--- /dev/null
++++ b/d.txt
+@@ -0,0 +1 @@
++fresh file
+`
+	var buf bytes.Buffer
+	err := DiffViewer(diff).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	body := buf.String()
+	if !strings.Contains(body, "Added") {
+		t.Error("expected Added badge for new file")
+	}
+}
+
 func TestParseDiffOutput_MissingHunkHeaderStillRendersContent(t *testing.T) {
 	diff := `diff --git a/file.txt b/file.txt
 +some changes
