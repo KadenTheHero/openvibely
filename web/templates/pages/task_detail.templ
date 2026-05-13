@@ -1055,17 +1055,20 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 						var scrollY = window.scrollY || window.pageYOffset || 0;
 						var viewMode = _getDiffViewMode();
 
-						changesContent.innerHTML = html;
-
-						// Let the browser settle the new DOM, then restore UI state.
-						requestAnimationFrame(function() {
-							// Restore diff view mode (inline/split).
-							if (viewMode === 'split' && typeof switchDiffView === 'function') {
-								switchDiffView('split');
+							changesContent.innerHTML = html;
+							if (typeof htmx !== 'undefined' && typeof htmx.process === 'function') {
+								htmx.process(changesContent);
 							}
-							// Restore scroll position so the user stays where they were.
-							window.scrollTo(scrollX, scrollY);
-						});
+
+							// Let the browser settle the new DOM, then restore UI state.
+							requestAnimationFrame(function() {
+								// Restore diff view mode (inline/split).
+								if (viewMode === 'split' && typeof switchDiffView === 'function') {
+									switchDiffView('split');
+								}
+								// Restore scroll position so the user stays where they were.
+								window.scrollTo(scrollX, scrollY);
+							});
 					}).catch(function() {
 						_fileChangesUpdatePending = false;
 					});

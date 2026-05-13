@@ -94,6 +94,12 @@ func TestTaskChangesWorktreeContent_LocalAndGitHubSections(t *testing.T) {
 	if !strings.Contains(out, "Squash merge") {
 		t.Fatal("expected Squash merge option in Local section")
 	}
+	if !strings.Contains(out, `hx-target="#changes-content"`) {
+		t.Fatal("expected Changes-tab local merge actions to target the visible changes content")
+	}
+	if !strings.Contains(out, `type="button"`) {
+		t.Fatal("expected Changes-tab local merge actions to be explicit buttons so clicks cannot fall back to form submission")
+	}
 	if !strings.Contains(out, "Create PR") {
 		t.Fatal("expected Create PR in GitHub section")
 	}
@@ -177,6 +183,12 @@ func TestWorktreeInfoPanel_LocalSectionHeader(t *testing.T) {
 	if !strings.Contains(out, "Merge commit") {
 		t.Fatal("expected Merge commit option in worktree info panel")
 	}
+	if !strings.Contains(out, `hx-target="#worktree-info-panel"`) {
+		t.Fatal("expected worktree panel merge actions to refresh the worktree panel")
+	}
+	if !strings.Contains(out, `type="button"`) {
+		t.Fatal("expected worktree panel merge actions to be explicit buttons so clicks cannot fall back to form submission")
+	}
 }
 
 // TestTaskChangesWorktreeContent_BranchAlreadyMergedHidesLocalSection ensures
@@ -196,10 +208,10 @@ func TestTaskChangesWorktreeContent_BranchAlreadyMergedHidesLocalSection(t *test
 	}
 	out := buf.String()
 	if strings.Contains(out, "/worktree/merge") {
-		t.Fatal("did not expect merge endpoint actions when branch is already merged externally")
+		t.Fatal("did not expect merge endpoint actions when branch is already merged")
 	}
-	if !strings.Contains(out, "already merged") {
-		t.Fatal("expected an already-merged banner explaining why local merge actions are hidden")
+	if !strings.Contains(out, "file.txt") {
+		t.Fatal("expected preserved diff to remain visible when local merge actions are hidden")
 	}
 	// GitHub section should still render (Create PR / View PR remains valid).
 	if !strings.Contains(out, "GitHub") {

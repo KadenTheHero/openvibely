@@ -2,7 +2,7 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-05-12
+updated: 2026-05-13
 source: manual_conversion
 source_id: repo_root_MEMORY_md
 confidence: high
@@ -31,6 +31,7 @@ Worktree behavior:
 - When a task has an assigned worktree, agents must perform task edits in that worktree, not the main checkout. If accidental edits land in main, first inspect both `git status`/diffs, then move or recreate the relevant changes in the task worktree and restore main only after confirming nothing will be lost.
 - If a task branch is already merged but `tasks.merge_status` is stale, Changes-tab handlers should fall back to preserved execution diff rather than showing empty live diff.
 - If a task branch was fast-forward merged into the target/default branch, whether manually outside the app or through `/tasks/:id/worktree/merge`, the Changes tab should detect that merged state and hide/disable merge options instead of offering stale merge actions; do not let preserved execution diff content alone keep merge actions visible after `merge_status=merged`.
+- Worktree merge HTMX flows must provide immediate visible feedback and refresh the user-visible surface that initiated the action, especially Changes-tab merge buttons. Merge menu clicks should close the dropdown, disable/show busy state for the clicked action while the request is in flight, and then refresh the Changes tab or show an error/toast; refreshing only `#worktree-info-panel` can make a successful fast-forward look like a no-op unless the Changes tab also receives a reliable refresh/event and hides stale merge actions. Keep busy feedback tied to the initiating control/action, not a separate after-menu status label, unless the user explicitly asks for that extra status UI.
 - Scheduler runs cleanup scan every 5 minutes when worktree service is configured.
 
 Cleanup behavior:

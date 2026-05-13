@@ -1342,6 +1342,15 @@ func TestMergeBranch_SquashCommitFailureMarksMergeFailedAndDoesNotUseHardReset(t
 		t.Fatal(err)
 	}
 
+	if err := os.WriteFile(filepath.Join(repoDir, "user_staged_survives_failure.txt"), []byte("user staged survives failure\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stageCmd := exec.Command("git", "add", "user_staged_survives_failure.txt")
+	stageCmd.Dir = repoDir
+	if out, err := stageCmd.CombinedOutput(); err != nil {
+		t.Fatalf("stage user file: %v\n%s", err, out)
+	}
+
 	hookPath := filepath.Join(repoDir, ".git", "hooks", "pre-commit")
 	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\necho blocked squash commit >&2\nexit 1\n"), 0755); err != nil {
 		t.Fatal(err)
@@ -1369,8 +1378,12 @@ func TestMergeBranch_SquashCommitFailureMarksMergeFailedAndDoesNotUseHardReset(t
 	if statusErr != nil {
 		t.Fatalf("git status after failed squash commit: %v", statusErr)
 	}
-	if strings.TrimSpace(string(statusOut)) != "?? .worktrees/" {
-		t.Fatalf("expected failed squash cleanup to leave only managed worktree entry, status=%q", statusOut)
+	status := string(statusOut)
+	if !strings.Contains(status, "A  user_staged_survives_failure.txt") {
+		t.Fatalf("expected pre-existing staged user file to survive failed squash cleanup, status=%q", statusOut)
+	}
+	if strings.Contains(status, "squash_hook_failure.txt") {
+		t.Fatalf("expected failed squash cleanup to remove squash-produced changes, status=%q", statusOut)
 	}
 
 	serviceSource, readErr := os.ReadFile("worktree_service.go")

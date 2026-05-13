@@ -96,6 +96,8 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		mergeType = "merge"
 	}
 
+	fromChangesTab := c.FormValue("merge_source") == "changes_tab"
+
 	result, mergeErr := h.worktreeSvc.MergeBranch(c.Request().Context(), task, project.RepoPath, mergeType)
 	if mergeErr != nil {
 		log.Printf("[handler] MergeTaskBranch error: %v", mergeErr)
@@ -117,6 +119,9 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		}
 		// Conflicts detected - refresh the view to show conflict status
 		task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
+		if fromChangesTab {
+			return h.GetTaskChanges(c)
+		}
 		return h.renderWorktreeInfo(c, task)
 	}
 
@@ -129,6 +134,9 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	}
 	c.Response().Header().Set("HX-Trigger", fmt.Sprintf(`{"refreshChanges": true, "showToast": {"message": "Merged locally into %s", "type": "success", "taskId": "%s"}}`, targetBranch, task.ID))
 
+	if fromChangesTab {
+		return h.GetTaskChanges(c)
+	}
 	return h.renderWorktreeInfo(c, task)
 }
 

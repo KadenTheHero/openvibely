@@ -368,7 +368,7 @@ func TestHandler_GetTaskChanges_FastForwardMergedBranchHidesMergeOptions(t *test
 	mainBranch := gitCurrentBranch(t, repoDir)
 	taskBranch := "task/0f7ee252-smart-scrolling"
 
-		// Create a task branch with a commit, then fast-forward main onto it.
+	// Create a task branch with a commit, then fast-forward main onto it.
 	runGit(t, repoDir, "checkout", "-b", taskBranch)
 	testFile := filepath.Join(repoDir, "scrolling.txt")
 	if err := os.WriteFile(testFile, []byte("smart scrolling change\n"), 0644); err != nil {
@@ -441,10 +441,6 @@ func TestHandler_GetTaskChanges_FastForwardMergedBranchHidesMergeOptions(t *test
 	// Local merge actions must be hidden because the branch is already merged.
 	if strings.Contains(body, "/worktree/merge") {
 		t.Fatalf("expected local /worktree/merge actions to be hidden after fast-forward merge, body=%s", body)
-	}
-	// The already-merged banner should explain the suppressed actions.
-	if !strings.Contains(body, "already merged") {
-		t.Fatalf("expected an already-merged banner in changes-tab response, body=%s", body)
 	}
 	// Preserved diff content should still render so the user can review what was merged.
 	if !strings.Contains(body, "smart scrolling change") {

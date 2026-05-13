@@ -25,7 +25,7 @@ BINARY="$BIN_DIR/openvibely"
 LOG_DIR="$SCRIPT_DIR/logs"
 LOG_FILE="$LOG_DIR/openvibely.log"
 TEMPL_MODULE="github.com/a-h/templ/cmd/templ"
-TEMPL_VERSION="${TEMPL_VERSION:-v0.3.977}"
+TEMPL_VERSION="${TEMPL_VERSION:-}"
 ENVIRONMENT="${ENVIRONMENT:-development}"
 OPENVIBELY_ENABLE_LOCAL_REPO_PATH=true
 OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS=true
@@ -46,10 +46,16 @@ err() { echo -e "${RED}[openvibely]${NC} $1" >&2; }
 
 ensure_templ() {
     local gopath gobin
+    local templ_path templ_version
 
     if command -v templ &>/dev/null; then
-        log "templ found on PATH: $(command -v templ)"
-        return 0
+        templ_path="$(command -v templ)"
+        templ_version="$("$templ_path" version 2>/dev/null || true)"
+        if [ "$templ_version" = "$TEMPL_VERSION" ]; then
+            log "templ found on PATH: $templ_path ($templ_version)"
+            return 0
+        fi
+        warn "templ found on PATH at $templ_path, but version is ${templ_version:-unknown}; expected $TEMPL_VERSION"
     fi
 
     gobin="$(go env GOBIN 2>/dev/null || true)"
@@ -57,17 +63,25 @@ ensure_templ() {
 
     if [ -n "$gobin" ] && [ -x "$gobin/templ" ]; then
         export PATH="$gobin:$PATH"
-        log "templ found in GOBIN and added to PATH: $gobin/templ"
-        return 0
+        templ_version="$("$gobin/templ" version 2>/dev/null || true)"
+        if [ "$templ_version" = "$TEMPL_VERSION" ]; then
+            log "templ found in GOBIN and added to PATH: $gobin/templ ($templ_version)"
+            return 0
+        fi
+        warn "templ found in GOBIN at $gobin/templ, but version is ${templ_version:-unknown}; expected $TEMPL_VERSION"
     fi
 
     if [ -n "$gopath" ] && [ -x "$gopath/bin/templ" ]; then
         export PATH="$gopath/bin:$PATH"
-        log "templ found in GOPATH/bin and added to PATH: $gopath/bin/templ"
-        return 0
+        templ_version="$("$gopath/bin/templ" version 2>/dev/null || true)"
+        if [ "$templ_version" = "$TEMPL_VERSION" ]; then
+            log "templ found in GOPATH/bin and added to PATH: $gopath/bin/templ ($templ_version)"
+            return 0
+        fi
+        warn "templ found in GOPATH/bin at $gopath/bin/templ, but version is ${templ_version:-unknown}; expected $TEMPL_VERSION"
     fi
 
-    warn "templ not found; installing ${TEMPL_MODULE}@${TEMPL_VERSION}..."
+    warn "Installing ${TEMPL_MODULE}@${TEMPL_VERSION}..."
     go install "${TEMPL_MODULE}@${TEMPL_VERSION}"
 
     gobin="$(go env GOBIN 2>/dev/null || true)"
@@ -85,7 +99,14 @@ ensure_templ() {
         exit 1
     fi
 
-    log "templ installed and available at: $(command -v templ)"
+    templ_path="$(command -v templ)"
+    templ_version="$("$templ_path" version 2>/dev/null || true)"
+    if [ "$templ_version" != "$TEMPL_VERSION" ]; then
+        err "templ installation produced ${templ_version:-unknown}; expected $TEMPL_VERSION"
+        exit 1
+    fi
+
+    log "templ installed and available at: $templ_path ($templ_version)"
 }
 
 # Kill any existing openvibely server
@@ -99,6 +120,14 @@ fi
 if ! command -v go &>/dev/null; then
     err "Go is not installed. Install it from https://go.dev/dl/"
     exit 1
+fi
+
+if [ -z "$TEMPL_VERSION" ]; then
+    TEMPL_VERSION="$(go list -m -f '{{.Version}}' github.com/a-h/templ 2>/dev/null)"
+    if [ -z "$TEMPL_VERSION" ]; then
+        err "Unable to resolve templ version from go.mod"
+        exit 1
+    fi
 fi
 
 # Check/install templ and ensure it is usable in this shell

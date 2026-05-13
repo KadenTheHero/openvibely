@@ -476,7 +476,7 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 			if commitErrMsg == "" {
 				commitErrMsg = err.Error()
 			}
-			if resetErr := ResetSquashMergeChanges(repoDir); resetErr != nil {
+			if resetErr := ResetSquashMergeChanges(repoDir, squashPaths); resetErr != nil {
 				commitErrMsg = fmt.Sprintf("%s; additionally failed to restore squash merge changes: %v", commitErrMsg, resetErr)
 			}
 			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
@@ -573,18 +573,13 @@ func SquashMergePaths(repoDir string, stagedBefore map[string]bool) ([]string, e
 
 // ResetSquashMergeChanges restores only files changed by a failed squash merge
 // attempt. Unlike `git reset --hard`, this does not reset the whole target
-// checkout.
-func ResetSquashMergeChanges(repoDir string) error {
-	changedOut, err := gitOutput(repoDir, "diff", "--name-only", "--cached")
-	if err != nil {
-		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(changedOut)))
-	}
-	changed := strings.Fields(string(changedOut))
-	if len(changed) == 0 {
+// checkout or touch staged user changes that existed before the squash attempt.
+func ResetSquashMergeChanges(repoDir string, squashPaths []string) error {
+	if len(squashPaths) == 0 {
 		return nil
 	}
 
-	args := append([]string{"restore", "--staged", "--worktree", "--source=HEAD", "--"}, changed...)
+	args := append([]string{"restore", "--staged", "--worktree", "--source=HEAD", "--"}, squashPaths...)
 	if out, err := gitOutput(repoDir, args...); err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}

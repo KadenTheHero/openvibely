@@ -108,11 +108,11 @@ func TestTaskDetailMetrics_StatusBadgeVisibility(t *testing.T) {
 
 func TestTaskDetailContent_ChangesTabHidesReviewCommentCountBadge(t *testing.T) {
 	task := &models.Task{
-		ID:       "task-1",
-		Title:    "Task",
-		ProjectID:"project-1",
-		Status:   models.StatusCompleted,
-		Category: models.CategoryCompleted,
+		ID:        "task-1",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
 	}
 	reviewComments := []models.ReviewComment{{ID: "c1", CommentText: "x"}}
 
@@ -133,11 +133,11 @@ func TestTaskDetailContent_ChangesTabHidesReviewCommentCountBadge(t *testing.T) 
 
 func TestTaskDetailContent_ReactivatesFileChangesSSEWhenTaskBecomesActive(t *testing.T) {
 	task := &models.Task{
-		ID:       "task-2",
-		Title:    "Task",
-		ProjectID:"project-1",
-		Status:   models.StatusCompleted,
-		Category: models.CategoryCompleted,
+		ID:        "task-2",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
 	}
 
 	var buf bytes.Buffer
@@ -310,9 +310,23 @@ func TestTaskDetailContent_DiffUpdateUsesPreSwapFingerprint(t *testing.T) {
 		t.Fatal("expected early return path when diff fingerprint is unchanged")
 	}
 
+	// Must re-process manually inserted HTML so HTMX actions rendered by the Changes
+	// partial (including merge buttons) are bound after fetch()+innerHTML swaps.
+	if !strings.Contains(output, "htmx.process(changesContent)") {
+		t.Fatal("expected _updateDiffViewer to call htmx.process after manual innerHTML swap")
+	}
+
 	// Must use requestAnimationFrame for post-swap UI state restoration.
 	if !strings.Contains(output, "requestAnimationFrame(function()") {
 		t.Fatal("expected requestAnimationFrame for post-swap state restoration")
+	}
+	if strings.Contains(output, "// Restore diff view mode (inline/split).\t\t\t\t\t\t\tif (viewMode") ||
+		strings.Contains(output, "// Restore diff view mode (inline/split).							if (viewMode") {
+		t.Fatal("expected diff view restoration if-statement to stay off the line comment")
+	}
+	if !strings.Contains(output, "// Restore diff view mode (inline/split).\n") ||
+		!strings.Contains(output, "if (viewMode === 'split' && typeof switchDiffView === 'function') {") {
+		t.Fatal("expected syntactically valid diff view restoration block")
 	}
 }
 

@@ -2,7 +2,7 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-05-12
+updated: 2026-05-13
 source: manual_conversion
 source_id: repo_root_MEMORY_md
 confidence: high
@@ -14,6 +14,7 @@ OpenVibely uses server-rendered HTMX/templ UI with shared SSE-style live updates
 Realtime/diff updates:
 - Real-time file changes stream to the Changes tab during task execution via SSE every ~2 seconds using `GetWorktreeDiffWithUncommitted` to show committed branch changes and uncommitted work without auto-committing.
 - Task-thread follow-up executions should run the same periodic diff snapshot broadcast path, persisting `executions.diff_output` and publishing `diff_snapshot` events.
+- Treat live diff snapshot UI indicators as runtime feedback, not durable task artifacts; they may disappear after app restart, while persisted execution diff/task changes are the source of durable review state. Merge success toasts and already-merged banners/markers are also transient feedback; audit/history UI should be backed by persisted merge/execution records, not restart-volatile markers.
 - Changes-tab scroll preservation: SSE diff updates should fetch offscreen DOM, compare fingerprints, and skip live DOM mutation when unchanged. When content changes, save/restore window scroll and active diff mode via `requestAnimationFrame`; preserve `window._diffFileState` file expand/collapse state.
 - Avoid `htmx.ajax()` live swaps for frequent diff refreshes when a fingerprint gate is needed; it can remount DOM before the no-op check.
 
@@ -36,6 +37,7 @@ Chat/frontend rendering:
 - Mode selector hydration should use hidden input + localStorage restore, mark hydration state, and re-evaluate plan-completion prompt after restoring mode.
 
 Shared UI/page patterns:
+- For HTMX dropdown/menu actions, distinguish user reports of “spinner/toast but then failure” from “click did nothing.” If there is no spinner, toast, or menu close, first suspect that the HTMX request never fired or was not bound. Check rendered attributes, lazy-loaded HTMX processing, and whether menu `<button>` elements are inside a parent `<form>` without `type="button"`, which can trigger plain form submission instead of the HTMX action.
 - Chat/thread markdown links and task-result links share global link token `--ov-link-color: #7480ff` in `layout/base.templ`, with hover/focus/active/visited states.
 - `/schedule` current-time timeline tracer uses `--ov-link-color` instead of hardcoded green for light/dark consistency.
 - Schedule `Run At` controls should expose click-anywhere picker behavior using `showPicker()` with focus fallback while preserving keyboard entry.
@@ -47,3 +49,4 @@ Shared UI/page patterns:
 - `/agents` is plugin-first with modal marketplace/install state, generate flow, plugin endpoints, and no `color` field/UI.
 - Agent tool-selection UI should avoid ambiguous aggregate labels. If a capability like `Read` includes multiple concrete tools such as single-file read, directory listing, and search, expose enough detail in labels/help text so users can understand the granted operations. If `Managed Memory` appears as a tool/profile, make clear it is a scoped memory-file capability rather than inheriting arbitrary normal `Read`/`Write` repo tools.
 - Toast rendering must account for native dialog top-layer behavior by re-hosting toasts into the active modal dialog when needed.
+- Alert/banner inline values such as branch names should inherit the alert text color in dark mode; avoid themed surface backgrounds like `bg-base-200` on inline `<code>` inside colored alerts because contrast can become unreadable.
