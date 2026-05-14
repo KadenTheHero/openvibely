@@ -2671,6 +2671,111 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				})();
 			</script>
 
+			<!-- Desktop external-link bridge -->
+			<script>
+				// In Wails desktop mode, the embedded WebView does not handle
+				// target="_blank" or new-window navigation, so clicks on anchors
+				// like the Task Changes "View PR" link silently do nothing.
+				// Intercept clicks on external http(s) anchors and route them
+				// through the Wails Browser.OpenURL bridge so they open in the
+				// user's real system browser. In web/server mode this helper is
+				// inert (it only runs when window.wails.Browser.OpenURL exists),
+				// preserving normal anchor behavior.
+				(function() {
+					function isDesktopRuntime() {
+						try {
+							if (typeof window === 'undefined') return false;
+							if (window.location && window.location.protocol === 'wails:') return true;
+							if (typeof window.wails !== 'undefined') return true;
+							if (typeof window._wails !== 'undefined') return true;
+							if (typeof window.runtime !== 'undefined') return true;
+							if (typeof window.__WAILS__ !== 'undefined') return true;
+							return false;
+						} catch (_) {
+							return false;
+						}
+					}
+					function isExternalHref(href) {
+						if (!href) return false;
+						var lower = String(href).toLowerCase();
+						return lower.indexOf('http://') === 0 || lower.indexOf('https://') === 0 || lower.indexOf('mailto:') === 0;
+					}
+					function callWailsOpenURL(url) {
+						try {
+							if (window.wails && window.wails.Browser && typeof window.wails.Browser.OpenURL === 'function') {
+								var p = window.wails.Browser.OpenURL(url);
+								if (p && typeof p.then === 'function') {
+									p.catch(function(err) {
+										if (window.showToast) {
+											window.showToast('Failed to open link in system browser: ' + (err && err.message ? err.message : err), 'failed');
+										}
+									});
+								}
+								return true;
+							}
+							if (window.wails && typeof window.wails.OpenURL === 'function') {
+								// Older runtime shape.
+								var p2 = window.wails.OpenURL(url);
+								if (p2 && typeof p2.then === 'function') {
+									p2.catch(function(err) {
+										if (window.showToast) {
+											window.showToast('Failed to open link in system browser: ' + (err && err.message ? err.message : err), 'failed');
+										}
+									});
+								}
+								return true;
+							}
+						} catch (err) {
+							if (window.showToast) {
+								window.showToast('Failed to open link in system browser', 'failed');
+							}
+						}
+						return false;
+					}
+					function handleAnchorClick(event) {
+						if (!isDesktopRuntime()) return;
+						// Allow modifier-clicks to fall through.
+						if (event.defaultPrevented) return;
+						if (event.button !== undefined && event.button !== 0) return;
+						if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+						var target = event.target;
+						var anchor = target && target.closest ? target.closest('a[href]') : null;
+						if (!anchor) return;
+						var href = anchor.getAttribute('href');
+						if (!href) return;
+						// Only act on external links or links explicitly marked target="_blank".
+						var blank = anchor.getAttribute('target') === '_blank';
+						if (!isExternalHref(href) && !blank) return;
+						// If it's target="_blank" but a relative URL, resolve to absolute first
+						// so the system browser receives a usable URL.
+						var absolute = href;
+						try {
+							absolute = new URL(href, window.location.href).toString();
+						} catch (_) {}
+						if (!isExternalHref(absolute)) {
+							// Same-origin relative link in a new tab: let default behavior happen.
+							return;
+						}
+						event.preventDefault();
+						event.stopPropagation();
+						if (!callWailsOpenURL(absolute)) {
+							if (window.showToast) {
+								window.showToast('No system browser bridge available to open: ' + absolute, 'failed');
+							}
+						}
+					}
+					document.addEventListener('click', handleAnchorClick, true);
+					// Expose for callers that need an explicit opener (e.g., dropdown item buttons).
+					window.openExternalURL = function(url) {
+						if (!url) return false;
+						if (!isDesktopRuntime()) {
+							try { window.open(url, '_blank', 'noopener,noreferrer'); return true; } catch (_) { return false; }
+						}
+						return callWailsOpenURL(url);
+					};
+				})();
+			</script>
+
 			<!-- Selection Counter -->
 			<div id="selection-counter">
 				<span id="selection-count">0</span>

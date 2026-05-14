@@ -63,6 +63,19 @@ func TestToastDismissalCleanup(t *testing.T) {
 		t.Error("base layout wails runtime script must re-apply desktop runtime detection after load")
 	}
 
+	// Verify the desktop external-link bridge exists so target="_blank" anchors
+	// (e.g. Task Changes "View PR") actually open the system browser when running
+	// inside the Wails WebView, instead of silently doing nothing.
+	if !strings.Contains(html, "window.wails.Browser.OpenURL") {
+		t.Error("base layout must include desktop bridge that opens external links via window.wails.Browser.OpenURL")
+	}
+	if !strings.Contains(html, `anchor.getAttribute('target') === '_blank'`) {
+		t.Error("desktop external-link bridge must intercept target=\"_blank\" anchors so View PR opens in system browser")
+	}
+	if !strings.Contains(html, "window.openExternalURL") {
+		t.Error("base layout must expose window.openExternalURL helper for explicit external-link opens")
+	}
+
 	// Verify theme toggle is NOT present in top navbar (moved to sidebar footer).
 	if strings.Contains(html, "navbar-theme-toggle") {
 		t.Error("base layout navbar should not include theme toggle; toggle is rendered in sidebar footer")
