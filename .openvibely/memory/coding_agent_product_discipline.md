@@ -15,6 +15,8 @@ When implementing product behavior, identify the underlying product concept befo
 
 Avoid making generic capabilities carry hidden special-case behavior for one built-in use case. If one built-in agent or workflow needs exceptional behavior, express it through that agent/workflow's explicit configuration while keeping the generic feature predictable for all users.
 
+For generic environment/path discovery, derive values from authoritative user or system sources instead of hardcoding guessed locations for specific tools or package managers. Desktop PATH loading should stay generic, shell-derived, and free of special-case install paths such as Go or Homebrew defaults unless the user explicitly configures them.
+
 Treat similarly named roots as distinct concepts. Before resolving relative paths or write locations, determine whether the intended root is the project root, isolated worktree root, process working directory, durable repo location, or tool scope root. Preserve that meaning through storage and runtime resolution rather than casually switching roots.
 
 Do not defer configuration correctness to runtime failures. Users should not be able to save invalid settings that will predictably fail later when the invalid state can be detected at configuration time.

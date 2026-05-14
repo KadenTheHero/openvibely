@@ -15,11 +15,13 @@ Do not use repo-root `MEMORY.md` as active task/chat memory. Durable architectur
 
 Memory operations require a configured selected project with a valid local `repo_path`. Do not use an app-owned fallback such as `memory/projects/<project_id>/` or `OPENVIBELY_MEMORY_ROOT`. Each repository decides whether to check in `.openvibely/memory/*.md` or ignore it.
 
+Managed memory initialization should be idempotent across web/server mode and Wails desktop mode. For a selected project with a valid local `repo_path`, startup/runtime paths should create the repo-local `.openvibely/memory/` directory and `MEMORY.md` when missing; missing topic files should be created only when explicitly written or safely skipped when absent. New topic files are added to `MEMORY.md` by the model/tool memory workflow when deemed durable and index-worthy, not automatically by low-level file creation.
+
 `MemoryService` wraps path resolution, file storage, context building, extraction, consolidation, and DB metadata. Memory features should use OpenVibely's existing SQLite task/chat execution history as the transcript source; do not add JSONL transcript storage or migration scaffolding for unreleased local-only layouts unless explicitly requested.
 
 Filesystem access must be scoped to the managed memory directory. Tool executors must reject traversal, absolute paths, and symlink escapes. Tests should focus on this sandbox boundary and small helpers, not on pretending Go heuristics perform consolidation.
 
-Extraction and consolidation should save distilled reusable guidance, decisions, pitfalls, product direction, workflow constraints, and user preferences. Do not store raw complaint text, assistant-outcome boilerplate, one-off test prompts, transient logs, raw transcripts, secrets, provider-internal product terminology, or task-by-task summaries.
+Extraction and consolidation should save distilled reusable guidance, decisions, pitfalls, product direction, workflow constraints, and user preferences. Do not store raw complaint text, assistant-outcome boilerplate, one-off test prompts, transient logs, raw transcripts, secrets, provider-internal product terminology, task-by-task summaries, Chat page prompts, or Orchestrate/Plan mode-control text.
 
 The model owns memory extraction/consolidation decisions. Go code should not replace that with hardcoded rule extractors, deterministic topic classifiers, or JSON proposal workflows when provider tool execution is available. Use neutral OpenVibely-owned product terminology such as model/tool-driven managed memory.
 

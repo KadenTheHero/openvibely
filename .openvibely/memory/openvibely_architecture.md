@@ -31,6 +31,8 @@ Dual mode architecture:
 - Desktop mode (`cmd/desktop`) uses `config.LoadWithMode(ModeDesktop)`, defaults to OS app-data dirs for DB/repos/uploads, uses ephemeral port `PORT=0`, enables local repo paths, and loads the Wails WebView from the server base URL.
 - Env vars override mode defaults. Desktop users who set `DATABASE_PATH` in env get that path.
 - Desktop defaults to localhost OAuth callback flow (`APP_BASE_URL` unset). Server/VPS mode should set `APP_BASE_URL` for hosted callbacks.
+- Desktop/Wails GUI launches, especially on macOS, may not inherit the user's interactive shell `PATH`; task execution must use centralized environment/PATH construction. Do not hardcode assumed developer-tool install paths such as `/usr/local/go/bin`; derive or merge the user's real initialized shell `PATH` for desktop task execution without forking per-command behavior.
+- Desktop external-link handling should not assume desktop-mode detection means the Wails browser bridge is ready. Feature-detect the actual loaded runtime API before calling it, and remember the desktop WebView may be loaded from the local server URL rather than a `wails:` page.
 - Do not fork backend code between server and desktop; both modes share `internal/server`.
 
 Storage/deployment compatibility:

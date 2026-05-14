@@ -29,6 +29,7 @@ GitHub:
 - Git operations auto-detect system SSL CA bundles and fall back to `GIT_SSL_NO_VERIFY=true` if no valid bundle is found; users can override with `GIT_SSL_CAINFO` or explicit `GIT_SSL_NO_VERIFY`.
 - Project create/edit GitHub clone failures return HTMX toast guardrails (`openvibelyToast`) instead of raw error payloads.
 - Task Changes tab supports one-click PR creation (`POST /tasks/:taskId/worktree/pull-request`), one PR per task in `task_pull_requests`, and reuse of existing task/remote-branch PRs.
+- In Wails desktop mode, Task Changes `View PR` should open GitHub PR URLs in the system browser rather than navigating the local WebView; preserve existing web/server behavior and surface a clear error if no PR URL is available.
 - Changes tab merge dropdown visibility is feature-flagged by `OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS` (default off); disabled changes-tab merge posts are blocked server-side with `403`.
 - Failed tasks keep Local merge actions visible even when `tasks.merge_status=merged`, so users can reconcile additional uncommitted edits.
 - Merge/PR action menus group Local and GitHub sections. Toasts are destination-prefixed such as `Merged locally into <branch>` or `GitHub PR created (#N)`.
