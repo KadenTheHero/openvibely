@@ -331,7 +331,6 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 ## Git Worktree Merge Status
 
 - **Reset merge status when follow-ups create new changes** — After a task is merged (merge_status="merged"), if a follow-up creates new changes, reset merge_status to "pending" so the merge button re-appears
-- **Task Changes merge UI is flag-gated**: `OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS` controls merge dropdowns in the Changes tab (default off). Keep handler enforcement aligned: Changes-tab merge requests carry `merge_source=changes_tab`, and `MergeTaskBranch` must reject those with `403` when flag is off so hidden UI cannot be bypassed.
 - In the Changes tab, do not hide `Local` merge actions solely because `tasks.merge_status=merged` when `tasks.status=failed`; failed tasks can still have uncommitted worktree edits that need a local merge path in-UI.
 - **Check implemented in `completeWithSuccess`** — After capturing diff output, if diffOutput is non-empty AND task has a worktree AND merge_status is "merged", reset to "pending"
 - **Only reset when changes exist** — Read-only follow-ups (no diff) should NOT reset merge_status

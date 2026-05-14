@@ -158,10 +158,6 @@ index abc123..def456 100644
 	if !containsString(body, task.WorktreeBranch) {
 		t.Errorf("expected response to show worktree branch %s", task.WorktreeBranch)
 	}
-
-	if containsString(body, "Merge to") {
-		t.Error("did not expect merge options when task changes merge flag is disabled by default")
-	}
 }
 
 // TestHandler_GetTaskChanges_UnmergedTaskShowsLiveDiff verifies that for unmerged tasks,
@@ -360,7 +356,6 @@ func TestHandler_GetTaskChanges_PendingMergeStatusButMergedBranchShowsPreservedD
 func TestHandler_GetTaskChanges_FastForwardMergedBranchHidesMergeOptions(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	defer db.Close()
-	h.SetTaskChangesMergeOptionsEnabled(true) // ensure merge options would render if not suppressed
 
 	ctx := context.Background()
 
@@ -463,7 +458,6 @@ func TestHandler_GetTaskChanges_FastForwardMergedBranchHidesMergeOptions(t *test
 func TestHandler_MergeTaskBranch_RejectsAlreadyMergedBranch(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	defer db.Close()
-	h.SetTaskChangesMergeOptionsEnabled(true)
 
 	ctx := context.Background()
 	repoDir := createHandlerTestGitRepo(t)

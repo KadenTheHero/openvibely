@@ -49,10 +49,6 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	if task.WorktreeBranch == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "task has no worktree branch")
 	}
-	if c.FormValue("merge_source") == "changes_tab" && !h.isTaskChangesMergeOptionsEnabled() {
-		return echo.NewHTTPError(http.StatusForbidden, "task changes merge options are disabled")
-	}
-
 	// Get the repo path from the project
 	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
 	if err != nil || project == nil || project.RepoPath == "" {
@@ -423,7 +419,7 @@ func (h *Handler) GetTaskChangesWorktree(c echo.Context) error {
 			}
 
 			return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-				diffOutput, task, fileStats, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(), branchAlreadyMerged,
+				diffOutput, task, fileStats, reviewComments, taskPR, branchAlreadyMerged,
 			))
 		}
 	}

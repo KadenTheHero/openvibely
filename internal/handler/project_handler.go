@@ -232,13 +232,6 @@ func normalizePickedProjectFolderPath(raw string) (string, error) {
 	return path, nil
 }
 
-func (h *Handler) isTaskChangesMergeOptionsEnabled() bool {
-	if h.taskChangesMergeOptionsEnabled != nil {
-		return *h.taskChangesMergeOptionsEnabled
-	}
-	return config.ResolveEnableTaskChangesMergeOptions(os.Getenv("OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS"))
-}
-
 func pickProjectFolderNative(ctx context.Context) (string, bool, error) {
 	cmdName, cmdArgs, ok := projectFolderPickerCommandForGOOS(runtime.GOOS)
 	if !ok {

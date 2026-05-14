@@ -574,7 +574,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 		if !isActive && task.MergeStatus == models.MergeStatusMerged {
 			diffOutput := latestNonEmptyDiff(executions)
 			return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-				diffOutput, task, nil, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(), branchAlreadyMerged,
+				diffOutput, task, nil, reviewComments, taskPR, branchAlreadyMerged,
 			))
 		}
 
@@ -609,7 +609,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 					}
 
 					return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-						diffOutput, task, fileStats, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(), branchAlreadyMerged,
+						diffOutput, task, fileStats, reviewComments, taskPR, branchAlreadyMerged,
 					))
 				}
 			}
@@ -619,7 +619,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 		for i := len(executions) - 1; i >= 0; i-- {
 			if executions[i].DiffOutput != "" {
 				return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-					executions[i].DiffOutput, task, nil, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(), branchAlreadyMerged,
+					executions[i].DiffOutput, task, nil, reviewComments, taskPR, branchAlreadyMerged,
 				))
 			}
 		}

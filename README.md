@@ -109,7 +109,6 @@ Set environment variables directly or place them in `.env` (loaded by `start.sh`
 | `PROJECT_REPO_ROOT` | Managed clone root for GitHub URL projects | Filesystem path | `./repos` | `./repos` \| `/var/lib/openvibely/repos` |
 | `OPENVIBELY_PLUGIN_ROOT` | App-local plugin root override | Filesystem path (absolute or relative) | Unset = app-local plugin root (`.openvibely/plugins` under runtime base) | `./.openvibely/plugins` \| `/var/lib/openvibely/plugins` |
 | `OPENVIBELY_ENABLE_LOCAL_REPO_PATH` | Enables Local Path source mode in project setup | `1,true,yes,on,0,false,no,off` | Unset/invalid = `false`; `start.sh` exports `true` unless overridden in `.env` | `true` \| `false` |
-| `OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS` | Shows merge options in task `Changes` tab | `1,true,yes,on,0,false,no,off` | Unset/invalid = `false`; `start.sh` exports `true` unless overridden in `.env` | `true` \| `false` |
 | `OPENVIBELY_CODEX_REASONING_EFFORT` | Fallback reasoning effort for Codex requests when model config does not set one | `low`, `medium`, `high`, `xhigh` | If unset/invalid, defaults to `high` | `high` \| `medium` |
 
 ### App Authentication (Built-in Login)

@@ -442,7 +442,6 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		h.SetMemoryService(memorySvc)
 	}
 	h.SetLocalRepoPathEnabled(cfg.EnableLocalRepoPath)
-	h.SetTaskChangesMergeOptionsEnabled(cfg.EnableTaskChangesMergeOptions)
 	h.SetDesktopMode(cfg.Mode == config.ModeDesktop)
 	h.SetAuthConfig(authCfg)
 	e.Use(h.AuthMiddleware())

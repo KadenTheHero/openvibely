@@ -517,7 +517,6 @@ func TestHandler_MergeTaskBranch_ActiveConflictBlocksDuplicateMerge(t *testing.T
 
 func TestHandler_MergeTaskBranch_ChangesTabFastForwardAdvancesTargetAndRefreshesChanges(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
-	h.SetTaskChangesMergeOptionsEnabled(true)
 	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
 	ctx := context.Background()
 
@@ -599,45 +598,3 @@ func TestHandler_MergeTaskBranch_ChangesTabFastForwardAdvancesTargetAndRefreshes
 	}
 }
 
-func TestHandler_MergeTaskBranch_ChangesTabDisabled_ReturnsForbidden(t *testing.T) {
-	h, e, _ := setupTestHandler(t)
-	h.SetTaskChangesMergeOptionsEnabled(false)
-	ctx := context.Background()
-
-	project := &models.Project{
-		Name: "Test Project", Description: "Test", RepoPath: "/tmp/test", IsDefault: true,
-	}
-	if err := h.projectSvc.Create(ctx, project); err != nil {
-		t.Fatal(err)
-	}
-
-	task := &models.Task{
-		ProjectID:         project.ID,
-		Title:             "Merge Disabled",
-		Prompt:            "test",
-		Category:          models.CategoryActive,
-		Status:            models.StatusCompleted,
-		WorktreePath:      "/tmp/.worktrees/task_disabled",
-		WorktreeBranch:    "task/disabled-merge",
-		MergeTargetBranch: "main",
-		MergeStatus:       models.MergeStatusPending,
-	}
-	if err := h.taskRepo.Create(ctx, task); err != nil {
-		t.Fatal(err)
-	}
-
-	form := url.Values{
-		"merge_type":   {"merge"},
-		"merge_source": {"changes_tab"},
-	}
-	req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", form)
-	req.Header.Set("HX-Request", "true")
-	rec := worktreeExecute(e, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "task changes merge options are disabled") {
-		t.Fatalf("expected disabled flag error, got %s", rec.Body.String())
-	}
-}

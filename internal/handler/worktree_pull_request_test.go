@@ -319,24 +319,23 @@ func TestCreateTaskPullRequest_CreatePRFailureShowsToast(t *testing.T) {
 	}
 }
 
-func TestHandler_GetTaskChanges_ShowsMergeOptionsWhenFlagEnabled(t *testing.T) {
+func TestHandler_GetTaskChanges_ShowsMergeOptions(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
-	h.SetTaskChangesMergeOptionsEnabled(true)
 	ctx := context.Background()
 
 	repoPath := t.TempDir()
 	worktreePath := t.TempDir()
-	project := &models.Project{Name: "Flag Enabled Project", RepoPath: repoPath, IsDefault: true}
+	project := &models.Project{Name: "Merge Options Project", RepoPath: repoPath, IsDefault: true}
 	if err := h.projectSvc.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	task := &models.Task{
 		ProjectID:         project.ID,
-		Title:             "Flag Enabled Task",
+		Title:             "Merge Options Task",
 		Category:          models.CategoryActive,
 		Status:            models.StatusCompleted,
 		WorktreePath:      worktreePath,
-		WorktreeBranch:    "task/flag-enabled",
+		WorktreeBranch:    "task/merge-options",
 		MergeTargetBranch: "main",
 		MergeStatus:       models.MergeStatusPending,
 	}
@@ -358,7 +357,7 @@ func TestHandler_GetTaskChanges_ShowsMergeOptionsWhenFlagEnabled(t *testing.T) {
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, "Merge commit") {
-		t.Fatalf("expected merge options to be rendered when flag enabled, body=%s", body)
+		t.Fatalf("expected merge options to be rendered, body=%s", body)
 	}
 	if !strings.Contains(body, "merge_source") {
 		t.Fatalf("expected changes-tab merge actions to include merge_source marker, body=%s", body)
@@ -373,7 +372,6 @@ func TestHandler_GetTaskChanges_ShowsMergeOptionsWhenFlagEnabled(t *testing.T) {
 
 func TestHandler_GetTaskChanges_HidesMergeOptionsForFailedMergedTask(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
-	h.SetTaskChangesMergeOptionsEnabled(true)
 	ctx := context.Background()
 
 	repoPath := t.TempDir()

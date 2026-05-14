@@ -40,7 +40,6 @@ type Config struct {
 	ProjectRepoRoot               string
 	AppDataDir                    string
 	EnableLocalRepoPath           bool
-	EnableTaskChangesMergeOptions bool
 	AuthEnabled                   bool
 	AuthUsername                  string
 	AuthPassword                  string
@@ -102,7 +101,6 @@ func LoadWithMode(mode RuntimeMode) *Config {
 		ProjectRepoRoot:               getEnv("PROJECT_REPO_ROOT", defaultRepoRoot),
 		AppDataDir:                    appDataDir,
 		EnableLocalRepoPath:           enableLocalRepo,
-		EnableTaskChangesMergeOptions: ResolveEnableTaskChangesMergeOptions(os.Getenv("OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS")),
 		AuthEnabled:                   ResolveAuthEnabled(os.Getenv("AUTH_ENABLED"), os.Getenv("AUTH_USERNAME"), os.Getenv("AUTH_PASSWORD")),
 		AuthUsername:                  getEnv("AUTH_USERNAME", ""),
 		AuthPassword:                  getEnv("AUTH_PASSWORD", ""),
@@ -153,17 +151,6 @@ func ResolveEnableLocalRepoPath(explicitValue string) bool {
 		return v
 	}
 	return false
-}
-
-// ResolveEnableTaskChangesMergeOptions resolves merge-options visibility in the
-// Task Changes tab from OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS.
-// Unset or invalid values default to true so local merge/review workflows remain
-// available unless explicitly disabled.
-func ResolveEnableTaskChangesMergeOptions(explicitValue string) bool {
-	if v, ok := parseEnvBool(explicitValue); ok {
-		return v
-	}
-	return true
 }
 
 func parseEnvBool(value string) (bool, bool) {

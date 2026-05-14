@@ -54,7 +54,6 @@ type Handler struct {
 	githubSvc                      GitHubServiceProvider
 	slackSvc                       SlackServiceProvider
 	localRepoPathEnabled           *bool
-	taskChangesMergeOptionsEnabled *bool
 	projectFolderPicker            ProjectFolderPicker
 	webhookRepo                    *repository.WebhookRepo
 	memorySvc                      *service.MemoryService
@@ -208,11 +207,6 @@ func (h *Handler) SetSlackService(svc SlackServiceProvider) {
 func (h *Handler) SetLocalRepoPathEnabled(enabled bool) {
 	v := enabled
 	h.localRepoPathEnabled = &v
-}
-
-func (h *Handler) SetTaskChangesMergeOptionsEnabled(enabled bool) {
-	v := enabled
-	h.taskChangesMergeOptionsEnabled = &v
 }
 
 // SetDesktopMode marks the handler as running inside the Wails desktop app.
