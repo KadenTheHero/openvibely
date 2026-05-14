@@ -1,154 +1,160 @@
 package config
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
-// EnsureDesktopPATH augments the process PATH environment variable so that
-// task shells spawned by the OpenVibely desktop app can find common developer
-// tools (go, node, python, claude, codex, etc.).
+const (
+	desktopShellPATHTimeout = 10 * time.Second
+	desktopPathBeginMarker  = "__OPENVIBELY_PATH_BEGIN__"
+	desktopPathEndMarker    = "__OPENVIBELY_PATH_END__"
+)
+
+// EnsureDesktopPATH updates the process PATH so task shells spawned by the
+// OpenVibely desktop app inherit the same PATH the user gets from their shell.
 //
-// macOS GUI applications launched from Finder/Dock inherit only launchd's
-// minimal PATH (typically /usr/bin:/bin:/usr/sbin:/sbin), which omits Go,
-// Homebrew, and user-local binary directories. As a result, subprocesses
-// (including the Claude/Codex CLI shelling out to `bash -c "go ..."`) report
-// "command not found" even though the tool is installed.
+// macOS GUI applications launched from Finder/Dock inherit launchd's minimal
+// PATH instead of the user's login/interactive shell PATH. That makes tools
+// installed through Go, Homebrew, asdf, mise, nix, cargo, etc. disappear from
+// task subprocesses even though they work in Terminal.
 //
 // Server/VPS mode is unaffected because cmd/server never calls this function;
 // it lives in package config so it can be unit-tested without depending on
 // Wails or the desktop entrypoint.
-//
-// The function only prepends candidate directories that:
-//   - actually exist on disk, and
-//   - are not already present in PATH.
-//
-// It always returns the resulting PATH value (for logging/testing). Callers
-// that want to mutate the live environment should pass setEnv=true.
 func EnsureDesktopPATH() string {
-	return augmentDesktopPATH(os.Getenv("PATH"), defaultDesktopPATHCandidates(), true)
-}
+	currentPATH := os.Getenv("PATH")
 
-// defaultDesktopPATHCandidates returns the ordered list of directories the
-// desktop app should make available on PATH for spawned task shells.
-// Earlier entries take precedence (prepended first).
-func defaultDesktopPATHCandidates() []string {
-	home := os.Getenv("HOME")
-	if home == "" {
-		// On Windows os.UserHomeDir is more reliable than HOME.
-		if hd, err := os.UserHomeDir(); err == nil {
-			home = hd
-		}
-	}
-
-	// Common cross-platform developer-tool directories.
-	common := []string{
-		"/usr/local/bin",
-		"/usr/local/sbin",
-	}
-
-	// Go toolchain default install locations.
-	goPaths := []string{
-		"/usr/local/go/bin", // official installer
-	}
-	if home != "" {
-		goPaths = append(goPaths, filepath.Join(home, "go", "bin"))
-	}
-
-	var platform []string
-	switch runtime.GOOS {
-	case "darwin":
-		platform = []string{
-			"/opt/homebrew/bin", // Apple Silicon Homebrew
-			"/opt/homebrew/sbin",
-			"/usr/local/bin", // Intel Homebrew (already in common, dedup below)
-		}
-	case "linux":
-		platform = []string{
-			"/home/linuxbrew/.linuxbrew/bin",
-			"/snap/bin",
-		}
-	case "windows":
-		// Windows uses ; as separator and rarely needs PATH adjustments for
-		// GUI launches, but include the typical Go install location for
-		// completeness. PATH manipulation is still safe here.
-		platform = []string{
-			`C:\Program Files\Go\bin`,
-			`C:\Go\bin`,
-		}
-	}
-
-	var userLocal []string
-	if home != "" {
-		userLocal = []string{
-			filepath.Join(home, ".local", "bin"),
-			filepath.Join(home, ".cargo", "bin"),
-			filepath.Join(home, ".nvm", "versions", "node"), // not a bin itself; harmless if missing
-			filepath.Join(home, "bin"),
-		}
-	}
-
-	// Order: platform package managers first (Homebrew on macOS, etc.),
-	// then Go toolchain, then user-local bins, then generic /usr/local.
-	candidates := make([]string, 0, len(platform)+len(goPaths)+len(userLocal)+len(common))
-	candidates = append(candidates, platform...)
-	candidates = append(candidates, goPaths...)
-	candidates = append(candidates, userLocal...)
-	candidates = append(candidates, common...)
-
-	return candidates
-}
-
-// augmentDesktopPATH prepends candidate directories to currentPATH if they
-// exist on disk and are not already present. It returns the resulting PATH
-// string and, when setEnv is true, also writes it to the process environment.
-func augmentDesktopPATH(currentPATH string, candidates []string, setEnv bool) string {
-	sep := string(os.PathListSeparator)
-
-	// Build a set of existing entries (after trimming) for quick lookup.
-	existing := strings.Split(currentPATH, sep)
-	seen := make(map[string]struct{}, len(existing))
-	for _, e := range existing {
-		e = strings.TrimSpace(e)
-		if e == "" {
-			continue
-		}
-		seen[filepath.Clean(e)] = struct{}{}
-	}
-
-	var prepend []string
-	for _, dir := range candidates {
-		dir = strings.TrimSpace(dir)
-		if dir == "" {
-			continue
-		}
-		clean := filepath.Clean(dir)
-		if _, ok := seen[clean]; ok {
-			continue
-		}
-		// Only add directories that exist on disk to keep PATH tidy.
-		if info, err := os.Stat(clean); err != nil || !info.IsDir() {
-			continue
-		}
-		prepend = append(prepend, clean)
-		seen[clean] = struct{}{}
-	}
-
-	if len(prepend) == 0 {
+	shellPATH, err := readUserShellPATH()
+	if err != nil || strings.TrimSpace(shellPATH) == "" {
 		return currentPATH
 	}
 
-	var newPATH string
-	if strings.TrimSpace(currentPATH) == "" {
-		newPATH = strings.Join(prepend, sep)
-	} else {
-		newPATH = strings.Join(prepend, sep) + sep + currentPATH
+	return mergeDesktopPATH(currentPATH, shellPATH, true)
+}
+
+func readUserShellPATH() (string, error) {
+	if runtime.GOOS == "windows" {
+		return "", errors.New("shell PATH bootstrap is not used on windows")
 	}
+
+	shell := strings.TrimSpace(os.Getenv("SHELL"))
+	if shell == "" {
+		shell = defaultDesktopShell()
+	}
+	if shell == "" {
+		return "", errors.New("no user shell found")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), desktopShellPATHTimeout)
+	defer cancel()
+
+	return readShellPATH(ctx, shell)
+}
+
+func defaultDesktopShell() string {
+	candidates := []string{"/bin/zsh", "/bin/bash", "/bin/sh"}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func readShellPATH(ctx context.Context, shell string) (string, error) {
+	command := fmt.Sprintf("printf '\\n%s%%s%s\\n' \"$PATH\"", desktopPathBeginMarker, desktopPathEndMarker)
+	variants := [][]string{
+		{"-lic", command},
+		{"-lc", command},
+		{"-c", command},
+	}
+
+	var lastErr error
+	for _, args := range variants {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+
+		cmd := exec.CommandContext(ctx, shell, args...)
+		out, err := cmd.CombinedOutput()
+		if path, ok := extractMarkedPATH(string(out)); ok {
+			return path, nil
+		}
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		lastErr = fmt.Errorf("shell output did not contain PATH marker")
+	}
+	if lastErr == nil {
+		lastErr = errors.New("failed to read shell PATH")
+	}
+	return "", lastErr
+}
+
+func extractMarkedPATH(output string) (string, bool) {
+	start := strings.LastIndex(output, desktopPathBeginMarker)
+	if start < 0 {
+		return "", false
+	}
+	start += len(desktopPathBeginMarker)
+
+	endRel := strings.Index(output[start:], desktopPathEndMarker)
+	if endRel < 0 {
+		return "", false
+	}
+
+	return strings.TrimSpace(output[start : start+endRel]), true
+}
+
+// mergeDesktopPATH places shell-initialized entries before the inherited GUI
+// PATH, preserving all existing entries and removing duplicates. It does not
+// guess or stat tool locations; the user's shell PATH is treated as the source
+// of truth.
+func mergeDesktopPATH(currentPATH, shellPATH string, setEnv bool) string {
+	sep := string(os.PathListSeparator)
+	mergedEntries := mergePATHEntries(strings.Split(shellPATH, sep), strings.Split(currentPATH, sep))
+	newPATH := strings.Join(mergedEntries, sep)
 
 	if setEnv {
 		_ = os.Setenv("PATH", newPATH)
 	}
 	return newPATH
+}
+
+func mergePATHEntries(entryGroups ...[]string) []string {
+	var merged []string
+	seen := make(map[string]struct{})
+	for _, entries := range entryGroups {
+		for _, entry := range entries {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+
+			key := pathEntryKey(entry)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			merged = append(merged, entry)
+		}
+	}
+	return merged
+}
+
+func pathEntryKey(entry string) string {
+	key := filepath.Clean(entry)
+	if runtime.GOOS == "windows" {
+		key = strings.ToLower(key)
+	}
+	return key
 }

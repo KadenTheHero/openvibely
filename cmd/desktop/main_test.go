@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -13,59 +14,50 @@ import (
 )
 
 // TestEnsureDesktopPATHMakesGoLocatable reproduces the "bash: go: command not
-// found" runtime issue: macOS GUI launches of Wails apps inherit launchd's
-// minimal PATH which excludes /usr/local/go/bin, /opt/homebrew/bin, and
-// $HOME/go/bin. After EnsureDesktopPATH runs at startup, `go` (when installed
-// in a standard location) must be locatable by subprocesses.
+// found" runtime issue: desktop GUI launches can inherit a minimal PATH that
+// excludes the user's shell-initialized toolchain locations. After
+// EnsureDesktopPATH runs at startup, `go` must be locatable from whatever
+// directory the user's shell adds to PATH.
 func TestEnsureDesktopPATHMakesGoLocatable(t *testing.T) {
-	goPath, err := exec.LookPath("go")
-	if err != nil {
-		t.Skipf("go not installed on host; skipping: %v", err)
-	}
-	goDir, err := filepath.EvalSymlinks(filepath.Dir(goPath))
-	if err != nil {
-		goDir = filepath.Dir(goPath)
+	if runtime.GOOS == "windows" {
+		t.Skip("shell PATH bootstrap is not used on windows")
 	}
 
-	// This test is meaningful only when the host's Go install lives in one of
-	// the standard candidate dirs our bootstrap knows about. Otherwise the
-	// fix would correctly rely on the user's shell init, which is out of
-	// scope for an in-process unit test.
-	standard := false
-	for _, c := range []string{
-		"/usr/local/go/bin",
-		"/opt/homebrew/bin",
-		filepath.Join(os.Getenv("HOME"), "go", "bin"),
-	} {
-		if resolved, err := filepath.EvalSymlinks(c); err == nil && resolved == goDir {
-			standard = true
-			break
-		}
-		if filepath.Clean(c) == goDir {
-			standard = true
-			break
-		}
+	tmp := t.TempDir()
+	goBin := filepath.Join(tmp, "not-a-standard-location", "go", "bin")
+	if err := os.MkdirAll(goBin, 0o755); err != nil {
+		t.Fatalf("mkdir fake go bin: %v", err)
 	}
-	if !standard {
-		t.Skipf("host go (%s) is not in a standard desktop-PATH candidate dir; skipping", goDir)
+	fakeGo := filepath.Join(goBin, "go")
+	if err := os.WriteFile(fakeGo, []byte("#!/bin/sh\necho go version test\n"), 0o755); err != nil {
+		t.Fatalf("write fake go: %v", err)
 	}
 
-	// Simulate a Wails GUI launch on macOS: launchd's minimal PATH.
+	shell := filepath.Join(tmp, "shell")
+	script := "#!/bin/sh\nPATH=\"" + goBin + ":$PATH\"\nfor arg do cmd=\"$arg\"; done\nexec /bin/sh -c \"$cmd\"\n"
+	if err := os.WriteFile(shell, []byte(script), 0o755); err != nil {
+		t.Fatalf("write shell: %v", err)
+	}
+
+	// Simulate a Wails GUI launch with a restricted desktop-session PATH.
 	minimal := "/usr/bin" + string(os.PathListSeparator) + "/bin" +
 		string(os.PathListSeparator) + "/usr/sbin" + string(os.PathListSeparator) + "/sbin"
 	t.Setenv("PATH", minimal)
+	t.Setenv("SHELL", shell)
 
-	if _, err := exec.LookPath("go"); err == nil {
-		t.Skipf("host has `go` available via minimal PATH=%q; cannot reproduce", minimal)
+	if found, err := exec.LookPath("go"); err == nil {
+		t.Fatalf("test setup expected `go` to be unavailable before bootstrap, found %q", found)
 	}
 
 	// Run the desktop PATH bootstrap exactly as cmd/desktop/main.go does.
 	newPATH := config.EnsureDesktopPATH()
-	if !strings.Contains(newPATH, goDir) {
-		t.Fatalf("expected EnsureDesktopPATH to add %q to PATH; got %q", goDir, newPATH)
+	if !strings.HasPrefix(newPATH, goBin+string(os.PathListSeparator)) {
+		t.Fatalf("expected EnsureDesktopPATH to use shell PATH with fake go dir first; got %q", newPATH)
 	}
-	if _, err := exec.LookPath("go"); err != nil {
+	if found, err := exec.LookPath("go"); err != nil {
 		t.Fatalf("after EnsureDesktopPATH, expected `go` to be locatable; PATH=%q err=%v", os.Getenv("PATH"), err)
+	} else if found != fakeGo {
+		t.Fatalf("expected fake go at %q, got %q", fakeGo, found)
 	}
 }
 

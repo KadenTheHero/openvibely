@@ -29,14 +29,12 @@ func main() {
 	setDesktopOAuthDefaults()
 	loadDesktopConfigFile()
 
-	// macOS/Linux GUI launches inherit a minimal PATH from launchd / the
-	// desktop session, which omits /usr/local/go/bin, /opt/homebrew/bin,
-	// $HOME/go/bin, and other developer-tool locations. Augment PATH once
-	// here so every subprocess (task shells, Claude/Codex CLI shelling out
-	// to `bash -c "go ..."`, plugin MCP servers, etc.) inherits it.
-	if newPATH := config.EnsureDesktopPATH(); newPATH != "" {
-		log.Printf("[desktop] PATH=%s", newPATH)
-	}
+	// GUI launches often inherit a minimal desktop-session PATH instead of the
+	// user's shell-initialized PATH. Merge the user's real shell PATH once here
+	// so every subprocess (task shells, Claude/Codex CLI shelling out to
+	// `bash -c "go ..."`, plugin MCP servers, etc.) inherits it.
+	config.EnsureDesktopPATH()
+	log.Printf("[desktop] initialized task PATH from user shell")
 
 	cfg := config.LoadWithMode(config.ModeDesktop)
 
