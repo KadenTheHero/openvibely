@@ -2,11 +2,11 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-05-09
-source: manual_conversion
-source_id: repo_root_MEMORY_md
+updated: 2026-05-14
+source: consolidation
+source_id: memory_consolidation_2026_05_14
 confidence: high
-title: Integrations and channels
+title: Integrations and Channels
 ---
 
 OpenVibely has channel integrations for GitHub, Slack, Telegram, and generic inbound webhooks. Integration UIs should separate discovery/add flows from management cards, render explicit connection states, and keep destructive action language consistent as `Delete` with confirmation.

@@ -2,11 +2,11 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-05-09
-source: manual_conversion
-source_id: repo_root_MEMORY_md
+updated: 2026-05-14
+source: consolidation
+source_id: memory_consolidation_2026_05_14
 confidence: high
-title: Provider architecture
+title: Provider Architecture
 ---
 
 Provider logic is isolated in adapter packages under `internal/llm`: OpenAI, Anthropic, and Ollama. Provider routing goes through `internal/service/provider_adapter.go` and shared contracts/normalization/streaming packages.

@@ -2,11 +2,11 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-05-09
-source: manual_conversion
-source_id: repo_root_MEMORY_md
+updated: 2026-05-14
+source: consolidation
+source_id: memory_consolidation_2026_05_14
 confidence: high
-title: Chat and task-thread behavior
+title: Chat and Task-Thread Behavior
 ---
 
 Interactive chat bypasses worker capacity limits. Task-thread follow-ups respect worker limits and use `processStreamingResponse` with `IsTaskFollowup=true`.

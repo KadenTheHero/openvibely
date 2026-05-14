@@ -2,12 +2,14 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-05-13
+updated: 2026-05-14
 source: consolidation
-source_id: memory_consolidation_2026_05_13
+source_id: memory_consolidation_2026_05_14
 confidence: high
 title: Coding Agent Product Discipline
 ---
+
+When the user asks a design, behavior, or feasibility question, answer the question directly and do not make implementation changes unless they explicitly request changes. If a prior response made an unsolicited code change, acknowledge it and revert or ask before proceeding.
 
 When implementing product behavior, identify the underlying product concept before coding. Do not derive major behavior from incidental implementation shape such as tool lists, default flags, or temporary code structure; model product policy explicitly in configuration, state, or data model when it affects workflow, isolation, data writes, recovery, or review.
 

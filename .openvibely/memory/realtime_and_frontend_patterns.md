@@ -2,11 +2,11 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-05-13
-source: manual_conversion
-source_id: repo_root_MEMORY_md
+updated: 2026-05-14
+source: consolidation
+source_id: memory_consolidation_2026_05_14
 confidence: high
-title: Realtime and frontend patterns
+title: Realtime and Frontend Patterns
 ---
 
 OpenVibely uses server-rendered HTMX/templ UI with shared SSE-style live updates. Prefer one shared per-tab sidebar-managed SSE stream with in-browser event fan-out rather than opening separate long-lived EventSources for each surface.
@@ -23,6 +23,7 @@ Task Changes rendering safety:
 - Diff viewer uses GitHub-style load envelopes: max 300 files considered, max total loadable budget 20,000 lines or 1MB raw diff, max single-file budget 20,000 lines or 500KB raw diff, auto-load threshold 400 lines or 20KB per file.
 - Files above auto-load threshold render `Load diff` placeholders when still loadable; beyond single-file/total budgets render non-loadable placeholders with reason text.
 - Diff parsing synthesizes a fallback hunk when diff content lines exist without explicit `@@` header.
+- Deleted files in task diffs render as normal file cards with a `Deleted` status badge; textual deletions show removed-line hunks, while deleted binary/empty files without hunks show centered summary text such as `Binary file deleted.` or `Empty file deleted.`
 - Live diff refreshes are gated by active-tab checks. Task-detail file-change listeners/SSE handlers are explicitly rebound with cleanup so HTMX swaps do not accumulate stale listeners or leave SSE running after navigation.
 - Task completion on the detail page should update in place through live update/HTMX/SSE mechanisms; avoid hard/full browser refreshes after completion so active tab, scroll position, and context remain stable.
 - Task-thread SSE completion should finish dynamically in place: force the final streamed render, clear streaming indicators/state, and avoid post-stream `htmx.ajax()` reconciliation/refreshes of either `#task-thread-view` or the whole task shell.

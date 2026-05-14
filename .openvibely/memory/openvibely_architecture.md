@@ -2,11 +2,11 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-05-09
-source: manual_conversion
-source_id: repo_root_MEMORY_md
+updated: 2026-05-14
+source: consolidation
+source_id: memory_consolidation_2026_05_14
 confidence: high
-title: OpenVibely architecture
+title: OpenVibely Architecture
 ---
 
 OpenVibely is an open-source Go application for automated task scheduling and AI-powered execution. Users create tasks, schedule them, and have LLM agents execute them automatically.
@@ -32,6 +32,13 @@ Dual mode architecture:
 - Env vars override mode defaults. Desktop users who set `DATABASE_PATH` in env get that path.
 - Desktop defaults to localhost OAuth callback flow (`APP_BASE_URL` unset). Server/VPS mode should set `APP_BASE_URL` for hosted callbacks.
 - Do not fork backend code between server and desktop; both modes share `internal/server`.
+
+Storage/deployment compatibility:
+- Memory storage changes must remain backward-compatible for Docker/VPS, local server, and desktop deployments.
+- Docker/VPS should persist memory under `/data/memory` when `/data` is mounted.
+- Local server should not unexpectedly move an existing `./openvibely.db`.
+- Desktop should continue using OS app-data defaults unless the user opts into a shared app-data root.
+- When debugging local runtime state, verify the active process, port, and database path before assuming `.openvibely/openvibely.db`. In the 2026-05-09 local server incident, the active latest server on port `3001` was using repo-root `openvibely.db`, which contained the memory extraction runs.
 
 OAuth and base URLs:
 - Model OAuth initiate/callback resolves absolute app URLs via shared `buildAbsoluteURL()`: `APP_BASE_URL` first, then forwarded/request host fallback.
