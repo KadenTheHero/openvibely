@@ -11,17 +11,27 @@ import (
 // enqueueMemoryExtractionForChat fires a memory extraction pass for a
 // completed chat/thread interaction. Safe to call when the memory service is
 // not wired (no-op).
+//
+// Chat page interactions (interactive /chat and /api/chat/message) are
+// intentionally NOT enqueued for memory extraction: their prompts are
+// transient orchestration and mode-control text (Orchestrate/Plan, "Switch
+// to Orchestrate", <proposed_plan>, etc.) that must never end up in durable
+// project memory. Task-thread follow-ups remain eligible because they
+// represent durable work against a real task.
 func (h *Handler) enqueueMemoryExtractionForChat(params streamingResponseParams, output string) {
 	if h.memorySvc == nil || params.ProjectID == "" {
 		return
 	}
-	kind := memory.SourceChat
-	if params.IsTaskFollowup {
-		kind = memory.SourceThread
+	if !params.IsTaskFollowup {
+		// Chat page surface — skip entirely. The memory package also rejects
+		// SourceChat/SourceAPIChat defensively via ShouldExtract, but
+		// short-circuiting here avoids creating a "nothing" run row for
+		// every chat message and keeps the Schedule/Status UI clean.
+		return
 	}
 	h.memorySvc.EnqueueExtraction(memory.Interaction{
 		ProjectID:    params.ProjectID,
-		SourceKind:   kind,
+		SourceKind:   memory.SourceThread,
 		SourceID:     params.ExecID,
 		UserText:     params.Message,
 		AssistantOut: output,

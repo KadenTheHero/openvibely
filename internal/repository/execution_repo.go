@@ -97,6 +97,36 @@ func (r *ExecutionRepo) ListByProject(ctx context.Context, projectID string, lim
 	return execs, rows.Err()
 }
 
+// ListByProjectExcludingChat returns recent executions for a project but
+// excludes executions whose owning task is the internal Chat category. This
+// is used by memory consolidation so Chat page prompts and mode-control text
+// never contribute to durable memory; task and task-thread follow-up
+// executions are still included.
+func (r *ExecutionRepo) ListByProjectExcludingChat(ctx context.Context, projectID string, limit int) ([]models.Execution, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.error_message,
+		 e.tokens_used, e.duration_ms, e.is_followup, e.diff_output, e.cli_session_id, e.started_at, e.completed_at
+		 FROM executions e
+		 JOIN tasks t ON t.id = e.task_id
+		 WHERE t.project_id = ? AND t.category != 'chat'
+		 ORDER BY e.started_at DESC LIMIT ?`, projectID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing project executions excluding chat: %w", err)
+	}
+	defer rows.Close()
+
+	var execs []models.Execution
+	for rows.Next() {
+		var e models.Execution
+		if err := rows.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
+			&e.Output, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup, &e.DiffOutput, &e.CliSessionID, &e.StartedAt, &e.CompletedAt); err != nil {
+			return nil, fmt.Errorf("scanning execution: %w", err)
+		}
+		execs = append(execs, e)
+	}
+	return execs, rows.Err()
+}
+
 func (r *ExecutionRepo) GetByID(ctx context.Context, id string) (*models.Execution, error) {
 	var e models.Execution
 	err := r.db.QueryRowContext(ctx,

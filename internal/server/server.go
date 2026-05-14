@@ -282,6 +282,12 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 					return
 				}
 			}
+			// Internal Chat-category tasks (created by /chat and
+			// /api/chat/message) carry transient orchestration and
+			// mode-control text and must never feed durable memory.
+			if t.Category == models.CategoryChat {
+				return
+			}
 			cancelled := runErr != nil && strings.Contains(strings.ToLower(runErr.Error()), "cancel")
 			memorySvc.EnqueueExtraction(memory.Interaction{
 				ProjectID:  t.ProjectID,

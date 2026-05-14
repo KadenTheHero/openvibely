@@ -42,13 +42,28 @@ const (
 	SkipCancelled       SaveDecisionReason = "interaction cancelled"
 	SkipEmpty           SaveDecisionReason = "no meaningful user prose"
 	SkipSecretDominated SaveDecisionReason = "interaction dominated by secrets"
+	// SkipChatSurface indicates the interaction originated from a Chat page
+	// surface (interactive /chat or /api/chat/message). Chat prompts are
+	// transient orchestration and mode-control text, not durable signal, so
+	// they are excluded from memory extraction entirely. Task and task-thread
+	// follow-up interactions remain eligible.
+	SkipChatSurface SaveDecisionReason = "chat page interaction excluded from memory"
 )
+
+// IsChatSurface reports whether the source kind represents a Chat page
+// interaction whose prompts must not contribute to durable memory.
+func IsChatSurface(kind SourceKind) bool {
+	return kind == SourceChat || kind == SourceAPIChat
+}
 
 // ShouldExtract returns the reason an interaction should be skipped, or empty
 // when it is eligible for the model-backed extraction pass.
 func ShouldExtract(enabled bool, in Interaction) SaveDecisionReason {
 	if !enabled {
 		return SkipDisabled
+	}
+	if IsChatSurface(in.SourceKind) {
+		return SkipChatSurface
 	}
 	if in.Cancelled {
 		return SkipCancelled

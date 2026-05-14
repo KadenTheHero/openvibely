@@ -104,7 +104,12 @@ func (s *MemoryService) recentProjectExecutions(ctx context.Context, projectID s
 	if s.execRepo == nil {
 		return nil
 	}
-	execs, err := s.execRepo.ListByProject(ctx, projectID, limit)
+	// Chat page interactions (CategoryChat tasks) are intentionally excluded:
+	// the Chat surface carries transient orchestration/mode-control text
+	// (Orchestrate/Plan, "Switch to Orchestrate", <proposed_plan>, etc.) and
+	// prompts that should not be distilled into durable project memory. Task
+	// and task-thread follow-up executions remain eligible.
+	execs, err := s.execRepo.ListByProjectExcludingChat(ctx, projectID, limit)
 	if err != nil {
 		return nil
 	}

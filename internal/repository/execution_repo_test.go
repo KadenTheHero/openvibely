@@ -681,3 +681,67 @@ func TestExecutionRepo_MultiTurnOrderingWithReRuns(t *testing.T) {
 		t.Fatalf("expected 4 executions from ListByTask, got %d", len(descExecs))
 	}
 }
+
+// TestExecutionRepo_ListByProjectExcludingChat verifies that memory
+// consolidation's execution snippets exclude Chat-category tasks so chat
+// prompts and orchestration/mode-control text never feed durable memory,
+// while task and task-thread follow-up executions still surface.
+func TestExecutionRepo_ListByProjectExcludingChat(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	agentRepo := NewLLMConfigRepo(db)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+
+	agent, _ := agentRepo.GetDefault(ctx)
+
+	chatTask := &models.Task{ProjectID: "default", Title: "Chat 12:00:00.000: hi", Category: models.CategoryChat, Status: models.StatusPending, Prompt: "switch to orchestrate mode"}
+	if err := taskRepo.Create(ctx, chatTask); err != nil {
+		t.Fatalf("create chat task: %v", err)
+	}
+	taskTask := &models.Task{ProjectID: "default", Title: "Real task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "implement feature"}
+	if err := taskRepo.Create(ctx, taskTask); err != nil {
+		t.Fatalf("create real task: %v", err)
+	}
+
+	mkExec := func(taskID, prompt string, followup bool) string {
+		exec := &models.Execution{TaskID: taskID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: prompt, IsFollowup: followup}
+		if err := execRepo.Create(ctx, exec); err != nil {
+			t.Fatalf("create exec: %v", err)
+		}
+		if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "out", "", 1, 1); err != nil {
+			t.Fatalf("complete exec: %v", err)
+		}
+		return exec.ID
+	}
+	chatExecID := mkExec(chatTask.ID, "Plan: refactor", false)
+	taskExecID := mkExec(taskTask.ID, "implement feature", false)
+	threadExecID := mkExec(taskTask.ID, "follow-up question", true)
+
+	// Plain ListByProject must include all of them (used by other surfaces).
+	all, err := execRepo.ListByProject(ctx, "default", 100)
+	if err != nil {
+		t.Fatalf("ListByProject: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("ListByProject expected 3 execs, got %d", len(all))
+	}
+
+	got, err := execRepo.ListByProjectExcludingChat(ctx, "default", 100)
+	if err != nil {
+		t.Fatalf("ListByProjectExcludingChat: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, e := range got {
+		ids[e.ID] = true
+	}
+	if ids[chatExecID] {
+		t.Errorf("chat execution %s must be excluded from memory consolidation source", chatExecID)
+	}
+	if !ids[taskExecID] {
+		t.Errorf("task execution %s must remain in memory consolidation source", taskExecID)
+	}
+	if !ids[threadExecID] {
+		t.Errorf("task-thread follow-up execution %s must remain in memory consolidation source", threadExecID)
+	}
+}
