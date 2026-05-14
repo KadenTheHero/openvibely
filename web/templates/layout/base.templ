@@ -2673,14 +2673,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 			<!-- Desktop external-link bridge -->
 			<script>
-				// In Wails desktop mode, the embedded WebView does not handle
-				// target="_blank" or new-window navigation, so clicks on anchors
-				// like the Task Changes "View PR" link silently do nothing.
-				// Intercept clicks on external http(s) anchors and route them
-				// through the Wails Browser.OpenURL bridge so they open in the
-				// user's real system browser. In web/server mode this helper is
-				// inert (it only runs when window.wails.Browser.OpenURL exists),
-				// preserving normal anchor behavior.
+					// In Wails desktop mode, the embedded WebView does not handle
+					// target="_blank" or new-window navigation, so clicks on anchors
+					// like the Task Changes "View PR" link silently do nothing.
+					// Intercept clicks on external links and route them through the
+					// Wails Browser.OpenURL bridge or the server-side desktop opener
+					// so they open in the user's real system browser. In web/server
+					// mode this helper is inert, preserving normal anchor behavior.
 				(function() {
 					function isDesktopRuntime() {
 						try {
@@ -2705,9 +2704,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					// This is the most reliable path in desktop mode because the
 					// Wails runtime JS is not always injected when the WebView loads
 					// from an HTTP server URL rather than the Wails asset server.
-					function openExternalViaBackend(url) {
-						fetch('/open-external?url=' + encodeURIComponent(url))
-							.then(function(r) {
+						function openExternalViaBackend(url) {
+							fetch('/open-external?url=' + encodeURIComponent(url), {
+								method: 'POST',
+								headers: { 'X-OpenVibely-Desktop': '1' }
+							})
+								.then(function(r) {
 								if (!r.ok) { throw new Error('HTTP ' + r.status); }
 							})
 							.catch(function() {

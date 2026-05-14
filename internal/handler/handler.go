@@ -281,7 +281,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 
 	// Desktop system-browser redirect (desktop mode only; 404 in server mode)
-	e.GET("/open-external", h.OpenExternal)
+	e.POST("/open-external", h.OpenExternal)
 
 	// Authentication
 	e.GET("/login", h.AuthLoginPage)

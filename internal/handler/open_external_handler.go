@@ -13,13 +13,16 @@ import (
 // Swapped out in tests.
 var openExternalURL = browser.OpenURL
 
-// OpenExternal opens a validated HTTPS URL in the system browser.
+// OpenExternal opens a validated URL in the system browser.
 // It is only active in desktop mode; in server mode it returns 404.
 //
-// GET /open-external?url=<encoded-url>
+// POST /open-external?url=<encoded-url>
 func (h *Handler) OpenExternal(c echo.Context) error {
 	if !h.desktopMode {
 		return echo.ErrNotFound
+	}
+	if c.Request().Method != http.MethodPost || c.Request().Header.Get("X-OpenVibely-Desktop") != "1" {
+		return echo.ErrForbidden
 	}
 
 	rawURL := strings.TrimSpace(c.QueryParam("url"))
@@ -28,8 +31,8 @@ func (h *Handler) OpenExternal(c echo.Context) error {
 	}
 
 	parsed, err := url.Parse(rawURL)
-	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "url must be a valid http/https URL"})
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http" && parsed.Scheme != "mailto") {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "url must be a valid http/https/mailto URL"})
 	}
 
 	if err := openExternalURL(rawURL); err != nil {

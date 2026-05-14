@@ -41,11 +41,10 @@ func TestTaskChangesWorktreeContent_RendersViewPRInGitHubSection(t *testing.T) {
 	if !strings.Contains(out, "View PR #42") {
 		t.Fatal("expected View PR link in dropdown")
 	}
-	// The View PR action must point at the absolute GitHub PR URL and use
-	// target="_blank" so the desktop bridge (in base layout) routes the click
-	// through window.wails.Browser.OpenURL to the system browser. Without the
-	// absolute URL the Wails WebView resolves it against wails://wails/ and
-	// the click does nothing.
+		// The View PR action must point at the absolute GitHub PR URL and use
+		// target="_blank" so the desktop bridge (in base layout) routes the click
+		// to the system browser instead of relying on Wails WebView new-window
+		// navigation, which silently drops the click.
 	if !strings.Contains(out, `href="https://github.com/openvibely/openvibely/pull/42"`) {
 		t.Fatal("expected View PR anchor to use absolute GitHub PR URL")
 	}
@@ -108,7 +107,7 @@ func TestTaskChangesWorktreeContent_MergedStatusWithoutDiffHidesLocalSection(t *
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()
-	// When merged and no diff remains, local merge options should not appear even with flag on.
+		// When merged and no diff remains, local merge options should not appear.
 	if strings.Contains(out, "/worktree/merge") {
 		t.Fatal("did not expect merge endpoint actions when already merged")
 	}
