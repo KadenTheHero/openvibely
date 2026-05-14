@@ -2700,37 +2700,45 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						var lower = String(href).toLowerCase();
 						return lower.indexOf('http://') === 0 || lower.indexOf('https://') === 0 || lower.indexOf('mailto:') === 0;
 					}
+					// openExternalViaBackend calls the server-side /open-external
+					// endpoint, which uses the OS browser opener (browser.OpenURL).
+					// This is the most reliable path in desktop mode because the
+					// Wails runtime JS is not always injected when the WebView loads
+					// from an HTTP server URL rather than the Wails asset server.
+					function openExternalViaBackend(url) {
+						fetch('/open-external?url=' + encodeURIComponent(url))
+							.then(function(r) {
+								if (!r.ok) { throw new Error('HTTP ' + r.status); }
+							})
+							.catch(function() {
+								if (window.showToast) {
+									window.showToast('Failed to open in system browser: ' + url, 'failed');
+								}
+							});
+					}
 					function callWailsOpenURL(url) {
+						// Try Wails v3 Browser.OpenURL (injected runtime).
 						try {
 							if (window.wails && window.wails.Browser && typeof window.wails.Browser.OpenURL === 'function') {
 								var p = window.wails.Browser.OpenURL(url);
 								if (p && typeof p.then === 'function') {
-									p.catch(function(err) {
-										if (window.showToast) {
-											window.showToast('Failed to open link in system browser: ' + (err && err.message ? err.message : err), 'failed');
-										}
-									});
+									// If the Wails API rejects, fall back to the backend endpoint.
+									p.catch(function() { openExternalViaBackend(url); });
 								}
 								return true;
 							}
+							// Older Wails runtime shape.
 							if (window.wails && typeof window.wails.OpenURL === 'function') {
-								// Older runtime shape.
 								var p2 = window.wails.OpenURL(url);
 								if (p2 && typeof p2.then === 'function') {
-									p2.catch(function(err) {
-										if (window.showToast) {
-											window.showToast('Failed to open link in system browser: ' + (err && err.message ? err.message : err), 'failed');
-										}
-									});
+									p2.catch(function() { openExternalViaBackend(url); });
 								}
 								return true;
 							}
-						} catch (err) {
-							if (window.showToast) {
-								window.showToast('Failed to open link in system browser', 'failed');
-							}
-						}
-						return false;
+						} catch (_) { /* fall through */ }
+						// Wails JS API unavailable — use server-side opener.
+						openExternalViaBackend(url);
+						return true; // handled asynchronously
 					}
 					function handleAnchorClick(event) {
 						if (!isDesktopRuntime()) return;
@@ -2758,11 +2766,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 						event.preventDefault();
 						event.stopPropagation();
-						if (!callWailsOpenURL(absolute)) {
-							if (window.showToast) {
-								window.showToast('No system browser bridge available to open: ' + absolute, 'failed');
-							}
-						}
+						callWailsOpenURL(absolute);
 					}
 					document.addEventListener('click', handleAnchorClick, true);
 					// Expose for callers that need an explicit opener (e.g., dropdown item buttons).

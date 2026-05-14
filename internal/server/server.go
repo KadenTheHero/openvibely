@@ -443,6 +443,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	}
 	h.SetLocalRepoPathEnabled(cfg.EnableLocalRepoPath)
 	h.SetTaskChangesMergeOptionsEnabled(cfg.EnableTaskChangesMergeOptions)
+	h.SetDesktopMode(cfg.Mode == config.ModeDesktop)
 	h.SetAuthConfig(authCfg)
 	e.Use(h.AuthMiddleware())
 	llmSvc.SetAgentRepo(agentRepo)

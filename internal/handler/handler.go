@@ -59,6 +59,7 @@ type Handler struct {
 	webhookRepo                    *repository.WebhookRepo
 	memorySvc                      *service.MemoryService
 	authCfg                        *auth.Config
+	desktopMode                    bool
 
 	loginFailuresMu     sync.Mutex
 	loginFailureTimes   []time.Time
@@ -214,6 +215,12 @@ func (h *Handler) SetTaskChangesMergeOptionsEnabled(enabled bool) {
 	h.taskChangesMergeOptionsEnabled = &v
 }
 
+// SetDesktopMode marks the handler as running inside the Wails desktop app.
+// When true, the /open-external endpoint will open URLs in the system browser.
+func (h *Handler) SetDesktopMode(desktop bool) {
+	h.desktopMode = desktop
+}
+
 func (h *Handler) SetProjectFolderPicker(picker ProjectFolderPicker) {
 	h.projectFolderPicker = picker
 }
@@ -278,6 +285,9 @@ func parseIntClamped(value string, min, max int) int {
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Swagger API documentation
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
+
+	// Desktop system-browser redirect (desktop mode only; 404 in server mode)
+	e.GET("/open-external", h.OpenExternal)
 
 	// Authentication
 	e.GET("/login", h.AuthLoginPage)

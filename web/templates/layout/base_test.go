@@ -75,6 +75,14 @@ func TestToastDismissalCleanup(t *testing.T) {
 	if !strings.Contains(html, "window.openExternalURL") {
 		t.Error("base layout must expose window.openExternalURL helper for explicit external-link opens")
 	}
+	// Verify the backend-endpoint fallback so that the system browser opens even
+	// when the Wails JS runtime is not injected (HTTP-served WebView).
+	if !strings.Contains(html, "/open-external") {
+		t.Error("desktop external-link bridge must fall back to /open-external backend endpoint when Wails JS API is unavailable")
+	}
+	if !strings.Contains(html, "openExternalViaBackend") {
+		t.Error("desktop external-link bridge must define openExternalViaBackend as the server-side fallback")
+	}
 
 	// Verify theme toggle is NOT present in top navbar (moved to sidebar footer).
 	if strings.Contains(html, "navbar-theme-toggle") {
