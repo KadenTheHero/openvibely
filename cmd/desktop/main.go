@@ -29,6 +29,15 @@ func main() {
 	setDesktopOAuthDefaults()
 	loadDesktopConfigFile()
 
+	// macOS/Linux GUI launches inherit a minimal PATH from launchd / the
+	// desktop session, which omits /usr/local/go/bin, /opt/homebrew/bin,
+	// $HOME/go/bin, and other developer-tool locations. Augment PATH once
+	// here so every subprocess (task shells, Claude/Codex CLI shelling out
+	// to `bash -c "go ..."`, plugin MCP servers, etc.) inherits it.
+	if newPATH := config.EnsureDesktopPATH(); newPATH != "" {
+		log.Printf("[desktop] PATH=%s", newPATH)
+	}
+
 	cfg := config.LoadWithMode(config.ModeDesktop)
 
 	log.Println("[desktop] starting OpenVibely desktop app...")
