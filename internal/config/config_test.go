@@ -210,6 +210,21 @@ func TestLoadWithMode_DesktopDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadWithMode_DoesNotConfigureAppOwnedMemoryRoot(t *testing.T) {
+	for _, k := range []string{"OPENVIBELY_APP_DATA_DIR", "OPENVIBELY_MEMORY_ROOT"} {
+		prev := os.Getenv(k)
+		os.Unsetenv(k)
+		defer os.Setenv(k, prev)
+	}
+
+	for _, mode := range []RuntimeMode{ModeServer, ModeDesktop} {
+		cfg := LoadWithMode(mode)
+		if strings.Contains(cfg.ProjectRepoRoot, "memory") || strings.Contains(cfg.DatabasePath, "memory") {
+			t.Fatalf("%s config unexpectedly routes storage through memory root: %#v", mode, cfg)
+		}
+	}
+}
+
 func TestLoadWithMode_AppDataDirRootsServerAndDesktopStorage(t *testing.T) {
 	dataDir := t.TempDir()
 	for _, k := range []string{"PORT", "DATABASE_PATH", "PROJECT_REPO_ROOT", "OPENVIBELY_APP_DATA_DIR", "OPENVIBELY_ENABLE_LOCAL_REPO_PATH"} {

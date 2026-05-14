@@ -24,6 +24,80 @@ func newStore(t *testing.T) *FileStore {
 	return NewFileStore(r)
 }
 
+func TestFileStore_EnsureProjectCreatesDirectoryAndIndexWhenMissing(t *testing.T) {
+	s := newStore(t)
+	dir, err := s.EnsureProject("p1")
+	if err != nil {
+		t.Fatalf("EnsureProject: %v", err)
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("expected memory dir to exist: info=%v err=%v", info, err)
+	}
+	idx, err := s.ReadIndex("p1")
+	if err != nil {
+		t.Fatalf("ReadIndex: %v", err)
+	}
+	if !strings.Contains(idx, "# Project Memory") || !strings.Contains(idx, "No topic files") {
+		t.Fatalf("unexpected default index: %q", idx)
+	}
+}
+
+func TestFileStore_EnsureProjectCreatesMissingIndexInExistingDirectory(t *testing.T) {
+	s := newStore(t)
+	dir, err := s.EnsureProject("p1")
+	if err != nil {
+		t.Fatalf("EnsureProject first: %v", err)
+	}
+	if err := os.Remove(dir + string(os.PathSeparator) + IndexFileName); err != nil {
+		t.Fatalf("remove index: %v", err)
+	}
+	if _, err := s.EnsureProject("p1"); err != nil {
+		t.Fatalf("EnsureProject second: %v", err)
+	}
+	idx, err := s.ReadIndex("p1")
+	if err != nil {
+		t.Fatalf("ReadIndex: %v", err)
+	}
+	if strings.TrimSpace(idx) == "" {
+		t.Fatal("expected missing index to be recreated")
+	}
+}
+
+func TestFileStore_EnsureProjectDoesNotRewriteExistingIndex(t *testing.T) {
+	s := newStore(t)
+	if _, err := s.EnsureProject("p1"); err != nil {
+		t.Fatalf("EnsureProject: %v", err)
+	}
+	custom := "# Custom Memory\n\n- keep this\n"
+	if err := s.WriteIndex("p1", custom); err != nil {
+		t.Fatalf("WriteIndex: %v", err)
+	}
+	if _, err := s.EnsureProject("p1"); err != nil {
+		t.Fatalf("EnsureProject second: %v", err)
+	}
+	got, err := s.ReadIndex("p1")
+	if err != nil {
+		t.Fatalf("ReadIndex: %v", err)
+	}
+	if got != custom {
+		t.Fatalf("index was rewritten: %q", got)
+	}
+}
+
+func TestFileStore_ListFilesSkipsMissingTopicFiles(t *testing.T) {
+	s := newStore(t)
+	if _, err := s.EnsureProject("p1"); err != nil {
+		t.Fatalf("EnsureProject: %v", err)
+	}
+	files, err := s.ListFiles("p1")
+	if err != nil {
+		t.Fatalf("ListFiles: %v", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("expected no topic files, got %+v", files)
+	}
+}
+
 func TestFileStore_WriteThenRead(t *testing.T) {
 	s := newStore(t)
 	if _, err := s.EnsureProject("p1"); err != nil {

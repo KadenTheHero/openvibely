@@ -63,6 +63,10 @@ func TestMemoryServiceEnsureProjectUsesRepoMemoryDir(t *testing.T) {
 	if info, err := os.Stat(wantDir); err != nil || !info.IsDir() {
 		t.Fatalf("expected repo memory dir to exist: info=%v err=%v", info, err)
 	}
+	wantIndex := wantDir + string(os.PathSeparator) + memory.IndexFileName
+	if _, err := os.Stat(wantIndex); err != nil {
+		t.Fatalf("expected repo-local memory index to exist: %v", err)
+	}
 }
 
 func TestMemoryServiceEnsureProjectCreatesMemoryConsolidatorAgentAndSchedule(t *testing.T) {

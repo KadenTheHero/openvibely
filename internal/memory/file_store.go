@@ -75,9 +75,30 @@ func (s *FileStore) WithProjectLock(projectID string, fn func() error) error {
 	return fn()
 }
 
-// EnsureProject creates the per-project directory layout. Idempotent.
+const defaultIndexContents = `# Project Memory
+
+This index tracks durable top-level memory topic files in this directory.
+
+- No topic files have been created yet.
+`
+
+// EnsureProject creates the per-project directory layout and initializes the
+// MEMORY.md index when it is missing. Idempotent.
 func (s *FileStore) EnsureProject(projectID string) (string, error) {
-	return s.resolver.EnsureProjectDir(projectID)
+	dir, err := s.resolver.EnsureProjectDir(projectID)
+	if err != nil {
+		return "", err
+	}
+	indexPath := filepath.Join(dir, IndexFileName)
+	if _, err := os.Stat(indexPath); err == nil {
+		return dir, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("memory: stat index: %w", err)
+	}
+	if err := atomicWrite(indexPath, []byte(defaultIndexContents)); err != nil {
+		return "", err
+	}
+	return dir, nil
 }
 
 // ListFiles returns top-level memory markdown files for a project, excluding
