@@ -15,9 +15,8 @@ import (
 
 // TestEnsureDesktopPATHMakesGoLocatable reproduces the "bash: go: command not
 // found" runtime issue: desktop GUI launches can inherit a minimal PATH that
-// excludes the user's shell-initialized toolchain locations. After
-// EnsureDesktopPATH runs at startup, `go` must be locatable from whatever
-// directory the user's shell adds to PATH.
+// excludes paths initialized by the user's shell. After EnsureDesktopPATH runs
+// at startup, `go` must be locatable when the user's shell adds it to PATH.
 func TestEnsureDesktopPATHMakesGoLocatable(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell PATH bootstrap is not used on windows")

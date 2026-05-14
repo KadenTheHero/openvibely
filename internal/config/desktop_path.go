@@ -22,9 +22,8 @@ const (
 // OpenVibely desktop app inherit the same PATH the user gets from their shell.
 //
 // macOS GUI applications launched from Finder/Dock inherit launchd's minimal
-// PATH instead of the user's login/interactive shell PATH. That makes tools
-// installed through Go, Homebrew, asdf, mise, nix, cargo, etc. disappear from
-// task subprocesses even though they work in Terminal.
+// PATH instead of the user's login/interactive shell PATH. That makes commands
+// available in Terminal disappear from task subprocesses.
 //
 // Server/VPS mode is unaffected because cmd/server never calls this function;
 // it lives in package config so it can be unit-tested without depending on
