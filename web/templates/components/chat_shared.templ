@@ -1541,15 +1541,24 @@ templ ChatAutoScrollScript() {
 				return !this.userScrolledUp && window.chatAutoScroll.isNearBottom(this.element);
 			},
 
-			resetOnUserSend: function() {
-				this.userScrolledUp = false;
-				if (this.element) {
-					window.chatAutoScroll.scrollToBottom(this.element, false);
-				}
-			},
+				resetOnUserSend: function() {
+					this.userScrolledUp = false;
+					if (this.element) {
+						window.chatAutoScroll.scrollToBottom(this.element, false);
+					}
+				},
 
-			autoScroll: function() {
-				if (this.shouldAutoScroll() && this.element) {
+				snapshot: function() {
+					if (!this.element) return { scrollTop: 0, userScrolledUp: false, pinned: true };
+					var nearBottom = window.chatAutoScroll.isNearBottom(this.element);
+					return {
+						scrollTop: this.element.scrollTop || 0,
+						userScrolledUp: this.userScrolledUp || !nearBottom,
+						pinned: !this.userScrolledUp && nearBottom
+					};
+				},
+
+				autoScroll: function() {				if (this.shouldAutoScroll() && this.element) {
 					window.chatAutoScroll.scrollToBottom(this.element, true);
 				}
 			},

@@ -406,34 +406,32 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				return persistedMode;
 			};
 
-			window.hidePlanCompletionPrompt = function() {
-				window._chatPlanPromptLatched = false;
-				var prompt = document.getElementById('chat-plan-complete-prompt');
-				if (!prompt) return;
-				prompt.classList.add('hidden');
-				prompt.removeAttribute('data-has-plan-completion');
-			};
+				window.hidePlanCompletionPrompt = function() {
+					var prompt = document.getElementById('chat-plan-complete-prompt');
+					if (!prompt) return;
+					prompt.classList.add('hidden');
+					prompt.removeAttribute('data-has-plan-completion');
+				};
 
-			window.showPlanCompletionPrompt = function() {
-				window._chatPlanPromptLatched = true;
-				var prompt = document.getElementById('chat-plan-complete-prompt');
-				if (!prompt) return;
-				prompt.classList.remove('hidden');
-			};
+				window.showPlanCompletionPrompt = function() {
+					var prompt = document.getElementById('chat-plan-complete-prompt');
+					if (!prompt) return;
+					prompt.classList.remove('hidden');
+				};
 
-			window.applyChatBubbleTransforms = function(chatMessages) {
-				if (!chatMessages) return;
-				// Re-hydrate assistant bubbles from raw content first (tool/thinking cards).
-				// This keeps hard-refresh behavior consistent with task-thread rendering
-				// and prevents marker-cleanup passes from stripping tool markers before
-				// tool-card rendering runs.
-				if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
-				chatMessages.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg').forEach(function(bubble) {
-					if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
-					if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
-					if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
-				});
-			};
+				window.applyChatBubbleTransforms = function(chatMessages) {
+					if (!chatMessages) return;
+					// Re-hydrate assistant bubbles from raw content first (tool/thinking cards).
+					// This keeps hard-refresh behavior consistent with task-thread rendering
+					// and prevents marker-cleanup passes from stripping tool markers before
+					// tool-card rendering runs.
+					if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+					chatMessages.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg').forEach(function(bubble) {
+						if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
+						if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
+						if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+					});
+				};
 
 			// Explicit refresh helper: force assistant bubble hydration from raw content.
 			window.rehydrateChatAssistantBubbles = function() {
@@ -515,12 +513,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					}
 				}
 
-				// Reconnect/hydration scans can transiently return empty text before DOM settles.
-				// Preserve previously-earned CTA visibility in that case.
-				if (!fromCompletedEvent && !text && window._chatPlanPromptLatched) {
-					window.showPlanCompletionPrompt();
-					return;
-				}
 
 				window.hidePlanCompletionPrompt();
 			};
@@ -937,6 +929,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							setTimeout(function() {
 								if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 							}, 0);
+							return;
+						}
+						var hasRenderedHistory = !!document.querySelector('#chat-messages .chat-bubble-user-msg, #chat-messages .chat-bubble-assistant-msg');
+						if (hasRenderedHistory) {
+							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 							return;
 						}
 						var pid = chatContainer.getAttribute('data-project-id');

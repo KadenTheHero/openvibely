@@ -849,12 +849,45 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 						return !!chatPanel && !chatPanel.classList.contains('hidden');
 					}
 
-					function _scrollThreadToBottom(force) {
+					function _taskThreadScrollStateKey(taskId) {
+						return taskId ? 'task-thread-scroll-' + taskId : '';
+					}
+
+					function _getTaskThreadScrollState(taskId) {
+						window._taskThreadScrollStates = window._taskThreadScrollStates || {};
+						var key = _taskThreadScrollStateKey(taskId || _currentTaskIdFromPath());
+						return key ? window._taskThreadScrollStates[key] : null;
+					}
+
+					function _saveTaskThreadScrollState(taskId) {
+						taskId = taskId || _currentTaskIdFromPath();
+						var key = _taskThreadScrollStateKey(taskId);
+						var chatMessages = document.getElementById('task-thread-messages');
+						if (!key || !chatMessages || !window.chatAutoScroll) return;
+						var tracker = window._taskThreadPageTracker;
+						var nearBottom = window.chatAutoScroll.isNearBottom(chatMessages);
+						var snapshot = tracker && typeof tracker.snapshot === 'function'
+							? tracker.snapshot()
+							: { scrollTop: chatMessages.scrollTop || 0, userScrolledUp: !nearBottom, pinned: nearBottom };
+						window._taskThreadScrollStates = window._taskThreadScrollStates || {};
+						window._taskThreadScrollStates[key] = snapshot;
+						window._taskThreadUserScrolledUp = !!snapshot.userScrolledUp;
+					}
+
+					function _restoreThreadScrollOrBottom(taskId, forceBottom) {
 						requestAnimationFrame(function() {
 							var chatMessages = document.getElementById('task-thread-messages');
 							if (!chatMessages || !window.chatAutoScroll) return;
 
-							if (!force) {
+							var state = _getTaskThreadScrollState(taskId);
+							if (!forceBottom && state) {
+								chatMessages.scrollTop = state.pinned ? chatMessages.scrollHeight : (state.scrollTop || 0);
+								if (window._taskThreadPageTracker) window._taskThreadPageTracker.userScrolledUp = !!state.userScrolledUp;
+								window._taskThreadUserScrolledUp = !!state.userScrolledUp;
+								return;
+							}
+
+							if (!forceBottom) {
 								var tracker = window._taskThreadPageTracker;
 								var userScrolledUp = false;
 								if (tracker && typeof tracker.userScrolledUp === 'boolean') {
@@ -865,7 +898,8 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 								if (userScrolledUp) return;
 							}
 
-							window.chatAutoScroll.scrollToBottom(chatMessages, !!force);
+							window.chatAutoScroll.scrollToBottom(chatMessages, !!forceBottom);
+							_saveTaskThreadScrollState(taskId);
 						});
 					}
 
@@ -902,6 +936,10 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 					var container = document.getElementById('task-detail-content');
 					if (!container) return;
 
+					if (_isChatTabActive()) {
+						_saveTaskThreadScrollState();
+					}
+
 				container.querySelectorAll('.task-tab-panel').forEach(function(panel) {
 					panel.classList.add('hidden');
 				});
@@ -922,12 +960,11 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 						var taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();
 						if (taskId) {
 							_loadThreadContent(taskId).then(function() {
-								_scrollThreadToBottom(false);
-							});
-						} else {
-							_scrollThreadToBottom(false);
-						}
-					}
+									_restoreThreadScrollOrBottom(taskId, false);
+								});
+							} else {
+								_restoreThreadScrollOrBottom(taskId, false);
+							}					}
 
 				// Reload changes content and start SSE when switching to changes tab
 				if (tabName === 'changes') {
@@ -1085,9 +1122,8 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 							var taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();
 							if (taskId) {
 								_loadThreadContent(taskId).then(function() {
-									_scrollThreadToBottom(false);
-								});
-							}
+										_restoreThreadScrollOrBottom(taskId, false);
+									});							}
 						}
 						if (_isChangesTabActive()) {
 							var changesContent = document.getElementById('changes-content');

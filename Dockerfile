@@ -1,19 +1,19 @@
 # =============================================================================
 # Stage 1: Builder — compile Go binary with all generated assets
 # =============================================================================
-FROM golang:1.26.1-alpine AS builder
+FROM golang:1.26.3-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
-
-# Install templ and swag for code generation
-RUN go install github.com/a-h/templ/cmd/templ@latest \
- && go install github.com/swaggo/swag/cmd/swag@latest
 
 WORKDIR /src
 
 # Cache module downloads
 COPY go.mod go.sum ./
 RUN go mod download
+
+# Install templ and swag using the versions declared in go.mod
+RUN go install github.com/a-h/templ/cmd/templ@$(go list -m -f '{{.Version}}' github.com/a-h/templ) \
+ && go install github.com/swaggo/swag/cmd/swag@$(go list -m -f '{{.Version}}' github.com/swaggo/swag)
 
 # Copy full source
 COPY . .

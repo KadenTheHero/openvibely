@@ -11,9 +11,11 @@ install-tools:
 dev:
 	air
 
+TEMPL_VERSION := $(shell go list -m -f '{{.Version}}' github.com/a-h/templ)
+
 # Generate templ files (no global binary required)
 templ:
-	go run github.com/a-h/templ/cmd/templ@v0.3.1001 generate
+	go run github.com/a-h/templ/cmd/templ@$(TEMPL_VERSION) generate
 
 # Generate Swagger documentation (no global binary required)
 swagger:

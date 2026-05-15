@@ -37,7 +37,7 @@ User-friendly by design, simple to operate, and fast to set up.
 
 ### Prerequisite
 
-- Go `1.24.4+`
+- Go `1.26.3+`
 
 ### Fresh Clone
 

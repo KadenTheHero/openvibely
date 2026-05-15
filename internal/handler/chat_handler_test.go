@@ -2600,16 +2600,8 @@ func TestHandler_Chat_PlanCompletionPrompt_CentralizedEvaluator(t *testing.T) {
 	assert.Contains(t, body, "window.planModeHasProposedPlan(text)",
 		"evaluator must check for proposed_plan marker")
 
-	// Reconnect/hydration scans that temporarily return empty text should preserve
-	// an already-earned CTA, while explicit completion events still control clearing.
 	assert.Contains(t, body, "var fromCompletedEvent = (typeof completedText === 'string');",
 		"evaluator must distinguish completion events from DOM-scan fallback")
-	assert.Contains(t, body, "if (!fromCompletedEvent && !text && window._chatPlanPromptLatched)",
-		"empty reconnect/history scans must preserve latched CTA visibility")
-	assert.Contains(t, body, "window._chatPlanPromptLatched = true",
-		"show helper must latch CTA visibility across tab refocus")
-	assert.Contains(t, body, "window._chatPlanPromptLatched = false",
-		"hide helper must clear CTA latch when state genuinely changes")
 
 	// handlePlanModeCompletion must clear streaming flag and delegate
 	assert.Contains(t, body, "window._chatStreamInProgress = false",
@@ -3162,8 +3154,19 @@ func TestHandler_Chat_ReconnectRefreshSkipsWhileActiveStream(t *testing.T) {
 
 	assert.Contains(t, onConnectBody, "window._chatStreamInProgress && hasActiveChatStream()",
 		"reconnect handler must detect active stream before triggering refresh")
+	assert.Contains(t, onConnectBody, "#chat-messages .chat-bubble-user-msg, #chat-messages .chat-bubble-assistant-msg",
+		"reconnect handler must detect static rendered history after hard refresh")
+	assert.Contains(t, onConnectBody, "if (hasRenderedHistory)",
+		"reconnect handler must skip destructive chat root refresh when history is already rendered")
 	assert.Contains(t, onConnectBody, "return;",
-		"reconnect handler should early-return when active stream is present")
+		"reconnect handler should early-return when active stream or rendered history is present")
+
+	ajaxIdx := strings.Index(onConnectBody, "htmx.ajax('GET', '/chat?project_id=")
+	historyIdx := strings.Index(onConnectBody, "if (hasRenderedHistory)")
+	require.NotEqual(t, -1, ajaxIdx, "reconnect handler must still refresh when no history is rendered")
+	require.NotEqual(t, -1, historyIdx, "rendered history guard must exist")
+	assert.Less(t, historyIdx, ajaxIdx,
+		"rendered history guard must run before issuing destructive chat root refresh")
 }
 
 func TestHandler_Chat_PlanCompletionPrompt_ChatResponseDoneCompletedOutput(t *testing.T) {

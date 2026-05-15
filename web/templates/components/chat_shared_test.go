@@ -1520,6 +1520,59 @@ func TestStreamingRenderSnapshotsPinnedStateBeforeDomGrowth(t *testing.T) {
 // TestChatScrollTracker_DestroyRemovesAllListeners ensures the scroll listener
 // is torn down by destroy() to prevent leaks across morph swaps that recreate
 // the tracker.
+func TestChatScrollTracker_ExposesNavigationSnapshot(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	}
+	content := buf.String()
+
+	required := []string{
+		"snapshot: function()",
+		"scrollTop: this.element.scrollTop || 0",
+		"userScrolledUp: this.userScrolledUp || !nearBottom",
+		"pinned: !this.userScrolledUp && nearBottom",
+	}
+	for _, r := range required {
+		if !strings.Contains(content, r) {
+			t.Fatalf("expected ChatScrollTracker snapshot to include %q", r)
+		}
+	}
+}
+
+func TestTaskThreadView_PreservesPerTaskScrollState(t *testing.T) {
+	task := &models.Task{
+		ID:        "thread-scroll-1",
+		ProjectID: "p1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskThreadView(task, nil, nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render TaskThreadView: %v", err)
+	}
+	content := buf.String()
+
+	required := []string{
+		"window._taskThreadScrollStates = window._taskThreadScrollStates || {};",
+		"return taskId ? 'task-thread-scroll-' + taskId : '';",
+		"var preservedScrollState = _getTaskThreadScrollState(taskId);",
+		"var restoredScrollState = _restoreTaskThreadScrollState(chatMessages, preservedScrollState);",
+		"messages.scrollTop = state.pinned ? messages.scrollHeight : (state.scrollTop || 0);",
+		"_saveTaskThreadScrollState();",
+	}
+	for _, r := range required {
+		if !strings.Contains(content, r) {
+			t.Fatalf("expected task thread scroll preservation code to include %q", r)
+		}
+	}
+
+	if strings.Contains(content, "var preservedUserScrolledUp = window._taskThreadUserScrolledUp;") {
+		t.Fatal("task thread entry must not restore scroll intent from a single global userScrolledUp flag")
+	}
+}
+
 func TestChatScrollTracker_DestroyRemovesAllListeners(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {

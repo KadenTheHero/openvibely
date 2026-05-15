@@ -357,6 +357,41 @@ func TestTaskDetailContent_ThreadAutoLoadsWhenChatTabInitiallyActive(t *testing.
 	}
 }
 
+func TestTaskDetailContent_ThreadTabRestoresPerTaskScrollState(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-thread-scroll-1",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	output := buf.String()
+
+	required := []string{
+		"window._taskThreadScrollStates = window._taskThreadScrollStates || {};",
+		"return taskId ? 'task-thread-scroll-' + taskId : '';",
+		"function _restoreThreadScrollOrBottom(taskId, forceBottom) {",
+		"chatMessages.scrollTop = state.pinned ? chatMessages.scrollHeight : (state.scrollTop || 0);",
+		"if (_isChatTabActive()) {",
+		"_saveTaskThreadScrollState();",
+		"_restoreThreadScrollOrBottom(taskId, false);",
+	}
+	for _, r := range required {
+		if !strings.Contains(output, r) {
+			t.Fatalf("expected task detail thread tab scroll code to include %q", r)
+		}
+	}
+
+	if strings.Contains(output, "_scrollThreadToBottom(false)") {
+		t.Fatal("thread tab switching should restore per-task scroll state instead of blindly bottom-aligning")
+	}
+}
+
 func TestTaskDetailContent_RunAtFieldsClickablePickerAffordance(t *testing.T) {
 	task := &models.Task{
 		ID:        "task-schedule-1",

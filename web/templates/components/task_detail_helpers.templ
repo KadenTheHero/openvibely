@@ -276,10 +276,47 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 		@ChatAutoScrollScript()
 		@_initThreadStreamingScript()
 		<script>
-			function _taskThreadDraftStorageKey() {
+			function _taskThreadTaskId() {
+				var threadContent = document.getElementById('thread-content');
+				if (threadContent && threadContent.dataset.taskId) return threadContent.dataset.taskId;
 				var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
-				if (!taskIdMatch || !taskIdMatch[1]) return '';
-				return 'task-thread-draft-' + taskIdMatch[1];
+				return taskIdMatch && taskIdMatch[1] ? taskIdMatch[1] : '';
+			}
+
+			function _taskThreadDraftStorageKey() {
+				var taskId = _taskThreadTaskId();
+				return taskId ? 'task-thread-draft-' + taskId : '';
+			}
+
+			function _taskThreadScrollStateKey(taskId) {
+				return taskId ? 'task-thread-scroll-' + taskId : '';
+			}
+
+			function _getTaskThreadScrollState(taskId) {
+				window._taskThreadScrollStates = window._taskThreadScrollStates || {};
+				var key = _taskThreadScrollStateKey(taskId || _taskThreadTaskId());
+				return key ? window._taskThreadScrollStates[key] : null;
+			}
+
+			function _saveTaskThreadScrollState() {
+				var taskId = _taskThreadTaskId();
+				var key = _taskThreadScrollStateKey(taskId);
+				var messages = document.getElementById('task-thread-messages');
+				if (!key || !messages || !window.chatAutoScroll) return;
+				var tracker = window._taskThreadPageTracker;
+				var nearBottom = window.chatAutoScroll.isNearBottom(messages);
+				var snapshot = tracker && typeof tracker.snapshot === 'function'
+					? tracker.snapshot()
+					: { scrollTop: messages.scrollTop || 0, userScrolledUp: !nearBottom, pinned: nearBottom };
+				window._taskThreadScrollStates = window._taskThreadScrollStates || {};
+				window._taskThreadScrollStates[key] = snapshot;
+				window._taskThreadUserScrolledUp = !!snapshot.userScrolledUp;
+			}
+
+			function _restoreTaskThreadScrollState(messages, state) {
+				if (!messages || !state) return false;
+				messages.scrollTop = state.pinned ? messages.scrollHeight : (state.scrollTop || 0);
+				return true;
 			}
 
 			function _syncTaskThreadDraftFromTextarea() {
@@ -326,22 +363,23 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 				var chatMessages = document.getElementById('task-thread-messages');
 				if (chatMessages) {
 					if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
-					// Preserve scroll intent across morph swaps.
-					// undefined means first page load (allow initial autoscroll to bottom).
-					var preservedUserScrolledUp = window._taskThreadUserScrolledUp;
-					if (!preservedUserScrolledUp) {
-						if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
+					var taskId = _taskThreadTaskId();
+					var preservedScrollState = _getTaskThreadScrollState(taskId);
+					var restoredScrollState = _restoreTaskThreadScrollState(chatMessages, preservedScrollState);
+					if (!restoredScrollState && window.chatAutoScroll) {
+						window.chatAutoScroll.scrollToBottom(chatMessages, false);
 					}
+					var preservedUserScrolledUp = restoredScrollState ? !!preservedScrollState.userScrolledUp : false;
 
 					// Set up page-level scroll tracker for task thread
 					if (window.ChatScrollTracker) {
 						if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
 						window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);
-						window._taskThreadPageTracker.userScrolledUp = !!preservedUserScrolledUp;
+						window._taskThreadPageTracker.userScrolledUp = preservedUserScrolledUp;
 					}
 
 					// Keep global flag as fallback source of truth across partial re-inits.
-					window._taskThreadUserScrolledUp = !!preservedUserScrolledUp;
+					window._taskThreadUserScrolledUp = preservedUserScrolledUp;
 				}
 				// Render streaming content markers and initialize SSE for any running executions.
 				// Content is in data-raw-content attribute (not textContent) to prevent raw text flash.
@@ -362,92 +400,93 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 
 				// Rule 1: Reset tracker when user sends a message (beforeRequest fires before swap)
 				// Also cancel polling requests when SSE streaming is active to prevent morph from killing the EventSource
-					document.body.addEventListener('htmx:beforeRequest', function(event) {
-						var threadView = document.getElementById('task-thread-view');
-						var isTaskActive = !!(threadView && threadView.getAttribute('data-task-active') === 'true');
-						var triggerEl = event.detail && event.detail.elt;
-						// Block stale polls when task is no longer active
-						if (triggerEl && triggerEl.id === 'task-thread-view' && !isTaskActive) {
-							event.preventDefault();
-							return;
-						}
-						var detail = event.detail || {};
-						var requestConfig = detail.requestConfig || {};
-						var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
-						var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
-						var isPost = requestMethod === 'POST';
-						var isThreadPath = requestPath.indexOf('/thread') !== -1;
-						var isThreadSendRequest = isPost && isThreadPath;
-						if (isThreadSendRequest) {
-							var tracker = window._taskThreadPageTracker;
-							if (tracker) tracker.resetOnUserSend();
-							window._taskThreadUserScrolledUp = false;
-						}
+				document.body.addEventListener('htmx:beforeRequest', function(event) {
+					var threadView = document.getElementById('task-thread-view');
+					var isTaskActive = !!(threadView && threadView.getAttribute('data-task-active') === 'true');
+					var triggerEl = event.detail && event.detail.elt;
+					// Block stale polls when task is no longer active
+					if (triggerEl && triggerEl.id === 'task-thread-view' && !isTaskActive) {
+						event.preventDefault();
+						return;
+					}
+					var detail = event.detail || {};
+					var requestConfig = detail.requestConfig || {};
+					var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
+					var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
+					var isPost = requestMethod === 'POST';
+					var isThreadPath = requestPath.indexOf('/thread') !== -1;
+					var isThreadSendRequest = isPost && isThreadPath;
+					if (isThreadSendRequest) {
+						var tracker = window._taskThreadPageTracker;
+						if (tracker) tracker.resetOnUserSend();
+						var taskId = _taskThreadTaskId();
+						var key = _taskThreadScrollStateKey(taskId);
+						window._taskThreadScrollStates = window._taskThreadScrollStates || {};
+						if (key) window._taskThreadScrollStates[key] = { scrollTop: 0, userScrolledUp: false, pinned: true };
+						window._taskThreadUserScrolledUp = false;
+					}
 					// Block polling requests to task-thread-view while SSE streaming
 					// is active or sidebar navigation is in progress
-						if (triggerEl && triggerEl.id === 'task-thread-view') {
-							if (window._taskThreadStreamingActive || window._sidebarNavigating) {
-								event.preventDefault();
-							}
+					if (triggerEl && triggerEl.id === 'task-thread-view') {
+						if (window._taskThreadStreamingActive || window._sidebarNavigating) {
+							event.preventDefault();
 						}
-					});
+					}
+				});
 
-					document.body.addEventListener('htmx:afterRequest', function(event) {
-						var detail = event.detail || {};
-						var requestConfig = detail.requestConfig || {};
+				document.body.addEventListener('htmx:afterRequest', function(event) {
+					var detail = event.detail || {};
+					var requestConfig = detail.requestConfig || {};
+					var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
+					var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
+					var isPost = requestMethod === 'POST';
+					var isThreadPath = requestPath.indexOf('/thread') !== -1;
+					var isThreadSendRequest = isPost && isThreadPath;
+					if (!isThreadSendRequest) return;
+					if (!detail.successful) return;
+					var xhr = detail.xhr;
+					var responseText = xhr ? (xhr.responseText || '') : '';
+					if (responseText.trim() === '') return;
+					window._taskThreadSavedInput = '';
+					window._taskThreadDrafts = window._taskThreadDrafts || {};
+					var key = _taskThreadDraftStorageKey();
+					if (key) delete window._taskThreadDrafts[key];
+				});
+
+				// Before swaps, capture scroll state and preserve textarea input
+				document.body.addEventListener('htmx:beforeSwap', function(event) {
+					var target = event.detail.target;
+					if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view')) {
+						var requestConfig = event.detail.requestConfig || {};
 						var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
 						var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
 						var isPost = requestMethod === 'POST';
 						var isThreadPath = requestPath.indexOf('/thread') !== -1;
 						var isThreadSendRequest = isPost && isThreadPath;
-						if (!isThreadSendRequest) return;
-						if (!detail.successful) return;
-						var xhr = detail.xhr;
+						var xhr = event.detail.xhr;
 						var responseText = xhr ? (xhr.responseText || '') : '';
-						if (responseText.trim() === '') return;
-						window._taskThreadSavedInput = '';
-						window._taskThreadDrafts = window._taskThreadDrafts || {};
-						var key = _taskThreadDraftStorageKey();
-						if (key) delete window._taskThreadDrafts[key];
-					});
 
-					// Before swaps, capture scroll state and preserve textarea input
-					document.body.addEventListener('htmx:beforeSwap', function(event) {
-						var target = event.detail.target;
-						if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view')) {
-							var requestConfig = event.detail.requestConfig || {};
-							var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
-							var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
-							var isPost = requestMethod === 'POST';
-							var isThreadPath = requestPath.indexOf('/thread') !== -1;
-							var isThreadSendRequest = isPost && isThreadPath;
-							var xhr = event.detail.xhr;
-							var responseText = xhr ? (xhr.responseText || '') : '';
-
-							if (isThreadSendRequest && responseText.trim() !== '') {
-								window._taskThreadSavedInput = '';
-								window._taskThreadDrafts = window._taskThreadDrafts || {};
-								var sentKey = _taskThreadDraftStorageKey();
-								if (sentKey) delete window._taskThreadDrafts[sentKey];
-							} else {
-								// Save textarea value before swap to prevent clearing during morph polling
-								var textarea = document.getElementById('task-message-input');
-								if (textarea) {
-									window._taskThreadSavedInput = textarea.value;
-									_syncTaskThreadDraftFromTextarea();
-								}
+						if (isThreadSendRequest && responseText.trim() !== '') {
+							window._taskThreadSavedInput = '';
+							window._taskThreadDrafts = window._taskThreadDrafts || {};
+							var sentKey = _taskThreadDraftStorageKey();
+							if (sentKey) delete window._taskThreadDrafts[sentKey];
+						} else {
+							// Save textarea value before swap to prevent clearing during morph polling
+							var textarea = document.getElementById('task-message-input');
+							if (textarea) {
+								window._taskThreadSavedInput = textarea.value;
+								_syncTaskThreadDraftFromTextarea();
 							}
-							var tracker = window._taskThreadPageTracker;
-							if (tracker) {
-								window._taskThreadUserScrolledUp = !!tracker.userScrolledUp;
-							}
+						}
+						_saveTaskThreadScrollState();
 					}
 					// Clean up thread state when navigating away via sidebar
 					// (sidebar replaces main-content, removing the thread view)
 					if (target && target.id === 'main-content') {
+						_saveTaskThreadScrollState();
 						window._taskThreadStreamingActive = false;
 						window._taskThreadSavedInput = '';
-						window._taskThreadUserScrolledUp = false;
 						if (window._taskThreadPageTracker) {
 							window._taskThreadPageTracker.destroy();
 							window._taskThreadPageTracker = null;
@@ -482,6 +521,7 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 								if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
 								window._taskThreadPageTracker = new window.ChatScrollTracker(target);
 								window._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;
+								_saveTaskThreadScrollState();
 							}
 						}
 					}
@@ -506,6 +546,7 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 									if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
 									window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);
 									window._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;
+									_saveTaskThreadScrollState();
 								}
 							}
 						}
@@ -513,16 +554,16 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 						if (window._initThreadStreaming) window._initThreadStreaming();
 					}
 					// Also handle full page refreshes on task-detail-content
-						else if (target && target.id === 'task-detail-content') {
-							var chatMessages = document.getElementById('task-thread-messages');
-							if (chatMessages) {
-								if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
-							}
+					else if (target && target.id === 'task-detail-content') {
+						var chatMessages = document.getElementById('task-thread-messages');
+						if (chatMessages) {
+							if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
 						}
-						// Restore textarea value after morph polling or full page refresh
-						_restoreTaskThreadDraftToTextarea();
-					});
-				}
+					}
+					// Restore textarea value after morph polling or full page refresh
+					_restoreTaskThreadDraftToTextarea();
+				});
+			}
 			</script>
 		</div>
 }
