@@ -2,9 +2,9 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-05-14
+updated: 2026-05-15
 source: consolidation
-source_id: memory_consolidation_2026_05_14
+source_id: memory_consolidation_2026_05_15
 confidence: high
 title: Integrations and Channels
 ---
@@ -30,7 +30,6 @@ GitHub:
 - Project create/edit GitHub clone failures return HTMX toast guardrails (`openvibelyToast`) instead of raw error payloads.
 - Task Changes tab supports one-click PR creation (`POST /tasks/:taskId/worktree/pull-request`), one PR per task in `task_pull_requests`, and reuse of existing task/remote-branch PRs.
 - In Wails desktop mode, Task Changes `View PR` should open GitHub PR URLs in the system browser rather than navigating the local WebView; preserve existing web/server behavior and surface a clear error if no PR URL is available.
-- Changes tab merge dropdown visibility is feature-flagged by `OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS` (default off); disabled changes-tab merge posts are blocked server-side with `403`.
 - Failed tasks keep Local merge actions visible even when `tasks.merge_status=merged`, so users can reconcile additional uncommitted edits.
 - Merge/PR action menus group Local and GitHub sections. Toasts are destination-prefixed such as `Merged locally into <branch>` or `GitHub PR created (#N)`.
 
