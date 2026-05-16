@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,10 +23,81 @@ import (
 	mcpclient "github.com/openvibely/openvibely/pkg/mcp_client"
 )
 
-const anthropicAgenticOutputBudget = 16384
+const claudeCodeMaxOutputTokensEnv = "CLAUDE_CODE_MAX_OUTPUT_TOKENS"
+
+type claudeCodeOutputBudget struct {
+	Default    int
+	UpperLimit int
+}
 
 // applyAgentToSystemPrompt prepends the agent definition's system prompt and
 // skill contents to the base system context string.
+func claudeCodeOutputBudgetForModel(model string) claudeCodeOutputBudget {
+	m := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.Contains(m, "claude-opus-4-7"), strings.Contains(m, "claude-opus-4-6"):
+		return claudeCodeOutputBudget{Default: 64000, UpperLimit: 128000}
+	case strings.Contains(m, "claude-sonnet-4-6"):
+		return claudeCodeOutputBudget{Default: 32000, UpperLimit: 64000}
+	case strings.Contains(m, "claude-opus-4-5"), strings.Contains(m, "claude-sonnet-4-5"),
+		strings.Contains(m, "claude-sonnet-4-0"), strings.Contains(m, "claude-haiku-4-5"),
+		strings.Contains(m, "claude-3-7-sonnet"):
+		return claudeCodeOutputBudget{Default: 32000, UpperLimit: 64000}
+	case strings.Contains(m, "claude-opus-4-1"), strings.Contains(m, "claude-opus-4-0"):
+		return claudeCodeOutputBudget{Default: 32000, UpperLimit: 32000}
+	case strings.Contains(m, "claude-3-5-sonnet"), strings.Contains(m, "claude-3-5-haiku"),
+		strings.Contains(m, "claude-3-sonnet"):
+		return claudeCodeOutputBudget{Default: 8192, UpperLimit: 8192}
+	case strings.Contains(m, "claude-3-opus"), strings.Contains(m, "claude-3-haiku"):
+		return claudeCodeOutputBudget{Default: 4096, UpperLimit: 4096}
+	default:
+		return claudeCodeOutputBudget{Default: 32000, UpperLimit: 128000}
+	}
+}
+
+func claudeCodeMaxOutputTokens(model string) int {
+	budget := claudeCodeOutputBudgetForModel(model)
+	parsed, ok := parseClaudeCodeMaxOutputTokensEnv(os.Getenv(claudeCodeMaxOutputTokensEnv), budget.UpperLimit)
+	if !ok || parsed <= 0 {
+		return budget.Default
+	}
+	if parsed > budget.UpperLimit {
+		return budget.UpperLimit
+	}
+	return parsed
+}
+
+func parseClaudeCodeMaxOutputTokensEnv(raw string, upperLimit int) (int, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	end := 0
+	if raw[0] == '+' || raw[0] == '-' {
+		end = 1
+	}
+	for end < len(raw) && raw[end] >= '0' && raw[end] <= '9' {
+		end++
+	}
+	if end == 0 || (end == 1 && (raw[0] == '+' || raw[0] == '-')) {
+		return 0, false
+	}
+	parsed, err := strconv.ParseInt(raw[:end], 10, 64)
+	if err != nil {
+		if strings.HasPrefix(raw[:end], "-") {
+			return math.MinInt, true
+		}
+		return upperLimit, true
+	}
+	if parsed > int64(math.MaxInt) {
+		return upperLimit, true
+	}
+	if parsed < int64(math.MinInt) {
+		return math.MinInt, true
+	}
+	return int(parsed), true
+}
+
 func applyAgentToSystemPrompt(base string, agent *models.Agent) string {
 	if agent == nil {
 		return base
@@ -381,7 +455,8 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 
 // callDirect calls the Anthropic API using OAuth tokens.
 func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, disableTools bool, skipDefaultTools bool) (string, int, error) {
-	log.Printf("[anthropic] callDirect model=%s max_tokens=%d workDir=%s attachments=%d disable_tools=%v", agent.Model, anthropicAgenticOutputBudget, workDir, len(attachments), disableTools)
+	maxTokens := claudeCodeMaxOutputTokens(agent.Model)
+	log.Printf("[anthropic] callDirect model=%s max_tokens=%d workDir=%s attachments=%d disable_tools=%v", agent.Model, maxTokens, workDir, len(attachments), disableTools)
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
@@ -395,9 +470,9 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
 	opts := &anthropicclient.AgenticOptions{
-		Model:        agent.Model,
-		MaxTokens:    anthropicAgenticOutputBudget,
-		BudgetTokens: anthropicThinkingBudgetTokens(agent.ReasoningEffort), System: llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
+		Model:            agent.Model,
+		MaxTokens:        maxTokens,
+		System:           llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
 		WorkDir:          workDir,
 		Attachments:      mcAttachments,
 		DisableTools:     disableTools,
@@ -425,7 +500,8 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 
 // callChatStreaming calls the Anthropic API with streaming for chat/followup.
 func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool) (string, int, error) {
-	log.Printf("[anthropic] callChatStreaming model=%s history=%d exec=%s isTaskFollowup=%v workDir=%s attachments=%d", agent.Model, len(chatHistory), execID, isTaskFollowup, workDir, len(attachments))
+	maxTokens := claudeCodeMaxOutputTokens(agent.Model)
+	log.Printf("[anthropic] callChatStreaming model=%s max_tokens=%d history=%d exec=%s isTaskFollowup=%v workDir=%s attachments=%d", agent.Model, maxTokens, len(chatHistory), execID, isTaskFollowup, workDir, len(attachments))
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
@@ -452,9 +528,9 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	disableTools, skipDefaultTools := resolveChatToolPolicy(isTaskFollowup, chatMode, rt)
 	chatInThinking := false
 	opts := &anthropicclient.AgenticOptions{
-		Model:        agent.Model,
-		MaxTokens:    anthropicAgenticOutputBudget,
-		BudgetTokens: anthropicThinkingBudgetTokens(agent.ReasoningEffort), EnableThinking: true,
+		Model:            agent.Model,
+		MaxTokens:        maxTokens,
+		EnableThinking:   true,
 		DisableTools:     disableTools,
 		SkipDefaultTools: skipDefaultTools,
 		System:           systemPromptStr,
@@ -515,7 +591,8 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 
 // callStreaming calls the Anthropic API with streaming.
 func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool) (string, string, int, error) {
-	log.Printf("[anthropic] callStreaming model=%s max_tokens=%d exec=%s workDir=%s attachments=%d", agent.Model, anthropicAgenticOutputBudget, execID, workDir, len(attachments))
+	maxTokens := claudeCodeMaxOutputTokens(agent.Model)
+	log.Printf("[anthropic] callStreaming model=%s max_tokens=%d exec=%s workDir=%s attachments=%d", agent.Model, maxTokens, execID, workDir, len(attachments))
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
@@ -539,9 +616,9 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 
 	inThinking := false
 	opts := &anthropicclient.AgenticOptions{
-		Model:        agent.Model,
-		MaxTokens:    anthropicAgenticOutputBudget,
-		BudgetTokens: anthropicThinkingBudgetTokens(agent.ReasoningEffort), EnableThinking: true,
+		Model:            agent.Model,
+		MaxTokens:        maxTokens,
+		EnableThinking:   true,
 		SkipDefaultTools: skipDefaultTools,
 		System:           llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
 		WorkDir:          workDir,
@@ -700,19 +777,6 @@ func convertAttachments(attachments []models.Attachment) ([]*anthropicclient.Fil
 		result = append(result, mcAtt)
 	}
 	return result, nil
-}
-
-func anthropicThinkingBudgetTokens(effort string) int {
-	switch strings.ToLower(strings.TrimSpace(effort)) {
-	case "low":
-		return 4096
-	case "medium":
-		return 8192
-	case "high", "max":
-		return anthropicAgenticOutputBudget * 8 / 10
-	default:
-		return 0
-	}
 }
 
 // stopReasonIfMaxTokens returns "max_tokens" if err is errMaxTokens, else empty string.
