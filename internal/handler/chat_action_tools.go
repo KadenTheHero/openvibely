@@ -148,12 +148,39 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			if err != nil {
 				return "", err
 			}
+			// Guard: an empty project context means task FK insert would fail
+			// silently (the model would still see a "success" tool result without
+			// the task ever landing on the board). Fail loudly instead.
+			if strings.TrimSpace(params.ProjectID) == "" {
+				return "", fmt.Errorf("create_task: no current project — cannot create task without a project context")
+			}
 			agents, err := h.llmConfigRepo.List(ctx)
 			if err != nil {
 				agents = nil
 			}
 			updated, _ := h.processChatTaskCreations(ctx, params.ExecID, params.ProjectID, marker, agents)
 			summary := toolSummaryFromMarker(marker, updated)
+			// Verify the summary actually contains at least one [TASK_ID:...]
+			// marker AND that each referenced task exists in the current project.
+			// If create silently failed, surface that as a tool error so the
+			// model sees is_error=true and reports the failure to the user
+			// instead of paraphrasing the result as a success.
+			createdIDs := extractTaskIDsFromOutput(summary)
+			if len(createdIDs) == 0 {
+				return summary, fmt.Errorf("create_task: no tasks were persisted (see summary for details)")
+			}
+			if h.taskRepo != nil {
+				var missing []string
+				for _, id := range createdIDs {
+					t, gerr := h.taskRepo.GetByID(ctx, id)
+					if gerr != nil || t == nil || t.ProjectID != params.ProjectID {
+						missing = append(missing, id)
+					}
+				}
+				if len(missing) > 0 {
+					return summary, fmt.Errorf("create_task: %d task(s) reported as created are not present in project %s: %s", len(missing), params.ProjectID, strings.Join(missing, ", "))
+				}
+			}
 			if collector != nil {
 				collector.addCreated(summary)
 			}

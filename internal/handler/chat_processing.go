@@ -221,6 +221,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// calling. Tool definitions are derived from the canonical chatcontrol registry
 	// filtered by mode and surface. In plan mode only read actions are available.
 	// Runtime-tools and marker post-processing are mutually exclusive per request.
+	runtimeToolsInjected := false
 	if !params.IsTaskFollowup && supportsChatActionTools(params.Agent) {
 		surface := params.Surface
 		if surface == "" {
@@ -231,9 +232,22 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			rt := h.buildChatActionToolRuntimeFromDefs(params, nil, defs, chatMode, surface)
 			ctx = llmcontracts.WithRuntimeTools(ctx, rt)
 			params.ProcessMarkers = false
+			runtimeToolsInjected = true
 			log.Printf("[handler] processStreamingResponse exec=%s injected %d runtime action tools mode=%s surface=%s",
 				params.ExecID, len(defs), chatMode, surface)
 		}
+	}
+	// Fallback: when interactive chat targets a provider/auth path without
+	// runtime tool support (e.g. Claude CLI, Codex CLI, Ollama), we MUST fall
+	// back to marker post-processing so [CREATE_TASK]/[EDIT_TASK]/
+	// [EXECUTE_TASKS] blocks emitted by the model are actually executed. If
+	// neither runtime tools nor marker processing run, the assistant transcript
+	// can display a "tool call" the backend never executed — producing a
+	// phantom task that never reaches the task store.
+	if !params.IsTaskFollowup && !runtimeToolsInjected && !params.ProcessMarkers {
+		params.ProcessMarkers = true
+		log.Printf("[handler] processStreamingResponse exec=%s no runtime tools (provider=%s auth=%s); enabling marker processing fallback",
+			params.ExecID, params.Agent.Provider, params.Agent.AuthMethod)
 	}
 
 	h.registerTaskCancellation(params.TaskID, cancel)

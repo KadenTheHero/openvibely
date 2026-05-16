@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -155,4 +156,54 @@ func TestChatActionHandlers_CoverageWebAndAPI(t *testing.T) {
 	if err := chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceAPI, true, apiHandlers); err != nil {
 		t.Fatalf("api handler coverage mismatch: %v", err)
 	}
+}
+
+// TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure is the regression
+// test for the phantom create_task bug: the runtime tool handler used to
+// always return (summary, nil), so even if processChatTaskCreations failed to
+// persist any task (empty project context, malformed input, or DB error) the
+// model would receive isError=false and report a fake successful create_task
+// to the user. The fix returns an error when no [TASK_ID:...] markers appear
+// in the summary or when a referenced task ID cannot be verified in the
+// current project's task store.
+func TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Create Task Failure Project")
+	input := json.RawMessage(`{"title":"Fix bug","prompt":"do it"}`)
+
+	t.Run("empty project id", func(t *testing.T) {
+		handlers := h.chatActionHandlers(streamingResponseParams{ExecID: "exec-empty-project", ProjectID: ""}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+		createHandler := handlers["create_task"]
+		if createHandler == nil {
+			t.Fatal("create_task handler missing")
+		}
+		if _, err := createHandler(ctx, input); err == nil {
+			t.Fatal("expected create_task with empty project_id to return an error")
+		}
+	})
+
+	t.Run("summary without persisted task id", func(t *testing.T) {
+		handlers := h.chatActionHandlers(streamingResponseParams{ExecID: "exec-db-failure", ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+		createHandler := handlers["create_task"]
+		if createHandler == nil {
+			t.Fatal("create_task handler missing")
+		}
+
+		if _, err := h.taskRepo.GetByID(ctx, "sanity-check"); err != nil {
+			t.Fatalf("task repo should work before closing db: %v", err)
+		}
+		h.execRepo = nil // Avoid best-effort execution-output updates after the DB is closed.
+		if err := db.Close(); err != nil {
+			t.Fatalf("close db: %v", err)
+		}
+
+		output, err := createHandler(ctx, input)
+		if err == nil {
+			t.Fatalf("expected create_task to fail when persistence fails, got nil error and output %q", output)
+		}
+		if !strings.Contains(output, "Failed to create") {
+			t.Fatalf("expected failure summary in tool output, got %q", output)
+		}
+	})
 }

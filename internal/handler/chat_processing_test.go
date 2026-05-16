@@ -1477,3 +1477,84 @@ func TestViewThreadRequest_OffsetLimit(t *testing.T) {
 		t.Errorf("expected limit 3, got %d", requests[0].Limit)
 	}
 }
+
+// TestProcessStreamingResponse_PhantomCreateTaskRegression verifies the fix for
+// the phantom-create_task bug: when the caller (e.g. ChatSend) passes
+// ProcessMarkers=false and the agent's provider/auth does NOT support runtime
+// action tools (Claude CLI, Codex CLI, Ollama, test), processStreamingResponse
+// must fall back to marker processing so [CREATE_TASK] blocks emitted by the
+// model are actually executed. Without the fallback, the assistant transcript
+// would show a "create_task" action that the backend never executed — leaving
+// the task absent from the project task list.
+func TestProcessStreamingResponse_PhantomCreateTaskRegression(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	// ProviderTest deliberately returns false from supportsChatActionTools,
+	// mirroring the behavior of Claude CLI / Codex CLI / Ollama in production.
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Phantom Task Project")
+
+	// Mock the model's response: a normal chat turn that emits a CREATE_TASK
+	// marker, as a CLI-backed model would.
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "I'll create that task for you.\n\n[CREATE_TASK]\n" +
+		`{"title": "Fix overlapping thinking and non-thinking content in task thread view", "prompt": "Investigate and fix the overlapping rendering."}` +
+		"\n[/CREATE_TASK]"
+	mock.TextOnly = mock.Response
+	mock.Tokens = 25
+	h.llmSvc.SetLLMCaller(mock)
+
+	// ChatSend creates a CategoryChat host task that owns the chat execution
+	// record. Mirror that so the FK on executions(task_id) is satisfied.
+	chatHostTask := createTask(t, h, project.ID, "Chat host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusPending
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, chatHostTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Create a task to fix overlapping thinking content"
+	})
+
+	// Simulate the call pattern used by ChatSend / APIChatMessage: a chat turn
+	// (not a task follow-up) with ProcessMarkers explicitly set to false.
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         chatHostTask.ID,
+		Message:        "Create a task to fix overlapping thinking content",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		SystemContext:  "",
+		WorkDir:        "",
+		IsTaskFollowup: false,
+		ProcessMarkers: false,
+	})
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	// Expect the marker-created task in addition to the CategoryChat host task.
+	var created *models.Task
+	for i := range tasks {
+		if strings.Contains(tasks[i].Title, "overlapping thinking") {
+			created = &tasks[i]
+			break
+		}
+	}
+	if created == nil {
+		t.Fatalf("expected a task created from the [CREATE_TASK] marker to be present in the project task list, got %+v", tasks)
+	}
+
+	// The execution output should also be rewritten to include the canonical
+	// [TASK_ID:...] confirmation marker that proves the task was persisted.
+	updatedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if !strings.Contains(updatedExec.Output, "[TASK_ID:") {
+		t.Errorf("expected execution output to contain [TASK_ID:...] confirmation marker after marker processing, got: %s", updatedExec.Output)
+	}
+}
