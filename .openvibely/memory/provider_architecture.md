@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-05-14
+updated: 2026-05-16
 source: consolidation
-source_id: memory_consolidation_2026_05_14
+source_id: memory_consolidation_2026_05_16
 confidence: high
 title: Provider Architecture
 ---
@@ -34,4 +34,4 @@ Runtime tools and memory:
 - Runtime tools are request-scoped, provider-generic, and carried through the LLM service/provider adapter path.
 - When adding or fixing runtime tool profiles such as managed memory, verify both OpenAI and Anthropic API/OAuth adapter paths. A fix that only wires OpenAI can leave scheduled memory consolidation failing for Anthropic-backed agents even when the agent/tool profile is correct.
 - Anthropic orchestrate chat with runtime action tools should send runtime tools without default local coding tools to avoid wasted tool-not-allowed turns. Task follow-up and plan modes keep mode-appropriate tools.
-- Memory-specific tools should be scoped to memory-maintenance requests, not global provider behavior.
+- Provider adapters should not make memory tools globally available; memory tool exposure is a request/tool-profile decision.

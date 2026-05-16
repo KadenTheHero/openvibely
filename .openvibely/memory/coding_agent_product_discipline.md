@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-05-14
+updated: 2026-05-16
 source: consolidation
-source_id: memory_consolidation_2026_05_14
+source_id: memory_consolidation_2026_05_16
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -15,7 +15,7 @@ When implementing product behavior, identify the underlying product concept befo
 
 Avoid making generic capabilities carry hidden special-case behavior for one built-in use case. If one built-in agent or workflow needs exceptional behavior, express it through that agent/workflow's explicit configuration while keeping the generic feature predictable for all users.
 
-For generic environment/path discovery, derive values from authoritative user or system sources instead of hardcoding guessed locations for specific tools or package managers. Desktop PATH loading should stay generic, shell-derived, and free of special-case install paths such as Go or Homebrew defaults unless the user explicitly configures them.
+For generic environment/path discovery, derive values from authoritative user or system sources instead of hardcoding guessed locations for specific tools or package managers. Tool/runtime PATH loading should stay generic, user-derived, and free of special-case install paths unless the user explicitly configures them.
 
 Treat similarly named roots as distinct concepts. Before resolving relative paths or write locations, determine whether the intended root is the project root, isolated worktree root, process working directory, durable repo location, or tool scope root. Preserve that meaning through storage and runtime resolution rather than casually switching roots.
 
@@ -27,4 +27,14 @@ Prefer product-correct defaults over mechanically convenient defaults. For UI an
 
 When drafting reusable coding-agent context or instructions, favor generalized patterns and broad behavioral rules over narrow, specific examples. The user values useful improvisation, but it must be constrained by explicit assumption discipline rather than unsupported product or architecture guesses.
 
+When summarizing code changes or implementation results, be concrete rather than generic: cite the specific files, symbols/handlers/tests changed, behavior affected, and verification performed when that context is available.
+
+When the user challenges whether prior changes are actually beneficial, audit each change or commit individually against the current code behavior, not just by commit message. Separate unrelated baseline/merge commits from the review, classify changes as keep, partial, redundant, or risky, and recommend cleanup instead of defending all accumulated work.
+
+When cleaning up an overgrown or suspicious task branch, reduce it to the minimal root-cause fix rather than preserving accumulated incidental changes. Before any destructive reset/checkout/rebase, capture or verify the intended patch so useful work is not lost; after cleanup, review the final diff for bugs, dead code, and unintended behavior before reporting completion.
+
 Long model prompts should be readable const templates with dynamic context interpolated, not assembled through chains of `WriteString` calls. Keep prompt text easy to review against external provider prompt shapes.
+
+For scheduled Go maintenance tasks, inspect all Go version references (`go.mod`, `toolchain`, Dockerfiles, CI workflows, build scripts, docs, and version-manager files), update consistently only when a newer stable toolchain is available, check compatible Go module upgrades, run `go mod tidy`, verify with `go test -count=1 ./...` plus the project's standard build checks, and fix update-caused failures rather than masking them. Summaries should distinguish updated items, already-current items, and follow-up risks/manual steps.
+
+When maintaining development tooling commands, avoid duplicating tool versions across scripts and Dockerfiles. Prefer deriving versions from authoritative module metadata such as `go.mod` when practical; as of 2026-05-15, `templ` and `swag` had known drift risk because Dockerfile/Makefile installs could hardcode versions while other scripts resolved from `go.mod`.

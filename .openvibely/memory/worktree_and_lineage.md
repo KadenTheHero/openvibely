@@ -2,7 +2,7 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-05-14
+updated: 2026-05-16
 source: consolidation
 source_id: memory_consolidation_2026_05_14
 confidence: high
@@ -28,6 +28,7 @@ Worktree behavior:
 - Changes tab shows worktree branch diff vs target branch when available, falling back to execution diff.
 - Changes-tab diff count triage should distinguish live branch-vs-target tip diffs from merge-base/triple-dot diffs: stale ancestry after squash/manual merges can surface many already-merged files and make the task appear far larger than its real delta.
 - When a follow-up appears to undo already-merged work, verify the real target/default branch and task branch ancestry rather than trusting a linked worktree's local `main` ref alone; manual merges performed from inside task worktrees can make branch/ref state misleading during triage.
+- When a user worries that a commit merged into `main` is missing from a task worktree and may be lost by merging the task branch, use explicit reachability/range checks (`git merge-base --is-ancestor main HEAD`, `git merge-base --is-ancestor HEAD main`, `git log --oneline HEAD..main`, and `git log --oneline main..HEAD`) before answering. If `main` is an ancestor of the task branch and `HEAD..main` is empty, the task branch already contains current `main`; a normal merge back to `main` will not remove that commit unless history is rewritten or a conflict is resolved by deleting it.
 - When a task has an assigned worktree, agents must perform task edits in that worktree, not the main checkout. If accidental edits land in main, first inspect both `git status`/diffs, then move or recreate the relevant changes in the task worktree and restore main only after confirming nothing will be lost.
 - If a task branch is already merged but `tasks.merge_status` is stale, Changes-tab handlers should fall back to preserved execution diff rather than showing empty live diff.
 - If a task branch was fast-forward merged into the target/default branch, whether manually outside the app or through `/tasks/:id/worktree/merge`, the Changes tab should detect that merged state and hide/disable merge options instead of offering stale merge actions; do not let preserved execution diff content alone keep merge actions visible after `merge_status=merged`.

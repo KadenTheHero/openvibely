@@ -2,7 +2,7 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-05-14
+updated: 2026-05-16
 source: consolidation
 source_id: memory_consolidation_2026_05_14
 confidence: high
@@ -32,6 +32,8 @@ Plan handoff behavior:
 - Plan-mode guidance should be prose-first while still requiring one `<proposed_plan>...</proposed_plan>` output block.
 - Rendered chat/thread output strips `<proposed_plan>` wrapper tags while raw stored output keeps them for CTA detection.
 - Plan completion prompt evaluation is centralized and requires stream complete, mode `plan`, and the latest completed assistant response containing `<proposed_plan>`. Older plan markers should not trigger it.
+- Once an eligible plan handoff card is shown for the latest completed response, client refocus/refresh/hydration evaluations should preserve it. Only a real invalidation should hide it: explicit dismissal, a newer response, active stream, or intentional mode switch.
+- Browser tab `focus`/`visibilitychange` and left-nav return flows should re-evaluate plan completion from the latest completed assistant response after mode hydration, rather than clearing or relying only on transient prompt state. Do not let transient pre-hydration evaluations call hide paths that remove server-rendered fallback attributes such as `data-has-plan-completion`; otherwise the plan handoff card may briefly appear on tab return and then vanish.
 
 Thread/follow-up behavior:
 - Task thread interaction from `/chat` uses `[VIEW_TASK_CHAT]`/`[SEND_TO_TASK]` markers where compatibility requires it.

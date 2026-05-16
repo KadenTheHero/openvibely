@@ -2,9 +2,9 @@
 name: managed_memory
 type: project
 created: 2026-05-09
-updated: 2026-05-14
+updated: 2026-05-16
 source: consolidation
-source_id: memory_consolidation_2026_05_14
+source_id: memory_consolidation_2026_05_16
 confidence: high
 title: Managed Memory
 ---

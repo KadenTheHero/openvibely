@@ -2,7 +2,7 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-05-14
+updated: 2026-05-16
 source: consolidation
 source_id: memory_consolidation_2026_05_14
 confidence: high
@@ -32,10 +32,13 @@ Task Changes rendering safety:
 Chat/frontend rendering:
 - For streaming chat and tool cards, batch DOM rendering with `requestAnimationFrame` and force final flush on completion.
 - Active chat/task-thread streaming should use shared smart autoscroll behavior, e.g. the common `ChatScrollTracker` path when present: keep the core invariant simple by recording whether the viewport was pinned before content growth, then only scroll after rendering if it was pinned. If the user scrolls up to read earlier streamed output, do not force-scroll back down until they return to the bottom or initiate a new send. Avoid layering broad user-interaction windows or global programmatic-scroll deadlines that can ignore legitimate user scrolls during streaming. Treat upward user movement as intent even inside the near-bottom threshold, and mark/ignore programmatic `scrollToBottom()` events so they cannot clear that intent. Avoid one-surface-only fixes for scroll behavior that should apply to both `/chat` and task threads.
+- Task-thread tab/task navigation should keep per-thread scroll state: returning from Details/Changes or another task should restore remembered position or bottom-align only when the prior thread state was pinned, on fresh initial entry, or for new send/active stream activity. Do not solve navigation scroll bugs with hard remounts or full refreshes that reset task context.
 - Avoid expensive full-container reprocessing on polling refreshes; use content signatures and incremental cleaning.
 - Chat/thread markdown rendering escapes raw HTML-like tags outside fenced/inline code before `marked.parse` so malformed model outputs do not break DOM.
+- Avoid destructive `/chat` `outerHTML` history refreshes on tab refocus or SSE reconnect when chat history is already loaded, including after hard refresh where static `.chat-bubble-*` markup is present. Prefer guarding/skipping the refresh over layering plan-CTA recovery workarounds.
 - Plan-mode read-only repo exploration tool cards (`read_file`, `list_files`, `grep_search`) should remain visible in assistant bubble rendering during live streams and refreshes.
 - Mode selector hydration should use hidden input + localStorage restore, mark hydration state, and re-evaluate plan-completion prompt after restoring mode.
+- Chat plan-completion prompt state is sensitive to tab-switch/refocus and SSE reconnect races: persisted completed-plan state should win over transient mode/input checks, and stale hide/evaluate branches should not clear the prompt after restoration.
 
 Shared UI/page patterns:
 - For HTMX dropdown/menu actions, distinguish user reports of “spinner/toast but then failure” from “click did nothing.” If there is no spinner, toast, or menu close, first suspect that the HTMX request never fired or was not bound. Check rendered attributes, lazy-loaded HTMX processing, and whether menu `<button>` elements are inside a parent `<form>` without `type="button"`, which can trigger plain form submission instead of the HTMX action.
