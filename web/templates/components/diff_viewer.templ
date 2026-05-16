@@ -496,7 +496,7 @@ func lineNumForReview(line DiffLine) int {
 }
 
 templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, reviewComments []models.ReviewComment) {
-	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-task-id={ taskID }>
+	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-task-id={ taskID } data-state-key={ diffViewerStateKey(metas, taskID) }>
 		<!-- Toolbar -->
 		<div class="flex items-center justify-between mb-4">
 			<div class="flex items-center gap-2">
@@ -579,8 +579,14 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 
 		<!-- Inline review JavaScript -->
 		<script>
-			// Session-level state for diff file expand/collapse
+			// Session-level state for diff file expand/collapse, scoped by viewer.
 			if (!window._diffFileState) window._diffFileState = {};
+			function diffFileStateBucket() {
+				var viewer = document.getElementById('diff-viewer');
+				var key = viewer ? (viewer.dataset.stateKey || 'default') : 'default';
+				if (!window._diffFileState[key]) window._diffFileState[key] = {};
+				return window._diffFileState[key];
+			}
 
 			function toggleDiffFile(idx) {
 				var inlineBody = document.getElementById('diff-body-' + idx);
@@ -590,6 +596,33 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 
 				var isExpanded = chevron && chevron.classList.contains('rotate-90');
 				var newState = !isExpanded;
+
+				// When collapsing a card whose sticky header is currently
+				// pinned to the top of the scroll container, the body shrinks
+				// while the page stays scrolled, and the sticky header's
+				// containing-block constraint drags the header off-screen.
+				// Pre-scroll the page so the card's top aligns with the
+				// scroller top before the body animates; the header then
+				// stays put while the body collapses in place.
+				if (!newState) {
+					var card = null;
+					[
+						document.getElementById('diff-file-' + idx),
+						document.getElementById('diff-file-split-' + idx)
+					].some(function(candidate) {
+						if (!candidate || candidate.getClientRects().length === 0) return false;
+						card = candidate;
+						return true;
+					});
+					var scroller = document.getElementById('main-content');
+					if (card && scroller) {
+						var cardTop = card.getBoundingClientRect().top;
+						var scrollerTop = scroller.getBoundingClientRect().top;
+						if (cardTop < scrollerTop) {
+							scroller.scrollTop -= (scrollerTop - cardTop);
+						}
+					}
+				}
 
 				if (inlineBody) {
 					if (newState) {
@@ -616,7 +649,12 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				if (chevron) chevron.classList.toggle('rotate-90', newState);
 				if (chevronSplit) chevronSplit.classList.toggle('rotate-90', newState);
 
-				window._diffFileState[idx] = newState;
+				document.querySelectorAll('[data-diff-toggle="' + idx + '"]').forEach(function(el) {
+					if (newState) el.removeAttribute('data-collapsed');
+					else el.setAttribute('data-collapsed', '1');
+				});
+
+				diffFileStateBucket()[idx] = newState;
 			}
 
 			function toggleAllDiffFiles(expand) {
@@ -644,38 +682,54 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				}, 50);
 			}
 
-			// Restore session state on re-render (HTMX swaps)
-			(function() {
+			// Restore persisted expand/collapse state after initial render and after
+			// HTMX swaps. Deferred file-card swaps render expanded by default, so the
+			// saved state must be re-applied to the body, chevrons, and header shape.
+			window._restoreDiffFileState = window._restoreDiffFileState || function() {
 				var viewer = document.getElementById('diff-viewer');
-				if (!viewer) return;
+				if (!viewer || !window._diffFileState) return;
+				var state = diffFileStateBucket();
 				var count = parseInt(viewer.dataset.fileCount || '0');
 				for (var i = 0; i < count; i++) {
-					if (window._diffFileState.hasOwnProperty(i)) {
-						var chevron = document.getElementById('diff-chevron-' + i);
-						var isExpanded = chevron && chevron.classList.contains('rotate-90');
-						if (isExpanded !== window._diffFileState[i]) {
-							var bodies = [
-								document.getElementById('diff-body-' + i),
-								document.getElementById('diff-body-split-' + i)
-							];
-							var chevrons = [
-								chevron,
-								document.getElementById('diff-chevron-split-' + i)
-							];
-							bodies.forEach(function(body) {
-								if (!body) return;
-								body.style.transition = 'none';
-								body.style.maxHeight = window._diffFileState[i] ? '' : '0';
-								body.offsetHeight;
-								body.style.transition = '';
-							});
-							chevrons.forEach(function(c) {
-								if (c) c.classList.toggle('rotate-90', window._diffFileState[i]);
-							});
-						}
+					if (state.hasOwnProperty(i)) {
+						var savedExpanded = state[i];
+						var bodies = [
+							document.getElementById('diff-body-' + i),
+							document.getElementById('diff-body-split-' + i)
+						];
+						var chevrons = [
+							document.getElementById('diff-chevron-' + i),
+							document.getElementById('diff-chevron-split-' + i)
+						];
+						bodies.forEach(function(body) {
+							if (!body) return;
+							body.style.transition = 'none';
+							body.style.maxHeight = savedExpanded ? '' : '0';
+							body.offsetHeight;
+							body.style.transition = '';
+						});
+						chevrons.forEach(function(c) {
+							if (!c) return;
+							var previousTransition = c.style.transition;
+							c.style.transition = 'none';
+							c.classList.toggle('rotate-90', savedExpanded);
+							c.getBoundingClientRect();
+							c.style.transition = previousTransition;
+						});
+						document.querySelectorAll('[data-diff-toggle="' + i + '"]').forEach(function(el) {
+							if (savedExpanded) el.removeAttribute('data-collapsed');
+							else el.setAttribute('data-collapsed', '1');
+						});
 					}
 				}
-			})();
+			};
+			window._restoreDiffFileState();
+			if (!window._diffFileStateRestoreRegistered) {
+				window._diffFileStateRestoreRegistered = true;
+				['htmx:afterSwap', 'htmx:afterSettle'].forEach(function(eventName) {
+					document.body.addEventListener(eventName, window._restoreDiffFileState);
+				});
+			}
 
 			function switchDiffView(mode) {
 				var inlineEl = document.getElementById('diff-content-inline');
@@ -1191,81 +1245,103 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				});
 			}
 
-			// Track when a sticky diff file header is pinned to the top of the
-			// scroll container so CSS can extend its background over the scroll
-			// container's top padding band (preventing previous diff rows from
-			// peeking through). Defined once on window so the non-review variant
-			// can reuse it; the script re-runs on each HTMX swap of the diff
-			// viewer, which is when we (re-)wire headers in the current DOM.
-			if (!window._wireDiffStickyHeaders) {
-				window._wireDiffStickyHeaders = function() {
-					if (!('IntersectionObserver' in window)) return;
-					var headers = document.querySelectorAll('.diff-file-header');
-					if (!headers.length) return;
-					if (!window._diffStickyObserver) {
-						window._diffStickyObserver = new IntersectionObserver(function(entries) {
-							entries.forEach(function(entry) {
-								var header = entry.target.nextElementSibling;
-								if (!header || !header.classList.contains('diff-file-header')) return;
-								if (!entry.isIntersecting && entry.boundingClientRect.top < 0) {
-									header.setAttribute('data-stuck', '1');
-								} else {
-									header.removeAttribute('data-stuck');
-								}
-							});
-						}, { threshold: [0] });
-					}
-					headers.forEach(function(header) {
-						var prev = header.previousElementSibling;
-						if (prev && prev.classList.contains('diff-sticky-sentinel')) return;
-						var sentinel = document.createElement('div');
-						sentinel.className = 'diff-sticky-sentinel';
-						sentinel.style.height = '1px';
-						sentinel.style.marginBottom = '-1px';
-						sentinel.setAttribute('aria-hidden', 'true');
-						header.parentNode.insertBefore(sentinel, header);
-						window._diffStickyObserver.observe(sentinel);
+			// Track when sticky diff file headers are pinned. Headers keep their
+			// original rounded corners in normal flow, then square their top
+			// corners while pinned so diff rows cannot show through the radius.
+			window._wireDiffStickyHeaders = window._wireDiffStickyHeaders || (function() {
+				var ticking = false;
+
+				function updateStickyHeaders() {
+					ticking = false;
+					var scroller = document.getElementById("main-content");
+					var rootTop = scroller ? scroller.getBoundingClientRect().top : 0;
+					var viewer = document.getElementById("diff-viewer") || document;
+					viewer.querySelectorAll(".diff-file-header").forEach(function(header) {
+						var sentinel = header.previousElementSibling;
+						if (!sentinel || sentinel.getAttribute("data-diff-sticky-sentinel") !== "1") return;
+						if (sentinel.getBoundingClientRect().top <= rootTop + 1) {
+							header.setAttribute("data-stuck", "1");
+						} else {
+							header.removeAttribute("data-stuck");
+						}
 					});
+				}
+
+				function scheduleUpdate() {
+					if (ticking) return;
+					ticking = true;
+					requestAnimationFrame(updateStickyHeaders);
+				}
+
+				return function() {
+					var viewer = document.getElementById("diff-viewer") || document;
+					viewer.querySelectorAll(".diff-file-header:not([data-sticky-wired])").forEach(function(header) {
+						var sentinel = document.createElement("div");
+						sentinel.style.cssText = "height:1px;margin-bottom:-1px;pointer-events:none;";
+						sentinel.setAttribute("aria-hidden", "true");
+						sentinel.setAttribute("data-diff-sticky-sentinel", "1");
+						header.parentNode.insertBefore(sentinel, header);
+						header.setAttribute("data-sticky-wired", "1");
+					});
+					scheduleUpdate();
 				};
-			}
+			})();
 			window._wireDiffStickyHeaders();
+			if (!window._diffStickyHeadersScrollRegistered) {
+				window._diffStickyHeadersScrollRegistered = true;
+				var diffScroller = document.getElementById("main-content");
+				if (diffScroller) diffScroller.addEventListener("scroll", window._wireDiffStickyHeaders, { passive: true });
+				window.addEventListener("resize", window._wireDiffStickyHeaders);
+				document.body.addEventListener("htmx:afterSettle", window._wireDiffStickyHeaders);
+			}
 
 		</script>
 
 		<style>
 			/* Sticky file headers within the diff viewer.
-			   The Task Detail page scroll container is #main-content, and the
-			   diff file cards themselves cannot use overflow-hidden or sticky
-			   would be clipped, so corner rounding is applied to the header
-			   and body explicitly. */
+			   The Task Detail page scroll container is #main-content. The
+			   diff file card itself cannot use any overflow other than
+			   visible — `overflow: hidden`/`auto`/`scroll`/`clip` all trap
+			   `position: sticky` against the card instead of #main-content.
+			   The header therefore inherits the card's top corner radius
+			   directly and the body inherits the bottom corner radius; the
+			   card border draws cleanly around them without an intermediate
+			   clipping context. Each card keeps its full rounded corners
+			   and the original space-y-4 gap between files. */
 			.diff-file-card {
 				border-radius: var(--rounded-box, 1rem);
 			}
+			/* #main-content has p-6 (1.5rem) padding-top. Tailwind's
+			   `top-0` would stick the header at the content-box edge —
+			   24px below the visible page top — leaving a band where
+			   diff rows scrolling up remain visible above the header.
+			   Using `top: -1.5rem` snaps the header's top edge flush
+			   with the padding-box edge (the visible page top), so
+			   overflow clipping hides rows behind it.
+
+			   The header keeps its original rounded top corners while in
+			   normal flow. When it is pinned, JS marks it data-stuck="1"
+			   and the top corners become square so diff rows cannot show
+			   through the rounded radius. */
 			.diff-file-header {
+				top: -1.5rem;
 				border-top-left-radius: inherit;
 				border-top-right-radius: inherit;
 			}
-			/* When the header is stuck, square its top corners so diff rows
-			   scrolling behind it are not visible through the rounded cutouts. */
 			.diff-file-header[data-stuck="1"] {
 				border-top-left-radius: 0;
 				border-top-right-radius: 0;
 			}
-			/* #main-content has p-6 (1.5rem) padding-top, which sits inside
-			   its scroll-clip region. Without compensation, rows scrolling
-			   toward the sticky header remain visible inside that padding
-			   band above the header. When the header is stuck (data-stuck="1"
-			   added by the IntersectionObserver below), this pseudo-element
-			   extends the header background upward to cover that band. */
-			.diff-file-header[data-stuck="1"]::before {
-				content: "";
-				position: absolute;
-				left: 0;
-				right: 0;
-				bottom: 100%;
-				height: 1.5rem;
-				background-color: inherit;
-				pointer-events: none;
+			.diff-file-header[data-stuck="1"]:hover {
+				background-color: oklch(var(--b2));
+			}
+			.diff-file-header[data-collapsed="1"] {
+				border-bottom-color: transparent;
+				border-bottom-left-radius: inherit;
+				border-bottom-right-radius: inherit;
+			}
+			.diff-file-header[data-collapsed="1"] + .diff-file-body {
+				max-height: 0 !important;
 			}
 			.diff-file-body {
 				border-bottom-left-radius: inherit;
@@ -1373,10 +1449,13 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 
 templ diffFileHeader(f DiffFile, idx int, defaultExpanded bool, splitChevron bool) {
 	<div
-		class="diff-file-header sticky top-0 z-20 bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2 cursor-pointer select-none hover:bg-base-300/50 transition-colors"
+		class="diff-file-header sticky z-20 bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2 cursor-pointer select-none hover:bg-base-300/50 transition-colors"
 		onclick={ templ.ComponentScript{Call: fmt.Sprintf("toggleDiffFile(%d)", idx)} }
 		data-diff-toggle={ fmt.Sprintf("%d", idx) }
 		data-diff-status={ diffFileStatusValue(f.Status) }
+		if !defaultExpanded {
+			data-collapsed="1"
+		}
 	>
 		<svg
 			if splitChevron {
@@ -1493,7 +1572,7 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 	</div>
 }
 
-templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) }>
+templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-state-key={ diffViewerStateKey(metas, "") }>
 		<!-- Toolbar -->
 		<div class="flex items-center justify-between mb-4">
 			<div class="flex items-center gap-2">
@@ -1572,35 +1651,36 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 		</div>
 
 		<style>
-			/* Sticky file headers within the diff viewer. */
+			/* Sticky file headers within the diff viewer.
+			   The card cannot use any overflow other than visible —
+			   overflow: hidden/auto/scroll/clip all trap position: sticky
+			   against the card. Each card keeps its full rounded corners
+			   and the original space-y-4 gap between files. */
 			.diff-file-card {
 				border-radius: var(--rounded-box, 1rem);
 			}
+			/* See review variant for rationale: top: -1.5rem snaps the
+			   sticky header flush with #main-content's padding-box edge.
+			   Keep rounded corners normally; square them only while pinned. */
 			.diff-file-header {
+				top: -1.5rem;
 				border-top-left-radius: inherit;
 				border-top-right-radius: inherit;
 			}
-			/* When the header is stuck, square its top corners so diff rows
-			   scrolling behind it are not visible through the rounded cutouts. */
 			.diff-file-header[data-stuck="1"] {
 				border-top-left-radius: 0;
 				border-top-right-radius: 0;
 			}
-			/* #main-content has p-6 (1.5rem) padding-top, which sits inside
-			   its scroll-clip region. Without compensation, rows scrolling
-			   toward the sticky header remain visible inside that padding
-			   band above the header. When the header is stuck (data-stuck="1"
-			   added by the IntersectionObserver below), this pseudo-element
-			   extends the header background upward to cover that band. */
-			.diff-file-header[data-stuck="1"]::before {
-				content: "";
-				position: absolute;
-				left: 0;
-				right: 0;
-				bottom: 100%;
-				height: 1.5rem;
-				background-color: inherit;
-				pointer-events: none;
+			.diff-file-header[data-stuck="1"]:hover {
+				background-color: oklch(var(--b2));
+			}
+			.diff-file-header[data-collapsed="1"] {
+				border-bottom-color: transparent;
+				border-bottom-left-radius: inherit;
+				border-bottom-right-radius: inherit;
+			}
+			.diff-file-header[data-collapsed="1"] + .diff-file-body {
+				max-height: 0 !important;
 			}
 			.diff-file-body {
 				border-bottom-left-radius: inherit;
@@ -1608,8 +1688,14 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 			}
 		</style>
 		<script>
-			// Session-level state for diff file expand/collapse
+			// Session-level state for diff file expand/collapse, scoped by viewer.
 			if (!window._diffFileState) window._diffFileState = {};
+			function diffFileStateBucket() {
+				var viewer = document.getElementById('diff-viewer');
+				var key = viewer ? (viewer.dataset.stateKey || 'default') : 'default';
+				if (!window._diffFileState[key]) window._diffFileState[key] = {};
+				return window._diffFileState[key];
+			}
 
 			function toggleDiffFile(idx) {
 				var inlineBody = document.getElementById('diff-body-' + idx);
@@ -1619,6 +1705,32 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 
 				var isExpanded = chevron && chevron.classList.contains('rotate-90');
 				var newState = !isExpanded;
+
+				// When collapsing a card whose sticky header is currently
+				// pinned to the top of the scroll container, pre-scroll the
+				// page so the card's top aligns with the scroller top before
+				// the body animates; otherwise the sticky header's
+				// containing-block constraint would drag the header
+				// off-screen as the body collapses.
+				if (!newState) {
+					var card = null;
+					[
+						document.getElementById('diff-file-' + idx),
+						document.getElementById('diff-file-split-' + idx)
+					].some(function(candidate) {
+						if (!candidate || candidate.getClientRects().length === 0) return false;
+						card = candidate;
+						return true;
+					});
+					var scroller = document.getElementById('main-content');
+					if (card && scroller) {
+						var cardTop = card.getBoundingClientRect().top;
+						var scrollerTop = scroller.getBoundingClientRect().top;
+						if (cardTop < scrollerTop) {
+							scroller.scrollTop -= (scrollerTop - cardTop);
+						}
+					}
+				}
 
 				// Update inline view
 				if (inlineBody) {
@@ -1650,8 +1762,13 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 				if (chevron) chevron.classList.toggle('rotate-90', newState);
 				if (chevronSplit) chevronSplit.classList.toggle('rotate-90', newState);
 
+				document.querySelectorAll('[data-diff-toggle="' + idx + '"]').forEach(function(el) {
+					if (newState) el.removeAttribute('data-collapsed');
+					else el.setAttribute('data-collapsed', '1');
+				});
+
 				// Persist state
-				window._diffFileState[idx] = newState;
+				diffFileStateBucket()[idx] = newState;
 			}
 
 			function toggleAllDiffFiles(expand) {
@@ -1680,39 +1797,54 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 				}, 50);
 			}
 
-			// Restore session state on re-render (HTMX swaps)
-			(function() {
+			// Restore persisted expand/collapse state after initial render and after
+			// HTMX swaps. Deferred file-card swaps render expanded by default, so the
+			// saved state must be re-applied to the body, chevrons, and header shape.
+			window._restoreDiffFileState = window._restoreDiffFileState || function() {
 				var viewer = document.getElementById('diff-viewer');
-				if (!viewer) return;
+				if (!viewer || !window._diffFileState) return;
+				var state = diffFileStateBucket();
 				var count = parseInt(viewer.dataset.fileCount || '0');
 				for (var i = 0; i < count; i++) {
-					if (window._diffFileState.hasOwnProperty(i)) {
-						var chevron = document.getElementById('diff-chevron-' + i);
-						var isExpanded = chevron && chevron.classList.contains('rotate-90');
-						if (isExpanded !== window._diffFileState[i]) {
-							// Apply state without animation
-							var bodies = [
-								document.getElementById('diff-body-' + i),
-								document.getElementById('diff-body-split-' + i)
-							];
-							var chevrons = [
-								chevron,
-								document.getElementById('diff-chevron-split-' + i)
-							];
-							bodies.forEach(function(body) {
-								if (!body) return;
-								body.style.transition = 'none';
-								body.style.maxHeight = window._diffFileState[i] ? '' : '0';
-								body.offsetHeight; // force reflow
-								body.style.transition = '';
-							});
-							chevrons.forEach(function(c) {
-								if (c) c.classList.toggle('rotate-90', window._diffFileState[i]);
-							});
-						}
+					if (state.hasOwnProperty(i)) {
+						var savedExpanded = state[i];
+						var bodies = [
+							document.getElementById('diff-body-' + i),
+							document.getElementById('diff-body-split-' + i)
+						];
+						var chevrons = [
+							document.getElementById('diff-chevron-' + i),
+							document.getElementById('diff-chevron-split-' + i)
+						];
+						bodies.forEach(function(body) {
+							if (!body) return;
+							body.style.transition = 'none';
+							body.style.maxHeight = savedExpanded ? '' : '0';
+							body.offsetHeight;
+							body.style.transition = '';
+						});
+						chevrons.forEach(function(c) {
+							if (!c) return;
+							var previousTransition = c.style.transition;
+							c.style.transition = 'none';
+							c.classList.toggle('rotate-90', savedExpanded);
+							c.getBoundingClientRect();
+							c.style.transition = previousTransition;
+						});
+						document.querySelectorAll('[data-diff-toggle="' + i + '"]').forEach(function(el) {
+							if (savedExpanded) el.removeAttribute('data-collapsed');
+							else el.setAttribute('data-collapsed', '1');
+						});
 					}
 				}
-			})();
+			};
+			window._restoreDiffFileState();
+			if (!window._diffFileStateRestoreRegistered) {
+				window._diffFileStateRestoreRegistered = true;
+				['htmx:afterSwap', 'htmx:afterSettle'].forEach(function(eventName) {
+					document.body.addEventListener(eventName, window._restoreDiffFileState);
+				});
+			}
 
 			function switchDiffView(mode) {
 				var inlineEl = document.getElementById('diff-content-inline');
@@ -1733,42 +1865,56 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 				}
 			}
 
-			// Sticky diff file header pinning. Mirrors the review variant so
-			// the non-review diff viewer also covers the scroll container's
-			// padding band when headers are pinned. Idempotent via
-			// window._wireDiffStickyHeaders.
-			if (!window._wireDiffStickyHeaders) {
-				window._wireDiffStickyHeaders = function() {
-					if (!('IntersectionObserver' in window)) return;
-					var headers = document.querySelectorAll('.diff-file-header');
-					if (!headers.length) return;
-					if (!window._diffStickyObserver) {
-						window._diffStickyObserver = new IntersectionObserver(function(entries) {
-							entries.forEach(function(entry) {
-								var header = entry.target.nextElementSibling;
-								if (!header || !header.classList.contains('diff-file-header')) return;
-								if (!entry.isIntersecting && entry.boundingClientRect.top < 0) {
-									header.setAttribute('data-stuck', '1');
-								} else {
-									header.removeAttribute('data-stuck');
-								}
-							});
-						}, { threshold: [0] });
-					}
-					headers.forEach(function(header) {
-						var prev = header.previousElementSibling;
-						if (prev && prev.classList.contains('diff-sticky-sentinel')) return;
-						var sentinel = document.createElement('div');
-						sentinel.className = 'diff-sticky-sentinel';
-						sentinel.style.height = '1px';
-						sentinel.style.marginBottom = '-1px';
-						sentinel.setAttribute('aria-hidden', 'true');
-						header.parentNode.insertBefore(sentinel, header);
-						window._diffStickyObserver.observe(sentinel);
+			// Track when sticky diff file headers are pinned. Headers keep their
+			// original rounded corners in normal flow, then square their top
+			// corners while pinned so diff rows cannot show through the radius.
+			window._wireDiffStickyHeaders = window._wireDiffStickyHeaders || (function() {
+				var ticking = false;
+
+				function updateStickyHeaders() {
+					ticking = false;
+					var scroller = document.getElementById("main-content");
+					var rootTop = scroller ? scroller.getBoundingClientRect().top : 0;
+					var viewer = document.getElementById("diff-viewer") || document;
+					viewer.querySelectorAll(".diff-file-header").forEach(function(header) {
+						var sentinel = header.previousElementSibling;
+						if (!sentinel || sentinel.getAttribute("data-diff-sticky-sentinel") !== "1") return;
+						if (sentinel.getBoundingClientRect().top <= rootTop + 1) {
+							header.setAttribute("data-stuck", "1");
+						} else {
+							header.removeAttribute("data-stuck");
+						}
 					});
+				}
+
+				function scheduleUpdate() {
+					if (ticking) return;
+					ticking = true;
+					requestAnimationFrame(updateStickyHeaders);
+				}
+
+				return function() {
+					var viewer = document.getElementById("diff-viewer") || document;
+					viewer.querySelectorAll(".diff-file-header:not([data-sticky-wired])").forEach(function(header) {
+						var sentinel = document.createElement("div");
+						sentinel.style.cssText = "height:1px;margin-bottom:-1px;pointer-events:none;";
+						sentinel.setAttribute("aria-hidden", "true");
+						sentinel.setAttribute("data-diff-sticky-sentinel", "1");
+						header.parentNode.insertBefore(sentinel, header);
+						header.setAttribute("data-sticky-wired", "1");
+					});
+					scheduleUpdate();
 				};
-			}
+			})();
 			window._wireDiffStickyHeaders();
+			if (!window._diffStickyHeadersScrollRegistered) {
+				window._diffStickyHeadersScrollRegistered = true;
+				var diffScroller = document.getElementById("main-content");
+				if (diffScroller) diffScroller.addEventListener("scroll", window._wireDiffStickyHeaders, { passive: true });
+				window.addEventListener("resize", window._wireDiffStickyHeaders);
+				document.body.addEventListener("htmx:afterSettle", window._wireDiffStickyHeaders);
+			}
+
 		</script>
 	</div>
 }
@@ -2254,7 +2400,7 @@ templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view st
 		class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2"
 	>
 		<div
-			class="diff-file-header sticky top-0 z-20 bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2"
+			class="diff-file-header sticky z-20 bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2"
 			data-diff-status={ diffFileStatusValue(meta.File.Status) }
 		>
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2342,6 +2488,27 @@ func isDiffFileLoadable(diffOutput string, fileIndex int) bool {
 
 func getDiffFileBlockedReason(diffOutput string, fileIndex int) string {
 	return getDiffRenderMeta(diffOutput, fileIndex).BlockedReason
+}
+
+func diffViewerStateKey(metas []DiffFileRenderMeta, taskID string) string {
+	var b strings.Builder
+	if taskID != "" {
+		b.WriteString("task:")
+		b.WriteString(taskID)
+		b.WriteString("|")
+	}
+	b.WriteString(fmt.Sprintf("files:%d", len(metas)))
+	for _, m := range metas {
+		b.WriteString("|")
+		b.WriteString(strconv.Itoa(m.Index))
+		b.WriteString(":")
+		b.WriteString(m.File.Status)
+		b.WriteString(":")
+		b.WriteString(m.File.OldPath)
+		b.WriteString("->")
+		b.WriteString(m.File.Path)
+	}
+	return b.String()
 }
 
 func formatByteSize(bytes int) string {
