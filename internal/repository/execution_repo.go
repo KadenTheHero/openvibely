@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -171,6 +172,7 @@ func (r *ExecutionRepo) UpdateOutput(ctx context.Context, id string, output stri
 }
 
 func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.ExecutionStatus, output, errMsg string, tokensUsed int, durationMs int64) error {
+	output = llmtranscript.NormalizeMarkers(output)
 	// When output is empty, preserve any partial output already written by the
 	// streaming writer during LLM execution. Failure completion paths frequently
 	// call Complete with empty output while the streamed transcript already exists
@@ -325,12 +327,12 @@ func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID st
 
 // AvgExecutionTime represents average execution time
 type AvgExecutionTime struct {
-	ID      string
-	Name    string
-	AvgMs   float64
-	Count   int
-	MinMs   int64
-	MaxMs   int64
+	ID    string
+	Name  string
+	AvgMs float64
+	Count int
+	MinMs int64
+	MaxMs int64
 }
 
 // GetAvgExecutionTimeByTask returns average execution times per task
@@ -445,10 +447,10 @@ func (r *ExecutionRepo) GetExecutionTrendsByHour(ctx context.Context, projectID 
 
 // AgentUsage represents agent usage statistics
 type AgentUsage struct {
-	AgentID      string
-	AgentName    string
-	ProjectID    string
-	ProjectName  string
+	AgentID        string
+	AgentName      string
+	ProjectID      string
+	ProjectName    string
 	ExecutionCount int
 	SuccessCount   int
 	FailureCount   int
@@ -499,8 +501,8 @@ func (r *ExecutionRepo) GetAgentUsageByProject(ctx context.Context, projectID st
 
 // TaskFrequency represents task execution frequency
 type TaskFrequency struct {
-	TaskID        string
-	TaskTitle     string
+	TaskID         string
+	TaskTitle      string
 	ExecutionCount int
 	LastExecutedAt string
 }

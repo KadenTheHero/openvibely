@@ -158,6 +158,7 @@ func TestCleanChatOutput(t *testing.T) {
 		{name: "strips multi_tool_use with unicode", input: "} to=multi_tool_use.parallel code 彩神争霸高json uμ? Wait malformed.\nRetrying.", expected: "Retrying."},
 		{name: "preserves normal multi-tool text", input: "The multi-tool approach works well.", expected: "The multi-tool approach works well."},
 		{name: "strips thinking blocks", input: "\n[Thinking]\nLet me analyze this question.\n\nCOBOL was created in 1959.", expected: "COBOL was created in 1959."},
+		{name: "strips legacy raw thinking close tags without eating final answer", input: "\n[Thinking]\nLet me analyze this question.\n</thinking>\nCOBOL was created in 1959.", expected: "COBOL was created in 1959."},
 		{name: "empty input", input: "", expected: ""},
 	}
 

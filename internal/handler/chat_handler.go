@@ -538,20 +538,22 @@ func (h *Handler) ChatStreamSSE(c echo.Context) error {
 				return nil
 			}
 
+			output := exec.Output
+
 			// Send new output if changed
-			if exec.Output != lastOutput && len(exec.Output) > len(lastOutput) {
+			if output != lastOutput && len(output) > len(lastOutput) {
 				// Send only the delta (new content)
-				delta := exec.Output[len(lastOutput):]
+				delta := output[len(lastOutput):]
 				log.Printf("[handler] ChatStreamSSE exec=%s delta_len=%d delta=%q", execID, len(delta), delta)
 				// SSE requires multi-line data to have each line prefixed with "data:".
 				// Without this, content after the first newline is silently dropped
 				// by the browser's EventSource parser.
 				writeSSEData(c, delta)
 				c.Response().Flush()
-				lastOutput = exec.Output
-			} else if exec.Output != lastOutput {
+				lastOutput = output
+			} else if output != lastOutput {
 				// Output was modified (not just appended) — update tracking
-				lastOutput = exec.Output
+				lastOutput = output
 			}
 
 			// Check if execution is complete

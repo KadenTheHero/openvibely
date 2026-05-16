@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 )
 
 // ExtractMarker looks for a marker like "[STATUS: FAILED | reason]" in the output.
@@ -97,7 +99,7 @@ func CleanChatOutput(output string) string {
 // When stripSummaries is true, it also removes the result/summary sections
 // (used for LLM history context). When false, summaries are preserved (used for display).
 func doCleanChatOutput(output string, stripSummaries bool) string {
-	result := output
+	result := llmtranscript.NormalizeMarkers(output)
 
 	// Remove properly closed thinking blocks first (regex handles [Thinking]...[/Thinking])
 	result = reCleanThinking.ReplaceAllString(result, "")

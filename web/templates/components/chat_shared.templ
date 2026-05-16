@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -77,10 +78,10 @@ templ ChatBubble(role, content string) {
 			{ role }
 		</div>
 		<div class="chat-bubble-inner">
-			if role == "User" {
-				<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ CleanDisplayContent(content) }</div>
-			} else {
-				<div class="chat-stream-content" data-raw-content={ content }></div>
+				if role == "User" {
+					<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ CleanDisplayContent(content) }</div>
+				} else {
+					<div class="chat-stream-content" data-raw-content={ NormalizeDisplayMarkers(content) }></div>
 				<script>
 					(function() {
 						var el = document.currentScript.previousElementSibling;
@@ -130,8 +131,8 @@ templ ChatBubbleError(role, errorMsg, output string) {
 			if errorMsg != "" {
 				<div class="text-error/80 text-sm font-medium mb-2">{ "Error: " + errorMsg }</div>
 			}
-			if output != "" {
-				<div class="chat-stream-content" data-raw-content={ output }></div>
+				if output != "" {
+					<div class="chat-stream-content" data-raw-content={ NormalizeDisplayMarkers(output) }></div>
 				<script>
 					(function() {
 						var el = document.currentScript.previousElementSibling;
@@ -378,16 +379,18 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					var lastRenderedLength = 0;
 					function renderBufferedOutput(force) {
 						if (!window.renderStreamingContent) {
-							container.textContent = textBuffer;
+							container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
 							return;
 						}
 						if (!force && renderScheduled) return;
 						var runRender = function() {
 							renderScheduled = false;
-							if (!force && textBuffer.length === lastRenderedLength) return;
+							var renderText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
+							if (!force && renderText.length === lastRenderedLength) return;
 							var shouldScroll = !tracker || tracker.shouldAutoScroll();
-							window.renderStreamingContent(container, textBuffer);
-							lastRenderedLength = textBuffer.length;
+							container.setAttribute('data-raw-content', renderText);
+							window.renderStreamingContent(container, renderText);
+							lastRenderedLength = renderText.length;
 							// Auto-scroll only if the viewport was pinned before this render grew the DOM.
 							if (shouldScroll) {
 								requestAnimationFrame(function() {
@@ -435,8 +438,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						
 						// Append to buffer and re-render
 						textBuffer += event.data;
-						// Persist raw stream content for completion fallback logic
-						container.setAttribute('data-raw-content', textBuffer);
+						// Persist normalized render content for completion fallback logic
+						container.setAttribute('data-raw-content', window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer);
 						renderBufferedOutput(false);
 					};
 
@@ -547,7 +550,7 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 					@ChatLoadingDots("sm")
 				</div>
 			}
-			<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-length={ fmt.Sprintf("%d", jsStringLength(partialContent)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-content={ partialContent } style="word-wrap: break-word;"></div>
+				<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-length={ fmt.Sprintf("%d", jsStringLength(NormalizeDisplayMarkers(partialContent))) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
 			<script>
 				(function() {
 					var el = document.currentScript.previousElementSibling;
@@ -691,16 +694,18 @@ templ _initThreadStreamingScript() {
 				var lastRenderedLength = 0;
 				function renderCumulativeContent(force) {
 					if (!window.renderStreamingContent) {
-						container.textContent = cumulativeContent;
+						container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(cumulativeContent) : cumulativeContent;
 						return;
 					}
 					if (!force && renderScheduled) return;
 					var runRender = function() {
 						renderScheduled = false;
-						if (!force && cumulativeContent.length === lastRenderedLength) return;
+						var renderText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(cumulativeContent) : cumulativeContent;
+						if (!force && renderText.length === lastRenderedLength) return;
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
-						window.renderStreamingContent(container, cumulativeContent);
-						lastRenderedLength = cumulativeContent.length;
+						container.setAttribute('data-raw-content', renderText);
+						window.renderStreamingContent(container, renderText);
+						lastRenderedLength = renderText.length;
 						if (shouldScroll) {
 							requestAnimationFrame(function() {
 								var cm = document.getElementById(messagesId);
@@ -1601,8 +1606,9 @@ templ ChatAutoScrollScript() {
 		// into styled DOM elements matching Claude Code VSCode extension style.
 		// Tools: flat row with bold name + checkmark (completed) or spinner (active).
 		// Thinking: collapsible <details> with italic label and markdown content.
-		window.renderStreamingContent = function(container, textBuffer) {
-			// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
+			window.renderStreamingContent = function(container, textBuffer) {
+				if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer || '');
+				// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
 				'bash': 'Bash', 'grep_search': 'Grep', 'list_files': 'List Files',
@@ -1970,8 +1976,20 @@ templ ChatAutoScrollScript() {
 		};
 
 		// Clean action markers from chat message content (shared between chat and task thread)
-		window.cleanActionMarkers = function(text, noTrim) {
-			if (!text) return text;
+			window.normalizeTranscriptMarkers = function(text) {
+				if (!text) return text;
+				text = text.replace(/\[Using tool:\s*([A-Za-z0-9_.-]+)"(?:\]|>)\s*<parameter\s+name="command">([\s\S]*?)<\/parameter>\s*<\/invoke>\s*/g, function(_, tool, command) {
+					command = command.replace(/\]/g, ')').replace(/[\r\n]+/g, ' ').trim();
+					return '\n[Using tool: ' + tool + (command ? ' | ' + command : '') + ']\n';
+				});
+				text = text.replace(/<\s*thinking\s*>/gi, '\n[Thinking]\n');
+				text = text.replace(/<\/\s*thinking\s*>/gi, '\n[/Thinking]\n');
+				return text;
+			};
+
+			window.cleanActionMarkers = function(text, noTrim) {
+				if (!text) return text;
+				text = window.normalizeTranscriptMarkers(text);
 			text = text.replace(/\[CREATE_TASK\][\s\S]*?\[\/CREATE_TASK\]/g, '');
 			text = text.replace(/\[EDIT_TASK\][\s\S]*?\[\/EDIT_TASK\]/g, '');
 			text = text.replace(/\[EXECUTE_TASKS\][\s\S]*?\[\/EXECUTE_TASKS\]/g, '');
@@ -2194,11 +2212,17 @@ var (
 	reExcessLines = regexp.MustCompile(`\n{3,}`)
 )
 
+// NormalizeDisplayMarkers canonicalizes legacy/provider marker variants for UI rendering.
+func NormalizeDisplayMarkers(text string) string {
+	return llmtranscript.NormalizeMarkers(text)
+}
+
 // CleanDisplayContent strips action markers from chat content for display.
 func CleanDisplayContent(text string) string {
 	if text == "" {
 		return text
 	}
+	text = NormalizeDisplayMarkers(text)
 	text = reCreateTask.ReplaceAllString(text, "")
 	text = reEditTask.ReplaceAllString(text, "")
 	text = reExecTasks.ReplaceAllString(text, "")
