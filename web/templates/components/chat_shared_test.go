@@ -1290,6 +1290,37 @@ func TestCleanAssistantMessages_HandlesStreamingResumeContainers(t *testing.T) {
 // view's afterSwap handlers check _sidebarNavigating before running expensive
 // DOM operations (cleanAssistantMessages, _initThreadStreaming). This prevents
 // morph-induced main-thread blocking from delaying sidebar navigation clicks.
+func TestTaskThreadView_SelectsTaskAssignedModelInDropdown(t *testing.T) {
+	agentID := "opus-config"
+	task := &models.Task{
+		ID:        "t1",
+		ProjectID: "p1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryActive,
+		AgentID:   &agentID,
+	}
+	agents := []models.LLMConfig{
+		{ID: "sonnet-config", Name: "Claude Sonnet 4.6", Model: "claude-sonnet-4-6"},
+		{ID: agentID, Name: "Claude Opus 4.7", Model: "claude-opus-4-7"},
+	}
+
+	var buf bytes.Buffer
+	if err := TaskThreadView(task, nil, agents, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render TaskThreadView: %v", err)
+	}
+	content := buf.String()
+
+	if !strings.Contains(content, `id="task-thread-form-agent-id" name="agent_id" value="opus-config"`) {
+		t.Fatal("task thread hidden agent input must default to the task-assigned model")
+	}
+	if strings.Contains(content, `<option value="auto" selected`) {
+		t.Fatal("task thread dropdown must not select Auto when the task has an assigned model")
+	}
+	if !strings.Contains(content, `<option value="opus-config" selected`) {
+		t.Fatal("task thread dropdown must select the task-assigned model option")
+	}
+}
+
 func TestTaskThreadView_SkipsExpensiveWorkDuringNavigation(t *testing.T) {
 	task := &models.Task{
 		ID:        "t1",

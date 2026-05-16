@@ -1536,8 +1536,8 @@ func TestHandler_ViewSchedule_WeekNavigation(t *testing.T) {
 	rec := htmxGet(e, base)
 	assertCode(t, rec, http.StatusOK)
 	assertNotContains(t, rec, "Future Task")
-	assertContains(t, rec, "Previous week")  // chevron aria-label
-	assertContains(t, rec, "Next week")      // chevron aria-label
+	assertContains(t, rec, "Previous week") // chevron aria-label
+	assertContains(t, rec, "Next week")     // chevron aria-label
 
 	// Week +2 should show the task and enabled Today button
 	rec = htmxGet(e, base+"&week=2")
@@ -2733,15 +2733,15 @@ func TestSidebar_LightModeBackgroundAndNavReadability(t *testing.T) {
 		"/insights",
 	}
 
-		requiredSnippets := []string{
-			`id="sidebar"`,
-			`class="sidebar-aside bg-base-100`,
-			`id="project-selector"`,
-			`--ov-l-bg: #FAFAFA;`,
-			`--ov-l-surface: #F5F5F5;`,
-			`[data-theme="light"] .sidebar-aside {`,
-			`background-color: #FAFAFA;`,
-			`border-color: var(--ov-l-border);`,
+	requiredSnippets := []string{
+		`id="sidebar"`,
+		`class="sidebar-aside bg-base-100`,
+		`id="project-selector"`,
+		`--ov-l-bg: #FAFAFA;`,
+		`--ov-l-surface: #F5F5F5;`,
+		`[data-theme="light"] .sidebar-aside {`,
+		`background-color: #FAFAFA;`,
+		`border-color: var(--ov-l-border);`,
 		`[data-theme="light"] .menu-title span {`,
 		`color: var(--ov-l-text);`,
 		`[data-theme="light"] .menu a,`,

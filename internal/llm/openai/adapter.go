@@ -751,7 +751,7 @@ func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig) (*opena
 		before := client.CurrentAuth()
 		if err := client.EnsureValidToken(); err != nil {
 			log.Printf("[openai-adapter] getClient token refresh failed for agent=%s: %v", agent.Name, err)
-			return nil, fmt.Errorf("OAuth token refresh failed for %q: %w", agent.Name, err)
+			return nil, fmt.Errorf("OAuth token refresh failed for model config %q (id=%s provider=%s model=%s): %w", agent.Name, agent.ID, agent.Provider, agent.Model, err)
 		}
 
 		after := client.CurrentAuth()

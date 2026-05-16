@@ -34,8 +34,9 @@ type ChatInputFormConfig struct {
 	ChatMode          models.ChatMode // default when not persisted
 	TaskID        string // non-empty enables cancel button when IsRunning
 	IsRunning     bool
-	ProjectID     string // non-empty enables model selection persistence via localStorage
-}
+		ProjectID       string // non-empty enables model selection persistence via localStorage
+		SelectedAgentID string // initial model selection; defaults to auto when empty
+	}
 
 // chatElementIDs returns derived element IDs based on the form ID prefix.
 func chatAttachmentPreviewID(formID string) string { return formID + "-attachments-preview" }
@@ -43,6 +44,13 @@ func chatAttachmentListID(formID string) string    { return formID + "-attachmen
 func chatSessionInputID(formID string) string      { return formID + "-session-id" }
 func chatFileInputID(formID string) string         { return formID + "-file-input" }
 func chatDropOverlayID(formID string) string       { return formID + "-drop-overlay" }
+func selectedAgentOrAuto(agentID string) string {
+	if agentID == "" {
+		return "auto"
+	}
+	return agentID
+}
+
 func chatModeOrDefault(mode models.ChatMode) string {
 	if mode == "" {
 		return string(models.ChatModeOrchestrate)
@@ -849,7 +857,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			</div>
 		</div>
 		if config.ShowModelSelector {
-			<input type="hidden" id={ config.FormID + "-agent-id" } name="agent_id" value="auto"/>
+			<input type="hidden" id={ config.FormID + "-agent-id" } name="agent_id" value={ selectedAgentOrAuto(config.SelectedAgentID) }/>
 		}
 		if config.ShowModeSelector {
 			<input type="hidden" id={ config.FormID + "-chat-mode" } name="chat_mode" value={ chatModeOrDefault(config.ChatMode) }/>
@@ -887,10 +895,10 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			<div class="flex items-center gap-1 -ml-2">
 				if config.ShowModelSelector {
 					<select id={ config.FormID + "-agent-select" } class="chat-model-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 max-w-[140px] rounded-lg" data-agent-input={ config.FormID + "-agent-id" }>
-						<option value="auto" selected>Auto</option>
-						<option value="default">Default</option>
+						<option value="auto" if selectedAgentOrAuto(config.SelectedAgentID) == "auto" { selected }>Auto</option>
+						<option value="default" if config.SelectedAgentID == "default" { selected }>Default</option>
 						for _, agent := range config.Agents {
-							<option value={ agent.ID }>
+							<option value={ agent.ID } if config.SelectedAgentID == agent.ID { selected }>
 								{ agent.Name } ({ agent.Model })
 							</option>
 						}

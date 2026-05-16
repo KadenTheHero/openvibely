@@ -1466,8 +1466,8 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	sessionID := c.FormValue("attachment_session_id")
 	hasImages := hasPendingImages(sessionID)
 
-	// Select agent: prefer form value, fall back to task's assigned agent, then auto-select
-	// Uses the shared selectAgent helper for explicit/auto selection, with task-specific fallback
+	// Select agent: prefer form value, fall back to task's assigned agent, then auto-select.
+	// "auto" routes through complexity-based auto-selection; explicit IDs route directly.
 	agent, err := h.selectAgent(c.Request().Context(), agentID, message, hasImages)
 	if err != nil {
 		log.Printf("[handler] TaskThreadSend agent selection error: %v, trying task fallback", err)
