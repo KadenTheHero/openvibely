@@ -49,7 +49,7 @@ type DiffLine struct {
 }
 
 const (
-	// GitHub-style diff limits.
+	// Diff rendering load limits.
 	maxDiffFiles               = 300
 	maxLoadableTotalDiffLines  = 20000
 	maxLoadableTotalDiffChars  = 1 * 1024 * 1024
@@ -1194,6 +1194,22 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 		</script>
 
 		<style>
+			/* Sticky file headers within the diff viewer.
+			   The Task Detail page scroll container is #main-content, and the
+			   diff file cards themselves cannot use overflow-hidden or sticky
+			   would be clipped, so corner rounding is applied to the header
+			   and body explicitly. */
+			.diff-file-card {
+				border-radius: var(--rounded-box, 1rem);
+			}
+			.diff-file-header {
+				border-top-left-radius: inherit;
+				border-top-right-radius: inherit;
+			}
+			.diff-file-body {
+				border-bottom-left-radius: inherit;
+				border-bottom-right-radius: inherit;
+			}
 			/* Inline review styles — always active */
 			.diff-review-line {
 				position: relative;
@@ -1296,7 +1312,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 
 templ diffFileHeader(f DiffFile, idx int, defaultExpanded bool, splitChevron bool) {
 	<div
-		class="bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2 cursor-pointer select-none hover:bg-base-300/50 transition-colors"
+		class="diff-file-header sticky top-0 z-20 bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2 cursor-pointer select-none hover:bg-base-300/50 transition-colors"
 		onclick={ templ.ComponentScript{Call: fmt.Sprintf("toggleDiffFile(%d)", idx)} }
 		data-diff-toggle={ fmt.Sprintf("%d", idx) }
 		data-diff-status={ diffFileStatusValue(f.Status) }
@@ -1341,11 +1357,11 @@ templ diffFileEmptyBody(f DiffFile) {
 }
 
 templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID string, commentMap map[string][]models.ReviewComment) {
-	<div id={ fmt.Sprintf("diff-file-%d", idx) } class="card bg-base-100 border border-base-300 overflow-hidden">
+	<div id={ fmt.Sprintf("diff-file-%d", idx) } class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2">
 		@diffFileHeader(f, idx, defaultExpanded, false)
 		<div
 			id={ fmt.Sprintf("diff-body-%d", idx) }
-			class="overflow-hidden transition-all duration-300 ease-in-out"
+			class="diff-file-body overflow-hidden transition-all duration-300 ease-in-out"
 			if !defaultExpanded {
 				style="max-height: 0;"
 			}
@@ -1494,6 +1510,20 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 			}
 		</div>
 
+		<style>
+			/* Sticky file headers within the diff viewer. */
+			.diff-file-card {
+				border-radius: var(--rounded-box, 1rem);
+			}
+			.diff-file-header {
+				border-top-left-radius: inherit;
+				border-top-right-radius: inherit;
+			}
+			.diff-file-body {
+				border-bottom-left-radius: inherit;
+				border-bottom-right-radius: inherit;
+			}
+		</style>
 		<script>
 			// Session-level state for diff file expand/collapse
 			if (!window._diffFileState) window._diffFileState = {};
@@ -1624,11 +1654,11 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 }
 
 templ inlineDiffFile(f DiffFile, idx int, defaultExpanded bool) {
-	<div id={ fmt.Sprintf("diff-file-%d", idx) } class="card bg-base-100 border border-base-300 overflow-hidden">
+	<div id={ fmt.Sprintf("diff-file-%d", idx) } class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2">
 		@diffFileHeader(f, idx, defaultExpanded, false)
 		<div
 			id={ fmt.Sprintf("diff-body-%d", idx) }
-			class="overflow-hidden transition-all duration-300 ease-in-out"
+			class="diff-file-body overflow-hidden transition-all duration-300 ease-in-out"
 			if !defaultExpanded {
 				style="max-height: 0;"
 			}
@@ -1668,11 +1698,11 @@ templ inlineDiffFile(f DiffFile, idx int, defaultExpanded bool) {
 }
 
 templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID string, commentMap map[string][]models.ReviewComment) {
-	<div id={ fmt.Sprintf("diff-file-split-%d", idx) } class="card bg-base-100 border border-base-300 overflow-hidden">
+	<div id={ fmt.Sprintf("diff-file-split-%d", idx) } class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2">
 		@diffFileHeader(f, idx, defaultExpanded, true)
 		<div
 			id={ fmt.Sprintf("diff-body-split-%d", idx) }
-			class="overflow-hidden transition-all duration-300 ease-in-out"
+			class="diff-file-body overflow-hidden transition-all duration-300 ease-in-out"
 			if !defaultExpanded {
 				style="max-height: 0;"
 			}
@@ -1762,11 +1792,11 @@ templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 }
 
 templ splitDiffFile(f DiffFile, idx int, defaultExpanded bool) {
-	<div id={ fmt.Sprintf("diff-file-split-%d", idx) } class="card bg-base-100 border border-base-300 overflow-hidden">
+	<div id={ fmt.Sprintf("diff-file-split-%d", idx) } class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2">
 		@diffFileHeader(f, idx, defaultExpanded, true)
 		<div
 			id={ fmt.Sprintf("diff-body-split-%d", idx) }
-			class="overflow-hidden transition-all duration-300 ease-in-out"
+			class="diff-file-body overflow-hidden transition-all duration-300 ease-in-out"
 			if !defaultExpanded {
 				style="max-height: 0;"
 			}
@@ -2101,9 +2131,12 @@ func diffFileCardTargetSelector(idx int, view string) string {
 templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view string, reviewMode bool) {
 	<div
 		id={ diffFileCardID(meta.Index, view) }
-		class="card bg-base-100 border border-base-300 overflow-hidden"
+		class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2"
 	>
-		<div class="bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2" data-diff-status={ diffFileStatusValue(meta.File.Status) }>
+		<div
+			class="diff-file-header sticky top-0 z-20 bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2"
+			data-diff-status={ diffFileStatusValue(meta.File.Status) }
+		>
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
 			</svg>
@@ -2116,7 +2149,7 @@ templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view st
 				{ diffStats(meta.File) }
 			</span>
 		</div>
-		<div class="p-6 bg-base-100 text-center">
+		<div class="diff-file-body p-6 bg-base-100 text-center">
 			if meta.CanLoadOnDemand {
 				<div class="text-sm font-medium mb-1">Large file diff not shown by default</div>
 				<div class="text-xs opacity-60 mb-4">
