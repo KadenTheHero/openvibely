@@ -132,7 +132,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	isChatGPTOAuth := strings.TrimSpace(c.auth.APIKey) == ""
 
-	if err := c.EnsureValidToken(); err != nil {
+	if err := c.ensureValidToken(); err != nil {
 		return nil, err
 	}
 
@@ -588,7 +588,7 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 		return httpReq, nil
 	}
 
-	resp, err := doWithRetry(ctx, c.httpClient, buildReq)
+	resp, err := c.doWithOAuthRecovery(ctx, endpoint, isChatGPTOAuth, buildReq)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1029,7 +1029,7 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 		return httpReq, nil
 	}
 
-	resp, err := doWithRetry(ctx, c.httpClient, buildReq)
+	resp, err := c.doWithOAuthRecovery(ctx, endpoint, isChatGPTOAuth, buildReq)
 	if err != nil {
 		return nil, err
 	}

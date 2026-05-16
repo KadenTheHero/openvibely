@@ -76,7 +76,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		opts.Temperature = 0.7
 	}
 
-	if err := c.EnsureValidToken(); err != nil {
+	if err := c.ensureValidToken(); err != nil {
 		return nil, err
 	}
 
@@ -308,7 +308,7 @@ func (c *Client) sendCompletionsTurn(ctx context.Context, messages []completions
 		return httpReq, nil
 	}
 
-	resp, err := doWithRetry(ctx, c.httpClient, buildReq)
+	resp, err := c.doWithOAuthRecovery(ctx, endpoint, c.oauthUnauthorizedHandler != nil, buildReq)
 	if err != nil {
 		return nil, err
 	}

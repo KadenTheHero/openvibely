@@ -904,9 +904,25 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 		return httpReq, nil
 	}
 
+	tokenUsed := c.auth.Token
 	resp, err := doWithRetry(ctx, c.httpClient, buildReq)
 	if err != nil {
 		return nil, err
+	}
+	if resp.StatusCode == http.StatusUnauthorized && isOAuth && c.oauthUnauthorizedHandler != nil {
+		resp.Body.Close()
+		tokens, recovered, recoverErr := c.oauthUnauthorizedHandler(ctx, tokenUsed)
+		if recoverErr != nil {
+			return nil, recoverErr
+		}
+		if !recovered {
+			return nil, fmt.Errorf("API error 401: OAuth unauthorized recovery did not refresh token")
+		}
+		c.applyOAuthTokens(tokens)
+		resp, err = doWithRetry(ctx, c.httpClient, buildReq)
+		if err != nil {
+			return nil, err
+		}
 	}
 	defer resp.Body.Close()
 

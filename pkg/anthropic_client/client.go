@@ -61,6 +61,16 @@ type StoredAuth struct {
 	APIKey       string `json:"api_key,omitempty"`
 }
 
+// OAuthTokens are refreshed OAuth credentials supplied by an external authority.
+type OAuthTokens struct {
+	AccessToken  string
+	RefreshToken string
+	ExpiresAt    int64
+}
+
+// OAuthUnauthorizedHandler recovers an OAuth client after a request receives 401.
+type OAuthUnauthorizedHandler func(ctx context.Context, tokenUsed string) (OAuthTokens, bool, error)
+
 // Message is a single message in a conversation.
 type Message struct {
 	Role    string `json:"role"`
@@ -164,14 +174,33 @@ type Response struct {
 
 // Client is an Anthropic API client with conversation history.
 type Client struct {
-	auth       *StoredAuth
-	httpClient *http.Client
-	History    []Message
+	auth                     *StoredAuth
+	httpClient               *http.Client
+	oauthUnauthorizedHandler OAuthUnauthorizedHandler
+	History                  []Message
 }
 
 // Auth returns the current auth state (token may have been refreshed).
 func (c *Client) Auth() StoredAuth {
 	return *c.auth
+}
+
+// SetOAuthUnauthorizedHandler installs request-level OAuth recovery used when a
+// request receives 401 before streaming content starts.
+func (c *Client) SetOAuthUnauthorizedHandler(handler OAuthUnauthorizedHandler) {
+	c.oauthUnauthorizedHandler = handler
+}
+
+func (c *Client) applyOAuthTokens(tokens OAuthTokens) {
+	if tokens.AccessToken != "" {
+		c.auth.Token = tokens.AccessToken
+	}
+	if tokens.RefreshToken != "" {
+		c.auth.RefreshToken = tokens.RefreshToken
+	}
+	if tokens.ExpiresAt != 0 {
+		c.auth.ExpiresAt = tokens.ExpiresAt
+	}
 }
 
 // NewWithAPIKey creates a client using an API key.

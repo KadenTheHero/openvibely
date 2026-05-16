@@ -103,6 +103,17 @@ type StoredAuth struct {
 	AccountID    string `json:"account_id,omitempty"`
 }
 
+// OAuthTokens are refreshed OAuth credentials supplied by an external authority.
+type OAuthTokens struct {
+	AccessToken  string
+	RefreshToken string
+	ExpiresAt    int64
+	AccountID    string
+}
+
+// OAuthUnauthorizedHandler recovers an OAuth client after a request receives 401.
+type OAuthUnauthorizedHandler func(ctx context.Context, tokenUsed string) (OAuthTokens, bool, error)
+
 // Message is a single conversation message.
 type Message struct {
 	Role    string `json:"role"`
@@ -135,10 +146,12 @@ type Response struct {
 
 // Client is an OpenAI API client with conversation history.
 type Client struct {
-	auth       *StoredAuth
-	httpClient *http.Client
-	sessionID  string
-	History    []Message
+	auth                          *StoredAuth
+	httpClient                    *http.Client
+	sessionID                     string
+	oauthUnauthorizedHandler      OAuthUnauthorizedHandler
+	oauthRefreshExternallyManaged bool
+	History                       []Message
 }
 
 // NewWithAPIKey creates a client using an API key.
@@ -170,6 +183,65 @@ func (c *Client) CurrentAuth() StoredAuth {
 		return StoredAuth{}
 	}
 	return *c.auth
+}
+
+// SetOAuthUnauthorizedHandler installs request-level OAuth recovery used when a
+// request receives 401 before streaming content starts. It also marks token
+// refresh as externally managed so adapter-backed clients persist all rotations
+// through their selected model config row instead of refreshing only in-memory.
+func (c *Client) SetOAuthUnauthorizedHandler(handler OAuthUnauthorizedHandler) {
+	c.oauthUnauthorizedHandler = handler
+	c.oauthRefreshExternallyManaged = handler != nil
+}
+
+func (c *Client) ensureValidToken() error {
+	if c.oauthRefreshExternallyManaged {
+		return nil
+	}
+	return c.EnsureValidToken()
+}
+
+func (c *Client) applyOAuthTokens(tokens OAuthTokens) {
+	if c.auth == nil {
+		return
+	}
+	if tokens.AccessToken != "" {
+		c.auth.Token = tokens.AccessToken
+	}
+	if tokens.RefreshToken != "" {
+		c.auth.RefreshToken = tokens.RefreshToken
+	}
+	if tokens.ExpiresAt != 0 {
+		c.auth.ExpiresAt = tokens.ExpiresAt
+	}
+	if tokens.AccountID != "" {
+		c.auth.AccountID = tokens.AccountID
+	}
+}
+
+func (c *Client) doWithOAuthRecovery(ctx context.Context, endpoint string, isOAuth bool, buildReq func() (*http.Request, error)) (*http.Response, error) {
+	tokenUsed := ""
+	if c.auth != nil {
+		tokenUsed = c.auth.Token
+	}
+	resp, err := doWithRetry(ctx, c.httpClient, buildReq)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusUnauthorized || !isOAuth || c.oauthUnauthorizedHandler == nil {
+		return resp, nil
+	}
+
+	resp.Body.Close()
+	tokens, recovered, recoverErr := c.oauthUnauthorizedHandler(ctx, tokenUsed)
+	if recoverErr != nil {
+		return nil, recoverErr
+	}
+	if !recovered {
+		return nil, fmt.Errorf("POST %q: 401 Unauthorized: OAuth unauthorized recovery did not refresh token", endpoint)
+	}
+	c.applyOAuthTokens(tokens)
+	return doWithRetry(ctx, c.httpClient, buildReq)
 }
 
 // EnsureValidToken refreshes the OAuth token if it is expiring within 1 hour.
@@ -269,7 +341,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 
 	isChatGPTOAuth := strings.TrimSpace(c.auth.APIKey) == ""
 
-	if err := c.EnsureValidToken(); err != nil {
+	if err := c.ensureValidToken(); err != nil {
 		return nil, err
 	}
 
@@ -338,7 +410,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		return req, nil
 	}
 
-	resp, err := doWithRetry(ctx, c.httpClient, buildReq)
+	resp, err := c.doWithOAuthRecovery(ctx, endpoint, isChatGPTOAuth, buildReq)
 	if err != nil {
 		return nil, err
 	}

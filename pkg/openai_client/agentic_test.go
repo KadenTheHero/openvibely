@@ -2656,3 +2656,105 @@ func TestLegacyToolCallsUnaffectedByWebSearch(t *testing.T) {
 		t.Errorf("args = %q", result.toolCalls[0].Arguments)
 	}
 }
+
+func TestSendAgenticTurnRecoversOAuthUnauthorizedAndRetries(t *testing.T) {
+	var seenAuth []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = append(seenAuth, r.Header.Get("Authorization"))
+		if len(seenAuth) == 1 {
+			http.Error(w, `{"error":"expired"}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, buildSSE([]string{
+			`{"type":"response.output_text.delta","delta":"ok"}`,
+			`{"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-test","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+		}))
+	}))
+	defer srv.Close()
+
+	oldChatGPTBaseURL := OpenAIChatGPTAPIBaseURL
+	OpenAIChatGPTAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
+
+	client := NewWithOAuthToken("old-token", "old-refresh", time.Now().Add(time.Hour).UnixMilli(), "acct")
+	client.SetOAuthUnauthorizedHandler(func(ctx context.Context, tokenUsed string) (OAuthTokens, bool, error) {
+		if tokenUsed != "old-token" {
+			t.Fatalf("tokenUsed = %q", tokenUsed)
+		}
+		return OAuthTokens{AccessToken: "new-token", RefreshToken: "new-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli(), AccountID: "acct"}, true, nil
+	})
+
+	resp, err := client.SendAgentic(context.Background(), "hello", &AgenticOptions{Model: "gpt-test", MaxTurns: 1, DisableTools: true})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if resp.Text != "ok" {
+		t.Fatalf("Text = %q", resp.Text)
+	}
+	if len(seenAuth) != 2 {
+		t.Fatalf("requests = %d, want 2", len(seenAuth))
+	}
+	if seenAuth[0] != "Bearer old-token" || seenAuth[1] != "Bearer new-token" {
+		t.Fatalf("auth headers = %#v", seenAuth)
+	}
+	if client.CurrentAuth().Token != "new-token" || client.CurrentAuth().RefreshToken != "new-refresh" {
+		t.Fatalf("client auth not updated: %#v", client.CurrentAuth())
+	}
+}
+
+func TestSendRecoversOAuthUnauthorizedAndRetries(t *testing.T) {
+	var seenAuth []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = append(seenAuth, r.Header.Get("Authorization"))
+		if len(seenAuth) == 1 {
+			http.Error(w, `{"error":"expired"}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, buildSSE([]string{
+			`{"type":"response.output_text.delta","delta":"ok"}`,
+			`{"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-test","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+		}))
+	}))
+	defer srv.Close()
+
+	oldChatGPTBaseURL := OpenAIChatGPTAPIBaseURL
+	OpenAIChatGPTAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
+
+	client := NewWithOAuthToken("old-token", "old-refresh", time.Now().Add(time.Hour).UnixMilli(), "acct")
+	client.SetOAuthUnauthorizedHandler(func(ctx context.Context, tokenUsed string) (OAuthTokens, bool, error) {
+		if tokenUsed != "old-token" {
+			t.Fatalf("tokenUsed = %q", tokenUsed)
+		}
+		return OAuthTokens{AccessToken: "new-token", RefreshToken: "new-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli(), AccountID: "acct"}, true, nil
+	})
+
+	resp, err := client.Send(context.Background(), "hello", &SendOptions{Model: "gpt-test"})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if resp.Text != "ok" {
+		t.Fatalf("Text = %q", resp.Text)
+	}
+	if len(seenAuth) != 2 {
+		t.Fatalf("requests = %d, want 2", len(seenAuth))
+	}
+	if seenAuth[0] != "Bearer old-token" || seenAuth[1] != "Bearer new-token" {
+		t.Fatalf("auth headers = %#v", seenAuth)
+	}
+}
+
+func TestExternallyManagedOAuthSkipsPackagePreflightRefresh(t *testing.T) {
+	client := NewWithOAuthToken("old-token", "old-refresh", time.Now().Add(-time.Hour).UnixMilli(), "acct")
+	client.SetOAuthUnauthorizedHandler(func(ctx context.Context, tokenUsed string) (OAuthTokens, bool, error) {
+		return OAuthTokens{}, false, nil
+	})
+	if err := client.ensureValidToken(); err != nil {
+		t.Fatalf("ensureValidToken: %v", err)
+	}
+	if client.CurrentAuth().Token != "old-token" || client.CurrentAuth().RefreshToken != "old-refresh" {
+		t.Fatalf("client auth changed unexpectedly: %#v", client.CurrentAuth())
+	}
+}

@@ -2345,3 +2345,53 @@ func TestLegacyAnthropicToolCallsUnaffected(t *testing.T) {
 		t.Errorf("stopReason = %q, want tool_use", result.stopReason)
 	}
 }
+
+func TestSendAgenticTurnRecoversOAuthUnauthorizedAndRetries(t *testing.T) {
+	var seenAuth []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = append(seenAuth, r.Header.Get("Authorization"))
+		if len(seenAuth) == 1 {
+			http.Error(w, `{"error":"expired"}`, http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, buildSSE([]string{
+			`{"type":"message_start","message":{"model":"claude-test","usage":{"input_tokens":1}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`,
+			`{"type":"message_stop"}`,
+		}))
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	client := NewWithOAuthToken("old-token", "old-refresh", time.Now().Add(time.Hour).UnixMilli())
+	client.SetOAuthUnauthorizedHandler(func(ctx context.Context, tokenUsed string) (OAuthTokens, bool, error) {
+		if tokenUsed != "old-token" {
+			t.Fatalf("tokenUsed = %q", tokenUsed)
+		}
+		return OAuthTokens{AccessToken: "new-token", RefreshToken: "new-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, true, nil
+	})
+
+	resp, err := client.SendAgentic(context.Background(), "hello", &AgenticOptions{Model: "claude-test", MaxTurns: 1, DisableTools: true})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if resp.Text != "ok" {
+		t.Fatalf("Text = %q", resp.Text)
+	}
+	if len(seenAuth) != 2 {
+		t.Fatalf("requests = %d, want 2", len(seenAuth))
+	}
+	if seenAuth[0] != "Bearer old-token" || seenAuth[1] != "Bearer new-token" {
+		t.Fatalf("auth headers = %#v", seenAuth)
+	}
+	if client.Auth().Token != "new-token" || client.Auth().RefreshToken != "new-refresh" {
+		t.Fatalf("client auth not updated: %#v", client.Auth())
+	}
+}

@@ -10,6 +10,7 @@ import (
 
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
@@ -39,6 +40,7 @@ func isMaxTokensStopReason(reason string) bool {
 type Adapter struct {
 	llmConfigRepo *repository.LLMConfigRepo
 	execRepo      *repository.ExecutionRepo
+	oauthRecovery *llmoauth.Manager
 }
 
 func applyOpenAIOAuthSystemPrompt(base string, agent models.LLMConfig) string {
@@ -292,6 +294,7 @@ func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.Execution
 	return &Adapter{
 		llmConfigRepo: llmConfigRepo,
 		execRepo:      execRepo,
+		oauthRecovery: llmoauth.NewManager(llmConfigRepo),
 	}
 }
 
@@ -734,6 +737,36 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	return output, usage, nil
 }
 
+func (a *Adapter) openAIRefreshFunc() llmoauth.RefreshFunc {
+	return func(ctx context.Context, cfg models.LLMConfig) (llmoauth.TokenSet, error) {
+		auth, err := openaiclient.RefreshToken(cfg.OAuthRefreshToken)
+		if err != nil {
+			return llmoauth.TokenSet{}, err
+		}
+		return llmoauth.TokenSet{AccessToken: auth.Token, RefreshToken: auth.RefreshToken, ExpiresAt: auth.ExpiresAt, AccountID: cfg.OAuthAccountID}, nil
+	}
+}
+
+func (a *Adapter) ensureFreshOAuth(ctx context.Context, agent models.LLMConfig) (models.LLMConfig, error) {
+	return a.oauthRecovery.EnsureFresh(ctx, agent, time.Hour, a.openAIRefreshFunc())
+}
+
+func (a *Adapter) recoverUnauthorized(ctx context.Context, agent models.LLMConfig, tokenUsed string) (models.LLMConfig, bool, error) {
+	return a.oauthRecovery.RecoverUnauthorized(ctx, agent, tokenUsed, a.openAIRefreshFunc())
+}
+
+func (a *Adapter) newOAuthClient(ctx context.Context, agent models.LLMConfig) *openaiclient.Client {
+	client := openaiclient.NewWithOAuthToken(agent.OAuthAccessToken, agent.OAuthRefreshToken, agent.OAuthExpiresAt, agent.OAuthAccountID)
+	client.SetOAuthUnauthorizedHandler(func(ctx context.Context, tokenUsed string) (openaiclient.OAuthTokens, bool, error) {
+		fresh, recovered, err := a.recoverUnauthorized(ctx, agent, tokenUsed)
+		if err != nil || !recovered {
+			return openaiclient.OAuthTokens{}, recovered, err
+		}
+		return openaiclient.OAuthTokens{AccessToken: fresh.OAuthAccessToken, RefreshToken: fresh.OAuthRefreshToken, ExpiresAt: fresh.OAuthExpiresAt, AccountID: fresh.OAuthAccountID}, true, nil
+	})
+	return client
+}
+
 func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig) (*openaiclient.Client, error) {
 	if agent.IsOpenAIAPIKey() {
 		if strings.TrimSpace(agent.APIKey) == "" {
@@ -747,21 +780,13 @@ func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig) (*opena
 			return nil, fmt.Errorf("OAuth not configured for model %q - click 'Connect with OAuth' on the Models page", agent.Name)
 		}
 
-		client := openaiclient.NewWithOAuthToken(agent.OAuthAccessToken, agent.OAuthRefreshToken, agent.OAuthExpiresAt, agent.OAuthAccountID)
-		before := client.CurrentAuth()
-		if err := client.EnsureValidToken(); err != nil {
+		agent, err := a.ensureFreshOAuth(ctx, agent)
+		if err != nil {
 			log.Printf("[openai-adapter] getClient token refresh failed for agent=%s: %v", agent.Name, err)
-			return nil, fmt.Errorf("OAuth token refresh failed for model config %q (id=%s provider=%s model=%s): %w", agent.Name, agent.ID, agent.Provider, agent.Model, err)
+			return nil, err
 		}
 
-		after := client.CurrentAuth()
-		if agent.ID != "" && (before.Token != after.Token || before.RefreshToken != after.RefreshToken || before.ExpiresAt != after.ExpiresAt) {
-			if err := a.llmConfigRepo.UpdateOAuthTokens(ctx, agent.ID, after.Token, after.RefreshToken, after.ExpiresAt); err != nil {
-				log.Printf("[openai-adapter] getClient failed to persist refreshed token for agent=%s: %v", agent.Name, err)
-			}
-		}
-
-		return client, nil
+		return a.newOAuthClient(ctx, agent), nil
 	}
 
 	return nil, fmt.Errorf("OpenAI model %q is configured with auth_method=%q; expected api_key or oauth", agent.Name, agent.AuthMethod)

@@ -10,6 +10,7 @@ import (
 
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
@@ -49,6 +50,7 @@ var errMaxTokens = fmt.Errorf("response truncated: max_tokens limit reached (out
 type Adapter struct {
 	llmConfigRepo *repository.LLMConfigRepo
 	execRepo      *repository.ExecutionRepo
+	oauthRecovery *llmoauth.Manager
 }
 
 func mapBuiltInToolName(name string) string {
@@ -303,6 +305,7 @@ func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.Execution
 	return &Adapter{
 		llmConfigRepo: llmConfigRepo,
 		execRepo:      execRepo,
+		oauthRecovery: llmoauth.NewManager(llmConfigRepo),
 	}
 }
 
@@ -597,6 +600,36 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	return output, textOnly, tokensUsed, nil
 }
 
+func (a *Adapter) anthropicRefreshFunc() llmoauth.RefreshFunc {
+	return func(ctx context.Context, cfg models.LLMConfig) (llmoauth.TokenSet, error) {
+		auth, err := anthropicclient.RefreshToken(cfg.OAuthRefreshToken)
+		if err != nil {
+			return llmoauth.TokenSet{}, err
+		}
+		return llmoauth.TokenSet{AccessToken: auth.Token, RefreshToken: auth.RefreshToken, ExpiresAt: auth.ExpiresAt}, nil
+	}
+}
+
+func (a *Adapter) ensureFreshOAuth(ctx context.Context, agent models.LLMConfig) (models.LLMConfig, error) {
+	return a.oauthRecovery.EnsureFresh(ctx, agent, time.Hour, a.anthropicRefreshFunc())
+}
+
+func (a *Adapter) recoverUnauthorized(ctx context.Context, agent models.LLMConfig, tokenUsed string) (models.LLMConfig, bool, error) {
+	return a.oauthRecovery.RecoverUnauthorized(ctx, agent, tokenUsed, a.anthropicRefreshFunc())
+}
+
+func (a *Adapter) newOAuthClient(ctx context.Context, agent models.LLMConfig) *anthropicclient.Client {
+	client := anthropicclient.NewWithOAuthToken(agent.OAuthAccessToken, agent.OAuthRefreshToken, agent.OAuthExpiresAt)
+	client.SetOAuthUnauthorizedHandler(func(ctx context.Context, tokenUsed string) (anthropicclient.OAuthTokens, bool, error) {
+		fresh, recovered, err := a.recoverUnauthorized(ctx, agent, tokenUsed)
+		if err != nil || !recovered {
+			return anthropicclient.OAuthTokens{}, recovered, err
+		}
+		return anthropicclient.OAuthTokens{AccessToken: fresh.OAuthAccessToken, RefreshToken: fresh.OAuthRefreshToken, ExpiresAt: fresh.OAuthExpiresAt}, true, nil
+	})
+	return client
+}
+
 // getClient creates an anthropicclient.Client from API key or OAuth tokens.
 func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig) (*anthropicclient.Client, error) {
 	if agent.IsAnthropicAPIKey() {
@@ -610,22 +643,13 @@ func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig) (*anthr
 		return nil, fmt.Errorf("OAuth not configured for model %q - click 'Connect with OAuth' on the Models page", agent.Name)
 	}
 
-	client := anthropicclient.NewWithOAuthToken(agent.OAuthAccessToken, agent.OAuthRefreshToken, agent.OAuthExpiresAt)
-
-	if err := client.EnsureValidToken(); err != nil {
+	agent, err := a.ensureFreshOAuth(ctx, agent)
+	if err != nil {
 		log.Printf("[anthropic] getClient token refresh failed for agent=%s: %v", agent.Name, err)
-		return nil, fmt.Errorf("OAuth token refresh failed for model config %q (id=%s provider=%s model=%s): %w", agent.Name, agent.ID, agent.Provider, agent.Model, err)
+		return nil, err
 	}
 
-	auth := client.Auth()
-	if auth.Token != agent.OAuthAccessToken {
-		log.Printf("[anthropic] getClient token refreshed for agent=%s, persisting to DB", agent.Name)
-		if err := a.llmConfigRepo.UpdateOAuthTokens(ctx, agent.ID, auth.Token, auth.RefreshToken, auth.ExpiresAt); err != nil {
-			log.Printf("[anthropic] getClient failed to persist refreshed tokens for agent=%s: %v", agent.Name, err)
-		}
-	}
-
-	return client, nil
+	return a.newOAuthClient(ctx, agent), nil
 }
 
 // buildClientHistory converts chat execution history to anthropicclient.Message slices.
