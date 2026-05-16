@@ -1191,6 +1191,45 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				});
 			}
 
+			// Track when a sticky diff file header is pinned to the top of the
+			// scroll container so CSS can extend its background over the scroll
+			// container's top padding band (preventing previous diff rows from
+			// peeking through). Defined once on window so the non-review variant
+			// can reuse it; the script re-runs on each HTMX swap of the diff
+			// viewer, which is when we (re-)wire headers in the current DOM.
+			if (!window._wireDiffStickyHeaders) {
+				window._wireDiffStickyHeaders = function() {
+					if (!('IntersectionObserver' in window)) return;
+					var headers = document.querySelectorAll('.diff-file-header');
+					if (!headers.length) return;
+					if (!window._diffStickyObserver) {
+						window._diffStickyObserver = new IntersectionObserver(function(entries) {
+							entries.forEach(function(entry) {
+								var header = entry.target.nextElementSibling;
+								if (!header || !header.classList.contains('diff-file-header')) return;
+								if (!entry.isIntersecting && entry.boundingClientRect.top < 0) {
+									header.setAttribute('data-stuck', '1');
+								} else {
+									header.removeAttribute('data-stuck');
+								}
+							});
+						}, { threshold: [0] });
+					}
+					headers.forEach(function(header) {
+						var prev = header.previousElementSibling;
+						if (prev && prev.classList.contains('diff-sticky-sentinel')) return;
+						var sentinel = document.createElement('div');
+						sentinel.className = 'diff-sticky-sentinel';
+						sentinel.style.height = '1px';
+						sentinel.style.marginBottom = '-1px';
+						sentinel.setAttribute('aria-hidden', 'true');
+						header.parentNode.insertBefore(sentinel, header);
+						window._diffStickyObserver.observe(sentinel);
+					});
+				};
+			}
+			window._wireDiffStickyHeaders();
+
 		</script>
 
 		<style>
@@ -1205,6 +1244,28 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 			.diff-file-header {
 				border-top-left-radius: inherit;
 				border-top-right-radius: inherit;
+			}
+			/* When the header is stuck, square its top corners so diff rows
+			   scrolling behind it are not visible through the rounded cutouts. */
+			.diff-file-header[data-stuck="1"] {
+				border-top-left-radius: 0;
+				border-top-right-radius: 0;
+			}
+			/* #main-content has p-6 (1.5rem) padding-top, which sits inside
+			   its scroll-clip region. Without compensation, rows scrolling
+			   toward the sticky header remain visible inside that padding
+			   band above the header. When the header is stuck (data-stuck="1"
+			   added by the IntersectionObserver below), this pseudo-element
+			   extends the header background upward to cover that band. */
+			.diff-file-header[data-stuck="1"]::before {
+				content: "";
+				position: absolute;
+				left: 0;
+				right: 0;
+				bottom: 100%;
+				height: 1.5rem;
+				background-color: inherit;
+				pointer-events: none;
 			}
 			.diff-file-body {
 				border-bottom-left-radius: inherit;
@@ -1519,6 +1580,28 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 				border-top-left-radius: inherit;
 				border-top-right-radius: inherit;
 			}
+			/* When the header is stuck, square its top corners so diff rows
+			   scrolling behind it are not visible through the rounded cutouts. */
+			.diff-file-header[data-stuck="1"] {
+				border-top-left-radius: 0;
+				border-top-right-radius: 0;
+			}
+			/* #main-content has p-6 (1.5rem) padding-top, which sits inside
+			   its scroll-clip region. Without compensation, rows scrolling
+			   toward the sticky header remain visible inside that padding
+			   band above the header. When the header is stuck (data-stuck="1"
+			   added by the IntersectionObserver below), this pseudo-element
+			   extends the header background upward to cover that band. */
+			.diff-file-header[data-stuck="1"]::before {
+				content: "";
+				position: absolute;
+				left: 0;
+				right: 0;
+				bottom: 100%;
+				height: 1.5rem;
+				background-color: inherit;
+				pointer-events: none;
+			}
 			.diff-file-body {
 				border-bottom-left-radius: inherit;
 				border-bottom-right-radius: inherit;
@@ -1649,6 +1732,43 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 					btnSplit.classList.remove('btn-active');
 				}
 			}
+
+			// Sticky diff file header pinning. Mirrors the review variant so
+			// the non-review diff viewer also covers the scroll container's
+			// padding band when headers are pinned. Idempotent via
+			// window._wireDiffStickyHeaders.
+			if (!window._wireDiffStickyHeaders) {
+				window._wireDiffStickyHeaders = function() {
+					if (!('IntersectionObserver' in window)) return;
+					var headers = document.querySelectorAll('.diff-file-header');
+					if (!headers.length) return;
+					if (!window._diffStickyObserver) {
+						window._diffStickyObserver = new IntersectionObserver(function(entries) {
+							entries.forEach(function(entry) {
+								var header = entry.target.nextElementSibling;
+								if (!header || !header.classList.contains('diff-file-header')) return;
+								if (!entry.isIntersecting && entry.boundingClientRect.top < 0) {
+									header.setAttribute('data-stuck', '1');
+								} else {
+									header.removeAttribute('data-stuck');
+								}
+							});
+						}, { threshold: [0] });
+					}
+					headers.forEach(function(header) {
+						var prev = header.previousElementSibling;
+						if (prev && prev.classList.contains('diff-sticky-sentinel')) return;
+						var sentinel = document.createElement('div');
+						sentinel.className = 'diff-sticky-sentinel';
+						sentinel.style.height = '1px';
+						sentinel.style.marginBottom = '-1px';
+						sentinel.setAttribute('aria-hidden', 'true');
+						header.parentNode.insertBefore(sentinel, header);
+						window._diffStickyObserver.observe(sentinel);
+					});
+				};
+			}
+			window._wireDiffStickyHeaders();
 		</script>
 	</div>
 }
