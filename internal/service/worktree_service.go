@@ -100,6 +100,16 @@ func GetCurrentBranch(repoDir string) string {
 	return strings.TrimSpace(string(out))
 }
 
+func GitStatusPorcelain(repoDir string) (string, error) {
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
 // SetupWorktree creates a git worktree for a task.
 // For chained tasks with lineage metadata (BaseCommitSHA/BaseBranch), the worktree
 // is created from the parent's commit SHA so child tasks inherit parent code changes.
@@ -329,23 +339,24 @@ func CommitWorktreeChanges(worktreePath string, message string) error {
 	}
 
 	// Check for changes
-	statusCmd := exec.Command("git", "status", "--porcelain")
-	statusCmd.Dir = worktreePath
-	out, err := statusCmd.Output()
+	out, err := GitStatusPorcelain(worktreePath)
 	if err != nil {
 		return fmt.Errorf("checking git status: %w", err)
 	}
-	if len(strings.TrimSpace(string(out))) == 0 {
+	if len(strings.TrimSpace(out)) == 0 {
 		return nil // no changes
 	}
 
-	// Ensure git config is set (required for commits)
-	// First check if config exists, if not set fallback bot identity
-	checkConfigCmd := exec.Command("git", "config", "user.email")
-	checkConfigCmd.Dir = worktreePath
-	if out, _ := checkConfigCmd.Output(); len(strings.TrimSpace(string(out))) == 0 {
-		// No user.email configured, set defaults
+	// Ensure git identity is set (required for commits). Check email and name
+	// independently because a repo/environment may configure only one of them.
+	checkEmailCmd := exec.Command("git", "config", "user.email")
+	checkEmailCmd.Dir = worktreePath
+	if out, _ := checkEmailCmd.Output(); len(strings.TrimSpace(string(out))) == 0 {
 		exec.Command("git", "-C", worktreePath, "config", "user.email", "bot@openvibely.ai").Run()
+	}
+	checkNameCmd := exec.Command("git", "config", "user.name")
+	checkNameCmd.Dir = worktreePath
+	if out, _ := checkNameCmd.Output(); len(strings.TrimSpace(string(out))) == 0 {
 		exec.Command("git", "-C", worktreePath, "config", "user.name", "OpenVibely Bot").Run()
 	}
 
@@ -1076,10 +1087,16 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 		return
 	}
 
-	// Commit any changes in the worktree
+	// Commit any changes in the worktree. If this fails, do not mark the task
+	// branch as ready/pending; otherwise the Changes tab can offer a branch merge
+	// for a branch that does not actually contain the provider's file edits.
 	msg := fmt.Sprintf("Task completed: %s", task.Title)
 	if err := CommitWorktreeChanges(task.WorktreePath, msg); err != nil {
 		log.Printf("[worktree] error committing changes for task %s: %v", task.ID, err)
+		if ws.taskRepo != nil {
+			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		}
+		return
 	}
 
 	// Auto-merge if enabled

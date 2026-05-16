@@ -32,6 +32,20 @@ type runtimeToolWritingLLMCaller struct {
 	workDir string
 }
 
+type fileWritingLLMCaller struct {
+	fileName string
+	content  string
+	workDir  string
+}
+
+func (c *fileWritingLLMCaller) CallModel(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
+	c.workDir = workDir
+	if err := os.WriteFile(filepath.Join(workDir, c.fileName), []byte(c.content), 0644); err != nil {
+		return "", "", 0, err
+	}
+	return "changed files\n[STATUS: SUCCESS]", "changed files\n[STATUS: SUCCESS]", 10, nil
+}
+
 func (c *runtimeToolWritingLLMCaller) CallModel(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
 	c.workDir = workDir
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
@@ -1078,6 +1092,76 @@ func TestLLMService_ExecuteTaskWithAgent_MovesRepeatOnceToCompleted(t *testing.T
 	}
 	if updated.Category != models.CategoryCompleted {
 		t.Errorf("expected task to be moved to completed category, got %q", updated.Category)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_CommitsWorktreeEditsAndPersistsDiff(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	project := &models.Project{Name: "Provider Edit Project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	caller := &fileWritingLLMCaller{fileName: "anthropic-style.txt", content: "provider left this edit\n"}
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetLLMCaller(caller)
+	svc.SetWorktreeService(NewWorktreeService(taskRepo, projectRepo, settingsRepo))
+
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Capture Anthropic edits",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+		Prompt:    "Create a file.",
+		AgentID:   &agent.ID,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	execRec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if execRec == nil {
+		t.Fatal("expected execution")
+	}
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if caller.workDir != updatedTask.WorktreePath {
+		t.Fatalf("expected provider to run in worktree %q, got %q", updatedTask.WorktreePath, caller.workDir)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "anthropic-style.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected main checkout to remain untouched, stat err=%v", err)
+	}
+
+	targetBranch := updatedTask.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = GetDefaultBranch(repoDir)
+	}
+	committedDiff := GetWorktreeDiff(repoDir, updatedTask.WorktreeBranch, targetBranch)
+	if !strings.Contains(committedDiff, "provider left this edit") {
+		t.Fatalf("expected task branch diff to contain provider edit, got:\n%s", committedDiff)
+	}
+	stored, err := execRepo.GetByID(ctx, execRec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if stored == nil || !strings.Contains(stored.DiffOutput, "provider left this edit") {
+		t.Fatalf("expected persisted diff_output to contain provider edit, got %#v", stored)
 	}
 }
 

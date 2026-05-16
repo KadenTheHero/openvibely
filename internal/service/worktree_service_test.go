@@ -566,6 +566,59 @@ func TestCommitWorktreeChanges_AutoConfigSetup(t *testing.T) {
 	}
 }
 
+func TestCommitWorktreeChanges_AutoConfigSetupMissingName(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v\n%s", err, out)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add failed: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "-c", "user.email=test@test.com", "-c", "user.name=Test", "commit", "-m", "initial")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("initial commit failed: %v\n%s", err, out)
+	}
+
+	cmd = exec.Command("git", "config", "--local", "user.email", "partial@example.com")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("set local email failed: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "config", "--local", "--unset", "user.name")
+	cmd.Dir = dir
+	_ = cmd.Run()
+
+	if err := os.WriteFile(filepath.Join(dir, "partial-config.txt"), []byte("content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(dir, "partial config commit"); err != nil {
+		t.Fatalf("CommitWorktreeChanges should set missing user.name independently: %v", err)
+	}
+
+	cmd = exec.Command("git", "config", "--local", "user.name")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name := strings.TrimSpace(string(out)); name != "OpenVibely Bot" {
+		t.Fatalf("expected missing user.name to be filled, got %q", name)
+	}
+}
+
 func TestWorktreeDiff(t *testing.T) {
 	repoDir := createTestGitRepo(t)
 	defaultBranch := GetCurrentBranch(repoDir)

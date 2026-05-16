@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -398,6 +399,12 @@ func (h *Handler) GetTaskChangesWorktree(c echo.Context) error {
 			}
 			diffOutput := service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
 			fileStats := service.GetWorktreeFileStats(project.RepoPath, task.WorktreeBranch, targetBranch)
+			if task.WorktreePath != "" && task.MergeStatus != models.MergeStatusMerged {
+				if _, err := os.Stat(task.WorktreePath); err == nil {
+					diffOutput = service.GetWorktreeDiffWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
+					fileStats = service.GetWorktreeFileStatsWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
+				}
+			}
 
 			// If live diff is empty because the branch was already merged, fall
 			// back to the preserved execution diff.

@@ -453,6 +453,11 @@ func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models
 	if err != nil || project == nil || project.RepoPath == "" {
 		return false
 	}
+	if task.WorktreePath != "" {
+		if statusOut, statusErr := service.GitStatusPorcelain(task.WorktreePath); statusErr == nil && strings.TrimSpace(statusOut) != "" {
+			return false
+		}
+	}
 
 	targetBranch := task.MergeTargetBranch
 	if targetBranch == "" {
@@ -508,7 +513,7 @@ func (h *Handler) resolveTaskChangesDiffOutput(ctx context.Context, task *models
 						targetBranch = service.GetDefaultBranch(project.RepoPath)
 					}
 					var diffOutput string
-					if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
+					if task.Status == models.StatusRunning || task.Status == models.StatusQueued || task.MergeStatus != models.MergeStatusMerged {
 						diffOutput = service.GetWorktreeDiffWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
 					} else {
 						diffOutput = service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
@@ -589,13 +594,13 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 					}
 					// For running/queued tasks, include uncommitted changes for real-time visibility
 					var diffOutput string
-					if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
+					if task.Status == models.StatusRunning || task.Status == models.StatusQueued || task.MergeStatus != models.MergeStatusMerged {
 						diffOutput = service.GetWorktreeDiffWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
 					} else {
 						diffOutput = service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
 					}
 					fileStats := service.GetWorktreeFileStats(project.RepoPath, task.WorktreeBranch, targetBranch)
-					if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
+					if task.Status == models.StatusRunning || task.Status == models.StatusQueued || task.MergeStatus != models.MergeStatusMerged {
 						fileStats = service.GetWorktreeFileStatsWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
 					}
 					if strings.TrimSpace(diffOutput) == "" &&

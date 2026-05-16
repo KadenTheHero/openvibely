@@ -348,6 +348,64 @@ func TestHandler_GetTaskChanges_PendingMergeStatusButMergedBranchShowsPreservedD
 	}
 }
 
+func TestHandler_GetTaskChanges_CompletedUnmergedWorktreeShowsUncommittedChanges(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	repoDir := createHandlerTestGitRepo(t)
+	mainBranch := gitCurrentBranch(t, repoDir)
+	taskBranch := "task/8176b26b-anthropic-uncommitted"
+	worktreePath := filepath.Join(repoDir, ".worktrees", "task_uncommitted")
+	runGit(t, repoDir, "worktree", "add", "-b", taskBranch, worktreePath, mainBranch)
+	if err := os.WriteFile(filepath.Join(worktreePath, "claude-uncommitted.txt"), []byte("anthropic edit preserved\n"), 0644); err != nil {
+		t.Fatalf("write uncommitted file: %v", err)
+	}
+
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Uncommitted Worktree Project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	taskRepo := repository.NewTaskRepo(db, nil)
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Anthropic uncommitted task",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		WorktreePath:      worktreePath,
+		WorktreeBranch:    taskBranch,
+		MergeTargetBranch: mainBranch,
+		MergeStatus:       models.MergeStatusPending,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+
+	if err := h.GetTaskChanges(c); err != nil {
+		t.Fatalf("GetTaskChanges failed: %v", err)
+	}
+
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	if !containsString(body, "anthropic edit preserved") {
+		t.Fatalf("expected uncommitted worktree diff in response body, got: %s", body)
+	}
+	if !containsString(body, "/tasks/"+task.ID+"/worktree/merge") {
+		t.Fatalf("expected local merge actions to remain available for unmerged uncommitted worktree changes")
+	}
+}
+
 // TestHandler_GetTaskChanges_FastForwardMergedBranchHidesMergeOptions
 // reproduces the stale-state bug where a task branch that is already reachable
 // from the target branch keeps surfacing local merge options on the Changes tab.

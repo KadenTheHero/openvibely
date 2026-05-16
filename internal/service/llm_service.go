@@ -572,22 +572,11 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 
 	// Capture git diff of changes made during execution
 	if workDir != "" {
-		// For worktree tasks, capture the diff between the task branch and target
+		// For worktree tasks, capture the diff between the task branch and target.
 		if task.WorktreePath != "" && task.WorktreeBranch != "" {
-			targetBranch := task.MergeTargetBranch
-			if targetBranch == "" {
-				targetBranch = GetDefaultBranch(repoDir)
-			}
-			// First commit changes in the worktree
-			CommitWorktreeChanges(task.WorktreePath, fmt.Sprintf("Task completed: %s", task.Title))
-			diffOutput := GetWorktreeDiff(repoDir, task.WorktreeBranch, targetBranch)
+			diffOutput := s.captureWorktreeDiffAfterExecution(ctx, exec.ID, &task, repoDir)
 			if diffOutput != "" {
-				if diffErr := s.execRepo.UpdateDiffOutput(ctx, exec.ID, diffOutput); diffErr != nil {
-					log.Printf("[agent-svc] ExecuteTaskWithAgent error saving worktree diff output: %v", diffErr)
-				} else {
-					exec.DiffOutput = diffOutput
-					log.Printf("[agent-svc] ExecuteTaskWithAgent captured worktree diff output for exec=%s (%d bytes)", exec.ID, len(diffOutput))
-				}
+				exec.DiffOutput = diffOutput
 			}
 		} else if diffOutput := s.CaptureGitDiff(workDir); diffOutput != "" {
 			if diffErr := s.execRepo.UpdateDiffOutput(ctx, exec.ID, diffOutput); diffErr != nil {
@@ -656,6 +645,34 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 	}
 
 	return exec, nil
+}
+
+func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, execID string, task *models.Task, repoDir string) string {
+	if task == nil || task.WorktreePath == "" || task.WorktreeBranch == "" || repoDir == "" {
+		return ""
+	}
+	targetBranch := task.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = GetDefaultBranch(repoDir)
+	}
+	if err := CommitWorktreeChanges(task.WorktreePath, fmt.Sprintf("Task completed: %s", task.Title)); err != nil {
+		log.Printf("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, task.WorktreeBranch, err)
+	}
+
+	// Persist the authoritative branch diff when the auto-commit succeeds or the
+	// provider already committed. If the provider left uncommitted edits and the
+	// app-level commit fails, preserve those edits in diff_output so Changes does
+	// not appear empty and the merge path can still commit them just-in-time.
+	diffOutput := GetWorktreeDiffWithUncommitted(repoDir, task.WorktreeBranch, targetBranch, task.WorktreePath)
+	if diffOutput == "" {
+		return ""
+	}
+	if diffErr := s.execRepo.UpdateDiffOutput(ctx, execID, diffOutput); diffErr != nil {
+		log.Printf("[agent-svc] ExecuteTaskWithAgent error saving worktree diff output: %v", diffErr)
+		return diffOutput
+	}
+	log.Printf("[agent-svc] ExecuteTaskWithAgent captured worktree diff output for exec=%s (%d bytes)", execID, len(diffOutput))
+	return diffOutput
 }
 
 // broadcastDiffSnapshots periodically captures and broadcasts git diff snapshots
