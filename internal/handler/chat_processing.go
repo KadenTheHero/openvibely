@@ -256,7 +256,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	log.Printf("[handler] processStreamingResponse exec=%s task=%s agent=%s model=%s followup=%v markers=%v history=%d",
 		params.ExecID, params.TaskID, params.Agent.Name, params.Agent.Model, params.IsTaskFollowup, params.ProcessMarkers, len(params.ChatHistory))
 
-	initialDiffOutput := h.captureTaskDiffBaseline(ctx, params.TaskID, params.WorkDir, params.IsTaskFollowup)
 	stopDiffBroadcast, diffBroadcastDone := h.startFollowupDiffSnapshotBroadcast(ctx, params.TaskID, params.ExecID, params.WorkDir, params.IsTaskFollowup)
 
 	agentDef := h.resolveTaskAgentDefinitionForTask(ctx, params.TaskID, params.AgentDefinition)
@@ -324,7 +323,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	log.Printf("[handler] processStreamingResponse exec=%s task=%s success tokens=%d duration=%dms output_len=%d",
 		params.ExecID, params.TaskID, tokensUsed, durationMs, len(output))
 
-	h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, initialDiffOutput, tokensUsed, durationMs)
+	h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs)
 
 	if params.IsTaskFollowup {
 		statusCheckOutput := textOnlyOutput
@@ -400,7 +399,7 @@ func (h *Handler) deregisterTaskCancellation(taskID string) {
 // Also moves Active tasks to the Completed category so they appear in the right column.
 // Logs errors but does not fail since this runs in a background goroutine.
 // Captures git diff if workDir is provided.
-func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, output, workDir, initialDiffOutput string, tokensUsed int, durationMs int64) {
+func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64) {
 	if err := h.execRepo.Complete(ctx, execID, models.ExecCompleted, output, "", tokensUsed, durationMs); err != nil {
 		log.Printf("[handler] completeWithSuccess exec=%s error completing execution: %v", execID, err)
 	}
@@ -436,9 +435,7 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 				log.Printf("[handler] completeWithSuccess exec=%s error updating diff: %v", execID, err)
 			}
 
-			// Reset merge status when follow-up creates new changes
-			// If task was previously merged and now has new changes, set status to pending
-			// so the merge button re-appears
+			// Reset merge status when follow-up creates new changes.
 			if task != nil && task.WorktreePath != "" && task.MergeStatus == models.MergeStatusMerged {
 				log.Printf("[handler] completeWithSuccess task=%s resetting merge_status from merged to pending (new changes detected)", taskID)
 				if err := h.taskRepo.UpdateMergeStatus(ctx, taskID, models.MergeStatusPending); err != nil {
@@ -533,17 +530,6 @@ func (h *Handler) startFollowupDiffSnapshotBroadcast(ctx context.Context, taskID
 	}()
 
 	return stop, done
-}
-
-func (h *Handler) captureTaskDiffBaseline(ctx context.Context, taskID, workDir string, isTaskFollowup bool) string {
-	if !isTaskFollowup || workDir == "" {
-		return ""
-	}
-	task, err := h.taskRepo.GetByID(ctx, taskID)
-	if err != nil || task == nil {
-		return ""
-	}
-	return h.captureTaskDiffOutput(ctx, task, workDir, "")
 }
 
 func (h *Handler) captureTaskDiffOutput(ctx context.Context, task *models.Task, workDir, commitMessage string) string {

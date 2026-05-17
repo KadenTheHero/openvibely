@@ -14,6 +14,7 @@ import (
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
+	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
@@ -738,7 +739,9 @@ func buildClientHistory(chatHistory []models.Execution) []anthropicclient.Messag
 			messages = appendMergedMessage(messages, "user", exec.PromptSent)
 		}
 		if exec.Output != "" && (exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed) {
-			messages = appendMergedMessage(messages, "assistant", exec.Output)
+			if cleaned := llmoutput.CleanChatOutput(exec.Output); cleaned != "" {
+				messages = appendMergedMessage(messages, "assistant", cleaned)
+			}
 		}
 	}
 	if len(messages) > 0 && messages[len(messages)-1].Role == "user" {

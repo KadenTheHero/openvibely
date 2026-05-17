@@ -529,7 +529,7 @@ func TestCompleteWithSuccess_UpdatesTaskStatusBeforeDiffCapture(t *testing.T) {
 	}
 
 	// Call completeWithSuccess (no workDir so no git diff capture)
-	h.completeWithSuccess(ctx, exec.ID, task.ID, "output text", "", "", 100, 5000)
+	h.completeWithSuccess(ctx, exec.ID, task.ID, "output text", "", 100, 5000)
 
 	// Verify execution is completed
 	completedExec, err := h.execRepo.GetByID(ctx, exec.ID)
