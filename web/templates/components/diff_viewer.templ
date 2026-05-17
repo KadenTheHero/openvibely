@@ -1333,7 +1333,10 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				border-top-right-radius: 0;
 			}
 			.diff-file-header[data-stuck="1"]:hover {
-				background-color: oklch(var(--b2));
+				background-color: oklch(var(--b2)) !important;
+			}
+			[data-theme="light"] .diff-file-header[data-stuck="1"]:hover {
+				background-color: var(--ov-l-bg) !important;
 			}
 			.diff-file-header[data-collapsed="1"] {
 				border-bottom-color: transparent;
@@ -1672,7 +1675,10 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 				border-top-right-radius: 0;
 			}
 			.diff-file-header[data-stuck="1"]:hover {
-				background-color: oklch(var(--b2));
+				background-color: oklch(var(--b2)) !important;
+			}
+			[data-theme="light"] .diff-file-header[data-stuck="1"]:hover {
+				background-color: var(--ov-l-bg) !important;
 			}
 			.diff-file-header[data-collapsed="1"] {
 				border-bottom-color: transparent;
