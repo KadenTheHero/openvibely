@@ -701,6 +701,21 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					--ov-l-warning: #895503;
 					--ov-l-error: #F85149;
 					--ov-l-code-bg: #0000001F;
+
+				}
+
+				/* Diff viewer line backgrounds (light mode).
+				   daisyUI v4 resolves bg-success/10 via oklch(var(--su)/.1). In the
+				   Wails WKWebView on older macOS, oklch() and color-mix() can be
+				   unreliable, so diff line backgrounds end up transparent. Force
+				   plain rgba() overrides keyed to the light-theme success/error
+				   colors (#2EA043 / #F85149) so red/green render in both webapp
+				   and Wails desktop regardless of WebView CSS support. */
+				[data-theme="light"] .bg-success\/10 {
+					background-color: rgba(46, 160, 67, 0.14) !important;
+				}
+				[data-theme="light"] .bg-error\/10 {
+					background-color: rgba(248, 81, 73, 0.14) !important;
 				}
 
 				/* --- App shell surfaces --- */
