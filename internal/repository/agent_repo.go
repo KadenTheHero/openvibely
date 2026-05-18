@@ -18,16 +18,69 @@ func NewAgentRepo(db *sql.DB) *AgentRepo {
 	return &AgentRepo{db: db}
 }
 
-const agentColumns = `id, name, description, system_prompt, model, tools, tool_config, plugins, mcp_servers, skills, system_kind, created_at, updated_at`
+const agentColumns = `id, name, description, system_prompt, model, tools, tool_config, plugins, mcp_servers, skills, system_kind, ` +
+	`COALESCE(key, ''), COALESCE(scope, 'global'), project_id, ` +
+	`COALESCE(selectable_as_primary, 1), COALESCE(enabled, 1), ` +
+	`COALESCE(permission_defaults_json, '{}'), ` +
+	`COALESCE(model_defaults_json, '{}'), COALESCE(created_by, 'user'), ` +
+	`COALESCE(generated_status, 'user_edited'), absorbed_into, ` +
+	`COALESCE(source_refs_json, '[]'), archived_at, ` +
+	`created_at, updated_at`
 
 func scanAgent(row interface{ Scan(dest ...any) error }) (*models.Agent, error) {
 	var a models.Agent
-	var toolsJSON, toolConfigJSON, pluginsJSON, mcpJSON, skillsJSON string
+	var (
+		toolsJSON, toolConfigJSON, pluginsJSON, mcpJSON, skillsJSON string
+		scope, createdBy, generatedStatus                           string
+		permJSON, modelDefaultsJSON, sourceRefsJSON                 string
+		selectableInt, enabledInt                                   int
+		projectID, absorbedInto                                     sql.NullString
+		archivedAt                                                  sql.NullTime
+	)
 	err := row.Scan(&a.ID, &a.Name, &a.Description, &a.SystemPrompt,
 		&a.Model, &toolsJSON, &toolConfigJSON, &pluginsJSON, &mcpJSON, &skillsJSON,
-		&a.SystemKind, &a.CreatedAt, &a.UpdatedAt)
+		&a.SystemKind,
+		&a.Key, &scope, &projectID,
+		&selectableInt, &enabledInt,
+		&permJSON, &modelDefaultsJSON, &createdBy,
+		&generatedStatus, &absorbedInto,
+		&sourceRefsJSON, &archivedAt,
+		&a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
+	}
+	a.Scope = models.AgentScope(scope)
+	if projectID.Valid {
+		a.ProjectID = projectID.String
+	}
+	a.SelectableAsPrimary = selectableInt != 0
+	a.Enabled = enabledInt != 0
+	a.CreatedBy = models.AgentCreatedBy(createdBy)
+	a.GeneratedStatus = models.AgentGeneratedStatus(generatedStatus)
+	if absorbedInto.Valid {
+		a.AbsorbedInto = absorbedInto.String
+	}
+	if archivedAt.Valid {
+		t := archivedAt.Time
+		a.ArchivedAt = &t
+	}
+	if s := strings.TrimSpace(permJSON); s != "" && s != "{}" {
+		if err := json.Unmarshal([]byte(s), &a.PermissionDefaults); err != nil {
+			return nil, fmt.Errorf("unmarshaling permission_defaults: %w", err)
+		}
+	}
+	if s := strings.TrimSpace(modelDefaultsJSON); s != "" && s != "{}" {
+		if err := json.Unmarshal([]byte(s), &a.ModelDefaults); err != nil {
+			return nil, fmt.Errorf("unmarshaling model_defaults: %w", err)
+		}
+	}
+	if s := strings.TrimSpace(sourceRefsJSON); s != "" && s != "[]" {
+		if err := json.Unmarshal([]byte(s), &a.SourceRefs); err != nil {
+			return nil, fmt.Errorf("unmarshaling source_refs: %w", err)
+		}
+	}
+	if a.SourceRefs == nil {
+		a.SourceRefs = []string{}
 	}
 	if toolsJSON != "" && toolsJSON != "[]" {
 		if err := json.Unmarshal([]byte(toolsJSON), &a.Tools); err != nil {
@@ -130,6 +183,49 @@ func (r *AgentRepo) GetByName(ctx context.Context, name string) (*models.Agent, 
 	return a, nil
 }
 
+// GetByKey returns an agent by its durable lifecycle key, ignoring archived
+// rows. Returns (nil, nil) when no live agent has the key.
+func (r *AgentRepo) GetByKey(ctx context.Context, key string) (*models.Agent, error) {
+	if key == "" {
+		return nil, nil
+	}
+	a, err := scanAgent(r.db.QueryRowContext(ctx,
+		`SELECT `+agentColumns+` FROM agents WHERE key = ? AND COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY created_at ASC LIMIT 1`, key))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting agent by key: %w", err)
+	}
+	return a, nil
+}
+
+// MarkArchived flips an agent's generated_status to archived and stores the
+// absorbed_into/reason metadata for forwarding (runbook line 1760).
+func (r *AgentRepo) MarkArchived(ctx context.Context, id, absorbedInto, reason string) error {
+	if id == "" {
+		return fmt.Errorf("MarkArchived: missing id")
+	}
+	refs := []string{}
+	if reason != "" {
+		refs = append(refs, "reason:"+reason)
+	}
+	refsJSON, _ := marshalJSON(refs)
+	var absorbed any
+	if absorbedInto != "" {
+		absorbed = absorbedInto
+	}
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE agents SET generated_status = 'archived', enabled = 0,
+		 absorbed_into = ?, source_refs_json = ?, archived_at = datetime('now'),
+		 updated_at = datetime('now') WHERE id = ?`,
+		absorbed, refsJSON, id)
+	if err != nil {
+		return fmt.Errorf("archiving agent: %w", err)
+	}
+	return nil
+}
+
 func (r *AgentRepo) GetBySystemKind(ctx context.Context, systemKind string) (*models.Agent, error) {
 	a, err := scanAgent(r.db.QueryRowContext(ctx,
 		`SELECT `+agentColumns+` FROM agents WHERE system_kind = ? ORDER BY created_at ASC LIMIT 1`, systemKind))
@@ -143,6 +239,7 @@ func (r *AgentRepo) GetBySystemKind(ctx context.Context, systemKind string) (*mo
 }
 
 func (r *AgentRepo) Create(ctx context.Context, a *models.Agent) error {
+	applyAgentDefaults(a)
 	normalizeAgentToolConfig(a)
 	toolsJSON, err := marshalJSON(a.Tools)
 	if err != nil {
@@ -164,20 +261,70 @@ func (r *AgentRepo) Create(ctx context.Context, a *models.Agent) error {
 	if err != nil {
 		return fmt.Errorf("marshaling skills: %w", err)
 	}
+	permJSON, err := marshalJSON(a.PermissionDefaults)
+	if err != nil {
+		return fmt.Errorf("marshaling permission_defaults: %w", err)
+	}
+	modelDefaultsJSON, err := marshalJSON(a.ModelDefaults)
+	if err != nil {
+		return fmt.Errorf("marshaling model_defaults: %w", err)
+	}
+	sourceRefsJSON, err := marshalJSON(a.SourceRefs)
+	if err != nil {
+		return fmt.Errorf("marshaling source_refs: %w", err)
+	}
+	var projectID, absorbedInto any
+	if a.ProjectID != "" {
+		projectID = a.ProjectID
+	}
+	if a.AbsorbedInto != "" {
+		absorbedInto = a.AbsorbedInto
+	}
 	err = r.db.QueryRowContext(ctx,
-		`INSERT INTO agents (id, name, description, system_prompt, model, tools, tool_config, plugins, mcp_servers, skills, system_kind)
-		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO agents (
+		   id, name, description, system_prompt, model, tools, tool_config,
+		   plugins, mcp_servers, skills, system_kind,
+		   key, scope, project_id, selectable_as_primary, enabled,
+		   permission_defaults_json, model_defaults_json,
+		   created_by, generated_status, absorbed_into, source_refs_json
+		 ) VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+		   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 RETURNING id, created_at, updated_at`,
 		a.Name, a.Description, a.SystemPrompt, a.Model,
-		toolsJSON, toolConfigJSON, pluginsJSON, mcpJSON, skillsJSON, a.SystemKind).
-		Scan(&a.ID, &a.CreatedAt, &a.UpdatedAt)
+		toolsJSON, toolConfigJSON, pluginsJSON, mcpJSON, skillsJSON, a.SystemKind,
+		a.Key, string(a.Scope), projectID, boolToInt(a.SelectableAsPrimary), boolToInt(a.Enabled),
+		permJSON, modelDefaultsJSON,
+		string(a.CreatedBy), string(a.GeneratedStatus), absorbedInto, sourceRefsJSON,
+	).Scan(&a.ID, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("creating agent: %w", err)
 	}
 	return nil
 }
 
+// applyAgentDefaults populates the lifecycle-era fields with safe defaults
+// when callers leave them blank, so the new columns are always populated and
+// the dialog/importer paths converge on one model.
+func applyAgentDefaults(a *models.Agent) {
+	if a == nil {
+		return
+	}
+	if a.Scope == "" {
+		a.Scope = models.AgentScopeGlobal
+	}
+	if a.CreatedBy == "" {
+		a.CreatedBy = models.AgentCreatedByUser
+	}
+	if a.GeneratedStatus == "" {
+		a.GeneratedStatus = models.AgentStatusUserEdited
+	}
+	if a.SourceRefs == nil {
+		a.SourceRefs = []string{}
+	}
+}
+
 func (r *AgentRepo) Update(ctx context.Context, a *models.Agent) error {
+	applyAgentDefaults(a)
 	normalizeAgentToolConfig(a)
 	toolsJSON, err := marshalJSON(a.Tools)
 	if err != nil {
@@ -199,13 +346,44 @@ func (r *AgentRepo) Update(ctx context.Context, a *models.Agent) error {
 	if err != nil {
 		return fmt.Errorf("marshaling skills: %w", err)
 	}
+	permJSON, err := marshalJSON(a.PermissionDefaults)
+	if err != nil {
+		return fmt.Errorf("marshaling permission_defaults: %w", err)
+	}
+	modelDefaultsJSON, err := marshalJSON(a.ModelDefaults)
+	if err != nil {
+		return fmt.Errorf("marshaling model_defaults: %w", err)
+	}
+	sourceRefsJSON, err := marshalJSON(a.SourceRefs)
+	if err != nil {
+		return fmt.Errorf("marshaling source_refs: %w", err)
+	}
+	var projectID, absorbedInto, archivedAt any
+	if a.ProjectID != "" {
+		projectID = a.ProjectID
+	}
+	if a.AbsorbedInto != "" {
+		absorbedInto = a.AbsorbedInto
+	}
+	if a.ArchivedAt != nil {
+		archivedAt = a.ArchivedAt.UTC()
+	}
 	_, err = r.db.ExecContext(ctx,
 		`UPDATE agents SET name = ?, description = ?, system_prompt = ?,
 		 model = ?, tools = ?, tool_config = ?, plugins = ?, mcp_servers = ?, skills = ?, system_kind = ?,
+		 key = ?, scope = ?, project_id = ?, selectable_as_primary = ?, enabled = ?,
+		 permission_defaults_json = ?, model_defaults_json = ?,
+		 created_by = ?, generated_status = ?, absorbed_into = ?, source_refs_json = ?,
+		 archived_at = ?,
 		 updated_at = datetime('now')
 		 WHERE id = ?`,
 		a.Name, a.Description, a.SystemPrompt, a.Model,
-		toolsJSON, toolConfigJSON, pluginsJSON, mcpJSON, skillsJSON, a.SystemKind, a.ID)
+		toolsJSON, toolConfigJSON, pluginsJSON, mcpJSON, skillsJSON, a.SystemKind,
+		a.Key, string(a.Scope), projectID, boolToInt(a.SelectableAsPrimary), boolToInt(a.Enabled),
+		permJSON, modelDefaultsJSON,
+		string(a.CreatedBy), string(a.GeneratedStatus), absorbedInto, sourceRefsJSON,
+		archivedAt,
+		a.ID)
 	if err != nil {
 		return fmt.Errorf("updating agent: %w", err)
 	}

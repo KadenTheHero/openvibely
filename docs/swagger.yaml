@@ -421,6 +421,43 @@ definitions:
       taskTitle:
         type: string
     type: object
+  viewmodels.LifecycleExecutionEventView:
+    properties:
+      created_at:
+        type: string
+      event_type:
+        type: string
+      id:
+        type: string
+      payload:
+        additionalProperties: {}
+        type: object
+      seq:
+        type: integer
+    type: object
+  viewmodels.LifecycleExecutionView:
+    properties:
+      agent_id:
+        type: string
+      completed_at:
+        type: string
+      error:
+        type: string
+      id:
+        type: string
+      output_contract:
+        type: string
+      skill_key:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      summary:
+        type: string
+      when:
+        type: string
+    type: object
 host: localhost:3001
 info:
   contact:
@@ -1568,6 +1605,35 @@ paths:
       summary: Get collision report
       tags:
       - collisions
+  /api/lifecycle-executions/{id}/events:
+    get:
+      description: Returns prompt-safe trace events for one lifecycle hook invocation.
+      parameters:
+      - description: Lifecycle execution ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/viewmodels.LifecycleExecutionEventView'
+            type: array
+        "400":
+          description: Invalid execution ID
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get lifecycle execution trace events
+      tags:
+      - Lifecycle
   /api/projects:
     get:
       description: Get a list of all available projects with their IDs, names, paths,
@@ -1586,6 +1652,36 @@ paths:
       summary: List all projects
       tags:
       - projects
+  /api/tasks/{id}/lifecycle-executions:
+    get:
+      description: Returns lifecycle hook invocations (routing, before-run preparation,
+        after-complete learning) recorded for the given task.
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/viewmodels.LifecycleExecutionView'
+            type: array
+        "400":
+          description: Invalid task ID
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: List lifecycle executions for a task
+      tags:
+      - Lifecycle
   /api/workflows/best-agent:
     get:
       description: Returns the best-performing model for the requested task type based

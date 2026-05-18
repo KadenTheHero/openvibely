@@ -141,13 +141,14 @@ func (s *scopedFilesToolSession) runtimeTools(skipDefaultTools bool) *llmcontrac
 }
 
 func scopedFilesToolDefinitions() []llmcontracts.RuntimeToolDefinition {
+	const scopePrefixDoc = " When multiple scopes are configured, prefix the path with '<scope_label>/' to address a specific scope explicitly; without a prefix the first matching scope is used."
 	return []llmcontracts.RuntimeToolDefinition{
-		{Name: "list_files", Description: "List files inside the configured scoped directory. Paths are relative to that directory.", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"recursive":{"type":"boolean"},"pattern":{"type":"string"}},"additionalProperties":false}`)},
-		{Name: "read_file", Description: "Read a file from the configured scoped directory.", Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}},"required":["file_path"],"additionalProperties":false}`)},
-		{Name: "write_file", Description: "Write a file inside the configured scoped directory. Overwrites the file.", Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"content":{"type":"string"}},"required":["file_path","content"],"additionalProperties":false}`)},
-		{Name: "edit_file", Description: "Edit a file inside the configured scoped directory by replacing old_string with new_string.", Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}},"required":["file_path","old_string","new_string"],"additionalProperties":false}`)},
-		{Name: "grep_search", Description: "Search files inside the configured scoped directory with a regular expression.", Parameters: json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"},"include":{"type":"string"}},"required":["pattern"],"additionalProperties":false}`)},
-		{Name: "delete_file", Description: "Delete a file inside the configured scoped directory.", Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"}},"required":["file_path"],"additionalProperties":false}`)},
+		{Name: "list_files", Description: "List files inside the configured scoped directory. Paths are relative to that directory." + scopePrefixDoc, Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"recursive":{"type":"boolean"},"pattern":{"type":"string"}},"additionalProperties":false}`)},
+		{Name: "read_file", Description: "Read a file from the configured scoped directory." + scopePrefixDoc, Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}},"required":["file_path"],"additionalProperties":false}`)},
+		{Name: "write_file", Description: "Write a file inside the configured scoped directory. Overwrites the file." + scopePrefixDoc, Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"content":{"type":"string"}},"required":["file_path","content"],"additionalProperties":false}`)},
+		{Name: "edit_file", Description: "Edit a file inside the configured scoped directory by replacing old_string with new_string." + scopePrefixDoc, Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean"}},"required":["file_path","old_string","new_string"],"additionalProperties":false}`)},
+		{Name: "grep_search", Description: "Search files inside the configured scoped directory with a regular expression." + scopePrefixDoc, Parameters: json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"},"include":{"type":"string"}},"required":["pattern"],"additionalProperties":false}`)},
+		{Name: "delete_file", Description: "Delete a file inside the configured scoped directory." + scopePrefixDoc, Parameters: json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"}},"required":["file_path"],"additionalProperties":false}`)},
 	}
 }
 
@@ -187,6 +188,11 @@ func (s *scopedFilesToolSession) result() memory.ConsolidationResult {
 	return memory.ConsolidationResult{TouchedPaths: paths}
 }
 
+// scopedPath resolves a model-supplied relative path against the configured
+// scopes. When the session has more than one configured scope, the path can
+// optionally be prefixed with "<scope_label>/" to address a specific scope
+// explicitly. Without a prefix, the first scope that permits the operation wins,
+// matching the legacy single-scope behavior.
 func (s *scopedFilesToolSession) scopedPath(rel string, allowRoot bool, need scopedFilesPermissionSet) (string, string, *scopedFilesScope, error) {
 	rel = strings.TrimSpace(rel)
 	if rel == "" || rel == "." {
@@ -206,6 +212,29 @@ func (s *scopedFilesToolSession) scopedPath(rel string, allowRoot bool, need sco
 	if clean == ".." || strings.HasPrefix(clean, "../") {
 		return "", "", nil, fmt.Errorf("scoped files: path escapes scope: %s", rel)
 	}
+
+	// Explicit scope routing: "<label>/<path>" picks a specific scope. The
+	// label must match a configured scope.directory value (which for extras
+	// is the Label and for normal scopes is the relative directory itself).
+	if idx := strings.Index(clean, "/"); idx > 0 {
+		prefix := clean[:idx]
+		rest := clean[idx+1:]
+		for i := range s.scopes {
+			scope := &s.scopes[i]
+			if scope.directory != prefix {
+				continue
+			}
+			if !scope.hasPermissions(need) {
+				return "", "", nil, fmt.Errorf("scoped files: scope %q does not permit %s", prefix, rel)
+			}
+			abs := filepath.Join(scope.absoluteDir, filepath.FromSlash(rest))
+			if err := memory.AssertPathWithin(scope.absoluteDir, abs); err != nil {
+				return "", "", nil, fmt.Errorf("scoped files: path escapes scope %q", prefix)
+			}
+			return abs, rest, scope, nil
+		}
+	}
+
 	for i := range s.scopes {
 		scope := &s.scopes[i]
 		if !scope.hasPermissions(need) {

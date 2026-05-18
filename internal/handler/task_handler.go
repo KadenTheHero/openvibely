@@ -79,6 +79,39 @@ func (h *Handler) listAgentDefinitions(ctx context.Context) []models.Agent {
 	return agentDefs
 }
 
+func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, currentAgentID *string) []models.Agent {
+	agentDefs := h.listAgentDefinitions(ctx)
+	out := selectableTaskAgentDefinitions(agentDefs)
+	if currentAgentID == nil || *currentAgentID == "" {
+		return out
+	}
+	for _, agent := range out {
+		if agent.ID == *currentAgentID {
+			return out
+		}
+	}
+	for _, agent := range agentDefs {
+		if agent.ID == *currentAgentID && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil {
+			return append([]models.Agent{agent}, out...)
+		}
+	}
+	return out
+}
+
+func selectableTaskAgentDefinitions(agentDefs []models.Agent) []models.Agent {
+	out := make([]models.Agent, 0, len(agentDefs))
+	for _, agent := range agentDefs {
+		if !agent.Enabled || !agent.SelectableAsPrimary {
+			continue
+		}
+		if agent.GeneratedStatus == models.AgentStatusArchived || agent.ArchivedAt != nil {
+			continue
+		}
+		out = append(out, agent)
+	}
+	return out
+}
+
 func (h *Handler) renderKanbanBoard(c echo.Context, tasks []models.Task, projectID string, sortPrefs taskSortPreferences, llmModels []models.LLMConfig) error {
 	agentDefs := h.listAgentDefinitions(c.Request().Context())
 	return render(c, http.StatusOK, components.KanbanBoard(tasks, projectID, sortPrefs.Backlog, sortPrefs.Completed, llmModels, agentDefs))
@@ -126,10 +159,7 @@ func (h *Handler) ListTasks(c echo.Context) error {
 
 	project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
 	agents, _ := h.llmConfigRepo.List(c.Request().Context())
-	var agentDefs []models.Agent
-	if h.agentRepo != nil {
-		agentDefs, _ = h.agentRepo.List(c.Request().Context())
-	}
+	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), nil)
 
 	if isHTMX {
 		return render(c, http.StatusOK, pages.TasksContent(project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed))
@@ -351,10 +381,7 @@ func (h *Handler) GetTask(c echo.Context) error {
 	schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
 	agents, _ := h.llmConfigRepo.List(c.Request().Context())
 	attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-	var agentDefs []models.Agent
-	if h.agentRepo != nil {
-		agentDefs, _ = h.agentRepo.List(c.Request().Context())
-	}
+	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.AgentDefinitionID)
 	var reviewComments []models.ReviewComment
 	if h.reviewCommentRepo != nil {
 		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
@@ -821,10 +848,7 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 		schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-		var adefs []models.Agent
-		if h.agentRepo != nil {
-			adefs, _ = h.agentRepo.List(c.Request().Context())
-		}
+		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.AgentDefinitionID)
 		var rc []models.ReviewComment
 		if h.reviewCommentRepo != nil {
 			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
@@ -1432,10 +1456,7 @@ func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 		schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-		var adefs []models.Agent
-		if h.agentRepo != nil {
-			adefs, _ = h.agentRepo.List(c.Request().Context())
-		}
+		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.AgentDefinitionID)
 		var rc []models.ReviewComment
 		if h.reviewCommentRepo != nil {
 			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
@@ -1597,5 +1618,12 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		chatAttachmentsByExec = make(map[string][]models.ChatAttachment)
 	}
 
-	return render(c, http.StatusOK, components.TaskThreadView(task, executions, agents, chatAttachmentsByExec))
+	var agentDef *models.Agent
+	if task.AgentDefinitionID != nil && h.agentRepo != nil {
+		if ad, adErr := h.agentRepo.GetByID(c.Request().Context(), *task.AgentDefinitionID); adErr == nil && ad != nil {
+			agentDef = ad
+		}
+	}
+
+	return render(c, http.StatusOK, components.TaskThreadView(task, executions, agents, agentDef, chatAttachmentsByExec))
 }

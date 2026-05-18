@@ -28,10 +28,10 @@ func TestRuntimeToolsContextRoundTrip(t *testing.T) {
 }
 
 func TestRuntimeToolsContextNilSafe(t *testing.T) {
-	if got := RuntimeToolsFromContext(nil); got != nil {
-		t.Fatalf("expected nil runtime tools for nil context")
+	if got := RuntimeToolsFromContext(context.TODO()); got != nil {
+		t.Fatalf("expected nil runtime tools for context without runtime tools")
 	}
-	ctx := WithRuntimeTools(nil, nil)
+	ctx := WithRuntimeTools(context.TODO(), nil)
 	if ctx == nil {
 		t.Fatalf("expected non-nil context")
 	}

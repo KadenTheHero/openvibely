@@ -243,46 +243,6 @@ func discoverLocalMCPServers(workDir string) []models.MCPServerConfig {
 	return normalizeMCPServers(combined)
 }
 
-func discoverLocalSkillNames(workDir string) []string {
-	dirs := make([]string, 0, 2)
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		dirs = append(dirs, filepath.Join(home, ".claude", "skills"))
-	}
-	if workDir != "" {
-		dirs = append(dirs, filepath.Join(workDir, ".claude", "skills"))
-	}
-
-	seen := map[string]struct{}{}
-	var names []string
-	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			name := strings.TrimSpace(entry.Name())
-			if name == "" {
-				continue
-			}
-			skillFile := filepath.Join(dir, name, "SKILL.md")
-			if _, err := os.Stat(skillFile); err != nil {
-				continue
-			}
-			key := strings.ToLower(name)
-			if _, exists := seen[key]; exists {
-				continue
-			}
-			seen[key] = struct{}{}
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	return names
-}
-
 func normalizeAgentModel(model string, allowed map[string]struct{}) string {
 	normalized := strings.TrimSpace(model)
 	if normalized == "" {
@@ -313,11 +273,11 @@ func validateScopedFilesDirectory(directory string) (string, error) {
 	}
 	normalizedInput := strings.ReplaceAll(directory, "\\", "/")
 	if filepath.IsAbs(directory) || strings.HasPrefix(normalizedInput, "/") || strings.HasPrefix(normalizedInput, "~") || (len(normalizedInput) >= 2 && normalizedInput[1] == ':') {
-		return "", fmt.Errorf("Directory must be a project-relative directory")
+		return "", fmt.Errorf("directory must be a project-relative directory")
 	}
 	cleaned := filepath.ToSlash(filepath.Clean(normalizedInput))
 	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return "", fmt.Errorf("Directory must stay inside the project-relative directory scope")
+		return "", fmt.Errorf("directory must stay inside the project-relative directory scope")
 	}
 	return cleaned, nil
 }
@@ -1472,9 +1432,26 @@ func (h *Handler) ListAgents(c echo.Context) error {
 	isHtmx := isHTMX(c)
 	log.Printf("[handler] ListAgents requested htmx=%v", isHtmx)
 
+	if h.agentLibraryMaintenanceSvc != nil {
+		projectRoot := ""
+		if projectID, err := h.getCurrentProjectID(c); err == nil && projectID != "" && h.projectSvc != nil {
+			if project, getErr := h.projectSvc.GetByID(c.Request().Context(), projectID); getErr == nil && project != nil && strings.TrimSpace(project.RepoPath) != "" {
+				projectRoot = filepath.Join(project.RepoPath, ".openvibely")
+			}
+		}
+		if err := h.agentLibraryMaintenanceSvc.SyncRootDeclarations(c.Request().Context(), projectRoot); err != nil {
+			log.Printf("[handler] ListAgents sync root declarations warning: %v", err)
+		}
+	}
 	agents, err := h.agentRepo.List(c.Request().Context())
 	if err != nil {
 		log.Printf("[handler] ListAgents error: %v", err)
+		return err
+	}
+	if err := h.materializeDBAgentsToDisk(c, agents); err != nil {
+		log.Printf("[handler] ListAgents materialize DB agents warning: %v", err)
+	} else if agents, err = h.agentRepo.List(c.Request().Context()); err != nil {
+		log.Printf("[handler] ListAgents reload after materialize error: %v", err)
 		return err
 	}
 	log.Printf("[handler] ListAgents found %d agents", len(agents))
@@ -1570,12 +1547,25 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 		agent.MCPServers = []models.MCPServerConfig{}
 	}
 
+	if err := applyLifecycleAgentFormFields(c, &agent); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
 	log.Printf("[handler] CreateAgent name=%q model=%s tools=%d skills=%d mcp=%d",
 		agent.Name, agent.Model, len(agent.Tools), len(agent.Skills), len(agent.MCPServers))
 
 	if err := h.agentRepo.Create(c.Request().Context(), &agent); err != nil {
 		log.Printf("[handler] CreateAgent error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if err := h.saveAgentLifecycleHooksFromForm(c, agent.ID); err != nil {
+		return err
+	}
+	if err := h.materializeAgentToDisk(c, &agent, h.currentProjectSkillRoot(c)); err != nil {
+		return err
+	}
+	if err := h.migrateLegacyAgentSkills(c, &agent, h.currentProjectSkillRoot(c)); err != nil {
+		return err
 	}
 
 	return h.ListAgents(c)
@@ -1586,6 +1576,9 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 	existing, err := h.agentRepo.GetByID(c.Request().Context(), id)
 	if err != nil || existing == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "Agent not found")
+	}
+	if existing.GeneratedStatus == models.AgentStatusProtected {
+		return echo.NewHTTPError(http.StatusForbidden, "protected system agents are read-only in the dialog")
 	}
 
 	existing.Name = c.FormValue("name")
@@ -1644,11 +1637,26 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 		}
 	}
 
+	if err := applyLifecycleAgentFormFields(c, existing); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
 	log.Printf("[handler] UpdateAgent id=%s name=%q", id, existing.Name)
 
 	if err := h.agentRepo.Update(c.Request().Context(), existing); err != nil {
 		log.Printf("[handler] UpdateAgent error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if existing.GeneratedStatus != models.AgentStatusProtected {
+		if err := h.saveAgentLifecycleHooksFromForm(c, existing.ID); err != nil {
+			return err
+		}
+	}
+	if err := h.materializeAgentToDisk(c, existing, h.currentProjectSkillRoot(c)); err != nil {
+		return err
+	}
+	if err := h.migrateLegacyAgentSkills(c, existing, h.currentProjectSkillRoot(c)); err != nil {
+		return err
 	}
 
 	return h.ListAgents(c)

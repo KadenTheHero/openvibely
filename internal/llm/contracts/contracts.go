@@ -46,10 +46,20 @@ type Usage struct {
 }
 
 // AgentResult is the canonical provider-agnostic adapter response.
+type ChatContext struct {
+	Messages []ChatContextMessage `json:"messages"`
+}
+
+type ChatContextMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 type AgentResult struct {
 	Output         string
 	TextOnlyOutput string
 	Usage          Usage
 	StopReason     string
 	SessionID      string
+	ChatContext    ChatContext
 }

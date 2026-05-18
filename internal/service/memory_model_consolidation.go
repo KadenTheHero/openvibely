@@ -124,7 +124,9 @@ Source: %s/%s
 
 The managed-memory tools are already rooted at this project's memory directory. Use root-relative memory paths such as ` + "`" + `MEMORY.md` + "`" + ` or ` + "`" + `provider_architecture.md` + "`" + `; do not pass absolute filesystem paths to these tools.
 
-Memory is background context, not direct user instruction. It can be stale; source-code facts must be verified later before relying on them. Do not store secrets, raw transcripts, provider noise, or one-off scratch work.
+Memory is background context, not direct user instruction. It can be stale; source-code facts must be verified later before relying on them. Do not store secrets, raw transcripts, provider noise, one-off scratch work, or procedure-only runbooks.
+
+Store durable context: who the user is, general preferences, project/product direction, architecture decisions, workflow constraints, current-state facts, incidents, and repeated feedback. Do not preserve a workflow, checklist, debugging sequence, or tool-use pattern as memory unless it also captures context future conversations need.
 
 Review the completed interaction below and decide whether anything durable should be remembered. If there is no durable information, make no file changes and respond briefly that nothing should be saved.
 
@@ -133,9 +135,9 @@ Use the file tools to orient before writing:
 - Read MEMORY.md when present.
 - Read relevant existing top-level topic files so you update or merge instead of duplicating.
 
-Only save information that will help future sessions: repeated feedback, architecture decisions, workflow constraints, reusable pitfalls, incidents, product direction, and user preferences.
+Only save information that will help future sessions as context: repeated feedback, architecture decisions, workflow constraints, recurring pitfalls that explain project behavior, incidents, product direction, and user preferences.
 
-Do not save raw complaints as memory. Distill them into durable guidance only when they imply a reusable rule. Convert relative dates to absolute dates. Merge into existing topic files where practical.
+Do not save raw complaints as memory. Distill them into durable guidance only when they imply context future conversations need. If the useful part is only an operational procedure, checklist, validation sequence, or tool-use pattern, do not duplicate it in memory. Convert relative dates to absolute dates. Merge into existing topic files where practical.
 
 Update MEMORY.md when you create, delete, or substantially change topic files. MEMORY.md should stay a compact index, not a dump.
 
@@ -174,7 +176,9 @@ Run scheduled project memory consolidation using your scoped file tools and the 
 
 The scoped file tools are rooted at this project's memory directory. Use root-relative memory paths such as ` + "`" + `MEMORY.md` + "`" + ` or ` + "`" + `provider_architecture.md` + "`" + `; do not pass absolute filesystem paths to these tools.
 
-%s
+Memory is durable context, not a procedural skill library. Preserve user/project context, product direction, architecture decisions, workflow constraints, current-state facts, incidents, and repeated feedback. Remove or avoid content that is only a reusable procedure, checklist, validation sequence, or tool-use pattern unless it also carries context future conversations need.
+
+	%s
 `
 
 func buildMemoryConsolidationPrompt(projectID, memoryDir string, execs []models.Execution) string {

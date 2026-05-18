@@ -2,9 +2,9 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-05-16
+updated: 2026-05-21
 source: consolidation
-source_id: memory_consolidation_2026_05_14
+source_id: memory_consolidation_2026_05_21
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -18,13 +18,13 @@ Definitions and routes:
 
 Chat modes and runtime actions:
 - `/chat` supports `orchestrate` (default) and `plan` (read-only planning).
-- Plan mode enables read-only repo exploration tools (`read_file`, `list_files`, `grep_search`) and blocks mutating tools (`write_file`, `edit_file`, `bash`).
+- Plan mode enables read-only repo exploration tools and blocks mutating tools.
 - Plan mode disables marker execution (`ProcessMarkers=false`) so no task/settings mutations run from marker blocks.
 - Canonical chat capability registry is `internal/chatcontrol/registry.go`; it defines action names, domain, read/write access, allowed modes, surfaces, confirmation requirements, and sensitivity. Tool definitions, mode gating, and surface availability derive from the registry.
-- Web/API chat and channel services should generate runtime action tools from `chatcontrol.ToolDefsForContext(mode, surface, includeThread)` rather than hand-crafted tool lists.
+- Web/API chat and channel services should generate runtime action tools from registry helpers rather than hand-crafted tool lists.
 - Runtime tools and marker processing are mutually exclusive per request. When runtime tools are injected, `ProcessMarkers=false` prevents duplicate execution.
 - Legacy marker parser helpers remain for compatibility/tests, but normal chat entrypoints should not depend on assistant-emitted marker blocks.
-- New/expected registry actions across surfaces include `get_chat_mode`, `set_chat_mode`, `list_capabilities`, `get_alert`, `get_model`, `get_personality`, `get_current_project`, and `switch_project`.
+- Expected registry actions across surfaces include chat mode, capabilities, alert, model, personality, current project, and project switching actions.
 
 Plan handoff behavior:
 - `/chat` shows a post-plan handoff prompt when a completed assistant response contains `<proposed_plan>` while in plan mode.
@@ -33,12 +33,13 @@ Plan handoff behavior:
 - Rendered chat/thread output strips `<proposed_plan>` wrapper tags while raw stored output keeps them for CTA detection.
 - Plan completion prompt evaluation is centralized and requires stream complete, mode `plan`, and the latest completed assistant response containing `<proposed_plan>`. Older plan markers should not trigger it.
 - Once an eligible plan handoff card is shown for the latest completed response, client refocus/refresh/hydration evaluations should preserve it. Only a real invalidation should hide it: explicit dismissal, a newer response, active stream, or intentional mode switch.
-- Browser tab `focus`/`visibilitychange` and left-nav return flows should re-evaluate plan completion from the latest completed assistant response after mode hydration, rather than clearing or relying only on transient prompt state. Do not let transient pre-hydration evaluations call hide paths that remove server-rendered fallback attributes such as `data-has-plan-completion`; otherwise the plan handoff card may briefly appear on tab return and then vanish.
+- Browser tab `focus`/`visibilitychange` and left-nav return flows should re-evaluate plan completion from the latest completed assistant response after mode hydration, rather than clearing or relying only on transient prompt state.
 
 Thread/follow-up behavior:
 - Task thread interaction from `/chat` uses `[VIEW_TASK_CHAT]`/`[SEND_TO_TASK]` markers where compatibility requires it.
-- `view_task_thread` supports `offset`/`limit` pagination. Transcripts are size-budgeted (80KB total, 50KB per message) with explicit continuation hints when truncated.
+- `view_task_thread` supports pagination. Transcripts are size-budgeted with explicit continuation hints when truncated.
 - Task-thread follow-ups should use chronological execution history, not re-inject the original task prompt, and propagate the task agent definition so plugin skills/MCP tools are active on API provider paths.
+- When task execution delegates to separate LLM-backed agents or lifecycle hooks, their outputs should be visible in an appropriate user-facing execution view; lifecycle-agent activity belongs in its dedicated task-detail tab rather than mixed into the main task Thread tab.
 - Follow-up completion inspects streaming text-only output for `[STATUS: FAILED | ...]` and `[STATUS: NEEDS_FOLLOWUP | ...]` markers. A missing/new-empty diff should not turn a successful read-only follow-up into failure.
 - Failure completion preserves already-streamed `executions.output` when the failed completion call returns empty output so thread history is not reset.
 - Retry writer continuity: streaming writer seeds its in-memory buffer from existing `executions.output` for retryable provider retries on the same execution, preventing transient retries from overwriting streamed history.
@@ -48,7 +49,7 @@ Thread/follow-up behavior:
 
 Task execution/scheduling behavior:
 - Active tasks auto-submit to the worker pool on creation or when moved to Active category.
-- `/tasks/{id}/run` uses an atomic guarded pending update (`status NOT IN ('running','queued')`) and only submits when that update succeeds, so duplicate run requests cannot downgrade running work back to pending.
+- `/tasks/{id}/run` uses an atomic guarded pending update and only submits when that update succeeds, so duplicate run requests cannot downgrade running work back to pending.
 - Scheduled tasks are triggered by the background scheduler when `next_run <= now`.
 - One-time schedules set `next_run = NULL` after running; repeating schedules compute `next_run` from repeat type and interval.
 - Tag-based execution allows batch task execution through chat commands.

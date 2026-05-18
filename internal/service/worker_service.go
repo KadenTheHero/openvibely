@@ -7,6 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/agentlibrary"
+	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/internal/lifecycle"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -18,8 +22,8 @@ type WorkerService struct {
 	llmConfigRepo *repository.LLMConfigRepo
 
 	mu         sync.Mutex
-	numWorkers int            // max parallel tasks (global limit)
-	queue      []models.Task  // FIFO task queue
+	numWorkers int             // max parallel tasks (global limit)
+	queue      []models.Task   // FIFO task queue
 	pending    map[string]bool // task IDs in queue or running (dedup)
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -43,6 +47,59 @@ type WorkerService struct {
 	// interaction. Errors thrown by the callback are logged but never
 	// affect task status.
 	onTaskComplete func(task models.Task, executionErr error)
+
+	// lifecycleRunner, when set, runs route_task/before_run/after_complete hook
+	// slots around task execution per runbook §Runner Changes.
+	lifecycleRunner *lifecycle.Runner
+
+	globalSkillRoot      string
+	agentRepo            *repository.AgentRepo
+	lifecycleRepo        *repository.LifecycleRepo
+	execRepo             *repository.ExecutionRepo
+	mutationRecorder     func(models.Task) agentlibrary.MutationRecorder
+	agentRootSyncService *AgentLibraryMaintenanceService
+	currentCatalog       atomic.Value // stores *agentskills.Catalog for hook skill resolution
+}
+
+// SetLifecycleRunner attaches the lifecycle runner so the worker can invoke
+// before_run hooks ahead of task execution and after_complete hooks once
+// execution finishes. Optional: when unset the worker behaves exactly as
+// before.
+func (w *WorkerService) SetLifecycleRunner(r *lifecycle.Runner) {
+	w.lifecycleRunner = r
+}
+
+func (w *WorkerService) SetLifecycleSkillRoot(root string) {
+	w.globalSkillRoot = root
+}
+
+func (w *WorkerService) SetLifecycleAgentRepo(repo *repository.AgentRepo) {
+	w.agentRepo = repo
+}
+
+func (w *WorkerService) SetLifecycleRepo(repo *repository.LifecycleRepo) {
+	w.lifecycleRepo = repo
+}
+
+func (w *WorkerService) SetExecutionRepo(repo *repository.ExecutionRepo) {
+	w.execRepo = repo
+}
+
+func (w *WorkerService) SetLifecycleMutationRecorderFactory(fn func(models.Task) agentlibrary.MutationRecorder) {
+	w.mutationRecorder = fn
+}
+
+func (w *WorkerService) SetAgentRootSyncService(svc *AgentLibraryMaintenanceService) {
+	w.agentRootSyncService = svc
+}
+
+func (w *WorkerService) CurrentLifecycleCatalog() *agentskills.Catalog {
+	if v := w.currentCatalog.Load(); v != nil {
+		if c, ok := v.(*agentskills.Catalog); ok {
+			return c
+		}
+	}
+	return nil
 }
 
 // SetOnTaskComplete registers a callback invoked after every task completion.
@@ -217,7 +274,12 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 	taskCtx, taskCancel := context.WithCancel(w.ctx)
 	w.RegisterCancel(task.ID, taskCancel)
 
-	_, err := w.llmSvc.ExecuteTask(taskCtx, task)
+	turn := w.PrepareLifecycleTurn(taskCtx, task)
+	taskCtx = turn.Ctx
+
+	_, chatContext, err := w.llmSvc.executeTaskWithChatContext(taskCtx, task)
+
+	turn.AfterComplete(err, chatContext)
 
 	w.DeregisterCancel(task.ID)
 	taskCancel()
@@ -252,6 +314,52 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 
 	// Task finished, slot freed — dispatch next queued task
 	w.dispatchNext()
+}
+
+// runLifecycleSlot dispatches the lifecycle runner for the supplied slot if
+// one is configured. Errors are logged; they never affect task status. The
+// task struct is mapped into a HookInput shape the runner can consume.
+func (w *WorkerService) runLifecycleSlot(ctx context.Context, when models.LifecycleWhen, task models.Task, taskRunID string, runErr error, chatContext llmcontracts.ChatContext) lifecycle.SlotResult {
+	if w.lifecycleRunner == nil {
+		return lifecycle.SlotResult{When: when}
+	}
+	if taskRunID == "" {
+		taskRunID = newLifecycleTaskRunID(task.ID)
+	}
+	in := lifecycle.HookInput{
+		When:      when,
+		TaskID:    task.ID,
+		TaskRunID: taskRunID,
+		ProjectID: task.ProjectID,
+		WorkDir:   projectRepoPath(ctx, w.projectRepo, task.ProjectID),
+	}
+	if task.AgentDefinitionID != nil {
+		in.ActiveModeAgent = *task.AgentDefinitionID
+	}
+	if runErr != nil {
+		in.Extras = map[string]any{"execution_error": runErr.Error()}
+	}
+	if when == models.LifecycleRouteTask {
+		if turn := lifecycleTurnFromContext(ctx); turn.SkillIndex != "" {
+			if in.Extras == nil {
+				in.Extras = make(map[string]any)
+			}
+			in.Extras["available_skills"] = turn.SkillIndex
+		}
+	}
+	if when == models.LifecycleAfterComplete {
+		if in.Extras == nil {
+			in.Extras = make(map[string]any)
+		}
+		in.Extras[lifecycle.ConversationTranscriptKey] = chatContext
+		in.Extras[lifecycle.LearningSnapshotKey] = w.buildLearningSnapshot(ctx, task, taskRunID, runErr)
+	}
+	result, err := w.lifecycleRunner.RunSlot(ctx, when, in)
+	if err != nil {
+		log.Printf("[worker] lifecycle %s failed for task=%s: %v", when, task.ID, err)
+		return lifecycle.SlotResult{When: when}
+	}
+	return result
 }
 
 func (w *WorkerService) QueueSize() int {

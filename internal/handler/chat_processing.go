@@ -260,12 +260,28 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 
 	agentDef := h.resolveTaskAgentDefinitionForTask(ctx, params.TaskID, params.AgentDefinition)
 
+	// Lifecycle integration for task-thread followups: lifecycle hooks must run on
+	// every model turn including followups. Without this block, followups would
+	// never see selected skills, skill runtime tools, or the available-skills
+	// catalog.
+	var lifecycleAfter func(err error, chatContext llmcontracts.ChatContext)
+	if params.IsTaskFollowup && h.workerSvc != nil && params.TaskID != "" {
+		if task, terr := h.taskRepo.GetByID(ctx, params.TaskID); terr == nil && task != nil {
+			turn := h.workerSvc.PrepareLifecycleTurn(ctx, *task)
+			ctx = turn.Ctx
+			lifecycleAfter = turn.AfterComplete
+		}
+	}
+
 	start := time.Now()
 	result, err := h.llmSvc.CallAgentDirectStreamingDetailed(
 		ctx, params.Message, params.ImageAttachments, params.Agent,
 		params.ExecID, params.ChatHistory, params.SystemContext,
 		params.WorkDir, agentDef, params.IsTaskFollowup,
 	)
+	if lifecycleAfter != nil {
+		lifecycleAfter(err, result.ChatContext)
+	}
 	if stopDiffBroadcast != nil {
 		close(stopDiffBroadcast)
 		if diffBroadcastDone != nil {

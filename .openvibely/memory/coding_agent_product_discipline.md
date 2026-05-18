@@ -2,14 +2,16 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-05-16
+updated: 2026-05-26
 source: consolidation
-source_id: memory_consolidation_2026_05_16
+source_id: memory_consolidation_2026_05_21
 confidence: high
 title: Coding Agent Product Discipline
 ---
 
 When the user asks a design, behavior, or feasibility question, answer the question directly and do not make implementation changes unless they explicitly request changes. If a prior response made an unsolicited code change, acknowledge it and revert or ask before proceeding.
+
+When the user asks to implement an entire runbook/spec except an explicitly excluded area, treat every non-excluded section as in scope. Do not defer in-scope pieces without naming the blocker and getting confirmation; re-read the source spec and audit existing implementation before declaring work complete.
 
 When implementing product behavior, identify the underlying product concept before coding. Do not derive major behavior from incidental implementation shape such as tool lists, default flags, or temporary code structure; model product policy explicitly in configuration, state, or data model when it affects workflow, isolation, data writes, recovery, or review.
 
@@ -25,16 +27,20 @@ Do not add legacy compatibility, aliases, migrations, or helper wrappers for bad
 
 Prefer product-correct defaults over mechanically convenient defaults. For UI and workflow changes, optimize for clarity, reversibility, user intent, and useful behavior rather than merely making tests pass or minimizing implementation effort.
 
-When drafting reusable coding-agent context or instructions, favor generalized patterns and broad behavioral rules over narrow, specific examples. The user values useful improvisation, but it must be constrained by explicit assumption discipline rather than unsupported product or architecture guesses.
+When drafting reusable coding-agent context or instructions, favor generalized patterns and broad behavioral rules over narrow examples. The user values useful improvisation, but it must be constrained by explicit assumption discipline rather than unsupported product or architecture guesses.
 
-When summarizing code changes or implementation results, be concrete rather than generic: cite the specific files, symbols/handlers/tests changed, behavior affected, and verification performed when that context is available.
+When summarizing code changes or implementation results, be concrete rather than generic: cite specific files, symbols/handlers/tests changed, behavior affected, and verification performed when that context is available.
 
-When the user challenges whether prior changes are actually beneficial, audit each change or commit individually against the current code behavior, not just by commit message. Separate unrelated baseline/merge commits from the review, classify changes as keep, partial, redundant, or risky, and recommend cleanup instead of defending all accumulated work.
+When the user asks for a broad review before completion, actively look for mistakes, unintended diff, dead code, and verification gaps. Check the diff plus relevant build/test/vet/static analysis where practical, and report tool limitations rather than implying unsupported confidence.
 
-When cleaning up an overgrown or suspicious task branch, reduce it to the minimal root-cause fix rather than preserving accumulated incidental changes. Before any destructive reset/checkout/rebase, capture or verify the intended patch so useful work is not lost; after cleanup, review the final diff for bugs, dead code, and unintended behavior before reporting completion.
+When the user challenges whether prior changes are beneficial, audit each change or commit individually against current code behavior, not only by commit message. Separate unrelated baseline/merge commits from the review, classify changes as keep, partial, redundant, or risky, and recommend cleanup instead of defending all accumulated work.
+
+When cleaning up an overgrown or suspicious task branch, reduce it to the minimal root-cause fix rather than preserving accumulated incidental changes. Before destructive reset/checkout/rebase, capture or verify the intended patch so useful work is not lost; after cleanup, review the final diff for bugs, dead code, and unintended behavior before reporting completion.
 
 Long model prompts should be readable const templates with dynamic context interpolated, not assembled through chains of `WriteString` calls. Keep prompt text easy to review against external provider prompt shapes.
 
 For scheduled Go maintenance tasks, inspect all Go version references (`go.mod`, `toolchain`, Dockerfiles, CI workflows, build scripts, docs, and version-manager files), update consistently only when a newer stable toolchain is available, check compatible Go module upgrades, run `go mod tidy`, verify with `go test -count=1 ./...` plus the project's standard build checks, and fix update-caused failures rather than masking them. Summaries should distinguish updated items, already-current items, and follow-up risks/manual steps.
 
-When maintaining development tooling commands, avoid duplicating tool versions across scripts and Dockerfiles. Prefer deriving versions from authoritative module metadata such as `go.mod` when practical; as of 2026-05-15, `templ` and `swag` had known drift risk because Dockerfile/Makefile installs could hardcode versions while other scripts resolved from `go.mod`.
+When maintaining development tooling commands, avoid duplicating tool versions across scripts and Dockerfiles. Prefer deriving versions from authoritative module metadata such as `go.mod` when practical; `templ` and `swag` previously had drift risk because Dockerfile/Makefile installs could hardcode versions while other scripts resolved from `go.mod`.
+
+The last public release boundary the user identified was commit `d654a068ee0b4f146bb9e51dd536728eab49a150`. Schema migrations added only after that boundary and not yet pushed publicly can be consolidated before release instead of preserving every local goose iteration; distinguish this from runtime/local database-file moves such as `openvibely.db` storage migration.

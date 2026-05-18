@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-05-16
+updated: 2026-05-21
 source: consolidation
-source_id: memory_consolidation_2026_05_16
+source_id: memory_consolidation_2026_05_21
 confidence: high
 title: Provider Architecture
 ---
@@ -16,17 +16,17 @@ Provider paths:
 - OpenAI compaction has pre-turn transcript-size estimation and mid-turn session-token ledger behavior using the latest observed turn footprint plus estimated locally appended items. If `context_length_exceeded` happens before threshold compaction, force-compact and retry that turn once.
 - OpenAI compaction uses a dedicated compact prompt (`openAICompactionInstructions` by default, optional override) rather than the full task system prompt. Preserve the compacted output from `/responses/compact` rather than re-summarizing/trimming it client-side.
 - When trimming for OpenAI compaction requests, preserve both the opening task objective and newest context; tail-only trimming loses the actual task.
-- OpenAI stream parsing should surface reasoning summary/content deltas (`response.reasoning_summary_text.delta`, `response.reasoning_text.delta`, `response.reasoning_summary_part.added`) plus fallbacks from output-item/completed blocks as `[Thinking]` stream blocks. OpenAI agentic requests set `reasoning.summary="auto"`.
+- OpenAI stream parsing should surface reasoning summary/content deltas plus fallbacks from output-item/completed blocks as `[Thinking]` stream blocks. OpenAI agentic requests set `reasoning.summary="auto"`.
 - OpenAI OAuth API calls append extra embedded `Working with the user` system-prompt guidance sourced from `runbooks/codex/prompt-base-gpt-5.4.md`; this is OAuth-specific and should not leak into all providers.
 - Anthropic uses `ProviderAnthropic` only; the old `ProviderClaudeMax` migration was merged. OAuth/API key path uses `pkg/anthropicclient`; CLI path uses subprocess. Helpers live in `models/llm_config.go`.
 - Ollama uses `/api/chat`, `ollama_base_url` migration 056, defaulting to `http://localhost:11434`.
 
 Provider-native tools:
 - Provider-native web search is executed by providers, not local web tooling. OpenAI sends `{"type":"web_search"}`; legacy `web_search_preview` is compatibility mapping only.
-- OpenAI web-search output items (`web_search_call`/`tool_search_call`) should round-trip without local execution. UI callbacks should emit useful status/source detail, not raw `url="..."`/`query="..."` blobs.
+- OpenAI web-search output items should round-trip without local execution. UI callbacks should emit useful status/source detail, not raw URL/query blobs.
 - Anthropic sends direct versioned tool types such as `web_search_20250305` and `web_fetch_20250910` with names `web_search`/`web_fetch` through mixed raw-tools JSON; do not wrap these as `server_tool`.
 - Anthropic provider-managed result block types match generically as `*_tool_result` and must be carried forward in assistant history between `pause_turn` continuations.
-- Anthropic provider tool-result blocks must preserve the original JSON shape of `content`; replaying object payloads as strings can trigger provider invalid-shape errors such as `RequestCodeExecutionToolResultError`.
+- Anthropic provider tool-result blocks must preserve the original JSON shape of `content`; replaying object payloads as strings can trigger provider invalid-shape errors.
 - Anthropic provider tool callbacks should fire even on `stop_reason="end_turn"` and be emitted in stream order at `content_block_stop`; delayed post-turn callback emission can render tool cards after summary text.
 - Do not append explicit provider web retrieval guidance prose to Anthropic system prompts. Enforce tool behavior in runtime/tool-loop logic to avoid user-visible implementation leakage.
 

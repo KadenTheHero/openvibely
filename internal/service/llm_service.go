@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmnormalize "github.com/openvibely/openvibely/internal/llm/normalize"
@@ -49,6 +50,8 @@ type LLMService struct {
 	scheduleRepo          *repository.ScheduleRepo
 	attachmentRepo        *repository.AttachmentRepo
 	agentRepo             *repository.AgentRepo
+	lifecycleRepo         *repository.LifecycleRepo
+	mutationRecorder      func(models.Task) agentlibrary.MutationRecorder
 	alertSvc              *AlertService
 	taskSvc               *TaskService
 	worktreeSvc           *WorktreeService
@@ -59,6 +62,10 @@ type LLMService struct {
 	providerAdapters      map[models.LLMProvider]ProviderAdapter
 	routing               *agentRoutingStrategy
 	fileChangeBroadcaster *events.FileChangeBroadcaster
+	// globalSkillRoot is the parent directory holding <root>/agents for global
+	// agents/skills. It is used for catalog construction and bounded skill
+	// mutation writes; agents themselves remain user-managed.
+	globalSkillRoot string
 }
 
 func NewLLMService(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.ExecutionRepo, taskRepo *repository.TaskRepo, projectRepo *repository.ProjectRepo, scheduleRepo *repository.ScheduleRepo, attachmentRepo *repository.AttachmentRepo) *LLMService {
@@ -131,6 +138,29 @@ func (s *LLMService) SetAgentRepo(repo *repository.AgentRepo) {
 	s.agentRepo = repo
 }
 
+func (s *LLMService) SetLifecycleRepo(repo *repository.LifecycleRepo) {
+	s.lifecycleRepo = repo
+}
+
+func (s *LLMService) SetLifecycleMutationRecorderFactory(fn func(models.Task) agentlibrary.MutationRecorder) {
+	s.mutationRecorder = fn
+}
+
+// SetGlobalSkillRoot registers the on-disk parent directory that contains
+// <root>/agents for global agents/skills. Empty disables the global skill root.
+func (s *LLMService) SetGlobalSkillRoot(root string) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		s.globalSkillRoot = ""
+		return
+	}
+	if abs, err := filepath.Abs(filepath.Clean(root)); err == nil {
+		s.globalSkillRoot = abs
+		return
+	}
+	s.globalSkillRoot = filepath.Clean(root)
+}
+
 // SetLLMCaller overrides the default model calling behavior.
 // In tests, pass a mock to prevent real API/CLI calls.
 func (s *LLMService) SetLLMCaller(c LLMCaller) {
@@ -148,6 +178,11 @@ func (s *LLMService) ensureRoutingStrategy() *agentRoutingStrategy {
 }
 
 func (s *LLMService) ExecuteTask(ctx context.Context, task models.Task) (*models.Execution, error) {
+	exec, _, err := s.executeTaskWithChatContext(ctx, task)
+	return exec, err
+}
+
+func (s *LLMService) executeTaskWithChatContext(ctx context.Context, task models.Task) (*models.Execution, llmcontracts.ChatContext, error) {
 	log.Printf("[agent-svc] ExecuteTask task=%s title=%q agent_id=%v", task.ID, task.Title, task.AgentID)
 
 	var agent *models.LLMConfig
@@ -158,7 +193,7 @@ func (s *LLMService) ExecuteTask(ctx context.Context, task models.Task) (*models
 		agent, err = s.llmConfigRepo.GetByID(ctx, *task.AgentID)
 		if err != nil {
 			log.Printf("[agent-svc] ExecuteTask error getting agent %s: %v", *task.AgentID, err)
-			return nil, fmt.Errorf("getting agent: %w", err)
+			return nil, llmcontracts.ChatContext{}, fmt.Errorf("getting agent: %w", err)
 		}
 		if agent == nil {
 			log.Printf("[agent-svc] ExecuteTask agent %s not found, falling back to default", *task.AgentID)
@@ -166,7 +201,7 @@ func (s *LLMService) ExecuteTask(ctx context.Context, task models.Task) (*models
 			agent, err = s.getDefaultAgentForTask(ctx, task.ProjectID)
 			if err != nil {
 				log.Printf("[agent-svc] ExecuteTask error getting default agent: %v", err)
-				return nil, fmt.Errorf("getting default agent: %w", err)
+				return nil, llmcontracts.ChatContext{}, fmt.Errorf("getting default agent: %w", err)
 			}
 		} else {
 			log.Printf("[agent-svc] ExecuteTask using assigned agent=%s provider=%s model=%s", agent.Name, agent.Provider, agent.Model)
@@ -176,7 +211,7 @@ func (s *LLMService) ExecuteTask(ctx context.Context, task models.Task) (*models
 		agent, err = s.getDefaultAgentForTask(ctx, task.ProjectID)
 		if err != nil {
 			log.Printf("[agent-svc] ExecuteTask error getting default agent: %v", err)
-			return nil, fmt.Errorf("getting default agent: %w", err)
+			return nil, llmcontracts.ChatContext{}, fmt.Errorf("getting default agent: %w", err)
 		}
 		if agent != nil {
 			log.Printf("[agent-svc] ExecuteTask using default agent=%s provider=%s model=%s", agent.Name, agent.Provider, agent.Model)
@@ -185,10 +220,10 @@ func (s *LLMService) ExecuteTask(ctx context.Context, task models.Task) (*models
 
 	if agent == nil {
 		log.Printf("[agent-svc] ExecuteTask no agent available")
-		return nil, fmt.Errorf("no agent configured")
+		return nil, llmcontracts.ChatContext{}, fmt.Errorf("no agent configured")
 	}
 
-	return s.ExecuteTaskWithAgent(ctx, task, *agent)
+	return s.executeTaskWithAgent(ctx, task, *agent)
 }
 
 // getDefaultAgentForTask returns the appropriate default agent for a task.
@@ -215,19 +250,12 @@ func (s *LLMService) getDefaultAgentForTask(ctx context.Context, projectID strin
 }
 
 func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task, agent models.LLMConfig) (*models.Execution, error) {
-	log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s agent=%s model=%s", task.ID, agent.Name, agent.Model)
+	exec, _, err := s.executeTaskWithAgent(ctx, task, agent)
+	return exec, err
+}
 
-	// Atomically claim the task (only succeeds if status is pending)
-	claimed, err := s.taskRepo.ClaimTask(ctx, task.ID)
-	if err != nil {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent error claiming task: %v", err)
-		return nil, fmt.Errorf("claiming task: %w", err)
-	}
-	if !claimed {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s not pending (already running/completed), skipping", task.ID)
-		return nil, nil
-	}
-	log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s status -> running", task.ID)
+func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task, agent models.LLMConfig) (*models.Execution, llmcontracts.ChatContext, error) {
+	log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s agent=%s model=%s", task.ID, agent.Name, agent.Model)
 
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && s.agentRepo != nil {
@@ -236,6 +264,17 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 			log.Printf("[agent-svc] ExecuteTaskWithAgent using agent definition=%s (%s)", ad.Name, ad.ID)
 		}
 	}
+	// Atomically claim the task (only succeeds if status is pending)
+	claimed, err := s.taskRepo.ClaimTask(ctx, task.ID)
+	if err != nil {
+		log.Printf("[agent-svc] ExecuteTaskWithAgent error claiming task: %v", err)
+		return nil, llmcontracts.ChatContext{}, fmt.Errorf("claiming task: %w", err)
+	}
+	if !claimed {
+		log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s not pending (already running/completed), skipping", task.ID)
+		return nil, llmcontracts.ChatContext{}, nil
+	}
+	log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s status -> running", task.ID)
 
 	var runtimeTools *llmcontracts.RuntimeTools
 	scopedFilesWorkDir := ""
@@ -249,7 +288,7 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 	}
 	if err := s.execRepo.Create(ctx, exec); err != nil {
 		log.Printf("[agent-svc] ExecuteTaskWithAgent error creating execution: %v", err)
-		return nil, fmt.Errorf("creating execution: %w", err)
+		return nil, llmcontracts.ChatContext{}, fmt.Errorf("creating execution: %w", err)
 	}
 	log.Printf("[agent-svc] ExecuteTaskWithAgent execution=%s created, calling LLM...", exec.ID)
 
@@ -257,7 +296,7 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 	attachments, err := s.attachmentRepo.ListByTask(ctx, task.ID)
 	if err != nil {
 		log.Printf("[agent-svc] ExecuteTaskWithAgent error loading attachments: %v", err)
-		return nil, fmt.Errorf("loading attachments: %w", err)
+		return nil, llmcontracts.ChatContext{}, fmt.Errorf("loading attachments: %w", err)
 	}
 	log.Printf("[agent-svc] ExecuteTaskWithAgent loaded %d attachments for task=%s", len(attachments), task.ID)
 
@@ -294,7 +333,7 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 				if statusErr := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusFailed); statusErr != nil {
 					log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after missing repo: %v", statusErr)
 				}
-				return exec, fmt.Errorf("repo path missing: %s", errMsg)
+				return exec, llmcontracts.ChatContext{}, fmt.Errorf("repo path missing: %s", errMsg)
 			}
 			repoDir = project.RepoPath
 			workDir = project.RepoPath
@@ -346,7 +385,7 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 				if s.slackSvc != nil {
 					s.slackSvc.SendTaskCompletionNotification(ctx, task, "", syncErr.Error())
 				}
-				return exec, fmt.Errorf("startup worktree auto-merge failed: %w", syncErr)
+				return exec, llmcontracts.ChatContext{}, fmt.Errorf("startup worktree auto-merge failed: %w", syncErr)
 			}
 		}
 	}
@@ -372,7 +411,7 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 			}
 			exec.Status = models.ExecFailed
 			exec.ErrorMessage = errMsg
-			return exec, fmt.Errorf("preparing scoped file tools: %w", prepErr)
+			return exec, llmcontracts.ChatContext{}, fmt.Errorf("preparing scoped file tools: %w", prepErr)
 		}
 		runtimeTools = rt
 		scopedFilesWorkDir = preparedWorkDir
@@ -382,11 +421,20 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 			log.Printf("[agent-svc] ExecuteTaskWithAgent using scoped files workDir=%s", workDir)
 		}
 	}
-
+	if agentSkillTools := s.agentDeclaredSkillRuntimeTools(ctx, task, agentDef, workDir); agentSkillTools != nil {
+		runtimeTools = llmcontracts.CompositeRuntimeTools(runtimeTools, agentSkillTools)
+	}
 	// Load project instructions (AGENTS.md) from the working directory.
 	projectInstructions := loadProjectInstructions(workDir)
+	if extra := additionalProjectInstructionsFromContext(ctx); extra != "" {
+		if projectInstructions == "" {
+			projectInstructions = extra
+		} else {
+			projectInstructions = extra + "\n\n" + projectInstructions
+		}
+	}
 	if projectInstructions != "" {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent loaded AGENTS.md (%d bytes) from %s", len(projectInstructions), workDir)
+		log.Printf("[agent-svc] ExecuteTaskWithAgent loaded project instructions (%d bytes) from %s", len(projectInstructions), workDir)
 	}
 	if runtimeTools == nil && s.memoryTaskRunner != nil && task.ProjectID != "" {
 		mem := s.memoryTaskRunner.RecallContext(ctx, task.ProjectID, MemoryRecallQuery{
@@ -412,14 +460,18 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 
 	// Call the LLM
 	callCtx := ctx
-	if runtimeTools != nil {
-		callCtx = llmcontracts.WithRuntimeTools(callCtx, runtimeTools)
-		if runtimeTools.SkipDefaultTools {
+	if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil {
+		mergedTools := llmcontracts.CompositeRuntimeTools(ctxTools, runtimeTools)
+		callCtx = llmcontracts.WithRuntimeTools(callCtx, mergedTools)
+		if mergedTools != nil && mergedTools.SkipDefaultTools {
 			projectInstructions = ""
 		}
 	}
 	start := time.Now()
-	output, textOnlyOutput, tokensUsed, err := s.callLLM(callCtx, task.Prompt, attachments, agent, exec.ID, workDir, projectInstructions, agentDef)
+	result, err := s.callLLMDetailed(callCtx, task.Prompt, attachments, agent, exec.ID, workDir, projectInstructions, agentDef)
+	output := result.Output
+	textOnlyOutput := result.TextOnlyOutput
+	tokensUsed := result.Usage.TotalTokens
 	durationMs := time.Since(start).Milliseconds()
 
 	// Stop diff snapshot broadcaster
@@ -446,7 +498,7 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 			}
 			exec.Status = models.ExecCancelled
 			exec.ErrorMessage = "task cancelled by user"
-			return exec, fmt.Errorf("task cancelled")
+			return exec, result.ChatContext, fmt.Errorf("task cancelled")
 		}
 
 		log.Printf("[agent-svc] ExecuteTaskWithAgent LLM call FAILED task=%s duration=%dms error=%v",
@@ -488,7 +540,7 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 		if s.slackSvc != nil {
 			s.slackSvc.SendTaskCompletionNotification(bgCtx, task, "", err.Error())
 		}
-		return exec, fmt.Errorf("calling LLM: %w", err)
+		return exec, result.ChatContext, fmt.Errorf("calling LLM: %w", err)
 	}
 
 	log.Printf("[agent-svc] ExecuteTaskWithAgent LLM call SUCCESS task=%s tokens=%d duration=%dms output_len=%d",
@@ -534,7 +586,7 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 		if s.slackSvc != nil {
 			s.slackSvc.SendTaskCompletionNotification(ctx, task, "", reason)
 		}
-		return exec, nil
+		return exec, result.ChatContext, nil
 	}
 
 	// NOTE: detectToolFailures was previously used here to scan for non-zero exit
@@ -644,7 +696,7 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 		s.slackSvc.SendTaskCompletionNotification(ctx, task, output, "")
 	}
 
-	return exec, nil
+	return exec, result.ChatContext, nil
 }
 
 func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, execID string, task *models.Task, repoDir string) string {
@@ -741,6 +793,14 @@ func (s *LLMService) CallAgentDirect(ctx context.Context, message string, attach
 	return s.callAgentDirect(ctx, message, attachments, agent, workDir, false)
 }
 
+// CallAgentDirectWithDefinition calls an agent directly while applying a persisted
+// agent definition's prompt, runtime tools, and scoped-file grants. Lifecycle
+// learning hooks use this to run Skill Curator as a forked reviewer with the
+// same skill/agent tools it gets during normal task execution.
+func (s *LLMService) CallAgentDirectWithDefinition(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent) (string, int, error) {
+	return s.callAgentDirectWithDefinition(ctx, message, attachments, agent, workDir, agentDef, false)
+}
+
 // CallAgentDirectNoTools calls the agent directly and explicitly suppresses
 // tool/plugin execution. Use this for strict JSON-generation helpers.
 func (s *LLMService) CallAgentDirectNoTools(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string) (string, int, error) {
@@ -748,20 +808,39 @@ func (s *LLMService) CallAgentDirectNoTools(ctx context.Context, message string,
 }
 
 func (s *LLMService) callAgentDirect(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string, disableTools bool) (string, int, error) {
-	log.Printf("[agent-svc] CallAgentDirect agent=%s model=%s message_len=%d workDir=%s disable_tools=%v", agent.Name, agent.Model, len(message), workDir, disableTools)
+	return s.callAgentDirectWithDefinition(ctx, message, attachments, agent, workDir, nil, disableTools)
+}
+
+func (s *LLMService) callAgentDirectWithDefinition(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent, disableTools bool) (string, int, error) {
+	log.Printf("[agent-svc] CallAgentDirect agent=%s model=%s message_len=%d workDir=%s disable_tools=%v agent_def=%t", agent.Name, agent.Model, len(message), workDir, disableTools, agentDef != nil)
 
 	adapter, err := s.ensureRoutingStrategy().resolveAdapter(agent.Provider)
 	if err != nil {
 		return "", 0, err
 	}
+	callCtx := ctx
+	if agentDef != nil && AgentAllowsTool(agentDef, models.AgentToolScopedFiles) && len(agentDef.ToolConfig.ScopedFiles) > 0 && !disableTools {
+		scopedWorkDir, rt, prepErr := s.directScopedFilesRuntime(ctx, agentDef, workDir)
+		if prepErr != nil {
+			return "", 0, prepErr
+		}
+		if scopedWorkDir != "" {
+			workDir = scopedWorkDir
+		}
+		if rt != nil {
+			rt = llmcontracts.TraceRuntimeTools(rt, llmcontracts.RuntimeToolTraceRecorderFromContext(callCtx))
+			callCtx = llmcontracts.WithRuntimeTools(callCtx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(callCtx), rt))
+		}
+	}
 	req, err := llmnormalize.NormalizeRequest(llmcontracts.AgentRequest{
-		Ctx:          ctx,
-		Operation:    llmcontracts.OperationDirect,
-		Message:      message,
-		Attachments:  attachments,
-		Agent:        agent,
-		WorkDir:      workDir,
-		DisableTools: disableTools,
+		Ctx:             callCtx,
+		Operation:       llmcontracts.OperationDirect,
+		Message:         message,
+		Attachments:     attachments,
+		Agent:           agent,
+		WorkDir:         workDir,
+		DisableTools:    disableTools,
+		AgentDefinition: agentDef,
 	})
 	if err != nil {
 		return "", 0, err
@@ -774,6 +853,24 @@ func (s *LLMService) callAgentDirect(ctx context.Context, message string, attach
 		return "", 0, err
 	}
 	return res.Output, res.Usage.TotalTokens, nil
+}
+
+func (s *LLMService) directScopedFilesRuntime(ctx context.Context, agentDef *models.Agent, workDir string) (string, *llmcontracts.RuntimeTools, error) {
+	if agentDef == nil || len(agentDef.ToolConfig.ScopedFiles) == 0 {
+		return workDir, nil, nil
+	}
+	root := strings.TrimSpace(workDir)
+	if root == "" {
+		root = "."
+	}
+	preparedWorkDir, rt, err := buildScopedFilesRuntimeTools(ctx, "", root, agentDef.ToolConfig)
+	if err != nil {
+		return "", nil, fmt.Errorf("preparing direct scoped file tools: %w", err)
+	}
+	if agentDef.ToolConfig.SkipDefaultTools && preparedWorkDir != "" {
+		return preparedWorkDir, rt, nil
+	}
+	return workDir, rt, nil
 }
 
 // CallAgentDirectStreaming calls the agent with streaming support, writing output to DB in real-time.
@@ -815,11 +912,16 @@ func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, messa
 		return llmcontracts.AgentResult{}, err
 	}
 	res, err := adapter.Call(req)
+	assistantOutput := res.TextOnlyOutput
+	if assistantOutput == "" {
+		assistantOutput = res.Output
+	}
+	res.ChatContext = chatContextFromNormalizedRequest(req, assistantOutput)
 	if err != nil {
 		if res.StopReason == "max_tokens" {
 			return res, err
 		}
-		return llmcontracts.AgentResult{}, err
+		return llmcontracts.AgentResult{ChatContext: res.ChatContext}, err
 	}
 	return res, nil
 }
@@ -843,10 +945,15 @@ func loadProjectInstructions(workDir string) string {
 }
 
 func (s *LLMService) callLLM(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, agentDef ...*models.Agent) (string, string, int, error) {
+	res, err := s.callLLMDetailed(ctx, prompt, attachments, agent, execID, workDir, projectInstructions, agentDef...)
+	return res.Output, res.TextOnlyOutput, res.Usage.TotalTokens, err
+}
+
+func (s *LLMService) callLLMDetailed(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, agentDef ...*models.Agent) (llmcontracts.AgentResult, error) {
 	log.Printf("[agent-svc] callLLM provider=%s model=%s prompt_len=%d attachments=%d workDir=%s projectInstructions=%d", agent.Provider, agent.Model, len(prompt), len(attachments), workDir, len(projectInstructions))
 	adapter, err := s.ensureRoutingStrategy().resolveAdapter(agent.Provider)
 	if err != nil {
-		return "", "", 0, err
+		return llmcontracts.AgentResult{}, err
 	}
 	var ad *models.Agent
 	if len(agentDef) > 0 {
@@ -864,18 +971,44 @@ func (s *LLMService) callLLM(ctx context.Context, prompt string, attachments []m
 		AgentDefinition:     ad,
 	})
 	if err != nil {
-		return "", "", 0, err
+		return llmcontracts.AgentResult{}, err
 	}
 	res, err := adapter.Call(req)
+	assistantOutput := res.TextOnlyOutput
+	if assistantOutput == "" {
+		assistantOutput = res.Output
+	}
+	res.ChatContext = chatContextFromNormalizedRequest(req, assistantOutput)
 	if err != nil {
 		// On max_tokens, return the partial output so callers can preserve it.
 		// The error still propagates so the task is marked as failed.
 		if res.StopReason == "max_tokens" {
-			return res.Output, res.TextOnlyOutput, res.Usage.TotalTokens, err
+			return res, err
 		}
-		return "", "", 0, err
+		return llmcontracts.AgentResult{ChatContext: res.ChatContext}, err
 	}
-	return res.Output, res.TextOnlyOutput, res.Usage.TotalTokens, nil
+	return res, nil
+}
+
+func chatContextFromNormalizedRequest(req llmcontracts.AgentRequest, assistantOutput string) llmcontracts.ChatContext {
+	messages := make([]llmcontracts.ChatContextMessage, 0, len(req.ChatHistory)*2+2)
+	for _, turn := range req.ChatHistory {
+		if strings.TrimSpace(turn.PromptSent) != "" {
+			messages = append(messages, llmcontracts.ChatContextMessage{Role: "user", Content: turn.PromptSent})
+		}
+		if strings.TrimSpace(turn.Output) != "" && (turn.Status == models.ExecCompleted || turn.Status == models.ExecFailed) {
+			if cleaned := llmoutput.CleanChatOutput(turn.Output); cleaned != "" {
+				messages = append(messages, llmcontracts.ChatContextMessage{Role: "assistant", Content: cleaned})
+			}
+		}
+	}
+	if strings.TrimSpace(req.Message) != "" {
+		messages = append(messages, llmcontracts.ChatContextMessage{Role: "user", Content: req.Message})
+	}
+	if strings.TrimSpace(assistantOutput) != "" {
+		messages = append(messages, llmcontracts.ChatContextMessage{Role: "assistant", Content: assistantOutput})
+	}
+	return llmcontracts.ChatContext{Messages: messages}
 }
 
 func (s *LLMService) callAnthropic(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig) (string, int, error) {

@@ -107,6 +107,7 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 			<a role="tab" class={ "tab", templ.KV("tab-active", defaultTab == "schedules") } data-tab="schedules" onclick="switchTaskTab('schedules')">Schedules</a>
 			<a role="tab" class={ "tab", templ.KV("tab-active", defaultTab == "chaining") } data-tab="chaining" onclick="switchTaskTab('chaining')">Chaining</a>
 			<a role="tab" class={ "tab", templ.KV("tab-active", defaultTab == "attachments") } data-tab="attachments" onclick="switchTaskTab('attachments')">Attachments</a>
+			<a role="tab" class={ "tab", templ.KV("tab-active", defaultTab == "lifecycle") } data-tab="lifecycle" onclick="switchTaskTab('lifecycle')">Lifecycle</a>
 		</div>
 
 		<!-- Tab: Details -->
@@ -772,6 +773,79 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 			</div>
 		</div>
 		<!-- End Tab: Attachments -->
+
+		<!-- Tab: Lifecycle (runbook §Rollout step 17) -->
+		<div id="tab-lifecycle" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "lifecycle") }>
+			<div class="card bg-base-100 shadow-sm border border-base-300">
+				<div class="card-body">
+					<div class="flex items-center justify-between mb-3">
+						<h4 class="text-lg font-bold">Lifecycle Activity</h4>
+						<button type="button" class="btn btn-ghost btn-xs" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "')"} }>Refresh</button>
+					</div>
+					<p class="text-sm opacity-70 mb-3">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p>
+					<div id="lifecycle-activity-list" data-task-id={ task.ID } class="space-y-2">
+						<p class="text-sm opacity-50">Loading lifecycle activity...</p>
+					</div>
+				</div>
+			</div>
+			<script>
+				(function() {
+					function statusBadge(status) {
+						var map = { completed: 'badge-success', failed: 'badge-error', skipped: 'badge-ghost', queued: 'badge-info', running: 'badge-warning' };
+						var cls = map[status] || 'badge-ghost';
+						return '<span class="badge ' + cls + ' badge-sm">' + status + '</span>';
+					}
+					function escapeText(value) {
+						return String(value == null ? '' : value)
+							.replace(/&/g, '&amp;')
+							.replace(/</g, '&lt;')
+							.replace(/>/g, '&gt;');
+					}
+					window.refreshLifecycleActivity = async function(taskID) {
+						var container = document.getElementById('lifecycle-activity-list');
+						if (!container) return;
+						try {
+							var response = await fetch('/api/tasks/' + encodeURIComponent(taskID) + '/lifecycle-executions', { headers: { 'Accept': 'application/json' } });
+							if (!response.ok) throw new Error('failed to load lifecycle executions');
+							var rows = await response.json();
+							if (!Array.isArray(rows) || rows.length === 0) {
+								container.innerHTML = '<p class="text-sm opacity-50">No lifecycle activity recorded yet.</p>';
+								return;
+							}
+							container.innerHTML = rows.map(function(r) {
+								var summary = r.summary ? '<p class="text-sm mt-1">' + escapeText(r.summary) + '</p>' : '';
+								var error = r.error ? '<p class="text-xs text-error mt-1">' + escapeText(r.error) + '</p>' : '';
+								var when = r.completed_at ? new Date(r.completed_at).toLocaleString() : new Date(r.started_at).toLocaleString();
+								return '<div class="border border-base-300 rounded-lg p-3">' +
+									'<div class="flex items-center justify-between flex-wrap gap-2">' +
+										'<div class="flex items-center gap-2 flex-wrap">' +
+											'<span class="font-mono text-xs opacity-70">' + escapeText(r.when || '') + '</span>' +
+											'<span class="text-sm font-medium">' + escapeText(r.skill_key || '') + '</span>' +
+											statusBadge(r.status || '') +
+										'</div>' +
+										'<span class="text-xs opacity-60">' + escapeText(when) + '</span>' +
+									'</div>' +
+									summary + error +
+								'</div>';
+							}).join('');
+						} catch (err) {
+							container.innerHTML = '<p class="text-sm text-error">' + escapeText(err.message || err) + '</p>';
+						}
+					};
+					if (document.querySelector('[data-tab="lifecycle"].tab-active')) {
+						var el = document.getElementById('lifecycle-activity-list');
+						if (el) window.refreshLifecycleActivity(el.dataset.taskId);
+					}
+					document.addEventListener('click', function(ev) {
+						var tab = ev.target.closest && ev.target.closest('[data-tab="lifecycle"]');
+						if (!tab) return;
+						var el = document.getElementById('lifecycle-activity-list');
+						if (el) window.refreshLifecycleActivity(el.dataset.taskId);
+					});
+				})();
+			</script>
+		</div>
+		<!-- End Tab: Lifecycle -->
 
 		<!-- Tab: Changes -->
 		<div id="tab-changes" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "changes") }>

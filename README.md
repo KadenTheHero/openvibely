@@ -103,10 +103,10 @@ Set environment variables directly or place them in `.env` (loaded by `start.sh`
 | Variable | Purpose | Allowed values | Default behavior (from code) | Examples (local / VPS-public) |
 |---|---|---|---|---|
 | `PORT` | HTTP listen port | Any valid TCP port string | `3001` (`internal/config/config.go`; Docker image overrides to `3001`) | `3001` \| `8080` |
-| `DATABASE_PATH` | SQLite database file path | Filesystem path | `./openvibely.db` | `./openvibely.db` \| `/var/lib/openvibely/openvibely.db` |
+| `DATABASE_PATH` | SQLite database file path | Filesystem path | `<OPENVIBELY_APP_DATA_DIR>/openvibely.db`; default app dir is `~/.openvibely` | `~/.openvibely/openvibely.db` \| `/var/lib/openvibely/openvibely.db` |
 | `DATABASE_URL` | Reserved config field (currently loaded but not used by server startup) | String | Empty (`""`) when unset | unset \| unset |
 | `ENVIRONMENT` | Runtime environment label | Free-form string | `development` (`start.sh` also defaults to `development`; Docker image sets `production`) | `development` \| `production` |
-| `PROJECT_REPO_ROOT` | Managed clone root for GitHub URL projects | Filesystem path | `./repos` | `./repos` \| `/var/lib/openvibely/repos` |
+| `PROJECT_REPO_ROOT` | Managed clone root for GitHub URL projects | Filesystem path | `<OPENVIBELY_APP_DATA_DIR>/repos`; default app dir is `~/.openvibely` | `~/.openvibely/repos` \| `/var/lib/openvibely/repos` |
 | `OPENVIBELY_PLUGIN_ROOT` | App-local plugin root override | Filesystem path (absolute or relative) | Unset = app-local plugin root (`.openvibely/plugins` under runtime base) | `./.openvibely/plugins` \| `/var/lib/openvibely/plugins` |
 | `OPENVIBELY_ENABLE_LOCAL_REPO_PATH` | Enables Local Path source mode in project setup | `1,true,yes,on,0,false,no,off` | Unset/invalid = `false`; `start.sh` exports `true` unless overridden in `.env` | `true` \| `false` |
 | `OPENVIBELY_CODEX_REASONING_EFFORT` | Fallback reasoning effort for Codex requests when model config does not set one | `low`, `medium`, `high`, `xhigh` | If unset/invalid, defaults to `high` | `high` \| `medium` |
@@ -204,7 +204,8 @@ Minimal deployment examples:
 ```bash
 # Local development (default localhost callback behavior)
 PORT=3001
-DATABASE_PATH=./openvibely.db
+# DATABASE_PATH defaults to ~/.openvibely/openvibely.db
+# PROJECT_REPO_ROOT defaults to ~/.openvibely/repos
 # APP_BASE_URL unset
 OAUTH_REDIRECT_MODE=auto
 
@@ -301,13 +302,11 @@ Desktop mode defaults:
 | Setting | Desktop default | Env override |
 |---|---|---|
 | Port | `0` (ephemeral) | `PORT` |
-| DB path | `~/Library/Application Support/OpenVibely/openvibely.db` (macOS) | `DATABASE_PATH` |
-| Repo root | `~/Library/Application Support/OpenVibely/repos` (macOS) | `PROJECT_REPO_ROOT` |
+| DB path | `~/.openvibely/openvibely.db` | `DATABASE_PATH` or `OPENVIBELY_APP_DATA_DIR` |
+| Repo root | `~/.openvibely/repos` | `PROJECT_REPO_ROOT` or `OPENVIBELY_APP_DATA_DIR` |
 | Local repo paths | enabled | `OPENVIBELY_ENABLE_LOCAL_REPO_PATH` |
 
-Paths are OS-specific: macOS uses `~/Library/Application Support/OpenVibely`, Linux uses `~/.local/share/openvibely`, Windows uses `%LOCALAPPDATA%\OpenVibely`.
-
-All env vars still work as overrides in desktop mode.
+Runtime storage defaults to the same user app directory used by the web/server binary so desktop and web share the same DB by default. The desktop wrapper still reads its optional `config.env` from the OS desktop config directory, and all env vars still work as overrides in desktop mode.
 
 ### Docker
 

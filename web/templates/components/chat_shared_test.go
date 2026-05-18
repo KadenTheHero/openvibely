@@ -113,10 +113,10 @@ func TestChatBubbleStreaming_ThreadCompletionDoesNotRefresh(t *testing.T) {
 // after task completion.
 func TestChatBubbleStreaming_NeverTargetsTaskDetailContent(t *testing.T) {
 	cases := []struct {
-		name           string
-		messagesID     string
-		pauseTargetID  string
-		isThread       bool
+		name          string
+		messagesID    string
+		pauseTargetID string
+		isThread      bool
 	}{
 		{"thread", "task-thread-messages", "task-thread-view", true},
 		{"chat", "chat-messages", "", false},
@@ -1305,7 +1305,7 @@ func TestTaskThreadView_SelectsTaskAssignedModelInDropdown(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := TaskThreadView(task, nil, agents, nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskThreadView(task, nil, agents, nil, nil).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render TaskThreadView: %v", err)
 	}
 	content := buf.String()
@@ -1329,7 +1329,7 @@ func TestTaskThreadView_SkipsExpensiveWorkDuringNavigation(t *testing.T) {
 		Category:  models.CategoryActive,
 	}
 	var buf bytes.Buffer
-	err := TaskThreadView(task, nil, nil, nil).Render(context.Background(), &buf)
+	err := TaskThreadView(task, nil, nil, nil, nil).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("Failed to render TaskThreadView: %v", err)
 	}
@@ -1372,7 +1372,7 @@ func TestTaskThreadView_ClearsDraftBeforeSuccessfulThreadSwap(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := TaskThreadView(task, nil, nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskThreadView(task, nil, nil, nil, nil).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render TaskThreadView: %v", err)
 	}
 	content := buf.String()
@@ -1533,12 +1533,12 @@ func TestStreamingRenderSnapshotsPinnedStateBeforeDomGrowth(t *testing.T) {
 		t.Fatalf("expected streaming renderers to snapshot shouldScroll before DOM render, found %d", count)
 	}
 	textScrollIdx := strings.Index(content, "var shouldScroll = !tracker || tracker.shouldAutoScroll();")
-	textRenderIdx := strings.Index(content, "window.renderStreamingContent(container, textBuffer)")
+	textRenderIdx := strings.Index(content, "window.renderStreamingContent(container, renderText)")
 	if textScrollIdx == -1 || textRenderIdx == -1 || textScrollIdx > textRenderIdx {
 		t.Error("new-message streaming renderer must compute shouldScroll before renderStreamingContent")
 	}
 
-	resumeRenderIdx := strings.Index(content, "window.renderStreamingContent(container, cumulativeContent)")
+	resumeRenderIdx := strings.LastIndex(content, "window.renderStreamingContent(container, renderText)")
 	if resumeRenderIdx == -1 {
 		t.Fatal("resume streaming renderer must call renderStreamingContent")
 	}
@@ -1580,7 +1580,7 @@ func TestTaskThreadView_PreservesPerTaskScrollState(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := TaskThreadView(task, nil, nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskThreadView(task, nil, nil, nil, nil).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render TaskThreadView: %v", err)
 	}
 	content := buf.String()
