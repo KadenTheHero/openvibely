@@ -22,9 +22,9 @@ var FS embed.FS
 //
 // SKILL.md bodies are always overwritten: those are the app's source of
 // truth and travel with the binary. AGENTS.md and user-managed per-agent
-// SKILLS.md files are only written when missing. The protected built-in
-// skill_curator root declaration is also overwritten because it carries system
-// policy and permission grants, not user narrative.
+// SKILLS.md files are only written when missing. Protected built-in system
+// agent root declarations are also overwritten because they carry system policy
+// and permission grants, not user narrative.
 func SyncTo(root string) error {
 	if root == "" {
 		return nil
@@ -50,7 +50,9 @@ func SyncTo(root string) error {
 		}
 		base := filepath.Base(dst)
 		isIndex := base == "AGENTS.md" || base == "SKILLS.md"
-		isProtectedSystemDeclaration := filepath.ToSlash(rel) == "agents/skill_curator/SKILLS.md"
+		relSlash := filepath.ToSlash(rel)
+		isProtectedSystemDeclaration := relSlash == "agents/skill_curator/SKILLS.md" ||
+			relSlash == "agents/memory_curator/SKILLS.md"
 		if isIndex && !isProtectedSystemDeclaration {
 			if _, err := os.Stat(dst); err == nil {
 				// User-managed once it exists: don't clobber hand edits.

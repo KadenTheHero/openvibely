@@ -102,6 +102,80 @@ func containsHookID(hooks []models.AgentLifecycleHook, id string) bool {
 	return false
 }
 
+// TestLifecycleRepo_HooksForWhenExcludesArchivedAgentHooks verifies that
+// hooks owned by archived or disabled agents are filtered out of HooksForWhen.
+//
+// Regression test for duplicate lifecycle activity rows: when a system agent
+// (for example "System: Memory Curator") is renamed/absorbed via
+// AgentRepo.MarkArchived, the old agent stays in the agents table but is
+// flipped to enabled=0/generated_status=archived. Its agent_lifecycle_hooks
+// rows still carry enabled=1, so HooksForWhen used to return both the archived
+// and the canonical agent's hook for the same (when, skill_key) pair, causing
+// the runner to record duplicate before_run/recall_memory and
+// after_complete/update_memory executions per task run.
+func TestLifecycleRepo_HooksForWhenExcludesArchivedAgentHooks(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	live := createLifecycleTestAgent(t, agentRepo)
+	archived := &models.Agent{
+		Name:         "Lifecycle Test Agent (archived)",
+		Description:  "fixture",
+		SystemPrompt: "x",
+		Model:        "inherit",
+	}
+	if err := agentRepo.Create(ctx, archived); err != nil {
+		t.Fatalf("create archived agent: %v", err)
+	}
+
+	liveHook := &models.AgentLifecycleHook{
+		AgentID:        live.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "memory/recall_memory",
+		OutputContract: models.OutputContractContextBlock,
+		Enabled:        true,
+	}
+	if err := repo.CreateHook(ctx, liveHook); err != nil {
+		t.Fatalf("create live hook: %v", err)
+	}
+	archivedHook := &models.AgentLifecycleHook{
+		AgentID:        archived.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "memory/recall_memory",
+		OutputContract: models.OutputContractContextBlock,
+		Enabled:        true,
+	}
+	if err := repo.CreateHook(ctx, archivedHook); err != nil {
+		t.Fatalf("create archived hook: %v", err)
+	}
+
+	// Before archive: both hooks are visible.
+	before, err := repo.HooksForWhen(ctx, models.LifecycleBeforeRun)
+	if err != nil {
+		t.Fatalf("hooks for when (pre-archive): %v", err)
+	}
+	if !containsHookID(before, liveHook.ID) || !containsHookID(before, archivedHook.ID) {
+		t.Fatalf("expected both hooks before archive, got %+v", before)
+	}
+
+	if err := agentRepo.MarkArchived(ctx, archived.ID, live.ID, "duplicate"); err != nil {
+		t.Fatalf("mark archived: %v", err)
+	}
+
+	after, err := repo.HooksForWhen(ctx, models.LifecycleBeforeRun)
+	if err != nil {
+		t.Fatalf("hooks for when (post-archive): %v", err)
+	}
+	if !containsHookID(after, liveHook.ID) {
+		t.Fatalf("expected live hook still present, got %+v", after)
+	}
+	if containsHookID(after, archivedHook.ID) {
+		t.Fatalf("expected archived hook filtered from HooksForWhen, got %+v", after)
+	}
+}
+
 func TestLifecycleRepo_ExecutionLifecycle(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	agentRepo := NewAgentRepo(db)

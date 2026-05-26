@@ -72,7 +72,7 @@ lifecycle_hooks:
 	}
 }
 
-func TestAgentLibraryMaintenanceService_SyncRootDeclarationsSanitizesSystemSkillCurator(t *testing.T) {
+func TestAgentLibraryMaintenanceService_SyncRootDeclarationsSkipsProtectedSystemAgents(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 	agentRepo := repository.NewAgentRepo(db)
@@ -81,36 +81,24 @@ func TestAgentLibraryMaintenanceService_SyncRootDeclarationsSanitizesSystemSkill
 	if err := builtinskills.SyncTo(root); err != nil {
 		t.Fatalf("SyncTo: %v", err)
 	}
-	declPath := filepath.Join(root, bundledSkillCuratorDeclarationPath)
-	legacy, err := os.ReadFile(declPath)
-	if err != nil {
-		t.Fatalf("read declaration: %v", err)
-	}
-	legacyText := strings.Replace(string(legacy), "  - skill_view", "  - ScopedFiles\n  - agent_manage\n  - skill_view", 1)
-	legacyText = strings.Replace(legacyText, "permissions:\n  read_task_prompt: true", "tool_config:\n  scoped_files:\n    - directory: .openvibely/agents\n      permissions:\n        - read\n        - write\n        - delete\n  skip_default_tools: true\n  disable_runtime_worktree: true\npermissions:\n  read_task_prompt: true", 1)
-	legacyText = strings.Replace(legacyText, "  write_skills: true", "  write_skills: true\n  write_agents: true\n  read_repository_files: true\n  write_repository_files: true", 1)
-	if err := os.WriteFile(declPath, []byte(legacyText), 0o644); err != nil {
-		t.Fatalf("write legacy declaration: %v", err)
-	}
 
 	svc := &AgentLibraryMaintenanceService{agentRepo: agentRepo, lifecycleRepo: lifecycleRepo, agentsRootPath: root}
 	if err := svc.SyncRootDeclarations(ctx, ""); err != nil {
 		t.Fatalf("SyncRootDeclarations: %v", err)
 	}
-	agent, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindSkillCurator)
-	if err != nil || agent == nil {
-		t.Fatalf("load system agent: %v %#v", err, agent)
+	memoryAgent, err := agentRepo.GetByKey(ctx, "memory_curator")
+	if err != nil {
+		t.Fatalf("GetByKey(memory): %v", err)
 	}
-	for _, denied := range []string{models.AgentToolScopedFiles, "agent_manage"} {
-		if AgentAllowsTool(agent, denied) {
-			t.Fatalf("synced system agent must not grant %s, tools=%v", denied, agent.Tools)
-		}
+	if memoryAgent != nil {
+		t.Fatalf("generic root sync must skip protected Memory Curator, got %#v", memoryAgent)
 	}
-	if len(agent.ToolConfig.ScopedFiles) != 0 || agent.ToolConfig.SkipDefaultTools || agent.ToolConfig.DisableRuntimeWorktree {
-		t.Fatalf("synced system agent must not keep scoped files config: %#v", agent.ToolConfig)
+	skillCurator, err := agentRepo.GetByKey(ctx, "skill_curator")
+	if err != nil || skillCurator == nil {
+		t.Fatalf("expected seeded Skill Curator to remain available: %v %#v", err, skillCurator)
 	}
-	if agent.PermissionDefaults.WriteAgents || agent.PermissionDefaults.ReadRepositoryFiles || agent.PermissionDefaults.WriteRepositoryFiles {
-		t.Fatalf("synced system agent must not keep agent/repo write permissions: %#v", agent.PermissionDefaults)
+	if skillCurator.SystemKind != models.AgentSystemKindSkillCurator || skillCurator.GeneratedStatus != models.AgentStatusProtected {
+		t.Fatalf("generic root sync must not rewrite Skill Curator through importer path: %#v", skillCurator)
 	}
 }
 

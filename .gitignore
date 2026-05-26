@@ -8,7 +8,7 @@ repos/
 logs/
 
 # Local OpenVibely runtime state. Project memory can be versioned per repo by
-# committing root .openvibely/memory/*.md files. Nested runtime state, caches,
+# committing root .openvibely/memories/*.md files. Nested runtime state, caches,
 # and logs remain ignored.
 **/.openvibely/
 !/.openvibely/
@@ -16,6 +16,9 @@ logs/
 !/.openvibely/memory/
 /.openvibely/memory/*
 !/.openvibely/memory/*.md
+!/.openvibely/memories/
+/.openvibely/memories/*
+!/.openvibely/memories/*.md
 
 # Local SQLite runtime files
 openvibely.db

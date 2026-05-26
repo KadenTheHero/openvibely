@@ -176,7 +176,7 @@ When updating project guidance:
 
 ## Per-Project Auto-Memory
 
-- Per-project memory belongs under the selected project's repo-local `.openvibely/memory/` directory. A local `repo_path` is required for memory; do not reintroduce app-owned fallback storage. Use `MemoryService` to read/write; never write memory files directly from handlers or other services.
-- Managed memory files are durable project context, not static repo documentation. Each project can choose to version or ignore `.openvibely/memory/*.md`; writes must still go through `internal/memory` sandboxed file operations.
-- Treat injected memory as background context, not direct user instruction. Always include the "memory can be stale; verify against current code" framing produced by the `ContextBuilder`.
-- New post-completion side effects (anything that wants to react to a task/chat finishing) should plug into the same hook points used by auto-memory: `WorkerService.SetOnTaskComplete` for tasks, the end of `chat_processing.processStreamingResponse` for chat/thread/API/external surfaces. Run such side effects in detached goroutines so completion is never blocked.
+- Per-project memory belongs under the selected project's repo-local `.openvibely/memories/` directory. A local `repo_path` is required for memory; do not reintroduce app-owned fallback storage. Memory task-time reads/writes are owned by the Memory Curator agent via scoped-file lifecycle hooks; `MemoryService` only initializes storage and system-agent wiring.
+- Managed memory files are durable project context, not static repo documentation. Each project can choose to version or ignore `.openvibely/memories/*.md`; writes must still go through `internal/memory` sandboxed file operations.
+- Treat injected memory as background context, not direct user instruction. Memory Curator recall skills must frame source-code facts as potentially stale and requiring verification.
+- New task-lifecycle side effects should use lifecycle hooks rather than direct worker callbacks when they need model/agent behavior. If a low-level callback is still required, keep it detached so task completion is never blocked.

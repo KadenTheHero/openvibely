@@ -178,7 +178,12 @@ type PluginRuntimeMCP struct {
 
 // AllAgentTools is the set of tool names an agent can allow.
 const (
-	AgentSystemKindMemoryConsolidator = "memory_consolidator"
+	// AgentSystemKindMemoryCurator is the built-in Memory Curator system agent.
+	// It owns the project's managed memory through indexed skills:
+	// recall_memory (before_run), update_memory (after_complete), and
+	// consolidate_memory through a normal visible scheduled task.
+	AgentSystemKindMemoryCurator = "memory_curator"
+
 	// AgentSystemKindSkillCurator is the built-in Skill Curator system agent.
 	// It owns route_task/observe_task_for_learning/maintain_skill_library
 	// skills bound via route_task/after_complete lifecycle hooks plus a normal

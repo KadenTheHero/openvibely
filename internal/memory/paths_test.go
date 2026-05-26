@@ -13,7 +13,7 @@ func newRegisteredResolver(t *testing.T, projectID string) (*PathResolver, strin
 	if err != nil {
 		t.Fatalf("NewPathResolver: %v", err)
 	}
-	dir := filepath.Join(t.TempDir(), ".openvibely", "memory")
+	dir := filepath.Join(t.TempDir(), ".openvibely", MemoryDirName)
 	if err := r.SetProjectDirOverride(projectID, dir); err != nil {
 		t.Fatalf("SetProjectDirOverride: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestSharedRepoMemoryDirUsesRepoLocalMemoryPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SharedRepoMemoryDir: %v", err)
 	}
-	want := filepath.Join(repo, ".openvibely", "memory")
+	want := filepath.Join(repo, ".openvibely", MemoryDirName)
 	if got != want {
 		t.Fatalf("dir = %q want %q", got, want)
 	}
@@ -146,7 +146,7 @@ func TestProjectIDValidation(t *testing.T) {
 	}
 	good := []string{"a", "abc-123", "abc_123", "1234567890abcdef1234567890abcdef"}
 	for _, id := range good {
-		if err := r.SetProjectDirOverride(id, filepath.Join(t.TempDir(), ".openvibely", "memory")); err != nil {
+		if err := r.SetProjectDirOverride(id, filepath.Join(t.TempDir(), ".openvibely", MemoryDirName)); err != nil {
 			t.Fatalf("register %q: %v", id, err)
 		}
 		if _, err := r.ProjectDir(id); err != nil {

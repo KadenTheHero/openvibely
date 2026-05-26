@@ -9,3 +9,9 @@ Each `## <agent_key>` heading documents an existing system/manual agent root. St
 System agent that ships with OpenVibely. It selects relevant skills for task turns, observes completed tasks for reusable skill learning, and maintains skill files/indexes. It is not user-selectable as a primary agent and does not manage agents autonomously.
 
 Skills: see `skill_curator/SKILLS.md`.
+
+## memory_curator
+
+System agent that ships with OpenVibely. It owns the project's managed memory: it recalls relevant memory before task turns, updates durable memory after completed task turns, and consolidates the durable store on a daily schedule. It is not user-selectable as a primary agent and only writes through its scoped memory file tools.
+
+Skills: see `memory_curator/SKILLS.md`.

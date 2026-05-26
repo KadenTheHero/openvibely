@@ -340,7 +340,7 @@ Common targets:
 If you are working on this repository as an AI coding agent, read in this order:
 
 1. `AGENTS.md`
-2. `MEMORY.md`
+2. `MEMORIES.md`
 3. `guardrails.md`
 4. `PRACTICES.md`
 

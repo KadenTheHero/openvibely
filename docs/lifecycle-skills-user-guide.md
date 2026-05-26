@@ -166,21 +166,22 @@ This scheduled task is focused on maintaining the standalone skill library. It s
 
 ## System Memory Consolidation
 
-`System: Memory Consolidation` is assigned to the memory agent.
+`System: Memory Curator` is the built-in on-disk agent under `internal/builtinskills/builtin/agents/memory_curator/`. It owns task-turn memory lifecycle skills plus scheduled consolidation:
 
-At the moment, the memory agent is not fully converted into an on-disk agent with indexed skills. That means routing sees an empty agent-owned skill list.
+- `memory_curator/recall_memory` runs at `before_run` and returns a compact `context_block` with relevant memories for the task turn.
+- `memory_curator/update_memory` runs at `after_complete` and updates durable managed memory when the completed task transcript contains memory-worthy facts.
+- `memory_curator/consolidate_memory` runs through the visible `System: Memory Consolidation` scheduled task assigned to Memory Curator.
 
-Current flow:
+Scheduled consolidation flow:
 
 ```text
 scheduled memory task fires
--> assigned agent is Memory Consolidator
--> route_task sees no indexed agent-owned skills
--> route_task selects no skills
--> normal memory task still runs with its existing memory tools
+-> assigned agent is System: Memory Curator
+-> route_task selects consolidate_memory from the Memory Curator agent's indexed skills
+-> normal task runs as Memory Curator with scoped memory file tools
 ```
 
-After Memory Consolidator becomes a real on-disk agent with skills, route_task will be able to select from those agent-owned skills.
+The Memory Curator agent is not user-selectable as a primary agent and writes only through its scoped memory file tools.
 
 ## Guardrails
 

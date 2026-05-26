@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/memory"
@@ -12,10 +13,11 @@ import (
 )
 
 type memoryScheduleTestRepos struct {
-	tasks     *repository.TaskRepo
-	schedules *repository.ScheduleRepo
-	agents    *repository.AgentRepo
-	projectID string
+	tasks      *repository.TaskRepo
+	schedules  *repository.ScheduleRepo
+	agents     *repository.AgentRepo
+	lifecycles *repository.LifecycleRepo
+	projectID  string
 }
 
 func newMemoryScheduleTestService(t *testing.T) (*MemoryService, memoryScheduleTestRepos) {
@@ -29,14 +31,15 @@ func newMemoryScheduleTestService(t *testing.T) (*MemoryService, memoryScheduleT
 	taskRepo := repository.NewTaskRepo(db, nil)
 	scheduleRepo := repository.NewScheduleRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
-	memoryRepo := repository.NewMemoryRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
 	resolver, err := memory.NewPathResolver(t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("path resolver: %v", err)
 	}
 	store := memory.NewFileStore(resolver)
-	svc := NewMemoryService(memoryRepo, taskRepo, scheduleRepo, agentRepo, nil, projectRepo, nil, nil, store, resolver)
-	return svc, memoryScheduleTestRepos{tasks: taskRepo, schedules: scheduleRepo, agents: agentRepo, projectID: project.ID}
+	svc := NewMemoryService(taskRepo, scheduleRepo, agentRepo, projectRepo, store, resolver)
+	svc.SetLifecycleRepo(lifecycleRepo)
+	return svc, memoryScheduleTestRepos{tasks: taskRepo, schedules: scheduleRepo, agents: agentRepo, lifecycles: lifecycleRepo, projectID: project.ID}
 }
 
 func TestMemoryServiceEnsureProjectUsesRepoMemoryDir(t *testing.T) {
@@ -53,7 +56,7 @@ func TestMemoryServiceEnsureProjectUsesRepoMemoryDir(t *testing.T) {
 	if err := svc.EnsureProject(ctx, repos.projectID); err != nil {
 		t.Fatalf("ensure project: %v", err)
 	}
-	got, err := svc.ProjectDir(repos.projectID)
+	got, err := svc.pathResolver.ProjectDir(repos.projectID)
 	if err != nil {
 		t.Fatalf("project dir: %v", err)
 	}
@@ -69,7 +72,107 @@ func TestMemoryServiceEnsureProjectUsesRepoMemoryDir(t *testing.T) {
 	}
 }
 
-func TestMemoryServiceEnsureProjectCreatesMemoryConsolidatorAgentAndSchedule(t *testing.T) {
+func TestMemoryServiceEnsureProjectMigratesLegacyMemoryDir(t *testing.T) {
+	ctx := context.Background()
+	svc, repos := newMemoryScheduleTestService(t)
+	project, err := svc.projectRepo.GetByID(ctx, repos.projectID)
+	if err != nil || project == nil {
+		t.Fatalf("get project: %v", err)
+	}
+	legacyDir, err := memory.SharedRepoLegacyMemoryDir(project.RepoPath)
+	if err != nil {
+		t.Fatalf("legacy dir: %v", err)
+	}
+	newDir, err := memory.SharedRepoMemoryDir(project.RepoPath)
+	if err != nil {
+		t.Fatalf("new dir: %v", err)
+	}
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatalf("mkdir legacy dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, memory.LegacyIndexFileName), []byte("# Legacy\n"), 0o644); err != nil {
+		t.Fatalf("write legacy index: %v", err)
+	}
+
+	if err := svc.EnsureProject(ctx, repos.projectID); err != nil {
+		t.Fatalf("ensure project: %v", err)
+	}
+	if _, err := os.Stat(legacyDir); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy dir to be moved away, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(newDir, memory.IndexFileName)); err != nil {
+		t.Fatalf("expected migrated index at new path: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(newDir, memory.LegacyIndexFileName)); !os.IsNotExist(err) {
+		t.Fatalf("expected old index filename to be migrated, err=%v", err)
+	}
+	got, err := svc.pathResolver.ProjectDir(repos.projectID)
+	if err != nil {
+		t.Fatalf("project dir: %v", err)
+	}
+	if got != newDir {
+		t.Fatalf("project dir = %q, want %q", got, newDir)
+	}
+}
+
+func TestMemoryServiceEnsureProjectMergesAndRemovesLegacyMemoryDirWhenBothExist(t *testing.T) {
+	ctx := context.Background()
+	svc, repos := newMemoryScheduleTestService(t)
+	project, err := svc.projectRepo.GetByID(ctx, repos.projectID)
+	if err != nil || project == nil {
+		t.Fatalf("get project: %v", err)
+	}
+	legacyDir, err := memory.SharedRepoLegacyMemoryDir(project.RepoPath)
+	if err != nil {
+		t.Fatalf("legacy dir: %v", err)
+	}
+	newDir, err := memory.SharedRepoMemoryDir(project.RepoPath)
+	if err != nil {
+		t.Fatalf("new dir: %v", err)
+	}
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatalf("mkdir legacy dir: %v", err)
+	}
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		t.Fatalf("mkdir new dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "legacy_topic.md"), []byte("legacy"), 0o644); err != nil {
+		t.Fatalf("write legacy topic: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, memory.LegacyIndexFileName), []byte("# Legacy\n"), 0o644); err != nil {
+		t.Fatalf("write legacy index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "conflict.md"), []byte("legacy conflict"), 0o644); err != nil {
+		t.Fatalf("write legacy conflict: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(newDir, memory.IndexFileName), []byte("# New\n"), 0o644); err != nil {
+		t.Fatalf("write new index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(newDir, "conflict.md"), []byte("new conflict"), 0o644); err != nil {
+		t.Fatalf("write new conflict: %v", err)
+	}
+
+	if err := svc.EnsureProject(ctx, repos.projectID); err != nil {
+		t.Fatalf("ensure project: %v", err)
+	}
+	if _, err := os.Stat(legacyDir); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy dir to be removed after merge, err=%v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(newDir, "legacy_topic.md")); err != nil || string(got) != "legacy" {
+		t.Fatalf("expected legacy topic to be moved into new dir: got=%q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(newDir, memory.IndexFileName)); err != nil || string(got) != "# New\n" {
+		t.Fatalf("expected existing new index to remain: got=%q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(newDir, "conflict.md")); err != nil || string(got) != "new conflict" {
+		t.Fatalf("expected existing conflicting file to remain: got=%q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(newDir, "conflict.legacy1.md")); err != nil || string(got) != "legacy conflict" {
+		t.Fatalf("expected conflicting legacy file to be preserved with suffix: got=%q err=%v", got, err)
+	}
+}
+
+func TestMemoryServiceEnsureProjectCreatesMemoryCuratorAgentAndSchedule(t *testing.T) {
 	ctx := context.Background()
 	svc, repos := newMemoryScheduleTestService(t)
 
@@ -77,21 +180,66 @@ func TestMemoryServiceEnsureProjectCreatesMemoryConsolidatorAgentAndSchedule(t *
 		t.Fatalf("ensure project: %v", err)
 	}
 
-	agent, err := repos.agents.GetBySystemKind(ctx, models.AgentSystemKindMemoryConsolidator)
+	agent, err := repos.agents.GetBySystemKind(ctx, models.AgentSystemKindMemoryCurator)
 	if err != nil {
-		t.Fatalf("get memory consolidator agent: %v", err)
+		t.Fatalf("get memory curator agent: %v", err)
 	}
 	if agent == nil {
-		t.Fatal("expected memory consolidator agent")
+		t.Fatal("expected memory curator agent")
 	}
-	if !agentHasTool(agent.Tools, models.AgentToolScopedFiles) {
-		t.Fatalf("expected memory consolidator agent to show %q tool in modal, got %v", models.AgentToolScopedFiles, agent.Tools)
+	hasScopedFiles := false
+	for _, tool := range agent.Tools {
+		if tool == models.AgentToolScopedFiles {
+			hasScopedFiles = true
+			break
+		}
 	}
-	if len(agent.ToolConfig.ScopedFiles) != 1 || agent.ToolConfig.ScopedFiles[0].Directory != ".openvibely/memory" || !agent.ToolConfig.SkipDefaultTools || !agent.ToolConfig.DisableRuntimeWorktree {
+	if !hasScopedFiles {
+		t.Fatalf("expected Memory Curator agent to declare %q tool, got %v", models.AgentToolScopedFiles, agent.Tools)
+	}
+	if len(agent.ToolConfig.ScopedFiles) != 1 || agent.ToolConfig.ScopedFiles[0].Directory != ".openvibely/memories" || !agent.ToolConfig.SkipDefaultTools || !agent.ToolConfig.DisableRuntimeWorktree {
 		t.Fatalf("unexpected scoped file config: %+v", agent.ToolConfig)
 	}
-	if agent.SystemPrompt == "" || agent.Name != memoryConsolidatorAgentName {
+	if agent.SystemPrompt == "" || agent.Name != memoryAgentName {
 		t.Fatalf("unexpected built-in agent: %#v", agent)
+	}
+	wantSkills := map[string]bool{"recall_memory": false, "update_memory": false, "consolidate_memory": false}
+	for _, skill := range agent.Skills {
+		if _, ok := wantSkills[skill.Name]; ok {
+			wantSkills[skill.Name] = true
+		}
+	}
+	for skill, found := range wantSkills {
+		if !found {
+			t.Fatalf("expected Memory Curator skill %q in %#v", skill, agent.Skills)
+		}
+	}
+	if err := repos.lifecycles.CreateHook(ctx, &models.AgentLifecycleHook{AgentID: agent.ID, When: models.LifecycleScheduled, SkillKey: "consolidate_memory", OutputContract: models.OutputContractActivitySummary, Blocking: true, Enabled: true}); err != nil {
+		t.Fatalf("create stale scheduled hook: %v", err)
+	}
+	if err := svc.EnsureProject(ctx, repos.projectID); err != nil {
+		t.Fatalf("repair project after stale hook: %v", err)
+	}
+	hooks, err := repos.lifecycles.HooksByAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("list memory hooks: %v", err)
+	}
+	wantHooks := map[models.LifecycleWhen]string{
+		models.LifecycleBeforeRun:     "recall_memory",
+		models.LifecycleAfterComplete: "update_memory",
+	}
+	for _, hook := range hooks {
+		if want, ok := wantHooks[hook.When]; ok && hook.SkillKey == want && hook.Enabled {
+			delete(wantHooks, hook.When)
+		}
+	}
+	if len(wantHooks) > 0 {
+		t.Fatalf("missing Memory Curator lifecycle hooks: %#v from %#v", wantHooks, hooks)
+	}
+	for _, hook := range hooks {
+		if hook.When == models.LifecycleScheduled {
+			t.Fatalf("Memory Curator should not declare a scheduled lifecycle hook; scheduled consolidation uses a normal scheduled task: %#v", hook)
+		}
 	}
 
 	tasks, err := repos.tasks.ListByProject(ctx, repos.projectID, string(models.CategoryScheduled))
@@ -124,7 +272,7 @@ func TestMemoryServiceEnsureProjectDoesNotRewriteUserScheduledTaskAssignedToMemo
 	if err := svc.EnsureProject(ctx, repos.projectID); err != nil {
 		t.Fatalf("ensure project first: %v", err)
 	}
-	agent, err := repos.agents.GetBySystemKind(ctx, models.AgentSystemKindMemoryConsolidator)
+	agent, err := repos.agents.GetBySystemKind(ctx, models.AgentSystemKindMemoryCurator)
 	if err != nil || agent == nil {
 		t.Fatalf("get memory agent: %v", err)
 	}
@@ -174,18 +322,12 @@ func TestMemoryServiceEnsureProjectIsIdempotent(t *testing.T) {
 		t.Fatalf("ensure project second: %v", err)
 	}
 
-	agents, err := repos.agents.List(ctx)
+	agents, err := repos.agents.ListBySystemKind(ctx, models.AgentSystemKindMemoryCurator)
 	if err != nil {
-		t.Fatalf("list agents: %v", err)
+		t.Fatalf("list memory curator agents: %v", err)
 	}
-	memoryAgents := 0
-	for _, agent := range agents {
-		if agent.SystemKind == models.AgentSystemKindMemoryConsolidator {
-			memoryAgents++
-		}
-	}
-	if memoryAgents != 1 {
-		t.Fatalf("expected one memory consolidator agent, got %d", memoryAgents)
+	if len(agents) != 1 {
+		t.Fatalf("expected one live memory curator agent, got %d", len(agents))
 	}
 	tasks, err := repos.tasks.ListByProject(ctx, repos.projectID, string(models.CategoryScheduled))
 	if err != nil {
@@ -200,5 +342,195 @@ func TestMemoryServiceEnsureProjectIsIdempotent(t *testing.T) {
 	}
 	if len(schedules) != 1 {
 		t.Fatalf("expected one schedule, got %d", len(schedules))
+	}
+}
+
+func containsMemoryScheduleHookID(hooks []models.AgentLifecycleHook, id string) bool {
+	for _, hook := range hooks {
+		if hook.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func TestMemoryServiceEnsureProjectRepairsLegacyMemoryAgents(t *testing.T) {
+	ctx := context.Background()
+	svc, repos := newMemoryScheduleTestService(t)
+	legacy := &models.Agent{
+		Name:                memoryAgentName,
+		Description:         "legacy memory curator",
+		SystemPrompt:        "legacy prompt",
+		Model:               "inherit",
+		Tools:               []string{models.AgentToolScopedFiles},
+		ToolConfig:          models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: ".openvibely/memory", Permissions: []string{"read", "write"}}}, SkipDefaultTools: true},
+		SystemKind:          "memory",
+		Key:                 "memory",
+		Scope:               models.AgentScopeGlobal,
+		SelectableAsPrimary: false,
+		Enabled:             true,
+		GeneratedStatus:     models.AgentStatusProtected,
+		CreatedBy:           models.AgentCreatedBySystem,
+	}
+	if err := repos.agents.Create(ctx, legacy); err != nil {
+		t.Fatalf("create legacy memory agent: %v", err)
+	}
+	legacyHook := &models.AgentLifecycleHook{
+		AgentID:        legacy.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "recall_memory",
+		OutputContract: models.OutputContractContextBlock,
+		Enabled:        true,
+	}
+	if err := repos.lifecycles.CreateHook(ctx, legacyHook); err != nil {
+		t.Fatalf("create legacy memory hook: %v", err)
+	}
+	archivedLegacy := &models.Agent{
+		Name:                memoryAgentName,
+		Description:         "already archived legacy memory curator",
+		SystemPrompt:        "archived legacy prompt",
+		Model:               "inherit",
+		SystemKind:          "memory",
+		Key:                 "archived_memory",
+		Scope:               models.AgentScopeGlobal,
+		SelectableAsPrimary: false,
+		Enabled:             true,
+		GeneratedStatus:     models.AgentStatusProtected,
+		CreatedBy:           models.AgentCreatedBySystem,
+	}
+	if err := repos.agents.Create(ctx, archivedLegacy); err != nil {
+		t.Fatalf("create archived legacy memory agent: %v", err)
+	}
+	archivedLegacyHook := &models.AgentLifecycleHook{
+		AgentID:        archivedLegacy.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "recall_memory",
+		OutputContract: models.OutputContractContextBlock,
+		Enabled:        true,
+	}
+	if err := repos.lifecycles.CreateHook(ctx, archivedLegacyHook); err != nil {
+		t.Fatalf("create archived legacy memory hook: %v", err)
+	}
+	if err := repos.agents.MarkArchived(ctx, archivedLegacy.ID, legacy.ID, "preexisting archive"); err != nil {
+		t.Fatalf("archive legacy memory agent: %v", err)
+	}
+	duplicate := &models.Agent{
+		Name:                memoryAgentName,
+		Description:         "duplicate memory curator",
+		SystemPrompt:        "duplicate prompt",
+		Model:               "inherit",
+		Tools:               []string{models.AgentToolScopedFiles},
+		ToolConfig:          models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: ".openvibely/memory", Permissions: []string{"read", "write"}}}, SkipDefaultTools: true},
+		SystemKind:          models.AgentSystemKindMemoryCurator,
+		Key:                 "memory_curator",
+		Scope:               models.AgentScopeGlobal,
+		SelectableAsPrimary: false,
+		Enabled:             true,
+		GeneratedStatus:     models.AgentStatusProtected,
+		CreatedBy:           models.AgentCreatedBySystem,
+	}
+	if err := repos.agents.Create(ctx, duplicate); err != nil {
+		t.Fatalf("create duplicate memory curator agent: %v", err)
+	}
+	consolidator := &models.Agent{
+		Name:                "System: Memory Consolidator",
+		Description:         "obsolete memory consolidator",
+		SystemPrompt:        "legacy consolidator prompt",
+		Model:               "inherit",
+		SystemKind:          "memory_consolidator",
+		Key:                 "memory_consolidator",
+		Scope:               models.AgentScopeGlobal,
+		SelectableAsPrimary: false,
+		Enabled:             true,
+		GeneratedStatus:     models.AgentStatusProtected,
+		CreatedBy:           models.AgentCreatedBySystem,
+	}
+	if err := repos.agents.Create(ctx, consolidator); err != nil {
+		t.Fatalf("create legacy consolidator agent: %v", err)
+	}
+	orphanDuplicate := &models.Agent{
+		Name:                memoryAgentName,
+		Description:         "orphan duplicate memory curator",
+		SystemPrompt:        "orphan duplicate prompt",
+		Model:               "inherit",
+		Scope:               models.AgentScopeGlobal,
+		SelectableAsPrimary: false,
+		Enabled:             true,
+		GeneratedStatus:     models.AgentStatusProtected,
+		CreatedBy:           models.AgentCreatedBySystem,
+	}
+	if err := repos.agents.Create(ctx, orphanDuplicate); err != nil {
+		t.Fatalf("create orphan duplicate memory curator agent: %v", err)
+	}
+	orphanConsolidator := &models.Agent{
+		Name:                "System: Memory Consolidator",
+		Description:         "orphan obsolete memory consolidator",
+		SystemPrompt:        "orphan legacy consolidator prompt",
+		Model:               "inherit",
+		Scope:               models.AgentScopeGlobal,
+		SelectableAsPrimary: false,
+		Enabled:             true,
+		GeneratedStatus:     models.AgentStatusProtected,
+		CreatedBy:           models.AgentCreatedBySystem,
+	}
+	if err := repos.agents.Create(ctx, orphanConsolidator); err != nil {
+		t.Fatalf("create orphan legacy consolidator agent: %v", err)
+	}
+
+	if err := svc.EnsureProject(ctx, repos.projectID); err != nil {
+		t.Fatalf("ensure project: %v", err)
+	}
+
+	canonical, err := repos.agents.GetBySystemKind(ctx, models.AgentSystemKindMemoryCurator)
+	if err != nil || canonical == nil {
+		t.Fatalf("get canonical memory curator: agent=%#v err=%v", canonical, err)
+	}
+	if canonical.ID != duplicate.ID {
+		t.Fatalf("expected existing memory_curator row to be repaired, got %s want %s", canonical.ID, duplicate.ID)
+	}
+	if len(canonical.ToolConfig.ScopedFiles) != 1 || canonical.ToolConfig.ScopedFiles[0].Directory != ".openvibely/memories" {
+		t.Fatalf("canonical scoped dir was not repaired: %+v", canonical.ToolConfig)
+	}
+	liveCurators, err := repos.agents.ListBySystemKind(ctx, models.AgentSystemKindMemoryCurator)
+	if err != nil {
+		t.Fatalf("list live curators: %v", err)
+	}
+	if len(liveCurators) != 1 {
+		t.Fatalf("expected one live memory_curator row, got %d", len(liveCurators))
+	}
+	for _, oldID := range []string{legacy.ID, archivedLegacy.ID, consolidator.ID, orphanDuplicate.ID, orphanConsolidator.ID} {
+		old, err := repos.agents.GetByID(ctx, oldID)
+		if err != nil {
+			t.Fatalf("get old memory agent %s: %v", oldID, err)
+		}
+		if old != nil {
+			t.Fatalf("legacy/duplicate memory agent should be deleted, got %#v", old)
+		}
+	}
+	hooks, err := repos.lifecycles.HooksForWhen(ctx, models.LifecycleBeforeRun)
+	if err != nil {
+		t.Fatalf("list before-run hooks: %v", err)
+	}
+	if containsMemoryScheduleHookID(hooks, legacyHook.ID) || containsMemoryScheduleHookID(hooks, archivedLegacyHook.ID) {
+		t.Fatalf("legacy memory hooks should be deleted with the agents, got %+v", hooks)
+	}
+	allAgents, err := repos.agents.List(ctx)
+	if err != nil {
+		t.Fatalf("list live agents: %v", err)
+	}
+	for _, agent := range allAgents {
+		if agent.ID == orphanDuplicate.ID || agent.ID == orphanConsolidator.ID || agent.ID == consolidator.ID || agent.ID == legacy.ID {
+			t.Fatalf("legacy/duplicate memory agent should be hidden from live list: %#v", agent)
+		}
+		if agent.Name == "System: Memory Consolidator" {
+			t.Fatalf("memory consolidator should not remain a live agent: %#v", agent)
+		}
+	}
+	task, err := repos.tasks.GetByProjectAndTitle(ctx, repos.projectID, memoryConsolidationTaskTitle)
+	if err != nil || task == nil {
+		t.Fatalf("get consolidation task: task=%#v err=%v", task, err)
+	}
+	if task.AgentDefinitionID == nil || *task.AgentDefinitionID != canonical.ID {
+		t.Fatalf("consolidation task agent = %v, want %s", task.AgentDefinitionID, canonical.ID)
 	}
 }

@@ -233,9 +233,10 @@ func (h *Handler) SetWebhookRepo(repo *repository.WebhookRepo) {
 	h.webhookRepo = repo
 }
 
-// SetMemoryService wires the auto-memory service so handlers can read/write
-// per-project memory metadata, render the memory consolidation card on the
-// Schedule page, and trigger "Run Now" passes.
+// SetMemoryService wires the Memory service so project-create handlers
+// can seed per-project memory storage and the Memory Consolidation
+// scheduled task. The service no longer participates in task-time memory
+// behavior; that runs through the Memory Curator agent's lifecycle hooks.
 func (h *Handler) SetMemoryService(svc *service.MemoryService) {
 	h.memorySvc = svc
 }
@@ -330,9 +331,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Tasks (project-scoped via ?project_id= query param)
 	e.GET("/tasks", h.ListTasks)
 	e.GET("/schedule", h.ViewSchedule)
-	// Memory subsystem routes (model-backed auto-memory).
-	e.POST("/memory/consolidate", h.RunMemoryConsolidationNow)
-	e.POST("/memory/settings", h.UpdateMemorySettings)
 	e.POST("/tasks", h.CreateTask)
 	e.POST("/tasks/move-completed", h.MoveCompletedActiveToCompleted)
 	e.DELETE("/tasks/completed", h.DeleteAllCompletedTasks)

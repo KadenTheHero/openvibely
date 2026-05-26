@@ -358,7 +358,7 @@ func TestRepoApplier_SparseAgentRootDeclarationPreservesRichExistingFields(t *te
 		Model:        "custom-model",
 		Tools:        []string{"Read", "Bash"},
 		ToolConfig: models.AgentToolConfig{
-			ScopedFiles: []models.ScopedFilesConfig{{Directory: ".openvibely/memory", Permissions: []string{"read", "write"}}},
+			ScopedFiles: []models.ScopedFilesConfig{{Directory: ".openvibely/memories", Permissions: []string{"read", "write"}}},
 		},
 		Plugins:    []string{"plugin@example"},
 		MCPServers: []models.MCPServerConfig{{Name: "server", Command: []string{"cmd"}, Env: map[string]string{"A": "B"}}},

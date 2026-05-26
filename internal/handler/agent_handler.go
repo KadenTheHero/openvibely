@@ -269,7 +269,7 @@ func agentToolsInclude(tools []string, tool string) bool {
 func validateScopedFilesDirectory(directory string) (string, error) {
 	directory = strings.TrimSpace(directory)
 	if directory == "" {
-		return ".openvibely/memory", nil
+		return ".openvibely/memories", nil
 	}
 	normalizedInput := strings.ReplaceAll(directory, "\\", "/")
 	if filepath.IsAbs(directory) || strings.HasPrefix(normalizedInput, "/") || strings.HasPrefix(normalizedInput, "~") || (len(normalizedInput) >= 2 && normalizedInput[1] == ':') {

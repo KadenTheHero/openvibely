@@ -2,22 +2,22 @@
 name: managed_memory
 type: project
 created: 2026-05-09
-updated: 2026-05-25
+updated: 2026-05-28
 source: consolidation
 source_id: memory_consolidation_2026_05_23
 confidence: high
 title: Managed Memory
 ---
 
-OpenVibely managed memory is model-backed, tool-driven, project-scoped, and stored under the selected project's repo-local `.openvibely/memory/` directory. The directory is flat: `MEMORY.md` is a compact index and top-level focused topic markdown files hold durable context. Do not recreate old `user/`, `feedback/`, `project/`, or `runs/` subdirectories.
+OpenVibely managed memory is model-backed, tool-driven, project-scoped, and stored under the selected project's repo-local `.openvibely/memory/` directory. The directory is flat: `MEMORIES.md` is a compact index and top-level focused topic markdown files hold durable context. Do not recreate old `user/`, `feedback/`, `project/`, or `runs/` subdirectories.
 
 When using scoped memory file tools, the tool root may already be `.openvibely/memory`; if `.openvibely/memory` appears missing, list `.` before assuming memory is absent or creating nested paths.
 
-Do not use repo-root `MEMORY.md` as active task/chat memory. Durable architecture decisions, user preferences, implementation feedback, repeated pitfalls, and task/chat lessons should go into OpenVibely managed memory through `MemoryService`. If old branches contain useful root-memory content, migrate only the durable parts into focused `.openvibely/memory/*.md` files instead of restoring a root compatibility pointer. Keep `AGENTS.md`, `guardrails.md`, and `PRACTICES.md` as static operating instructions, not feature-history or task-summary stores.
+Do not use repo-root `MEMORIES.md` as active task/chat memory. Durable architecture decisions, user preferences, implementation feedback, repeated pitfalls, and task/chat lessons should go into OpenVibely managed memory through `MemoryService`. If old branches contain useful root-memory content, migrate only the durable parts into focused `.openvibely/memory/*.md` files instead of restoring a root compatibility pointer. Keep `AGENTS.md`, `guardrails.md`, and `PRACTICES.md` as static operating instructions, not feature-history or task-summary stores.
 
 Memory operations require a configured selected project with a valid local `repo_path`. Do not use an app-owned fallback such as `memory/projects/<project_id>/` or `OPENVIBELY_MEMORY_ROOT`. Each repository decides whether to check in `.openvibely/memory/*.md` or ignore it.
 
-Managed memory initialization should be idempotent in both web/server and Wails desktop modes. For a selected project with a valid local `repo_path`, startup/runtime paths may create `.openvibely/memory/` and `MEMORY.md` when missing; topic files should be created only when explicitly written or safely skipped when absent. New topic files are indexed by the model/tool memory workflow when deemed durable and index-worthy, not automatically by low-level file creation.
+Managed memory initialization should be idempotent in both web/server and Wails desktop modes. For a selected project with a valid local `repo_path`, startup/runtime paths may create `.openvibely/memory/` and `MEMORIES.md` when missing; topic files should be created only when explicitly written or safely skipped when absent. New topic files are indexed by the model/tool memory workflow when deemed durable and index-worthy, not automatically by low-level file creation.
 
 `MemoryService` owns path resolution, file storage, context building, extraction, consolidation, and DB metadata. Memory features should use existing SQLite task/chat execution history as transcript source; do not add JSONL transcript storage or migration scaffolding for unreleased local-only layouts unless explicitly requested.
 
@@ -31,7 +31,7 @@ Prompt wording for managed-memory storage boundaries should stay abstract and pr
 
 The model owns memory extraction/consolidation decisions. Go code should not replace that with hardcoded rule extractors, deterministic topic classifiers, or JSON proposal workflows when provider tool execution is available. Use neutral OpenVibely-owned product terminology such as model/tool-driven managed memory.
 
-Normal task, thread, and chat executions consume selected managed memory as injected read-only prompt context after runtime model-backed retrieval/selection and synthesis. Do not inject all memory files by default, and do not rely on the main coding model opening `MEMORY.md` with file tools. The recall flow should use `MEMORY.md` as an index, select topic filenames, then synthesize brief assistant-facing context from selected files; the synthesized injection should be directly actionable rather than relying on unresolved filename citations.
+Normal task, thread, and chat executions consume selected managed memory as injected read-only prompt context after runtime model-backed retrieval/selection and synthesis. Do not inject all memory files by default, and do not rely on the main coding model opening `MEMORIES.md` with file tools. The recall flow should use `MEMORIES.md` as an index, select topic filenames, then synthesize brief assistant-facing context from selected files; the synthesized injection should be directly actionable rather than relying on unresolved filename citations.
 
 Direct managed-memory write tools should usually be reserved for memory-specific extraction/consolidation passes triggered by completion or scheduled runs. Scoped memory file tools are for flows explicitly updating the managed memory directory, not global provider behavior.
 

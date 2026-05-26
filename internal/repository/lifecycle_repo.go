@@ -24,6 +24,25 @@ const hookCols = `id, agent_id, when_slot, skill_key, prompt_override, output_co
                   blocking, enabled, permissions_json, run_policy_json, schedule_json,
                   created_at, updated_at`
 
+// prefixedHookCols returns hookCols with each column prefixed by the supplied
+// table alias. Used by HooksForWhen so the JOIN against agents does not need
+// a separate scan path.
+func prefixedHookCols(alias string) string {
+	cols := []string{
+		"id", "agent_id", "when_slot", "skill_key", "prompt_override", "output_contract",
+		"blocking", "enabled", "permissions_json", "run_policy_json", "schedule_json",
+		"created_at", "updated_at",
+	}
+	out := ""
+	for i, c := range cols {
+		if i > 0 {
+			out += ", "
+		}
+		out += alias + "." + c
+	}
+	return out
+}
+
 func scanHook(row interface{ Scan(...any) error }) (*models.AgentLifecycleHook, error) {
 	var h models.AgentLifecycleHook
 	var scheduleJSON sql.NullString
@@ -150,12 +169,25 @@ func (r *LifecycleRepo) HooksByAgent(ctx context.Context, agentID string) ([]mod
 
 // HooksForWhen returns enabled hooks across all agents for one `when` value.
 // Hooks are returned ordered by agent_id, created_at for deterministic execution.
+//
+// Hooks owned by archived or disabled agents are excluded so a single
+// (skill_key, when) pair is not invoked once per leftover copy of a system
+// agent that was renamed or absorbed (for example, both the legacy "memory"
+// and current "memory_curator" agents carrying the same recall_memory /
+// update_memory hooks). Without this filter, agent_lifecycle_hooks rows
+// linger after MarkArchived flips the owning agent to enabled=0, so every
+// task run records duplicate before_run/after_complete executions per
+// archived copy.
 func (r *LifecycleRepo) HooksForWhen(ctx context.Context, when models.LifecycleWhen) ([]models.AgentLifecycleHook, error) {
 	rows, err := r.db.QueryContext(ctx, `
-        SELECT `+hookCols+`
-        FROM agent_lifecycle_hooks
-        WHERE when_slot = ? AND enabled = 1
-        ORDER BY agent_id ASC, created_at ASC`, string(when))
+        SELECT `+prefixedHookCols("h")+`
+        FROM agent_lifecycle_hooks h
+        JOIN agents a ON a.id = h.agent_id
+        WHERE h.when_slot = ?
+          AND h.enabled = 1
+          AND a.archived_at IS NULL
+          AND COALESCE(a.generated_status, 'user_edited') <> 'archived'
+        ORDER BY h.agent_id ASC, h.created_at ASC`, string(when))
 	if err != nil {
 		return nil, fmt.Errorf("listing hooks for %s: %w", when, err)
 	}

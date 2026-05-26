@@ -1,7 +1,6 @@
-// Package memory provides Claude-style auto-memory storage and operations
-// for OpenVibely projects. Memory is project-scoped and normally lives under
-// the selected project's repo at .openvibely/memory, using the existing DB
-// task/chat history as the transcript source for extraction and consolidation.
+// Package memory provides repo-local managed-memory path resolution and
+// minimal filesystem setup for OpenVibely projects. Task-time memory selection,
+// updates, and consolidation are owned by the Memory Curator agent.
 package memory
 
 import (
@@ -13,39 +12,23 @@ import (
 	"sync"
 )
 
-// MemoryType describes the category in a memory file's frontmatter. Memory
-// files themselves live at the top level of the managed memory directory.
-type MemoryType string
+// MemoryDirName is the canonical repo-local managed memory directory name.
+const MemoryDirName = "memories"
 
-const (
-	// TypeUser holds durable facts/preferences about the user.
-	TypeUser MemoryType = "user"
-	// TypeFeedback holds corrections about how OpenVibely or its agents should behave.
-	TypeFeedback MemoryType = "feedback"
-	// TypeProject holds project-specific decisions, architecture, workflows, pitfalls.
-	TypeProject MemoryType = "project"
-)
-
-// AllTypes returns the canonical list of memory types in display order.
-func AllTypes() []MemoryType {
-	return []MemoryType{TypeUser, TypeFeedback, TypeProject}
-}
-
-// IsKnownType reports whether t is one of the well-known memory types.
-func IsKnownType(t MemoryType) bool {
-	switch t {
-	case TypeUser, TypeFeedback, TypeProject:
-		return true
-	}
-	return false
-}
+// LegacyMemoryDirName is the previous repo-local managed memory directory name.
+// MemoryService migrates this directory to MemoryDirName at runtime.
+const LegacyMemoryDirName = "memory"
 
 // IndexFileName is the per-project memory index file name.
-const IndexFileName = "MEMORY.md"
+const IndexFileName = "MEMORIES.md"
+
+// LegacyIndexFileName is the previous per-project memory index file name.
+// EnsureProject migrates this file to IndexFileName when the new index is absent.
+const LegacyIndexFileName = "MEMORY.md"
 
 // PathResolver resolves the absolute on-disk path for project memory storage.
 // Each project must be registered to its repo-local memory directory:
-// <repo>/.openvibely/memory.
+// <repo>/.openvibely/memories.
 type PathResolver struct {
 	mu          sync.RWMutex
 	projectDirs map[string]string
@@ -69,10 +52,24 @@ func SharedRepoMemoryDir(repoPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("memory: repo path: %w", err)
 	}
-	return filepath.Join(abs, ".openvibely", "memory"), nil
+	return filepath.Join(abs, ".openvibely", MemoryDirName), nil
 }
 
-// SharedRepoMemoryIndexPath returns the stable repo-local MEMORY.md path.
+// SharedRepoLegacyMemoryDir returns the previous repo-local memory directory for a
+// project repo. It is used only for runtime migration to SharedRepoMemoryDir.
+func SharedRepoLegacyMemoryDir(repoPath string) (string, error) {
+	repoPath = strings.TrimSpace(repoPath)
+	if repoPath == "" {
+		return "", errors.New("memory: repo path is empty")
+	}
+	abs, err := filepath.Abs(filepath.Clean(repoPath))
+	if err != nil {
+		return "", fmt.Errorf("memory: repo path: %w", err)
+	}
+	return filepath.Join(abs, ".openvibely", LegacyMemoryDirName), nil
+}
+
+// SharedRepoMemoryIndexPath returns the stable repo-local memory index path.
 func SharedRepoMemoryIndexPath(repoPath string) (string, error) {
 	dir, err := SharedRepoMemoryDir(repoPath)
 	if err != nil {
@@ -123,7 +120,7 @@ func (r *PathResolver) ProjectDir(projectID string) (string, error) {
 
 // EnsureProjectDir creates the per-project memory directory. The layout is
 // intentionally Claude-style and flat: topic markdown files live beside
-// MEMORY.md in the per-project directory.
+// MEMORIES.md in the per-project directory.
 func (r *PathResolver) EnsureProjectDir(projectID string) (string, error) {
 	dir, err := r.ProjectDir(projectID)
 	if err != nil {
@@ -135,7 +132,7 @@ func (r *PathResolver) EnsureProjectDir(projectID string) (string, error) {
 	return dir, nil
 }
 
-// IndexPath returns the absolute path to the project's MEMORY.md.
+// IndexPath returns the absolute path to the project's MEMORIES.md.
 func (r *PathResolver) IndexPath(projectID string) (string, error) {
 	dir, err := r.ProjectDir(projectID)
 	if err != nil {

@@ -2,76 +2,85 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/agentlibrary"
+	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
-// MemoryService is the high-level orchestrator for OpenVibely's auto-memory
-// subsystem. It wraps the memory package's PathResolver/FileStore/etc. and
-// the MemoryRepo for run/schedule metadata. Callers in handlers and other
-// services depend on this type rather than the lower-level memory package.
+// MemoryService owns storage setup and reconciliation for OpenVibely's
+// managed memory subsystem. The actual memory work (selecting relevant
+// memories on task start, updating memories on task completion, and
+// periodic consolidation) is delegated to the built-in System: Memory
+// Curator agent and its on-disk skills via lifecycle hooks plus a normal
+// scheduled task. This service exists to:
+//
+//   - Resolve the per-project repo-local managed memory directory and
+//     migrate any legacy .openvibely/memory directory to .openvibely/memories,
+//     then migrate any legacy MEMORY.md to MEMORIES.md.
+//   - Reconcile the protected Memory Curator agent DB row from its
+//     embedded on-disk declaration (mirroring SkillCuratorService).
+//   - Reconcile the Memory Curator lifecycle hook rows from that
+//     declaration so before_run / after_complete bindings exist.
+//   - Create and maintain the visible per-project "System: Memory
+//     Consolidation" scheduled task assigned to the Memory Curator agent.
 type MemoryService struct {
-	repo           *repository.MemoryRepo
-	taskRepo       *repository.TaskRepo
-	scheduleRepo   *repository.ScheduleRepo
-	agentRepo      *repository.AgentRepo
-	llmConfigRepo  *repository.LLMConfigRepo
-	projectRepo    *repository.ProjectRepo
-	execRepo       *repository.ExecutionRepo
-	modelCaller    memoryModelCaller
-	store          *memory.FileStore
-	pathResolver   *memory.PathResolver
-	contextBuilder *memory.ContextBuilder
-	defaultEnabled bool
+	taskRepo      *repository.TaskRepo
+	scheduleRepo  *repository.ScheduleRepo
+	agentRepo     *repository.AgentRepo
+	lifecycleRepo *repository.LifecycleRepo
+	projectRepo   *repository.ProjectRepo
+	store         *memory.FileStore
+	pathResolver  *memory.PathResolver
 }
 
-// NewMemoryService builds a service with the given pieces. Automatic memory
-// extraction/consolidation is model-backed and tool-driven when a model is
-// configured; without a model, extraction records a no-op run.
+// NewMemoryService builds a memory service. Only the dependencies needed
+// for storage setup, agent/hook reconciliation, and scheduled-task wiring
+// are required; task-time memory behavior runs through the Memory Curator
+// agent and is independent of this service.
 func NewMemoryService(
-	repo *repository.MemoryRepo,
 	taskRepo *repository.TaskRepo,
 	scheduleRepo *repository.ScheduleRepo,
 	agentRepo *repository.AgentRepo,
-	llmConfigRepo *repository.LLMConfigRepo,
 	projectRepo *repository.ProjectRepo,
-	execRepo *repository.ExecutionRepo,
-	modelCaller memoryModelCaller,
 	store *memory.FileStore,
 	resolver *memory.PathResolver,
 ) *MemoryService {
 	return &MemoryService{
-		repo:           repo,
-		taskRepo:       taskRepo,
-		scheduleRepo:   scheduleRepo,
-		agentRepo:      agentRepo,
-		llmConfigRepo:  llmConfigRepo,
-		projectRepo:    projectRepo,
-		execRepo:       execRepo,
-		modelCaller:    modelCaller,
-		store:          store,
-		pathResolver:   resolver,
-		contextBuilder: memory.NewContextBuilder(store),
-		defaultEnabled: true,
+		taskRepo:     taskRepo,
+		scheduleRepo: scheduleRepo,
+		agentRepo:    agentRepo,
+		projectRepo:  projectRepo,
+		store:        store,
+		pathResolver: resolver,
 	}
 }
 
-// PathResolver returns the underlying resolver (for diagnostics / "Open
-// Memory" UI).
-func (s *MemoryService) PathResolver() *memory.PathResolver { return s.pathResolver }
+// SetLifecycleRepo wires lifecycle hook persistence for the built-in Memory Curator agent.
+func (s *MemoryService) SetLifecycleRepo(repo *repository.LifecycleRepo) {
+	if s != nil {
+		s.lifecycleRepo = repo
+	}
+}
 
-// Store returns the underlying file store.
-func (s *MemoryService) Store() *memory.FileStore { return s.store }
-
-// ProjectDir returns the absolute on-disk per-project memory directory.
-func (s *MemoryService) ProjectDir(projectID string) (string, error) {
-	return s.pathResolver.ProjectDir(projectID)
+// EnsureProject ensures the on-disk memory directory exists, that any legacy
+// .openvibely/memory directory has been migrated to .openvibely/memories, that
+// any legacy MEMORY.md has been migrated to MEMORIES.md, and that the per-project
+// Memory Consolidation scheduled task is wired to the Memory Curator agent.
+// Idempotent on every server boot and project creation.
+func (s *MemoryService) EnsureProject(ctx context.Context, projectID string) error {
+	if _, err := s.ensureProjectMemoryDir(ctx, projectID); err != nil {
+		return err
+	}
+	return s.ensureConsolidationTaskSchedule(ctx, projectID)
 }
 
 func (s *MemoryService) ensureProjectMemoryDir(ctx context.Context, projectID string) (string, error) {
@@ -79,34 +88,6 @@ func (s *MemoryService) ensureProjectMemoryDir(ctx context.Context, projectID st
 		return "", err
 	}
 	return s.store.EnsureProject(projectID)
-}
-
-// IsEnabled returns whether memory is enabled for projectID. Defaults to true
-// when no explicit settings row exists.
-func (s *MemoryService) IsEnabled(ctx context.Context, projectID string) (bool, error) {
-	settings, err := s.repo.GetSettings(ctx, projectID)
-	if err != nil {
-		return false, err
-	}
-	return settings.Enabled, nil
-}
-
-// SetEnabled persists the enabled flag.
-func (s *MemoryService) SetEnabled(ctx context.Context, projectID string, enabled bool) error {
-	return s.repo.UpsertSettings(ctx, projectID, enabled)
-}
-
-// EnsureProject ensures both the on-disk directory layout and DB rows exist
-// for projectID. Idempotent and safe to call on every server boot or when a
-// project is created.
-func (s *MemoryService) EnsureProject(ctx context.Context, projectID string) error {
-	if _, err := s.ensureProjectMemoryDir(ctx, projectID); err != nil {
-		return err
-	}
-	if err := s.repo.EnsureSettings(ctx, projectID); err != nil {
-		return err
-	}
-	return s.ensureConsolidationTaskSchedule(ctx, projectID)
 }
 
 func (s *MemoryService) refreshProjectMemoryDir(ctx context.Context, projectID string) error {
@@ -120,6 +101,9 @@ func (s *MemoryService) refreshProjectMemoryDir(ctx context.Context, projectID s
 	if strings.TrimSpace(project.RepoPath) == "" {
 		return fmt.Errorf("memory: project %s has no local repo_path", projectID)
 	}
+	if err := migrateLegacyMemoryDir(project.RepoPath); err != nil {
+		return err
+	}
 	dir, err := memory.SharedRepoMemoryDir(project.RepoPath)
 	if err != nil {
 		return err
@@ -127,67 +111,133 @@ func (s *MemoryService) refreshProjectMemoryDir(ctx context.Context, projectID s
 	return s.pathResolver.SetProjectDirOverride(projectID, dir)
 }
 
-const memoryConsolidatorAgentName = "System: Memory Consolidator"
+func migrateLegacyMemoryDir(repoPath string) error {
+	legacyDir, err := memory.SharedRepoLegacyMemoryDir(repoPath)
+	if err != nil {
+		return err
+	}
+	newDir, err := memory.SharedRepoMemoryDir(repoPath)
+	if err != nil {
+		return err
+	}
+	if legacyDir == newDir {
+		return nil
+	}
+	legacyInfo, err := os.Stat(legacyDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("stat legacy memory dir %s: %w", legacyDir, err)
+	}
+	if !legacyInfo.IsDir() {
+		return fmt.Errorf("legacy memory path %s is not a directory", legacyDir)
+	}
+	newInfo, err := os.Stat(newDir)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("stat memory dir %s: %w", newDir, err)
+		}
+		if err := os.MkdirAll(filepath.Dir(newDir), 0o755); err != nil {
+			return fmt.Errorf("create memory parent dir %s: %w", filepath.Dir(newDir), err)
+		}
+		if err := os.Rename(legacyDir, newDir); err != nil {
+			return fmt.Errorf("migrate legacy memory dir %s to %s: %w", legacyDir, newDir, err)
+		}
+		return nil
+	}
+	if !newInfo.IsDir() {
+		return fmt.Errorf("memory path %s is not a directory", newDir)
+	}
+	if err := mergeLegacyMemoryDir(legacyDir, newDir); err != nil {
+		return err
+	}
+	if err := os.Remove(legacyDir); err != nil {
+		return fmt.Errorf("remove migrated legacy memory dir %s: %w", legacyDir, err)
+	}
+	return nil
+}
+
+func mergeLegacyMemoryDir(legacyDir, newDir string) error {
+	entries, err := os.ReadDir(legacyDir)
+	if err != nil {
+		return fmt.Errorf("read legacy memory dir %s: %w", legacyDir, err)
+	}
+	for _, entry := range entries {
+		legacyPath := filepath.Join(legacyDir, entry.Name())
+		newPath := filepath.Join(newDir, entry.Name())
+		if entry.IsDir() {
+			if err := os.MkdirAll(newPath, 0o755); err != nil {
+				return fmt.Errorf("create migrated memory subdir %s: %w", newPath, err)
+			}
+			if err := mergeLegacyMemoryDir(legacyPath, newPath); err != nil {
+				return err
+			}
+			if err := os.Remove(legacyPath); err != nil {
+				return fmt.Errorf("remove migrated legacy memory subdir %s: %w", legacyPath, err)
+			}
+			continue
+		}
+		if _, err := os.Stat(newPath); err == nil {
+			if err := moveConflictingLegacyMemoryFile(legacyPath, newDir, entry.Name()); err != nil {
+				return err
+			}
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("stat memory file %s: %w", newPath, err)
+		}
+		if err := os.Rename(legacyPath, newPath); err != nil {
+			return fmt.Errorf("migrate legacy memory file %s to %s: %w", legacyPath, newPath, err)
+		}
+	}
+	return nil
+}
+
+func moveConflictingLegacyMemoryFile(legacyPath, newDir, name string) error {
+	legacyData, err := os.ReadFile(legacyPath)
+	if err != nil {
+		return fmt.Errorf("read legacy memory file %s: %w", legacyPath, err)
+	}
+	newPath := filepath.Join(newDir, name)
+	newData, err := os.ReadFile(newPath)
+	if err != nil {
+		return fmt.Errorf("read memory file %s: %w", newPath, err)
+	}
+	if string(legacyData) == string(newData) {
+		if err := os.Remove(legacyPath); err != nil {
+			return fmt.Errorf("remove duplicate legacy memory file %s: %w", legacyPath, err)
+		}
+		return nil
+	}
+	base := strings.TrimSuffix(name, filepath.Ext(name))
+	ext := filepath.Ext(name)
+	if base == "" {
+		base = name
+		ext = ""
+	}
+	for i := 1; ; i++ {
+		candidate := filepath.Join(newDir, fmt.Sprintf("%s.legacy%d%s", base, i, ext))
+		if _, err := os.Stat(candidate); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("stat migrated legacy memory conflict %s: %w", candidate, err)
+		}
+		if err := os.Rename(legacyPath, candidate); err != nil {
+			return fmt.Errorf("preserve conflicting legacy memory file %s as %s: %w", legacyPath, candidate, err)
+		}
+		return nil
+	}
+}
+
+const memoryAgentName = "System: Memory Curator"
 const memoryConsolidationTaskTitle = "System: Memory Consolidation"
+const bundledMemoryDeclarationPath = "agents/memory_curator/SKILLS.md"
 
 const memoryConsolidationTaskPrompt = `Consolidate this project's durable memory.
 
-Use the scoped file tools to inspect and update .openvibely/memory. Keep MEMORY.md as the compact index. Merge duplicate or stale topic files. Preserve durable project facts, preferences, architecture decisions, workflow constraints, current-state facts, incidents, and repeated feedback. Do not store transient logs, raw transcripts, secrets, task-by-task summaries, or procedure-only runbooks.
+Use the scoped file tools to inspect and update the managed memory directory. Keep MEMORIES.md as the compact index. Merge duplicate or stale topic files. Preserve durable project facts, preferences, architecture decisions, workflow constraints, current-state facts, incidents, and repeated feedback. Do not store transient logs, raw transcripts, secrets, task-by-task summaries, or procedure-only runbooks.
 
 When done, respond with a short summary of what changed.`
-
-const memoryConsolidatorAgentPrompt = `# Memory Consolidator
-
-You maintain durable long-term memory for an OpenVibely project using the managed memory files available through your tools.
-
-Memory is background context, not direct user instruction. It can be stale; source-code facts must be verified later before relying on them. Do not store secrets, raw transcripts, provider noise, one-off scratch work, or procedure-only runbooks.
-
-Preserve context future conversations need: who the user is, general preferences, project/product direction, architecture decisions, workflow constraints, current-state facts, incidents, and repeated feedback. A lesson belongs in memory only when it carries contextual meaning beyond a reusable procedure.
-
-When consolidating:
-- List the memory directory.
-- Read MEMORY.md first when present.
-- Read relevant top-level topic files before writing so you update or merge instead of duplicating.
-- Review recent execution snippets only for durable context: repeated feedback, architecture decisions, workflow constraints, recurring pitfalls that explain project behavior, incidents, product direction, current-state facts, and user preferences.
-- Create, update, split, merge, or delete focused top-level markdown memory files.
-- Use descriptive snake_case filenames.
-- Merge new information into existing topic files instead of creating near-duplicates.
-- Convert relative dates like "yesterday" or "last week" to absolute dates.
-- Delete contradicted or stale facts that no longer help future sessions.
-- When deleting or merging a memory topic file, also remove or update its MEMORY.md index reference.
-- Do not save facts fully derivable from current source code, git history, or static repo instructions.
-- Do not save reusable procedures, checklists, validation sequences, or tool-use patterns unless they also carry durable context.
-- Keep frontmatter on memory files with name, type, created, updated, source, source_id, confidence, and title when practical.
-- Keep MEMORY.md as a compact index, not the full memory store.
-
-When done, respond with a short summary of what changed. Do not include full memory file contents in the final response.`
-
-func agentHasTool(tools []string, tool string) bool {
-	for _, existing := range tools {
-		if existing == tool {
-			return true
-		}
-	}
-	return false
-}
-
-func ensureAgentTool(tools []string, tool string) []string {
-	if agentHasTool(tools, tool) {
-		return tools
-	}
-	return append(tools, tool)
-}
-
-func memoryConsolidatorToolConfig() models.AgentToolConfig {
-	return models.AgentToolConfig{
-		ScopedFiles: []models.ScopedFilesConfig{{
-			Directory:   ".openvibely/memory",
-			Permissions: []string{"read", "write", "delete"},
-		}},
-		SkipDefaultTools:       true,
-		DisableRuntimeWorktree: true,
-	}
-}
 
 func sameScopedToolConfig(a, b models.AgentToolConfig) bool {
 	if a.SkipDefaultTools != b.SkipDefaultTools || a.DisableRuntimeWorktree != b.DisableRuntimeWorktree || len(a.ScopedFiles) != len(b.ScopedFiles) {
@@ -205,7 +255,7 @@ func (s *MemoryService) ensureConsolidationTaskSchedule(ctx context.Context, pro
 	if s.taskRepo == nil || s.scheduleRepo == nil || s.agentRepo == nil {
 		return nil
 	}
-	agent, err := s.ensureMemoryConsolidatorAgent(ctx)
+	agent, err := s.ensureMemoryAgent(ctx)
 	if err != nil {
 		return err
 	}
@@ -269,188 +319,227 @@ func (s *MemoryService) ensureConsolidationTaskSchedule(ctx context.Context, pro
 	})
 }
 
-func (s *MemoryService) ensureMemoryConsolidatorAgent(ctx context.Context) (*models.Agent, error) {
-	agent, err := s.agentRepo.GetBySystemKind(ctx, models.AgentSystemKindMemoryConsolidator)
+func (s *MemoryService) ensureMemoryAgent(ctx context.Context) (*models.Agent, error) {
+	decl, err := loadBundledMemoryDeclaration()
+	if err != nil {
+		return nil, err
+	}
+	want := agentFromBundledMemoryDeclaration(decl)
+
+	agent, err := s.findCanonicalMemoryAgent(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if agent == nil {
-		agent = &models.Agent{
-			Name:         memoryConsolidatorAgentName,
-			Description:  "Built-in agent that consolidates OpenVibely project memory.",
-			SystemPrompt: memoryConsolidatorAgentPrompt,
-			Model:        "inherit",
-			Tools:        []string{models.AgentToolScopedFiles},
-			ToolConfig:   memoryConsolidatorToolConfig(),
-			Plugins:      []string{},
-			MCPServers:   []models.MCPServerConfig{},
-			Skills:       []models.SkillConfig{},
-			SystemKind:   models.AgentSystemKindMemoryConsolidator,
-		}
+		agent = want
 		if err := s.agentRepo.Create(ctx, agent); err != nil {
 			return nil, err
 		}
-		return agent, nil
-	}
-	wantConfig := memoryConsolidatorToolConfig()
-	if agent.Name != memoryConsolidatorAgentName || agent.SystemPrompt != memoryConsolidatorAgentPrompt || agent.Model == "" || !agentHasTool(agent.Tools, models.AgentToolScopedFiles) || !sameScopedToolConfig(agent.ToolConfig, wantConfig) {
-		agent.Name = memoryConsolidatorAgentName
-		agent.Description = "Built-in agent that consolidates OpenVibely project memory."
-		agent.SystemPrompt = memoryConsolidatorAgentPrompt
-		if agent.Model == "" {
-			agent.Model = "inherit"
-		}
-		agent.SystemKind = models.AgentSystemKindMemoryConsolidator
-		agent.Tools = ensureAgentTool(agent.Tools, models.AgentToolScopedFiles)
-		agent.ToolConfig = wantConfig
+	} else if applyBundledMemoryDeclaration(agent, want) {
 		if err := s.agentRepo.Update(ctx, agent); err != nil {
 			return nil, err
 		}
 	}
+	if err := s.deleteLegacyMemoryAgents(ctx, agent.ID); err != nil {
+		return nil, err
+	}
+	if err := s.ensureMemoryHooks(ctx, agent.ID, decl); err != nil {
+		return nil, err
+	}
 	return agent, nil
 }
 
-// BuildContext returns the bounded memory block to inject into a prompt for
-// projectID. When memory is disabled or unavailable, an empty string is
-// returned. Errors loading memory are logged but never bubble up to block
-// the caller.
-func (s *MemoryService) BuildContext(ctx context.Context, projectID string, opts memory.ContextOptions) string {
-	if _, err := s.ensureProjectMemoryDir(ctx, projectID); err != nil {
-		log.Printf("memory: build-context: ensure project failed for %s: %v", projectID, err)
-		return ""
+func (s *MemoryService) findCanonicalMemoryAgent(ctx context.Context) (*models.Agent, error) {
+	if s.agentRepo == nil {
+		return nil, nil
 	}
-	enabled, err := s.IsEnabled(ctx, projectID)
+	agents, err := s.agentRepo.ListBySystemKind(ctx, models.AgentSystemKindMemoryCurator)
 	if err != nil {
-		log.Printf("memory: build-context: settings lookup failed for %s: %v", projectID, err)
-		return ""
+		return nil, err
 	}
-	out, err := s.contextBuilder.Build(projectID, enabled, opts)
-	if err != nil {
-		log.Printf("memory: build-context: %v", err)
-		return ""
+	if len(agents) > 0 {
+		return &agents[0], nil
 	}
-	return out
+	if agent, err := s.agentRepo.GetByKey(ctx, "memory_curator"); err != nil || agent != nil {
+		return agent, err
+	}
+	if agent, err := s.agentRepo.GetByKey(ctx, "memory"); err != nil || agent != nil {
+		return agent, err
+	}
+	return s.agentRepo.GetByName(ctx, memoryAgentName)
 }
 
-// EnqueueExtraction kicks off a memory extraction pass for a completed
-// interaction. The pass runs asynchronously so callers in completion paths
-// (worker, chat, threads, webhook handlers) are never blocked.
-//
-// Skip reasons are recorded as run rows with status="nothing" so the UI can
-// surface why nothing was saved.
-func (s *MemoryService) EnqueueExtraction(in memory.Interaction) {
-	go func() {
-		// Use a fresh detached context so the caller's request lifetime does
-		// not cancel the extraction half-way.
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		if err := s.runExtraction(ctx, in); err != nil {
-			log.Printf("memory: extraction failed for project=%s source=%s/%s: %v",
-				in.ProjectID, in.SourceKind, in.SourceID, err)
-		}
-	}()
-}
-
-// runExtraction is the synchronous body of an extraction pass. Exposed for
-// testing.
-func (s *MemoryService) runExtraction(ctx context.Context, in memory.Interaction) error {
-	if in.ProjectID == "" {
-		return fmt.Errorf("memory: missing project id")
+func (s *MemoryService) deleteLegacyMemoryAgents(ctx context.Context, canonicalID string) error {
+	if s.agentRepo == nil || canonicalID == "" {
+		return nil
 	}
-
-	enabled, err := s.IsEnabled(ctx, in.ProjectID)
+	agents, err := s.agentRepo.ListIncludingArchived(ctx)
 	if err != nil {
 		return err
 	}
-	if reason := memory.ShouldExtract(enabled, in); reason != "" {
-		// Record a "nothing" run for visibility (helps the Schedule/Status UI).
-		runID, cerr := s.repo.CreateExtractionRun(ctx, in.ProjectID, string(in.SourceKind), in.SourceID)
-		if cerr == nil {
-			_ = s.repo.FinishExtractionRun(ctx, runID, "nothing", string(reason), "", nil)
+	for i := range agents {
+		agent := &agents[i]
+		if agent.ID == canonicalID || !isSupersededMemoryAgent(agent) {
+			continue
 		}
-		return nil
-	}
-	if _, err := s.ensureProjectMemoryDir(ctx, in.ProjectID); err != nil {
-		return err
-	}
-
-	runID, err := s.repo.CreateExtractionRun(ctx, in.ProjectID, string(in.SourceKind), in.SourceID)
-	if err != nil {
-		return err
-	}
-
-	res, usedModel, extractErr := s.runModelBackedExtraction(ctx, in)
-	if !usedModel {
-		reason := "model-backed extraction skipped: no default/project model configured"
-		_ = s.repo.FinishExtractionRun(ctx, runID, "nothing", reason, "", nil)
-		return nil
-	}
-	if extractErr != nil {
-		_ = s.repo.FinishExtractionRun(ctx, runID, "error", "", extractErr.Error(), nil)
-		return extractErr
-	}
-
-	status := "ok"
-	errMsg := ""
-	reason := strings.Join(res.Notes, "; ")
-	if len(res.TouchedPaths) == 0 {
-		status = "nothing"
-		if reason == "" {
-			reason = "Nothing to save"
+		if err := s.agentRepo.Delete(ctx, agent.ID); err != nil {
+			return err
 		}
 	}
-
-	_ = s.repo.FinishExtractionRun(ctx, runID, status, reason, errMsg, res.TouchedPaths)
 	return nil
 }
 
-// RunConsolidationNow performs a consolidation pass synchronously and returns
-// the recorded run row. Kept for explicit/debug routes; scheduled consolidation
-// runs through the normal task execution path.
-func (s *MemoryService) RunConsolidationNow(ctx context.Context, projectID string) (*models.MemoryConsolidationRun, error) {
-	if err := s.EnsureProject(ctx, projectID); err != nil {
-		return nil, err
+func isSupersededMemoryAgent(agent *models.Agent) bool {
+	if agent == nil {
+		return false
 	}
-	runID, err := s.repo.CreateConsolidationRun(ctx, projectID)
+	switch agent.SystemKind {
+	case models.AgentSystemKindMemoryCurator, "memory", "memory_consolidator":
+		return true
+	}
+	switch agent.Key {
+	case "memory_curator", "memory", "memory_consolidator":
+		return true
+	}
+	switch agent.Name {
+	case memoryAgentName, "System: Memory", "System: Memory Consolidator":
+		return true
+	}
+	return false
+}
+
+func loadBundledMemoryDeclaration() (*agentlibrary.SkillDeclaration, error) {
+	path := filepath.ToSlash(filepath.Join("builtin", bundledMemoryDeclarationPath))
+	data, err := builtinskills.FS.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read Memory declaration %s: %w", path, err)
 	}
-
-	res, usedModel, runErr := s.runModelBackedConsolidation(ctx, projectID)
-	status := "ok"
-	if !usedModel {
-		status = "nothing"
-		res.Notes = append(res.Notes, "memory consolidation skipped: no project/default model configured")
+	decl, body, err := agentlibrary.ParseDeclaration(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("parse Memory declaration %s: %w", path, err)
 	}
-	errMsg := ""
-	if runErr != nil {
-		status = "error"
-		errMsg = runErr.Error()
+	if decl.Agent.Key != "memory_curator" {
+		return nil, fmt.Errorf("Memory declaration must declare memory_curator, got %s", decl.Agent.Key)
 	}
-	if err := s.repo.FinishConsolidationRun(ctx, runID, status, errMsg, res.TouchedPaths, res.Notes); err != nil {
-		return nil, err
+	if decl.Agent.SystemPrompt == "" {
+		decl.Agent.SystemPrompt = strings.TrimSpace(body)
 	}
-	return s.repo.GetLatestConsolidationRun(ctx, projectID)
+	decl.Skill.Key = ""
+	return decl, nil
 }
 
-// GetLatestConsolidationRun returns the latest consolidation run row.
-func (s *MemoryService) GetLatestConsolidationRun(ctx context.Context, projectID string) (*models.MemoryConsolidationRun, error) {
-	return s.repo.GetLatestConsolidationRun(ctx, projectID)
+func agentFromBundledMemoryDeclaration(decl *agentlibrary.SkillDeclaration) *models.Agent {
+	agent := &models.Agent{
+		Name:                decl.Agent.AgentDisplayName(),
+		Description:         decl.Agent.Description,
+		SystemPrompt:        decl.Agent.SystemPrompt,
+		Model:               firstNonEmptyString(decl.ModelDefaults.Model, "inherit"),
+		Tools:               compactStrings(decl.Tools),
+		ToolConfig:          toolConfigFromAgentDeclaration(decl.ToolConfig),
+		Plugins:             compactStrings(decl.Plugins),
+		MCPServers:          mcpServersFromAgentDeclaration(decl.MCPServers),
+		Skills:              skillsFromBundledAgentIndex(decl.Agent.SystemPrompt),
+		SystemKind:          models.AgentSystemKindMemoryCurator,
+		Key:                 "memory_curator",
+		Scope:               models.AgentScope(firstNonEmptyString(decl.Agent.Scope, string(models.AgentScopeGlobal))),
+		ProjectID:           decl.Agent.ProjectID,
+		SelectableAsPrimary: decl.Agent.SelectableAsPrimary,
+		Enabled:             true,
+		GeneratedStatus:     models.AgentStatusProtected,
+		CreatedBy:           models.AgentCreatedBySystem,
+		PermissionDefaults: models.AgentPermissionDefaults{
+			ReadTaskPrompt:     decl.Permissions.ReadTaskPrompt,
+			ReadTaskExecution:  decl.Permissions.ReadTaskExecution,
+			ReadProjectMemory:  decl.Permissions.ReadProjectMemory,
+			WriteProjectMemory: decl.Permissions.WriteProjectMemory,
+			UseShellOrTools:    decl.Permissions.UseShellOrTools,
+		},
+		ModelDefaults: models.AgentModelDefaults{
+			Model:       decl.ModelDefaults.Model,
+			Temperature: decl.ModelDefaults.Temperature,
+			MaxTokens:   decl.ModelDefaults.MaxTokens,
+		},
+		SourceRefs: []string{bundledMemoryDeclarationPath},
+	}
+	if decl.Agent.Enabled != nil {
+		agent.Enabled = *decl.Agent.Enabled
+	}
+	return agent
 }
 
-// IndexSize returns the current MEMORY.md size in bytes, for status UI.
-func (s *MemoryService) IndexSize(projectID string) int64 {
-	n, _ := s.store.IndexSizeBytes(projectID)
-	return n
+func applyBundledMemoryDeclaration(agent, want *models.Agent) bool {
+	changed := false
+	set := func(ok bool, apply func()) {
+		if ok {
+			apply()
+			changed = true
+		}
+	}
+	set(agent.Name != want.Name, func() { agent.Name = want.Name })
+	set(agent.Description != want.Description, func() { agent.Description = want.Description })
+	set(agent.SystemPrompt != want.SystemPrompt, func() { agent.SystemPrompt = want.SystemPrompt })
+	set(agent.Model != want.Model, func() { agent.Model = want.Model })
+	set(!sameAgentToolsList(agent.Tools, want.Tools), func() { agent.Tools = append([]string(nil), want.Tools...) })
+	set(!sameScopedToolConfig(agent.ToolConfig, want.ToolConfig), func() { agent.ToolConfig = want.ToolConfig })
+	set(!sameSkillConfigs(agent.Skills, want.Skills), func() { agent.Skills = append([]models.SkillConfig(nil), want.Skills...) })
+	set(agent.SystemKind != want.SystemKind, func() { agent.SystemKind = want.SystemKind })
+	set(agent.Key != want.Key, func() { agent.Key = want.Key })
+	set(agent.Scope != want.Scope, func() { agent.Scope = want.Scope })
+	set(agent.ProjectID != want.ProjectID, func() { agent.ProjectID = want.ProjectID })
+	set(agent.SelectableAsPrimary != want.SelectableAsPrimary, func() { agent.SelectableAsPrimary = want.SelectableAsPrimary })
+	set(agent.Enabled != want.Enabled, func() { agent.Enabled = want.Enabled })
+	set(agent.GeneratedStatus != want.GeneratedStatus, func() { agent.GeneratedStatus = want.GeneratedStatus })
+	set(agent.CreatedBy == "" || agent.CreatedBy != want.CreatedBy, func() { agent.CreatedBy = want.CreatedBy })
+	set(!sameStringSlice(agent.SourceRefs, want.SourceRefs), func() { agent.SourceRefs = append([]string(nil), want.SourceRefs...) })
+	if !sameJSON(agent.PermissionDefaults, want.PermissionDefaults) {
+		agent.PermissionDefaults = want.PermissionDefaults
+		changed = true
+	}
+	if !sameJSON(agent.ModelDefaults, want.ModelDefaults) {
+		agent.ModelDefaults = want.ModelDefaults
+		changed = true
+	}
+	return changed
 }
 
-// IndexBody returns MEMORY.md text (or "" when missing).
-func (s *MemoryService) IndexBody(projectID string) string {
-	body, _ := s.store.ReadIndex(projectID)
-	return strings.TrimSpace(body)
-}
-
-// LastExtractionRuns returns up to limit recent extraction runs.
-func (s *MemoryService) LastExtractionRuns(ctx context.Context, projectID string, limit int) ([]models.MemoryExtractionRun, error) {
-	return s.repo.ListRecentExtractionRuns(ctx, projectID, limit)
+func (s *MemoryService) ensureMemoryHooks(ctx context.Context, agentID string, decl *agentlibrary.SkillDeclaration) error {
+	if s.lifecycleRepo == nil || decl == nil || len(decl.LifecycleHooks) == 0 {
+		return nil
+	}
+	existing, err := s.lifecycleRepo.HooksByAgent(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	desired := map[string]struct{}{}
+	for when, hookDecl := range decl.LifecycleHooks {
+		if when == "primary" {
+			continue
+		}
+		hook := lifecycleHookFromAgentDeclaration(agentID, models.LifecycleWhen(when), hookDecl)
+		desired[string(hook.When)+"/"+hook.SkillKey] = struct{}{}
+		match := findAgentLifecycleHook(existing, hook.When, hook.SkillKey)
+		if match == nil {
+			if err := s.lifecycleRepo.CreateHook(ctx, hook); err != nil {
+				return err
+			}
+			continue
+		}
+		hook.ID = match.ID
+		if !sameLifecycleHook(match, hook) {
+			if err := s.lifecycleRepo.UpdateHook(ctx, hook); err != nil {
+				return err
+			}
+		}
+	}
+	for _, hook := range existing {
+		if _, ok := desired[string(hook.When)+"/"+hook.SkillKey]; ok {
+			continue
+		}
+		if hook.AgentID == agentID && hook.SkillKey == "consolidate_memory" && hook.When == models.LifecycleScheduled {
+			if err := s.lifecycleRepo.DeleteHook(ctx, hook.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

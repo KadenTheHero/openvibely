@@ -200,7 +200,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 									<p class="text-xs opacity-60 mb-3">Restrict file tools to a project-relative directory.</p>
 									<div class="form-control mb-3">
 										<label class="label"><span class="label-text text-sm">Directory</span></label>
-										<input type="text" id="scoped_files_directory" class="input input-bordered input-sm" placeholder=".openvibely/memory" value=".openvibely/memory" aria-describedby="scoped_files_directory_error" oninput="validateScopedFilesDirectoryInput()" onblur="validateScopedFilesDirectoryInput()"/>
+										<input type="text" id="scoped_files_directory" class="input input-bordered input-sm" placeholder=".openvibely/memories" value=".openvibely/memories" aria-describedby="scoped_files_directory_error" oninput="validateScopedFilesDirectoryInput()" onblur="validateScopedFilesDirectoryInput()"/>
 										<p id="scoped_files_directory_error" class="hidden text-xs text-error mt-1"></p>
 									</div>
 									<div class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
@@ -543,7 +543,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					const raw = String(value || '').trim();
 					if (!raw) return '';
 					if (raw.startsWith('/') || raw.startsWith('\\\\') || raw.startsWith('~')) {
-						return 'Use a project-relative directory, for example .openvibely/memory or docs.';
+						return 'Use a project-relative directory, for example .openvibely/memories or docs.';
 					}
 					const normalized = raw.replaceAll('\\\\', '/');
 					const parts = normalized.split('/').filter(part => part && part !== '.');
@@ -551,7 +551,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					for (const part of parts) {
 						if (part === '..') {
 							if (depth === 0) {
-								return 'Directory must stay inside the project, for example .openvibely/memory or docs.';
+								return 'Directory must stay inside the project, for example .openvibely/memories or docs.';
 							}
 							depth -= 1;
 						} else {
@@ -587,7 +587,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					const normalized = config && typeof config === 'object' ? config : {};
 					const scoped = Array.isArray(normalized.scoped_files) && normalized.scoped_files.length > 0 ? normalized.scoped_files[0] : {};
 					const permissions = Array.isArray(scoped.permissions) ? scoped.permissions : [];
-					document.getElementById('scoped_files_directory').value = scoped.directory || '.openvibely/memory';
+					document.getElementById('scoped_files_directory').value = scoped.directory || '.openvibely/memories';
 					validateScopedFilesDirectoryInput();
 					document.getElementById('scoped_files_perm_read').checked = permissions.length === 0 || permissions.includes('read');
 					document.getElementById('scoped_files_perm_write').checked = permissions.length === 0 || permissions.includes('write');
@@ -604,7 +604,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					if (document.getElementById('scoped_files_perm_delete').checked) permissions.push('delete');
 					return {
 						scoped_files: [{
-							directory: document.getElementById('scoped_files_directory').value || '.openvibely/memory',
+							directory: document.getElementById('scoped_files_directory').value || '.openvibely/memories',
 							permissions: permissions.length > 0 ? permissions : ['read'],
 						}],
 						skip_default_tools: document.getElementById('scoped_files_skip_default_tools').checked,

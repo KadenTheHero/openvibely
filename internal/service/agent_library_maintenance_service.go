@@ -98,10 +98,10 @@ func syncRootDeclarationsFromRoot(ctx context.Context, root string, applier *age
 		if !decl.IsAgentRootDeclaration() || decl.Agent.Key == "" {
 			continue
 		}
-		if decl.Agent.Key == "skill_curator" {
-			// The protected system Skill Curator is repaired through EnsureProject,
-			// which sanitizes stale bundled declarations. Generic root sync must not
-			// try to mutate protected system agents or reapply old autonomous-agent grants.
+		if decl.Agent.Key == "skill_curator" || decl.Agent.Key == "memory_curator" {
+			// Protected system agents are repaired through their owning services. Generic
+			// root sync must not try to mutate protected system agents or reapply stale
+			// bundled declarations through the user/generated-agent importer path.
 			continue
 		}
 		if decl.Agent.SystemPrompt == "" {
@@ -267,7 +267,7 @@ func agentFromBundledDeclaration(decl *agentlibrary.SkillDeclaration) *models.Ag
 		ToolConfig:          toolConfigFromAgentDeclaration(decl.ToolConfig),
 		Plugins:             compactStrings(decl.Plugins),
 		MCPServers:          mcpServersFromAgentDeclaration(decl.MCPServers),
-		Skills:              skillsFromBundledSkillCuratorIndex(decl.Agent.SystemPrompt),
+		Skills:              skillsFromBundledAgentIndex(decl.Agent.SystemPrompt),
 		SystemKind:          models.AgentSystemKindSkillCurator,
 		Key:                 "skill_curator",
 		Scope:               models.AgentScope(firstNonEmptyString(decl.Agent.Scope, string(models.AgentScopeGlobal))),
@@ -350,7 +350,7 @@ func (s *AgentLibraryMaintenanceService) ensureSkillCuratorHooks(ctx context.Con
 			continue
 		}
 		hook := lifecycleHookFromAgentDeclaration(agentID, models.LifecycleWhen(when), hookDecl)
-		match := findSkillCuratorHook(existing, hook.When, hook.SkillKey)
+		match := findAgentLifecycleHook(existing, hook.When, hook.SkillKey)
 		if match == nil {
 			if err := s.lifecycleRepo.CreateHook(ctx, hook); err != nil {
 				return err
@@ -367,7 +367,7 @@ func (s *AgentLibraryMaintenanceService) ensureSkillCuratorHooks(ctx context.Con
 	return nil
 }
 
-func skillsFromBundledSkillCuratorIndex(indexBody string) []models.SkillConfig {
+func skillsFromBundledAgentIndex(indexBody string) []models.SkillConfig {
 	skills := []models.SkillConfig{}
 	seen := map[string]struct{}{}
 	for _, line := range strings.Split(indexBody, "\n") {
@@ -418,7 +418,7 @@ func lifecycleHookFromAgentDeclaration(agentID string, when models.LifecycleWhen
 	}
 }
 
-func findSkillCuratorHook(hooks []models.AgentLifecycleHook, when models.LifecycleWhen, skill string) *models.AgentLifecycleHook {
+func findAgentLifecycleHook(hooks []models.AgentLifecycleHook, when models.LifecycleWhen, skill string) *models.AgentLifecycleHook {
 	for i := range hooks {
 		if hooks[i].When == when && hooks[i].SkillKey == skill {
 			return &hooks[i]

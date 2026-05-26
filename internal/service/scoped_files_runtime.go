@@ -177,17 +177,6 @@ func (s *scopedFilesToolSession) execute(ctx context.Context, name string, input
 	}
 }
 
-func (s *scopedFilesToolSession) result() memory.ConsolidationResult {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	paths := make([]string, 0, len(s.touched))
-	for p := range s.touched {
-		paths = append(paths, p)
-	}
-	sort.Strings(paths)
-	return memory.ConsolidationResult{TouchedPaths: paths}
-}
-
 // scopedPath resolves a model-supplied relative path against the configured
 // scopes. When the session has more than one configured scope, the path can
 // optionally be prefixed with "<scope_label>/" to address a specific scope
@@ -534,4 +523,27 @@ func (s *scopedFilesToolSession) recordTouched(rel string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.touched[rel] = struct{}{}
+}
+
+func matchGlob(pattern, name string) bool {
+	ok, err := filepath.Match(pattern, name)
+	return err == nil && ok
+}
+
+func atomicWriteService(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	_, writeErr := tmp.Write(data)
+	closeErr := tmp.Close()
+	if writeErr != nil || closeErr != nil {
+		_ = os.Remove(tmpName)
+		if writeErr != nil {
+			return writeErr
+		}
+		return closeErr
+	}
+	return os.Rename(tmpName, path)
 }

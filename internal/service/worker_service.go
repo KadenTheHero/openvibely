@@ -43,9 +43,9 @@ type WorkerService struct {
 	submitted chan models.Task
 
 	// onTaskComplete, when set, is invoked after every task completion
-	// (success or failure) so subsystems like auto-memory can record the
-	// interaction. Errors thrown by the callback are logged but never
-	// affect task status.
+	// (success or failure) for low-level post-completion side effects.
+	// Agent/model-driven behavior should prefer lifecycle hooks. Errors thrown
+	// by the callback are logged but never affect task status.
 	onTaskComplete func(task models.Task, executionErr error)
 
 	// lifecycleRunner, when set, runs route_task/before_run/after_complete hook
@@ -103,8 +103,8 @@ func (w *WorkerService) CurrentLifecycleCatalog() *agentskills.Catalog {
 }
 
 // SetOnTaskComplete registers a callback invoked after every task completion.
-// Use this to wire auto-memory extraction or any other post-completion side
-// effect that should not block the worker pool.
+// Prefer lifecycle hooks for agent/model-driven post-completion behavior; use
+// this only for low-level side effects that should not block the worker pool.
 func (w *WorkerService) SetOnTaskComplete(fn func(task models.Task, executionErr error)) {
 	w.onTaskComplete = fn
 }
@@ -300,8 +300,8 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 	}
 
 	if w.onTaskComplete != nil {
-		// Run the post-completion hook in a goroutine so memory extraction
-		// (or any other heavy callback) never blocks worker dispatch.
+		// Run the post-completion callback in a goroutine so heavy side
+		// effects never block worker dispatch.
 		go func(t models.Task, runErr error) {
 			defer func() {
 				if r := recover(); r != nil {

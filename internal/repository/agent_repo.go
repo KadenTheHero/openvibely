@@ -141,8 +141,18 @@ func normalizeAgentToolConfig(a *models.Agent) {
 }
 
 func (r *AgentRepo) List(ctx context.Context) ([]models.Agent, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+agentColumns+` FROM agents ORDER BY name ASC`)
+	return r.list(ctx, `SELECT `+agentColumns+` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC`)
+}
+
+// ListIncludingArchived returns every agent row, including generated agents that
+// were archived/absorbed. Most callers should use List; this is for narrow
+// reconciliation paths that need to remove obsolete rows from earlier cleanups.
+func (r *AgentRepo) ListIncludingArchived(ctx context.Context) ([]models.Agent, error) {
+	return r.list(ctx, `SELECT `+agentColumns+` FROM agents ORDER BY name ASC`)
+}
+
+func (r *AgentRepo) list(ctx context.Context, query string) ([]models.Agent, error) {
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("listing agents: %w", err)
 	}
@@ -172,15 +182,33 @@ func (r *AgentRepo) GetByID(ctx context.Context, id string) (*models.Agent, erro
 }
 
 func (r *AgentRepo) GetByName(ctx context.Context, name string) (*models.Agent, error) {
-	a, err := scanAgent(r.db.QueryRowContext(ctx,
-		`SELECT `+agentColumns+` FROM agents WHERE LOWER(name) = LOWER(?)`, name))
-	if err == sql.ErrNoRows {
+	agents, err := r.ListByName(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if len(agents) == 0 {
 		return nil, nil
 	}
+	return &agents[0], nil
+}
+
+func (r *AgentRepo) ListByName(ctx context.Context, name string) ([]models.Agent, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+agentColumns+` FROM agents WHERE LOWER(name) = LOWER(?) AND COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY created_at ASC`, name)
 	if err != nil {
-		return nil, fmt.Errorf("getting agent by name: %w", err)
+		return nil, fmt.Errorf("listing agents by name: %w", err)
 	}
-	return a, nil
+	defer rows.Close()
+
+	var agents []models.Agent
+	for rows.Next() {
+		a, err := scanAgent(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning agent: %w", err)
+		}
+		agents = append(agents, *a)
+	}
+	return agents, rows.Err()
 }
 
 // GetByKey returns an agent by its durable lifecycle key, ignoring archived
@@ -228,7 +256,7 @@ func (r *AgentRepo) MarkArchived(ctx context.Context, id, absorbedInto, reason s
 
 func (r *AgentRepo) GetBySystemKind(ctx context.Context, systemKind string) (*models.Agent, error) {
 	a, err := scanAgent(r.db.QueryRowContext(ctx,
-		`SELECT `+agentColumns+` FROM agents WHERE system_kind = ? ORDER BY created_at ASC LIMIT 1`, systemKind))
+		`SELECT `+agentColumns+` FROM agents WHERE system_kind = ? AND COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY created_at ASC LIMIT 1`, systemKind))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -236,6 +264,25 @@ func (r *AgentRepo) GetBySystemKind(ctx context.Context, systemKind string) (*mo
 		return nil, fmt.Errorf("getting agent by system kind: %w", err)
 	}
 	return a, nil
+}
+
+func (r *AgentRepo) ListBySystemKind(ctx context.Context, systemKind string) ([]models.Agent, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+agentColumns+` FROM agents WHERE system_kind = ? AND COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY created_at ASC`, systemKind)
+	if err != nil {
+		return nil, fmt.Errorf("listing agents by system kind: %w", err)
+	}
+	defer rows.Close()
+
+	var agents []models.Agent
+	for rows.Next() {
+		a, err := scanAgent(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning agent: %w", err)
+		}
+		agents = append(agents, *a)
+	}
+	return agents, rows.Err()
 }
 
 func (r *AgentRepo) Create(ctx context.Context, a *models.Agent) error {

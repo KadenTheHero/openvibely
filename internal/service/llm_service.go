@@ -38,10 +38,6 @@ type LLMCaller interface {
 	CallModel(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (output, textOnly string, tokens int, err error)
 }
 
-type memoryTaskRunner interface {
-	RecallContext(ctx context.Context, projectID string, query MemoryRecallQuery) string
-}
-
 type LLMService struct {
 	llmConfigRepo         *repository.LLMConfigRepo
 	execRepo              *repository.ExecutionRepo
@@ -57,7 +53,6 @@ type LLMService struct {
 	worktreeSvc           *WorktreeService
 	telegramSvc           *TelegramService
 	slackSvc              *SlackService
-	memoryTaskRunner      memoryTaskRunner
 	llmCaller             LLMCaller
 	providerAdapters      map[models.LLMProvider]ProviderAdapter
 	routing               *agentRoutingStrategy
@@ -124,13 +119,6 @@ func (s *LLMService) SetSlackService(ss *SlackService) {
 // SetFileChangeBroadcaster sets the file change broadcaster for real-time file change updates.
 func (s *LLMService) SetFileChangeBroadcaster(fcb *events.FileChangeBroadcaster) {
 	s.fileChangeBroadcaster = fcb
-}
-
-// SetMemoryTaskRunner wires project memory recall into task execution. Scheduled
-// memory consolidation still runs as a normal scheduled task; agent definitions
-// decide their own scoped-file tools and runtime worktree behavior.
-func (s *LLMService) SetMemoryTaskRunner(runner memoryTaskRunner) {
-	s.memoryTaskRunner = runner
 }
 
 // SetAgentRepo sets the agent repository for resolving agent definitions on tasks.
@@ -436,21 +424,6 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if projectInstructions != "" {
 		log.Printf("[agent-svc] ExecuteTaskWithAgent loaded project instructions (%d bytes) from %s", len(projectInstructions), workDir)
 	}
-	if runtimeTools == nil && s.memoryTaskRunner != nil && task.ProjectID != "" {
-		mem := s.memoryTaskRunner.RecallContext(ctx, task.ProjectID, MemoryRecallQuery{
-			Surface: "task",
-			Title:   task.Title,
-			Prompt:  task.Prompt,
-		})
-		if mem != "" {
-			if projectInstructions == "" {
-				projectInstructions = mem
-			} else {
-				projectInstructions = mem + "\n" + projectInstructions
-			}
-		}
-	}
-
 	// Start background diff snapshot broadcaster (if file change broadcaster is configured)
 	var stopDiffBroadcast chan struct{}
 	if s.fileChangeBroadcaster != nil && workDir != "" {
@@ -795,8 +768,8 @@ func (s *LLMService) CallAgentDirect(ctx context.Context, message string, attach
 
 // CallAgentDirectWithDefinition calls an agent directly while applying a persisted
 // agent definition's prompt, runtime tools, and scoped-file grants. Lifecycle
-// learning hooks use this to run Skill Curator as a forked reviewer with the
-// same skill/agent tools it gets during normal task execution.
+// hooks use this to run protected system agents such as Skill Curator and Memory
+// Curator with the same scoped tools they receive during normal task execution.
 func (s *LLMService) CallAgentDirectWithDefinition(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent) (string, int, error) {
 	return s.callAgentDirectWithDefinition(ctx, message, attachments, agent, workDir, agentDef, false)
 }

@@ -14,7 +14,7 @@ Before coding, read the repo instruction files that still carry static operating
 2. @PRACTICES.md — **Project practices**: high-level development workflow and coding conventions for this repository.
 
 Managed memory now owns durable project context:
-- OpenVibely managed memory = repo-local per-project files under the selected project's `.openvibely/memory/` directory. A local `repo_path` is required; there is no app-owned memory fallback.
+- OpenVibely managed memory = repo-local per-project files under the selected project's `.openvibely/memories/` directory. A local `repo_path` is required; there is no app-owned memory fallback.
 - Durable architecture decisions, user preferences, implementation feedback, repeated pitfalls, and task/chat lessons should be extracted from DB task/chat history by auto-memory and written only through `MemoryService`/`internal/memory`.
 
 Repository-root markdown should be static instruction only:
@@ -80,10 +80,10 @@ go test ./internal/... -count=1 -timeout 60s  # Tests
 ## Memory Maintenance
 
 Use these rules:
-- Durable interaction memory: let OpenVibely auto-memory extract from DB task/chat history and write to the selected project's repo-local `.openvibely/memory/` directory via `MemoryService`.
+- Durable interaction memory: let OpenVibely auto-memory extract from DB task/chat history and write to the selected project's repo-local `.openvibely/memories/` directory via `MemoryService`.
 - Repo instruction changes: update `AGENTS.md`, `guardrails.md`, or `PRACTICES.md` only when static operating guidance itself changes.
 - `AGENTS.md`: concise entry-point rules every coding agent must see.
 - `guardrails.md`: pitfalls that should prevent repeated bugs.
 - `PRACTICES.md`: reusable, high-level development practices only.
-- Managed memory tools are scoped to the selected project's repo-local `.openvibely/memory/` directory; do not write memory elsewhere.
+- Managed memory tools are scoped to the selected project's repo-local `.openvibely/memories/` directory; do not write memory elsewhere.
 - Condense static guidance periodically and remove stale entries rather than leaving misleading instructions.

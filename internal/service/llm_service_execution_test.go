@@ -16,14 +16,6 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
-type fakeMemoryTaskRunner struct {
-	memoryContext string
-}
-
-func (f *fakeMemoryTaskRunner) RecallContext(ctx context.Context, projectID string, query MemoryRecallQuery) string {
-	return f.memoryContext
-}
-
 type captureProviderAdapter struct {
 	lastReq llmcontracts.AgentRequest
 }
@@ -704,20 +696,18 @@ func TestLLMService_ExecuteTask_MemoryConsolidationUsesNormalExecutionPath(t *te
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
 	agentRepo := repository.NewAgentRepo(db)
 	svc.SetAgentRepo(agentRepo)
-	memoryRunner := &fakeMemoryTaskRunner{}
-	svc.SetMemoryTaskRunner(memoryRunner)
 	mock := &testutil.MockLLMCaller{Response: "memory task response", TextOnly: "memory task response", Tokens: 10}
 	svc.SetLLMCaller(mock)
 
 	repoPath := t.TempDir()
 	agentDef := &models.Agent{
-		Name:         "Memory Consolidator",
-		SystemKind:   models.AgentSystemKindMemoryConsolidator,
+		Name:         "System: Memory Curator",
+		SystemKind:   models.AgentSystemKindMemoryCurator,
 		SystemPrompt: "Consolidate memory",
 		Model:        "inherit",
 		Tools:        []string{models.AgentToolScopedFiles},
 		ToolConfig: models.AgentToolConfig{
-			ScopedFiles:            []models.ScopedFilesConfig{{Directory: ".openvibely/memory", Permissions: []string{"read", "write", "delete"}}},
+			ScopedFiles:            []models.ScopedFilesConfig{{Directory: ".openvibely/memories", Permissions: []string{"read", "write", "delete"}}},
 			SkipDefaultTools:       true,
 			DisableRuntimeWorktree: true,
 		},
@@ -762,7 +752,7 @@ func TestLLMService_ExecuteTask_MemoryConsolidationUsesNormalExecutionPath(t *te
 	if last.Prompt != task.Prompt {
 		t.Fatalf("expected scheduled task prompt, got %q", last.Prompt)
 	}
-	wantWorkDir := filepath.Join(repoPath, ".openvibely", "memory")
+	wantWorkDir := filepath.Join(repoPath, ".openvibely", "memories")
 	if last.WorkDir != wantWorkDir {
 		t.Fatalf("expected scoped memory workdir %q, got %q", wantWorkDir, last.WorkDir)
 	}
@@ -800,13 +790,13 @@ func TestLLMService_ExecuteTask_MemoryConsolidationSkipsRuntimeWorktree(t *testi
 
 	agentRepo := repository.NewAgentRepo(db)
 	agentDef := &models.Agent{
-		Name:         "Memory Consolidator",
-		SystemKind:   models.AgentSystemKindMemoryConsolidator,
+		Name:         "System: Memory Curator",
+		SystemKind:   models.AgentSystemKindMemoryCurator,
 		SystemPrompt: "Consolidate memory",
 		Model:        "inherit",
 		Tools:        []string{models.AgentToolScopedFiles},
 		ToolConfig: models.AgentToolConfig{
-			ScopedFiles:            []models.ScopedFilesConfig{{Directory: ".openvibely/memory", Permissions: []string{"read", "write", "delete"}}},
+			ScopedFiles:            []models.ScopedFilesConfig{{Directory: ".openvibely/memories", Permissions: []string{"read", "write", "delete"}}},
 			SkipDefaultTools:       true,
 			DisableRuntimeWorktree: true,
 		},
@@ -818,7 +808,6 @@ func TestLLMService_ExecuteTask_MemoryConsolidationSkipsRuntimeWorktree(t *testi
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.SetAgentRepo(agentRepo)
 	svc.SetWorktreeService(NewWorktreeService(taskRepo, projectRepo, settingsRepo))
-	svc.SetMemoryTaskRunner(&fakeMemoryTaskRunner{})
 	mock := &testutil.MockLLMCaller{Response: "memory task response", TextOnly: "memory task response", Tokens: 10}
 	svc.SetLLMCaller(mock)
 
@@ -843,16 +832,16 @@ func TestLLMService_ExecuteTask_MemoryConsolidationSkipsRuntimeWorktree(t *testi
 	if exec == nil {
 		t.Fatal("expected execution")
 	}
-	wantWorkDir := filepath.Join(repoPath, ".openvibely", "memory")
+	wantWorkDir := filepath.Join(repoPath, ".openvibely", "memories")
 	if got := mock.LastCall().WorkDir; got != wantWorkDir {
-		t.Fatalf("expected memory consolidator to write directly to repo memory dir %q, got %q", wantWorkDir, got)
+		t.Fatalf("expected Memory Curator to write directly to repo memory dir %q, got %q", wantWorkDir, got)
 	}
 	updated, err := taskRepo.GetByID(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
 	if updated.WorktreePath != "" || updated.WorktreeBranch != "" {
-		t.Fatalf("memory consolidator should not create runtime worktree, got path=%q branch=%q", updated.WorktreePath, updated.WorktreeBranch)
+		t.Fatalf("Memory Curator should not create runtime worktree, got path=%q branch=%q", updated.WorktreePath, updated.WorktreeBranch)
 	}
 }
 
@@ -891,7 +880,6 @@ func TestLLMService_ExecuteTask_ScopedFilesAgentUsesRuntimeWorktreeByDefault(t *
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.SetAgentRepo(agentRepo)
 	svc.SetWorktreeService(NewWorktreeService(taskRepo, projectRepo, settingsRepo))
-	svc.SetMemoryTaskRunner(&fakeMemoryTaskRunner{})
 	caller := &runtimeToolWritingLLMCaller{}
 	svc.SetLLMCaller(caller)
 
@@ -931,53 +919,6 @@ func TestLLMService_ExecuteTask_ScopedFilesAgentUsesRuntimeWorktreeByDefault(t *
 	}
 	if _, err := os.Stat(filepath.Join(repoPath, "docs", "scoped.txt")); !os.IsNotExist(err) {
 		t.Fatalf("expected project repo docs to remain untouched, stat err=%v", err)
-	}
-}
-
-func TestLLMService_ExecuteTask_IncludesProjectMemoryContext(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	ctx := context.Background()
-
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
-	memoryRunner := &fakeMemoryTaskRunner{memoryContext: "Recalled from your persistent memory system:\n\n- Provider guidance applies here.\n\nSources: provider_architecture.md"}
-	svc.SetMemoryTaskRunner(memoryRunner)
-
-	agent, _ := llmConfigRepo.GetDefault(ctx)
-	agent.Provider = models.ProviderTest
-
-	task := &models.Task{
-		ProjectID: "default",
-		Title:     "Provider task",
-		Category:  models.CategoryActive,
-		Status:    models.StatusPending,
-		Prompt:    "Use provider architecture guidance.",
-	}
-	if err := taskRepo.Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	capture := &captureProviderAdapter{}
-	svc.providerAdapters[models.ProviderTest] = capture
-
-	_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
-	if err != nil {
-		t.Fatalf("ExecuteTaskWithAgent: %v", err)
-	}
-
-	last := capture.lastReq
-	if !strings.Contains(last.ProjectInstructions, "Recalled from your persistent memory system:") {
-		t.Fatalf("expected project memory in project instructions, got %q", last.ProjectInstructions)
-	}
-	if !strings.Contains(last.ProjectInstructions, "Sources: provider_architecture.md") {
-		t.Fatalf("expected memory sources in project instructions, got %q", last.ProjectInstructions)
-	}
-	if last.Message != task.Prompt {
-		t.Fatalf("expected task prompt unchanged, got %q", last.Message)
 	}
 }
 

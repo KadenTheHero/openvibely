@@ -495,17 +495,24 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	worktreeSvc.SetGitHubService(githubSvc)
 	schedulerSvc.SetWorktreeService(worktreeSvc)
 
-	// Auto-memory subsystem (Claude-style per-project memory). Each project
-	// stores memory under its configured local repo path at .openvibely/memory.
+	// Lifecycle runner: dispatches route_task/before_run/after_complete hook
+	// slots around normal task execution. Scheduled agent maintenance uses the
+	// existing task scheduler, not a second lifecycle scheduler.
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	mutationRepo := repository.NewAgentMutationRepo(db)
+
+	// Auto-memory subsystem. Each project stores managed memory under its configured
+	// local repo path; Memory Curator lifecycle hooks select and update task-turn
+	// memory, while this service owns storage setup and scheduled consolidation tasks.
 	memoryResolver, mrErr := memory.NewPathResolver("", "")
 	if mrErr != nil {
 		log.Printf("[memory] path resolver init failed (memory subsystem disabled): %v", mrErr)
 	}
 	var memorySvc *service.MemoryService
 	if memoryResolver != nil {
-		memoryRepo := repository.NewMemoryRepo(db)
 		memoryStore := memory.NewFileStore(memoryResolver)
-		memorySvc = service.NewMemoryService(memoryRepo, taskRepo, scheduleRepo, agentRepo, llmConfigRepo, projectRepo, execRepo, llmSvc, memoryStore, memoryResolver)
+		memorySvc = service.NewMemoryService(taskRepo, scheduleRepo, agentRepo, projectRepo, memoryStore, memoryResolver)
+		memorySvc.SetLifecycleRepo(lifecycleRepo)
 		// Seed per-project memory state for any existing projects.
 		if existing, lerr := projectRepo.List(context.Background()); lerr == nil {
 			for _, p := range existing {
@@ -514,43 +521,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 				}
 			}
 		}
-		llmSvc.SetMemoryTaskRunner(memorySvc)
-
-		// After every task completion, kick off an extraction pass. The
-		// hook runs in a detached goroutine inside the worker; here we just
-		// build the bounded Interaction from the in-memory task struct.
-		// The memory service performs model-backed, tool-driven extraction
-		// when a project/default model is configured.
-		workerSvc.SetOnTaskComplete(func(t models.Task, runErr error) {
-			if t.AgentDefinitionID != nil {
-				if ad, adErr := agentRepo.GetByID(context.Background(), *t.AgentDefinitionID); adErr == nil && ad != nil && ad.SystemKind == models.AgentSystemKindMemoryConsolidator {
-					return
-				}
-			}
-			// Internal Chat-category tasks (created by /chat and
-			// /api/chat/message) carry transient orchestration and
-			// mode-control text and must never feed durable memory.
-			if t.Category == models.CategoryChat {
-				return
-			}
-			cancelled := runErr != nil && strings.Contains(strings.ToLower(runErr.Error()), "cancel")
-			memorySvc.EnqueueExtraction(memory.Interaction{
-				ProjectID:  t.ProjectID,
-				SourceKind: memory.SourceTask,
-				SourceID:   t.ID,
-				Title:      t.Title,
-				UserText:   t.Prompt,
-				Cancelled:  cancelled,
-			})
-		})
 		log.Printf("[memory] repo-local memory enabled")
 	}
-
-	// Lifecycle runner: dispatches route_task/before_run/after_complete hook
-	// slots around normal task execution. Scheduled agent maintenance uses the
-	// existing task scheduler, not a second lifecycle scheduler.
-	lifecycleRepo := repository.NewLifecycleRepo(db)
-	mutationRepo := repository.NewAgentMutationRepo(db)
 	globalSkillRoot := cfg.AppDataDir
 	if err := builtinskills.SyncTo(globalSkillRoot); err != nil {
 		log.Printf("warning: failed to sync built-in lifecycle skills: %v", err)

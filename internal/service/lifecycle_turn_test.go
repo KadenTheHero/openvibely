@@ -86,6 +86,11 @@ func contextBlockPayload(title string) json.RawMessage {
 	return json.RawMessage(fmt.Sprintf(`{"title":%q,"content":"test context"}`, title))
 }
 
+func memoryContextBlockPayload(content string, sources ...string) json.RawMessage {
+	b, _ := json.Marshal(lifecycle.ContextBlock{Content: content, Sources: sources, Confidence: 0.9})
+	return b
+}
+
 func routeTestRunner(outputs map[string]json.RawMessage) *lifecycle.Runner {
 	store := &routeHookStore{hooks: []models.AgentLifecycleHook{
 		{ID: "a-low", When: models.LifecycleRouteTask, SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills, Blocking: true, Enabled: true},
@@ -488,20 +493,107 @@ func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesRouterSelectedAge
 	}
 }
 
+func TestPrepareLifecycleTurn_MemoryCuratorBeforeRunInjectsRelevantMemory(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	agent := &models.Agent{
+		ID:                  "memory-agent",
+		Key:                 "memory_curator",
+		Name:                "System: Memory Curator",
+		SystemKind:          models.AgentSystemKindMemoryCurator,
+		SelectableAsPrimary: false,
+		Tools:               []string{models.AgentToolScopedFiles},
+	}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create memory curator: %v", err)
+	}
+
+	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{ID: "memory-recall", AgentID: agent.ID, When: models.LifecycleBeforeRun, SkillKey: "recall_memory", OutputContract: models.OutputContractContextBlock, Blocking: true, Enabled: true}}}
+	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(_ context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
+		if hook.SkillKey != "recall_memory" || in.ProjectID != "project-1" {
+			t.Fatalf("unexpected memory hook input hook=%#v input=%#v", hook, in)
+		}
+		return memoryContextBlockPayload("Remember to preserve repo-local managed memory.", "MEMORIES.md", "managed_memory.md"), nil
+	}), nil)
+
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleRunner(runner)
+	worker.SetLifecycleAgentRepo(agentRepo)
+	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-memory", ProjectID: "project-1", Title: "Need memory", Prompt: "Use relevant context"})
+	instructions := additionalProjectInstructionsFromContext(turn.Ctx)
+	if !strings.Contains(instructions, "Remember to preserve repo-local managed memory.") || !strings.Contains(instructions, "[recall_memory]") {
+		t.Fatalf("expected Memory Curator before_run context in task prompt, got:\n%s", instructions)
+	}
+}
+
+func TestPrepareLifecycleTurn_MemoryConsolidationTaskRoutesConsolidateMemorySkill(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeLifecycleTestSkill(t, root, "memory_curator", "recall_memory", "recall body")
+	writeLifecycleTestSkill(t, root, "memory_curator", "update_memory", "update body")
+	writeLifecycleTestSkill(t, root, "memory_curator", "consolidate_memory", "consolidate body")
+
+	db := testutil.NewTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	agent := &models.Agent{
+		ID:                  "memory-agent",
+		Key:                 "memory_curator",
+		Name:                "System: Memory Curator",
+		SystemKind:          models.AgentSystemKindMemoryCurator,
+		SelectableAsPrimary: false,
+		Tools:               []string{models.AgentToolScopedFiles},
+	}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create memory curator: %v", err)
+	}
+
+	var routeCalled bool
+	var available any
+	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{ID: "route", When: models.LifecycleRouteTask, SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills, Blocking: true, Enabled: true}}}
+	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
+		routeCalled = true
+		available = in.Extras["available_skills"]
+		return routePayload([]string{"consolidate_memory"}, 0.95), nil
+	}), nil)
+
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleRunner(runner)
+	worker.SetLifecycleSkillRoot(root)
+	worker.SetLifecycleAgentRepo(agentRepo)
+	worker.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "memory-task", Title: "System: Memory Consolidation", Category: models.CategoryScheduled, AgentDefinitionID: &agent.ID})
+	if !routeCalled {
+		t.Fatal("assigned system tasks should run skill routing")
+	}
+	if availableText, _ := available.(string); !strings.Contains(availableText, "memory_curator/consolidate_memory") || strings.Contains(availableText, "other_skill") {
+		t.Fatalf("route_task should receive Memory Curator skill index, got:\n%s", availableText)
+	}
+	instructions := additionalProjectInstructionsFromContext(turn.Ctx)
+	if !strings.Contains(instructions, "consolidate_memory") || strings.Contains(instructions, "recall_memory") || strings.Contains(instructions, "update_memory") {
+		t.Fatalf("scheduled Memory Curator task should include only router-selected consolidate_memory skill, got:\n%s", instructions)
+	}
+	rt := llmcontracts.RuntimeToolsFromContext(turn.Ctx)
+	out, handled, isErr, err := rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"consolidate_memory"}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "consolidate body") {
+		t.Fatalf("selected consolidate_memory skill_view failed handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+}
+
 func TestPrepareLifecycleTurn_AssignedAgentWithNoSkillsRoutesEmptyIndex(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 	agentRepo := repository.NewAgentRepo(db)
 	agent := &models.Agent{
 		ID:                  "memory-agent",
-		Key:                 "memory_consolidator",
-		Name:                "Memory Consolidator",
-		SystemKind:          models.AgentSystemKindMemoryConsolidator,
+		Key:                 "memory_curator",
+		Name:                "System: Memory Curator",
+		SystemKind:          models.AgentSystemKindMemoryCurator,
 		SelectableAsPrimary: false,
 		Tools:               []string{models.AgentToolScopedFiles},
 	}
 	if err := agentRepo.Create(ctx, agent); err != nil {
-		t.Fatalf("create memory consolidator: %v", err)
+		t.Fatalf("create memory curator: %v", err)
 	}
 
 	var routeCalled bool

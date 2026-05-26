@@ -433,11 +433,11 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 
 ## Auto-Memory Pitfall Prevention
 
-- Memory storage MUST live under the selected project's repo-local `.openvibely/memory/` directory. Do not reintroduce app-owned `memory/projects/<project_id>/` fallback storage or `OPENVIBELY_MEMORY_ROOT`.
-- Always validate memory file paths via `PathResolver.ResolveSafe(projectID, rel)`. It rejects absolute paths, parent traversal, and symlink escapes. Never trust raw paths from extraction prompts/tools.
-- Always run user/extraction text through `memory.Redact` before persisting. `FileStore.WriteFile` does this automatically; do not bypass it.
-- Always use `FileStore.WithProjectLock(projectID, fn)` for multi-step memory writes (extraction, consolidation, index rewrite). Concurrent extractions otherwise race on `MEMORY.md`.
-- The Schedule page's "Memory Consolidation" entry uses a real system-created task assigned to the built-in Memory Consolidator agent plus a normal row in `schedules`. Do not reintroduce a separate memory schedule card/table or hidden scheduler interception path.
+- Memory storage MUST live under the selected project's repo-local `.openvibely/memories/` directory. Existing `.openvibely/memory/` directories are runtime-migrated by `MemoryService.EnsureProject`; do not manually move checked-in memory files or reintroduce app-owned `memory/projects/<project_id>/` fallback storage or `OPENVIBELY_MEMORY_ROOT`.
+- Always validate memory/scoped file paths through the sandbox path resolver before reading or writing. It rejects absolute paths, parent traversal, and symlink escapes. Never trust raw paths from prompts/tools.
+- Always run user/tool-provided text through `memory.Redact` before persisting through scoped-file runtime helpers; do not bypass redaction for memory writes.
+- Memory Curator writes happen through scoped-file tools and task lifecycle hooks. Do not reintroduce hardcoded Go-side extraction/consolidation writers or a service-owned task-time memory prompt.
+- The Schedule page's "Memory Consolidation" entry uses a real system-created task assigned to the built-in `System: Memory Curator` agent (which owns the `consolidate_memory` skill) plus a normal row in `schedules`. Do not reintroduce a separate memory schedule card/table or hidden scheduler interception path.
 - When changing `pages.Schedule` or `pages.ScheduleContent` template signatures, update all three callers: `internal/handler/project_handler.go ViewSchedule`, `internal/handler/task_handler.go` (HTMX-mode schedule fragment), and any test fixtures that render the page directly.
 - Avoid unwanted legacy terminology in memory product UI, routes, DB names, or code identifiers. Use `Memory Consolidation` / `memory_consolidation` instead.
 - Don't add JSONL transcript storage for memory — OpenVibely's existing DB executions/tasks tables are the transcript source.
