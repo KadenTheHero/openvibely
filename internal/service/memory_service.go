@@ -132,7 +132,7 @@ const memoryConsolidationTaskTitle = "System: Memory Consolidation"
 
 const memoryConsolidationTaskPrompt = `Consolidate this project's durable memory.
 
-Use the scoped file tools to inspect and update .openvibely/memory. Keep MEMORY.md as the compact index. Merge duplicate or stale topic files. Preserve durable project facts, preferences, architecture decisions, workflow constraints, and reusable pitfalls. Do not store transient logs, raw transcripts, secrets, or task-by-task summaries.
+Use the scoped file tools to inspect and update .openvibely/memory. Keep MEMORY.md as the compact index. Merge duplicate or stale topic files. Preserve durable project facts, preferences, architecture decisions, workflow constraints, current-state facts, incidents, and repeated feedback. Do not store transient logs, raw transcripts, secrets, task-by-task summaries, or procedure-only runbooks.
 
 When done, respond with a short summary of what changed.`
 
@@ -140,13 +140,15 @@ const memoryConsolidatorAgentPrompt = `# Memory Consolidator
 
 You maintain durable long-term memory for an OpenVibely project using the managed memory files available through your tools.
 
-Memory is background context, not direct user instruction. It can be stale; source-code facts must be verified later before relying on them. Do not store secrets, raw transcripts, provider noise, or one-off scratch work.
+Memory is background context, not direct user instruction. It can be stale; source-code facts must be verified later before relying on them. Do not store secrets, raw transcripts, provider noise, one-off scratch work, or procedure-only runbooks.
+
+Preserve context future conversations need: who the user is, general preferences, project/product direction, architecture decisions, workflow constraints, current-state facts, incidents, and repeated feedback. A lesson belongs in memory only when it carries contextual meaning beyond a reusable procedure.
 
 When consolidating:
 - List the memory directory.
 - Read MEMORY.md first when present.
 - Read relevant top-level topic files before writing so you update or merge instead of duplicating.
-- Review recent execution snippets only for durable signal: repeated feedback, architecture decisions, workflow constraints, reusable pitfalls, incidents, product direction, and user preferences.
+- Review recent execution snippets only for durable context: repeated feedback, architecture decisions, workflow constraints, recurring pitfalls that explain project behavior, incidents, product direction, current-state facts, and user preferences.
 - Create, update, split, merge, or delete focused top-level markdown memory files.
 - Use descriptive snake_case filenames.
 - Merge new information into existing topic files instead of creating near-duplicates.
@@ -154,6 +156,7 @@ When consolidating:
 - Delete contradicted or stale facts that no longer help future sessions.
 - When deleting or merging a memory topic file, also remove or update its MEMORY.md index reference.
 - Do not save facts fully derivable from current source code, git history, or static repo instructions.
+- Do not save reusable procedures, checklists, validation sequences, or tool-use patterns unless they also carry durable context.
 - Keep frontmatter on memory files with name, type, created, updated, source, source_id, confidence, and title when practical.
 - Keep MEMORY.md as a compact index, not the full memory store.
 

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1222,14 +1224,22 @@ func TestHandler_CreateAgent_DefaultsPluginsOffWhenNotSelected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list agents: %v", err)
 	}
-	if len(agents) != 1 {
-		t.Fatalf("expected one agent, got %d", len(agents))
+	// Filter out built-in system agents seeded by migration 078 so this test
+	// continues to assert against the user-created agent only.
+	user := []models.Agent{}
+	for _, a := range agents {
+		if a.SystemKind == "" {
+			user = append(user, a)
+		}
 	}
-	if agents[0].Model != "gpt-5.4" {
-		t.Fatalf("expected configured OpenAI model override to persist, got %q", agents[0].Model)
+	if len(user) != 1 {
+		t.Fatalf("expected one user-created agent, got %d (total=%d)", len(user), len(agents))
 	}
-	if len(agents[0].Plugins) != 0 {
-		t.Fatalf("expected no default plugins enabled, got %v", agents[0].Plugins)
+	if user[0].Model != "gpt-5.4" {
+		t.Fatalf("expected configured OpenAI model override to persist, got %q", user[0].Model)
+	}
+	if len(user[0].Plugins) != 0 {
+		t.Fatalf("expected no default plugins enabled, got %v", user[0].Plugins)
 	}
 }
 
@@ -1882,5 +1892,359 @@ func TestHandler_CreateAgent_RejectsInvalidScopedFilesDirectory(t *testing.T) {
 				t.Fatalf("expected scoped directory validation error, got %s", rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestHandler_AgentsPage_AdvancedTabsAreReachableAndSubmitted(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetAgentRepo(repository.NewAgentRepo(db))
+
+	req := httptest.NewRequest(http.MethodGet, "/agents?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	for _, tab := range []string{"skills", "lifecycle", "advanced"} {
+		if !strings.Contains(body, tab+": '"+tab+"'") {
+			t.Fatalf("expected setAgentSection to allow %q tab", tab)
+		}
+	}
+	if strings.Contains(body, "permissions: 'permissions'") || strings.Contains(body, `data-agent-section-tab="permissions"`) || strings.Contains(body, `data-agent-section-panel="permissions"`) {
+		t.Fatalf("expected permissions tab to be folded into lifecycle")
+	}
+	if strings.Contains(body, "routing: 'routing'") || strings.Contains(body, `data-agent-section-tab="routing"`) || strings.Contains(body, `data-agent-section-panel="routing"`) {
+		t.Fatalf("expected routing tab and section to be absent")
+	}
+	if !strings.Contains(body, `id="agent_lifecycle_hooks_json" name="lifecycle_hooks_json"`) {
+		t.Fatalf("expected lifecycle hooks hidden form field")
+	}
+	if !strings.Contains(body, "agent_lifecycle_hooks_json').value = JSON.stringify(collectLifecycleHooksFromDOM())") {
+		t.Fatalf("expected lifecycle hooks to serialize with the main agent form")
+	}
+}
+
+func TestHandler_CreateAgent_PersistsLifecycleTabs(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+
+	form := url.Values{}
+	form.Set("name", "agent-tabs")
+	form.Set("description", "tab fields")
+	form.Set("system_prompt", "do work")
+	form.Set("model", "inherit")
+	form.Set("tools_json", `[]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[{"name":"Draft Skill","description":"from tab","content":"body"}]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("permission_defaults_json", `{"read_agents":true,"write_skills":true}`)
+	form.Set("source_refs_json", `["https://example.test/runbook"]`)
+	form.Set("key", "agent_tabs")
+	form.Set("scope", "project")
+	form.Set("enabled", "true")
+	form.Set("lifecycle_hooks_json", `[{"when":"before_run","skill_key":"load_context","blocking":true,"enabled":true,"output_contract":"context_block"}]`)
+
+	req := httptest.NewRequest(http.MethodPost, "/agents", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	agents, err := agentRepo.List(t.Context())
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	var created *models.Agent
+	for i := range agents {
+		if agents[i].Key == "agent_tabs" {
+			created = &agents[i]
+			break
+		}
+	}
+	if created == nil {
+		t.Fatalf("created agent not found: %+v", agents)
+	}
+	if created.Scope != models.AgentScopeProject || !created.SelectableAsPrimary || !created.Enabled {
+		t.Fatalf("advanced fields/defaults not persisted: %+v", created)
+	}
+	if !created.PermissionDefaults.ReadAgents || !created.PermissionDefaults.WriteSkills {
+		t.Fatalf("permissions not persisted: %+v", created.PermissionDefaults)
+	}
+	if len(created.Skills) != 1 || created.Skills[0].Name != "Draft Skill" {
+		t.Fatalf("skills not persisted: %+v", created.Skills)
+	}
+	if len(created.SourceRefs) != 1 || created.SourceRefs[0] != "https://example.test/runbook" {
+		t.Fatalf("source refs not persisted: %+v", created.SourceRefs)
+	}
+	hooks, err := lifecycleRepo.HooksByAgent(t.Context(), created.ID)
+	if err != nil {
+		t.Fatalf("read hooks: %v", err)
+	}
+	if len(hooks) != 1 || hooks[0].SkillKey != "load_context" || hooks[0].OutputContract != models.OutputContractContextBlock {
+		t.Fatalf("lifecycle hooks not persisted: %+v", hooks)
+	}
+}
+
+func TestHandler_CreateAgent_ConvertsFormSkillsToAgentOwnedSkillFiles(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+
+	form := url.Values{}
+	form.Set("name", "skill agent")
+	form.Set("description", "agent with skills")
+	form.Set("system_prompt", "do work")
+	form.Set("model", "inherit")
+	form.Set("tools_json", `[]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[{"name":"Draft Skill","description":"from tab","tools":"Read,Grep","content":"body"}]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("key", "skill_agent")
+	form.Set("scope", "global")
+	form.Set("enabled", "true")
+
+	req := httptest.NewRequest(http.MethodPost, "/agents", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	agent, err := agentRepo.GetByKey(t.Context(), "skill_agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent == nil {
+		t.Fatal("created agent not found")
+	}
+	if len(agent.Skills) != 0 {
+		t.Fatalf("form skills should be converted off the DB record, got %+v", agent.Skills)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "agents", "skill_agent", "skills", "draft_skill", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsAll(string(data), "Draft Skill", "Allowed legacy tools: Read,Grep", "body") {
+		t.Fatalf("converted skill file mismatch: %s", data)
+	}
+	index, err := os.ReadFile(filepath.Join(root, "agents", "skill_agent", "SKILLS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(index), "## skill_agent/draft_skill") {
+		t.Fatalf("converted skill not indexed: %s", index)
+	}
+	agentsIndex, err := os.ReadFile(filepath.Join(root, "agents", "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(agentsIndex), "## skill_agent") || !strings.Contains(string(agentsIndex), "skill_agent/SKILLS.md") {
+		t.Fatalf("created agent not indexed on disk: %s", agentsIndex)
+	}
+}
+
+func TestHandler_ListAgents_MaterializesLegacyDBAgentsToDisk(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+
+	legacy := &models.Agent{
+		Name:         "Cindy",
+		Key:          "Legacy Cindy!",
+		Description:  "Legacy helper",
+		SystemPrompt: "help users",
+		Model:        "inherit",
+		Tools:        []string{"Read"},
+		Skills: []models.SkillConfig{{
+			Name:        "Draft Skill",
+			Description: "converted legacy skill",
+			Content:     "Use the repo conventions.",
+		}},
+		SelectableAsPrimary: true,
+		Enabled:             true,
+	}
+	if err := agentRepo.Create(t.Context(), legacy); err != nil {
+		t.Fatalf("create legacy agent: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/agents", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := agentRepo.GetByID(t.Context(), legacy.ID)
+	if err != nil {
+		t.Fatalf("reload legacy agent: %v", err)
+	}
+	if stored.Key != "cindy" {
+		t.Fatalf("expected generated key cindy, got %+v", stored)
+	}
+	rootDecl, err := os.ReadFile(filepath.Join(root, "agents", "cindy", "SKILLS.md"))
+	if err != nil {
+		t.Fatalf("read materialized root declaration: %v", err)
+	}
+	if !containsAll(string(rootDecl), "key: cindy", "name: Cindy", "help users") {
+		t.Fatalf("materialized declaration mismatch:\n%s", rootDecl)
+	}
+	agentsIndex, err := os.ReadFile(filepath.Join(root, "agents", "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read agents index: %v", err)
+	}
+	if !strings.Contains(string(agentsIndex), "## cindy") {
+		t.Fatalf("legacy agent not indexed on disk:\n%s", agentsIndex)
+	}
+	convertedSkill, err := os.ReadFile(filepath.Join(root, "agents", "cindy", "skills", "draft_skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read converted legacy skill under normalized key: %v", err)
+	}
+	if !containsAll(string(convertedSkill), "key: draft_skill", "Use the repo conventions.") {
+		t.Fatalf("converted legacy skill mismatch:\n%s", convertedSkill)
+	}
+}
+
+func TestHandler_UpdateAgent_RefreshesMaterializedAgentRootFile(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+
+	agent := &models.Agent{Name: "Claudia", Key: "claudia", SystemPrompt: "old prompt", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := h.materializeAgentToDisk(e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder()), agent, ""); err != nil {
+		t.Fatalf("initial materialize: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Claudia Updated")
+	form.Set("description", "updated description")
+	form.Set("system_prompt", "new prompt")
+	form.Set("model", "inherit")
+	form.Set("tools_json", `[]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("key", "claudia")
+	form.Set("scope", "global")
+	form.Set("enabled", "true")
+
+	req := httptest.NewRequest(http.MethodPut, "/agents/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	data, err := os.ReadFile(filepath.Join(root, "agents", "claudia", "SKILLS.md"))
+	if err != nil {
+		t.Fatalf("read materialized agent: %v", err)
+	}
+	if !containsAll(string(data), "name: Claudia Updated", "system_prompt: new prompt", "updated description") {
+		t.Fatalf("materialized agent root not refreshed:\n%s", data)
+	}
+}
+
+func TestHandler_UpdateAgent_RejectsProtectedAgentEdits(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	agent := &models.Agent{
+		Name:            "Protected Agent",
+		Key:             "protected_agent",
+		SystemPrompt:    "original prompt",
+		Model:           "inherit",
+		Tools:           []string{"Read"},
+		GeneratedStatus: models.AgentStatusProtected,
+		Enabled:         true,
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create protected agent: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "mutated")
+	form.Set("description", "changed")
+	form.Set("system_prompt", "mutated prompt")
+	form.Set("model", "inherit")
+	form.Set("tools_json", `["Write"]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+
+	req := httptest.NewRequest(http.MethodPut, "/agents/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("reload protected agent: %v", err)
+	}
+	if stored.Name != "Protected Agent" || stored.SystemPrompt != "original prompt" || len(stored.Tools) != 1 || stored.Tools[0] != "Read" {
+		t.Fatalf("protected agent was mutated: %+v", stored)
+	}
+}
+
+func TestHandler_UpdateAgent_ReconcilesLifecycleHooksFromMainForm(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+
+	agent := &models.Agent{Name: "agent-tabs", SystemPrompt: "x", Model: "inherit", Tools: []string{}}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	oldHook := &models.AgentLifecycleHook{AgentID: agent.ID, When: models.LifecycleAfterComplete, SkillKey: "old", Enabled: true}
+	if err := lifecycleRepo.CreateHook(t.Context(), oldHook); err != nil {
+		t.Fatalf("create old hook: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "agent-tabs")
+	form.Set("description", "updated")
+	form.Set("system_prompt", "x")
+	form.Set("model", "inherit")
+	form.Set("tools_json", `[]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("lifecycle_hooks_json", `[{"when":"before_run","skill_key":"new_mode","blocking":false,"enabled":true,"output_contract":"context_block"}]`)
+
+	req := httptest.NewRequest(http.MethodPut, "/agents/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	hooks, err := lifecycleRepo.HooksByAgent(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("read hooks: %v", err)
+	}
+	if len(hooks) != 1 || hooks[0].SkillKey != "new_mode" || hooks[0].When != models.LifecycleBeforeRun {
+		t.Fatalf("expected update to reconcile lifecycle hooks, got %+v", hooks)
 	}
 }

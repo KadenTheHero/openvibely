@@ -144,8 +144,8 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Never re-inject `task.Prompt` on follow-ups — use `buildThreadSystemContext()`
 - Auto-reactivation: always set status=queued + category=active on follow-up (any previous state)
 - Task thread MUST use `ListByTaskChronological` (ASC), not `ListByTask` (DESC)
-- Task-thread follow-up calls must propagate the task's `agent_definition_id` into streaming requests (or resolve it by `taskID` in shared processing), or agent plugin/MCP tools will be missing on API paths
-- **Plugin scoping is by agent definition**: `resolveAgentRuntime(agentDef)` resolves only `agentDef.Plugins`. `nil` agent def → zero plugins (no skills, no MCP, no dirs). Empty `Plugins` list → no resolver call. Never inject globally installed plugins when no agent definition is assigned to a task
+- Task-thread follow-up calls must preserve or re-resolve the task's active mode/effective agent context (or resolve it by `taskID` in shared processing), or scoped runtime tools and MCP permissions will be missing on API paths
+- **Plugin/MCP scoping is by active mode/effective agent definition**: `resolveAgentRuntime(agentDef)` resolves only `agentDef.Plugins`. `nil` agent def → zero plugins/MCP/dirs. Empty `Plugins` list → no resolver call. Never inject globally installed plugins when no agent definition is assigned to a task. Do not use plugin runtime resolution as a reason to inject every visible skill body into the prompt
 - `is_followup` column (migration 034) and `diff_output` column (migration 035): ALL SELECT queries must include them
 - Thread follow-ups must not treat “stream returned nil error” as success by itself — parse `[STATUS: FAILED | ...]` / `[STATUS: NEEDS_FOLLOWUP | ...]` from text-only output before marking completion
 - Thread follow-ups must start realtime diff snapshot broadcasting when `workDir` is available (persist `executions.diff_output` during the run + publish `diff_snapshot` events). Do not rely only on final completion diff capture, or the Changes tab will stall for completed-task reactivations
@@ -154,6 +154,22 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - For thread/chat assistant bubbles rendered from `data-raw-content`, DOM-cleaning skips must verify both content signature and rendered DOM presence; on morph swaps after failures (including provider 429/rate-limit), `data-cleaned-*` flags can survive while inner DOM is blank, which makes prior history look wiped unless re-render is forced when rendered content is missing
 - Do not fail a task or follow-up solely because no git diff was produced. Some valid tasks are read-only (analysis, summaries, screenshot inspection, reporting) and complete successfully without repository writes
 - In task-thread HTMX lifecycle handlers, never classify all `/thread` requests as sends. Polling is `GET /tasks/:id/thread`; draft-clear logic must only run for real send submissions (`POST` + `/thread` and/or `#task-thread-form` trigger), otherwise drafts can be wiped during blur/focus reconnect cycles.
+
+## Agent / Task Mode And Skill Routing
+
+- Treat OpenVibely agents as reusable task modes: role, judgment frame, permissions/tool policy, communication defaults, model/settings defaults when applicable, skill visibility/ranking, and project-specific instructions. An agent is not just a tool bundle, not a skill collection, and not a separate subagent by default.
+- Route each task execution to an active mode/effective agent, then let the task execution dynamically load only the skills it needs. Selecting a mode does not launch a subagent and does not load every visible skill body.
+- Preferred flow: `route_task` chooses whether to continue the current mode or switch modes; the task system prompt contains the active mode instructions, compact task-visible skill index, and `skill_view` tool contract; the task calls `skill_view(skill_id)` only when full skill instructions are needed; the runner returns only that skill's full content.
+- Keep the active mode instructions and compact task-visible skill index in the task system prompt layer, not ordinary chat history. Task conversation remains continuous user messages, assistant outputs, tool results, task summaries, diffs, and prior decisions.
+- Full skill bodies must not be loaded by default. The compact skill index should contain only enough metadata for the task to decide relevance, for example `debug_go_tests: Diagnose and fix failing Go tests`.
+- Skills are reusable capabilities, not agent identity. Agents grant, filter, rank, or recommend skills for the current execution. Compute the task-visible skill index from the active mode/effective agent plus workspace/task permissions.
+- `skill_view` must be scoped to the active mode/effective agent and current task/workspace. It may only load skills visible and allowed for the current execution.
+- On every task follow-up, perform a lightweight continue-or-switch routing decision using the latest user message, task summary/context, and current active mode. If the follow-up continues the same kind of work, keep the current mode. If it changes the work, replace the active mode layer for the next execution.
+- When the active mode changes, replace the mode-specific system prompt layer and recompute scoped tools, MCP permissions, communication defaults, and the compact task-visible skill index. Do not accumulate old mode instructions or old mode skill indexes as active system instructions. Keep prior work as task history instead.
+- Global and local agents that represent the same role should resolve into one project-effective mode before routing. The router should see the effective mode, not competing global/local variants.
+- Effective-mode merge behavior: global prompt + local project-specific prompt additions + global skill grants/index metadata + local skill additions/overrides - locally disabled skills. If a local skill has the same key as a global skill, the local skill wins. If local disables a global skill, hide it from the task-visible skill index. Local permissions may narrow global permissions.
+- Agent/mode and skill metadata is runtime instruction context, separate from task history. Agent instructions and skill indexes should not depend on chat history surviving compaction. If a prior full `skill_view` result is compacted away, the task can call `skill_view` again because the compact skill index and loading contract remain in the active system prompt layer.
+- Subagents or child tasks are future delegation primitives for parallel work or isolated review flows. They are not required for task-scoped active-mode execution.
 
 ## Testing
 

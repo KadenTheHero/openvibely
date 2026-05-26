@@ -7,20 +7,26 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentplugins"
+	"github.com/openvibely/openvibely/internal/agentskills"
 	"github.com/openvibely/openvibely/internal/auth"
+	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/handler"
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -41,6 +47,233 @@ type Instance struct {
 	Shutdown func()
 }
 
+func migrateLegacyStorage(cfg *config.Config) error {
+	if cfg == nil || os.Getenv("OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION") != "" {
+		return nil
+	}
+	if os.Getenv("OPENVIBELY_APP_DATA_DIR") != "" {
+		return nil
+	}
+	if os.Getenv("DATABASE_PATH") == "" {
+		if err := migrateLegacyDatabaseFiles(cfg.DatabasePath); err != nil {
+			return err
+		}
+	}
+	if os.Getenv("PROJECT_REPO_ROOT") == "" {
+		if err := migrateLegacyRepoRoot(cfg.ProjectRepoRoot); err != nil {
+			return err
+		}
+	}
+	if err := migrateLegacyDirectory("uploads", filepath.Join(cfg.AppDataDir, "uploads")); err != nil {
+		return err
+	}
+	return nil
+}
+
+func migrateLegacyDatabaseFiles(databasePath string) error {
+	if strings.TrimSpace(databasePath) == "" {
+		return nil
+	}
+	targetAbs, err := filepath.Abs(databasePath)
+	if err != nil {
+		return fmt.Errorf("resolving database path: %w", err)
+	}
+	legacyAbs, err := firstExistingLegacyPath("openvibely.db", targetAbs)
+	if err != nil {
+		return err
+	}
+	if legacyAbs == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(targetAbs), 0o755); err != nil {
+		return fmt.Errorf("creating database directory %s: %w", filepath.Dir(targetAbs), err)
+	}
+	for _, suffix := range databaseFileSuffixes() {
+		if err := backupExistingPath(targetAbs + suffix); err != nil {
+			return err
+		}
+	}
+	for _, suffix := range databaseFileSuffixes() {
+		from := legacyAbs + suffix
+		to := targetAbs + suffix
+		if _, err := os.Stat(from); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return fmt.Errorf("checking legacy database file %s: %w", from, err)
+		}
+		if err := moveOrCopyPath(from, to); err != nil {
+			return fmt.Errorf("moving legacy database file %s to %s: %w", from, to, err)
+		}
+		log.Printf("[storage] moved legacy database file %s to %s", from, to)
+	}
+	return nil
+}
+
+func migrateLegacyRepoRoot(projectRepoRoot string) error {
+	return migrateLegacyDirectory("repos", projectRepoRoot)
+}
+
+func migrateLegacyDirectory(name, targetPath string) error {
+	if strings.TrimSpace(targetPath) == "" {
+		return nil
+	}
+	targetAbs, err := filepath.Abs(targetPath)
+	if err != nil {
+		return fmt.Errorf("resolving %s target: %w", name, err)
+	}
+	legacyAbs, err := firstExistingLegacyPath(name, targetAbs)
+	if err != nil {
+		return err
+	}
+	if legacyAbs == "" {
+		return nil
+	}
+	info, err := os.Stat(legacyAbs)
+	if err != nil {
+		return fmt.Errorf("checking legacy %s %s: %w", name, legacyAbs, err)
+	}
+	if !info.IsDir() {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(targetAbs), 0o755); err != nil {
+		return fmt.Errorf("creating %s parent %s: %w", name, filepath.Dir(targetAbs), err)
+	}
+	if err := backupExistingPath(targetAbs); err != nil {
+		return err
+	}
+	if err := moveOrCopyPath(legacyAbs, targetAbs); err != nil {
+		return fmt.Errorf("moving legacy %s %s to %s: %w", name, legacyAbs, targetAbs, err)
+	}
+	log.Printf("[storage] moved legacy %s %s to %s", name, legacyAbs, targetAbs)
+	return nil
+}
+
+func databaseFileSuffixes() []string {
+	return []string{"", "-wal", "-shm", "-journal"}
+}
+
+func firstExistingLegacyPath(name, targetAbs string) (string, error) {
+	seen := map[string]bool{}
+	for _, base := range legacyStorageSearchDirs() {
+		candidate, err := filepath.Abs(filepath.Join(base, name))
+		if err != nil {
+			return "", fmt.Errorf("resolving legacy path %s: %w", filepath.Join(base, name), err)
+		}
+		if candidate == targetAbs || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		} else if !os.IsNotExist(err) {
+			return "", fmt.Errorf("checking legacy path %s: %w", candidate, err)
+		}
+	}
+	return "", nil
+}
+
+func legacyStorageSearchDirs() []string {
+	dirs := []string{"."}
+	if exe, err := os.Executable(); err == nil && exe != "" {
+		dirs = append(dirs, filepath.Dir(exe), filepath.Dir(filepath.Dir(exe)))
+	}
+	return dirs
+}
+
+func backupExistingPath(path string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("checking target path %s: %w", path, err)
+	}
+	backup := path + ".pre-appdata-migration-backup"
+	for i := 1; ; i++ {
+		candidate := backup
+		if i > 1 {
+			candidate = fmt.Sprintf("%s.%d", backup, i)
+		}
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			if err := os.Rename(path, candidate); err != nil {
+				return fmt.Errorf("backing up existing target path %s to %s: %w", path, candidate, err)
+			}
+			log.Printf("[storage] backed up existing target path %s to %s", path, candidate)
+			return nil
+		} else if err != nil {
+			return fmt.Errorf("checking backup path %s: %w", candidate, err)
+		}
+	}
+}
+
+func moveOrCopyPath(from, to string) error {
+	if err := os.Rename(from, to); err == nil {
+		return nil
+	} else if !isCrossDeviceRename(err) {
+		return err
+	}
+	info, err := os.Stat(from)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		if err := copyDir(from, to); err != nil {
+			return err
+		}
+		return os.RemoveAll(from)
+	}
+	if err := copyFile(from, to, info.Mode()); err != nil {
+		return err
+	}
+	return os.Remove(from)
+}
+
+func isCrossDeviceRename(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "cross-device") || strings.Contains(strings.ToLower(err.Error()), "invalid cross-device link")
+}
+
+func copyFile(from, to string, mode os.FileMode) error {
+	in, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		_ = os.Remove(to)
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(to)
+		return closeErr
+	}
+	return nil
+}
+
+func copyDir(from, to string) error {
+	return filepath.WalkDir(from, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(from, path)
+		if err != nil {
+			return err
+		}
+		dest := filepath.Join(to, rel)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return os.MkdirAll(dest, info.Mode())
+		}
+		return copyFile(path, dest, info.Mode())
+	})
+}
+
 // Start wires the full OpenVibely backend and starts serving HTTP on cfg.Port.
 // It blocks until the HTTP listener is bound and background services are started,
 // then returns an Instance with the bound address and a shutdown handle.
@@ -48,6 +281,10 @@ type Instance struct {
 // The caller is responsible for calling Instance.Shutdown when done, or
 // listening for OS signals and calling it from a signal handler.
 func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config is nil")
+	}
+	cfg.NormalizeForMode()
 	if err := config.ValidateAppBaseURL(os.Getenv("APP_BASE_URL")); err != nil {
 		log.Printf("warning: %v", err)
 	}
@@ -62,6 +299,13 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	if err := authCfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid auth configuration: %w", err)
 	}
+
+	if err := migrateLegacyStorage(cfg); err != nil {
+		return nil, err
+	}
+
+	uploadsPath := filepath.Join(cfg.AppDataDir, "uploads")
+	handler.SetUploadsDir(uploadsPath)
 
 	// Database
 	db, err := database.New(cfg.DatabasePath)
@@ -128,6 +372,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	workerSvc := service.NewWorkerService(llmSvc, maxWorkers, projectRepo)
 	workerSvc.SetTaskRepo(taskRepo)
 	workerSvc.SetLLMConfigRepo(llmConfigRepo)
+	workerSvc.SetExecutionRepo(execRepo)
 
 	projectSvc := service.NewProjectService(projectRepo)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
@@ -301,6 +546,58 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		log.Printf("[memory] repo-local memory enabled")
 	}
 
+	// Lifecycle runner: dispatches route_task/before_run/after_complete hook
+	// slots around normal task execution. Scheduled agent maintenance uses the
+	// existing task scheduler, not a second lifecycle scheduler.
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	mutationRepo := repository.NewAgentMutationRepo(db)
+	globalSkillRoot := cfg.AppDataDir
+	if err := builtinskills.SyncTo(globalSkillRoot); err != nil {
+		log.Printf("warning: failed to sync built-in lifecycle skills: %v", err)
+	}
+	if err := agentskills.EnsureAgentsRoot(globalSkillRoot); err != nil {
+		log.Printf("warning: failed to ensure agents root at %s: %v", globalSkillRoot, err)
+	}
+	if err := agentskills.EnsureSkillsRoot(globalSkillRoot); err != nil {
+		log.Printf("warning: failed to ensure skills root at %s: %v", globalSkillRoot, err)
+	}
+	llmHookInvoker := lifecycle.NewLLMHookInvoker(llmSvc, agentRepo, llmConfigRepo)
+	skillResolver := service.NewCatalogSkillResolver(agentRepo, workerSvc.CurrentLifecycleCatalog, globalSkillRoot, func(ctx context.Context, projectID string) string {
+		return service.ProjectSkillRootForResolver(ctx, projectRepo, projectID)
+	})
+	lifecycleRunner := lifecycle.NewRunner(lifecycleRepo, llmHookInvoker, skillResolver)
+	workerSvc.SetLifecycleRunner(lifecycleRunner)
+	workerSvc.SetLifecycleSkillRoot(globalSkillRoot)
+	// Give the LLM service the same root used for global skill catalog and
+	// skill mutation writes.
+	llmSvc.SetGlobalSkillRoot(globalSkillRoot)
+	llmSvc.SetLifecycleRepo(lifecycleRepo)
+	mutationRecorderFactory := func(t models.Task) agentlibrary.MutationRecorder {
+		return agentlibrary.NewRepoRecorder(mutationRepo, agentlibrary.MutationActor{
+			TaskID:    t.ID,
+			TaskRunID: t.ID,
+			ProjectID: t.ProjectID,
+		})
+	}
+	llmSvc.SetLifecycleMutationRecorderFactory(mutationRecorderFactory)
+	workerSvc.SetLifecycleAgentRepo(agentRepo)
+	workerSvc.SetLifecycleRepo(lifecycleRepo)
+	workerSvc.SetLifecycleMutationRecorderFactory(mutationRecorderFactory)
+	agentLibraryMaintenanceSvc := service.NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
+	agentLibraryMaintenanceSvc.SetLifecycleRepo(lifecycleRepo)
+	agentLibraryMaintenanceSvc.SetAgentsRootPath(globalSkillRoot)
+	workerSvc.SetAgentRootSyncService(agentLibraryMaintenanceSvc)
+	if err := agentLibraryMaintenanceSvc.SyncRootDeclarations(context.Background(), ""); err != nil {
+		log.Printf("[agent-library] sync root declarations: %v", err)
+	}
+	if existing, lerr := projectRepo.List(context.Background()); lerr == nil {
+		for _, p := range existing {
+			if err := agentLibraryMaintenanceSvc.EnsureProject(context.Background(), p.ID); err != nil {
+				log.Printf("[agent-library] ensure project %s: %v", p.ID, err)
+			}
+		}
+	}
+	log.Printf("[lifecycle] runner wired with catalog/tools root=%s", globalSkillRoot)
 	// Telegram Bot (optional - starts if token is configured via env or saved in DB)
 	telegramToken := cfg.TelegramToken
 	if telegramToken == "" {
@@ -351,14 +648,14 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	}
 
 	// Clean up orphaned attachment files
-	if count, cleanErr := attachmentRepo.CleanupOrphanedFiles(context.Background(), "uploads"); cleanErr != nil {
+	if count, cleanErr := attachmentRepo.CleanupOrphanedFiles(context.Background(), filepath.Join(cfg.AppDataDir, "uploads")); cleanErr != nil {
 		log.Printf("warning: failed to cleanup orphaned attachments: %v", cleanErr)
 	} else if count > 0 {
 		log.Printf("cleaned up %d orphaned attachment files", count)
 	}
 
 	// Clean up orphaned chat attachment files
-	if count, cleanErr := chatAttachmentRepo.CleanupOrphanedFiles(context.Background(), "uploads"); cleanErr != nil {
+	if count, cleanErr := chatAttachmentRepo.CleanupOrphanedFiles(context.Background(), filepath.Join(cfg.AppDataDir, "uploads")); cleanErr != nil {
 		log.Printf("warning: failed to cleanup orphaned chat attachments: %v", cleanErr)
 	} else if count > 0 {
 		log.Printf("cleaned up %d orphaned chat attachment files", count)
@@ -396,7 +693,6 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 
 	workerSvc.Start(srvCtx)
 	schedulerSvc.Start(srvCtx)
-
 	// Start Telegram bot if configured
 	if telegramSvc != nil {
 		telegramSvc.Start()
@@ -434,6 +730,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetCustomPersonalityRepo(customPersonalityRepo)
 	h.SetWorktreeService(worktreeSvc)
 	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+	h.SetAgentSkillRoot(globalSkillRoot)
+	h.SetAgentLibraryMaintenanceService(agentLibraryMaintenanceSvc)
 	h.SetTaskPullRequestRepo(taskPullRequestRepo)
 	h.SetGitHubService(githubSvc)
 	h.SetSlackService(slackSvc)

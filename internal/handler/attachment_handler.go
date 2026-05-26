@@ -19,13 +19,21 @@ const (
 var uploadsDir = "uploads"
 
 func init() {
+	SetUploadsDir(uploadsDir)
+}
+
+func SetUploadsDir(dir string) {
+	if dir == "" {
+		return
+	}
 	// Convert uploadsDir to absolute path so file paths stored in the DB work
 	// regardless of the working directory. This is critical for task execution:
 	// the Claude CLI agent runs with cmd.Dir set to the project's repo path,
 	// so relative paths like "uploads/tasks/{id}/file.png" would be unresolvable.
-	if abs, err := filepath.Abs(uploadsDir); err == nil {
-		uploadsDir = abs
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
 	}
+	uploadsDir = dir
 	// Ensure uploads directory exists
 	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
 		log.Printf("[attachment] Failed to create uploads directory: %v", err)

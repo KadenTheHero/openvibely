@@ -53,7 +53,7 @@ Use this when OpenVibely should clone and manage the repo for you.
 
 Behavior:
 
-- OpenVibely clones the repository into managed storage (default root is `./repos` unless `PROJECT_REPO_ROOT` is set).
+- OpenVibely clones the repository into managed storage (default root is `~/.openvibely/repos` unless `PROJECT_REPO_ROOT` or `OPENVIBELY_APP_DATA_DIR` is set).
 - The project stores both the normalized GitHub URL and managed clone path.
 
 If GitHub credentials are missing (for example PAT not configured), creation fails and you get a toast with a link to `/channels`.

@@ -5,7 +5,7 @@ PORT="${PORT:-3001}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Load .env before resolving runtime defaults so OPENVIBELY_APP_DATA_DIR can
-# make local server and desktop share DB/repos/memory when desired.
+# make local server and desktop share DB/repos/global agents when desired.
 if [ -f "$SCRIPT_DIR/.env" ]; then
     echo -e "\033[0;32m[openvibely]\033[0m Loading .env"
     set -a
@@ -13,13 +13,16 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +a
 fi
 
-RUNTIME_DIR="${OPENVIBELY_APP_DATA_DIR:-${OPENVIBELY_RUNTIME_DIR:-$SCRIPT_DIR/.openvibely}}"
 if [ -n "${OPENVIBELY_APP_DATA_DIR:-}" ]; then
-    DATABASE_PATH="${DATABASE_PATH:-$RUNTIME_DIR/openvibely.db}"
-    PROJECT_REPO_ROOT="${PROJECT_REPO_ROOT:-$RUNTIME_DIR/repos}"
+    RUNTIME_DIR="$OPENVIBELY_APP_DATA_DIR"
+elif [ -n "${OPENVIBELY_RUNTIME_DIR:-}" ]; then
+    OPENVIBELY_APP_DATA_DIR="$OPENVIBELY_RUNTIME_DIR"
+    RUNTIME_DIR="$OPENVIBELY_APP_DATA_DIR"
 else
-    DATABASE_PATH="${DATABASE_PATH:-./openvibely.db}"
+    RUNTIME_DIR="$HOME/.openvibely"
 fi
+DISPLAY_DATABASE_PATH="${DATABASE_PATH:-$RUNTIME_DIR/openvibely.db}"
+DISPLAY_PROJECT_REPO_ROOT="${PROJECT_REPO_ROOT:-$RUNTIME_DIR/repos}"
 BIN_DIR="$SCRIPT_DIR/bin"
 BINARY="$BIN_DIR/openvibely"
 LOG_DIR="$SCRIPT_DIR/logs"
@@ -147,7 +150,10 @@ if lsof -ti:"$PORT" &>/dev/null; then
     exit 1
 fi
 
-export PORT DATABASE_PATH PROJECT_REPO_ROOT ENVIRONMENT OPENVIBELY_APP_DATA_DIR OPENVIBELY_ENABLE_LOCAL_REPO_PATH AUTH_ENABLED AUTH_USERNAME AUTH_PASSWORD AUTH_SESSION_SECRET
+export PORT ENVIRONMENT OPENVIBELY_ENABLE_LOCAL_REPO_PATH AUTH_ENABLED AUTH_USERNAME AUTH_PASSWORD AUTH_SESSION_SECRET
+if [ -n "${OPENVIBELY_APP_DATA_DIR:-}" ]; then export OPENVIBELY_APP_DATA_DIR; fi
+if [ -n "${DATABASE_PATH:-}" ]; then export DATABASE_PATH; fi
+if [ -n "${PROJECT_REPO_ROOT:-}" ]; then export PROJECT_REPO_ROOT; fi
 
 # APP_BASE_URL controls hosted OAuth callback URLs.
 # Leave unset for local development (uses localhost callback listeners).
@@ -163,7 +169,10 @@ if [ -n "${OAUTH_REDIRECT_MODE:-}" ]; then
     export OAUTH_REDIRECT_MODE
 fi
 
-mkdir -p "$LOG_DIR" "$RUNTIME_DIR"
+mkdir -p "$LOG_DIR"
+if [ -n "${OPENVIBELY_APP_DATA_DIR:-}" ]; then
+    mkdir -p "$RUNTIME_DIR"
+fi
 
 log "Starting OpenVibely on http://localhost:$PORT"
 if [ -n "${APP_BASE_URL:-}" ]; then
@@ -171,8 +180,8 @@ if [ -n "${APP_BASE_URL:-}" ]; then
 else
     log "App base URL: not set (OAuth callbacks use localhost)"
 fi
-log "Database: $DATABASE_PATH"
-log "Repos: ${PROJECT_REPO_ROOT:-./repos}"
+log "Database: $DISPLAY_DATABASE_PATH"
+log "Repos: $DISPLAY_PROJECT_REPO_ROOT"
 log "Logs: $LOG_FILE"
 log "Press Ctrl+C to stop"
 echo ""

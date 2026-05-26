@@ -27,7 +27,8 @@ func TestBuildMemoryExtractionPromptUsesToolDrivenInstructions(t *testing.T) {
 		"List the memory directory",
 		"Read MEMORY.md",
 		"Do not save raw complaints as memory",
-		"Distill them into durable guidance",
+		"procedure-only runbooks",
+		"only an operational procedure",
 		"User text:",
 		"use normal scheduled tasks",
 	} {
@@ -55,6 +56,7 @@ func TestBuildMemoryConsolidationPromptUsesDynamicRunContext(t *testing.T) {
 		"Project ID: p1",
 		"root-relative memory paths",
 		"MEMORY.md",
+		"Memory is durable context, not a procedural skill library",
 		"Recent Execution Snippets",
 		"Use app-managed project memory outside repos.",
 	} {

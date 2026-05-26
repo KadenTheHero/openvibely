@@ -40,6 +40,61 @@ type AgentToolConfig struct {
 	DisableRuntimeWorktree bool                `json:"disable_runtime_worktree,omitempty"`
 }
 
+// AgentGeneratedStatus identifies how an agent record came to exist and whether
+// it is editable through normal user/admin flows. Autonomous agent edits are no
+// longer product behavior, but these values remain part of persisted state.
+type AgentGeneratedStatus string
+
+const (
+	AgentStatusGenerated  AgentGeneratedStatus = "generated"   // produced by Skill Curator
+	AgentStatusUserEdited AgentGeneratedStatus = "user_edited" // manually customized; preserve intent
+	AgentStatusProtected  AgentGeneratedStatus = "protected"   // bundled/locked; no autonomous edits
+	AgentStatusArchived   AgentGeneratedStatus = "archived"    // retained for history; not routed to
+)
+
+// AgentScope reports whether an agent is portable across projects or scoped
+// to one repo.
+type AgentScope string
+
+const (
+	AgentScopeGlobal  AgentScope = "global"
+	AgentScopeProject AgentScope = "project"
+)
+
+// AgentCreatedBy reports who originally produced the agent record.
+type AgentCreatedBy string
+
+const (
+	AgentCreatedByUser   AgentCreatedBy = "user"
+	AgentCreatedBySystem AgentCreatedBy = "system"
+	AgentCreatedByAgent  AgentCreatedBy = "agent"
+)
+
+// AgentPermissionDefaults captures the per-agent default permissions the
+// runbook §Permissions Tab (lines 2253-2266) lists. Lifecycle hooks may
+// override these per-hook through `permissions_json` on the hook row.
+type AgentPermissionDefaults struct {
+	ReadTaskPrompt       bool `json:"read_task_prompt,omitempty"`
+	ReadTaskExecution    bool `json:"read_task_execution,omitempty"`
+	ReadProjectMemory    bool `json:"read_project_memory,omitempty"`
+	WriteProjectMemory   bool `json:"write_project_memory,omitempty"`
+	ReadAgents           bool `json:"read_agents,omitempty"`
+	WriteAgents          bool `json:"write_agents,omitempty"`
+	ReadSkills           bool `json:"read_skills,omitempty"`
+	WriteSkills          bool `json:"write_skills,omitempty"`
+	ReadRepositoryFiles  bool `json:"read_repository_files,omitempty"`
+	WriteRepositoryFiles bool `json:"write_repository_files,omitempty"`
+	UseShellOrTools      bool `json:"use_shell_or_tools,omitempty"`
+}
+
+// AgentModelDefaults stores the optional model preferences and runtime
+// execution defaults declared in agent frontmatter.
+type AgentModelDefaults struct {
+	Model       string  `json:"model,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
+	MaxTokens   int     `json:"max_tokens,omitempty"`
+}
+
 // Agent is a named configuration that wraps a system prompt, tool restrictions,
 // skills, MCP servers, and parameterized tool config. Tasks can be assigned to an agent.
 type Agent struct {
@@ -54,8 +109,23 @@ type Agent struct {
 	MCPServers   []MCPServerConfig `json:"mcp_servers"`
 	SystemKind   string            `json:"system_kind,omitempty"`
 	Skills       []SkillConfig     `json:"skills"`
-	CreatedAt    time.Time         `json:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at"`
+	// Lifecycle-era identity & policy fields (runbook §Data Model Additions
+	// lines 2429-2450). All optional; defaults are populated by migration 077
+	// for backwards compatibility with existing rows.
+	Key                 string                  `json:"key,omitempty"`
+	Scope               AgentScope              `json:"scope,omitempty"`
+	ProjectID           string                  `json:"project_id,omitempty"`
+	SelectableAsPrimary bool                    `json:"selectable_as_primary"`
+	Enabled             bool                    `json:"enabled"`
+	PermissionDefaults  AgentPermissionDefaults `json:"permission_defaults,omitempty"`
+	ModelDefaults       AgentModelDefaults      `json:"model_defaults,omitempty"`
+	CreatedBy           AgentCreatedBy          `json:"created_by,omitempty"`
+	GeneratedStatus     AgentGeneratedStatus    `json:"generated_status,omitempty"`
+	AbsorbedInto        string                  `json:"absorbed_into,omitempty"`
+	SourceRefs          []string                `json:"source_refs,omitempty"`
+	ArchivedAt          *time.Time              `json:"archived_at,omitempty"`
+	CreatedAt           time.Time               `json:"created_at"`
+	UpdatedAt           time.Time               `json:"updated_at"`
 }
 
 // PluginMarketplace mirrors Claude plugin marketplace list metadata.
@@ -109,10 +179,21 @@ type PluginRuntimeMCP struct {
 // AllAgentTools is the set of tool names an agent can allow.
 const (
 	AgentSystemKindMemoryConsolidator = "memory_consolidator"
-	AgentToolScopedFiles              = "ScopedFiles"
+	// AgentSystemKindSkillCurator is the built-in Skill Curator system agent.
+	// It owns route_task/observe_task_for_learning/maintain_skill_library
+	// skills bound via route_task/after_complete lifecycle hooks plus a normal
+	// visible scheduled task for skill library maintenance.
+	AgentSystemKindSkillCurator = "skill_curator"
+	AgentToolScopedFiles        = "ScopedFiles"
 )
 
 var AllAgentTools = []string{
 	"Read", "Write", "Edit", "Bash", "Glob", "Grep",
 	"WebFetch", "WebSearch", "NotebookEdit", AgentToolScopedFiles,
+	// Lifecycle/skills runtime tools. These are attached via runtime context
+	// per turn and surfaced in the agent dialog so users can choose which
+	// agents may inspect or maintain standalone skills. After-complete learning
+	// hooks may also improve skills owned by the task's assigned agent through
+	// server-scoped agent_skill_manage.
+	"skill_view", "skills_list", "agent_view", "skill_manage", "agent_skill_manage",
 }

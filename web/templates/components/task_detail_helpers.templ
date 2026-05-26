@@ -243,11 +243,23 @@ templ TaskThreadStatusIndicator(task *models.Task, executions []models.Execution
 	}
 }
 
+templ TaskPrimaryAgentBanner(agentDef *models.Agent) {
+	if agentDef != nil {
+		<div id="task-thread-primary-agent" class="rounded-lg border border-primary/20 bg-primary/10 px-3 py-2 text-xs text-primary-content">
+			<span class="font-medium">Assigned agent:</span>
+			<span>{ agentDef.Name }</span>
+			if agentDef.Key != "" {
+				<span class="font-mono opacity-70">({ agentDef.Key })</span>
+			}
+		</div>
+	}
+}
+
 // TaskThreadView renders the unified thread interface for a task.
 // Uses shared chat components for message bubbles and input form.
 // Accepts agents list to show model selector matching /chat page behavior.
 // chatAttachments map is optional - when nil, no attachment indicators are shown on messages.
-templ TaskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, chatAttachments map[string][]models.ChatAttachment) {
+templ TaskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment) {
 	<div
 		id="task-thread-view"
 		class="flex flex-col flex-1 min-h-0"
@@ -261,6 +273,7 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 	>
 		<!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) -->
 		<div id="task-thread-messages" class="flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0">
+			@TaskPrimaryAgentBanner(agentDef)
 			if len(executions) == 0 {
 				@ChatEmptyState("No messages yet. Click \"Run Now\" to start, then follow up here.")
 			} else {

@@ -137,11 +137,20 @@ func TestLoadWithMode_ServerDefaults(t *testing.T) {
 	if cfg.Port != "3001" {
 		t.Fatalf("expected server default port 3001, got %s", cfg.Port)
 	}
-	if cfg.DatabasePath != "./openvibely.db" {
-		t.Fatalf("expected server default DB path, got %s", cfg.DatabasePath)
+	if cfg.DatabasePath != filepath.Join(cfg.AppDataDir, "openvibely.db") {
+		t.Fatalf("expected server DB under AppDataDir, got %s", cfg.DatabasePath)
 	}
-	if cfg.ProjectRepoRoot != "./repos" {
-		t.Fatalf("expected server default repo root, got %s", cfg.ProjectRepoRoot)
+	if cfg.ProjectRepoRoot != filepath.Join(cfg.AppDataDir, "repos") {
+		t.Fatalf("expected server repo root under AppDataDir, got %s", cfg.ProjectRepoRoot)
+	}
+	if cfg.AppDataDir == "" {
+		t.Fatal("server mode should default AppDataDir so global agents do not fall back into project .openvibely")
+	}
+	if !filepath.IsAbs(cfg.AppDataDir) {
+		t.Fatalf("expected absolute server AppDataDir, got %s", cfg.AppDataDir)
+	}
+	if filepath.Base(cfg.AppDataDir) != ".openvibely" {
+		t.Fatalf("expected server AppDataDir to default to ~/.openvibely-style path, got %s", cfg.AppDataDir)
 	}
 	if cfg.EnableLocalRepoPath {
 		t.Fatal("expected server default EnableLocalRepoPath=false")
@@ -156,6 +165,7 @@ func TestLoadWithMode_DesktopDefaults(t *testing.T) {
 		defer os.Setenv(k, prev)
 	}
 
+	serverCfg := LoadWithMode(ModeServer)
 	cfg := LoadWithMode(ModeDesktop)
 	if cfg.Mode != ModeDesktop {
 		t.Fatalf("expected mode desktop, got %s", cfg.Mode)
@@ -164,7 +174,26 @@ func TestLoadWithMode_DesktopDefaults(t *testing.T) {
 		t.Fatalf("expected desktop default port 0 (ephemeral), got %s", cfg.Port)
 	}
 
-	// DB path should be inside OS app-data dir, not relative.
+	if cfg.AppDataDir == "" {
+		t.Fatal("desktop mode should default AppDataDir")
+	}
+	if cfg.AppDataDir != serverCfg.AppDataDir {
+		t.Fatalf("desktop and server should default to the same AppDataDir; desktop=%q server=%q", cfg.AppDataDir, serverCfg.AppDataDir)
+	}
+	if cfg.DatabasePath != serverCfg.DatabasePath {
+		t.Fatalf("desktop and server should default to the same DB; desktop=%q server=%q", cfg.DatabasePath, serverCfg.DatabasePath)
+	}
+	if cfg.ProjectRepoRoot != serverCfg.ProjectRepoRoot {
+		t.Fatalf("desktop and server should default to the same repo root; desktop=%q server=%q", cfg.ProjectRepoRoot, serverCfg.ProjectRepoRoot)
+	}
+	if cfg.DatabasePath != filepath.Join(cfg.AppDataDir, "openvibely.db") {
+		t.Fatalf("expected desktop DB under AppDataDir, got %s", cfg.DatabasePath)
+	}
+	if cfg.ProjectRepoRoot != filepath.Join(cfg.AppDataDir, "repos") {
+		t.Fatalf("expected desktop repo root under AppDataDir, got %s", cfg.ProjectRepoRoot)
+	}
+
+	// DB path should be inside the shared app-data dir, not relative.
 	if cfg.DatabasePath == "./openvibely.db" {
 		t.Fatal("desktop mode should not use relative default DB path")
 	}
@@ -251,6 +280,33 @@ func TestLoadWithMode_AppDataDirDoesNotOverrideExplicitStoragePaths(t *testing.T
 	}
 }
 
+func TestConfigNormalizeForMode_FillsAppStorageDefaults(t *testing.T) {
+	for _, k := range []string{"OPENVIBELY_APP_DATA_DIR", "DATABASE_PATH", "PROJECT_REPO_ROOT", "OPENVIBELY_ENABLE_LOCAL_REPO_PATH"} {
+		prev := os.Getenv(k)
+		os.Unsetenv(k)
+		defer os.Setenv(k, prev)
+	}
+
+	for _, mode := range []RuntimeMode{ModeServer, ModeDesktop} {
+		cfg := (&Config{Mode: mode}).NormalizeForMode()
+		if cfg.AppDataDir == "" {
+			t.Fatalf("%s normalization should fill AppDataDir", mode)
+		}
+		if cfg.DatabasePath != filepath.Join(cfg.AppDataDir, "openvibely.db") {
+			t.Fatalf("%s DatabasePath=%q want app-data DB under %q", mode, cfg.DatabasePath, cfg.AppDataDir)
+		}
+		if cfg.ProjectRepoRoot != filepath.Join(cfg.AppDataDir, "repos") {
+			t.Fatalf("%s ProjectRepoRoot=%q want app-data repos under %q", mode, cfg.ProjectRepoRoot, cfg.AppDataDir)
+		}
+		if mode == ModeDesktop && !cfg.EnableLocalRepoPath {
+			t.Fatal("desktop normalization should enable local repo paths by default")
+		}
+		if mode == ModeServer && cfg.EnableLocalRepoPath {
+			t.Fatal("server normalization should not enable local repo paths by default")
+		}
+	}
+}
+
 func TestLoadWithMode_DesktopEnvOverrides(t *testing.T) {
 	// Env vars override desktop defaults.
 	os.Setenv("PORT", "9999")
@@ -279,7 +335,20 @@ func TestLoadWithMode_DesktopEnvOverrides(t *testing.T) {
 	}
 }
 
-func TestDesktopDataDir(t *testing.T) {
+func TestServerDataDir(t *testing.T) {
+	dir := serverDataDir()
+	if dir == "" {
+		t.Fatal("serverDataDir returned empty string")
+	}
+	if !filepath.IsAbs(dir) {
+		t.Fatalf("expected absolute path, got %s", dir)
+	}
+	if filepath.Base(dir) != ".openvibely" {
+		t.Fatalf("server data dir should default to ~/.openvibely-style path, got %s", dir)
+	}
+}
+
+func TestDesktopConfigDataDir(t *testing.T) {
 	dir := desktopDataDir()
 	if dir == "" {
 		t.Fatal("desktopDataDir returned empty string")

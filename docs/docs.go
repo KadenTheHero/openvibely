@@ -1700,6 +1700,50 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/lifecycle-executions/{id}/events": {
+            "get": {
+                "description": "Returns prompt-safe trace events for one lifecycle hook invocation.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Lifecycle"
+                ],
+                "summary": "Get lifecycle execution trace events",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Lifecycle execution ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/viewmodels.LifecycleExecutionEventView"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid execution ID",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/projects": {
             "get": {
                 "description": "Get a list of all available projects with their IDs, names, paths, and creation timestamps",
@@ -1715,6 +1759,50 @@ const docTemplate = `{
                         "description": "Successfully retrieved projects",
                         "schema": {
                             "$ref": "#/definitions/handler.ProjectsListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tasks/{id}/lifecycle-executions": {
+            "get": {
+                "description": "Returns lifecycle hook invocations (routing, before-run preparation, after-complete learning) recorded for the given task.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Lifecycle"
+                ],
+                "summary": "List lifecycle executions for a task",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/viewmodels.LifecycleExecutionView"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid task ID",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
                         }
                     },
                     "500": {
@@ -2521,6 +2609,62 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "taskTitle": {
+                    "type": "string"
+                }
+            }
+        },
+        "viewmodels.LifecycleExecutionEventView": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "event_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "payload": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "seq": {
+                    "type": "integer"
+                }
+            }
+        },
+        "viewmodels.LifecycleExecutionView": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "output_contract": {
+                    "type": "string"
+                },
+                "skill_key": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "when": {
                     "type": "string"
                 }
             }

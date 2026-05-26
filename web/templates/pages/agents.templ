@@ -149,6 +149,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							<button type="button" role="tab" class="tab tab-active" data-agent-section-tab="details" aria-selected="true" onclick="setAgentSection('details')">Agent Details</button>
 							<button type="button" role="tab" class="tab" data-agent-section-tab="plugins" aria-selected="false" onclick="setAgentSection('plugins')">Plugins</button>
 							<button type="button" role="tab" class="tab" data-agent-section-tab="marketplace" aria-selected="false" onclick="setAgentSection('marketplace')">Marketplace</button>
+								<button type="button" role="tab" class="tab" data-agent-section-tab="skills" aria-selected="false" onclick="setAgentSection('skills')">Skills</button>
+								<button type="button" role="tab" class="tab" data-agent-section-tab="lifecycle" aria-selected="false" onclick="setAgentSection('lifecycle')">Lifecycle Hooks</button>
+								<button type="button" role="tab" class="tab" data-agent-section-tab="advanced" aria-selected="false" onclick="setAgentSection('advanced')">Advanced</button>
 						</div>
 					</div>
 
@@ -264,12 +267,147 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 								</div>
 							</div>
 						</div>
+
+							<div data-agent-section-panel="skills" class="h-full overflow-y-auto pr-1 hidden">
+								<div class="space-y-3">
+									<div class="alert alert-info text-sm">
+										Assigned-agent tasks route from this agent's indexed skills. Standalone skills are routed only for tasks with no assigned agent.
+									</div>
+									<div id="agent_skills_system_notice" class="hidden alert alert-warning text-sm">This is a protected built-in/system agent. Routed skills are read-only here.</div>
+									<div class="border border-base-300 rounded-lg p-3 bg-base-200/30">
+										<p class="text-sm font-medium mb-1">Router Preview</p>
+										<p id="agent_skills_router_summary" class="text-xs opacity-70">Save this agent to preview routed skills.</p>
+										<pre id="agent_skills_router_index" class="text-xs whitespace-pre-wrap mt-2 max-h-36 overflow-auto hidden"></pre>
+									</div>
+									<div class="border border-base-300 rounded-lg p-3">
+										<div class="flex items-center justify-between gap-2 mb-2">
+											<p class="text-sm font-medium">Skills</p>
+											<button type="button" id="agent_skill_new_btn" class="btn btn-outline btn-xs" onclick="startNewAgentOwnedSkill()">+ New Skill</button>
+										</div>
+										<div id="agent_skills_list" class="space-y-2"></div>
+									</div>
+									<div id="agent_skill_editor" class="hidden border border-base-300 rounded-lg p-3 bg-base-100">
+										<div class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
+											<label class="form-control"><span class="label-text text-xs">Skill key</span><input id="agent_skill_handle" class="input input-bordered input-sm" placeholder="review_migrations"/></label>
+											<label class="form-control"><span class="label-text text-xs">Name</span><input id="agent_skill_name" class="input input-bordered input-sm" placeholder="Review migrations"/></label>
+											<label class="form-control"><span class="label-text text-xs">Scope</span><select id="agent_skill_scope" class="select select-bordered select-sm"><option value="project">Project</option><option value="global">Global</option></select></label>
+										</div>
+										<label class="form-control mb-2"><span class="label-text text-xs">Description</span><input id="agent_skill_description" class="input input-bordered input-sm" placeholder="When this skill should be selected"/></label>
+										<label class="form-control"><span class="label-text text-xs">SKILL.md body or full SKILL.md</span><textarea id="agent_skill_body" class="textarea textarea-bordered h-40 font-mono text-xs" placeholder="Instructions for this skill..."></textarea></label>
+										<div class="flex justify-end gap-2 mt-3"><button type="button" class="btn btn-ghost btn-sm" onclick="cancelAgentOwnedSkillEdit()">Cancel</button><button type="button" id="agent_skill_save_btn" class="btn btn-primary btn-sm" onclick="saveAgentOwnedSkill()">Save Skill</button></div>
+									</div>
+									<p id="agent_skills_status" class="hidden text-xs mt-2"></p>
+								</div>
+							</div>
+
+								<div data-agent-section-panel="lifecycle" class="h-full overflow-y-auto pr-1 hidden">							<div class="space-y-3">
+										<p class="text-sm opacity-70">Lifecycle hooks are implementation hooks, usually for system/lifecycle agents. Normal assigned agents usually need skills, not custom hooks.</p>
+										<div class="alert alert-info text-sm">Task execution is separate from hooks: route_task selects skills, before_run can add context, after_complete observes and learns. task_mode is internal and is not configurable here.</div>
+									<div id="lifecycle_hooks_protected_banner" class="hidden alert alert-warning text-sm">
+										This agent is protected. Lifecycle hooks are shown read-only.
+									</div>
+									<div id="lifecycle_hooks_list" class="space-y-2"></div>
+									<button type="button" class="btn btn-outline btn-sm" id="lifecycle_hooks_add_btn" onclick="addLifecycleHookRow()">+ Add Hook</button>
+									<p id="lifecycle_hooks_status" class="hidden text-xs mt-2"></p>
+									<div class="divider text-sm opacity-50">Lifecycle Policy Defaults</div>
+									<p class="text-sm opacity-70">Defaults applied to this agent's lifecycle hooks unless an individual hook overrides them. These do not grant callable tools; use Allowed Tools on Agent Details for concrete tool access.</p>
+									<div class="alert alert-info text-sm">Tool scope: skill_view reads selected skills for the current task scope; skills_list lists standalone skills; skill_manage writes standalone skills; agent_skill_manage is an after-complete learning tool scoped to the task's assigned agent.</div>
+									<div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
+										<input type="checkbox" id="perm_read_task_prompt" class="checkbox checkbox-sm"/>
+										<span class="label-text text-sm">Read task prompt</span>
+									</label>
+									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
+										<input type="checkbox" id="perm_read_task_execution" class="checkbox checkbox-sm"/>
+										<span class="label-text text-sm">Read task execution output</span>
+									</label>
+									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
+										<input type="checkbox" id="perm_read_project_memory" class="checkbox checkbox-sm"/>
+										<span class="label-text text-sm">Read project memory</span>
+									</label>
+									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
+										<input type="checkbox" id="perm_write_project_memory" class="checkbox checkbox-sm"/>
+										<span class="label-text text-sm">Write project memory</span>
+									</label>
+									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
+										<input type="checkbox" id="perm_read_agents" class="checkbox checkbox-sm"/>
+										<span class="label-text text-sm">Read agents</span>
+									</label>
+									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
+										<input type="checkbox" id="perm_write_agents" class="checkbox checkbox-sm"/>
+										<span class="label-text text-sm">Write agents</span>
+									</label>
+									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
+										<input type="checkbox" id="perm_read_skills" class="checkbox checkbox-sm"/>
+										<span class="label-text text-sm">Read skills</span>
+									</label>
+									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
+										<input type="checkbox" id="perm_write_skills" class="checkbox checkbox-sm"/>
+										<span class="label-text text-sm">Write skills</span>
+									</label>
+									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
+										<input type="checkbox" id="perm_read_repository_files" class="checkbox checkbox-sm"/>
+										<span class="label-text text-sm">Read repository files</span>
+									</label>
+									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
+										<input type="checkbox" id="perm_write_repository_files" class="checkbox checkbox-sm"/>
+										<span class="label-text text-sm">Write repository files</span>
+									</label>
+									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
+										<input type="checkbox" id="perm_use_shell_or_tools" class="checkbox checkbox-sm"/>
+										<span class="label-text text-sm">Use shell / external tools</span>
+									</label>
+									</div>
+								</div>
+							</div>
+
+								<div data-agent-section-panel="advanced" class="h-full overflow-y-auto pr-1 hidden">
+								<div class="space-y-3">
+								<p class="text-sm opacity-70">Identity and scope. Most agents do not need to change these.</p>
+								<div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+									<div class="form-control">
+										<label class="label"><span class="label-text">Agent key (slug)</span></label>
+										<input type="text" id="advanced_key" class="input input-bordered input-sm" placeholder="my-agent"/>
+										<p class="text-xs opacity-60 mt-1">Lowercase letters, digits, _ -. Used as a stable identifier.</p>
+									</div>
+									<div class="form-control">
+										<label class="label"><span class="label-text">Scope</span></label>
+										<select id="advanced_scope" class="select select-bordered select-sm">
+											<option value="global">Global (app data)</option>
+											<option value="project">Project-scoped</option>
+										</select>
+									</div>
+								</div>
+								<div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
+										<input type="checkbox" id="advanced_selectable_as_primary" class="checkbox checkbox-sm"/>
+										<span class="label-text text-sm">Selectable as primary agent</span>
+									</label>
+									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
+										<input type="checkbox" id="advanced_enabled" class="checkbox checkbox-sm" checked/>
+										<span class="label-text text-sm">Enabled</span>
+									</label>
+								</div>
+								<div class="form-control">
+									<label class="label"><span class="label-text">Source evidence URLs (one per line)</span></label>
+									<textarea id="advanced_source_refs" class="textarea textarea-bordered h-16" placeholder="e.g. https://example.com/runbook"></textarea>
+								</div>
+								<p id="advanced_protected_notice" class="hidden alert alert-info text-sm">This is a built-in protected agent. Identity and scope fields are read-only.</p>
+							</div>
+						</div>
 					</div>
 						<input type="hidden" id="agent_tools_json" name="tools_json"/>
 						<input type="hidden" id="agent_tool_config_json" name="tool_config_json"/>
 						<input type="hidden" id="agent_plugins_json" name="plugins_json"/>
 					<input type="hidden" id="agent_skills_json" name="skills_json"/>
 					<input type="hidden" id="agent_mcp_servers_json" name="mcp_servers_json"/>
+					<input type="hidden" id="agent_permission_defaults_json" name="permission_defaults_json"/>
+					<input type="hidden" id="agent_lifecycle_hooks_json" name="lifecycle_hooks_json"/>
+					<input type="hidden" id="agent_source_refs_json" name="source_refs_json"/>
+					<input type="hidden" id="agent_key_field" name="key"/>
+					<input type="hidden" id="agent_scope_field" name="scope"/>
+					<input type="hidden" id="agent_selectable_as_primary_field" name="selectable_as_primary"/>
+					<input type="hidden" id="agent_enabled_field" name="enabled"/>
 
 					<div class="modal-action mt-0 sticky bottom-0 z-10 border-t border-base-300 bg-base-100 px-6 py-3">
 						<button type="button" class="btn" onclick="agent_modal.close()">Cancel</button>
@@ -281,12 +419,14 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 		</dialog>
 
 		<script>
-		let agentPluginState = { marketplaces: [], installed: [], available: [], runtime: [] };
-		let selectedPluginIDs = [];
-		let generatedSkillsState = [];
-		let generatedMCPServersState = [];
-		let activeAgentSection = 'details';
-		let activeAgentID = '';
+			let agentPluginState = { marketplaces: [], installed: [], available: [], runtime: [] };
+			let selectedPluginIDs = [];
+			let generatedSkillsState = [];
+					let generatedMCPServersState = [];
+					let agentOwnedSkillsState = { routed_skills: [], can_manage: false, protected: false };
+				let editingAgentSkillOriginalHandle = '';
+				let activeAgentSection = 'details';
+				let activeAgentID = '';
 		
 		let installingPluginIDs = new Set();
 		let uninstallingPluginIDs = new Set();
@@ -296,15 +436,18 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 		let syncingMarketplaceNames = new Set();
 		let restoringDefaultMarketplaces = false;
 
-			function setAgentSection(sectionName) {
-				const sectionNameMap = {
-					details: 'details',
-					plugins: 'plugins',
-					marketplace: 'marketplace',
-				};
-				const nextSection = sectionNameMap[sectionName] || 'details';
-				activeAgentSection = nextSection;
-				document.querySelectorAll('[data-agent-section-tab]').forEach(tab => {
+				function setAgentSection(sectionName) {
+					const sectionNameMap = {
+						details: 'details',
+								plugins: 'plugins',
+								marketplace: 'marketplace',
+								skills: 'skills',
+								lifecycle: 'lifecycle',
+								advanced: 'advanced',
+					};
+					const nextSection = sectionNameMap[sectionName] || 'details';
+					activeAgentSection = nextSection;
+					document.querySelectorAll('[data-agent-section-tab]').forEach(tab => {
 					const isActive = tab.dataset.agentSectionTab === nextSection;
 					tab.classList.toggle('tab-active', isActive);
 					tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
@@ -1129,10 +1272,12 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				setAgentTools([]);
 				selectedPluginIDs = [];
 			resetGeneratedState();
-			setAgentSection('details');
-			loadPluginState(false);
-			document.getElementById('agent_modal').showModal();
-		}
+			resetLifecycleFormFields();
+			populateLifecycleFormFromAgent({ enabled: true });
+				setAgentSection('details');
+				loadAgentSkillsForAgent(activeAgentID);
+				loadPluginState(false);
+				document.getElementById('agent_modal').showModal();		}
 
 		function editAgentFromData(el) {
 			const id = el.dataset.agentId;
@@ -1158,9 +1303,26 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			generatedMCPServersState = JSON.parse(el.dataset.agentMcpServers || '[]');
 			updateGeneratedSummary();
 
-			setAgentSection('details');
-			loadPluginState(false);
-			document.getElementById('agent_modal').showModal();
+			resetLifecycleFormFields();
+			loadAgentLifecycleFromServer(activeAgentID);
+
+				setAgentSection('details');
+				loadAgentSkillsForAgent(activeAgentID);
+				loadPluginState(false);
+				document.getElementById('agent_modal').showModal();		}
+
+		async function loadAgentLifecycleFromServer(agentID) {
+			if (!agentID) return;
+			try {
+				const response = await fetch('/agents/' + encodeURIComponent(agentID) + '/json', { headers: { 'Accept': 'application/json' }});
+				if (response.ok) {
+					const data = await response.json();
+					populateLifecycleFormFromAgent(data);
+				}
+			} catch (err) {
+				console.error('loadAgentLifecycleFromServer', err);
+			}
+			loadLifecycleHooksForAgent(agentID);
 		}
 
 		function fillAgentFormFromGenerated(data) {
@@ -1233,7 +1395,346 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				document.getElementById('agent_plugins_json').value = JSON.stringify(selectedPluginIDs);
 				document.getElementById('agent_skills_json').value = JSON.stringify(generatedSkillsState || []);
 				document.getElementById('agent_mcp_servers_json').value = JSON.stringify(generatedMCPServersState || []);
+
+					// Lifecycle dialog: permissions, hooks, identity/scope.
+					document.getElementById('agent_permission_defaults_json').value = JSON.stringify(collectPermissionDefaults());
+					document.getElementById('agent_lifecycle_hooks_json').value = JSON.stringify(collectLifecycleHooksFromDOM());
+				document.getElementById('agent_source_refs_json').value = JSON.stringify(splitLines(document.getElementById('advanced_source_refs').value));
+				document.getElementById('agent_key_field').value = (document.getElementById('advanced_key').value || '').trim();
+				document.getElementById('agent_scope_field').value = (document.getElementById('advanced_scope').value || '').trim();
+				document.getElementById('agent_selectable_as_primary_field').value = document.getElementById('advanced_selectable_as_primary').checked ? 'true' : 'false';
+				document.getElementById('agent_enabled_field').value = document.getElementById('advanced_enabled').checked ? 'true' : 'false';
 			}
+
+			function splitLines(value) {
+				return String(value || '')
+					.split(/\r?\n/)
+					.map(line => line.trim())
+					.filter(line => line.length > 0);
+			}
+
+			function collectPermissionDefaults() {
+				return {
+					read_task_prompt:       document.getElementById('perm_read_task_prompt').checked,
+					read_task_execution:    document.getElementById('perm_read_task_execution').checked,
+					read_project_memory:    document.getElementById('perm_read_project_memory').checked,
+					write_project_memory:   document.getElementById('perm_write_project_memory').checked,
+					read_agents:            document.getElementById('perm_read_agents').checked,
+					write_agents:           document.getElementById('perm_write_agents').checked,
+					read_skills:            document.getElementById('perm_read_skills').checked,
+					write_skills:           document.getElementById('perm_write_skills').checked,
+					read_repository_files:  document.getElementById('perm_read_repository_files').checked,
+					write_repository_files: document.getElementById('perm_write_repository_files').checked,
+					use_shell_or_tools:     document.getElementById('perm_use_shell_or_tools').checked,
+				};
+			}
+
+			function resetLifecycleFormFields() {
+				['perm_read_task_prompt','perm_read_task_execution','perm_read_project_memory','perm_write_project_memory','perm_read_agents','perm_write_agents','perm_read_skills','perm_write_skills','perm_read_repository_files','perm_write_repository_files','perm_use_shell_or_tools'].forEach(id => {
+					const el = document.getElementById(id); if (el) el.checked = false;
+				});
+						['advanced_key','advanced_source_refs'].forEach(id => {					const el = document.getElementById(id); if (el) el.value = '';
+					});
+					const scopeEl = document.getElementById('advanced_scope');
+					if (scopeEl) scopeEl.value = 'global';
+						['advanced_selectable_as_primary'].forEach(id => {
+							const el = document.getElementById(id); if (el) el.checked = true;
+						});				const enabledEl = document.getElementById('advanced_enabled');
+				if (enabledEl) enabledEl.checked = true;
+				const protectedNotice = document.getElementById('advanced_protected_notice');
+				if (protectedNotice) protectedNotice.classList.add('hidden');
+				const banner = document.getElementById('lifecycle_hooks_protected_banner');
+				if (banner) banner.classList.add('hidden');
+				const list = document.getElementById('lifecycle_hooks_list');
+				if (list) list.innerHTML = '';
+				lifecycleHooksState = [];
+			}
+
+			function populateLifecycleFormFromAgent(data) {
+				const perms = (data && data.permission_defaults) || {};
+				const setCheck = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+				const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = (val == null ? '' : String(val)); };
+				setCheck('perm_read_task_prompt', perms.read_task_prompt);
+				setCheck('perm_read_task_execution', perms.read_task_execution);
+				setCheck('perm_read_project_memory', perms.read_project_memory);
+				setCheck('perm_write_project_memory', perms.write_project_memory);
+				setCheck('perm_read_agents', perms.read_agents);
+				setCheck('perm_write_agents', perms.write_agents);
+				setCheck('perm_read_skills', perms.read_skills);
+				setCheck('perm_write_skills', perms.write_skills);
+				setCheck('perm_read_repository_files', perms.read_repository_files);
+				setCheck('perm_write_repository_files', perms.write_repository_files);
+				setCheck('perm_use_shell_or_tools', perms.use_shell_or_tools);
+
+				setVal('advanced_key', data ? data.key : '');
+							setVal('advanced_scope', data && data.scope === 'project' ? 'project' : 'global');
+					setCheck('advanced_selectable_as_primary', data ? data.selectable_as_primary !== false : true);				setCheck('advanced_enabled', data ? data.enabled : true);
+				setVal('advanced_source_refs', data && Array.isArray(data.source_refs) ? data.source_refs.join('\n') : '');
+
+				const protectedNotice = document.getElementById('advanced_protected_notice');
+				const banner = document.getElementById('lifecycle_hooks_protected_banner');
+				const isProtected = data && data.generated_status === 'protected';
+				if (protectedNotice) protectedNotice.classList.toggle('hidden', !isProtected);
+				if (banner) banner.classList.toggle('hidden', !isProtected);
+				lifecycleProtectedAgent = !!isProtected;
+			}
+
+			let lifecycleHooksState = [];
+			let lifecycleProtectedAgent = false;
+
+			async function loadLifecycleHooksForAgent(agentID) {
+				lifecycleHooksState = [];
+				document.getElementById('lifecycle_hooks_list').innerHTML = '';
+				if (!agentID) return;
+				try {
+					const response = await fetch('/agents/' + encodeURIComponent(agentID) + '/lifecycle-hooks', { headers: { 'Accept': 'application/json' }});
+					if (!response.ok) {
+						throw new Error('failed to load hooks: ' + response.status);
+					}
+					const hooks = await response.json();
+					lifecycleHooksState = Array.isArray(hooks) ? hooks : [];
+					renderLifecycleHooks();
+				} catch (err) {
+					console.error('loadLifecycleHooksForAgent', err);
+					const status = document.getElementById('lifecycle_hooks_status');
+					if (status) { status.textContent = String(err.message || err); status.classList.remove('hidden'); status.classList.add('text-error'); }
+				}
+			}
+
+			function renderLifecycleHooks() {
+				const list = document.getElementById('lifecycle_hooks_list');
+				if (!list) return;
+				list.innerHTML = '';
+				const addBtn = document.getElementById('lifecycle_hooks_add_btn');
+				if (addBtn) addBtn.disabled = lifecycleProtectedAgent;
+						lifecycleHooksState.forEach((hook, idx) => {
+							list.appendChild(buildLifecycleHookRow(hook, idx));
+						});
+					}
+				function lifecycleWhenOptions(selected) {
+					const allowed = ['route_task','before_run','after_complete'];
+					if (selected === 'task_mode') {
+						return '<option value="task_mode" selected disabled>task_mode (internal, not configurable)</option>' + allowed.map(w => '<option value="' + w + '">' + w + '</option>').join('');
+					}
+					return allowed.map(w => '<option value="' + w + '"' + (selected === w ? ' selected' : '') + '>' + w + '</option>').join('');
+				}
+
+				function buildLifecycleHookRow(hook, idx) {
+					const wrap = document.createElement('div');
+				wrap.className = 'border border-base-300 rounded-lg p-3 bg-base-200/30';
+				wrap.dataset.hookIdx = String(idx);
+				const disabled = lifecycleProtectedAgent ? 'disabled' : '';
+				wrap.innerHTML =
+					'<div class="grid grid-cols-1 md:grid-cols-2 gap-2">' +
+						'<label class="form-control"><span class="label-text text-xs">When</span>' +
+								'<select class="select select-bordered select-sm" data-hook-field="when" ' + disabled + '>' +
+									lifecycleWhenOptions(hook.when || '') +
+								'</select></label>' +
+						'<label class="form-control"><span class="label-text text-xs">Skill key</span>' +
+							'<input type="text" class="input input-bordered input-sm" data-hook-field="skill_key" value="' + escapeHtml(hook.skill_key || '') + '" placeholder="load_project_context" ' + disabled + '/></label>' +
+						'<label class="form-control"><span class="label-text text-xs">Output contract</span>' +
+							'<select class="select select-bordered select-sm" data-hook-field="output_contract" ' + disabled + '>' +
+								['','selected_skills','context_block','activity_summary','learning_summary','library_update_summary'].map(c => '<option value="' + c + '"' + ((hook.output_contract || '') === c ? ' selected' : '') + '>' + (c || '(none)') + '</option>').join('') +
+							'</select></label>' +
+						'<div class="flex items-end gap-3">' +
+							'<label class="label cursor-pointer gap-2 justify-start"><input type="checkbox" class="checkbox checkbox-sm" data-hook-field="blocking"' + (hook.blocking ? ' checked' : '') + ' ' + disabled + '/><span class="label-text text-sm">Blocking</span></label>' +
+							'<label class="label cursor-pointer gap-2 justify-start"><input type="checkbox" class="checkbox checkbox-sm" data-hook-field="enabled"' + ((hook.enabled !== false) ? ' checked' : '') + ' ' + disabled + '/><span class="label-text text-sm">Enabled</span></label>' +
+							(lifecycleProtectedAgent ? '' : '<button type="button" class="btn btn-ghost btn-xs ml-auto text-error" onclick="removeLifecycleHookRow(' + idx + ')">Remove</button>') +
+						'</div>' +
+					'</div>' +
+					'<label class="form-control mt-2"><span class="label-text text-xs">Prompt override (optional)</span>' +
+						'<textarea class="textarea textarea-bordered textarea-xs" data-hook-field="prompt_override" rows="2" placeholder="" ' + disabled + '>' + escapeHtml(hook.prompt_override || '') + '</textarea></label>';
+				return wrap;
+			}
+
+					function agentSkillAPIURL(path) {
+						const url = new URL(path, window.location.origin);
+						const projectID = new URLSearchParams(window.location.search).get('project_id');
+						if (projectID) url.searchParams.set('project_id', projectID);
+						return url.pathname + url.search;
+					}
+
+					async function loadAgentSkillsForAgent(agentID) {
+					const list = document.getElementById('agent_skills_list');
+						if (!list) return;
+							agentOwnedSkillsState = { routed_skills: [], can_manage: false, protected: false };
+						renderAgentOwnedSkills();
+						if (!agentID) {
+							list.innerHTML = '<p class="text-sm opacity-50">Save this agent before creating skills.</p>';
+							return;
+						}
+						list.innerHTML = '<p class="text-sm opacity-50">Loading routed skills...</p>';
+						try {
+							const response = await fetch(agentSkillAPIURL('/agents/' + encodeURIComponent(agentID) + '/skills'), { headers: { 'Accept': 'application/json' } });
+							if (!response.ok) throw new Error(await readErrorMessage(response, 'Could not load skills'));
+							agentOwnedSkillsState = await response.json();
+							renderAgentOwnedSkills();
+						} catch (err) {
+							list.innerHTML = '<p class="text-sm text-error">' + escapeHtml(String(err.message || err)) + '</p>';
+						}
+					}
+
+					function renderAgentOwnedSkills() {
+						const list = document.getElementById('agent_skills_list');
+						const summary = document.getElementById('agent_skills_router_summary');
+						const index = document.getElementById('agent_skills_router_index');
+						const newBtn = document.getElementById('agent_skill_new_btn');
+						const notice = document.getElementById('agent_skills_system_notice');
+							const state = agentOwnedSkillsState || {};
+							const routed = Array.isArray(state.routed_skills) ? state.routed_skills : [];
+						const canManage = Boolean(state.can_manage);
+							if (newBtn) newBtn.disabled = !canManage || !activeAgentID;
+							const scopeSelect = document.getElementById('agent_skill_scope');
+							if (scopeSelect) {
+								const projectOption = Array.from(scopeSelect.options).find(option => option.value === 'project');
+								if (projectOption) projectOption.disabled = !state.project_root_set;
+								if (scopeSelect.value === 'project' && !state.project_root_set) scopeSelect.value = 'global';
+							}
+							if (notice) notice.classList.toggle('hidden', !state.protected);
+						if (summary) {
+							summary.textContent = activeAgentID
+								? `When assigned to a task, route_task selects from ${routed.length} indexed skill(s) owned by agent ${state.agent_key || '(unknown)'}. Project skills override global skills.`
+								: 'Save this agent to preview routed skills.';
+						}
+						if (index) {
+							index.textContent = state.router_index || '';
+							index.classList.toggle('hidden', !state.router_index);
+						}
+						if (list) {
+							if (routed.length === 0) {
+								list.innerHTML = '<p class="text-sm opacity-50">No indexed skills yet.</p>';
+							} else {
+								list.innerHTML = routed.map(skill => renderAgentOwnedSkillCard(skill, canManage)).join('');
+							}
+						}
+					}
+
+					function renderAgentOwnedSkillCard(skill, canManage) {
+						const handle = String(skill.handle || '').trim();
+						const archived = Boolean(skill.archived);
+						const manageButtons = canManage ? '<div class="flex gap-1"><button type="button" class="btn btn-ghost btn-xs" onclick="editAgentOwnedSkill(\'' + escapeHtml(handle) + '\')">Edit</button><button type="button" class="btn btn-ghost btn-xs text-warning" onclick="archiveAgentOwnedSkill(\'' + escapeHtml(handle) + '\')">Archive</button></div>' : '';
+						return '<div class="border border-base-300 rounded-lg p-3 bg-base-200/30">' +
+							'<div class="flex items-start justify-between gap-2"><div><div class="font-medium text-sm">' + escapeHtml(skill.name || handle || '(unnamed)') + (archived ? ' <span class="badge badge-warning badge-xs">archived</span>' : '') + '</div>' +
+							'<p class="text-xs opacity-60">' + escapeHtml(handle) + ' · ' + escapeHtml(skill.scope || skill.source || 'project') + '</p></div>' + manageButtons + '</div>' +
+							(skill.description ? '<p class="text-xs opacity-70 mt-1">' + escapeHtml(skill.description) + '</p>' : '') +
+							(skill.path ? '<p class="text-[11px] opacity-50 mt-1 break-all">' + escapeHtml(skill.path) + '</p>' : '') +
+						'</div>';
+					}
+
+					function startNewAgentOwnedSkill() {
+						if (!activeAgentID || !(agentOwnedSkillsState && agentOwnedSkillsState.can_manage)) return;
+						editingAgentSkillOriginalHandle = '';
+						document.getElementById('agent_skill_handle').value = '';
+						document.getElementById('agent_skill_handle').disabled = false;
+						document.getElementById('agent_skill_name').value = '';
+						document.getElementById('agent_skill_description').value = '';
+							const preferredScope = ((agentOwnedSkillsState || {}).agent_scope === 'global' || !(agentOwnedSkillsState || {}).project_root_set) ? 'global' : 'project';
+							document.getElementById('agent_skill_scope').value = preferredScope;
+						document.getElementById('agent_skill_body').value = '';
+						document.getElementById('agent_skill_editor').classList.remove('hidden');
+					}
+
+					function editAgentOwnedSkill(handle) {
+						const skills = Array.isArray(agentOwnedSkillsState.routed_skills) ? agentOwnedSkillsState.routed_skills : [];
+						const skill = skills.find(item => item.handle === handle);
+						if (!skill) return;
+						editingAgentSkillOriginalHandle = handle;
+						document.getElementById('agent_skill_handle').value = skill.handle || '';
+						document.getElementById('agent_skill_handle').disabled = true;
+						document.getElementById('agent_skill_name').value = skill.name || '';
+						document.getElementById('agent_skill_description').value = skill.description || '';
+						document.getElementById('agent_skill_scope').value = skill.scope === 'global' ? 'global' : 'project';
+						document.getElementById('agent_skill_body').value = skill.content || '';
+						document.getElementById('agent_skill_editor').classList.remove('hidden');
+					}
+
+					function cancelAgentOwnedSkillEdit() {
+						editingAgentSkillOriginalHandle = '';
+						document.getElementById('agent_skill_editor').classList.add('hidden');
+					}
+
+					async function saveAgentOwnedSkill() {
+						if (!activeAgentID) return;
+						const handle = String(document.getElementById('agent_skill_handle').value || '').trim();
+						if (!handle || handle.includes('/')) {
+							if (window.showToast) window.showToast('Skill key is required and must not include /', 'failed');
+							return;
+						}
+						const payload = {
+							handle: handle,
+							name: document.getElementById('agent_skill_name').value || '',
+							description: document.getElementById('agent_skill_description').value || '',
+							scope: document.getElementById('agent_skill_scope').value || 'project',
+							body: document.getElementById('agent_skill_body').value || '',
+						};
+						const url = agentSkillAPIURL(editingAgentSkillOriginalHandle
+							? '/agents/' + encodeURIComponent(activeAgentID) + '/skills/' + encodeURIComponent(editingAgentSkillOriginalHandle)
+							: '/agents/' + encodeURIComponent(activeAgentID) + '/skills');
+						const method = editingAgentSkillOriginalHandle ? 'PUT' : 'POST';
+						try {
+							const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(payload) });
+							if (!response.ok) throw new Error(await readErrorMessage(response, 'Could not save skill'));
+							agentOwnedSkillsState = await response.json();
+							cancelAgentOwnedSkillEdit();
+							renderAgentOwnedSkills();
+							if (window.showToast) window.showToast('Agent-owned skill saved', 'completed');
+						} catch (err) {
+							if (window.showToast) window.showToast(String(err.message || err), 'failed');
+						}
+					}
+
+					async function archiveAgentOwnedSkill(handle) {
+						if (!activeAgentID || !handle || !window.confirm('Archive skill "' + handle + '"?')) return;
+						try {
+							const skill = (Array.isArray(agentOwnedSkillsState.routed_skills) ? agentOwnedSkillsState.routed_skills : []).find(item => item.handle === handle) || {};
+							const scopeParam = skill.scope ? ('?scope=' + encodeURIComponent(skill.scope)) : '';
+							const response = await fetch(agentSkillAPIURL('/agents/' + encodeURIComponent(activeAgentID) + '/skills/' + encodeURIComponent(handle) + '/archive' + scopeParam), { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ reason: 'Archived from the agent dialog' }) });
+							if (!response.ok) throw new Error(await readErrorMessage(response, 'Could not archive skill'));
+							agentOwnedSkillsState = await response.json();
+							renderAgentOwnedSkills();
+							if (window.showToast) window.showToast('Agent-owned skill archived', 'completed');
+						} catch (err) {
+							if (window.showToast) window.showToast(String(err.message || err), 'failed');
+						}
+					}
+
+
+						function collectLifecycleHooksFromDOM() {
+						const rows = document.querySelectorAll('#lifecycle_hooks_list [data-hook-idx]');
+						const out = [];				rows.forEach((row, i) => {
+					const get = (name) => {
+						const el = row.querySelector('[data-hook-field="' + name + '"]');
+						if (!el) return '';
+						if (el.type === 'checkbox') return !!el.checked;
+						return String(el.value || '').trim();
+					};
+					const hook = lifecycleHooksState[i] || {};
+					const when = get('when');
+					if (when === 'task_mode') return;
+					out.push({
+							id: hook.id || '',
+							when: when,
+							skill_key: get('skill_key'),
+							blocking: get('blocking'),
+							enabled: get('enabled'),
+							output_contract: get('output_contract'),
+								prompt_override: get('prompt_override'),
+							});				});
+				return out;
+			}
+
+			function addLifecycleHookRow() {
+				if (lifecycleProtectedAgent) return;
+				lifecycleHooksState.push({ when: 'before_run', skill_key: '', blocking: true, enabled: true, output_contract: '' });
+				renderLifecycleHooks();
+			}
+
+			function removeLifecycleHookRow(idx) {
+				if (lifecycleProtectedAgent) return;
+				lifecycleHooksState.splice(idx, 1);
+				renderLifecycleHooks();
+			}
+
 			document.body.addEventListener('htmx:responseError', function(event) {
 				if (!event.detail || !event.detail.target || event.detail.target.id !== 'agents-container') return;
 				const xhr = event.detail.xhr;

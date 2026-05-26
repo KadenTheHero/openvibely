@@ -22,29 +22,29 @@ const (
 
 type Config struct {
 	// Mode is the runtime mode (server or desktop).
-	Mode                          RuntimeMode
-	Port                          string
-	DatabasePath                  string
-	DatabaseURL                   string
-	AnthropicKey                  string
-	TelegramToken                 string
-	Environment                   string
-	GitHubAppID                   string
-	GitHubAppSlug                 string
-	GitHubAppPrivateKey           string
-	SlackClientID                 string
-	SlackClientSecret             string
-	SlackAppToken                 string
-	SlackBotToken                 string
-	AppBaseURL                    string
-	ProjectRepoRoot               string
-	AppDataDir                    string
-	EnableLocalRepoPath           bool
-	AuthEnabled                   bool
-	AuthUsername                  string
-	AuthPassword                  string
-	AuthSessionSecret             string
-	AuthSessionTTL                time.Duration
+	Mode                RuntimeMode
+	Port                string
+	DatabasePath        string
+	DatabaseURL         string
+	AnthropicKey        string
+	TelegramToken       string
+	Environment         string
+	GitHubAppID         string
+	GitHubAppSlug       string
+	GitHubAppPrivateKey string
+	SlackClientID       string
+	SlackClientSecret   string
+	SlackAppToken       string
+	SlackBotToken       string
+	AppBaseURL          string
+	ProjectRepoRoot     string
+	AppDataDir          string
+	EnableLocalRepoPath bool
+	AuthEnabled         bool
+	AuthUsername        string
+	AuthPassword        string
+	AuthSessionSecret   string
+	AuthSessionTTL      time.Duration
 }
 
 // Load builds a Config from environment variables in server mode.
@@ -55,62 +55,117 @@ func Load() *Config {
 // LoadWithMode builds a Config from environment variables, applying
 // mode-specific defaults where appropriate.
 func LoadWithMode(mode RuntimeMode) *Config {
-	// Resolve defaults that differ by mode.
-	defaultPort := "3001"
-	defaultAppDataDir := ""
-	defaultDBPath := "./openvibely.db"
-	defaultRepoRoot := "./repos"
-	defaultEnableLocalRepo := false
+	defaults := defaultsForMode(mode)
 
-	if mode == ModeDesktop {
-		// Desktop mode: use OS app-data directory for writable storage.
-		defaultAppDataDir = desktopDataDir()
-		// Ephemeral port — let OS pick; 0 means the server will bind to a random free port.
-		defaultPort = "0"
-		// Desktop users always have access to local paths.
-		defaultEnableLocalRepo = true
-	}
-
-	appDataDir := getEnv("OPENVIBELY_APP_DATA_DIR", defaultAppDataDir)
-	if appDataDir != "" {
-		defaultDBPath = filepath.Join(appDataDir, "openvibely.db")
-		defaultRepoRoot = filepath.Join(appDataDir, "repos")
-	}
+	appDataDir := getEnv("OPENVIBELY_APP_DATA_DIR", defaults.AppDataDir)
+	defaultDBPath := filepath.Join(appDataDir, "openvibely.db")
+	defaultRepoRoot := filepath.Join(appDataDir, "repos")
 
 	enableLocalRepo := ResolveEnableLocalRepoPath(os.Getenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH"))
 	if mode == ModeDesktop && os.Getenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH") == "" {
-		enableLocalRepo = defaultEnableLocalRepo
+		enableLocalRepo = defaults.EnableLocalRepoPath
 	}
 
-	return &Config{
-		Mode:                          mode,
-		Port:                          getEnv("PORT", defaultPort),
-		DatabasePath:                  getEnv("DATABASE_PATH", defaultDBPath),
-		DatabaseURL:                   getEnv("DATABASE_URL", ""),
-		AnthropicKey:                  getEnv("ANTHROPIC_API_KEY", ""),
-		TelegramToken:                 getEnv("TELEGRAM_BOT_TOKEN", ""),
-		Environment:                   getEnv("ENVIRONMENT", "development"),
-		GitHubAppID:                   getEnv("GITHUB_APP_ID", ""),
-		GitHubAppSlug:                 getEnv("GITHUB_APP_SLUG", ""),
-		GitHubAppPrivateKey:           getEnv("GITHUB_APP_PRIVATE_KEY", ""),
-		SlackClientID:                 getEnv("SLACK_CLIENT_ID", ""),
-		SlackClientSecret:             getEnv("SLACK_CLIENT_SECRET", ""),
-		SlackAppToken:                 getEnv("SLACK_APP_TOKEN", ""),
-		SlackBotToken:                 getEnv("SLACK_BOT_TOKEN", ""),
-		AppBaseURL:                    ResolveAppBaseURL(getEnv("APP_BASE_URL", "")),
-		ProjectRepoRoot:               getEnv("PROJECT_REPO_ROOT", defaultRepoRoot),
-		AppDataDir:                    appDataDir,
-		EnableLocalRepoPath:           enableLocalRepo,
-		AuthEnabled:                   ResolveAuthEnabled(os.Getenv("AUTH_ENABLED"), os.Getenv("AUTH_USERNAME"), os.Getenv("AUTH_PASSWORD")),
-		AuthUsername:                  getEnv("AUTH_USERNAME", ""),
-		AuthPassword:                  getEnv("AUTH_PASSWORD", ""),
-		AuthSessionSecret:             getEnv("AUTH_SESSION_SECRET", ""),
-		AuthSessionTTL:                ResolveAuthSessionTTL(getEnv("AUTH_SESSION_TTL", "")),
-	}
+	return (&Config{
+		Mode:                mode,
+		Port:                getEnv("PORT", defaults.Port),
+		DatabasePath:        getEnv("DATABASE_PATH", defaultDBPath),
+		DatabaseURL:         getEnv("DATABASE_URL", ""),
+		AnthropicKey:        getEnv("ANTHROPIC_API_KEY", ""),
+		TelegramToken:       getEnv("TELEGRAM_BOT_TOKEN", ""),
+		Environment:         getEnv("ENVIRONMENT", "development"),
+		GitHubAppID:         getEnv("GITHUB_APP_ID", ""),
+		GitHubAppSlug:       getEnv("GITHUB_APP_SLUG", ""),
+		GitHubAppPrivateKey: getEnv("GITHUB_APP_PRIVATE_KEY", ""),
+		SlackClientID:       getEnv("SLACK_CLIENT_ID", ""),
+		SlackClientSecret:   getEnv("SLACK_CLIENT_SECRET", ""),
+		SlackAppToken:       getEnv("SLACK_APP_TOKEN", ""),
+		SlackBotToken:       getEnv("SLACK_BOT_TOKEN", ""),
+		AppBaseURL:          ResolveAppBaseURL(getEnv("APP_BASE_URL", "")),
+		ProjectRepoRoot:     getEnv("PROJECT_REPO_ROOT", defaultRepoRoot),
+		AppDataDir:          appDataDir,
+		EnableLocalRepoPath: enableLocalRepo,
+		AuthEnabled:         ResolveAuthEnabled(os.Getenv("AUTH_ENABLED"), os.Getenv("AUTH_USERNAME"), os.Getenv("AUTH_PASSWORD")),
+		AuthUsername:        getEnv("AUTH_USERNAME", ""),
+		AuthPassword:        getEnv("AUTH_PASSWORD", ""),
+		AuthSessionSecret:   getEnv("AUTH_SESSION_SECRET", ""),
+		AuthSessionTTL:      ResolveAuthSessionTTL(getEnv("AUTH_SESSION_TTL", "")),
+	}).NormalizeForMode()
 }
 
-// desktopDataDir returns the OS-conventional app-data directory for OpenVibely
-// desktop mode.  The directory is created if it does not exist.
+// NormalizeForMode fills mode-specific storage defaults on partially constructed
+// configs. Entry points should normally use LoadWithMode, but server.Start also
+// calls this so tests and embedded callers cannot accidentally run desktop mode
+// with project-relative database, repo, or global agent storage paths.
+func (c *Config) NormalizeForMode() *Config {
+	if c == nil {
+		return nil
+	}
+	if c.Mode == "" {
+		c.Mode = ModeServer
+	}
+	defaults := defaultsForMode(c.Mode)
+	if c.Port == "" {
+		c.Port = defaults.Port
+	}
+	if c.AppDataDir == "" {
+		c.AppDataDir = defaults.AppDataDir
+	}
+	if c.AppDataDir != "" {
+		_ = os.MkdirAll(c.AppDataDir, 0o755)
+	}
+	if c.DatabasePath == "" {
+		c.DatabasePath = filepath.Join(c.AppDataDir, "openvibely.db")
+	}
+	if c.ProjectRepoRoot == "" {
+		c.ProjectRepoRoot = filepath.Join(c.AppDataDir, "repos")
+	}
+	if c.Mode == ModeDesktop && os.Getenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH") == "" {
+		c.EnableLocalRepoPath = true
+	}
+	return c
+}
+
+type modeDefaults struct {
+	Port                string
+	AppDataDir          string
+	DatabasePath        string
+	ProjectRepoRoot     string
+	EnableLocalRepoPath bool
+}
+
+func defaultsForMode(mode RuntimeMode) modeDefaults {
+	appDataDir := serverDataDir()
+	defaults := modeDefaults{
+		Port:            "3001",
+		AppDataDir:      appDataDir,
+		DatabasePath:    filepath.Join(appDataDir, "openvibely.db"),
+		ProjectRepoRoot: filepath.Join(appDataDir, "repos"),
+	}
+	if mode == ModeDesktop {
+		defaults.Port = "0"
+		defaults.EnableLocalRepoPath = true
+	}
+	return defaults
+}
+
+// serverDataDir returns the default app-owned storage directory for web/server
+// mode. This is where the default database, managed repos, global agents,
+// global skills, and other app-owned config live by default.
+func serverDataDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = "."
+	}
+	base := filepath.Join(home, ".openvibely")
+	_ = os.MkdirAll(base, 0o755)
+	return base
+}
+
+// desktopDataDir returns the OS-conventional desktop config directory for
+// OpenVibely. Runtime storage defaults intentionally use serverDataDir for both
+// web/server and desktop modes so both apps share the same DB unless explicitly
+// configured otherwise.
 func desktopDataDir() string {
 	var base string
 	switch runtime.GOOS {

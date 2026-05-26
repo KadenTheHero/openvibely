@@ -15,54 +15,57 @@ import (
 )
 
 type Handler struct {
-	projectSvc                     *service.ProjectService
-	taskSvc                        *service.TaskService
-	llmSvc                         *service.LLMService
-	workerSvc                      *service.WorkerService
-	schedulerSvc                   *service.SchedulerService
-	alertSvc                       *service.AlertService
-	upcomingSvc                    *service.UpcomingService
-	workflowSvc                    *service.WorkflowService
-	collisionSvc                   *service.CollisionService
-	insightsSvc                    *service.InsightsService
-	architectSvc                   *service.ArchitectService
-	backlogSvc                     *service.BacklogService
-	autonomousTriggerSvc           *service.AutonomousTriggerService
-	trendSvc                       *service.TrendIntelligenceService
-	templateSvc                    *service.TemplateService
-	patternSvc                     *service.PatternService
-	llmConfigRepo                  *repository.LLMConfigRepo
-	taskRepo                       *repository.TaskRepo
-	scheduleRepo                   *repository.ScheduleRepo
-	execRepo                       *repository.ExecutionRepo
-	workerRepo                     *repository.WorkerRepo
-	attachmentRepo                 *repository.AttachmentRepo
-	chatAttachmentRepo             *repository.ChatAttachmentRepo
-	projectRepo                    *repository.ProjectRepo
-	settingsRepo                   *repository.SettingsRepo
-	broadcaster                    *events.Broadcaster
-	chatBroadcaster                *events.ChatBroadcaster
-	fileChangeBroadcaster          *events.FileChangeBroadcaster
-	telegramService                *service.TelegramService
-	telegramAuthRepo               *repository.TelegramAuthRepo
-	slackAuthRepo                  *repository.SlackAuthRepo
-	reviewCommentRepo              *repository.ReviewCommentRepo
-	customPersonalityRepo          *repository.CustomPersonalityRepo
-	agentRepo                      *repository.AgentRepo
-	worktreeSvc                    *service.WorktreeService
-	taskPullRequestRepo            *repository.TaskPullRequestRepo
-	githubSvc                      GitHubServiceProvider
-	slackSvc                       SlackServiceProvider
-	localRepoPathEnabled           *bool
-	projectFolderPicker            ProjectFolderPicker
-	webhookRepo                    *repository.WebhookRepo
-	memorySvc                      *service.MemoryService
-	authCfg                        *auth.Config
-	desktopMode                    bool
+	projectSvc                 *service.ProjectService
+	taskSvc                    *service.TaskService
+	llmSvc                     *service.LLMService
+	workerSvc                  *service.WorkerService
+	schedulerSvc               *service.SchedulerService
+	alertSvc                   *service.AlertService
+	upcomingSvc                *service.UpcomingService
+	workflowSvc                *service.WorkflowService
+	collisionSvc               *service.CollisionService
+	insightsSvc                *service.InsightsService
+	architectSvc               *service.ArchitectService
+	backlogSvc                 *service.BacklogService
+	autonomousTriggerSvc       *service.AutonomousTriggerService
+	trendSvc                   *service.TrendIntelligenceService
+	templateSvc                *service.TemplateService
+	patternSvc                 *service.PatternService
+	llmConfigRepo              *repository.LLMConfigRepo
+	taskRepo                   *repository.TaskRepo
+	scheduleRepo               *repository.ScheduleRepo
+	execRepo                   *repository.ExecutionRepo
+	workerRepo                 *repository.WorkerRepo
+	attachmentRepo             *repository.AttachmentRepo
+	chatAttachmentRepo         *repository.ChatAttachmentRepo
+	projectRepo                *repository.ProjectRepo
+	settingsRepo               *repository.SettingsRepo
+	broadcaster                *events.Broadcaster
+	chatBroadcaster            *events.ChatBroadcaster
+	fileChangeBroadcaster      *events.FileChangeBroadcaster
+	telegramService            *service.TelegramService
+	telegramAuthRepo           *repository.TelegramAuthRepo
+	slackAuthRepo              *repository.SlackAuthRepo
+	reviewCommentRepo          *repository.ReviewCommentRepo
+	customPersonalityRepo      *repository.CustomPersonalityRepo
+	agentRepo                  *repository.AgentRepo
+	lifecycleRepo              *repository.LifecycleRepo
+	worktreeSvc                *service.WorktreeService
+	taskPullRequestRepo        *repository.TaskPullRequestRepo
+	githubSvc                  GitHubServiceProvider
+	slackSvc                   SlackServiceProvider
+	localRepoPathEnabled       *bool
+	projectFolderPicker        ProjectFolderPicker
+	webhookRepo                *repository.WebhookRepo
+	memorySvc                  *service.MemoryService
+	agentLibraryMaintenanceSvc *service.AgentLibraryMaintenanceService
+	agentSkillRoot             string
+	authCfg                    *auth.Config
+	desktopMode                bool
 
-	loginFailuresMu     sync.Mutex
-	loginFailureTimes   []time.Time
-	loginLockedUntil    time.Time
+	loginFailuresMu   sync.Mutex
+	loginFailureTimes []time.Time
+	loginLockedUntil  time.Time
 }
 
 type ProjectFolderPicker func(ctx context.Context) (path string, canceled bool, err error)
@@ -185,6 +188,12 @@ func (h *Handler) SetAgentRepo(repo *repository.AgentRepo) {
 	h.agentRepo = repo
 }
 
+// SetLifecycleRepo sets the lifecycle repo for agent hook management and
+// lifecycle execution activity surfacing.
+func (h *Handler) SetLifecycleRepo(repo *repository.LifecycleRepo) {
+	h.lifecycleRepo = repo
+}
+
 // SetWorktreeService sets the worktree service for git worktree management.
 func (h *Handler) SetWorktreeService(svc *service.WorktreeService) {
 	h.worktreeSvc = svc
@@ -229,6 +238,10 @@ func (h *Handler) SetWebhookRepo(repo *repository.WebhookRepo) {
 // Schedule page, and trigger "Run Now" passes.
 func (h *Handler) SetMemoryService(svc *service.MemoryService) {
 	h.memorySvc = svc
+}
+
+func (h *Handler) SetAgentLibraryMaintenanceService(svc *service.AgentLibraryMaintenanceService) {
+	h.agentLibraryMaintenanceSvc = svc
 }
 
 // getCurrentProjectID resolves the current project ID from the query param.
@@ -374,9 +387,19 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/agents/plugins/marketplaces/reset-defaults", h.ResetPluginMarketplaces)
 	e.POST("/agents/plugins/install", h.InstallPlugin)
 	e.POST("/agents/plugins/uninstall", h.UninstallPlugin)
+	e.GET("/agents/:id/json", h.GetAgentJSON)
+	e.GET("/agents/:id/skills", h.GetAgentSkills)
+	e.POST("/agents/:id/skills", h.CreateAgentOwnedSkill)
+	e.PUT("/agents/:id/skills/:skill", h.UpdateAgentOwnedSkill)
+	e.POST("/agents/:id/skills/:skill/archive", h.ArchiveAgentOwnedSkill)
 	e.PUT("/agents/:id", h.UpdateAgent)
 	e.DELETE("/agents/:id", h.DeleteAgent)
-	e.GET("/agents/:id/json", h.GetAgentJSON)
+	// Lifecycle hooks (runbook §Agent Create/Edit Dialog → Lifecycle Hooks Tab)
+	e.GET("/agents/:id/lifecycle-hooks", h.GetAgentLifecycleHooks)
+	e.PUT("/agents/:id/lifecycle-hooks", h.SaveAgentLifecycleHooks)
+	// Lifecycle execution activity (runbook §Rollout step 17)
+	e.GET("/api/tasks/:id/lifecycle-executions", h.GetTaskLifecycleExecutions)
+	e.GET("/api/lifecycle-executions/:id/events", h.GetLifecycleExecutionEvents)
 
 	e.GET("/models", h.ListModels)
 	e.POST("/models", h.CreateModel)

@@ -441,3 +441,25 @@ func TestTaskDetailContent_RunAtFieldsClickablePickerAffordance(t *testing.T) {
 		t.Fatal("expected showPicker-based open behavior with fallback focus")
 	}
 }
+func TestTaskDetailContent_AgentSelectorAllowsNoAgentSelection(t *testing.T) {
+	task := &models.Task{ID: "task1", ProjectID: "project1", Title: "Task", Status: models.StatusPending, Category: models.CategoryActive}
+	agentDefs := []models.Agent{{ID: "agent1", Name: "Reviewer", Key: "reviewer", Model: "inherit", Enabled: true, SelectableAsPrimary: true}}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, agentDefs, nil, "details", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task detail: %v", err)
+	}
+	body := buf.String()
+	if strings.Contains(body, "Auto (router selects each run)") {
+		t.Fatal("agent selector must not offer automatic agent routing")
+	}
+	if strings.Contains(body, `name="agent_definition_id" class="select select-bordered" required`) {
+		t.Fatalf("agent selector should allow an intentionally unassigned task, body=%s", body)
+	}
+	if !strings.Contains(body, `option value="" selected>No Agent</option>`) {
+		t.Fatalf("agent selector should preserve the no-agent option, body=%s", body)
+	}
+	if strings.Contains(body, `name="agent_definition_present"`) {
+		t.Fatalf("edit form should not need a sentinel for the no-agent option, body=%s", body)
+	}
+}

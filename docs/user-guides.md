@@ -26,6 +26,7 @@ If this is a fresh install:
 - [Project Setup User Guide](./project-setup-user-guide.md)
 - [Models User Guide](./models-user-guide.md)
 - [Agents User Guide](./agents-user-guide.md)
+- [Lifecycle Hooks and Skills User Guide](./lifecycle-skills-user-guide.md)
 - [Workers User Guide](./workers-user-guide.md)
 - [Tasks User Guide](./tasks-user-guide.md)
 - [Chat User Guide](./chat-user-guide.md)

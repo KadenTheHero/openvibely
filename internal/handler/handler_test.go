@@ -3148,6 +3148,81 @@ func TestHandler_GetTaskThread(t *testing.T) {
 	assertContains(t, rec, "task-thread-form")
 }
 
+func TestHandler_GetTaskThread_ShowsPrimaryAgentDefinition(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Temperature = 1.0 })
+	agentDef := &models.Agent{
+		Name:         "Reviewer Bot",
+		Key:          "reviewer_bot",
+		Description:  "Reviews code changes",
+		SystemPrompt: "Review and suggest improvements.",
+		Model:        "inherit",
+	}
+	if err := agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+	project := createProject(t, h, "Primary Agent Thread Project")
+	task := createTask(t, h, project.ID, "Primary Agent Thread Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.Prompt = "Test prompt"
+		tk.AgentID = &agent.ID
+		tk.AgentDefinitionID = &agentDef.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "Test prompt"
+	})
+	h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "Task output", "", 100, 500)
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "Assigned agent:")
+	assertContains(t, rec, "Reviewer Bot")
+	assertContains(t, rec, "reviewer_bot")
+}
+
+func TestHandler_GetTaskThread_HidesLifecycleAgentActivity(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Temperature = 1.0 })
+	project := createProject(t, h, "Lifecycle Thread Project")
+	task := createTask(t, h, project.ID, "Lifecycle Thread Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.Prompt = "Test prompt"
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "Test prompt"
+	})
+	h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "Task output", "", 100, 500)
+
+	lifeExec := &models.LifecycleExecution{
+		TaskID:         task.ID,
+		TaskRunID:      task.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "skill_curator/observe_task_for_learning",
+		OutputContract: models.OutputContractContextBlock,
+		Status:         models.LifecycleExecCompleted,
+		OutputJSON:     `{"title":"Prepared useful context","content":"private context"}`,
+	}
+	if err := h.lifecycleRepo.CreateExecution(ctx, lifeExec); err != nil {
+		t.Fatalf("create lifecycle execution: %v", err)
+	}
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "Test prompt")
+	assertContains(t, rec, "Task output")
+	assertNotContains(t, rec, "Lifecycle agent activity")
+	assertNotContains(t, rec, "before_run")
+	assertNotContains(t, rec, "Prepared useful context")
+	assertNotContains(t, rec, "private context")
+}
+
 func TestHandler_GetTaskThread_DoesNotPollWhenPending(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	project := createProject(t, h, "Pending Thread Polling Project")

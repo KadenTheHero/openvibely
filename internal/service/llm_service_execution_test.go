@@ -187,6 +187,47 @@ func TestLLMService_CallAgentDirectStreaming_TestProviderUsesMockCaller(t *testi
 	}
 }
 
+func TestLLMService_CallAgentDirectStreamingDetailed_BuildsChatContextFromNormalizedHistory(t *testing.T) {
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	capture := &captureProviderAdapter{}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
+
+	history := make([]models.Execution, 22)
+	for i := range history {
+		history[i] = models.Execution{PromptSent: fmt.Sprintf("old prompt %02d", i), Output: fmt.Sprintf("old output %02d", i), Status: models.ExecCompleted}
+	}
+	history[20].Status = models.ExecRunning
+	history[20].Output = "running output should be skipped"
+	history[21].Output = "visible answer\n[CREATE_TASK]\n{\"title\":\"internal\"}\n[/CREATE_TASK]"
+
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test"}
+	res, err := svc.CallAgentDirectStreamingDetailed(context.Background(), "  current prompt  ", nil, agent, "exec-123", history, "ctx", "/tmp/workdir", nil)
+	if err != nil {
+		t.Fatalf("CallAgentDirectStreamingDetailed error: %v", err)
+	}
+	got := res.ChatContext.Messages
+	if len(got) != 41 {
+		t.Fatalf("expected 20 normalized history prompts, completed/failed assistant outputs, plus current turn, got %d: %#v", len(got), got)
+	}
+	if got[0].Content != "old prompt 02" {
+		t.Fatalf("expected oldest retained history after normalization, got %#v", got[0])
+	}
+	if strings.Contains(got[38].Content, "CREATE_TASK") || got[38].Content != "visible answer" {
+		t.Fatalf("expected cleaned historical assistant output, got %#v", got[38])
+	}
+	for _, msg := range got {
+		if msg.Content == "running output should be skipped" {
+			t.Fatalf("running assistant output should not be included: %#v", got)
+		}
+	}
+	if got[39].Role != "user" || got[39].Content != "current prompt" {
+		t.Fatalf("expected normalized current user message, got %#v", got[39])
+	}
+	if got[40].Role != "assistant" || got[40].Content != "ok" {
+		t.Fatalf("expected current assistant text, got %#v", got[40])
+	}
+}
+
 func TestLLMService_CallAgentDirectStreamingDetailed_TestProviderPreservesTextOnly(t *testing.T) {
 	svc := &LLMService{}
 	mock := testutil.NewMockLLMCaller()
@@ -208,6 +249,90 @@ func TestLLMService_CallAgentDirectStreamingDetailed_TestProviderPreservesTextOn
 	}
 	if res.Usage.TotalTokens != 29 {
 		t.Fatalf("expected tokens=29, got %d", res.Usage.TotalTokens)
+	}
+	if got := res.ChatContext.Messages; len(got) != 2 || got[0].Role != "user" || got[0].Content != "hello" || got[1].Role != "assistant" || got[1].Content != "text-only" {
+		t.Fatalf("expected normalized request chat context plus assistant text, got %#v", got)
+	}
+}
+
+func TestLLMService_CallAgentDirectWithDefinition_PropagatesAgentDefinitionAndScopedTools(t *testing.T) {
+	repo := t.TempDir()
+	globalRoot := t.TempDir()
+	capture := &captureProviderAdapter{}
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
+	svc.SetGlobalSkillRoot(globalRoot)
+
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test"}
+	agentDef := &models.Agent{
+		ID:         "skill-curator-1",
+		Name:       "System: Skill Curator",
+		SystemKind: models.AgentSystemKindSkillCurator,
+		Tools:      []string{models.AgentToolScopedFiles},
+		ToolConfig: models.AgentToolConfig{
+			ScopedFiles:            []models.ScopedFilesConfig{{Directory: ".openvibely/agents", Permissions: []string{"read", "write", "delete"}}},
+			SkipDefaultTools:       true,
+			DisableRuntimeWorktree: true,
+		},
+	}
+
+	_, _, err := svc.CallAgentDirectWithDefinition(context.Background(), "review", nil, agent, repo, agentDef)
+	if err != nil {
+		t.Fatalf("CallAgentDirectWithDefinition error: %v", err)
+	}
+	if capture.lastReq.AgentDefinition == nil || capture.lastReq.AgentDefinition.ID != agentDef.ID {
+		t.Fatalf("expected agent definition propagated, got %#v", capture.lastReq.AgentDefinition)
+	}
+	rt := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx)
+	if rt == nil || !rt.HasDefinition("write_file") {
+		t.Fatalf("expected scoped file runtime tools, got %#v", rt)
+	}
+	if capture.lastReq.WorkDir == repo {
+		t.Fatalf("expected workdir switched to scoped root when SkipDefaultTools=true")
+	}
+	payload, _ := json.Marshal(map[string]string{"file_path": "AGENTS.md", "content": "# Agents\n"})
+	if _, handled, isErr, err := rt.Executor(capture.lastReq.Ctx, "write_file", payload); !handled || isErr || err != nil {
+		t.Fatalf("expected configured scoped file write to succeed handled=%v isErr=%v err=%v", handled, isErr, err)
+	}
+	globalPayload, _ := json.Marshal(map[string]string{"file_path": "global_agents/AGENTS.md", "content": "# Agents\n"})
+	if _, handled, isErr, err := rt.Executor(capture.lastReq.Ctx, "write_file", globalPayload); !handled || isErr || err != nil {
+		t.Fatalf("global_agents is only a normal relative path without an injected global scope, handled=%v isErr=%v err=%v", handled, isErr, err)
+	}
+	if _, err := os.Stat(filepath.Join(globalRoot, "agents", "AGENTS.md")); !os.IsNotExist(err) {
+		t.Fatalf("global agents index must not be writable through scoped files, stat err=%v", err)
+	}
+}
+
+func TestLLMService_CallAgentDirectWithDefinition_RequiresScopedFilesToolGrant(t *testing.T) {
+	repo := t.TempDir()
+	capture := &captureProviderAdapter{}
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
+
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test"}
+	agentDef := &models.Agent{
+		ID:    "agent-no-files",
+		Name:  "Agent Without File Grant",
+		Tools: []string{"skill_view"},
+		ToolConfig: models.AgentToolConfig{
+			ScopedFiles:            []models.ScopedFilesConfig{{Directory: ".openvibely/agents", Permissions: []string{"read", "write"}}},
+			SkipDefaultTools:       true,
+			DisableRuntimeWorktree: true,
+		},
+	}
+
+	_, _, err := svc.CallAgentDirectWithDefinition(context.Background(), "review", nil, agent, repo, agentDef)
+	if err != nil {
+		t.Fatalf("CallAgentDirectWithDefinition error: %v", err)
+	}
+	if capture.lastReq.AgentDefinition == nil || capture.lastReq.AgentDefinition.ID != agentDef.ID {
+		t.Fatalf("expected agent definition propagated, got %#v", capture.lastReq.AgentDefinition)
+	}
+	if rt := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx); rt != nil && rt.HasDefinition("write_file") {
+		t.Fatalf("did not expect scoped file tools without ScopedFiles grant, got %#v", rt.Definitions)
+	}
+	if capture.lastReq.WorkDir != repo {
+		t.Fatalf("expected workdir to stay unchanged without ScopedFiles grant, got %q", capture.lastReq.WorkDir)
 	}
 }
 
@@ -377,6 +502,110 @@ func TestLLMService_ExecuteTaskWithAgent_RecordsExecution(t *testing.T) {
 	}
 	if exec.Status != models.ExecFailed {
 		t.Errorf("expected exec status=failed, got %q", exec.Status)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_AllowsExplicitNonSelectableAgentForNormalTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	agentRepo := repository.NewAgentRepo(db)
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc.SetAgentRepo(agentRepo)
+	mock := &testutil.MockLLMCaller{Response: "skill curator ran", TextOnly: "skill curator ran", Tokens: 1}
+	svc.SetLLMCaller(mock)
+
+	agentDef, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindSkillCurator)
+	if err != nil {
+		t.Fatalf("get skill curator definition: %v", err)
+	}
+	if agentDef == nil {
+		t.Fatal("expected seeded skill curator definition")
+	}
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Normal user task",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		Prompt:            "run skill curator explicitly",
+		AgentDefinitionID: &agentDef.ID,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("explicit non-selectable agent should run: %v", err)
+	}
+	if exec == nil {
+		t.Fatal("expected execution")
+	}
+	if mock.CallCount() == 0 {
+		t.Fatal("expected model to be called")
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	agentRepo := repository.NewAgentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+
+	root := t.TempDir()
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc.SetAgentRepo(agentRepo)
+	svc.SetGlobalSkillRoot(root)
+	svc.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+	capture := &captureProviderAdapter{}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
+
+	agentDef, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindSkillCurator)
+	if err != nil {
+		t.Fatalf("get skill curator definition: %v", err)
+	}
+	if agentDef == nil {
+		t.Fatal("expected seeded skill curator definition")
+	}
+	agent := &models.LLMConfig{Name: "OpenAI", Provider: models.ProviderOpenAI, Model: "gpt-test", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create model agent: %v", err)
+	}
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             agentLibraryMaintenanceTaskTitle,
+		Category:          models.CategoryScheduled,
+		Status:            models.StatusPending,
+		Prompt:            agentLibraryMaintenanceTaskPrompt,
+		AgentDefinitionID: &agentDef.ID,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	writeLifecycleTestSkill(t, root, "skill_curator", "maintain_skill_library", "maintenance skill body")
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleSkillRoot(root)
+	worker.SetLifecycleAgentRepo(agentRepo)
+	worker.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+	turn := worker.PrepareLifecycleTurn(ctx, *task)
+	exec, err := svc.ExecuteTaskWithAgent(turn.Ctx, turn.Task, *agent)
+	if err != nil {
+		t.Fatalf("scheduled skill curator task should run: %v", err)
+	}
+	if exec == nil {
+		t.Fatal("expected execution")
+	}
+	rt := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx)
+	if rt == nil || !rt.HasDefinition("skill_manage") || !rt.HasDefinition("skills_list") || !rt.HasDefinition("agent_view") || rt.HasDefinition("agents_list") || rt.HasDefinition("agent_manage") {
+		t.Fatalf("scheduled Skill Curator task should get tools from assigned agent declaration, got %#v", rt)
 	}
 }
 
@@ -646,10 +875,11 @@ func TestLLMService_ExecuteTask_ScopedFilesAgentUsesRuntimeWorktreeByDefault(t *
 
 	agentRepo := repository.NewAgentRepo(db)
 	agentDef := &models.Agent{
-		Name:         "Scoped Docs Agent",
-		SystemPrompt: "Edit scoped docs",
-		Model:        "inherit",
-		Tools:        []string{models.AgentToolScopedFiles},
+		Name:                "Scoped Docs Agent",
+		SystemPrompt:        "Edit scoped docs",
+		Model:               "inherit",
+		Tools:               []string{models.AgentToolScopedFiles},
+		SelectableAsPrimary: true,
 		ToolConfig: models.AgentToolConfig{
 			ScopedFiles: []models.ScopedFilesConfig{{Directory: "docs", Permissions: []string{"read", "write"}}},
 		},
@@ -1363,9 +1593,10 @@ func TestLLMService_ExecuteTaskWithAgent_PluginScopingWithAgentDef(t *testing.T)
 
 	// Create an agent definition with plugins
 	agentDef := &models.Agent{
-		Name:         "test-plugin-agent",
-		SystemPrompt: "Use plugin tools for testing",
-		Plugins:      []string{"test-plugin@test-market"},
+		Name:                "test-plugin-agent",
+		SystemPrompt:        "Use plugin tools for testing",
+		Plugins:             []string{"test-plugin@test-market"},
+		SelectableAsPrimary: true,
 	}
 	if err := agentRepo.Create(ctx, agentDef); err != nil {
 		t.Fatalf("create agent definition: %v", err)
@@ -1581,10 +1812,11 @@ func TestLLMService_ExecuteTask_ScopedFilesPrepFailureCompletesExecution(t *test
 	}
 
 	agentDef := &models.Agent{
-		Name:         "Bad scoped agent",
-		SystemPrompt: "Use scoped files",
-		Model:        "inherit",
-		Tools:        []string{models.AgentToolScopedFiles},
+		Name:                "Bad scoped agent",
+		SystemPrompt:        "Use scoped files",
+		Model:               "inherit",
+		Tools:               []string{models.AgentToolScopedFiles},
+		SelectableAsPrimary: true,
 		ToolConfig: models.AgentToolConfig{
 			ScopedFiles: []models.ScopedFilesConfig{{Directory: "../escape", Permissions: []string{"read"}}},
 		},
