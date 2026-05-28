@@ -21,3 +21,14 @@ func additionalProjectInstructionsFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(additionalProjectInstructionsKey{}).(string)
 	return v
 }
+
+func combineAdditionalProjectInstructions(ctx context.Context, base string) string {
+	extra := additionalProjectInstructionsFromContext(ctx)
+	if extra == "" {
+		return base
+	}
+	if base == "" {
+		return extra
+	}
+	return extra + "\n\n" + base
+}

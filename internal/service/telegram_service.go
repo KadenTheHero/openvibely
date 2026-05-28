@@ -549,6 +549,9 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	workDir := s.resolveWorkDir(ctx, projectID)
 
 	callCtx := llmcontracts.WithChatMode(ctx, models.ChatModeOrchestrate)
+	if s.workerSvc != nil {
+		callCtx = s.workerSvc.PrepareRecallOnlyLifecycleTurn(callCtx, *task).Ctx
+	}
 	if supportsRuntimeChatActionTools(*agent) {
 		callCtx = llmcontracts.WithRuntimeTools(callCtx, s.buildTelegramActionToolRuntime(projectID, chatID, userID, nil))
 	}

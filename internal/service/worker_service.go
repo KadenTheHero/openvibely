@@ -320,6 +320,10 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 // one is configured. Errors are logged; they never affect task status. The
 // task struct is mapped into a HookInput shape the runner can consume.
 func (w *WorkerService) runLifecycleSlot(ctx context.Context, when models.LifecycleWhen, task models.Task, taskRunID string, runErr error, chatContext llmcontracts.ChatContext) lifecycle.SlotResult {
+	return w.runLifecycleSlotFiltered(ctx, when, task, taskRunID, runErr, chatContext, nil)
+}
+
+func (w *WorkerService) runLifecycleSlotFiltered(ctx context.Context, when models.LifecycleWhen, task models.Task, taskRunID string, runErr error, chatContext llmcontracts.ChatContext, include func(models.AgentLifecycleHook) bool) lifecycle.SlotResult {
 	if w.lifecycleRunner == nil {
 		return lifecycle.SlotResult{When: when}
 	}
@@ -354,7 +358,7 @@ func (w *WorkerService) runLifecycleSlot(ctx context.Context, when models.Lifecy
 		in.Extras[lifecycle.ConversationTranscriptKey] = chatContext
 		in.Extras[lifecycle.LearningSnapshotKey] = w.buildLearningSnapshot(ctx, task, taskRunID, runErr)
 	}
-	result, err := w.lifecycleRunner.RunSlot(ctx, when, in)
+	result, err := w.lifecycleRunner.RunSlotFiltered(ctx, when, in, include)
 	if err != nil {
 		log.Printf("[worker] lifecycle %s failed for task=%s: %v", when, task.ID, err)
 		return lifecycle.SlotResult{When: when}

@@ -38,6 +38,42 @@ type LifecycleTurn struct {
 	AfterComplete func(err error, chatContext llmcontracts.ChatContext)
 }
 
+// PrepareRecallOnlyLifecycleTurn runs only before_run context-block hooks for
+// an interactive chat turn. It deliberately skips route_task, selected skills,
+// task runtime tools, and after_complete so Chat can recall managed memory
+// without letting Chat prompts or mode-control text update memory.
+func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task models.Task) LifecycleTurn {
+	if w == nil {
+		return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: func(error, llmcontracts.ChatContext) {}}
+	}
+
+	runID := newLifecycleTaskRunID(task.ID)
+	if projectRoot := projectSkillRoot(ctx, w.projectRepo, task.ProjectID); projectRoot != "" && w.agentRootSyncService != nil {
+		if err := w.agentRootSyncService.SyncRootDeclarations(ctx, projectRoot); err != nil {
+			log.Printf("[lifecycle-turn] sync agent root declarations failed task=%s: %v", task.ID, err)
+		}
+	}
+	catalog := w.buildSkillCatalog(ctx, task)
+	w.currentCatalog.Store(catalog)
+	hookCtx := ctx
+	if hookReadTools := w.buildLifecycleReadRuntimeTools(task, catalog); hookReadTools != nil {
+		hookCtx = llmcontracts.WithRuntimeTools(hookCtx, hookReadTools)
+	}
+	preparedContext := ""
+	if w.lifecycleRunner != nil {
+		before := w.runLifecycleSlotFiltered(hookCtx, models.LifecycleBeforeRun, task, runID, nil, llmcontracts.ChatContext{}, w.isChatMemoryRecallHook(ctx))
+		preparedContext = lifecycle.MergeContextBlocks(before.Outputs)
+		if preparedContext != "" {
+			log.Printf("[lifecycle-turn] chat before_run prepared_context task=%s bytes=%d outputs=%d", task.ID, len(preparedContext), len(before.Outputs))
+		}
+	}
+	promptContext := buildLifecyclePromptContext("", preparedContext)
+	if promptContext != "" {
+		ctx = withAdditionalProjectInstructions(ctx, promptContext)
+	}
+	return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: func(error, llmcontracts.ChatContext) {}}
+}
+
 // PrepareLifecycleTurn runs the route_task + before_run lifecycle slots for
 // a model turn and returns the prepared context. The caller passes the
 // resulting Ctx to the LLM and then invokes AfterComplete(err, chatContext)
@@ -157,6 +193,24 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		}(task, runID, err, chatContext, hookMutationTools, lifecycleTurnContext{Catalog: taskCatalog, SelectedSkillHandles: selectedSkillHandles, AssignedAgent: assignedAgent})
 	}
 	return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: after}
+}
+
+func (w *WorkerService) isChatMemoryRecallHook(ctx context.Context) func(models.AgentLifecycleHook) bool {
+	memoryAgentID := ""
+	if w != nil && w.agentRepo != nil {
+		if agent, err := w.agentRepo.GetByKey(ctx, models.AgentSystemKindMemoryCurator); err == nil && agent != nil {
+			memoryAgentID = agent.ID
+		}
+	}
+	return func(hook models.AgentLifecycleHook) bool {
+		if hook.When != models.LifecycleBeforeRun || hook.SkillKey != "recall_memory" || hook.OutputContract != models.OutputContractContextBlock {
+			return false
+		}
+		if memoryAgentID == "" {
+			return w == nil || w.agentRepo == nil
+		}
+		return hook.AgentID == memoryAgentID
+	}
 }
 
 func filterCatalogHandles(catalog *agentskills.Catalog, handles []string) []string {

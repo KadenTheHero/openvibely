@@ -615,6 +615,9 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 	workDir := s.resolveWorkDir(ctx, projectID)
 
 	callCtx := llmcontracts.WithChatMode(ctx, models.ChatModeOrchestrate)
+	if s.workerSvc != nil {
+		callCtx = s.workerSvc.PrepareRecallOnlyLifecycleTurn(callCtx, *task).Ctx
+	}
 	markerCtx := slackMarkerContext{
 		TeamID:    msg.TeamID,
 		ChannelID: msg.ChannelID,

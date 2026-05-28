@@ -82,11 +82,18 @@ type streamingResponseParams struct {
 // Error handling: All errors in the completion path are logged but don't fail the
 // function since we're in a background goroutine. Failed completions leave tasks
 // stuck in "running" status, which is why error logging is critical.
+func (h *Handler) prepareChatMemoryRecall(ctx context.Context, task models.Task) context.Context {
+	if h.workerSvc == nil {
+		return ctx
+	}
+	return h.workerSvc.PrepareRecallOnlyLifecycleTurn(ctx, task).Ctx
+}
+
 func (h *Handler) processStreamingResponse(params streamingResponseParams) {
-	// Memory injection for task-thread followups happens through the Memory
-	// Curator agent's before_run lifecycle hook, wired below via
-	// PrepareLifecycleTurn. Chat surfaces without a task lifecycle do not
-	// receive automatic memory injection.
+	// Memory recall is injected for task-thread followups through the full task
+	// lifecycle path below. Interactive chat uses a recall-only lifecycle path so
+	// relevant project memory reaches Chat without triggering after_complete memory
+	// extraction for Chat prompts/mode-control text.
 	timeout := chatProcessingTimeout
 
 	// Enforce per-project and per-model worker constraints for task follow-ups only.
@@ -199,13 +206,19 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// Lifecycle integration for task-thread followups: lifecycle hooks must run on
 	// every model turn including followups. Without this block, followups would
 	// never see selected skills, skill runtime tools, or the available-skills
-	// catalog.
+	// catalog. Interactive chat only runs memory recall before the model turn;
+	// it intentionally skips after_complete extraction so Chat prompts and mode
+	// control text are not written back to managed memory.
 	var lifecycleAfter func(err error, chatContext llmcontracts.ChatContext)
-	if params.IsTaskFollowup && h.workerSvc != nil && params.TaskID != "" {
+	if params.TaskID != "" {
 		if task, terr := h.taskRepo.GetByID(ctx, params.TaskID); terr == nil && task != nil {
-			turn := h.workerSvc.PrepareLifecycleTurn(ctx, *task)
-			ctx = turn.Ctx
-			lifecycleAfter = turn.AfterComplete
+			if params.IsTaskFollowup && h.workerSvc != nil {
+				turn := h.workerSvc.PrepareLifecycleTurn(ctx, *task)
+				ctx = turn.Ctx
+				lifecycleAfter = turn.AfterComplete
+			} else if !params.IsTaskFollowup {
+				ctx = h.prepareChatMemoryRecall(ctx, *task)
+			}
 		}
 	}
 

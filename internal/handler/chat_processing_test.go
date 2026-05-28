@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,11 +12,55 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+type chatMemoryHookStore struct {
+	hooks []models.AgentLifecycleHook
+	seen  []models.LifecycleWhen
+}
+
+func (s *chatMemoryHookStore) HooksForWhen(ctx context.Context, when models.LifecycleWhen) ([]models.AgentLifecycleHook, error) {
+	s.seen = append(s.seen, when)
+	var out []models.AgentLifecycleHook
+	for _, h := range s.hooks {
+		if h.When == when && h.Enabled {
+			out = append(out, h)
+		}
+	}
+	return out, nil
+}
+
+func (s *chatMemoryHookStore) CreateExecution(ctx context.Context, e *models.LifecycleExecution) error {
+	if e.ID == "" {
+		e.ID = "chat-memory-" + string(e.When)
+	}
+	return nil
+}
+
+func (s *chatMemoryHookStore) UpdateExecution(ctx context.Context, e *models.LifecycleExecution) error {
+	return nil
+}
+
+func (s *chatMemoryHookStore) FindExecutionByIdempotencyKey(ctx context.Context, key string) (*models.LifecycleExecution, error) {
+	return nil, os.ErrNotExist
+}
+
+type chatMemoryHookInvoker struct {
+	seen []string
+}
+
+func (i *chatMemoryHookInvoker) Invoke(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
+	i.seen = append(i.seen, string(hook.When)+"/"+hook.SkillKey)
+	if hook.When == models.LifecycleBeforeRun {
+		return json.Marshal(lifecycle.ContextBlock{Content: "Remember: prefer repo-local managed memory for this project.", Sources: []string{"MEMORIES.md"}, Confidence: 0.9})
+	}
+	return json.Marshal(lifecycle.ActivitySummary{Summary: "updated chat memory", ChangedPaths: []string{"chat.md"}})
+}
 
 func createHandlerTestGitRepo(t *testing.T) string {
 	t.Helper()
@@ -289,6 +334,128 @@ func TestFilterChatHistory_ExcludesMultipleRunning(t *testing.T) {
 	}
 	if result[0].ID != "exec1" || result[1].ID != "exec3" {
 		t.Errorf("expected exec1 and exec3, got %s and %s", result[0].ID, result[1].ID)
+	}
+}
+
+func TestProcessStreamingResponse_InteractiveChatRunsMemoryRecallOnly(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "chat response"
+	mock.TextOnly = "chat response"
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Chat Memory Project")
+	chatTask := createTask(t, h, project.ID, "Chat host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusPending
+		tk.AgentID = &agent.ID
+		tk.Prompt = "What should I remember about managed memory?"
+	})
+	exec := createExec(t, h, chatTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = chatTask.Prompt
+	})
+
+	store := &chatMemoryHookStore{hooks: []models.AgentLifecycleHook{
+		{ID: "other-before", When: models.LifecycleBeforeRun, SkillKey: "load_context", OutputContract: models.OutputContractContextBlock, Blocking: true, Enabled: true},
+		{ID: "recall", When: models.LifecycleBeforeRun, SkillKey: "recall_memory", OutputContract: models.OutputContractContextBlock, Blocking: true, Enabled: true},
+		{ID: "update", When: models.LifecycleAfterComplete, SkillKey: "update_memory", OutputContract: models.OutputContractActivitySummary, Blocking: false, Enabled: true},
+	}}
+	invoker := &chatMemoryHookInvoker{}
+	h.workerSvc.SetLifecycleRunner(lifecycle.NewRunner(store, invoker, nil))
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         chatTask.ID,
+		Message:        chatTask.Prompt,
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		SystemContext:  "task list context",
+		IsTaskFollowup: false,
+		ProcessMarkers: false,
+		ChatMode:       models.ChatModeOrchestrate,
+	})
+
+	if mock.CallCount() != 1 {
+		t.Fatalf("expected one chat model call, got %d", mock.CallCount())
+	}
+	if len(invoker.seen) != 1 || invoker.seen[0] != "before_run/recall_memory" {
+		t.Fatalf("expected only before_run recall hook for chat, got %#v", invoker.seen)
+	}
+	if prompt := mock.LastCall().Prompt; !strings.Contains(prompt, "Remember: prefer repo-local managed memory for this project.") || !strings.Contains(prompt, "[recall_memory]") {
+		t.Fatalf("expected recalled memory in model-facing chat prompt, got:\n%s", prompt)
+	}
+	for _, when := range store.seen {
+		if when == models.LifecycleAfterComplete {
+			t.Fatalf("interactive chat must not run after_complete memory extraction, saw slots %#v", store.seen)
+		}
+	}
+	updatedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if updatedExec.Status != models.ExecCompleted {
+		t.Fatalf("expected chat execution completed, got %s", updatedExec.Status)
+	}
+}
+
+func TestProcessStreamingResponse_InteractiveChatPlanModeRunsMemoryRecallOnly(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "<proposed_plan>Plan with memory.</proposed_plan>"
+	mock.TextOnly = mock.Response
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Plan Chat Memory Project")
+	chatTask := createTask(t, h, project.ID, "Plan chat host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusPending
+		tk.AgentID = &agent.ID
+		tk.Prompt = "Plan how to update memory-safe chat."
+	})
+	exec := createExec(t, h, chatTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = chatTask.Prompt
+	})
+
+	store := &chatMemoryHookStore{hooks: []models.AgentLifecycleHook{
+		{ID: "other-before", When: models.LifecycleBeforeRun, SkillKey: "load_context", OutputContract: models.OutputContractContextBlock, Blocking: true, Enabled: true},
+		{ID: "recall", When: models.LifecycleBeforeRun, SkillKey: "recall_memory", OutputContract: models.OutputContractContextBlock, Blocking: true, Enabled: true},
+		{ID: "update", When: models.LifecycleAfterComplete, SkillKey: "update_memory", OutputContract: models.OutputContractActivitySummary, Blocking: false, Enabled: true},
+	}}
+	invoker := &chatMemoryHookInvoker{}
+	h.workerSvc.SetLifecycleRunner(lifecycle.NewRunner(store, invoker, nil))
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         chatTask.ID,
+		Message:        chatTask.Prompt,
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		SystemContext:  "task list context",
+		IsTaskFollowup: false,
+		ProcessMarkers: false,
+		ChatMode:       models.ChatModePlan,
+	})
+
+	if mock.CallCount() != 1 {
+		t.Fatalf("expected one plan chat model call, got %d", mock.CallCount())
+	}
+	if len(invoker.seen) != 1 || invoker.seen[0] != "before_run/recall_memory" {
+		t.Fatalf("expected only before_run recall hook for plan chat, got %#v", invoker.seen)
+	}
+	if prompt := mock.LastCall().Prompt; !strings.Contains(prompt, "Remember: prefer repo-local managed memory for this project.") || !strings.Contains(prompt, "[recall_memory]") {
+		t.Fatalf("expected recalled memory in model-facing plan chat prompt, got:\n%s", prompt)
+	}
+	for _, when := range store.seen {
+		if when == models.LifecycleAfterComplete {
+			t.Fatalf("plan chat must not run after_complete memory extraction, saw slots %#v", store.seen)
+		}
 	}
 }
 

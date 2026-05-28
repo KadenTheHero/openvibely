@@ -137,6 +137,12 @@ func IsInsideHook(ctx context.Context) bool {
 // Hook executions never themselves trigger another `when` value; if RunSlot
 // is called while ctx is already inside a hook, the call is refused.
 func (r *Runner) RunSlot(ctx context.Context, when models.LifecycleWhen, input HookInput) (SlotResult, error) {
+	return r.RunSlotFiltered(ctx, when, input, nil)
+}
+
+// RunSlotFiltered is RunSlot with an optional per-hook predicate. Hooks rejected
+// by include are not invoked or recorded. A nil predicate includes every hook.
+func (r *Runner) RunSlotFiltered(ctx context.Context, when models.LifecycleWhen, input HookInput, include func(models.AgentLifecycleHook) bool) (SlotResult, error) {
 	if r == nil {
 		return SlotResult{When: when}, errors.New("lifecycle: nil runner")
 	}
@@ -146,6 +152,15 @@ func (r *Runner) RunSlot(ctx context.Context, when models.LifecycleWhen, input H
 	hooks, err := r.store.HooksForWhen(ctx, when)
 	if err != nil {
 		return SlotResult{When: when}, err
+	}
+	if include != nil {
+		filtered := make([]models.AgentLifecycleHook, 0, len(hooks))
+		for _, hook := range hooks {
+			if include(hook) {
+				filtered = append(filtered, hook)
+			}
+		}
+		hooks = filtered
 	}
 	if len(hooks) == 0 {
 		r.logger.Printf("[lifecycle] slot=%s task=%s hooks=0", when, input.TaskID)

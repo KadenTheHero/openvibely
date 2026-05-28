@@ -876,7 +876,7 @@ func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, messa
 		ExecID:            execID,
 		ChatHistory:       chatHistory,
 		ChatMode:          chatMode,
-		ChatSystemContext: chatSystemContext,
+		ChatSystemContext: combineAdditionalProjectInstructions(ctx, chatSystemContext),
 		WorkDir:           workDir,
 		AgentDefinition:   agentDef,
 		Followup:          followup,
