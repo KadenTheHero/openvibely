@@ -278,48 +278,115 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 
 					const projectID = tasksPage.getAttribute('data-project-id');
 					let refreshTimeout = null;
+					// Deferred-refresh flag: when a refresh would interrupt the user
+					// (modal open, drag in progress, tab hidden) we set this flag
+					// and re-trigger the refresh once the blocker clears, instead
+					// of dropping the event. This fixes stale kanban dropzones
+					// (queued/in-progress/completed) when lifecycle hooks fire
+					// while the user has any dialog open.
+					let pendingRefresh = false;
+
+					function isRefreshBlocked() {
+						if (window.isDragging) return 'drag';
+						if (document.hidden) return 'hidden';
+						const openModals = document.querySelectorAll('dialog[open]');
+						if (openModals.length > 0) return 'modal';
+						return '';
+					}
+
+					function scheduleRefresh(delay) {
+						if (refreshTimeout) clearTimeout(refreshTimeout);
+						refreshTimeout = setTimeout(function() {
+							refreshTimeout = null;
+							const blocker = isRefreshBlocked();
+							if (blocker) {
+								console.log('[SSE] Refresh blocked by ' + blocker + ', deferring');
+								pendingRefresh = true;
+								return;
+							}
+							pendingRefresh = false;
+							htmx.ajax('GET', '/tasks?project_id=' + projectID, {
+								target: '#kanban-board',
+								swap: 'outerHTML'
+							});
+						}, delay);
+					}
+
+					function flushPendingRefresh() {
+						if (!pendingRefresh) return;
+						if (isRefreshBlocked()) return;
+						console.log('[SSE] Flushing deferred refresh');
+						scheduleRefresh(50);
+					}
 
 					function handleTaskEvent(event) {
 						const data = event.detail;
 						console.log('[SSE] Received event:', data);
 
 						// Only refresh if the event is for a task in the current project
-						if (data.project_id === projectID) {
-							// Check if user is currently dragging tasks - if so, don't auto-refresh
-							if (window.isDragging) {
-								console.log('[SSE] Drag in progress, skipping auto-refresh');
-								return;
-							}
+						if (data.project_id !== projectID) return;
 
-							// Check if ANY modal is currently open (e.g. new task, import)
-							const openModals = document.querySelectorAll('dialog[open]');
-							if (openModals.length > 0) {
-								console.log('[SSE] Modal open, skipping auto-refresh to avoid interrupting user');
-								return;
-							}
+						const blocker = isRefreshBlocked();
+						if (blocker) {
+							console.log('[SSE] Refresh blocked by ' + blocker + ', will retry on unblock');
+							pendingRefresh = true;
+							return;
+						}
 
-							// Debounce: clear any pending refresh and schedule a new one
-							if (refreshTimeout) {
-								clearTimeout(refreshTimeout);
-							}
+						// Debounce: clear any pending refresh and schedule a new one
+						scheduleRefresh(500);
+					}
 
-							refreshTimeout = setTimeout(function() {
-								htmx.ajax('GET', '/tasks?project_id=' + projectID, {
-									target: '#kanban-board',
-									swap: 'outerHTML'
-								});
-								refreshTimeout = null;
-							}, 500);
+					function handleSSEReconnected(event) {
+						// On reconnect we may have missed events while disconnected.
+						// Force a refresh so the kanban board re-syncs with server state.
+						const detail = event && event.detail;
+						if (detail && detail.reconnected === false) {
+							// Initial connect — server state already matches the
+							// page that was just rendered, no refresh needed.
+							return;
+						}
+						console.log('[SSE] Live connection (re)established, resyncing kanban');
+						if (isRefreshBlocked()) {
+							pendingRefresh = true;
+							return;
+						}
+						scheduleRefresh(100);
+					}
+
+					function handleVisibilityChange() {
+						if (!document.hidden) flushPendingRefresh();
+					}
+
+					function handleDragEnd() {
+						flushPendingRefresh();
+					}
+
+					function handleDialogClose(event) {
+						if (event.target && event.target.tagName === 'DIALOG') {
+							// Defer to next tick so the close finishes before we check open modals.
+							setTimeout(flushPendingRefresh, 0);
 						}
 					}
 
 					// Listen to events dispatched by the sidebar's shared SSE connection
 					window.addEventListener('sse-task-event', handleTaskEvent);
+					window.addEventListener('sse-live-connected', handleSSEReconnected);
+					document.addEventListener('visibilitychange', handleVisibilityChange);
+					document.addEventListener('dragend', handleDragEnd, true);
+					document.addEventListener('drop', handleDragEnd, true);
+					// 'close' does not bubble; capture phase picks it up from <dialog>.
+					document.addEventListener('close', handleDialogClose, true);
 
-					// Clean up listener when navigating away via HTMX
+					// Clean up listeners when navigating away via HTMX
 					document.body.addEventListener('htmx:beforeSwap', function(event) {
 						if (event.detail.target && event.detail.target.id === 'main-content') {
 							window.removeEventListener('sse-task-event', handleTaskEvent);
+							window.removeEventListener('sse-live-connected', handleSSEReconnected);
+							document.removeEventListener('visibilitychange', handleVisibilityChange);
+							document.removeEventListener('dragend', handleDragEnd, true);
+							document.removeEventListener('drop', handleDragEnd, true);
+							document.removeEventListener('close', handleDialogClose, true);
 							if (refreshTimeout) clearTimeout(refreshTimeout);
 						}
 					});

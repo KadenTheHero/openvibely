@@ -274,6 +274,48 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 	taskCtx, taskCancel := context.WithCancel(w.ctx)
 	w.RegisterCancel(task.ID, taskCancel)
 
+	// Claim the task BEFORE running lifecycle hooks so the kanban board
+	// reflects the task as "running" while route_task/before_run hooks
+	// execute. Without this pre-claim the task would stay visually stuck in
+	// the queued sub-zone of the active dropzone during early lifecycle
+	// hooks (which may call the LLM and take noticeable time). ClaimTask
+	// publishes a TaskStatusChanged event so the Tasks page updates live.
+	// If claim fails (task already running/completed/cancelled), skip — the
+	// task either was already promoted or shouldn't run.
+	if w.taskRepo != nil {
+		claimed, claimErr := w.taskRepo.ClaimTask(taskCtx, task.ID)
+		if claimErr != nil {
+			log.Printf("[worker] task=%s claim failed: %v", task.ID, claimErr)
+			w.DeregisterCancel(task.ID)
+			taskCancel()
+			w.mu.Lock()
+			delete(w.pending, task.ID)
+			w.mu.Unlock()
+			w.releaseProjectSlot(task.ProjectID)
+			w.releaseModelSlot(agentConfigID)
+			w.dispatchNext()
+			return
+		}
+		if !claimed {
+			log.Printf("[worker] task=%s not pending at dispatch (already running/terminal), skipping", task.ID)
+			w.DeregisterCancel(task.ID)
+			taskCancel()
+			w.mu.Lock()
+			delete(w.pending, task.ID)
+			w.mu.Unlock()
+			w.releaseProjectSlot(task.ProjectID)
+			w.releaseModelSlot(agentConfigID)
+			w.dispatchNext()
+			return
+		}
+		// Reflect the new running status in the in-memory copy passed to
+		// lifecycle hooks so they observe the post-claim state.
+		task.Status = models.StatusRunning
+		// Tag the context so executeTaskWithAgent knows the task has
+		// already been claimed and won't skip it as "already running".
+		taskCtx = withTaskPreClaimed(taskCtx)
+	}
+
 	turn := w.PrepareLifecycleTurn(taskCtx, task)
 	taskCtx = turn.Ctx
 

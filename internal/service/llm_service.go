@@ -252,17 +252,36 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			log.Printf("[agent-svc] ExecuteTaskWithAgent using agent definition=%s (%s)", ad.Name, ad.ID)
 		}
 	}
-	// Atomically claim the task (only succeeds if status is pending)
+	// Atomically claim the task (only succeeds if status is pending). The
+	// worker pre-claims the task before invoking lifecycle hooks so the
+	// kanban board can reflect the running state during early hooks; in
+	// that case ClaimTask returns false (task is already running) but the
+	// worker has signaled via context that it has already claimed the
+	// task, so we proceed. Direct callers of ExecuteTaskWithAgent (no
+	// pre-claim context flag) keep the original skip-on-running semantics.
 	claimed, err := s.taskRepo.ClaimTask(ctx, task.ID)
 	if err != nil {
 		log.Printf("[agent-svc] ExecuteTaskWithAgent error claiming task: %v", err)
 		return nil, llmcontracts.ChatContext{}, fmt.Errorf("claiming task: %w", err)
 	}
 	if !claimed {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s not pending (already running/completed), skipping", task.ID)
-		return nil, llmcontracts.ChatContext{}, nil
+		if !isTaskPreClaimed(ctx) {
+			log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s not pending (already running/completed), skipping", task.ID)
+			return nil, llmcontracts.ChatContext{}, nil
+		}
+		current, getErr := s.taskRepo.GetByID(ctx, task.ID)
+		if getErr != nil {
+			log.Printf("[agent-svc] ExecuteTaskWithAgent error checking task status after pre-claimed miss: %v", getErr)
+			return nil, llmcontracts.ChatContext{}, fmt.Errorf("checking task status: %w", getErr)
+		}
+		if current == nil || current.Status != models.StatusRunning {
+			log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s pre-claimed flag set but status=%v, skipping", task.ID, statusOrNil(current))
+			return nil, llmcontracts.ChatContext{}, nil
+		}
+		log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s already claimed by worker, proceeding", task.ID)
+	} else {
+		log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s status -> running", task.ID)
 	}
-	log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s status -> running", task.ID)
 
 	var runtimeTools *llmcontracts.RuntimeTools
 	scopedFilesWorkDir := ""
@@ -1917,4 +1936,34 @@ func (s *LLMService) callCodexCLISimple(ctx context.Context, prompt string, atta
 	output := sw.String()
 	log.Printf("[agent-svc] callCodexCLISimple success output_len=%d", len(output))
 	return output, 0, nil
+}
+
+// statusOrNil returns a stringified status for logging, or "<nil>" when the
+// task pointer is nil. Used by executeTaskWithAgent to log post-claim state.
+func statusOrNil(t *models.Task) string {
+	if t == nil {
+		return "<nil>"
+	}
+	return string(t.Status)
+}
+
+// taskPreClaimedKey is a context key flagging that the worker has already
+// transitioned the task to running before invoking the LLM service. When
+// set, executeTaskWithAgent treats a failed ClaimTask as expected (because
+// the worker did the claim) and proceeds with execution instead of skipping.
+// This drives the live kanban update during lifecycle hooks — see
+// WorkerService.executeTask for the corresponding pre-claim path.
+type taskPreClaimedKey struct{}
+
+// withTaskPreClaimed marks ctx so the LLM service knows the worker already
+// claimed the task via TaskRepo.ClaimTask.
+func withTaskPreClaimed(ctx context.Context) context.Context {
+	return context.WithValue(ctx, taskPreClaimedKey{}, true)
+}
+
+// isTaskPreClaimed reports whether ctx was tagged by the worker as having
+// already claimed the task.
+func isTaskPreClaimed(ctx context.Context) bool {
+	v, _ := ctx.Value(taskPreClaimedKey{}).(bool)
+	return v
 }
