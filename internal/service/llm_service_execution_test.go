@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -542,6 +543,92 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsExplicitNonSelectableAgentForNorm
 	}
 }
 
+func TestLLMService_ExecuteTaskWithAgent_CustomAgentSkillLibraryToolsUseRoutedSelection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	agentRepo := repository.NewAgentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+
+	root := t.TempDir()
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc.SetAgentRepo(agentRepo)
+	svc.SetGlobalSkillRoot(root)
+	svc.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+	capture := &captureProviderAdapter{}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
+
+	agentDef := &models.Agent{ID: "custom-skill-librarian-id", Key: "custom_librarian", Name: "Custom Librarian", Enabled: true, Tools: []string{"skill_view", "skills_list", "agent_list", "agent_view", "skill_manage"}}
+	if err := agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create custom agent definition: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "OpenAI", Provider: models.ProviderOpenAI, Model: "gpt-test", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create model agent: %v", err)
+	}
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Custom library maintenance",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		Prompt:            "curate skills",
+		AgentDefinitionID: &agentDef.ID,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	writeLifecycleTestSkill(t, root, "custom_librarian", "curate", "custom selected skill body")
+	writeLifecycleStandaloneSkill(t, root, "standalone_skill", "standalone body")
+	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{ID: "route", When: models.LifecycleRouteTask, SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills, Blocking: true, Enabled: true}}}
+	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
+		available, _ := in.Extras["available_skills"].(string)
+		if !strings.Contains(available, "custom_librarian/curate") || strings.Contains(available, "standalone_skill") {
+			return nil, fmt.Errorf("assigned-agent router saw wrong skill index: %s", available)
+		}
+		return routePayload([]string{"curate"}, 0.9), nil
+	}), nil)
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleRunner(runner)
+	worker.SetLifecycleSkillRoot(root)
+	worker.SetLifecycleAgentRepo(agentRepo)
+	worker.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+	turn := worker.PrepareLifecycleTurn(ctx, *task)
+	exec, err := svc.ExecuteTaskWithAgent(turn.Ctx, turn.Task, *agent)
+	if err != nil {
+		t.Fatalf("custom skill-library agent task should run: %v", err)
+	}
+	if exec == nil {
+		t.Fatal("expected execution")
+	}
+	rt := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx)
+	if rt == nil || !rt.HasDefinition("skill_manage") || !rt.HasDefinition("skills_list") || !rt.HasDefinition("agent_list") || !rt.HasDefinition("agent_view") || rt.HasDefinition("agent_manage") {
+		t.Fatalf("custom agent should get explicitly declared scoped skill tools, got %#v", rt)
+	}
+	out, handled, isErr, err := rt.Executor(context.Background(), "skills_list", json.RawMessage(`{}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "## standalone_skill") || strings.Contains(out, "custom_librarian/curate") {
+		t.Fatalf("skills_list should expose standalone skills only handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"standalone_skill"}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "standalone body") {
+		t.Fatalf("final runtime should view listed standalone skills handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"curate"}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "custom selected skill body") {
+		t.Fatalf("final runtime should view router-selected agent-owned skill handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(context.Background(), "agent_list", json.RawMessage(`{}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "custom_librarian") || strings.Contains(out, "skill_curator") || strings.Contains(out, "memory_curator") {
+		t.Fatalf("agent_list should expose non-system agents only handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(context.Background(), "skill_manage", json.RawMessage(`{"action":"write_file","handle":"custom_librarian/curate","scope":"global","support":{"kind":"references","path":"forbidden.md","content":"blocked"}}`))
+	if !handled || err != nil || !isErr || !strings.Contains(out, "invalid standalone skill handle") {
+		t.Fatalf("skill_manage must not mutate agent-owned custom skills handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+}
+
 func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
@@ -583,7 +670,14 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *test
 	}
 
 	writeLifecycleTestSkill(t, root, "skill_curator", "maintain_skill_library", "maintenance skill body")
+	writeLifecycleStandaloneSkill(t, root, "other_skill", "other skill body")
+	writeLifecycleStandaloneSkill(t, root, "maintain_skill_library", "standalone maintenance body")
+	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{ID: "route", When: models.LifecycleRouteTask, SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills, Blocking: true, Enabled: true}}}
+	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
+		return routePayload([]string{"maintain_skill_library"}, 0.9), nil
+	}), nil)
 	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleRunner(runner)
 	worker.SetLifecycleSkillRoot(root)
 	worker.SetLifecycleAgentRepo(agentRepo)
 	worker.SetLifecycleRepo(repository.NewLifecycleRepo(db))
@@ -596,8 +690,70 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *test
 		t.Fatal("expected execution")
 	}
 	rt := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx)
-	if rt == nil || !rt.HasDefinition("skill_manage") || !rt.HasDefinition("skills_list") || !rt.HasDefinition("agent_view") || rt.HasDefinition("agents_list") || rt.HasDefinition("agent_manage") {
+	if rt == nil || !rt.HasDefinition("skill_manage") || !rt.HasDefinition("agent_skill_manage") || !rt.HasDefinition("skills_list") || !rt.HasDefinition("agent_list") || !rt.HasDefinition("agent_view") || rt.HasDefinition("agent_manage") {
 		t.Fatalf("scheduled Skill Curator task should get tools from assigned agent declaration, got %#v", rt)
+	}
+	out, handled, isErr, err := rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"other_skill"}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "other skill body") {
+		t.Fatalf("final runtime should view listed standalone skills handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(context.Background(), "skills_list", json.RawMessage(`{}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "standalone:maintain_skill_library") {
+		t.Fatalf("final runtime skills_list should return qualified view handles handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"maintain_skill_library"}`))
+	if !handled || err != nil || !isErr || !strings.Contains(out, "ambiguous") {
+		t.Fatalf("final runtime should reject colliding bare maintainer skill handle handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"standalone:maintain_skill_library"}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "standalone maintenance body") {
+		t.Fatalf("final runtime should view qualified standalone maintainer skill handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"agent:skill_curator/maintain_skill_library"}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "maintenance skill body") {
+		t.Fatalf("final runtime should view qualified selected maintainer skill handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	reviewerAgent := &models.Agent{ID: "reviewer-agent-id", Key: "reviewer", Name: "Reviewer", Description: "Reviews code", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: true, GeneratedStatus: models.AgentStatusGenerated}
+	if err := agentRepo.Create(ctx, reviewerAgent); err != nil {
+		t.Fatalf("create reviewer agent: %v", err)
+	}
+	disabledAgent := &models.Agent{ID: "disabled-agent-id", Key: "disabled_agent", Name: "Disabled", Enabled: false, GeneratedStatus: models.AgentStatusGenerated}
+	if err := agentRepo.Create(ctx, disabledAgent); err != nil {
+		t.Fatalf("create disabled agent: %v", err)
+	}
+	archivedAgent := &models.Agent{ID: "archived-agent-id", Key: "archived_agent", Name: "Archived", Enabled: true, GeneratedStatus: models.AgentStatusArchived}
+	if err := agentRepo.Create(ctx, archivedAgent); err != nil {
+		t.Fatalf("create archived agent: %v", err)
+	}
+	out, handled, isErr, err = rt.Executor(context.Background(), "agent_list", json.RawMessage(`{}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "reviewer") || strings.Contains(out, "skill_curator") || strings.Contains(out, "memory_curator") || strings.Contains(out, "disabled_agent") || strings.Contains(out, "archived_agent") {
+		t.Fatalf("final runtime agent_list should expose active non-system agents only handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(context.Background(), "skill_manage", json.RawMessage(`{"action":"write_file","handle":"skill_curator/maintain_skill_library","scope":"global","support":{"kind":"references","path":"forbidden.md","content":"blocked"}}`))
+	if !handled || err != nil || !isErr || !strings.Contains(out, "invalid standalone skill handle") {
+		t.Fatalf("final runtime skill_manage must not mutate system agent skills handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(context.Background(), "agent_skill_manage", json.RawMessage(`{"action":"create","agent":"reviewer","scope":"global","declaration":"---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n  key: review_migrations\n---\n# Review migrations\n"}`))
+	if !handled || err != nil || isErr {
+		t.Fatalf("final runtime agent_skill_manage should mutate non-system agent skills handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "agents", "reviewer", "skills", "review_migrations", "SKILL.md")); err != nil {
+		t.Fatalf("agent_skill_manage did not write non-system agent skill: %v", err)
+	}
+	for _, tc := range []struct {
+		agent string
+		skill string
+		want  string
+	}{
+		{agent: "skill_curator", skill: "maintain_skill_library", want: "protected"},
+		{agent: "disabled_agent", skill: "disabled_skill", want: "disabled"},
+		{agent: "archived_agent", skill: "archived_skill", want: "archived"},
+	} {
+		params := fmt.Sprintf(`{"action":"write_file","agent":%q,"scope":"global","handle":%q,"support":{"kind":"references","path":"forbidden.md","content":"blocked"}}`, tc.agent, tc.skill)
+		out, handled, isErr, err = rt.Executor(context.Background(), "agent_skill_manage", json.RawMessage(params))
+		if !handled || err != nil || !isErr || !strings.Contains(out, tc.want) {
+			t.Fatalf("final runtime agent_skill_manage must block %s agent skills handled=%v isErr=%v err=%v out=%q", tc.want, handled, isErr, err, out)
+		}
 	}
 }
 

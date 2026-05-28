@@ -1004,23 +1004,35 @@ func appendAgentSkillIndexEntry(body, agentKey string, decl *SkillDeclaration) s
 
 func appendSkillIndexEntry(body string, decl *SkillDeclaration) string {
 	handle := decl.Handle()
-	if handle == "" || bodyHasSkillHandle(body, handle) {
+	if handle == "" {
 		return body
 	}
+	section := renderSkillIndexSection(decl)
 	trimmed := strings.TrimRight(body, "\n")
+	for _, existing := range splitSkillIndexSections(trimmed) {
+		if sectionHandle(existing) != handle {
+			continue
+		}
+		updated := strings.Replace(trimmed, strings.TrimRight(existing, "\n"), strings.TrimRight(section, "\n"), 1)
+		return strings.TrimRight(updated, "\n") + "\n"
+	}
 	if strings.TrimSpace(trimmed) == "" {
 		trimmed = "# Standalone Skills"
 	}
 	if strings.TrimSpace(trimmed) != "" {
 		trimmed += "\n\n"
 	}
+	return trimmed + section
+}
+
+func renderSkillIndexSection(decl *SkillDeclaration) string {
 	name := firstNonEmpty(decl.Skill.Name, titleFromSlug(decl.Skill.Key))
 	desc := strings.TrimSpace(decl.Skill.Description)
 	line := fmt.Sprintf("[%s](%s/SKILL.md)", name, decl.Skill.Key)
 	if desc != "" {
 		line += " — " + desc
 	}
-	return fmt.Sprintf("%s## %s\n\n%s\n", trimmed, handle, line)
+	return fmt.Sprintf("## %s\n\n%s\n", decl.Handle(), line)
 }
 
 func splitSkillIndexSections(body string) []string {

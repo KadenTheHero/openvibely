@@ -115,3 +115,36 @@ func TestAgentRepo_RoundTripsScopedFilesToolConfig(t *testing.T) {
 		t.Fatalf("expected read/write permissions, got %v", scope.Permissions)
 	}
 }
+
+func TestAgentRepo_GetByKeyIncludingArchivedSeesArchivedRows(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+
+	agent := &models.Agent{
+		ID:              "archived-agent-id",
+		Key:             "archived_agent",
+		Name:            "Archived Agent",
+		Enabled:         true,
+		GeneratedStatus: models.AgentStatusArchived,
+	}
+	if err := repo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	live, err := repo.GetByKey(ctx, "archived_agent")
+	if err != nil {
+		t.Fatalf("GetByKey: %v", err)
+	}
+	if live != nil {
+		t.Fatalf("GetByKey should hide archived rows, got %+v", live)
+	}
+
+	archived, err := repo.GetByKeyIncludingArchived(ctx, "archived_agent")
+	if err != nil {
+		t.Fatalf("GetByKeyIncludingArchived: %v", err)
+	}
+	if archived == nil || archived.Key != "archived_agent" || archived.GeneratedStatus != models.AgentStatusArchived {
+		t.Fatalf("expected archived row, got %+v", archived)
+	}
+}

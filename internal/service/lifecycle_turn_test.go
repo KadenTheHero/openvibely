@@ -248,7 +248,7 @@ func TestPrepareLifecycleTurn_AfterCompletePreservesRuntimeTools(t *testing.T) {
 	}}}
 	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(ctx context.Context, _ models.AgentLifecycleHook, _ lifecycle.HookInput) (json.RawMessage, error) {
 		rt := llmcontracts.RuntimeToolsFromContext(ctx)
-		if rt == nil || !rt.HasDefinition("skill_manage") || !rt.HasDefinition("skills_list") || rt.HasDefinition("agents_list") {
+		if rt == nil || !rt.HasDefinition("skill_manage") || !rt.HasDefinition("skills_list") || !rt.HasDefinition("agent_list") {
 			done <- fmt.Errorf("expected lifecycle runtime tools in after_complete context, got %#v", rt)
 			return json.RawMessage(`{"summary":"missing tools","nothing_to_save":true}`), nil
 		}
@@ -442,11 +442,12 @@ func TestPrepareLifecycleTurn_NormalTaskAssignedToSkillMaintainerDoesNotGetMutat
 	}
 }
 
-func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesRouterSelectedAgentSkill(t *testing.T) {
+func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesScopedSkillLibraryTools(t *testing.T) {
 	root := t.TempDir()
 	writeLifecycleTestSkill(t, root, "skill_curator", "maintain_skill_library", "maintenance skill body")
 	writeLifecycleTestSkill(t, root, "skill_curator", "observe_task_for_learning", "observe body")
 	writeLifecycleStandaloneSkill(t, root, "other_skill", "other skill body")
+	writeLifecycleStandaloneSkill(t, root, "maintain_skill_library", "standalone maintenance body")
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 	agentRepo := repository.NewAgentRepo(db)
@@ -469,7 +470,8 @@ func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesRouterSelectedAge
 	worker.SetLifecycleSkillRoot(root)
 	worker.SetLifecycleAgentRepo(agentRepo)
 	worker.SetLifecycleRepo(repository.NewLifecycleRepo(db))
-	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "maintenance-task", Title: agentLibraryMaintenanceTaskTitle, Category: models.CategoryScheduled, AgentDefinitionID: &agent.ID})
+	task := models.Task{ID: "maintenance-task", Title: agentLibraryMaintenanceTaskTitle, Category: models.CategoryScheduled, AgentDefinitionID: &agent.ID}
+	turn := worker.PrepareLifecycleTurn(ctx, task)
 	if !routeCalled {
 		t.Fatal("system skill maintenance task should run route_task against Skill Curator's owned skills")
 	}
@@ -490,6 +492,92 @@ func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesRouterSelectedAge
 	out, handled, isErr, err = rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"skill_curator/maintain_skill_library"}`))
 	if !handled || err != nil || !isErr || !strings.Contains(out, "not a valid") {
 		t.Fatalf("agent-prefixed handle must be rejected handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+
+	llmSvc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	llmSvc.SetGlobalSkillRoot(root)
+	llmSvc.SetAgentRepo(agentRepo)
+	llmSvc.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+	maintenanceTools := llmSvc.agentDeclaredSkillRuntimeTools(turn.Ctx, task, agent, "")
+	mergedTools := llmcontracts.CompositeRuntimeTools(maintenanceTools, rt)
+	for _, want := range []string{"skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "agent_skill_manage"} {
+		if !mergedTools.HasDefinition(want) {
+			t.Fatalf("scheduled maintenance runtime missing %s: %#v", want, mergedTools.Definitions)
+		}
+	}
+	out, handled, isErr, err = mergedTools.Executor(context.Background(), "skills_list", json.RawMessage(`{}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "## other_skill") || !strings.Contains(out, "standalone:other_skill") || !strings.Contains(out, "standalone:maintain_skill_library") || strings.Contains(out, "skill_curator/maintain_skill_library") {
+		t.Fatalf("maintenance skills_list should expose standalone skills only with qualified view handles handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = mergedTools.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"other_skill"}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "other skill body") {
+		t.Fatalf("maintenance skill_view must load unambiguous listed standalone skill handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = mergedTools.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"maintain_skill_library"}`))
+	if !handled || err != nil || !isErr || !strings.Contains(out, "ambiguous") {
+		t.Fatalf("maintenance skill_view must reject colliding bare handles handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = mergedTools.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"standalone:maintain_skill_library"}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "standalone maintenance body") {
+		t.Fatalf("maintenance skill_view must load qualified standalone skill handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = mergedTools.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"agent:skill_curator/maintain_skill_library"}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "maintenance skill body") {
+		t.Fatalf("maintenance skill_view must load qualified selected agent skill read-only handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	reviewerAgent := &models.Agent{ID: "reviewer-agent-id", Key: "reviewer", Name: "Reviewer", Description: "Reviews code", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: true, GeneratedStatus: models.AgentStatusGenerated, Skills: []models.SkillConfig{{Name: "review_migrations", Description: "Review migrations"}}}
+	if err := agentRepo.Create(ctx, reviewerAgent); err != nil {
+		t.Fatalf("create reviewer agent: %v", err)
+	}
+	disabledAgent := &models.Agent{ID: "disabled-agent-id", Key: "disabled_agent", Name: "Disabled", Enabled: false, GeneratedStatus: models.AgentStatusGenerated}
+	if err := agentRepo.Create(ctx, disabledAgent); err != nil {
+		t.Fatalf("create disabled agent: %v", err)
+	}
+	archivedAgent := &models.Agent{ID: "archived-agent-id", Key: "archived_agent", Name: "Archived", Enabled: true, GeneratedStatus: models.AgentStatusArchived}
+	if err := agentRepo.Create(ctx, archivedAgent); err != nil {
+		t.Fatalf("create archived agent: %v", err)
+	}
+
+	out, handled, isErr, err = mergedTools.Executor(context.Background(), "agent_list", json.RawMessage(`{}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "reviewer") || strings.Contains(out, "skill_curator") || strings.Contains(out, "memory_curator") || strings.Contains(out, "disabled_agent") || strings.Contains(out, "archived_agent") {
+		t.Fatalf("agent_list should expose active non-system agents only handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = mergedTools.Executor(context.Background(), "skill_manage", json.RawMessage(`{"action":"write_file","handle":"other_skill","scope":"global","support":{"kind":"references","path":"maintenance-note.md","content":"kept"}}`))
+	if !handled || err != nil || isErr {
+		t.Fatalf("maintenance skill_manage write_file failed handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "skills", "other_skill", "references", "maintenance-note.md")); err != nil {
+		t.Fatalf("expected skill_manage to write standalone support file: %v", err)
+	}
+	out, handled, isErr, err = mergedTools.Executor(context.Background(), "skill_manage", json.RawMessage(`{"action":"write_file","handle":"skill_curator/maintain_skill_library","scope":"global","support":{"kind":"references","path":"forbidden.md","content":"blocked"}}`))
+	if !handled || err != nil || !isErr || !strings.Contains(out, "invalid standalone skill handle") {
+		t.Fatalf("skill_manage must not mutate agent-owned system skills handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	out, handled, isErr, err = mergedTools.Executor(context.Background(), "agent_skill_manage", json.RawMessage(`{"action":"create","agent":"reviewer","scope":"global","declaration":"---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n  key: review_migrations\n---\n# Review migrations\n"}`))
+	if !handled || err != nil || isErr {
+		t.Fatalf("agent_skill_manage should mutate non-system agent skills handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "agents", "reviewer", "skills", "review_migrations", "SKILL.md")); err != nil {
+		t.Fatalf("agent_skill_manage did not write non-system agent skill: %v", err)
+	}
+	for _, tc := range []struct {
+		agent string
+		skill string
+		want  string
+	}{
+		{agent: "skill_curator", skill: "maintain_skill_library", want: "protected"},
+		{agent: "memory_curator", skill: "consolidate_memory", want: "protected"},
+		{agent: "disabled_agent", skill: "disabled_skill", want: "disabled"},
+		{agent: "archived_agent", skill: "archived_skill", want: "archived"},
+	} {
+		params := fmt.Sprintf(`{"action":"write_file","agent":%q,"scope":"global","handle":%q,"support":{"kind":"references","path":"forbidden.md","content":"blocked"}}`, tc.agent, tc.skill)
+		out, handled, isErr, err = mergedTools.Executor(context.Background(), "agent_skill_manage", json.RawMessage(params))
+		if !handled || err != nil || !isErr || !strings.Contains(out, tc.want) {
+			t.Fatalf("agent_skill_manage must block %s agent skills handled=%v isErr=%v err=%v out=%q", tc.want, handled, isErr, err, out)
+		}
+		if _, err := os.Stat(filepath.Join(root, "agents", tc.agent, "skills", tc.skill, "references", "forbidden.md")); !os.IsNotExist(err) {
+			t.Fatalf("agent_skill_manage wrote into protected system agent skill path err=%v", err)
+		}
 	}
 }
 
@@ -625,7 +713,7 @@ func assertTaskRuntimeIsSelectedSkillOnly(t *testing.T, rt *llmcontracts.Runtime
 	if rt == nil || !rt.HasDefinition("skill_view") {
 		t.Fatalf("expected task skill_view runtime tools, got %#v", rt)
 	}
-	for _, denied := range []string{"skill_manage", "agent_manage", "skills_list", "agents_list", "agent_view"} {
+	for _, denied := range []string{"skill_manage", "agent_manage", "skills_list", "agent_list", "agent_view"} {
 		if rt.HasDefinition(denied) {
 			t.Fatalf("task runtime tools must not expose %s, got %#v", denied, rt.Definitions)
 		}
@@ -686,7 +774,7 @@ func TestPrepareLifecycleTurn_AssignedAgentRouteHookDoesNotExposeStandaloneSkill
 	if routeTools == nil || !routeTools.HasDefinition("skill_view") {
 		t.Fatalf("expected assigned-agent route hook skill_view, got %#v", routeTools)
 	}
-	if routeTools.HasDefinition("skills_list") || routeTools.HasDefinition("agent_view") || routeTools.HasDefinition("skill_manage") {
+	if routeTools.HasDefinition("skills_list") || routeTools.HasDefinition("agent_list") || routeTools.HasDefinition("agent_view") || routeTools.HasDefinition("skill_manage") {
 		t.Fatalf("assigned-agent route hook must expose only scoped skill_view, got %#v", routeTools.Definitions)
 	}
 	out, handled, isErr, err := routeTools.Executor(ctx, "skill_view", json.RawMessage(`{"handle":"task_skill"}`))
@@ -712,7 +800,11 @@ func writeLifecycleStandaloneSkill(t *testing.T, root, skill, body string) {
 	if err := os.MkdirAll(filepath.Join(root, "skills", skill), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "skills", skill, "SKILL.md"), []byte(body), 0o644); err != nil {
+	content := body
+	if !strings.HasPrefix(strings.TrimSpace(content), "---") {
+		content = "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n  key: " + skill + "\n  scope: global\n---\n" + body
+	}
+	if err := os.WriteFile(filepath.Join(root, "skills", skill, "SKILL.md"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	appendLifecycleTestHeader(t, filepath.Join(root, "skills", "SKILLS.md"), skill)

@@ -19,6 +19,10 @@ type AgentStore interface {
 	MarkArchived(ctx context.Context, id, absorbedInto, reason string) error
 }
 
+type agentStoreIncludingArchived interface {
+	GetByKeyIncludingArchived(ctx context.Context, key string) (*models.Agent, error)
+}
+
 // HookStore is the subset of repository.LifecycleRepo the production Applier
 // needs. It writes the agent_lifecycle_hooks rows declared by the importer.
 type HookStore interface {
@@ -159,30 +163,60 @@ func (a *RepoApplier) ArchiveSkill(ctx context.Context, handle, absorbedInto, re
 
 // IsProtected reports whether the target is protected from autonomous edits.
 // Skills inherit their agent's protection state.
+func isBuiltInSystemAgentKey(key string) bool {
+	switch strings.TrimSpace(key) {
+	case models.AgentSystemKindSkillCurator, models.AgentSystemKindMemoryCurator:
+		return true
+	default:
+		return false
+	}
+}
+
 func (a *RepoApplier) IsProtected(ctx context.Context, targetType, key string) (bool, string, error) {
 	if a == nil || a.Agents == nil {
 		return false, "", nil
 	}
 	var agentKey string
+	agentOwnedSkill := false
 	switch targetType {
 	case "agent":
 		agentKey = key
 	case "skill":
-		// Standalone generated skills do not inherit protection from an agent.
-		// Agent-owned implementation skills are not managed through skill_manage.
-		return false, "", nil
+		parts := strings.Split(strings.TrimSpace(key), "/")
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+			// Standalone generated skills do not inherit protection from an agent.
+			return false, "", nil
+		}
+		agentKey = parts[0]
+		agentOwnedSkill = true
 	default:
 		return false, "", nil
 	}
 	existing, err := a.Agents.GetByKey(ctx, agentKey)
+	if agentOwnedSkill {
+		if archivedStore, ok := a.Agents.(agentStoreIncludingArchived); ok {
+			existing, err = archivedStore.GetByKeyIncludingArchived(ctx, agentKey)
+		}
+	}
 	if err != nil {
 		return false, "", err
 	}
 	if existing == nil {
+		if isBuiltInSystemAgentKey(agentKey) {
+			return true, "agent " + agentKey + " is protected", nil
+		}
 		return false, "", nil
 	}
-	if existing.GeneratedStatus == models.AgentStatusProtected {
+	if existing.GeneratedStatus == models.AgentStatusProtected || isBuiltInSystemAgentKey(agentKey) {
 		return true, "agent " + agentKey + " is protected", nil
+	}
+	if agentOwnedSkill {
+		if !existing.Enabled {
+			return true, "agent " + agentKey + " is disabled", nil
+		}
+		if existing.GeneratedStatus == models.AgentStatusArchived || existing.ArchivedAt != nil {
+			return true, "agent " + agentKey + " is archived", nil
+		}
 	}
 	return false, "", nil
 }

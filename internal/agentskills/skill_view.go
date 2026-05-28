@@ -13,13 +13,29 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
-// handleShape matches the canonical standalone skill handle form. We deliberately
-// reject paths, parents, agent prefixes, and trailing /SKILL.md.
+// handleShape matches the canonical bare skill handle form. We deliberately
+// reject paths, parents, agent prefixes, and trailing /SKILL.md for bare handles.
 var handleShape = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+
+// qualifiedSkillViewHandleShape accepts explicit maintenance/runtime view handles
+// returned by skills_list or agent-owned catalogs.
+var qualifiedSkillViewHandleShape = regexp.MustCompile(`^(standalone|skill):[A-Za-z0-9][A-Za-z0-9_.-]*$|^agent:[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
 // agentKeyShape matches the slug constraints we apply elsewhere. agent_view
 // rejects keys that don't match before calling the inspector.
 var agentKeyShape = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+
+// AgentSummary is the prompt-safe agent index record returned by agent_list.
+type AgentSummary struct {
+	Key             string   `json:"key"`
+	Name            string   `json:"name,omitempty"`
+	Description     string   `json:"description,omitempty"`
+	Scope           string   `json:"scope,omitempty"`
+	Enabled         bool     `json:"enabled"`
+	Selectable      bool     `json:"selectable_as_primary,omitempty"`
+	AttachedSkills  []string `json:"attached_skills,omitempty"`
+	GeneratedStatus string   `json:"generated_status,omitempty"`
+}
 
 // AgentDetails is the prompt-safe agent record returned by agent_view.
 type AgentDetails struct {
@@ -47,6 +63,7 @@ type AgentHookView struct {
 }
 
 type AgentInspector interface {
+	ListAgents(ctx context.Context) ([]AgentSummary, error)
 	InspectAgent(ctx context.Context, agentKey string) (*AgentDetails, error)
 }
 
@@ -69,26 +86,32 @@ func skillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspect
 	}
 	skillView := llmcontracts.RuntimeToolDefinition{
 		Name:        "skill_view",
-		Description: "Load a skill selected for this turn. With only handle, returns SKILL.md plus linked support-file metadata and absolute skill_dir/scripts_dir paths. With file_path, loads one support file under references/, templates/, scripts/, or assets/. Filesystem paths and agent-prefixed handles are not accepted; use the exact handle listed in <selected_skills>.",
-		Parameters:  json.RawMessage(`{"type":"object","properties":{"handle":{"type":"string","description":"Selected skill handle, e.g. debug_go_tests or maintain_skill_library"},"file_path":{"type":"string","description":"Optional support file path, e.g. references/common-failures.md or scripts/check.sh"}},"required":["handle"],"additionalProperties":false}`),
+		Description: "Load an authorized skill for this turn. Use a selected bare handle when only selected skills are available, or a qualified view handle such as standalone:<skill> or agent:<agent>/<skill> when library tools return one. With file_path, loads one support file under references/, templates/, scripts/, or assets/.",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"handle":{"type":"string","description":"Selected bare handle or qualified view handle, e.g. debug_go_tests, standalone:debug_go_tests, or agent:reviewer/review_code"},"file_path":{"type":"string","description":"Optional support file path, e.g. references/common-failures.md or scripts/check.sh"}},"required":["handle"],"additionalProperties":false}`),
 	}
 	definitions := []llmcontracts.RuntimeToolDefinition{skillView}
 	tools := map[string]struct{}{"skill_view": {}}
 	if includeLibraryTools {
 		skillsList := llmcontracts.RuntimeToolDefinition{
 			Name:        "skills_list",
-			Description: "Return the raw top-level skills/SKILLS.md contents. Optional 'scope' ('global'|'project'|'all', default 'all') filters which roots to include.",
+			Description: "Return top-level skills/SKILLS.md contents plus canonical view_handle values. Optional 'scope' ('global'|'project'|'all', default 'all') filters which roots to include. Use the returned view_handle with skill_view when available.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"scope":{"type":"string","enum":["global","project","all"]}},"additionalProperties":false}`),
 		}
 		definitions = append(definitions, skillsList)
 		tools["skills_list"] = struct{}{}
 		if inspector != nil {
+			agentList := llmcontracts.RuntimeToolDefinition{
+				Name:        "agent_list",
+				Description: "List enabled non-system agents that may have maintainable agent-owned skills. Returns prompt-safe summaries; use agent_view with a returned key for details.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+			}
 			agentView := llmcontracts.RuntimeToolDefinition{
 				Name:        "agent_view",
 				Description: "Inspect one manually assigned agent: prompt, permissions, tool grants, lifecycle hooks, and attached/manual skills. Accepts an agent key/slug.",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{"key":{"type":"string","description":"Agent key/slug to inspect"}},"required":["key"],"additionalProperties":false}`),
 			}
-			definitions = append(definitions, agentView)
+			definitions = append(definitions, agentList, agentView)
+			tools["agent_list"] = struct{}{}
 			tools["agent_view"] = struct{}{}
 		}
 	}
@@ -111,6 +134,18 @@ func skillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspect
 					break
 				}
 				body, err := resolveSkillsList(globalRoot, projectRoot, input)
+				if err != nil {
+					return err.Error(), true, true, nil
+				}
+				return body, true, false, nil
+			case "agent_list":
+				if !includeLibraryTools {
+					break
+				}
+				if inspector == nil {
+					return "agent_list: no inspector configured", true, true, nil
+				}
+				body, err := resolveAgentList(ctx, inspector, input)
 				if err != nil {
 					return err.Error(), true, true, nil
 				}
@@ -161,7 +196,64 @@ func resolveSkillsList(globalRoot, projectRoot string, input json.RawMessage) (s
 	if hits == 0 {
 		return "(no top-level skills/SKILLS.md found for the requested scope)", nil
 	}
+	handles, err := standaloneViewHandlesFromCatalog(scope, globalRoot, projectRoot)
+	if err != nil {
+		return "", err
+	}
+	if len(handles) > 0 {
+		out.WriteString("\n\n=== view_handles ===\n")
+		for _, handle := range handles {
+			fmt.Fprintf(&out, "- %s\n", handle)
+		}
+	}
 	return out.String(), nil
+}
+
+func standaloneViewHandlesFromCatalog(scope, globalRoot, projectRoot string) ([]string, error) {
+	useGlobal := scope == "global" || scope == "all"
+	useProject := scope == "project" || scope == "all"
+	catalogGlobal := ""
+	catalogProject := ""
+	if useGlobal {
+		catalogGlobal = globalRoot
+	}
+	if useProject {
+		catalogProject = projectRoot
+	}
+	catalog, err := BuildCatalog("skills-list", catalogGlobal, catalogProject)
+	if err != nil {
+		return nil, fmt.Errorf("skills_list: build view handles: %w", err)
+	}
+	var handles []string
+	for _, entry := range catalog.Entries() {
+		for _, handle := range qualifiedSkillHandles(entry) {
+			if strings.HasPrefix(handle, "standalone:") {
+				handles = append(handles, handle)
+			}
+		}
+	}
+	return uniqueSortedStrings(handles), nil
+}
+
+func uniqueSortedStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func parseScope(input json.RawMessage) string {
@@ -183,6 +275,10 @@ func parseScope(input json.RawMessage) string {
 	}
 }
 
+func isValidSkillViewHandle(handle string) bool {
+	return handleShape.MatchString(handle) || qualifiedSkillViewHandleShape.MatchString(handle)
+}
+
 func resolveSkillView(catalog *Catalog, input json.RawMessage) (string, error) {
 	var params struct {
 		Handle   string `json:"handle"`
@@ -192,10 +288,13 @@ func resolveSkillView(catalog *Catalog, input json.RawMessage) (string, error) {
 		return "", fmt.Errorf("skill_view: invalid input: %w", err)
 	}
 	handle := strings.TrimSpace(params.Handle)
-	if !handleShape.MatchString(handle) {
-		return "", fmt.Errorf("skill_view: handle %q is not a valid standalone skill handle", handle)
+	if !isValidSkillViewHandle(handle) {
+		return "", fmt.Errorf("skill_view: handle %q is not a valid skill_view handle", handle)
 	}
-	entry, ok := catalog.Lookup(handle)
+	entry, ok, ambiguous := catalog.ResolveSkillHandle(handle)
+	if ambiguous {
+		return "", fmt.Errorf("skill_view: handle %q is ambiguous in this turn; use a qualified handle such as standalone:%s or agent:<agent>/%s", handle, handle, handle)
+	}
 	if !ok {
 		return "", fmt.Errorf("skill_view: handle %q is not in this turn's authorized index", handle)
 	}
@@ -344,6 +443,30 @@ func ensureInsideSkillDir(skillDir, abs string) error {
 		return fmt.Errorf("support path escapes skill folder")
 	}
 	return nil
+}
+
+func resolveAgentList(ctx context.Context, inspector AgentInspector, input json.RawMessage) (string, error) {
+	if len(input) > 0 {
+		var params map[string]any
+		if err := json.Unmarshal(input, &params); err != nil {
+			return "", fmt.Errorf("agent_list: invalid input: %w", err)
+		}
+		if len(params) > 0 {
+			return "", fmt.Errorf("agent_list: no parameters are supported")
+		}
+	}
+	agents, err := inspector.ListAgents(ctx)
+	if err != nil {
+		return "", fmt.Errorf("agent_list: %w", err)
+	}
+	if agents == nil {
+		agents = []AgentSummary{}
+	}
+	b, err := json.MarshalIndent(agents, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("agent_list: encode: %w", err)
+	}
+	return string(b), nil
 }
 
 func resolveAgentView(ctx context.Context, inspector AgentInspector, input json.RawMessage) (string, error) {

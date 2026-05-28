@@ -1,6 +1,6 @@
 ---
 title: Maintain Skill Library
-description: Scheduled maintenance for durable standalone skills.
+description: Scheduled maintenance for durable standalone and non-system agent-owned skills.
 routing:
   triggers:
     - scheduled
@@ -11,30 +11,33 @@ routing:
 
 # Maintain Skill Library
 
-Maintain the standalone skill library. Consolidate duplicate generated skills, prune stale generated skills, and keep skills focused and discoverable.
+Maintain the skill library across standalone skills and non-system agent-owned skills. Consolidate duplicate generated skills, prune stale generated skills, and keep reusable skill guidance focused and discoverable.
 
-Agents are standalone user-managed configurations. Do not create, patch, archive, route, or reassign agents during scheduled maintenance. Use `agent_view` only to understand manually assigned agents when skill guidance mentions them.
+Agents are standalone user-managed configurations. Do not create, patch, archive, route, reassign, or change agent metadata during scheduled maintenance. You may maintain skill packages owned by non-system agents when the guidance is agent-specific. Never modify protected system agent skills, including `skill_curator/*` and `memory_curator/*`; backend protection rejects those writes.
 
 ## Read first
 
 Use the read tools to inspect current state before changing anything:
 
-- `skills_list` returns the raw top-level `skills/SKILLS.md` narrative for global and project scopes.
-- `agent_view` returns one manually managed agent's configuration and embedded/manual skills.
-- `skill_view` loads one standalone skill package by handle, returning `SKILL.md` plus linked support-file metadata.
+- `skills_list` returns the top-level `skills/SKILLS.md` narrative for global and project standalone scopes plus canonical `view_handle` values such as `standalone:<skill>`.
+- `agent_list` returns enabled non-system agents that may have maintainable agent-owned skills; use it to discover agent keys before inspecting or changing agent-owned skill packages.
+- `agent_view` returns one manually managed agent's configuration and embedded/manual skills; use it to understand non-system agent responsibilities before changing that agent's owned skills.
+- `skill_view` loads one standalone or selected skill package by handle, returning `SKILL.md` plus linked support-file metadata. Prefer the qualified `view_handle` returned by `skills_list` or agent-owned views; bare handles may be rejected when standalone and selected agent-owned skills share a name.
 - `skill_view` with `file_path` loads one support file such as `references/common-failures.md`, `templates/checklist.md`, `scripts/validate.sh`, or `assets/example.json`. Load support files selectively; do not load every support file by default.
 
 ## Make changes
 
-Use mutation tools only for validated, durable standalone skill improvements. Do not hard-delete skills. Archive stale generated skills with a reason and replacement handle when appropriate.
+Use mutation tools only for validated, durable skill improvements. Do not hard-delete skills. Archive stale generated standalone skills with a reason and replacement handle when appropriate.
 
 - `skill_manage(action=create)` creates a standalone skill at `skills/<skill>/SKILL.md`.
 - `skill_manage(action=patch)` updates an existing standalone `SKILL.md`.
 - `skill_manage(action=write_file)` writes `references/`, `templates/`, `scripts/`, or `assets/` support files under an existing standalone skill.
 - `skill_manage(action=remove_file)` removes stale or duplicate support files from an existing standalone skill.
 - `skill_manage(action=archive)` archives a generated standalone skill that was absorbed or superseded.
+- `agent_skill_manage(action=create|patch)` creates or updates a skill package under `agents/<agent>/skills/<skill>/SKILL.md` for a non-system, non-protected agent. Pass the target agent key in `agent`, the bare skill key in `handle` when needed, and never include `agent/skill` in `handle`.
+- `agent_skill_manage(action=write_file|remove_file)` writes or removes `references/`, `templates/`, `scripts/`, or `assets/` support files under an existing non-system agent-owned skill.
 
-Agent creation, editing, archival, and skill attachment decisions belong to users in the create/edit agent dialog. Scheduled maintenance only changes standalone generated skills.
+Agent creation, editing, archival, routing, and skill attachment decisions belong to users in the create/edit agent dialog. Scheduled maintenance may change standalone generated skills and non-system agent-owned skill packages only; it must not change agent metadata or protected system agent skills.
 
 ## Skill Substance
 
@@ -59,7 +62,7 @@ During consolidation, preserve useful support files from absorbed skills, remove
 
 ## Maintain the index files
 
-The top-level `skills/SKILLS.md` files are narrative discovery indexes for standalone generated skills. Agent-owned/system implementation skills are not routed and should not be added to this index.
+The top-level `skills/SKILLS.md` files are narrative discovery indexes for standalone generated skills. Agent-owned skills are discovered through their agent packages and should not be added to this standalone index.
 
 After any successful `skill_manage` write, the mutation tool maintains the top-level `skills/SKILLS.md` skill-link index. Use `skills_list` to verify the result when needed, but do not attempt direct index-file edits.
 
@@ -67,4 +70,4 @@ If `skills/SKILLS.md` is missing, empty, or appears out of sync with the on-disk
 
 ## Return value
 
-Return only JSON matching the `library_update_summary` contract. Skill archives must appear in exactly one consolidation or pruning entry. Leave all agent-related arrays empty.
+Return only JSON matching the `library_update_summary` contract. Skill archives must appear in exactly one consolidation or pruning entry. Summarize any non-system agent-owned skill changes clearly, and explicitly report when protected system agent skills were skipped rather than modified.

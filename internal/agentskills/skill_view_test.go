@@ -92,6 +92,38 @@ func TestSkillView_ReadsResolvedSkillBodyAndLinkedFiles(t *testing.T) {
 	}
 }
 
+func TestSkillView_QualifiedHandlesDisambiguateMergedCatalogs(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "shared", "---\ntitle: Standalone\n---\nstandalone body")
+	mustWriteFile(t, root, "agents/reviewer/SKILLS.md", "# Reviewer Skills\n\n## reviewer/shared\n")
+	mustWriteFile(t, root, "agents/reviewer/skills/shared/SKILL.md", "---\ntitle: Agent\n---\nagent body")
+	standalone, err := BuildCatalog("turn-standalone", root, "")
+	if err != nil {
+		t.Fatalf("build standalone: %v", err)
+	}
+	agent, err := BuildAgentCatalog("turn-agent", root, "", "reviewer")
+	if err != nil {
+		t.Fatalf("build agent: %v", err)
+	}
+	merged := NewCatalog("turn-merged", append(standalone.Entries(), agent.Entries()...))
+	rt := SkillRuntimeTools(merged, root, "", nil)
+
+	out, handled, isErr, err := rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"shared"}`))
+	if !handled || err != nil || !isErr || !strings.Contains(out, "ambiguous") {
+		t.Fatalf("expected ambiguous bare handle rejection handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+
+	out, handled, isErr, err = rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"standalone:shared"}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "standalone body") {
+		t.Fatalf("expected standalone qualified view handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+
+	out, handled, isErr, err = rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"agent:reviewer/shared"}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, "agent body") {
+		t.Fatalf("expected agent qualified view handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+}
+
 func TestSkillView_LoadsAuthorizedSupportFile(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, "skill", "---\ntitle: T\n---\nbody")
@@ -173,15 +205,58 @@ func TestSkillsList_ReturnsRawTopLevelSkillsMd(t *testing.T) {
 	if !strings.Contains(out, "## skill_x") || !strings.Contains(out, "## skill_y") {
 		t.Fatalf("skills_list missing skill headers: %s", out)
 	}
+	if !strings.Contains(out, "=== view_handles ===") || !strings.Contains(out, "standalone:skill_x") || !strings.Contains(out, "standalone:skill_y") {
+		t.Fatalf("skills_list missing qualified view handles: %s", out)
+	}
 }
 
 type fakeInspector struct {
-	out *AgentDetails
-	err error
+	list    []AgentSummary
+	listErr error
+	out     *AgentDetails
+	err     error
+}
+
+func (f *fakeInspector) ListAgents(ctx context.Context) ([]AgentSummary, error) {
+	return f.list, f.listErr
 }
 
 func (f *fakeInspector) InspectAgent(ctx context.Context, key string) (*AgentDetails, error) {
 	return f.out, f.err
+}
+
+func TestAgentList_OptionalAndReturnsInspectorSummaries(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "skill", "---\ntitle: T\n---\nbody")
+	cat, _ := BuildCatalog("turn", root, "")
+
+	rtNo := SkillRuntimeTools(cat, root, "", nil)
+	for _, def := range rtNo.Definitions {
+		if def.Name == "agent_list" {
+			t.Fatalf("agent_list must not be exposed without inspector")
+		}
+	}
+	if allow, handled := rtNo.Filter("agent_list"); handled || allow {
+		t.Fatalf("filter must not own agent_list when no inspector configured")
+	}
+
+	rt := SkillRuntimeTools(cat, root, "", &fakeInspector{list: []AgentSummary{{Key: "backend-engineer", Name: "Backend Engineer", Enabled: true, AttachedSkills: []string{"run-go-tests"}}}})
+	out, handled, isErr, err := rt.Executor(context.Background(), "agent_list", json.RawMessage(`{}`))
+	if !handled || err != nil || isErr {
+		t.Fatalf("expected ok agent_list, got handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	var got []AgentSummary
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("expected JSON, got %q: %v", out, err)
+	}
+	if len(got) != 1 || got[0].Key != "backend-engineer" || len(got[0].AttachedSkills) != 1 {
+		t.Fatalf("unexpected summaries: %+v", got)
+	}
+
+	out, handled, isErr, err = rt.Executor(context.Background(), "agent_list", json.RawMessage(`{"scope":"all"}`))
+	if !handled || err != nil || !isErr || !strings.Contains(out, "no parameters") {
+		t.Fatalf("expected parameter rejection, got handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
 }
 
 func TestAgentView_OptionalAndRequiresInspector(t *testing.T) {

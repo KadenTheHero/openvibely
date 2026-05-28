@@ -159,10 +159,10 @@ scheduled task fires
 -> route_task sees Skill Curator's own skills
 -> route_task should select maintain_skill_library
 -> normal task runs as Skill Curator
--> maintain_skill_library manages standalone skills
+-> maintain_skill_library manages standalone skills and non-system agent-owned skills
 ```
 
-This scheduled task is focused on maintaining the standalone skill library. It should not improve arbitrary agent-owned skills.
+This scheduled task maintains standalone skills and non-system agent-owned skill packages when the guidance is agent-specific. It must not create, edit, archive, route, or reassign agents, and it must not modify protected system agent skills such as `skill_curator/*` or `memory_curator/*`.
 
 ## System Memory Consolidation
 
@@ -192,5 +192,5 @@ Important separation rules:
 - No-agent tasks route standalone skills.
 - Assigned-agent tasks route only that assigned agent's skills.
 - `skill_manage` cannot write agent-owned skills.
-- `agent_skill_manage` cannot write standalone skills or another agent's skills.
+- `agent_skill_manage` cannot write standalone skills; assigned-agent learning is scoped to that assigned agent, while explicit scheduled library maintenance may target non-system, non-protected agents only.
 - Project scope overrides global scope for matching skill keys.

@@ -98,9 +98,12 @@ type Entry struct {
 // Catalog is the app-owned, frozen-per-turn set of handles the model is allowed
 // to call skill_view on.
 type Catalog struct {
-	entries    map[string]Entry
-	turnID     string
-	agentOwned bool
+	entries     map[string]Entry
+	byHandle    map[string][]Entry
+	byQualified map[string]Entry
+	ordered     []Entry
+	turnID      string
+	agentOwned  bool
 }
 
 // NewCatalog freezes the supplied entries into a lookup table keyed by handle.
@@ -109,14 +112,44 @@ func NewCatalog(turnID string, entries []Entry) *Catalog {
 }
 
 func newCatalog(turnID string, entries []Entry, agentOwned bool) *Catalog {
-	c := &Catalog{entries: make(map[string]Entry, len(entries)), turnID: turnID, agentOwned: agentOwned}
+	c := &Catalog{
+		entries:     make(map[string]Entry, len(entries)),
+		byHandle:    make(map[string][]Entry, len(entries)),
+		byQualified: make(map[string]Entry, len(entries)*3),
+		ordered:     make([]Entry, 0, len(entries)),
+		turnID:      turnID,
+		agentOwned:  agentOwned,
+	}
 	for _, e := range entries {
 		if e.Source == SourceAgent || e.AgentKey != "" {
 			c.agentOwned = true
 		}
 		c.entries[e.Handle] = e
+		c.byHandle[e.Handle] = append(c.byHandle[e.Handle], e)
+		for _, qualified := range qualifiedSkillHandles(e) {
+			c.byQualified[qualified] = e
+		}
+		c.ordered = append(c.ordered, e)
 	}
 	return c
+}
+
+func qualifiedSkillHandles(e Entry) []string {
+	skill := strings.TrimSpace(e.Skill)
+	if skill == "" {
+		skill = strings.TrimSpace(e.Handle)
+	}
+	if skill == "" {
+		return nil
+	}
+	if e.Source == SourceAgent || strings.TrimSpace(e.AgentKey) != "" {
+		agent := strings.TrimSpace(e.AgentKey)
+		if agent == "" {
+			return nil
+		}
+		return []string{"agent:" + agent + "/" + skill}
+	}
+	return []string{"standalone:" + skill, "skill:" + skill}
 }
 
 // TurnID returns the identifier of the model turn this catalog was frozen for.
@@ -127,9 +160,9 @@ func (c *Catalog) TurnID() string {
 	return c.turnID
 }
 
-// Lookup returns the entry for an exact standalone handle, or false if it was
-// not in the frozen set. The returned entry contains an absolute path that must
-// not be surfaced to the model.
+// Lookup returns the legacy bare-handle entry, or false if it was not in the
+// frozen set. For merged multi-scope skill_view calls, use ResolveSkillHandle so
+// duplicate bare handles can be reported as ambiguous instead of shadowed.
 func (c *Catalog) Lookup(handle string) (Entry, bool) {
 	if c == nil {
 		return Entry{}, false
@@ -138,16 +171,41 @@ func (c *Catalog) Lookup(handle string) (Entry, bool) {
 	return e, ok
 }
 
+// ResolveSkillHandle resolves either a qualified skill_view handle or an
+// unambiguous bare handle from the frozen turn catalog.
+func (c *Catalog) ResolveSkillHandle(handle string) (Entry, bool, bool) {
+	if c == nil {
+		return Entry{}, false, false
+	}
+	handle = strings.TrimSpace(handle)
+	if e, ok := c.byQualified[handle]; ok {
+		return e, true, false
+	}
+	entries := c.byHandle[handle]
+	if len(entries) == 0 {
+		return Entry{}, false, false
+	}
+	if len(entries) > 1 {
+		return Entry{}, true, true
+	}
+	return entries[0], true, false
+}
+
 // Entries returns the frozen entries sorted by handle for deterministic output.
 func (c *Catalog) Entries() []Entry {
 	if c == nil {
 		return nil
 	}
-	out := make([]Entry, 0, len(c.entries))
-	for _, e := range c.entries {
-		out = append(out, e)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Handle < out[j].Handle })
+	out := append([]Entry(nil), c.ordered...)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Handle != out[j].Handle {
+			return out[i].Handle < out[j].Handle
+		}
+		if out[i].AgentKey != out[j].AgentKey {
+			return out[i].AgentKey < out[j].AgentKey
+		}
+		return out[i].Source < out[j].Source
+	})
 	return out
 }
 

@@ -228,6 +228,24 @@ func (r *AgentRepo) GetByKey(ctx context.Context, key string) (*models.Agent, er
 	return a, nil
 }
 
+// GetByKeyIncludingArchived returns an agent by key without filtering archived
+// rows. Use this only for protection/maintenance checks that must not allow a
+// hidden archived row to be bypassed by writing to the same key.
+func (r *AgentRepo) GetByKeyIncludingArchived(ctx context.Context, key string) (*models.Agent, error) {
+	if key == "" {
+		return nil, nil
+	}
+	a, err := scanAgent(r.db.QueryRowContext(ctx,
+		`SELECT `+agentColumns+` FROM agents WHERE key = ? ORDER BY created_at ASC LIMIT 1`, key))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting agent by key including archived: %w", err)
+	}
+	return a, nil
+}
+
 // MarkArchived flips an agent's generated_status to archived and stores the
 // absorbed_into/reason metadata for forwarding (runbook line 1760).
 func (r *AgentRepo) MarkArchived(ctx context.Context, id, absorbedInto, reason string) error {

@@ -13,6 +13,7 @@ routing:
 tools:
   - skill_view
   - skills_list
+  - agent_list
   - agent_view
   - skill_manage
   - agent_skill_manage
@@ -63,10 +64,10 @@ When creating or maintaining skills:
 
 - Put generated, routable skill instructions in top-level `<root>/skills/<skill_key>/SKILL.md`.
 - Use `skill_manage` for standalone skill prompt changes and support files.
-- Use `agent_skill_manage` only from after-complete learning when the completed task had an assigned agent and the learning is specific to that assigned agent's role or selected agent-owned skills.
+- Use `agent_skill_manage` from after-complete learning for the assigned agent's own skills, or from scheduled skill-library maintenance for non-system agent-owned skills. Protected system agents such as `skill_curator` and `memory_curator` must not be modified.
 - When `skill_view` exposes a selected skill's `skill_dir`/`scripts_dir`, bundled scripts under `scripts/` can be called with the normal runtime tools available to the task. Do not invent a separate script runner contract; document concrete commands in `SKILL.md`.
 - The mutation tools maintain the minimal top-level `skills/SKILLS.md` skill-link index for active standalone skills.
-- Do not use scoped file tools or direct file writes for agent/index maintenance; use `skill_manage` only.
+- Do not use scoped file tools or direct file writes for skill package or index maintenance; use `skill_manage` for standalone skills and `agent_skill_manage` for non-system agent-owned skills.
 - Do not use autonomous tools to change agent metadata, routing, tools, permissions, lifecycle hooks, or skill attachments.
 
 ## skill_curator/route_task

@@ -434,7 +434,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// Call the LLM
 	callCtx := ctx
 	if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil {
-		mergedTools := llmcontracts.CompositeRuntimeTools(ctxTools, runtimeTools)
+		mergedTools := llmcontracts.CompositeRuntimeTools(runtimeTools, ctxTools)
 		callCtx = llmcontracts.WithRuntimeTools(callCtx, mergedTools)
 		if mergedTools != nil && mergedTools.SkipDefaultTools {
 			projectInstructions = ""

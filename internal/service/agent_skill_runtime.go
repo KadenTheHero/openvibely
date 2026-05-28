@@ -11,37 +11,68 @@ import (
 )
 
 func (s *LLMService) agentDeclaredSkillRuntimeTools(ctx context.Context, task models.Task, agent *models.Agent, workDir string) *llmcontracts.RuntimeTools {
-	if s == nil || agent == nil || !agentExplicitlyAllowsAnyTool(agent, "skill_view", "skills_list", "agent_view", "skill_manage") {
+	if s == nil || agent == nil || !agentExplicitlyAllowsAnyTool(agent, "skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "agent_skill_manage") {
 		return nil
 	}
-	catalog := lifecycleTurnFromContext(ctx).Catalog
-	if catalog == nil {
-		return nil
-	}
+	selectedCatalog := lifecycleTurnFromContext(ctx).Catalog
 	projectRoot := ""
 	if s.projectRepo != nil {
 		projectRoot = projectSkillRoot(ctx, s.projectRepo, task.ProjectID)
 	}
+	standaloneCatalog := s.standaloneSkillCatalog(task, projectRoot)
+
 	var inspector agentskills.AgentInspector
 	if s.agentRepo != nil {
 		inspector = newAgentInspector(s.agentRepo, s.lifecycleRepo, nil)
 	}
 	var readers *llmcontracts.RuntimeTools
-	if agentExplicitlyAllowsAnyTool(agent, "skills_list", "agent_view") {
-		readers = agentskills.SkillRuntimeTools(catalog, s.globalSkillRoot, projectRoot, inspector)
+	if agentExplicitlyAllowsAnyTool(agent, "skills_list", "agent_list", "agent_view") {
+		readers = agentskills.SkillRuntimeTools(mergeSkillCatalogs(task.ID+":skill-tools", standaloneCatalog, selectedCatalog), s.globalSkillRoot, projectRoot, inspector)
 	} else if agentExplicitlyAllowsTool(agent, "skill_view") {
-		readers = agentskills.SelectedSkillRuntimeTools(catalog)
+		readers = agentskills.SelectedSkillRuntimeTools(selectedCatalog)
 	}
-	var writers *llmcontracts.RuntimeTools
-	if agentExplicitlyAllowsTool(agent, "skill_manage") {
+	var writers []*llmcontracts.RuntimeTools
+	if agentExplicitlyAllowsTool(agent, "skill_manage") || agentExplicitlyAllowsTool(agent, "agent_skill_manage") {
 		importer := s.agentSkillImporter(task)
 		var recorder agentlibrary.MutationRecorder
 		if s.mutationRecorder != nil {
 			recorder = s.mutationRecorder(task)
 		}
-		writers = agentlibrary.SkillMutationTools(importer, recorder)
+		if agentExplicitlyAllowsTool(agent, "skill_manage") {
+			writers = append(writers, agentlibrary.SkillMutationTools(importer, recorder))
+		}
+		if agentExplicitlyAllowsTool(agent, "agent_skill_manage") {
+			writers = append(writers, agentlibrary.LibraryAgentSkillMutationTools(importer, recorder))
+		}
 	}
-	return llmcontracts.CompositeRuntimeTools(readers, writers)
+	parts := []*llmcontracts.RuntimeTools{readers}
+	parts = append(parts, writers...)
+	return llmcontracts.CompositeRuntimeTools(parts...)
+}
+
+func (s *LLMService) standaloneSkillCatalog(task models.Task, projectRoot string) *agentskills.Catalog {
+	if s == nil {
+		return nil
+	}
+	catalog, err := agentskills.BuildCatalog(task.ID+":standalone-skills", s.globalSkillRoot, projectRoot)
+	if err != nil {
+		return nil
+	}
+	return catalog
+}
+
+func mergeSkillCatalogs(turnID string, catalogs ...*agentskills.Catalog) *agentskills.Catalog {
+	var entries []agentskills.Entry
+	for _, catalog := range catalogs {
+		if catalog == nil {
+			continue
+		}
+		entries = append(entries, catalog.Entries()...)
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	return agentskills.NewCatalog(turnID, entries)
 }
 
 func (s *LLMService) agentSkillImporter(task models.Task) *agentlibrary.Importer {

@@ -140,6 +140,42 @@ func newAgentInspector(agentRepo *repository.AgentRepo, lifecycleRepo *repositor
 	return &agentInspector{agentRepo: agentRepo, lifecycleRepo: lifecycleRepo, catalogFn: catalogFn}
 }
 
+func isBuiltInSystemAgentKeyForList(key string) bool {
+	switch strings.TrimSpace(key) {
+	case models.AgentSystemKindSkillCurator, models.AgentSystemKindMemoryCurator:
+		return true
+	default:
+		return false
+	}
+}
+
+func (i *agentInspector) ListAgents(ctx context.Context) ([]agentskills.AgentSummary, error) {
+	if i == nil || i.agentRepo == nil {
+		return nil, nil
+	}
+	agents, err := i.agentRepo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]agentskills.AgentSummary, 0, len(agents))
+	for _, agent := range agents {
+		if !agent.Enabled || agent.GeneratedStatus == models.AgentStatusProtected || agent.GeneratedStatus == models.AgentStatusArchived || agent.ArchivedAt != nil || strings.TrimSpace(agent.SystemKind) != "" || isBuiltInSystemAgentKeyForList(agent.Key) {
+			continue
+		}
+		out = append(out, agentskills.AgentSummary{
+			Key:             agent.Key,
+			Name:            agent.Name,
+			Description:     agent.Description,
+			Scope:           string(agent.Scope),
+			Enabled:         agent.Enabled,
+			Selectable:      agent.SelectableAsPrimary,
+			GeneratedStatus: string(agent.GeneratedStatus),
+			AttachedSkills:  embeddedAgentSkillNames(agent.Skills),
+		})
+	}
+	return out, nil
+}
+
 func (i *agentInspector) InspectAgent(ctx context.Context, agentKey string) (*agentskills.AgentDetails, error) {
 	if i == nil || i.agentRepo == nil {
 		return nil, nil

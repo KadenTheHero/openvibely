@@ -47,17 +47,35 @@ func AgentSkillMutationTools(importer *Importer, recorder MutationRecorder, assi
 	if importer == nil || strings.TrimSpace(assignedAgentKey) == "" {
 		return nil
 	}
+	return agentSkillMutationTools(importer, recorder, assignedAgentKey, scope, false)
+}
+
+// LibraryAgentSkillMutationTools returns agent_skill_manage for explicit skill
+// library maintenance agents. The caller may target any non-protected agent via
+// an `agent` field; RepoApplier protection blocks system/protected agents.
+func LibraryAgentSkillMutationTools(importer *Importer, recorder MutationRecorder) *llmcontracts.RuntimeTools {
+	if importer == nil {
+		return nil
+	}
+	return agentSkillMutationTools(importer, recorder, "", "", true)
+}
+
+func agentSkillMutationTools(importer *Importer, recorder MutationRecorder, assignedAgentKey, scope string, allowExplicitAgent bool) *llmcontracts.RuntimeTools {
 	exec := func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		if strings.ToLower(strings.TrimSpace(name)) != "agent_skill_manage" {
 			return "", false, false, nil
 		}
-		res, err := runAgentSkillManage(ctx, importer, recorder, assignedAgentKey, scope, input)
+		res, err := runAgentSkillManage(ctx, importer, recorder, assignedAgentKey, scope, allowExplicitAgent, input)
 		return marshalToolResult(res, err)
+	}
+	description := agentSkillManageDescription(assignedAgentKey)
+	if allowExplicitAgent {
+		description = libraryAgentSkillManageDescription
 	}
 	return &llmcontracts.RuntimeTools{
 		Definitions: []llmcontracts.RuntimeToolDefinition{{
 			Name:        "agent_skill_manage",
-			Description: agentSkillManageDescription(assignedAgentKey),
+			Description: description,
 			Parameters:  json.RawMessage(agentSkillManageSchema),
 		}},
 		Executor: exec,
@@ -131,6 +149,11 @@ func agentSkillManageDescription(agentKey string) string {
 		"Use skill_manage instead for reusable standalone/project/global skill learning. The backend scopes all writes to agents/" + agentKey + "/skills; do not pass agent paths."
 }
 
+const libraryAgentSkillManageDescription = "Create, patch, or manage support files for skills owned by non-protected agents. " +
+	"Use this for skill library maintenance that consolidates or updates agent-specific skills. " +
+	"Pass the target agent key in 'agent' and the bare skill key in 'handle'; protected/system agents are rejected by the backend. " +
+	"Use skill_manage instead for standalone project/global skills."
+
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
@@ -141,11 +164,13 @@ func buildAgentSkillManageSchema() string {
   "type": "object",
   "properties": {
     "action": {"type": "string", "enum": ["create", "patch", "write_file", "remove_file"], "description": "What to do. 'create' and 'patch' require 'declaration'. 'write_file' and 'remove_file' require 'handle' and 'support'."},
-    "handle": {"type": "string", "description": "Assigned-agent skill key only, for example 'review_migrations'. Do not include an agent prefix."},
-    "declaration": {"type": "string", "description": "REQUIRED for create/patch. Full agent-owned skills/<skill>/SKILL.md content including YAML frontmatter. Required fields: kind=openvibely.agent_skill, version>=1, skill.key. Do not set agent.key; the server scopes the write to the task's assigned agent."},
+    "agent": {"type": "string", "description": "Target agent key for explicit library maintenance mode. Omit in assigned-agent learning mode, where the backend scopes this tool to the assigned agent."},
+    "scope": {"type": "string", "enum": ["global", "project"], "description": "Target root for explicit library maintenance mode. Omit in assigned-agent learning mode, where the backend supplies the assigned agent scope."},
+    "handle": {"type": "string", "description": "Agent-owned skill key only, for example 'review_migrations'. Do not include an agent prefix."},
+    "declaration": {"type": "string", "description": "REQUIRED for create/patch. Full agent-owned skills/<skill>/SKILL.md content including YAML frontmatter. Required fields: kind=openvibely.agent_skill, version>=1, skill.key. In explicit library maintenance mode, agent.key must either be omitted or match the target agent."},
     "support": {
       "type": "object",
-      "description": "Required only for action='write_file' or action='remove_file'. Manages a file under references/, templates/, scripts/, or assets/ of the assigned-agent skill.",
+      "description": "Required only for action='write_file' or action='remove_file'. Manages a file under references/, templates/, scripts/, or assets/ of the target agent-owned skill.",
       "properties": {
         "kind": {"type": "string", "enum": ["references", "templates", "scripts", "assets"]},
         "path": {"type": "string", "description": "Path relative to the chosen support directory, for example 'foo.md' or 'nested/foo.md'."},
@@ -188,6 +213,8 @@ func buildSkillManageSchema() string {
 
 type agentSkillManageParams struct {
 	Action      string `json:"action"`
+	Agent       string `json:"agent"`
+	Scope       string `json:"scope"`
 	Handle      string `json:"handle"`
 	Declaration string `json:"declaration"`
 	Support     struct {
@@ -214,13 +241,30 @@ type skillManageParams struct {
 	Reason       string `json:"reason"`
 }
 
-func runAgentSkillManage(ctx context.Context, importer *Importer, recorder MutationRecorder, assignedAgentKey, scope string, input json.RawMessage) (*ImportResult, error) {
+func runAgentSkillManage(ctx context.Context, importer *Importer, recorder MutationRecorder, assignedAgentKey, scope string, allowExplicitAgent bool, input json.RawMessage) (*ImportResult, error) {
 	var p agentSkillManageParams
 	if err := json.Unmarshal(input, &p); err != nil {
 		return nil, fmt.Errorf("agent_skill_manage: invalid input: %w", err)
 	}
 	action := strings.ToLower(strings.TrimSpace(p.Action))
-	mutationKey := strings.TrimSpace(assignedAgentKey)
+	targetAgentKey := strings.TrimSpace(assignedAgentKey)
+	targetScope := strings.TrimSpace(scope)
+	if allowExplicitAgent {
+		targetAgentKey = strings.TrimSpace(p.Agent)
+		targetScope = strings.TrimSpace(p.Scope)
+		if targetScope == "" {
+			targetScope = "project"
+		}
+		if err := validateScopeValue(targetScope); err != nil {
+			return blockedResult(ctx, recorder, action, "agent_skill", targetAgentKey, []byte(p.Declaration), fmt.Errorf("agent_skill_manage: %w", err))
+		}
+		if targetAgentKey == "" {
+			return blockedResult(ctx, recorder, action, "agent_skill", targetAgentKey, []byte(p.Declaration), errors.New("agent_skill_manage: agent is required"))
+		}
+	} else if strings.TrimSpace(p.Agent) != "" && strings.TrimSpace(p.Agent) != targetAgentKey {
+		return blockedResult(ctx, recorder, action, "agent_skill", strings.TrimSpace(p.Agent), []byte(p.Declaration), fmt.Errorf("agent_skill_manage is scoped to assigned agent %q", targetAgentKey))
+	}
+	mutationKey := targetAgentKey
 	if p.Handle != "" {
 		mutationKey += "/" + p.Handle
 	}
@@ -234,16 +278,16 @@ func runAgentSkillManage(ctx context.Context, importer *Importer, recorder Mutat
 			return blockedResult(ctx, recorder, action, "agent_skill", mutationKey, []byte(p.Declaration), err)
 		}
 		if decl.IsAgentRootDeclaration() {
-			return blockedResult(ctx, recorder, action, "agent_skill", assignedAgentKey, []byte(p.Declaration), errors.New("agent_skill_manage requires skill.key and cannot edit agent root declarations"))
+			return blockedResult(ctx, recorder, action, "agent_skill", targetAgentKey, []byte(p.Declaration), errors.New("agent_skill_manage requires skill.key and cannot edit agent root declarations"))
 		}
-		if strings.TrimSpace(decl.Agent.Key) != "" && decl.Agent.Key != assignedAgentKey {
-			return blockedResult(ctx, recorder, action, "agent_skill", mutationKey, []byte(p.Declaration), fmt.Errorf("agent_skill_manage is scoped to assigned agent %q", assignedAgentKey))
+		if strings.TrimSpace(decl.Agent.Key) != "" && decl.Agent.Key != targetAgentKey {
+			return blockedResult(ctx, recorder, action, "agent_skill", mutationKey, []byte(p.Declaration), fmt.Errorf("agent_skill_manage is scoped to agent %q", targetAgentKey))
 		}
 		if p.Handle != "" && p.Handle != decl.Handle() {
 			return blockedResult(ctx, recorder, action, "agent_skill", mutationKey, []byte(p.Declaration), fmt.Errorf("handle mismatch: declaration is %s but handle is %s", decl.Handle(), p.Handle))
 		}
-		res, err := importer.WriteAgentOwnedSkill(ctx, scope, assignedAgentKey, decl, body)
-		recordMutation(ctx, recorder, action, "agent_skill", assignedAgentKey+"/"+decl.Handle(), []byte(p.Declaration), res, err)
+		res, err := importer.WriteAgentOwnedSkill(ctx, targetScope, targetAgentKey, decl, body)
+		recordMutation(ctx, recorder, action, "agent_skill", targetAgentKey+"/"+decl.Handle(), []byte(p.Declaration), res, err)
 		return res, err
 	case "write_file", "remove_file":
 		if p.Handle == "" {
@@ -260,9 +304,9 @@ func runAgentSkillManage(ctx context.Context, importer *Importer, recorder Mutat
 				return nil, fmt.Errorf("agent_skill_manage: %w", decErr)
 			}
 			bytes = len(content)
-			res, err = importer.WriteAgentOwnedSupportFile(ctx, scope, assignedAgentKey, p.Handle, SupportFileKind(p.Support.Kind), p.Support.Path, content)
+			res, err = importer.WriteAgentOwnedSupportFile(ctx, targetScope, targetAgentKey, p.Handle, SupportFileKind(p.Support.Kind), p.Support.Path, content)
 		} else {
-			res, err = importer.RemoveAgentOwnedSupportFile(ctx, scope, assignedAgentKey, p.Handle, SupportFileKind(p.Support.Kind), p.Support.Path)
+			res, err = importer.RemoveAgentOwnedSupportFile(ctx, targetScope, targetAgentKey, p.Handle, SupportFileKind(p.Support.Kind), p.Support.Path)
 		}
 		payload, _ := json.Marshal(struct {
 			Agent  string `json:"agent"`
@@ -270,8 +314,8 @@ func runAgentSkillManage(ctx context.Context, importer *Importer, recorder Mutat
 			Kind   string `json:"kind"`
 			Path   string `json:"path"`
 			Bytes  int    `json:"bytes,omitempty"`
-		}{assignedAgentKey, p.Handle, p.Support.Kind, p.Support.Path, bytes})
-		recordMutation(ctx, recorder, action, "agent_support_file", assignedAgentKey+"/"+p.Handle, payload, res, err)
+		}{targetAgentKey, p.Handle, p.Support.Kind, p.Support.Path, bytes})
+		recordMutation(ctx, recorder, action, "agent_support_file", targetAgentKey+"/"+p.Handle, payload, res, err)
 		return res, err
 	default:
 		return nil, fmt.Errorf("agent_skill_manage: unknown action %q", p.Action)

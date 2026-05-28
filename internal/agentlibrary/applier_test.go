@@ -3,7 +3,9 @@ package agentlibrary
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -326,6 +328,107 @@ func TestRepoApplier_ArchiveAgentAndStandaloneSkill(t *testing.T) {
 	updated := agents.byKey["backend-engineer"]
 	if len(updated.Skills) != 2 {
 		t.Fatalf("standalone skill archive must not mutate embedded agent skills, got %+v", updated.Skills)
+	}
+}
+
+func TestRepoApplier_AgentOwnedSkillsInheritAgentProtection(t *testing.T) {
+	agents := newMemAgentStore()
+	agents.byKey["skill_curator"] = &models.Agent{
+		ID:              "id_skill_curator",
+		Key:             "skill_curator",
+		GeneratedStatus: models.AgentStatusProtected,
+	}
+	agents.byKey["memory_curator"] = &models.Agent{
+		ID:              "id_memory_curator",
+		Key:             "memory_curator",
+		GeneratedStatus: models.AgentStatusProtected,
+	}
+	agents.byKey["reviewer"] = &models.Agent{
+		ID:              "id_reviewer",
+		Key:             "reviewer",
+		Enabled:         true,
+		GeneratedStatus: models.AgentStatusGenerated,
+	}
+	ap := NewRepoApplier(agents, nil)
+
+	protected, reason, err := ap.IsProtected(context.Background(), "skill", "skill_curator/maintain_skill_library")
+	if err != nil {
+		t.Fatalf("IsProtected system agent skill: %v", err)
+	}
+	if !protected || reason == "" {
+		t.Fatalf("expected protected system agent skill, protected=%v reason=%q", protected, reason)
+	}
+
+	protected, reason, err = ap.IsProtected(context.Background(), "skill", "memory_curator/consolidate_memory")
+	if err != nil {
+		t.Fatalf("IsProtected memory curator skill: %v", err)
+	}
+	if !protected || reason == "" {
+		t.Fatalf("expected protected memory curator skill, protected=%v reason=%q", protected, reason)
+	}
+
+	protected, _, err = ap.IsProtected(context.Background(), "skill", "reviewer/review_migrations")
+	if err != nil {
+		t.Fatalf("IsProtected generated agent skill: %v", err)
+	}
+	if protected {
+		t.Fatal("generated agent skill should not be protected")
+	}
+
+	protected, _, err = ap.IsProtected(context.Background(), "skill", "standalone_skill")
+	if err != nil {
+		t.Fatalf("IsProtected standalone skill: %v", err)
+	}
+	if protected {
+		t.Fatal("standalone skill should not inherit agent protection")
+	}
+}
+
+func TestRepoApplier_AgentOwnedSkillMaintenanceRequiresActiveAgent(t *testing.T) {
+	now := time.Now()
+	agents := newMemAgentStore()
+	agents.byKey["disabled_agent"] = &models.Agent{ID: "id_disabled", Key: "disabled_agent", Enabled: false, GeneratedStatus: models.AgentStatusGenerated}
+	agents.byKey["archived_status_agent"] = &models.Agent{ID: "id_archived_status", Key: "archived_status_agent", Enabled: true, GeneratedStatus: models.AgentStatusArchived}
+	agents.byKey["archived_at_agent"] = &models.Agent{ID: "id_archived_at", Key: "archived_at_agent", Enabled: true, GeneratedStatus: models.AgentStatusGenerated, ArchivedAt: &now}
+	ap := NewRepoApplier(agents, nil)
+
+	for _, tc := range []struct {
+		key  string
+		want string
+	}{
+		{key: "disabled_agent/review", want: "disabled"},
+		{key: "archived_status_agent/review", want: "archived"},
+		{key: "archived_at_agent/review", want: "archived"},
+	} {
+		protected, reason, err := ap.IsProtected(context.Background(), "skill", tc.key)
+		if err != nil {
+			t.Fatalf("IsProtected(%s): %v", tc.key, err)
+		}
+		if !protected || !strings.Contains(reason, tc.want) {
+			t.Fatalf("expected %s to be blocked as %s, protected=%v reason=%q", tc.key, tc.want, protected, reason)
+		}
+	}
+
+	protected, reason, err := ap.IsProtected(context.Background(), "agent", "disabled_agent")
+	if err != nil {
+		t.Fatalf("IsProtected disabled agent root: %v", err)
+	}
+	if protected || reason != "" {
+		t.Fatalf("disabled agent root imports should not be treated as protected here, protected=%v reason=%q", protected, reason)
+	}
+}
+
+func TestRepoApplier_BuiltInSystemAgentSkillsProtectedWithoutDBRow(t *testing.T) {
+	agents := newMemAgentStore()
+	ap := NewRepoApplier(agents, nil)
+	for _, key := range []string{"skill_curator/maintain_skill_library", "memory_curator/consolidate_memory"} {
+		protected, reason, err := ap.IsProtected(context.Background(), "skill", key)
+		if err != nil {
+			t.Fatalf("IsProtected(%s): %v", key, err)
+		}
+		if !protected || reason == "" {
+			t.Fatalf("expected %s to be protected without DB row, protected=%v reason=%q", key, protected, reason)
+		}
 	}
 }
 

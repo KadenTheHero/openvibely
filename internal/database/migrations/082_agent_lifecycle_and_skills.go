@@ -282,7 +282,7 @@ INSERT INTO agents (
   'Built-in system agent that selects relevant skills for task turns and maintains the skill library on a schedule.',
   '',
   'inherit',
-  '["skill_view","skills_list","agent_view","skill_manage","agent_skill_manage"]',
+  '["skill_view","skills_list","agent_list","agent_view","skill_manage","agent_skill_manage"]',
   '{}', '[]', '[]', '[]',
   'skill_curator',
   'skill_curator', 'global', NULL, 0, 1,
@@ -306,7 +306,7 @@ INSERT INTO agent_lifecycle_hooks (
 ON CONFLICT(id) DO NOTHING;
 
 UPDATE agents
-SET tools = '["skill_view","skills_list","agent_view","skill_manage","agent_skill_manage"]',
+SET tools = '["skill_view","skills_list","agent_list","agent_view","skill_manage","agent_skill_manage"]',
     tool_config = CASE WHEN tool_config IS NULL OR tool_config = '' THEN '{}' ELSE tool_config END,
     permission_defaults_json = '{"read_task_prompt":true,"read_task_execution":true,"read_agents":true,"read_skills":true,"write_skills":true}',
     name = 'System: Skill Curator',
@@ -377,7 +377,7 @@ WHERE agent_id IN (SELECT id FROM agents WHERE system_kind = 'skill_curator' OR 
   );
 
 UPDATE agents
-SET tools = '["skill_view","skills_list","agent_view","skill_manage","agent_skill_manage"]',
+SET tools = '["skill_view","skills_list","agent_list","agent_view","skill_manage","agent_skill_manage"]',
     updated_at = datetime('now')
 WHERE system_kind = 'skill_curator'
   AND (tools IS NULL OR tools = '' OR tools = '[]');

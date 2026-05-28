@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openvibely/openvibely/internal/agentskills"
 )
 
 type recRecorder struct {
@@ -175,6 +178,72 @@ skill: {key: verify, scope: global}
 	}
 	if len(rec.rows) != 1 || !rec.rows[0].applied {
 		t.Fatalf("global mutation should be recorded as applied, rows=%+v", rec.rows)
+	}
+}
+
+func TestSkillManagePatchRefreshesSkillsListDescription(t *testing.T) {
+	imp, _, rec, root := buildTools(t)
+	tools := MutationTools(imp, rec)
+	ctx := context.Background()
+
+	createDeclaration := `---
+kind: openvibely.agent_skill
+version: 1
+skill:
+  key: consolidate_memory
+  name: Consolidate Memory
+  scope: project
+  description: Old memory consolidation summary.
+---
+# Consolidate Memory
+`
+	params, _ := json.Marshal(map[string]any{
+		"action":      "create",
+		"declaration": createDeclaration,
+	})
+	out, handled, isErr, err := tools.Executor(ctx, "skill_manage", params)
+	if !handled || err != nil || isErr {
+		t.Fatalf("create failed handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+
+	patchDeclaration := `---
+kind: openvibely.agent_skill
+version: 1
+skill:
+  key: consolidate_memory
+  name: Memory Consolidation
+  scope: project
+  description: Updated repo-local memory consolidation guidance.
+---
+# Memory Consolidation
+`
+	params, _ = json.Marshal(map[string]any{
+		"action":      "patch",
+		"handle":      "consolidate_memory",
+		"declaration": patchDeclaration,
+	})
+	out, handled, isErr, err = tools.Executor(ctx, "skill_manage", params)
+	if !handled || err != nil || isErr {
+		t.Fatalf("patch failed handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+
+	catalog, err := agentskills.BuildCatalog("turn", "", root)
+	if err != nil {
+		t.Fatalf("build catalog: %v", err)
+	}
+	runtimeTools := agentskills.SkillRuntimeTools(catalog, "", root, nil)
+	list, handled, isErr, err := runtimeTools.Executor(ctx, "skills_list", json.RawMessage(`{"scope":"project"}`))
+	if !handled || err != nil || isErr {
+		t.Fatalf("skills_list failed handled=%v isErr=%v err=%v out=%s", handled, isErr, err, list)
+	}
+	if !strings.Contains(list, "[Memory Consolidation](consolidate_memory/SKILL.md) — Updated repo-local memory consolidation guidance.") {
+		t.Fatalf("skills_list did not show patched description:\n%s", list)
+	}
+	if strings.Contains(list, "Old memory consolidation summary") || strings.Contains(list, "[Consolidate Memory]") {
+		t.Fatalf("skills_list still shows stale description/name:\n%s", list)
+	}
+	if !strings.Contains(list, "standalone:consolidate_memory") {
+		t.Fatalf("skills_list missing canonical view handle:\n%s", list)
 	}
 }
 
@@ -504,7 +573,7 @@ skill:
 `
 	params, _ := json.Marshal(map[string]any{"action": "patch", "declaration": declaration})
 	out, _, isErr, _ := tools.Executor(context.Background(), "agent_skill_manage", params)
-	if !isErr || !strings.Contains(out, "scoped to assigned agent") {
+	if !isErr || !strings.Contains(out, "scoped to agent") {
 		t.Fatalf("expected scoped-agent rejection, got isErr=%v out=%s", isErr, out)
 	}
 	if len(rec.rows) != 1 || rec.rows[0].applied {
@@ -523,5 +592,63 @@ func TestAgentSkillMutationTools_WriteSupportFileRejectsAgentPathHandle(t *testi
 	out, _, isErr, _ := tools.Executor(context.Background(), "agent_skill_manage", params)
 	if !isErr || !strings.Contains(out, "pass only the skill key") {
 		t.Fatalf("expected agent path handle rejection, got isErr=%v out=%s", isErr, out)
+	}
+}
+
+func TestLibraryAgentSkillMutationTools_CanTargetNonProtectedAgent(t *testing.T) {
+	imp, _, rec, projectRoot := buildTools(t)
+	tools := LibraryAgentSkillMutationTools(imp, rec)
+	if tools == nil || !tools.HasDefinition("agent_skill_manage") {
+		t.Fatalf("expected agent_skill_manage definition")
+	}
+	declaration := `---
+kind: openvibely.agent_skill
+version: 1
+skill:
+  key: review_migrations
+  description: Review migration safety.
+---
+# Review migrations
+`
+	params, _ := json.Marshal(map[string]any{"action": "create", "agent": "reviewer", "scope": "project", "declaration": declaration})
+	out, handled, isErr, err := tools.Executor(context.Background(), "agent_skill_manage", params)
+	if err != nil || !handled || isErr {
+		t.Fatalf("library agent_skill_manage create failed output=%s handled=%v isErr=%v err=%v", out, handled, isErr, err)
+	}
+	wantSkill := filepath.Join(projectRoot, "agents", "reviewer", "skills", "review_migrations", "SKILL.md")
+	if _, err := os.Stat(wantSkill); err != nil {
+		t.Fatalf("expected agent-owned SKILL.md at %s: %v", wantSkill, err)
+	}
+	if len(rec.rows) != 1 || rec.rows[0].target != "agent_skill" || rec.rows[0].key != "reviewer/review_migrations" || !rec.rows[0].applied {
+		t.Fatalf("unexpected recorder rows: %+v", rec.rows)
+	}
+}
+
+func TestLibraryAgentSkillMutationTools_BlocksProtectedSystemAgents(t *testing.T) {
+	for _, tc := range []struct {
+		agent string
+		skill string
+		title string
+	}{
+		{agent: "skill_curator", skill: "maintain_skill_library", title: "Maintain"},
+		{agent: "memory_curator", skill: "consolidate_memory", title: "Consolidate"},
+	} {
+		t.Run(tc.agent, func(t *testing.T) {
+			imp, app, rec, projectRoot := buildTools(t)
+			app.protected["skill:"+tc.agent+"/"+tc.skill] = "agent " + tc.agent + " is protected"
+			tools := LibraryAgentSkillMutationTools(imp, rec)
+			declaration := fmt.Sprintf("---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n  key: %s\n---\n# %s\n", tc.skill, tc.title)
+			params, _ := json.Marshal(map[string]any{"action": "patch", "agent": tc.agent, "scope": "project", "declaration": declaration})
+			out, _, isErr, _ := tools.Executor(context.Background(), "agent_skill_manage", params)
+			if isErr || !strings.Contains(out, "protected") {
+				t.Fatalf("expected protected system agent block result, got isErr=%v out=%s", isErr, out)
+			}
+			if _, err := os.Stat(filepath.Join(projectRoot, "agents", tc.agent, "skills", tc.skill, "SKILL.md")); !os.IsNotExist(err) {
+				t.Fatalf("protected system agent skill should not be written, stat err=%v", err)
+			}
+			if len(rec.rows) != 1 || rec.rows[0].applied || len(rec.rows[0].blocked) == 0 {
+				t.Fatalf("blocked mutation should be recorded: %+v", rec.rows)
+			}
+		})
 	}
 }
