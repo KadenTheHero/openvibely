@@ -1490,28 +1490,101 @@ func TestInitThreadStreaming_FindsStreamingDotsByID(t *testing.T) {
 	}
 }
 
-// TestChatScrollTracker_UsesPinnedToBottomState verifies the scroll tracker uses
-// the current viewport position as the source of truth. Programmatic/content
-// growth scroll events and user scrollbar drags both update the same simple
-// pinned state, avoiding fragile interaction-window heuristics.
-func TestChatScrollTracker_UsesPinnedToBottomState(t *testing.T) {
+// TestChatScrollTracker_UsesInteractionSignalsForScrollIntent verifies the
+// regression where smart scrolling stopped working during streaming in large
+// conversations. The fix:
+//   - Use real user-interaction signals (wheel/touchmove/keydown/pointerdown) to
+//     mark scroll intent. The clamp-driven scroll events fired when
+//     renderStreamingContent does container.innerHTML = ” must NOT be
+//     interpreted as the user reaching the bottom (that previously cleared
+//     userScrolledUp every chunk and pulled the user back down).
+//   - shouldAutoScroll must return purely !userScrolledUp, never ANDed with
+//     isNearBottom — otherwise the same clamp window triggers an auto-scroll
+//     pulse that undoes the user's scroll-up.
+func TestChatScrollTracker_UsesInteractionSignalsForScrollIntent(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
 	}
 	content := buf.String()
 
-	if strings.Contains(content, "_chatAutoScrollProgrammaticUntil") {
-		t.Error("ChatScrollTracker should not use a global programmatic-scroll deadline; it can suppress real user scrolls during continuous streaming")
+	// REGRESSION GUARDS: the broken implementation unconditionally derived
+	// userScrolledUp from isNearBottom on every scroll event, and ANDed the
+	// flag with isNearBottom in shouldAutoScroll. Both forms must be absent.
+	if strings.Contains(content, "self.userScrolledUp = !window.chatAutoScroll.isNearBottom(self.element);") {
+		t.Error("scroll handler must NOT unconditionally derive userScrolledUp from isNearBottom — clamp events fired when innerHTML is cleared would defeat user scroll-up during streaming")
 	}
-	if strings.Contains(content, "_userInteracting") || strings.Contains(content, "_markUserInteracting") {
-		t.Error("ChatScrollTracker should not depend on user-interaction windows to detect scroll intent")
+	if strings.Contains(content, "return !this.userScrolledUp && window.chatAutoScroll.isNearBottom(this.element)") {
+		t.Error("shouldAutoScroll must NOT AND with isNearBottom — clamp scroll events make isNearBottom briefly true even when the user has scrolled up, causing auto-scroll to yank the user back down")
 	}
-	if !strings.Contains(content, "self.userScrolledUp = !window.chatAutoScroll.isNearBottom(self.element)") {
-		t.Error("scroll handler must derive userScrolledUp directly from whether the viewport is near the bottom")
+
+	required := []string{
+		// Interaction-signal model
+		"this._userInteracting = false",
+		"this._pointerInteracting = false",
+		"if (self._userInteracting)",
+		// Listeners for real user scroll intent
+		"addEventListener('wheel'",
+		"addEventListener('touchmove'",
+		"addEventListener('pointerdown'",
+		"addEventListener('pointerup'",
+		"addEventListener('pointercancel'",
+		"addEventListener('keydown'",
+		// shouldAutoScroll relies solely on the persisted flag
+		"return !this.userScrolledUp;",
 	}
-	if !strings.Contains(content, "return !this.userScrolledUp && window.chatAutoScroll.isNearBottom(this.element)") {
-		t.Error("shouldAutoScroll must require both pinned state and current near-bottom position")
+	for _, r := range required {
+		if !strings.Contains(content, r) {
+			t.Errorf("ChatScrollTracker must contain %q to track scroll intent via user-interaction signals", r)
+		}
+	}
+
+	if !strings.Contains(content, "if (!self._pointerInteracting) self._userInteracting = false;") {
+		t.Error("timer-based interaction expiry must not clear _userInteracting during an active pointer/scrollbar drag")
+	}
+}
+
+// TestChatScrollTracker_ResolveAndRebindRecoversFromStaleElement guards the
+// regression where smart scrolling "froze" after a morph swap replaced the
+// messages container — the cached window.scrollTracker_<id> held a detached
+// element whose scrollHeight is 0, so isNearBottom returned true and auto-scroll
+// ran forever until a full page refresh.
+func TestChatScrollTracker_ResolveAndRebindRecoversFromStaleElement(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	}
+	content := buf.String()
+
+	if !strings.Contains(content, "window.resolveScrollTracker = function") {
+		t.Error("ChatAutoScrollScript must expose window.resolveScrollTracker to recover from stale tracker elements after morph swaps")
+	}
+	if !strings.Contains(content, "rebind: function(newElement)") {
+		t.Error("ChatScrollTracker must expose rebind() so it can recover from stale/detached elements without dropping userScrolledUp")
+	}
+	// Stale element detection conditions.
+	if !strings.Contains(content, "existing.element !== messagesEl") || !strings.Contains(content, "!existing.element.isConnected") {
+		t.Error("resolveScrollTracker must detect when the cached element no longer matches the live DOM or has been detached")
+	}
+}
+
+// TestStreamingRecoversFromStaleScrollTracker ensures the streaming renderers
+// re-resolve the scroll tracker against the live messages element before each
+// render. Without this, a morph swap mid-stream would leave the tracker bound to
+// a detached element and smart scrolling would keep yanking the user to the
+// bottom until a page refresh.
+func TestStreamingRecoversFromStaleScrollTracker(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatBubbleStreaming("Assistant", "exec-id", "chat-messages", "", false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render new-message streaming script: %v", err)
+	}
+	if err := _initThreadStreamingScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render thread streaming script: %v", err)
+	}
+	content := buf.String()
+
+	if count := strings.Count(content, "window.resolveScrollTracker(trackerKey, "); count < 4 {
+		t.Errorf("expected both streaming renderers to resolve the tracker on init AND inside the render loop (got %d resolveScrollTracker calls, want >= 4)", count)
 	}
 }
 
@@ -1611,8 +1684,18 @@ func TestChatScrollTracker_DestroyRemovesAllListeners(t *testing.T) {
 	}
 	content := buf.String()
 
+	// destroy() must remove every listener attached by _init, otherwise
+	// rebinding the tracker after a morph swap leaks handlers that fire on
+	// detached elements.
 	required := []string{
 		"removeEventListener('scroll'",
+		"removeEventListener('wheel'",
+		"removeEventListener('touchmove'",
+		"removeEventListener('pointerdown'",
+		"removeEventListener('pointerup'",
+		"removeEventListener('pointercancel'",
+		"removeEventListener('blur'",
+		"removeEventListener('keydown'",
 	}
 	for _, r := range required {
 		if !strings.Contains(content, r) {

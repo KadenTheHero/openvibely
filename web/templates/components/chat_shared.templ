@@ -357,22 +357,26 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							messages.appendChild(wrap);
 						}
 
-						// Get or create page-level tracker for this chat container
-					var chatMessages = document.getElementById(messagesId);
-					var tracker = null;
-					var trackerKey = 'scrollTracker_' + messagesId;
-					
-					if (chatMessages) {
-						// Reuse existing page-level tracker, or create new one if this is first stream
+					// Get or create page-level tracker for this chat container.
+					// resolveScrollTracker handles stale/replaced elements (morph swaps),
+					// which is what previously caused smart scrolling to "freeze" in
+					// long-lived conversations until a full page refresh.
+				var chatMessages = document.getElementById(messagesId);
+				var tracker = null;
+				var trackerKey = 'scrollTracker_' + messagesId;
+
+				if (chatMessages) {
+					if (window.resolveScrollTracker) {
+						tracker = window.resolveScrollTracker(trackerKey, chatMessages);
+					} else {
 						if (!window[trackerKey]) {
 							window[trackerKey] = new window.ChatScrollTracker(chatMessages);
 						}
 						tracker = window[trackerKey];
-						
-						// User just sent a message, reset scroll tracking and scroll to bottom
-						tracker.resetOnUserSend();
 					}
-
+					// User just sent a message: reset scroll tracking and pin to bottom.
+					if (tracker) tracker.resetOnUserSend();
+				}
 					// Buffer for accumulating streaming content
 					var textBuffer = '';
 					var renderScheduled = false;
@@ -383,25 +387,32 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							return;
 						}
 						if (!force && renderScheduled) return;
-						var runRender = function() {
-							renderScheduled = false;
-							var renderText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
-							if (!force && renderText.length === lastRenderedLength) return;
-							var shouldScroll = !tracker || tracker.shouldAutoScroll();
-							container.setAttribute('data-raw-content', renderText);
-							window.renderStreamingContent(container, renderText);
-							lastRenderedLength = renderText.length;
-							// Auto-scroll only if the viewport was pinned before this render grew the DOM.
-							if (shouldScroll) {
-								requestAnimationFrame(function() {
-									var chatMessages = document.getElementById(messagesId);
-									if (chatMessages) {
-										window.chatAutoScroll.scrollToBottom(chatMessages, false);
-									}
-								});
-							}
-						};
-						if (force) {
+					var runRender = function() {
+						renderScheduled = false;
+						var renderText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
+						if (!force && renderText.length === lastRenderedLength) return;
+						// Refresh tracker against the live messages element. If a morph
+						// swap replaced the container mid-stream, the old tracker would
+						// be holding a detached element and isNearBottom() would always
+						// be true — causing endless auto-scroll until page refresh.
+						var liveMessages = document.getElementById(messagesId);
+						if (liveMessages && window.resolveScrollTracker) {
+							tracker = window.resolveScrollTracker(trackerKey, liveMessages);
+						}
+						var shouldScroll = !tracker || tracker.shouldAutoScroll();
+						container.setAttribute('data-raw-content', renderText);
+						window.renderStreamingContent(container, renderText);
+						lastRenderedLength = renderText.length;
+						// Auto-scroll only if the viewport was pinned before this render grew the DOM.
+						if (shouldScroll) {
+							requestAnimationFrame(function() {
+								var chatMessages = document.getElementById(messagesId);
+								if (chatMessages) {
+									window.chatAutoScroll.scrollToBottom(chatMessages, false);
+								}
+							});
+						}
+					};						if (force) {
 							runRender();
 							return;
 						}
@@ -678,15 +689,22 @@ templ _initThreadStreamingScript() {
 						messages.appendChild(wrap);
 					}
 
-					// Get or reuse page-level tracker
+					// Get or reuse page-level tracker. Use resolveScrollTracker so a
+					// morph swap of #task-thread-messages mid-stream rebinds the tracker
+					// instead of leaving it pointing at a detached element (which would
+					// make isNearBottom always true and pull the user back down forever).
 				var chatMessages = document.getElementById(messagesId);
 				var tracker = null;
 				var trackerKey = 'scrollTracker_' + messagesId;
 				if (chatMessages) {
-					if (!window[trackerKey] && window.ChatScrollTracker) {
-						window[trackerKey] = new window.ChatScrollTracker(chatMessages);
+					if (window.resolveScrollTracker) {
+						tracker = window.resolveScrollTracker(trackerKey, chatMessages);
+					} else if (window.ChatScrollTracker) {
+						if (!window[trackerKey]) {
+							window[trackerKey] = new window.ChatScrollTracker(chatMessages);
+						}
+						tracker = window[trackerKey];
 					}
-					tracker = window[trackerKey];
 				}
 
 				var eventSource = new EventSource('/events/chat/' + execId);
@@ -702,6 +720,12 @@ templ _initThreadStreamingScript() {
 						renderScheduled = false;
 						var renderText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(cumulativeContent) : cumulativeContent;
 						if (!force && renderText.length === lastRenderedLength) return;
+						// Refresh tracker against the live messages element in case a
+						// morph swap replaced the container while streaming.
+						var liveMessages = document.getElementById(messagesId);
+						if (liveMessages && window.resolveScrollTracker) {
+							tracker = window.resolveScrollTracker(trackerKey, liveMessages);
+						}
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
 						container.setAttribute('data-raw-content', renderText);
 						window.renderStreamingContent(container, renderText);
@@ -1526,12 +1550,36 @@ templ ChatAutoScrollScript() {
 		// Alias for backward compatibility (task thread used a separate namespace)
 		window.threadAutoScroll = window.chatAutoScroll;
 
-		// ChatScrollTracker keeps one piece of state: whether the user is pinned to
-		// the bottom. Streaming code snapshots shouldAutoScroll() before rendering a
-		// chunk, then scrolls only if the viewport was pinned before content growth.
+		// ChatScrollTracker tracks whether the user has scrolled away from the bottom
+		// using REAL user-interaction signals (wheel/touchmove/keydown/pointerdown).
+		// This is critical for very large conversations during streaming because:
+		//   - renderStreamingContent() does `container.innerHTML = ''` on every chunk.
+		//     That temporarily shrinks scrollHeight; the browser clamps scrollTop and
+		//     fires a scroll event. A naive "userScrolledUp = !isNearBottom" handler
+		//     would interpret the clamp as the user being at the bottom and clear the
+		//     scrolled-up flag, undoing the user's scroll-up on every chunk.
+		//   - We must only clear userScrolledUp when the user themselves scrolls back
+		//     to the bottom. Programmatic / clamp scrolls must not clear the flag.
+		//
+		// Implementation:
+		//   - Interaction signals (wheel, touchmove, keydown of nav keys) mark a
+		//     short-lived _userInteracting=true window (250ms).
+		//   - Pointer/scrollbar drags stay active from pointerdown until
+		//     pointerup/pointercancel/window blur so long scrollbar drags in huge
+		//     conversations don't expire mid-drag.
+		//   - scroll handler:
+		//       user interaction + away from bottom    -> userScrolledUp = true
+		//       user interaction + back at bottom      -> userScrolledUp = false
+		//       not interacting                        -> preserve flag (don't trust)
+		//   - shouldAutoScroll() returns !userScrolledUp. Do NOT AND with
+		//     isNearBottom — during innerHTML refresh that creates a clamp-driven
+		//     "yes auto-scroll" pulse that yanks the user back down.
 		window.ChatScrollTracker = function(element) {
 			this.element = element;
 			this.userScrolledUp = false;
+			this._userInteracting = false;
+			this._pointerInteracting = false;
+			this._userInteractTimeout = null;
 			this._handlers = {};
 			this._init();
 		};
@@ -1541,45 +1589,160 @@ templ ChatAutoScrollScript() {
 				var self = this;
 				if (!this.element) return;
 
-				this._handlers.scroll = function() {
-					self.userScrolledUp = !window.chatAutoScroll.isNearBottom(self.element);
+				function markInteracting() {
+					self._userInteracting = true;
+					if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
+					self._userInteractTimeout = setTimeout(function() {
+						if (!self._pointerInteracting) self._userInteracting = false;
+					}, 250);
+				}
+
+				function endPointerInteraction() {
+					self._pointerInteracting = false;
+					if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
+					self._userInteractTimeout = setTimeout(function() {
+						self._userInteracting = false;
+					}, 250);
+				}
+
+				this._handlers.wheel = function() { markInteracting(); };
+				this._handlers.touchmove = function() { markInteracting(); };
+				this._handlers.pointerdown = function() {
+					self._pointerInteracting = true;
+					markInteracting();
+				};
+				this._handlers.pointerup = endPointerInteraction;
+				this._handlers.pointercancel = endPointerInteraction;
+				this._handlers.blur = endPointerInteraction;
+				this._handlers.keydown = function(e) {
+					// Treat scroll-navigation keys as user scroll intent.
+					// Only count when focus is inside the scroll container or on body
+					// (avoids triggering on textarea typing — typing doesn't scroll).
+					var k = e.key;
+					if (k === 'PageUp' || k === 'PageDown' || k === 'Home' || k === 'End' ||
+						k === 'ArrowUp' || k === 'ArrowDown' || k === ' ' || k === 'Spacebar') {
+						var t = e.target;
+						if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+						markInteracting();
+					}
 				};
 
+				this._handlers.scroll = function() {
+					if (!self.element) return;
+					var isNear = window.chatAutoScroll.isNearBottom(self.element);
+					if (self._userInteracting) {
+						self.userScrolledUp = !isNear;
+					}
+					// Programmatic / clamp scrolls: PRESERVE the flag. Do not clear it
+					// just because the viewport happens to be near the bottom after a
+					// DOM refresh — that would defeat user scroll-up during streaming.
+				};
+
+				this.element.addEventListener('wheel', this._handlers.wheel, { passive: true });
+				this.element.addEventListener('touchmove', this._handlers.touchmove, { passive: true });
+				this.element.addEventListener('pointerdown', this._handlers.pointerdown, { passive: true });
 				this.element.addEventListener('scroll', this._handlers.scroll, { passive: true });
+				// keydown is attached to window so PageUp/PageDown work even when the
+				// scroll container isn't focused. pointerup/cancel are also window-level
+				// because scrollbar drags can end outside the scroll element.
+				window.addEventListener('keydown', this._handlers.keydown, { passive: true });
+				window.addEventListener('pointerup', this._handlers.pointerup, { passive: true });
+				window.addEventListener('pointercancel', this._handlers.pointercancel, { passive: true });
+				window.addEventListener('blur', this._handlers.blur);
+
+				// Initial state based on current viewport position only — no interaction
+				// signal yet, so we trust the static layout.
 				this.userScrolledUp = !window.chatAutoScroll.isNearBottom(this.element);
 			},
 
+			// shouldAutoScroll: only the persisted flag governs auto-scroll. Once the
+			// user scrolls up they stay parked there until they themselves scroll back.
 			shouldAutoScroll: function() {
 				if (!this.element) return true;
-				return !this.userScrolledUp && window.chatAutoScroll.isNearBottom(this.element);
+				return !this.userScrolledUp;
 			},
 
-				resetOnUserSend: function() {
-					this.userScrolledUp = false;
-					if (this.element) {
-						window.chatAutoScroll.scrollToBottom(this.element, false);
+			// Re-bind to a new element (e.g. after morph swap replaced #task-thread-messages
+			// or #chat-messages). Without this the tracker would hold a detached element
+			// whose scrollHeight is 0 -> isNearBottom is always true -> auto-scroll forever.
+			rebind: function(newElement) {
+				if (!newElement || newElement === this.element) {
+					// Same element — but check if it's still attached. If detached, drop it.
+					if (this.element && !this.element.isConnected) {
+						this.destroy();
+						this.element = newElement || null;
+						if (this.element) this._init();
 					}
-				},
+					return;
+				}
+				var prevUserScrolledUp = this.userScrolledUp;
+				this.destroy();
+				this.element = newElement;
+				this._init();
+				// Preserve scroll intent across rebind so a morph swap doesn't reset
+				// the user's scroll-up.
+				this.userScrolledUp = prevUserScrolledUp;
+			},
 
-				snapshot: function() {
-					if (!this.element) return { scrollTop: 0, userScrolledUp: false, pinned: true };
-					var nearBottom = window.chatAutoScroll.isNearBottom(this.element);
-					return {
-						scrollTop: this.element.scrollTop || 0,
-						userScrolledUp: this.userScrolledUp || !nearBottom,
-						pinned: !this.userScrolledUp && nearBottom
-					};
-				},
+			resetOnUserSend: function() {
+				this.userScrolledUp = false;
+				this._userInteracting = false;
+				this._pointerInteracting = false;
+				if (this._userInteractTimeout) clearTimeout(this._userInteractTimeout);
+				if (this.element) {
+					window.chatAutoScroll.scrollToBottom(this.element, false);
+				}
+			},
 
-				autoScroll: function() {				if (this.shouldAutoScroll() && this.element) {
+			snapshot: function() {
+				if (!this.element) return { scrollTop: 0, userScrolledUp: false, pinned: true };
+				var nearBottom = window.chatAutoScroll.isNearBottom(this.element);
+				return {
+					scrollTop: this.element.scrollTop || 0,
+					userScrolledUp: this.userScrolledUp || !nearBottom,
+					pinned: !this.userScrolledUp && nearBottom
+				};
+			},
+
+			autoScroll: function() {
+				if (this.shouldAutoScroll() && this.element) {
 					window.chatAutoScroll.scrollToBottom(this.element, true);
 				}
 			},
 
 			destroy: function() {
+				if (this._userInteractTimeout) clearTimeout(this._userInteractTimeout);
+				this._userInteractTimeout = null;
+				this._userInteracting = false;
+				this._pointerInteracting = false;
+				if (this._handlers.keydown) window.removeEventListener('keydown', this._handlers.keydown);
+				if (this._handlers.pointerup) window.removeEventListener('pointerup', this._handlers.pointerup);
+				if (this._handlers.pointercancel) window.removeEventListener('pointercancel', this._handlers.pointercancel);
+				if (this._handlers.blur) window.removeEventListener('blur', this._handlers.blur);
 				if (!this.element) return;
-				this.element.removeEventListener('scroll', this._handlers.scroll);
+				if (this._handlers.scroll) this.element.removeEventListener('scroll', this._handlers.scroll);
+				if (this._handlers.wheel) this.element.removeEventListener('wheel', this._handlers.wheel);
+				if (this._handlers.touchmove) this.element.removeEventListener('touchmove', this._handlers.touchmove);
+				if (this._handlers.pointerdown) this.element.removeEventListener('pointerdown', this._handlers.pointerdown);
 			}
+		};
+
+		// resolveScrollTracker returns a tracker for `messagesEl`, creating one or
+		// rebinding the existing keyed tracker if the element changed (e.g. after a
+		// morph swap). This is the single entry point streaming code should use to
+		// avoid stale-element bugs that "freeze" smart scrolling until refresh.
+		window.resolveScrollTracker = function(trackerKey, messagesEl) {
+			if (!trackerKey || !messagesEl || !window.ChatScrollTracker) return null;
+			var existing = window[trackerKey];
+			if (!existing) {
+				window[trackerKey] = new window.ChatScrollTracker(messagesEl);
+				return window[trackerKey];
+			}
+			// Detect stale (detached or replaced) element and rebind.
+			if (existing.element !== messagesEl || !existing.element || !existing.element.isConnected) {
+				existing.rebind(messagesEl);
+			}
+			return existing;
 		};
 
 		// Persistent store for thinking section open states (survives DOM replacement by morph:outerHTML)
