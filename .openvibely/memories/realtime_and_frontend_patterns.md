@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-05-29
-source: consolidation
-source_id: memory_consolidation_2026_05_29
+updated: 2026-05-30
+source: after_complete
+source_id: b46b7f4a5593657eda03ba0ad680d5c6
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -22,6 +22,7 @@ Task Changes rendering safety:
 - Task detail lazily loads Changes tab content unless `tab=changes` is active, so Thread/Details do not pre-render heavy hidden diff DOM.
 - Diff viewer uses GitHub-style load envelopes and renders oversized files as explicit `Load diff` or non-loadable placeholders rather than eagerly mounting all diff DOM.
 - Diff parsing should synthesize a fallback hunk when diff content lines exist without an explicit `@@` header.
+- Task Changes file-header addition/deletion counts should visually align with the diff card add/delete palette, not raw DaisyUI `oklch()` semantic tokens or a separate hardcoded palette. Keep diff card fills at the user-specified colors: dark mode add `#1E3A38` and delete `#3D2C34`, light mode add `#DDEDE0` and delete `#FAE3E1`. Header `+/-` numbers should be text-only with no chip/background styling and use stronger-but-muted foregrounds: dark add `#559B70`, dark delete `#BD7076`, light add `#317A4A`, light delete `#A65353`. Keep desktop-WebView-safe plain color/RGBA variables for shared diff rendering.
 - Deleted files in task diffs render as normal file cards with a `Deleted` status badge; textual deletions show removed-line hunks, while deleted binary/empty files without hunks show centered summary text.
 - Live diff refreshes are gated by active-tab checks. Task-detail file-change listeners/SSE handlers are explicitly rebound with cleanup so HTMX swaps do not accumulate stale listeners or leave SSE running after navigation.
 - Task completion on the detail page should update in place through live update/HTMX/SSE mechanisms; avoid hard/full browser refreshes after completion so active tab, scroll position, and context remain stable.
@@ -30,7 +31,7 @@ Task Changes rendering safety:
 
 Chat and thread rendering:
 - For streaming chat and tool cards, batch DOM rendering with `requestAnimationFrame` and force final flush on completion.
-- Active chat/task-thread streaming should use shared smart autoscroll behavior when present: record whether the viewport was pinned before content growth, then only scroll after rendering if it was pinned. Upward user movement is intent to read; do not force-scroll back down until the user returns to the bottom or initiates a new send.
+- Active chat/task-thread streaming should use shared smart autoscroll behavior when present: record whether the viewport was pinned before content growth, then only scroll after rendering if it was pinned. Upward user movement is intent to read; do not force-scroll back down until the user returns to the bottom or initiates a new send. For large conversations, avoid clearing scroll intent from programmatic/clamp scroll events during streaming rerenders; derive intent from real user interactions such as wheel/touch/key/pointer and keep pointer/scrollbar drags active until pointerup/cancel/blur. Streaming code should resolve/rebind scroll trackers when HTMX/morph swaps replace or detach message containers so smart scrolling recovers without refresh.
 - Task-thread tab/task navigation should keep per-thread scroll state: returning from Details/Changes or another task should restore remembered position or bottom-align only when the prior thread state was pinned, on fresh initial entry, or for new send/active stream activity. Do not solve navigation scroll bugs with hard remounts or full refreshes that reset task context.
 - Task-thread streaming must keep its HTMX polling fallback resumable across lifecycle hook/status transitions: reactivated/resumed streams should reset stale inactive markers and preserve a valid `/tasks/:id/thread` poll URL/trigger so live updates continue if the per-execution EventSource closes or errors.
 - Avoid expensive full-container reprocessing on polling refreshes; use content signatures and incremental cleaning.

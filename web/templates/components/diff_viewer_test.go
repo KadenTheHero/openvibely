@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 func TestParseDiffOutput_Empty(t *testing.T) {
@@ -636,6 +637,13 @@ func TestDiffStats(t *testing.T) {
 	if stats != "+2 -1" {
 		t.Errorf("expected '+2 -1', got %q", stats)
 	}
+	counts := diffStatCounts(f)
+	if counts.Adds != 2 || counts.Dels != 1 {
+		t.Errorf("expected split counts +2/-1, got +%d/-%d", counts.Adds, counts.Dels)
+	}
+	if got := diffStatsAriaLabel(f); got != "2 added lines, 1 deleted lines" {
+		t.Errorf("expected accessible stats label, got %q", got)
+	}
 }
 
 func TestFileCountSuffix(t *testing.T) {
@@ -790,6 +798,105 @@ func TestDiffViewer_ChevronAndStatsVisible(t *testing.T) {
  func main() {
  }
 `
+	assertDiffViewerHeaderStats(t, diff, "+1", "-0", "1 added lines, 0 deleted lines")
+}
+
+func TestDiffViewer_HeaderStatsUseSemanticColorsForFileStatuses(t *testing.T) {
+	tests := []struct {
+		name      string
+		diff      string
+		wantAdd   string
+		wantDel   string
+		wantLabel string
+		wantState string
+	}{
+		{
+			name: "added file",
+			diff: `diff --git a/new.txt b/new.txt
+new file mode 100644
+--- /dev/null
++++ b/new.txt
+@@ -0,0 +1,2 @@
++one
++two
+`,
+			wantAdd:   "+2",
+			wantDel:   "-0",
+			wantLabel: "2 added lines, 0 deleted lines",
+			wantState: "added",
+		},
+		{
+			name: "deleted file",
+			diff: `diff --git a/old.txt b/old.txt
+deleted file mode 100644
+--- a/old.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+-one
+-two
+`,
+			wantAdd:   "+0",
+			wantDel:   "-2",
+			wantLabel: "0 added lines, 2 deleted lines",
+			wantState: "deleted",
+		},
+		{
+			name: "modified file",
+			diff: `diff --git a/app.go b/app.go
+--- a/app.go
++++ b/app.go
+@@ -1,2 +1,2 @@
+-old
++new
+ keep
+`,
+			wantAdd:   "+1",
+			wantDel:   "-1",
+			wantLabel: "1 added lines, 1 deleted lines",
+			wantState: "modified",
+		},
+		{
+			name: "renamed file",
+			diff: `diff --git a/old.go b/new.go
+similarity index 80%
+rename from old.go
+rename to new.go
+--- a/old.go
++++ b/new.go
+@@ -1 +1 @@
+-old
++new
+`,
+			wantAdd:   "+1",
+			wantDel:   "-1",
+			wantLabel: "1 added lines, 1 deleted lines",
+			wantState: "renamed",
+		},
+		{
+			name: "binary file",
+			diff: `diff --git a/img.bin b/img.bin
+index 1234567..89abcde 100644
+Binary files a/img.bin and b/img.bin differ
+`,
+			wantAdd:   "+0",
+			wantDel:   "-0",
+			wantLabel: "0 added lines, 0 deleted lines",
+			wantState: "modified",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := assertDiffViewerHeaderStats(t, tt.diff, tt.wantAdd, tt.wantDel, tt.wantLabel)
+			if !strings.Contains(body, `data-diff-status="`+tt.wantState+`"`) {
+				t.Errorf("expected data-diff-status=%s", tt.wantState)
+			}
+		})
+	}
+}
+
+func assertDiffViewerHeaderStats(t *testing.T, diff, wantAdd, wantDel, wantLabel string) string {
+	t.Helper()
 	var buf bytes.Buffer
 	err := DiffViewer(diff).Render(context.Background(), &buf)
 	if err != nil {
@@ -797,22 +904,67 @@ func TestDiffViewer_ChevronAndStatsVisible(t *testing.T) {
 	}
 	body := buf.String()
 
-	// File name visible
-	if !strings.Contains(body, "main.go") {
+	if !strings.Contains(body, "main.go") && strings.Contains(diff, "main.go") {
 		t.Error("expected file name 'main.go' to be visible")
 	}
-	// Stats visible (+1 -0)
-	if !strings.Contains(body, "+1 -0") {
-		t.Error("expected diff stats '+1 -0' to be visible")
+	if !strings.Contains(body, `class="diff-file-stats text-xs font-semibold ml-auto shrink-0 flex items-center gap-1"`) {
+		t.Error("expected diff stats wrapper to be visible")
 	}
-	// Chevron SVG present (right-pointing arrow path)
+	if !strings.Contains(body, `class="diff-stat-add" title="Added lines">`+wantAdd+`</span>`) {
+		t.Errorf("expected additions to render as %s in dedicated stats span", wantAdd)
+	}
+	if !strings.Contains(body, `class="diff-stat-del" title="Deleted lines">`+wantDel+`</span>`) {
+		t.Errorf("expected deletions to render as %s in dedicated stats span", wantDel)
+	}
+	if !strings.Contains(body, `aria-label="`+wantLabel+`"`) {
+		t.Errorf("expected accessible diff stats label %q", wantLabel)
+	}
+	if !strings.Contains(body, `diff-file-stats .diff-stat-add`) || !strings.Contains(body, `color: var(--ov-diff-add-fg);`) {
+		t.Error("expected additions to use the muted add foreground color")
+	}
+	if !strings.Contains(body, `diff-file-stats .diff-stat-del`) || !strings.Contains(body, `color: var(--ov-diff-del-fg);`) {
+		t.Error("expected deletions to use the muted delete foreground color")
+	}
+	if strings.Contains(body, `background-color: var(--ov-diff-add-bg);`) || strings.Contains(body, `background-color: var(--ov-diff-del-bg);`) {
+		t.Error("diff header stats should color the numbers, not add chip backgrounds")
+	}
+	if strings.Contains(body, `color: oklch(var(--su));`) || strings.Contains(body, `color: oklch(var(--er));`) {
+		t.Error("diff header stats should not depend on oklch-only DaisyUI colors")
+	}
+
+	var baseBuf bytes.Buffer
+	if err := layout.Base("Test", nil, "").Render(context.Background(), &baseBuf); err != nil {
+		t.Fatalf("base render failed: %v", err)
+	}
+	baseHTML := baseBuf.String()
+	for _, fragment := range []string{
+		"--ov-diff-add-bg: #1E3A38;",
+		"--ov-diff-del-bg: #3D2C34;",
+		"--ov-diff-add-fg: #559B70;",
+		"--ov-diff-del-fg: #BD7076;",
+		"--ov-diff-add-bg: #DDEDE0;",
+		"--ov-diff-del-bg: #FAE3E1;",
+		"--ov-diff-add-fg: #317A4A;",
+		"--ov-diff-del-fg: #A65353;",
+		`[data-theme="dark"] .diff-file-card .bg-success\/10 {`,
+		"background-color: var(--ov-diff-add-bg) !important;",
+		`[data-theme="dark"] .diff-file-card .bg-error\/10 {`,
+		"background-color: var(--ov-diff-del-bg) !important;",
+		`[data-theme="light"] .diff-file-card .bg-success\/10 {`,
+		`[data-theme="light"] .diff-file-card .bg-error\/10 {`,
+	} {
+		if !strings.Contains(baseHTML, fragment) {
+			t.Errorf("expected desktop-safe diff color fragment %q", fragment)
+		}
+	}
+
 	if !strings.Contains(body, "M9 5l7 7-7 7") {
 		t.Error("expected chevron SVG path")
 	}
-	// Click handler present
 	if !strings.Contains(body, "data-diff-toggle") {
 		t.Error("expected data-diff-toggle attribute on header")
 	}
+	return body
 }
 
 func TestDiffViewer_FileHeaderRendersCopyPathButton(t *testing.T) {

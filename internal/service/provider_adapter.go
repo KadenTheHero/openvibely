@@ -288,9 +288,16 @@ type testProviderAdapter struct {
 	svc *LLMService
 }
 
+type agentRequestRecorder interface {
+	RecordAgentRequest(req llmcontracts.AgentRequest)
+}
+
 func (a *testProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 	if a.svc.llmCaller == nil {
 		return llmcontracts.AgentResult{}, fmt.Errorf("test provider requires LLMCaller to be set via SetLLMCaller()")
+	}
+	if recorder, ok := a.svc.llmCaller.(agentRequestRecorder); ok {
+		recorder.RecordAgentRequest(req)
 	}
 	output, textOnly, tokens, err := a.svc.llmCaller.CallModel(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir)
 	return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), err)

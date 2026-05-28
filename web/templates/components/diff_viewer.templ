@@ -1399,28 +1399,34 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				border-bottom-left-radius: inherit;
 				border-bottom-right-radius: inherit;
 			}
-				.diff-file-header[data-collapsed="1"] + .diff-file-body {
-					max-height: 0 !important;
-				}
-				.diff-copy-path-btn {
-					color: oklch(var(--bc) / 0.7);
-				}
-				.diff-copy-path-btn:hover,
-				.diff-copy-path-btn:focus-visible {
-					color: oklch(var(--bc));
-					background-color: oklch(var(--b3) / 0.75);
-				}
+			.diff-file-header[data-collapsed="1"] + .diff-file-body {
+				max-height: 0 !important;
+			}
+			.diff-copy-path-btn {
+				color: oklch(var(--bc) / 0.7);
+			}
+			.diff-copy-path-btn:hover,
+			.diff-copy-path-btn:focus-visible {
+				color: oklch(var(--bc));
+				background-color: oklch(var(--b3) / 0.75);
+			}
 				.diff-file-body {
 					border-bottom-left-radius: inherit;
 					border-bottom-right-radius: inherit;
 				}
+				.diff-file-stats .diff-stat-add {
+					color: var(--ov-diff-add-fg);
+				}
+				.diff-file-stats .diff-stat-del {
+					color: var(--ov-diff-del-fg);
+				}
 				/* Inline review styles — always active */
-			.diff-review-line {
-				position: relative;
-			}
-			.diff-line-num {
-				padding-right: 1.75rem;
-			}
+				.diff-review-line {
+					position: relative;
+				}
+				.diff-line-num {
+					padding-right: 1.75rem;
+				}
 				.diff-add-comment-btn {
 					display: inline-flex;
 					align-items: center;
@@ -1549,9 +1555,7 @@ templ diffFileHeader(f DiffFile, idx int, defaultExpanded bool, splitChevron boo
 			<span class="font-mono text-sm font-medium truncate min-w-0" title={ diffFileDisplayPath(f) }>{ diffFileDisplayPath(f) }</span>
 			@diffFileCopyPathButton(diffFileDisplayPath(f))
 		</span>
-		<span class="text-xs opacity-50 shrink-0">
-			{ diffStats(f) }
-		</span>
+		@diffStatsBadge(f)
 	</div>
 }
 
@@ -1569,6 +1573,13 @@ templ diffFileCopyPathButton(path string) {
 			<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
 		</svg>
 	</button>
+}
+
+templ diffStatsBadge(f DiffFile) {
+	<span class="diff-file-stats text-xs font-semibold ml-auto shrink-0 flex items-center gap-1" aria-label={ diffStatsAriaLabel(f) }>
+		<span class="diff-stat-add" title="Added lines">+{ fmt.Sprintf("%d", diffStatCounts(f).Adds) }</span>
+		<span class="diff-stat-del" title="Deleted lines">-{ fmt.Sprintf("%d", diffStatCounts(f).Dels) }</span>
+	</span>
 }
 
 templ diffFileEmptyBody(f DiffFile) {
@@ -1783,11 +1794,17 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 					border-bottom-left-radius: inherit;
 					border-bottom-right-radius: inherit;
 				}
+				.diff-file-stats .diff-stat-add {
+					color: var(--ov-diff-add-fg);
+				}
+				.diff-file-stats .diff-stat-del {
+					color: var(--ov-diff-del-fg);
+				}
 			</style>
-		<script>
-			// Session-level state for diff file expand/collapse, scoped by viewer.
-			if (!window._diffFileState) window._diffFileState = {};
-			function diffFileStateBucket() {
+			<script>
+				// Session-level state for diff file expand/collapse, scoped by viewer.
+				if (!window._diffFileState) window._diffFileState = {};
+				function diffFileStateBucket() {
 				var viewer = document.getElementById('diff-viewer');
 				var key = viewer ? (viewer.dataset.stateKey || 'default') : 'default';
 				if (!window._diffFileState[key]) window._diffFileState[key] = {};
@@ -2455,18 +2472,33 @@ func diffFileName(path string) string {
 	return path
 }
 
-func diffStats(f DiffFile) string {
-	adds, dels := 0, 0
+type diffStatCount struct {
+	Adds int
+	Dels int
+}
+
+func diffStatCounts(f DiffFile) diffStatCount {
+	counts := diffStatCount{}
 	for _, h := range f.Hunks {
 		for _, l := range h.Lines {
 			if l.Type == "add" {
-				adds++
+				counts.Adds++
 			} else if l.Type == "del" {
-				dels++
+				counts.Dels++
 			}
 		}
 	}
-	return fmt.Sprintf("+%d -%d", adds, dels)
+	return counts
+}
+
+func diffStats(f DiffFile) string {
+	counts := diffStatCounts(f)
+	return fmt.Sprintf("+%d -%d", counts.Adds, counts.Dels)
+}
+
+func diffStatsAriaLabel(f DiffFile) string {
+	counts := diffStatCounts(f)
+	return fmt.Sprintf("%d added lines, %d deleted lines", counts.Adds, counts.Dels)
 }
 
 func fileCountSuffix(n int) string {
@@ -2567,9 +2599,7 @@ templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view st
 				<span class="font-mono text-sm font-medium truncate min-w-0" title={ diffFileDisplayPath(meta.File) }>{ diffFileDisplayPath(meta.File) }</span>
 				@diffFileCopyPathButton(diffFileDisplayPath(meta.File))
 			</span>
-			<span class="text-xs opacity-50 shrink-0">
-				{ diffStats(meta.File) }
-			</span>
+			@diffStatsBadge(meta.File)
 		</div>
 		<div class="diff-file-body p-6 bg-base-100 text-center">
 			if meta.CanLoadOnDemand {

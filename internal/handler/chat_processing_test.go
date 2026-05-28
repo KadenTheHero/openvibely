@@ -385,8 +385,8 @@ func TestProcessStreamingResponse_InteractiveChatRunsMemoryRecallOnly(t *testing
 	if len(invoker.seen) != 1 || invoker.seen[0] != "before_run/recall_memory" {
 		t.Fatalf("expected only before_run recall hook for chat, got %#v", invoker.seen)
 	}
-	if prompt := mock.LastCall().Prompt; !strings.Contains(prompt, "Remember: prefer repo-local managed memory for this project.") || !strings.Contains(prompt, "[recall_memory]") {
-		t.Fatalf("expected recalled memory in model-facing chat prompt, got:\n%s", prompt)
+	if chatContext := mock.LastAgentRequest().ChatSystemContext; !strings.Contains(chatContext, "Remember: prefer repo-local managed memory for this project.") || !strings.Contains(chatContext, "[recall_memory]") {
+		t.Fatalf("expected recalled memory in model-facing chat context, got:\n%s", chatContext)
 	}
 	for _, when := range store.seen {
 		if when == models.LifecycleAfterComplete {
@@ -449,8 +449,8 @@ func TestProcessStreamingResponse_InteractiveChatPlanModeRunsMemoryRecallOnly(t 
 	if len(invoker.seen) != 1 || invoker.seen[0] != "before_run/recall_memory" {
 		t.Fatalf("expected only before_run recall hook for plan chat, got %#v", invoker.seen)
 	}
-	if prompt := mock.LastCall().Prompt; !strings.Contains(prompt, "Remember: prefer repo-local managed memory for this project.") || !strings.Contains(prompt, "[recall_memory]") {
-		t.Fatalf("expected recalled memory in model-facing plan chat prompt, got:\n%s", prompt)
+	if chatContext := mock.LastAgentRequest().ChatSystemContext; !strings.Contains(chatContext, "Remember: prefer repo-local managed memory for this project.") || !strings.Contains(chatContext, "[recall_memory]") {
+		t.Fatalf("expected recalled memory in model-facing plan chat context, got:\n%s", chatContext)
 	}
 	for _, when := range store.seen {
 		if when == models.LifecycleAfterComplete {

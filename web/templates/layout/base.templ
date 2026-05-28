@@ -59,14 +59,20 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						--ov-link-color-visited: #7480ff;
 						--ov-link-focus-ring: rgba(116, 128, 255, 0.45);
 						--ov-link-decoration: rgba(116, 128, 255, 0.85);
-					/* Schedule-specific tokens kept explicit for cross-WebView consistency. */
-						--ov-schedule-grid-border: #15191E;					--ov-schedule-timeline-dash: repeating-linear-gradient(
-						to right,
-						var(--ov-link-color) 0px,
-						var(--ov-link-color) 4px,
-						transparent 4px,
-						transparent 6px
-					);					}
+							--ov-diff-add-bg: #1E3A38;
+							--ov-diff-del-bg: #3D2C34;
+							--ov-diff-add-fg: #559B70;
+							--ov-diff-del-fg: #BD7076;
+							/* Schedule-specific tokens kept explicit for cross-WebView consistency. */
+							--ov-schedule-grid-border: #15191E;
+						--ov-schedule-timeline-dash: repeating-linear-gradient(
+							to right,
+							var(--ov-link-color) 0px,
+							var(--ov-link-color) 4px,
+							transparent 4px,
+							transparent 6px
+						);
+					}
 					/* Canonical "Default" badge styling used across major settings pages. */
 					.ov-badge-default {
 						background-color: hsl(var(--p));
@@ -708,27 +714,35 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					--ov-l-accent-hover: #4F3CB8;
 					--ov-l-accent-soft: #DDD6FE;
 					--ov-l-accent-soft-strong: #C4B5FD7A;
-					--ov-l-success: #2EA043;
-					--ov-l-warning: #895503;
-					--ov-l-error: #F85149;
-					--ov-l-code-bg: #0000001F;
-
+						--ov-l-success: #2EA043;
+						--ov-l-warning: #895503;
+						--ov-l-error: #F85149;
+						--ov-diff-add-bg: #DDEDE0;
+						--ov-diff-del-bg: #FAE3E1;
+						--ov-diff-add-fg: #317A4A;
+						--ov-diff-del-fg: #A65353;
+						--ov-l-code-bg: #0000001F;
 				}
 
-				/* Diff viewer line backgrounds (light mode).
+				/* Diff viewer line colors.
 				   daisyUI v4 resolves bg-success/10 via oklch(var(--su)/.1). In the
 				   Wails WKWebView on older macOS, oklch() and color-mix() can be
-				   unreliable, so diff line backgrounds end up transparent. Force
-				   plain rgba() overrides keyed to the light-theme success/error
-				   colors (#2EA043 / #F85149) so red/green render in both webapp
-				   and Wails desktop regardless of WebView CSS support. */
-				[data-theme="light"] .bg-success\/10 {
-					background-color: rgba(46, 160, 67, 0.14) !important;
-				}
-				[data-theme="light"] .bg-error\/10 {
-					background-color: rgba(248, 81, 73, 0.14) !important;
-				}
-
+				   unreliable, so diff line backgrounds can end up transparent. Force
+				   plain rgba() overrides keyed to the same add/delete palette used by
+				   the file-header stats so red/green render consistently in web and
+				   Wails desktop, in both light and dark mode. */
+					[data-theme="dark"] .diff-file-card .bg-success\/10 {
+						background-color: var(--ov-diff-add-bg) !important;
+					}
+					[data-theme="dark"] .diff-file-card .bg-error\/10 {
+						background-color: var(--ov-diff-del-bg) !important;
+					}
+					[data-theme="light"] .diff-file-card .bg-success\/10 {
+						background-color: var(--ov-diff-add-bg) !important;
+					}
+					[data-theme="light"] .diff-file-card .bg-error\/10 {
+						background-color: var(--ov-diff-del-bg) !important;
+					}
 				/* --- App shell surfaces --- */
 				[data-theme="light"] body,
 				[data-theme="light"] .drawer-content {

@@ -2,9 +2,9 @@
 name: managed_memory
 type: project
 created: 2026-05-09
-updated: 2026-05-29
-source: consolidation
-source_id: memory_consolidation_2026_05_29
+updated: 2026-05-30
+source: after_complete
+source_id: b46b7f4a5593657eda03ba0ad680d5c6
 confidence: high
 title: Managed Memory
 ---
@@ -27,7 +27,7 @@ Content boundaries:
 Lifecycle behavior:
 - Memory lifecycle work is owned by the built-in system Memory Curator agent through `recall_memory`, `update_memory`, and `consolidate_memory` lifecycle skills. Do not add separate memory-maintainer/consolidator agents, duplicate memory-maintainer skills, or seed migrations for a separate memory-maintainer path unless explicitly requested.
 - The model owns memory extraction/consolidation decisions. Go code should not replace that with hardcoded rule extractors, deterministic topic classifiers, or JSON proposal workflows when provider tool execution is available.
-- Normal task, thread, and chat executions consume selected managed memory as injected read-only prompt context after runtime model-backed retrieval/selection and synthesis. Do not inject all memory files by default or rely on the main coding model opening `MEMORIES.md` with file tools.
+- Normal task, thread, and chat executions consume selected managed memory as injected read-only prompt context after runtime model-backed retrieval/selection and synthesis. For interactive chat, recalled memory is model-facing through `ChatSystemContext` rather than appended to the user prompt. Do not inject all memory files by default or rely on the main coding model opening `MEMORIES.md` with file tools.
 - Recall should use `MEMORIES.md` as an index, select topic filenames, then synthesize brief assistant-facing context from selected files; the injection should be directly actionable rather than unresolved filename citations.
 - Direct managed-memory write tools should usually be reserved for memory-specific extraction/consolidation passes triggered by completion or scheduled runs, not global provider behavior.
 
