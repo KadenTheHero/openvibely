@@ -58,8 +58,8 @@ Lifecycle hooks and routing:
 
 Scheduled maintenance:
 - Prefer modeling scheduled maintenance as normal scheduled tasks assigned to agents and running through the usual task lifecycle, unless a runbook explicitly requires invisible background hooks.
-- Built-in Skill Curator library maintenance should be a visible scheduled task using the Skill Curator agent with the `maintain_skill_library` skill. Let the loaded agent/skill declaration drive runtime tool grants rather than worker-side hardcoded maintenance tools.
-- Skill-library maintenance may inspect agent namespaces and available skills for context, but should not create, edit, archive, route, reassign, or otherwise manage standalone user-controlled agents unless the task explicitly authorizes it. It should avoid memory changes and prefer small, evidence-backed skill consolidation or `SKILL.md` instruction updates.
+- Let loaded agent/skill declarations drive scheduled-task runtime tool grants rather than worker-side hardcoded maintenance tools. Built-in memory-consolidation specifics live in `managed_memory.md`.
+- Skill-library maintenance should use the Skill Curator agent with the `maintain_skill_library` skill. It may inspect agent namespaces and available skills for context, but should not create, edit, archive, route, reassign, or otherwise manage standalone user-controlled agents unless the task explicitly authorizes it.
 - `maintain_skill_library` is scheduled/normal maintenance; post-task learning belongs in `observe_task_for_learning` or should explicitly trigger/recommend maintenance.
 - System-agent scheduled tasks should respect their explicit assigned agent and selected/manual skill configuration instead of running ordinary `route_task` skill routing.
 - Lifecycle direct-call scoped-file setup must pass absolute directories for extra scopes such as `global_agents`, resolving configured/built-in roots before constructing `ScopedFiles` extras.
