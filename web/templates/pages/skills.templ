@@ -1,0 +1,446 @@
+package pages
+
+import (
+	"strings"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+type SkillCard struct {
+	Handle      string
+	Name        string
+	Description string
+	Scope       string
+	Source      string
+	Content     string
+	Files       []string
+	Archived    bool
+}
+
+templ Skills(projects []models.Project, currentProjectID string, skills []SkillCard, canManage bool) {
+	@layout.Base("Skills", projects, currentProjectID) {
+		@skillsContent(skills, canManage)
+	}
+}
+
+templ SkillsContent(skills []SkillCard, canManage bool) {
+	@skillsContent(skills, canManage)
+}
+
+func skillSearchText(skill SkillCard) string {
+	status := "active"
+	if skill.Archived {
+		status = "archived"
+	}
+	return strings.TrimSpace(skill.Handle + " " + skill.Name + " " + skill.Description + " " + skill.Scope + " " + skill.Source + " " + status)
+}
+
+func defaultSkillBodyTemplate() string {
+	return "---\n" +
+		"kind: openvibely.agent_skill\n" +
+		"version: 1\n" +
+		"skill:\n" +
+		"    key: openvibely_database_migration_workflow\n" +
+		"    name: OpenVibely Database Migration Workflow\n" +
+		"    scope: project\n" +
+		"    description: Manage OpenVibely goose schema migrations, consolidation, and validation safely.\n" +
+		"---\n\nDescribe when to use this skill and the workflow the agent should follow.\n"
+}
+
+templ skillsContent(skills []SkillCard, canManage bool) {
+	<div id="skills-container" data-search-container>
+		<div class="flex items-center justify-between mb-6">
+			<h2 class="text-2xl font-bold">Skills</h2>
+			<div class="dropdown dropdown-end">
+				<label
+					tabindex="0"
+					class="btn btn-primary btn-sm"
+					onclick="handleDropdownToggle(event)"
+					if !canManage {
+						disabled
+					}
+				>
+					+ Add Skill
+				</label>
+				<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-56 border border-base-300">
+					<li>
+						<button type="button" onclick="openNewSkillModal()">Create Skill</button>
+					</li>
+					<li>
+						<button type="button" onclick="openImportSkillModal()">Import Skill Package</button>
+					</li>
+				</ul>
+			</div>
+		</div>
+		@CardSearchInput("skills", "Search skills...")
+		if len(skills) == 0 {
+			<div class="text-center py-12">
+				<p class="opacity-50 mb-4">No standalone skills found yet.</p>
+				<button
+					class="btn btn-primary"
+					onclick="openNewSkillModal()"
+					if !canManage {
+						disabled
+					}
+				>
+					Create Skill
+				</button>
+			</div>
+		} else {
+			<div class="grid gap-4">
+				for _, skill := range skills {
+					<div
+						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+						data-skill-handle={ skill.Handle }
+						data-skill-name={ skill.Name }
+						data-skill-description={ skill.Description }
+						data-skill-scope={ skill.Scope }
+						data-skill-source={ skill.Source }
+						data-skill-content={ skill.Content }
+						data-skill-files={ strings.Join(skill.Files, "\n") }
+						data-search-card
+						data-search-text={ skillSearchText(skill) }
+						onclick="editSkillFromData(this)"
+					>
+						<div class="card-body relative">
+							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+								<div class="dropdown dropdown-end">
+									<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+										</svg>
+									</label>
+									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+										<li>
+											<button onclick="editSkillFromData(this.closest('[data-skill-handle]'))">Edit</button>
+										</li>
+										<li>
+											<button class="text-error" data-skill-handle={ skill.Handle } data-skill-name={ firstSkillNonEmpty(skill.Name, skill.Handle) } data-skill-scope={ skill.Scope } onclick="deleteSkill(this)">Delete</button>
+										</li>
+									</ul>
+								</div>
+							</div>
+							<div class="pr-12">
+								<h3 class="font-bold">
+									{ firstSkillNonEmpty(skill.Name, skill.Handle) }
+								</h3>
+								if skill.Description != "" {
+									<p class="text-sm opacity-60 mt-1 line-clamp-2">{ skill.Description }</p>
+								}
+								<div class="flex flex-wrap gap-2 mt-2">
+									<span class="badge badge-outline badge-sm">{ skill.Scope }</span>
+									if skill.Archived {
+										<span class="badge badge-outline badge-sm">Archived</span>
+									}
+								</div>
+							</div>
+						</div>
+					</div>
+				}
+			</div>
+		}
+		<dialog id="skill_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
+			<div class="modal-box">
+				@ModalCloseButton("skill_modal", "Close skill dialog")
+				<h3 id="skill_modal_title" class="font-bold text-lg mb-4 pr-10">New Skill</h3>
+				<form id="skill_form" onsubmit="submitSkillForm(event)">
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+						<label class="form-control">
+							<span class="label-text mb-1">Skill key</span>
+							<input id="skill_handle" class="input input-bordered" required placeholder="review_migrations" oninput="syncNewSkillTemplate()"/>
+						</label>
+						<label class="form-control">
+							<span class="label-text mb-1">Scope</span>
+							<select id="skill_scope" class="select select-bordered" onchange="syncNewSkillTemplate()">
+								<option value="project">Project</option>
+								<option value="global">Global</option>
+							</select>
+						</label>
+					</div>
+					<label class="form-control mt-3">
+						<span class="label-text mb-1">Name</span>
+						<input id="skill_name" class="input input-bordered" placeholder="Review Migrations" oninput="syncNewSkillTemplate()"/>
+					</label>
+					<label class="form-control mt-3">
+						<span class="label-text mb-1">Description</span>
+						<input id="skill_description" class="input input-bordered" placeholder="When to use this skill" oninput="syncNewSkillTemplate()"/>
+					</label>
+					<label class="form-control mt-3">
+						<span class="label-text mb-1">Skill body</span>
+						<textarea id="skill_body" class="textarea textarea-bordered font-mono text-sm min-h-72" required placeholder="Instructions for this skill..." oninput="markSkillTemplateEdited()">{ defaultSkillBodyTemplate() }</textarea>
+					</label>
+					<div id="skill_files_section" class="hidden mt-3">
+						<div class="text-sm font-medium mb-2">Package files</div>
+						<div id="skill_files" class="border border-base-300 rounded-lg p-3 bg-base-200/30 text-xs font-mono space-y-1"></div>
+					</div>
+					<p id="skill_error" class="hidden text-error text-sm mt-3"></p>
+					<div class="modal-action">
+						<button type="button" class="btn" onclick="skill_modal.close()">Cancel</button>
+						<button id="skill_submit_btn" type="submit" class="btn btn-primary">Save</button>
+					</div>
+				</form>
+			</div>
+			<form method="dialog" class="modal-backdrop">
+				<button>close</button>
+			</form>
+		</dialog>
+		<dialog id="skill_import_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
+			<div class="modal-box">
+				@ModalCloseButton("skill_import_modal", "Close import skill dialog")
+				<h3 class="font-bold text-lg mb-4 pr-10">Import Skill Package</h3>
+				<form id="skill_import_form" onsubmit="submitSkillImportForm(event)">
+					<label class="form-control">
+						<span class="label-text mb-1">Scope</span>
+						<select id="skill_import_scope" name="scope" class="select select-bordered">
+							<option value="project">Project</option>
+							<option value="global">Global</option>
+						</select>
+					</label>
+					<label class="form-control mt-3">
+						<span class="label-text mb-1">Skill package files</span>
+						<input id="skill_import_files" name="files" type="file" class="file-input file-input-bordered" multiple webkitdirectory required/>
+						<span class="label-text-alt mt-1 opacity-70">Select a skill package folder containing SKILL.md. Support files under references, templates, scripts, and assets will be imported.</span>
+					</label>
+					<p id="skill_import_error" class="hidden text-error text-sm mt-3"></p>
+					<div class="modal-action">
+						<button type="button" class="btn" onclick="skill_import_modal.close()">Cancel</button>
+						<button id="skill_import_submit_btn" type="submit" class="btn btn-primary">Import</button>
+					</div>
+				</form>
+			</div>
+			<form method="dialog" class="modal-backdrop">
+				<button>close</button>
+			</form>
+		</dialog>
+		<script>
+			function defaultSkillTemplate(handle, name, scope, description) {
+				handle = (handle || 'openvibely_database_migration_workflow').trim();
+				name = (name || 'OpenVibely Database Migration Workflow').trim();
+				scope = (scope || 'project').trim();
+				description = (description || 'Manage OpenVibely goose schema migrations, consolidation, and validation safely.').trim();
+				return '---\n' +
+					'kind: openvibely.agent_skill\n' +
+					'version: 1\n' +
+					'skill:\n' +
+					'    key: ' + handle + '\n' +
+					'    name: ' + name + '\n' +
+					'    scope: ' + scope + '\n' +
+					'    description: ' + description + '\n' +
+					'---\n\nDescribe when to use this skill and the workflow the agent should follow.\n';
+			}
+
+			function currentSkillsProjectQuery() {
+				var selector = document.getElementById('project-selector');
+				var projectID = selector && selector.value ? selector.value : new URLSearchParams(window.location.search).get('project_id');
+				return projectID ? '?project_id=' + encodeURIComponent(projectID) : '';
+			}
+
+			function setSkillModalError(message) {
+				var el = document.getElementById('skill_error');
+				if (!el) return;
+				el.textContent = message || '';
+				el.classList.toggle('hidden', !message);
+			}
+
+			function setSkillImportError(message) {
+				var el = document.getElementById('skill_import_error');
+				if (!el) return;
+				el.textContent = message || '';
+				el.classList.toggle('hidden', !message);
+			}
+
+			function renderSkillPackageFiles(filesText) {
+				var section = document.getElementById('skill_files_section');
+				var list = document.getElementById('skill_files');
+				if (!section || !list) return;
+				var files = String(filesText || '').split('\n').map(function(file) { return file.trim(); }).filter(Boolean);
+				section.classList.toggle('hidden', files.length === 0);
+				list.innerHTML = files.length ? files.map(function(file) { return '<div>' + escapeSkillHTML(file) + '</div>'; }).join('') : '';
+			}
+
+			function escapeSkillHTML(value) {
+				return String(value || '').replace(/[&<>"']/g, function(ch) {
+					return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
+				});
+			}
+
+			function markSkillTemplateEdited() {
+				var form = document.getElementById('skill_form');
+				if (form && form.dataset.mode === 'create') form.dataset.templateEdited = 'true';
+			}
+
+			function syncNewSkillTemplate() {
+				var form = document.getElementById('skill_form');
+				var body = document.getElementById('skill_body');
+				if (!form || !body || form.dataset.mode !== 'create' || form.dataset.templateEdited === 'true') return;
+				body.value = defaultSkillTemplate(
+					document.getElementById('skill_handle').value,
+					document.getElementById('skill_name').value,
+					document.getElementById('skill_scope').value,
+					document.getElementById('skill_description').value
+				);
+			}
+
+			function openNewSkillModal() {
+				var form = document.getElementById('skill_form');
+				form.dataset.mode = 'create';
+				form.dataset.originalHandle = '';
+				form.dataset.templateEdited = '';
+				document.getElementById('skill_modal_title').textContent = 'New Skill';
+				document.getElementById('skill_handle').value = 'openvibely_database_migration_workflow';
+				document.getElementById('skill_handle').disabled = false;
+				document.getElementById('skill_scope').disabled = false;
+				document.getElementById('skill_scope').value = 'project';
+				document.getElementById('skill_name').value = 'OpenVibely Database Migration Workflow';
+				document.getElementById('skill_description').value = 'Manage OpenVibely goose schema migrations, consolidation, and validation safely.';
+				document.getElementById('skill_body').value = defaultSkillTemplate('', '', '', '');
+				renderSkillPackageFiles('');
+				setSkillModalError('');
+				skill_modal.showModal();
+			}
+
+			function openImportSkillModal() {
+				var form = document.getElementById('skill_import_form');
+				if (form) form.reset();
+				document.getElementById('skill_import_scope').value = 'project';
+				setSkillImportError('');
+				skill_import_modal.showModal();
+			}
+
+			function editSkillFromData(card) {
+				if (!card) return;
+				var form = document.getElementById('skill_form');
+				form.dataset.mode = 'edit';
+				form.dataset.originalHandle = card.dataset.skillHandle || '';
+				form.dataset.templateEdited = 'true';
+				document.getElementById('skill_modal_title').textContent = 'Edit Skill';
+				document.getElementById('skill_handle').value = card.dataset.skillHandle || '';
+				document.getElementById('skill_handle').disabled = true;
+				document.getElementById('skill_scope').value = card.dataset.skillScope || 'project';
+				document.getElementById('skill_scope').disabled = true;
+				document.getElementById('skill_name').value = card.dataset.skillName || '';
+				document.getElementById('skill_description').value = card.dataset.skillDescription || '';
+				document.getElementById('skill_body').value = card.dataset.skillContent || '';
+				renderSkillPackageFiles(card.dataset.skillFiles || '');
+				setSkillModalError('');
+				skill_modal.showModal();
+			}
+
+			function deleteSkill(button) {
+				var handle = button.dataset.skillHandle || '';
+				var name = button.dataset.skillName || handle;
+				var scope = button.dataset.skillScope || 'project';
+				if (!handle) return;
+				if (!confirm('Delete skill "' + name + '"? This action cannot be undone.')) return;
+				htmx.ajax('DELETE', '/skills/' + encodeURIComponent(handle) + '?scope=' + encodeURIComponent(scope) + currentSkillsProjectQuery().replace(/^\?/, '&'), {
+					target: '#skills-container',
+					swap: 'outerHTML'
+				}).catch(function(xhr) {
+					alert((xhr && xhr.responseText) || 'Failed to delete skill.');
+				});
+			}
+
+			function submitSkillImportForm(event) {
+				event.preventDefault();
+				var submit = document.getElementById('skill_import_submit_btn');
+				var input = document.getElementById('skill_import_files');
+				var data = new FormData();
+				data.append('scope', document.getElementById('skill_import_scope').value || 'project');
+				Array.from((input && input.files) || []).forEach(function(file) {
+					data.append('files', file, file.name);
+					data.append('paths', file.webkitRelativePath || file.name);
+				});
+				submit.disabled = true;
+				submit.textContent = 'Importing...';
+				setSkillImportError('');
+				fetch('/skills/import' + currentSkillsProjectQuery(), {
+					method: 'POST',
+					headers: {'HX-Request': 'true'},
+					body: data
+				}).then(function(resp) {
+					if (!resp.ok) {
+						return resp.text().then(function(text) { throw new Error(text || 'Failed to import skill package.'); });
+					}
+					return resp.text();
+				}).then(function(html) {
+					var container = document.getElementById('skills-container');
+					if (container) {
+						container.outerHTML = html;
+						if (window.htmx) htmx.process(document.getElementById('skills-container'));
+					}
+					var modal = document.getElementById('skill_import_modal');
+					if (modal && modal.open) modal.close();
+				}).catch(function(err) {
+					setSkillImportError(err.message || 'Failed to import skill package.');
+				}).finally(function() {
+					var nextSubmit = document.getElementById('skill_import_submit_btn');
+					if (nextSubmit) {
+						nextSubmit.disabled = false;
+						nextSubmit.textContent = 'Import';
+					}
+				});
+			}
+
+			function submitSkillForm(event) {
+				event.preventDefault();
+				var form = document.getElementById('skill_form');
+				var handle = document.getElementById('skill_handle').value.trim();
+				var payload = {
+					handle: handle,
+					scope: document.getElementById('skill_scope').value,
+					name: document.getElementById('skill_name').value.trim(),
+					description: document.getElementById('skill_description').value.trim(),
+					body: document.getElementById('skill_body').value
+				};
+				var mode = form.dataset.mode || 'create';
+				var originalHandle = form.dataset.originalHandle || handle;
+				var url = '/skills';
+				var method = 'POST';
+				if (mode === 'edit') {
+					url = '/skills/' + encodeURIComponent(originalHandle);
+					method = 'PUT';
+				}
+				var submit = document.getElementById('skill_submit_btn');
+				submit.disabled = true;
+				submit.textContent = 'Saving...';
+				setSkillModalError('');
+				fetch(url + currentSkillsProjectQuery(), {
+					method: method,
+					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
+					body: JSON.stringify(payload)
+				}).then(function(resp) {
+					if (!resp.ok) {
+						return resp.text().then(function(text) { throw new Error(text || 'Failed to save skill.'); });
+					}
+					return resp.text();
+				}).then(function(html) {
+					var container = document.getElementById('skills-container');
+					if (container) {
+						container.outerHTML = html;
+						if (window.htmx) htmx.process(document.getElementById('skills-container'));
+					}
+					var modal = document.getElementById('skill_modal');
+					if (modal && modal.open) modal.close();
+				}).catch(function(err) {
+					setSkillModalError(err.message || 'Failed to save skill.');
+				}).finally(function() {
+					var nextSubmit = document.getElementById('skill_submit_btn');
+					if (nextSubmit) {
+						nextSubmit.disabled = false;
+						nextSubmit.textContent = 'Save';
+					}
+				});
+			}
+		</script>
+	</div>
+}
+
+func firstSkillNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}

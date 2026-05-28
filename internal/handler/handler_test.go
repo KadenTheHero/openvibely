@@ -2689,6 +2689,26 @@ func TestSidebar_SamePageNavPrevention(t *testing.T) {
 	}
 }
 
+func TestSidebar_DoesNotPersistSelectedNavHighlight(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	for _, snippet := range []string{
+		`setSidebarActiveNav`,
+		`_sidebarPendingActiveBase`,
+		`aria-current`,
+		`:focus:not(:focus-visible):not(.active)`,
+	} {
+		if strings.Contains(body, snippet) {
+			t.Fatalf("sidebar should not persist selected nav highlight, found snippet: %s", snippet)
+		}
+	}
+}
+
 func TestSidebar_ProjectSelectorSingleBorderAndFocusVisible(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 

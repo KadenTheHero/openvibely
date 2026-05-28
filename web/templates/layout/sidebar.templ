@@ -117,10 +117,11 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							newUrl = '/dashboard-mockup?project_id=' + newProjectId;
 						} else if (currentPath.includes('/schedule')) {
 							newUrl = '/schedule?project_id=' + newProjectId;
-						} else if (currentPath.includes('/agents')) {
-							newUrl = '/agents?project_id=' + newProjectId;
-						} else if (currentPath.includes('/models')) {
-							newUrl = '/models?project_id=' + newProjectId;
+							} else if (currentPath.includes('/agents')) {
+								newUrl = '/agents?project_id=' + newProjectId;
+							} else if (currentPath.includes('/skills')) {
+								newUrl = '/skills?project_id=' + newProjectId;
+							} else if (currentPath.includes('/models')) {							newUrl = '/models?project_id=' + newProjectId;
 						} else if (currentPath.includes('/chat')) {
 							newUrl = '/chat?project_id=' + newProjectId;
 						} else if (currentPath.includes('/upcoming')) {
@@ -157,9 +158,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							swap: 'innerHTML'
 						});
 
-						// Update URL bar
-						history.pushState({}, '', newUrl);
-					});
+							// Update URL bar
+							history.pushState({}, '', newUrl);
+						});
 				})();
 
 				// Setup Server-Sent Events for real-time alert badge updates and toast notifications
@@ -302,9 +303,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						}
 					});
 
-					// Suppress stale polling morph responses during sidebar navigation.
-					// If a polling response arrives after we started navigating, skip
-					// its swap to avoid expensive DOM work that would block the page change.
+						// Suppress stale polling morph responses during sidebar navigation.
+						// If a polling response arrives after we started navigating, skip its swap
+						// to avoid expensive DOM work that would block the page change.
 					document.body.addEventListener('htmx:beforeSwap', function(event) {
 						if (!window._sidebarNavigating) return;
 						var target = event.detail.target;
@@ -548,11 +549,25 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						<span class="sidebar-text">Agents</span>
 					</a>
 				</li>
-				<li>
-					<a
-						data-nav-base="/workers"
-						data-tip="Workers"
-						href={ templ.SafeURL(fmt.Sprintf("/workers?project_id=%s", currentProjectID)) }
+					<li>
+						<a
+							data-nav-base="/skills"
+							data-tip="Skills"
+							href={ templ.SafeURL(fmt.Sprintf("/skills?project_id=%s", currentProjectID)) }
+							hx-get={ fmt.Sprintf("/skills?project_id=%s", currentProjectID) }
+							hx-target="#main-content"
+							hx-push-url="true"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+							</svg>
+							<span class="sidebar-text">Skills</span>
+						</a>
+					</li>
+					<li>
+						<a
+							data-nav-base="/workers"
+							data-tip="Workers"						href={ templ.SafeURL(fmt.Sprintf("/workers?project_id=%s", currentProjectID)) }
 						hx-get={ fmt.Sprintf("/workers?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
 						hx-push-url="true"

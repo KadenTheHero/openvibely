@@ -177,6 +177,43 @@ func TestCardSearch_ModelsPartial(t *testing.T) {
 	}
 }
 
+func TestCardSearch_SkillsPage(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetAgentSkillRoot(t.TempDir())
+
+	req := httptest.NewRequest(http.MethodGet, "/skills?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	assertSearch(t, body, "skills", "Search skills...")
+	if !strings.Contains(body, `data-nav-base="/skills"`) {
+		t.Error("expected Skills sidebar nav item")
+	}
+}
+
+func TestCardSearch_SkillsPartial(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetAgentSkillRoot(t.TempDir())
+
+	req := httptest.NewRequest(http.MethodGet, "/skills?project_id=default", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	assertSearch(t, body, "skills", "Search skills...")
+	if strings.Contains(body, "<!DOCTYPE") {
+		t.Error("HTMX partial should not contain full HTML layout")
+	}
+}
+
 func TestCardSearch_AlertsPage(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Test Project")
