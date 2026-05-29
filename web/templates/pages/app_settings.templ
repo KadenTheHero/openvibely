@@ -421,7 +421,10 @@ templ PersonalitySection(personality string, customPersonalities []models.Custom
 		<!-- Create/Edit Personality Modal -->
 		<dialog id="personality_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
 			<div class="modal-box">
-				<h3 id="personality_modal_title" class="font-bold text-lg mb-4">New Custom Personality</h3>
+				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closePersonalityModal()" aria-label="Close personality dialog" title="Close personality dialog">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+				</button>
+				<h3 id="personality_modal_title" class="font-bold text-lg mb-4 pr-10">New Custom Personality</h3>
 				<form id="personality_form" method="post">
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">Name *</span></label>

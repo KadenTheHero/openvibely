@@ -533,7 +533,10 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 		<!-- Channel Configuration Modal -->
 		<dialog id="channel_modal" class="modal">
 			<div class="modal-box max-w-2xl">
-				<h3 id="channel_modal_title" class="font-bold text-lg mb-4">Configure Telegram Bot</h3>
+				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeChannelModal()" aria-label="Close channel configuration" title="Close channel configuration">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+				</button>
+				<h3 id="channel_modal_title" class="font-bold text-lg mb-4 pr-10">Configure Telegram Bot</h3>
 				<form id="channel_form" method="post" action="/channels/telegram" hx-post="/channels/telegram" hx-swap="none">
 					<div class="form-control mb-4">
 						<label class="label">
@@ -652,7 +655,10 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 
 		<dialog id="github_config_modal" class="modal">
 			<div class="modal-box max-w-2xl">
-				<h3 class="font-bold text-lg mb-4">Configure GitHub</h3>
+				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeGitHubConfigModal()" aria-label="Close GitHub configuration" title="Close GitHub configuration">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+				</button>
+				<h3 class="font-bold text-lg mb-4 pr-10">Configure GitHub</h3>
 				<form id="github_config_form" method="post" action="/channels/github/configure" hx-post="/channels/github/configure" hx-swap="none">
 					<div class="form-control mb-4">
 						<label class="label"><span class="label-text">Authentication</span></label>
@@ -751,7 +757,10 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 
 		<dialog id="slack_config_modal" class="modal">
 			<div class="modal-box max-w-2xl">
-				<h3 class="font-bold text-lg mb-4">Configure Slack</h3>
+				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeSlackConfigModal()" aria-label="Close Slack configuration" title="Close Slack configuration">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+				</button>
+				<h3 class="font-bold text-lg mb-4 pr-10">Configure Slack</h3>
 				<form id="slack_config_form" method="post" action="/channels/slack/configure" hx-post="/channels/slack/configure" hx-swap="none">
 					<div class="alert alert-info mb-4 text-sm">
 						<div>
@@ -909,7 +918,10 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 		<!-- Webhook Configuration Modal -->
 		<dialog id="webhook_modal" class="modal">
 			<div class="modal-box max-w-4xl p-0 overflow-hidden">
-				<div class="px-6 pt-6 pb-2">
+				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeWebhookModal()" aria-label="Close webhook configuration" title="Close webhook configuration">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+				</button>
+				<div class="px-6 pt-6 pb-2 pr-14">
 					<h3 id="webhook_modal_title" class="font-bold text-lg">Add Webhook</h3>
 				</div>
 				<form id="webhook_form" hx-post={ "/channels/webhooks?project_id=" + currentProjectID } hx-swap="none" data-project-id={ currentProjectID } class="flex flex-col h-[78vh]">

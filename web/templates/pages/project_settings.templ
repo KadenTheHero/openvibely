@@ -33,14 +33,9 @@ script deleteProjectAction(projectID string) {
 
 templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, localRepoPathEnabled bool) {
 	<dialog id="edit_project_modal" class="modal" data-local-repo-path-enabled={ fmt.Sprintf("%t", localRepoPathEnabled) }>
-		<div class="modal-box">
-			<div class="flex items-center justify-between mb-4">
-				<h3 class="font-bold text-lg">Project Settings</h3>
-				<button
-					class="btn btn-sm btn-circle btn-ghost"
-					onclick="edit_project_modal.close()"
-				>&times;</button>
-			</div>
+			<div class="modal-box">
+				@ModalCloseButton("edit_project_modal", "Close project settings")
+				<h3 class="font-bold text-lg mb-4 pr-10">Project Settings</h3>
 			<form
 				method="post"
 				hx-put={ fmt.Sprintf("/projects/%s", project.ID) }
@@ -180,7 +175,8 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 	if !project.IsDefault {
 		<dialog id="delete_project_confirm_modal" class="modal">
 			<div class="modal-box">
-				<h3 class="font-bold text-lg text-error">Delete Project</h3>
+				@ModalCloseButton("delete_project_confirm_modal", "Close delete project confirmation")
+				<h3 class="font-bold text-lg text-error pr-10">Delete Project</h3>
 				<p class="py-4">
 					Are you sure you want to delete <strong>{ project.Name }</strong>? This action cannot be undone.
 				</p>
@@ -315,14 +311,9 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 
 templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) {
 	<dialog id="new_project_modal" class="modal" data-local-repo-path-enabled={ fmt.Sprintf("%t", localRepoPathEnabled) }>
-		<div class="modal-box">
-			<div class="flex items-center justify-between mb-4">
-				<h3 class="font-bold text-lg">New Project</h3>
-				<button
-					class="btn btn-sm btn-circle btn-ghost"
-					onclick="new_project_modal.close()"
-				>&times;</button>
-			</div>
+			<div class="modal-box">
+				@ModalCloseButton("new_project_modal", "Close new project dialog")
+				<h3 class="font-bold text-lg mb-4 pr-10">New Project</h3>
 			<form
 				id="new-project-form"
 				method="post"

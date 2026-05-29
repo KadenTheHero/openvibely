@@ -553,13 +553,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 		<!-- New Scheduled Task Dialog -->
 		<dialog id="new_scheduled_task_modal" class="modal">
 			<div class="modal-box">
-				<div class="flex items-center justify-between mb-4">
-					<h3 class="font-bold text-lg">New Scheduled Task</h3>
-					<button
-						class="btn btn-sm btn-circle btn-ghost"
-						onclick="new_scheduled_task_modal.close()"
-					>&#x2715;</button>
-				</div>
+				@ModalCloseButton("new_scheduled_task_modal", "Close new scheduled task dialog")
+				<h3 class="font-bold text-lg mb-4 pr-10">New Scheduled Task</h3>
 				<form
 					method="post"
 					hx-post={ fmt.Sprintf("/tasks?project_id=%s&from=schedule", projectID(currentProject)) }

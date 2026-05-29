@@ -140,7 +140,8 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 
 		<dialog id="agent_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
 			<div class="modal-box max-w-4xl p-0 overflow-hidden">
-				<div class="px-6 pt-6 pb-2">
+				@ModalCloseButton("agent_modal", "Close agent dialog")
+				<div class="px-6 pt-6 pb-2 pr-14">
 					<h3 id="agent_modal_title" class="font-bold text-lg">New Agent</h3>
 				</div>
 				<form id="agent_form" method="post" action="/agents" class="flex flex-col h-[78vh]">
@@ -294,7 +295,10 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 										</div>
 										<label class="form-control mb-2"><span class="label-text text-xs">Description</span><input id="agent_skill_description" class="input input-bordered input-sm" placeholder="When this skill should be selected"/></label>
 										<label class="form-control"><span class="label-text text-xs">SKILL.md body or full SKILL.md</span><textarea id="agent_skill_body" class="textarea textarea-bordered h-40 font-mono text-xs" placeholder="Instructions for this skill..."></textarea></label>
-										<div class="flex justify-end gap-2 mt-3"><button type="button" class="btn btn-ghost btn-sm" onclick="cancelAgentOwnedSkillEdit()">Cancel</button><button type="button" id="agent_skill_save_btn" class="btn btn-primary btn-sm" onclick="saveAgentOwnedSkill()">Save Skill</button></div>
+										<div class="flex justify-end gap-2 mt-3">
+										<button type="button" class="btn btn-ghost btn-sm" onclick="cancelAgentOwnedSkillEdit()">Cancel</button>
+										<button type="button" id="agent_skill_save_btn" class="btn btn-primary btn-sm" onclick="saveAgentOwnedSkill()">Save Skill</button>
+									</div>
 									</div>
 									<p id="agent_skills_status" class="hidden text-xs mt-2"></p>
 								</div>

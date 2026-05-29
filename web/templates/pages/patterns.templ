@@ -106,11 +106,17 @@ templ PatternsContent(currentProject *models.Project, data *models.PatternDashbo
 		}
 		<!-- Apply Modal -->
 		<dialog id="apply-modal" class="modal">
-			<div id="apply-modal-content" class="modal-box max-w-2xl"></div>
+			<div class="modal-box max-w-2xl">
+				@ModalCloseButton("document.getElementById('apply-modal')", "Close apply pattern dialog")
+				<div id="apply-modal-content"></div>
+			</div>
 		</dialog>
 		<!-- Edit Modal -->
 		<dialog id="edit-modal" class="modal">
-			<div id="edit-modal-content" class="modal-box max-w-2xl"></div>
+			<div class="modal-box max-w-2xl">
+				@ModalCloseButton("document.getElementById('edit-modal')", "Close edit pattern dialog")
+				<div id="edit-modal-content"></div>
+			</div>
 		</dialog>
 	</div>
 }
@@ -210,7 +216,8 @@ templ PatternCard(p models.PromptPattern, projectID string) {
 templ CreatePatternModal(projectID string) {
 	<dialog id="create-modal" class="modal">
 		<div class="modal-box max-w-2xl">
-			<h3 class="font-bold text-lg mb-4">Create New Pattern</h3>
+			@ModalCloseButton("document.getElementById('create-modal')", "Close create pattern dialog")
+			<h3 class="font-bold text-lg mb-4 pr-10">Create New Pattern</h3>
 			<form
 				hx-post="/patterns"
 				hx-target="closest .container"
@@ -259,7 +266,8 @@ templ CreatePatternModal(projectID string) {
 templ ImportPatternModal(projectID string) {
 	<dialog id="import-modal" class="modal">
 		<div class="modal-box">
-			<h3 class="font-bold text-lg mb-4">Import Patterns</h3>
+			@ModalCloseButton("document.getElementById('import-modal')", "Close import patterns dialog")
+			<h3 class="font-bold text-lg mb-4 pr-10">Import Patterns</h3>
 			<form
 				hx-post="/patterns/import"
 				hx-encoding="multipart/form-data"
@@ -283,7 +291,7 @@ templ ImportPatternModal(projectID string) {
 
 templ PatternApplyForm(pattern *models.PromptPattern, agents []models.LLMConfig) {
 	<div>
-		<h3 class="font-bold text-lg mb-4">Apply Pattern: { pattern.Title }</h3>
+		<h3 class="font-bold text-lg mb-4 pr-10">Apply Pattern: { pattern.Title }</h3>
 		<form
 			hx-post={ fmt.Sprintf("/patterns/%s/apply", pattern.ID) }
 			hx-target="#apply-result"
@@ -331,7 +339,7 @@ templ PatternApplyForm(pattern *models.PromptPattern, agents []models.LLMConfig)
 
 templ PatternEditForm(pattern *models.PromptPattern) {
 	<div>
-		<h3 class="font-bold text-lg mb-4">Edit Pattern</h3>
+		<h3 class="font-bold text-lg mb-4 pr-10">Edit Pattern</h3>
 		<form
 			hx-put={ fmt.Sprintf("/patterns/%s", pattern.ID) }
 			hx-target="closest .container"

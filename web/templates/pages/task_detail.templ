@@ -172,7 +172,8 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 						<!-- Delete Confirmation Modal -->
 						<dialog id="delete-task-modal" class="modal">
 							<div class="modal-box">
-								<h3 class="font-bold text-lg">Delete Task</h3>
+								@ModalCloseButton("document.getElementById('delete-task-modal')", "Close delete task confirmation")
+								<h3 class="font-bold text-lg pr-10">Delete Task</h3>
 								<p class="py-4">Are you sure you want to delete this task? This will also remove all executions, chat messages, schedules, and attachments. This action cannot be undone.</p>
 								<div class="modal-action">
 									<form method="dialog">

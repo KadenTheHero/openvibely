@@ -216,18 +216,29 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				dialog.modal::backdrop {
 					z-index: 1190;
 				}
-				dialog.modal .modal-backdrop {
-					z-index: 1195;
-				}
-				dialog.modal > .modal-box {
-					position: relative;
-					z-index: 1201;
-				}
-				/* Toast notifications */
-				#toast-container {
-					position: fixed;
-					top: 16px;
-					right: 16px;
+					dialog.modal .modal-backdrop {
+						z-index: 1195;
+					}
+					dialog.modal > .modal-box {
+						position: relative;
+						z-index: 1201;
+					}
+					.ov-modal-close {
+						position: absolute;
+						top: 0.5rem;
+						right: 0.5rem;
+						z-index: 1210;
+						color: hsl(var(--bc) / 0.7);
+						background-color: transparent;
+					}
+						.ov-modal-close:focus-visible {
+							outline: 2px solid currentColor;
+							outline-offset: 2px;
+						}
+						/* Toast notifications */
+						#toast-container {
+							position: fixed;
+							top: 16px;					right: 16px;
 					z-index: 1300;
 					display: flex;
 					flex-direction: column;
@@ -1023,17 +1034,25 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						background-color: #e24949;
 						border-color: #e24949;
 					}
-				/* Close/delete X buttons on cards */
+					/* Close/delete X buttons on cards and modals */
 					[data-theme="light"] .card .btn-circle.btn-ghost {
 						color: var(--ov-l-text-dim);
 						background-color: transparent;
 					}
-				[data-theme="light"] .card .btn-circle.btn-ghost:hover {
-					color: #C72E0F;
-					background-color: #F8514922;
-				}
-				/* Kebab menu button */
-				[data-theme="light"] .card .dropdown .btn-ghost {
+					[data-theme="light"] .card .btn-circle.btn-ghost:hover {
+						color: #C72E0F;
+						background-color: #F8514922;
+					}
+					[data-theme="light"] .ov-modal-close {
+						color: var(--ov-l-text-dim);
+						background-color: transparent;
+					}
+						[data-theme="light"] .ov-modal-close:hover,
+						[data-theme="light"] .ov-modal-close:focus-visible {
+							color: #C72E0F;
+							background-color: #F8514922;
+						}
+						/* Kebab menu button */				[data-theme="light"] .card .dropdown .btn-ghost {
 					color: var(--ov-l-text);
 				}
 				[data-theme="light"] .card .dropdown .btn-ghost:hover {

@@ -869,7 +869,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "</div><!-- Coming Soon Section --><div class=\"mb-8\"><h3 class=\"text-lg font-semibold mb-4 opacity-70\">Coming Soon</h3><div class=\"grid grid-cols-1 md:grid-cols-2 gap-4\"><!-- Discord Placeholder --><div class=\"card bg-base-100 shadow-sm border border-base-300 opacity-50 cursor-not-allowed\" data-search-card data-search-text=\"Discord Bot Coming Soon\"><div class=\"card-body\"><h3 class=\"card-title\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z\"></path></svg> Discord Bot <span class=\"badge badge-ghost badge-sm\">Coming Soon</span></h3><p class=\"text-sm opacity-70\">Connect your Discord server for task management.</p></div></div><!-- Email Placeholder --><div class=\"card bg-base-100 shadow-sm border border-base-300 opacity-50 cursor-not-allowed\" data-search-card data-search-text=\"Email Notifications Coming Soon\"><div class=\"card-body\"><h3 class=\"card-title\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z\"></path></svg> Email Notifications <span class=\"badge badge-ghost badge-sm\">Coming Soon</span></h3><p class=\"text-sm opacity-70\">Receive email alerts for important task events.</p></div></div></div></div><!-- Channel Configuration Modal --><dialog id=\"channel_modal\" class=\"modal\"><div class=\"modal-box max-w-2xl\"><h3 id=\"channel_modal_title\" class=\"font-bold text-lg mb-4\">Configure Telegram Bot</h3><form id=\"channel_form\" method=\"post\" action=\"/channels/telegram\" hx-post=\"/channels/telegram\" hx-swap=\"none\"><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text\">Bot Token</span></label><div class=\"relative\"><input type=\"password\" id=\"channel_telegram_token\" name=\"token\" class=\"input input-bordered w-full pr-10\" placeholder=\"123456789:ABCdefGHIjklMNOpqrsTUVwxyz\" required> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('channel_telegram_token', this)\" tabindex=\"-1\" aria-label=\"Toggle token visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div><label class=\"label\"><span class=\"label-text-alt opacity-70\">Get your bot token from <a href=\"https://t.me/BotFather\" target=\"_blank\" class=\"link\">BotFather</a></span></label></div><!-- Help Section --><div class=\"alert alert-info mb-4\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold text-sm\">How to Use the Bot</p><p class=\"text-xs opacity-80 mt-1\">Send natural language messages to your bot just like the Chat page. The bot can answer questions, create tasks, view execution output, and more.</p><details class=\"text-xs opacity-70 mt-2\"><summary class=\"cursor-pointer hover:opacity-100\">Optional slash command shortcuts</summary><ul class=\"list-disc list-inside space-y-1 ml-2 mt-2\"><li><code class=\"bg-base-300 px-1 rounded\">/start</code> - Welcome message and project setup</li><li><code class=\"bg-base-300 px-1 rounded\">/projects</code> - List all projects</li><li><code class=\"bg-base-300 px-1 rounded\">/switch &lt;project_id&gt;</code> - Switch active project</li></ul></details></div></div><!-- Authorized Users Section -->")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "</div><!-- Coming Soon Section --><div class=\"mb-8\"><h3 class=\"text-lg font-semibold mb-4 opacity-70\">Coming Soon</h3><div class=\"grid grid-cols-1 md:grid-cols-2 gap-4\"><!-- Discord Placeholder --><div class=\"card bg-base-100 shadow-sm border border-base-300 opacity-50 cursor-not-allowed\" data-search-card data-search-text=\"Discord Bot Coming Soon\"><div class=\"card-body\"><h3 class=\"card-title\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z\"></path></svg> Discord Bot <span class=\"badge badge-ghost badge-sm\">Coming Soon</span></h3><p class=\"text-sm opacity-70\">Connect your Discord server for task management.</p></div></div><!-- Email Placeholder --><div class=\"card bg-base-100 shadow-sm border border-base-300 opacity-50 cursor-not-allowed\" data-search-card data-search-text=\"Email Notifications Coming Soon\"><div class=\"card-body\"><h3 class=\"card-title\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z\"></path></svg> Email Notifications <span class=\"badge badge-ghost badge-sm\">Coming Soon</span></h3><p class=\"text-sm opacity-70\">Receive email alerts for important task events.</p></div></div></div></div><!-- Channel Configuration Modal --><dialog id=\"channel_modal\" class=\"modal\"><div class=\"modal-box max-w-2xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeChannelModal()\" aria-label=\"Close channel configuration\" title=\"Close channel configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 id=\"channel_modal_title\" class=\"font-bold text-lg mb-4 pr-10\">Configure Telegram Bot</h3><form id=\"channel_form\" method=\"post\" action=\"/channels/telegram\" hx-post=\"/channels/telegram\" hx-swap=\"none\"><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text\">Bot Token</span></label><div class=\"relative\"><input type=\"password\" id=\"channel_telegram_token\" name=\"token\" class=\"input input-bordered w-full pr-10\" placeholder=\"123456789:ABCdefGHIjklMNOpqrsTUVwxyz\" required> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('channel_telegram_token', this)\" tabindex=\"-1\" aria-label=\"Toggle token visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div><label class=\"label\"><span class=\"label-text-alt opacity-70\">Get your bot token from <a href=\"https://t.me/BotFather\" target=\"_blank\" class=\"link\">BotFather</a></span></label></div><!-- Help Section --><div class=\"alert alert-info mb-4\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold text-sm\">How to Use the Bot</p><p class=\"text-xs opacity-80 mt-1\">Send natural language messages to your bot just like the Chat page. The bot can answer questions, create tasks, view execution output, and more.</p><details class=\"text-xs opacity-70 mt-2\"><summary class=\"cursor-pointer hover:opacity-100\">Optional slash command shortcuts</summary><ul class=\"list-disc list-inside space-y-1 ml-2 mt-2\"><li><code class=\"bg-base-300 px-1 rounded\">/start</code> - Welcome message and project setup</li><li><code class=\"bg-base-300 px-1 rounded\">/projects</code> - List all projects</li><li><code class=\"bg-base-300 px-1 rounded\">/switch &lt;project_id&gt;</code> - Switch active project</li></ul></details></div></div><!-- Authorized Users Section -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -893,14 +893,14 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, " hx-post=\"/channels/telegram/send-responses\" hx-swap=\"none\" hx-trigger=\"change\" hx-include=\"this\" name=\"enabled\" value=\"true\"><div><span class=\"label-text font-semibold\">Send task responses to Telegram</span><p class=\"text-xs opacity-50 mt-1\">When tasks created via Telegram complete or fail, send the result back to the user who created them</p></div></label></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeChannelModal()\">Cancel</button> <button type=\"submit\" id=\"channel_submit_btn\" class=\"btn btn-primary\">Save & Start Bot</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> <dialog id=\"github_config_modal\" class=\"modal\"><div class=\"modal-box max-w-2xl\"><h3 class=\"font-bold text-lg mb-4\">Configure GitHub</h3><form id=\"github_config_form\" method=\"post\" action=\"/channels/github/configure\" hx-post=\"/channels/github/configure\" hx-swap=\"none\"><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text\">Authentication</span></label> <select id=\"github_auth_mode\" name=\"github_auth_mode\" class=\"select select-bordered w-full\" onchange=\"toggleGitHubAuthMode(this.value)\"><option value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, " hx-post=\"/channels/telegram/send-responses\" hx-swap=\"none\" hx-trigger=\"change\" hx-include=\"this\" name=\"enabled\" value=\"true\"><div><span class=\"label-text font-semibold\">Send task responses to Telegram</span><p class=\"text-xs opacity-50 mt-1\">When tasks created via Telegram complete or fail, send the result back to the user who created them</p></div></label></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeChannelModal()\">Cancel</button> <button type=\"submit\" id=\"channel_submit_btn\" class=\"btn btn-primary\">Save & Start Bot</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> <dialog id=\"github_config_modal\" class=\"modal\"><div class=\"modal-box max-w-2xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeGitHubConfigModal()\" aria-label=\"Close GitHub configuration\" title=\"Close GitHub configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 class=\"font-bold text-lg mb-4 pr-10\">Configure GitHub</h3><form id=\"github_config_form\" method=\"post\" action=\"/channels/github/configure\" hx-post=\"/channels/github/configure\" hx-swap=\"none\"><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text\">Authentication</span></label> <select id=\"github_auth_mode\" name=\"github_auth_mode\" class=\"select select-bordered w-full\" onchange=\"toggleGitHubAuthMode(this.value)\"><option value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var39 string
 		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.GitHubAuthModePAT)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 660, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 666, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 		if templ_7745c5c3_Err != nil {
@@ -923,7 +923,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var40 string
 		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.GitHubAuthModeApp)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 661, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 667, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 		if templ_7745c5c3_Err != nil {
@@ -946,7 +946,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var41 string
 		templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubPATValue)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 680, Col: 31}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 686, Col: 31}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
 		if templ_7745c5c3_Err != nil {
@@ -959,7 +959,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var42 string
 		templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubPATPlaceholder(githubHasPAT))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 681, Col: 57}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 687, Col: 57}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
 		if templ_7745c5c3_Err != nil {
@@ -972,7 +972,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var43 string
 		templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubAppID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 708, Col: 94}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 714, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 		if templ_7745c5c3_Err != nil {
@@ -985,7 +985,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var44 string
 		templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubAppSlug)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 712, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 718, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
 		if templ_7745c5c3_Err != nil {
@@ -998,7 +998,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var45 string
 		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubPrivateKeyPlaceholder(githubHasPrivateKey))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 721, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 727, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 		if templ_7745c5c3_Err != nil {
@@ -1011,20 +1011,20 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var46 string
 		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(githubPrivateKeyValue)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 722, Col: 32}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 728, Col: 32}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "</textarea> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-2 h-8 min-h-0 px-2\" onclick=\"toggleSecretTextareaVisibility('github_app_private_key', this)\" tabindex=\"-1\" aria-label=\"Toggle private key visibility\"><svg class=\"eye-open h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeGitHubConfigModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save GitHub Settings</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> <dialog id=\"slack_config_modal\" class=\"modal\"><div class=\"modal-box max-w-2xl\"><h3 class=\"font-bold text-lg mb-4\">Configure Slack</h3><form id=\"slack_config_form\" method=\"post\" action=\"/channels/slack/configure\" hx-post=\"/channels/slack/configure\" hx-swap=\"none\"><div class=\"alert alert-info mb-4 text-sm\"><div><p class=\"font-semibold\">Use OAuth + Socket Mode</p><p class=\"mt-1 opacity-80\">Configure `Client ID`, `Client Secret`, and `App-Level Token (xapp-...)`, then click Connect from the Slack card.</p><p class=\"mt-1 opacity-80\">If Slack blocks local OAuth with “use a complete URL beginning with https”, either use an HTTPS tunnel callback URL or select `Manual Override Token` mode with an `xoxb-...` token.</p></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Client ID</span></label> <input type=\"text\" name=\"slack_client_id\" class=\"input input-bordered\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "</textarea> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-2 h-8 min-h-0 px-2\" onclick=\"toggleSecretTextareaVisibility('github_app_private_key', this)\" tabindex=\"-1\" aria-label=\"Toggle private key visibility\"><svg class=\"eye-open h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeGitHubConfigModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save GitHub Settings</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> <dialog id=\"slack_config_modal\" class=\"modal\"><div class=\"modal-box max-w-2xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeSlackConfigModal()\" aria-label=\"Close Slack configuration\" title=\"Close Slack configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 class=\"font-bold text-lg mb-4 pr-10\">Configure Slack</h3><form id=\"slack_config_form\" method=\"post\" action=\"/channels/slack/configure\" hx-post=\"/channels/slack/configure\" hx-swap=\"none\"><div class=\"alert alert-info mb-4 text-sm\"><div><p class=\"font-semibold\">Use OAuth + Socket Mode</p><p class=\"mt-1 opacity-80\">Configure `Client ID`, `Client Secret`, and `App-Level Token (xapp-...)`, then click Connect from the Slack card.</p><p class=\"mt-1 opacity-80\">If Slack blocks local OAuth with “use a complete URL beginning with https”, either use an HTTPS tunnel callback URL or select `Manual Override Token` mode with an `xoxb-...` token.</p></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Client ID</span></label> <input type=\"text\" name=\"slack_client_id\" class=\"input input-bordered\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var47 string
 		templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackClientID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 765, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 774, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var47)
 		if templ_7745c5c3_Err != nil {
@@ -1037,7 +1037,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var48 string
 		templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(slackHasClientID, "Client ID"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 765, Col: 168}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 774, Col: 168}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var48)
 		if templ_7745c5c3_Err != nil {
@@ -1050,7 +1050,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var49 string
 		templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackClientSecret)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 775, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 784, Col: 33}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var49)
 		if templ_7745c5c3_Err != nil {
@@ -1063,7 +1063,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var50 string
 		templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(slackHasClientSecret, "Client Secret"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 776, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 785, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
 		if templ_7745c5c3_Err != nil {
@@ -1076,7 +1076,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var51 string
 		templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackAppToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 803, Col: 29}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 812, Col: 29}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
 		if templ_7745c5c3_Err != nil {
@@ -1089,7 +1089,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var52 string
 		templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(slackHasAppToken, "App-Level Token"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 804, Col: 81}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 813, Col: 81}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var52)
 		if templ_7745c5c3_Err != nil {
@@ -1102,7 +1102,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var53 string
 		templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.SlackBotTokenSourceOAuth)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 831, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 840, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var53)
 		if templ_7745c5c3_Err != nil {
@@ -1125,7 +1125,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var54 string
 		templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.SlackBotTokenSourceManual)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 834, Col: 56}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 843, Col: 56}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
 		if templ_7745c5c3_Err != nil {
@@ -1148,7 +1148,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var55 string
 		templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackBotToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 852, Col: 29}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 861, Col: 29}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var55)
 		if templ_7745c5c3_Err != nil {
@@ -1161,7 +1161,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var56 string
 		templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(slackHasBotToken, "Bot Token"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 853, Col: 75}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 862, Col: 75}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var56)
 		if templ_7745c5c3_Err != nil {
@@ -1191,14 +1191,14 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 111, "> <span class=\"label-text\">Send task completion/failure notifications for Slack-created tasks</span></label></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeSlackConfigModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save Slack Settings</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><!-- Webhook Configuration Modal --><dialog id=\"webhook_modal\" class=\"modal\"><div class=\"modal-box max-w-4xl p-0 overflow-hidden\"><div class=\"px-6 pt-6 pb-2\"><h3 id=\"webhook_modal_title\" class=\"font-bold text-lg\">Add Webhook</h3></div><form id=\"webhook_form\" hx-post=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 111, "> <span class=\"label-text\">Send task completion/failure notifications for Slack-created tasks</span></label></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeSlackConfigModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save Slack Settings</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><!-- Webhook Configuration Modal --><dialog id=\"webhook_modal\" class=\"modal\"><div class=\"modal-box max-w-4xl p-0 overflow-hidden\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeWebhookModal()\" aria-label=\"Close webhook configuration\" title=\"Close webhook configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><div class=\"px-6 pt-6 pb-2 pr-14\"><h3 id=\"webhook_modal_title\" class=\"font-bold text-lg\">Add Webhook</h3></div><form id=\"webhook_form\" hx-post=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var57 string
 		templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks?project_id=" + currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 915, Col: 89}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 927, Col: 89}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
 		if templ_7745c5c3_Err != nil {
@@ -1211,7 +1211,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var58 string
 		templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 915, Col: 141}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 927, Col: 141}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var58)
 		if templ_7745c5c3_Err != nil {
@@ -1224,7 +1224,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var59 string
 		templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 916, Col: 68}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 928, Col: 68}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var59)
 		if templ_7745c5c3_Err != nil {
@@ -1237,7 +1237,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var60 string
 		templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.ResolveAttributeValue(agentsJSON(agents))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1025, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1037, Col: 63}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var60)
 		if templ_7745c5c3_Err != nil {

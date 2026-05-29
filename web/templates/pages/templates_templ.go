@@ -548,20 +548,28 @@ func CreateTemplateModal(projectID string) templ.Component {
 			templ_7745c5c3_Var22 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<dialog id=\"create-template-modal\" class=\"modal\"><div class=\"modal-box w-11/12 max-w-3xl\"><h3 class=\"font-bold text-lg mb-4\">Create Custom Template</h3><form hx-post=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<dialog id=\"create-template-modal\" class=\"modal\"><div class=\"modal-box w-11/12 max-w-3xl\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = ModalCloseButton("document.getElementById('create-template-modal')", "Close create template dialog").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<h3 class=\"font-bold text-lg mb-4 pr-10\">Create Custom Template</h3><form hx-post=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var23 string
 		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/templates?project_id=%s", projectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/templates.templ`, Line: 251, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/templates.templ`, Line: 252, Col: 64}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" hx-target=\"#template-grid\" hx-swap=\"outerHTML\" method=\"post\" onsubmit=\"document.getElementById('create-template-modal').close()\"><div class=\"space-y-4\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" name=\"name\" class=\"input input-bordered\" required></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Description</span></label> <input type=\"text\" name=\"description\" class=\"input input-bordered\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Default Prompt</span></label> <textarea name=\"default_prompt\" class=\"textarea textarea-bordered h-32\" required></textarea></div><div class=\"grid grid-cols-2 gap-4\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Task Category</span></label> <select name=\"category\" class=\"select select-bordered\"><option value=\"active\">Active</option> <option value=\"backlog\" selected>Backlog</option></select></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Template Category</span></label> <select name=\"category_filter\" class=\"select select-bordered\"><option value=\"all\">General</option> <option value=\"code_review\">Code Review</option> <option value=\"bug_fix\">Bug Fix</option> <option value=\"feature\">Feature</option> <option value=\"refactor\">Refactor</option> <option value=\"documentation\">Documentation</option> <option value=\"testing\">Testing</option> <option value=\"research\">Research</option> <option value=\"deployment\">Deployment</option> <option value=\"maintenance\">Maintenance</option> <option value=\"planning\">Planning</option></select></div></div><div class=\"grid grid-cols-2 gap-4\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Priority</span></label> <select name=\"priority\" class=\"select select-bordered\"><option value=\"1\">Low</option> <option value=\"2\" selected>Normal</option> <option value=\"3\">High</option> <option value=\"4\">Urgent</option></select></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Tag</span></label> <select name=\"tag\" class=\"select select-bordered\"><option value=\"\">None</option> <option value=\"feature\">Feature</option> <option value=\"bug\">Bug</option></select></div></div></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"document.getElementById('create-template-modal').close()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Create</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" hx-target=\"#template-grid\" hx-swap=\"outerHTML\" method=\"post\" onsubmit=\"document.getElementById('create-template-modal').close()\"><div class=\"space-y-4\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" name=\"name\" class=\"input input-bordered\" required></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Description</span></label> <input type=\"text\" name=\"description\" class=\"input input-bordered\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Default Prompt</span></label> <textarea name=\"default_prompt\" class=\"textarea textarea-bordered h-32\" required></textarea></div><div class=\"grid grid-cols-2 gap-4\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Task Category</span></label> <select name=\"category\" class=\"select select-bordered\"><option value=\"active\">Active</option> <option value=\"backlog\" selected>Backlog</option></select></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Template Category</span></label> <select name=\"category_filter\" class=\"select select-bordered\"><option value=\"all\">General</option> <option value=\"code_review\">Code Review</option> <option value=\"bug_fix\">Bug Fix</option> <option value=\"feature\">Feature</option> <option value=\"refactor\">Refactor</option> <option value=\"documentation\">Documentation</option> <option value=\"testing\">Testing</option> <option value=\"research\">Research</option> <option value=\"deployment\">Deployment</option> <option value=\"maintenance\">Maintenance</option> <option value=\"planning\">Planning</option></select></div></div><div class=\"grid grid-cols-2 gap-4\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Priority</span></label> <select name=\"priority\" class=\"select select-bordered\"><option value=\"1\">Low</option> <option value=\"2\" selected>Normal</option> <option value=\"3\">High</option> <option value=\"4\">Urgent</option></select></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Tag</span></label> <select name=\"tag\" class=\"select select-bordered\"><option value=\"\">None</option> <option value=\"feature\">Feature</option> <option value=\"bug\">Bug</option></select></div></div></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"document.getElementById('create-template-modal').close()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Create</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -592,12 +600,12 @@ func TemplateSearchResults(results []models.TaskTemplate) templ.Component {
 		}
 		ctx = templ.ClearChildren(ctx)
 		if len(results) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<div class=\"card bg-base-200 p-8 text-center\"><p class=\"text-base-content/70\">No templates found</p></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<div class=\"card bg-base-200 p-8 text-center\"><p class=\"text-base-content/70\">No templates found</p></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<div class=\"grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<div class=\"grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -614,7 +622,7 @@ func TemplateSearchResults(results []models.TaskTemplate) templ.Component {
 					}
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

@@ -246,7 +246,8 @@ func favoriteClass(isFavorite bool) string {
 templ CreateTemplateModal(projectID string) {
 	<dialog id="create-template-modal" class="modal">
 		<div class="modal-box w-11/12 max-w-3xl">
-			<h3 class="font-bold text-lg mb-4">Create Custom Template</h3>
+			@ModalCloseButton("document.getElementById('create-template-modal')", "Close create template dialog")
+			<h3 class="font-bold text-lg mb-4 pr-10">Create Custom Template</h3>
 			<form
 				hx-post={ fmt.Sprintf("/templates?project_id=%s", projectID) }
 				hx-target="#template-grid"

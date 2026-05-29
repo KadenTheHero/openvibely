@@ -46,13 +46,8 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 	if project != nil {
 			<dialog id="new_task_modal" class="modal">
 				<div class="modal-box">
-					<div class="flex items-center justify-between mb-4">
-					<h3 class="font-bold text-lg">New Task</h3>
-					<button
-						class="btn btn-sm btn-circle btn-ghost"
-						onclick="new_task_modal.close()"
-					>✕</button>
-				</div>
+					@ModalCloseButton("new_task_modal", "Close new task dialog")
+					<h3 class="font-bold text-lg mb-4 pr-10">New Task</h3>
 					<form
 						method="post"
 						hx-post={ fmt.Sprintf("/tasks?project_id=%s", project.ID) }

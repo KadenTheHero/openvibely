@@ -82,7 +82,8 @@ templ ArchitectModeContent(currentProject *models.Project, data *models.Architec
 			<!-- New Session Dialog -->
 			<dialog id="new-session-dialog" class="modal">
 				<div class="modal-box">
-					<h3 class="text-lg font-bold mb-4">Start New Vision</h3>
+					@ModalCloseButton("document.getElementById('new-session-dialog')", "Close new vision dialog")
+					<h3 class="text-lg font-bold mb-4 pr-10">Start New Vision</h3>
 					<form
 						id="new-vision-form"
 						method="post"
@@ -396,8 +397,9 @@ templ ArchitectWizard(detail *models.ArchitectSessionDetail) {
 		<!-- Save Template Dialog -->
 		if detail.Session.Status == models.ArchitectStatusActive {
 			<dialog id="save-template-dialog" class="modal">
-				<div class="modal-box">
-					<h3 class="text-lg font-bold mb-4">Save as Template</h3>
+					<div class="modal-box">
+						@ModalCloseButton("document.getElementById('save-template-dialog')", "Close save template dialog")
+						<h3 class="text-lg font-bold mb-4 pr-10">Save as Template</h3>
 					<form
 						method="post"
 						hx-post={ fmt.Sprintf("/architect/sessions/%s/template", detail.Session.ID) }
