@@ -731,6 +731,62 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				});
 			}
 
+			function copyDiffFilePath(ev, button) {
+				if (ev) {
+					ev.preventDefault();
+					ev.stopPropagation();
+				}
+				var text = button && button.dataset ? button.dataset.copyPath : '';
+				if (!text) {
+					if (window.showToast) window.showToast('No file path to copy', 'failed');
+					return;
+				}
+
+				function setCopiedState() {
+					if (!button) return;
+					var originalHTML = button.innerHTML;
+					button.classList.add('btn-success');
+					button.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
+					setTimeout(function() {
+						button.classList.remove('btn-success');
+						button.innerHTML = originalHTML;
+					}, 1200);
+				}
+
+				function onCopySuccess() {
+					setCopiedState();
+				}
+
+				function onCopyFailure() {
+					if (window.showToast) window.showToast('Failed to copy file path', 'failed');
+				}
+
+				function fallbackCopy() {
+					var textarea = document.createElement('textarea');
+					textarea.value = text;
+					textarea.setAttribute('readonly', '');
+					textarea.style.position = 'fixed';
+					textarea.style.opacity = '0';
+					document.body.appendChild(textarea);
+					textarea.select();
+					textarea.setSelectionRange(0, textarea.value.length);
+					try {
+						if (document.execCommand('copy')) onCopySuccess();
+						else onCopyFailure();
+					} catch (e) {
+						onCopyFailure();
+					} finally {
+						document.body.removeChild(textarea);
+					}
+				}
+
+				if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+					navigator.clipboard.writeText(text).then(onCopySuccess).catch(fallbackCopy);
+					return;
+				}
+				fallbackCopy();
+			}
+
 			function switchDiffView(mode) {
 				var inlineEl = document.getElementById('diff-content-inline');
 				var splitEl = document.getElementById('diff-content-split');
@@ -1343,14 +1399,22 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				border-bottom-left-radius: inherit;
 				border-bottom-right-radius: inherit;
 			}
-			.diff-file-header[data-collapsed="1"] + .diff-file-body {
-				max-height: 0 !important;
-			}
-			.diff-file-body {
-				border-bottom-left-radius: inherit;
-				border-bottom-right-radius: inherit;
-			}
-			/* Inline review styles — always active */
+				.diff-file-header[data-collapsed="1"] + .diff-file-body {
+					max-height: 0 !important;
+				}
+				.diff-copy-path-btn {
+					color: oklch(var(--bc) / 0.7);
+				}
+				.diff-copy-path-btn:hover,
+				.diff-copy-path-btn:focus-visible {
+					color: oklch(var(--bc));
+					background-color: oklch(var(--b3) / 0.75);
+				}
+				.diff-file-body {
+					border-bottom-left-radius: inherit;
+					border-bottom-right-radius: inherit;
+				}
+				/* Inline review styles — always active */
 			.diff-review-line {
 				position: relative;
 			}
@@ -1481,11 +1545,30 @@ templ diffFileHeader(f DiffFile, idx int, defaultExpanded bool, splitChevron boo
 		if f.IsBinary {
 			<span class="badge badge-ghost badge-sm shrink-0" title="Binary file">Binary</span>
 		}
-		<span class="font-mono text-sm font-medium truncate" title={ diffFileDisplayPath(f) }>{ diffFileDisplayPath(f) }</span>
-		<span class="text-xs opacity-50 ml-auto shrink-0">
+		<span class="flex items-center gap-1 min-w-0 flex-1">
+			<span class="font-mono text-sm font-medium truncate min-w-0" title={ diffFileDisplayPath(f) }>{ diffFileDisplayPath(f) }</span>
+			@diffFileCopyPathButton(diffFileDisplayPath(f))
+		</span>
+		<span class="text-xs opacity-50 shrink-0">
 			{ diffStats(f) }
 		</span>
 	</div>
+}
+
+templ diffFileCopyPathButton(path string) {
+	<button
+		type="button"
+		class="diff-copy-path-btn btn btn-ghost btn-xs btn-square shrink-0 opacity-60 hover:opacity-100 focus:opacity-100"
+		title="Copy file path"
+		aria-label={ "Copy file path " + path }
+		data-copy-path={ path }
+		onclick={ templ.ComponentScript{Call: "copyDiffFilePath(event, this)"} }
+	>
+		<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+			<rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></rect>
+			<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+		</svg>
+	</button>
 }
 
 templ diffFileEmptyBody(f DiffFile) {
@@ -1685,14 +1768,22 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 				border-bottom-left-radius: inherit;
 				border-bottom-right-radius: inherit;
 			}
-			.diff-file-header[data-collapsed="1"] + .diff-file-body {
-				max-height: 0 !important;
-			}
-			.diff-file-body {
-				border-bottom-left-radius: inherit;
-				border-bottom-right-radius: inherit;
-			}
-		</style>
+				.diff-file-header[data-collapsed="1"] + .diff-file-body {
+					max-height: 0 !important;
+				}
+				.diff-copy-path-btn {
+					color: oklch(var(--bc) / 0.7);
+				}
+				.diff-copy-path-btn:hover,
+				.diff-copy-path-btn:focus-visible {
+					color: oklch(var(--bc));
+					background-color: oklch(var(--b3) / 0.75);
+				}
+				.diff-file-body {
+					border-bottom-left-radius: inherit;
+					border-bottom-right-radius: inherit;
+				}
+			</style>
 		<script>
 			// Session-level state for diff file expand/collapse, scoped by viewer.
 			if (!window._diffFileState) window._diffFileState = {};
@@ -1850,6 +1941,62 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 				['htmx:afterSwap', 'htmx:afterSettle'].forEach(function(eventName) {
 					document.body.addEventListener(eventName, window._restoreDiffFileState);
 				});
+			}
+
+			function copyDiffFilePath(ev, button) {
+				if (ev) {
+					ev.preventDefault();
+					ev.stopPropagation();
+				}
+				var text = button && button.dataset ? button.dataset.copyPath : '';
+				if (!text) {
+					if (window.showToast) window.showToast('No file path to copy', 'failed');
+					return;
+				}
+
+				function setCopiedState() {
+					if (!button) return;
+					var originalHTML = button.innerHTML;
+					button.classList.add('btn-success');
+					button.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
+					setTimeout(function() {
+						button.classList.remove('btn-success');
+						button.innerHTML = originalHTML;
+					}, 1200);
+				}
+
+				function onCopySuccess() {
+					setCopiedState();
+				}
+
+				function onCopyFailure() {
+					if (window.showToast) window.showToast('Failed to copy file path', 'failed');
+				}
+
+				function fallbackCopy() {
+					var textarea = document.createElement('textarea');
+					textarea.value = text;
+					textarea.setAttribute('readonly', '');
+					textarea.style.position = 'fixed';
+					textarea.style.opacity = '0';
+					document.body.appendChild(textarea);
+					textarea.select();
+					textarea.setSelectionRange(0, textarea.value.length);
+					try {
+						if (document.execCommand('copy')) onCopySuccess();
+						else onCopyFailure();
+					} catch (e) {
+						onCopyFailure();
+					} finally {
+						document.body.removeChild(textarea);
+					}
+				}
+
+				if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+					navigator.clipboard.writeText(text).then(onCopySuccess).catch(fallbackCopy);
+					return;
+				}
+				fallbackCopy();
 			}
 
 			function switchDiffView(mode) {
@@ -2416,8 +2563,9 @@ templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view st
 			if meta.File.IsBinary {
 				<span class="badge badge-ghost badge-sm shrink-0" title="Binary file">Binary</span>
 			}
-			<span class="font-mono text-sm font-medium truncate" title={ diffFileDisplayPath(meta.File) }>{ diffFileDisplayPath(meta.File) }</span>
-			<span class="text-xs opacity-50 ml-auto shrink-0">
+			<span class="font-mono text-sm font-medium truncate min-w-0 flex-1" title={ diffFileDisplayPath(meta.File) }>{ diffFileDisplayPath(meta.File) }</span>
+			@diffFileCopyPathButton(diffFileDisplayPath(meta.File))
+			<span class="text-xs opacity-50 shrink-0">
 				{ diffStats(meta.File) }
 			</span>
 		</div>

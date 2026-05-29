@@ -815,6 +815,68 @@ func TestDiffViewer_ChevronAndStatsVisible(t *testing.T) {
 	}
 }
 
+func TestDiffViewer_FileHeaderRendersCopyPathButton(t *testing.T) {
+	longPath := "internal/very/deep/package/with/a/really/long/path/name/that/should/truncate/without/hiding/copy/button/example_handler.go"
+	diff := fmt.Sprintf(`diff --git a/%s b/%s
+--- a/%s
++++ b/%s
+@@ -1 +1 @@
+-old
++new
+`, longPath, longPath, longPath, longPath)
+
+	var buf bytes.Buffer
+	if err := DiffViewer(diff).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	body := buf.String()
+
+	if !strings.Contains(body, `class="diff-copy-path-btn`) {
+		t.Fatal("expected file header copy path button")
+	}
+	if !strings.Contains(body, `data-copy-path="`+longPath+`"`) {
+		t.Fatalf("expected copy button to carry long file path %q", longPath)
+	}
+	if !strings.Contains(body, `<span class="flex items-center gap-1 min-w-0 flex-1"><span class="font-mono text-sm font-medium truncate min-w-0"`) {
+		t.Fatal("expected copy button to render in the filename group")
+	}
+	if !strings.Contains(body, `onclick="copyDiffFilePath(event, this)"`) {
+		t.Fatal("expected copy button to use the stop-propagating copy handler")
+	}
+	if !strings.Contains(body, `function copyDiffFilePath(ev, button)`) || !strings.Contains(body, `ev.stopPropagation()`) {
+		t.Fatal("expected copy handler to prevent header collapse toggle")
+	}
+	if strings.Contains(body, `showToast('File path copied', 'completed')`) {
+		t.Fatal("expected no successful copy toast feedback")
+	}
+	if !strings.Contains(body, `showToast('Failed to copy file path', 'failed')`) {
+		t.Fatal("expected failed copy toast feedback")
+	}
+}
+
+func TestDiffViewer_FileHeaderCopyButtonUsesRenamedDisplayPath(t *testing.T) {
+	diff := `diff --git a/old/name.go b/new/name.go
+similarity index 92%
+rename from old/name.go
+rename to new/name.go
+--- a/old/name.go
++++ b/new/name.go
+@@ -1 +1 @@
+-old
++new
+`
+
+	var buf bytes.Buffer
+	if err := DiffViewer(diff).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	body := buf.String()
+
+	if !strings.Contains(body, `data-copy-path="old/name.go → new/name.go"`) {
+		t.Fatal("expected renamed file copy button to carry the displayed old-to-new path")
+	}
+}
+
 func TestBuildCommentMap(t *testing.T) {
 	comments := []models.ReviewComment{
 		{FilePath: "main.go", LineNumber: 10, LineType: "new", CommentText: "Comment A"},
