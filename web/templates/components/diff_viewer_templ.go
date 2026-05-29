@@ -2891,14 +2891,14 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 183, "<span class=\"font-mono text-sm font-medium truncate min-w-0 flex-1\" title=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 183, "<span class=\"flex items-center gap-1 min-w-0 flex-1\"><span class=\"font-mono text-sm font-medium truncate min-w-0\" title=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var120 string
 		templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.ResolveAttributeValue(diffFileDisplayPath(meta.File))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2566, Col: 109}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2567, Col: 103}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var120)
 		if templ_7745c5c3_Err != nil {
@@ -2911,7 +2911,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 		var templ_7745c5c3_Var121 string
 		templ_7745c5c3_Var121, templ_7745c5c3_Err = templ.JoinStringErrs(diffFileDisplayPath(meta.File))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2566, Col: 144}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2567, Col: 138}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var121))
 		if templ_7745c5c3_Err != nil {
@@ -2925,14 +2925,14 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 186, "<span class=\"text-xs opacity-50 shrink-0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 186, "</span> <span class=\"text-xs opacity-50 shrink-0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var122 string
 		templ_7745c5c3_Var122, templ_7745c5c3_Err = templ.JoinStringErrs(diffStats(meta.File))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2569, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2571, Col: 26}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var122))
 		if templ_7745c5c3_Err != nil {
@@ -2950,7 +2950,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var123 string
 			templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d lines / %s", autoLoadFileDiffLines, formatByteSize(autoLoadFileDiffChars)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2576, Col: 121}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2578, Col: 121}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var123))
 			if templ_7745c5c3_Err != nil {
@@ -2963,7 +2963,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var124 string
 			templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes/file?file_index=%d&view=%s&review=%t", taskID, meta.Index, view, reviewMode))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2580, Col: 121}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2582, Col: 121}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var124)
 			if templ_7745c5c3_Err != nil {
@@ -2976,7 +2976,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var125 string
 			templ_7745c5c3_Var125, templ_7745c5c3_Err = templ.ResolveAttributeValue(diffFileCardTargetSelector(meta.Index, view))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2581, Col: 61}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2583, Col: 61}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var125)
 			if templ_7745c5c3_Err != nil {
@@ -2994,7 +2994,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var126 string
 			templ_7745c5c3_Var126, templ_7745c5c3_Err = templ.JoinStringErrs(meta.BlockedReason)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2588, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2590, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var126))
 			if templ_7745c5c3_Err != nil {
@@ -3047,7 +3047,7 @@ func LoadDiffFileCard(diffOutput string, fileIndex int, view string, taskID stri
 			var templ_7745c5c3_Var128 string
 			templ_7745c5c3_Var128, templ_7745c5c3_Err = templ.JoinStringErrs(getDiffFileBlockedReason(diffOutput, fileIndex))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2601, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2603, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var128))
 			if templ_7745c5c3_Err != nil {

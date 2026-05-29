@@ -2563,8 +2563,10 @@ templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view st
 			if meta.File.IsBinary {
 				<span class="badge badge-ghost badge-sm shrink-0" title="Binary file">Binary</span>
 			}
-			<span class="font-mono text-sm font-medium truncate min-w-0 flex-1" title={ diffFileDisplayPath(meta.File) }>{ diffFileDisplayPath(meta.File) }</span>
-			@diffFileCopyPathButton(diffFileDisplayPath(meta.File))
+			<span class="flex items-center gap-1 min-w-0 flex-1">
+				<span class="font-mono text-sm font-medium truncate min-w-0" title={ diffFileDisplayPath(meta.File) }>{ diffFileDisplayPath(meta.File) }</span>
+				@diffFileCopyPathButton(diffFileDisplayPath(meta.File))
+			</span>
 			<span class="text-xs opacity-50 shrink-0">
 				{ diffStats(meta.File) }
 			</span>

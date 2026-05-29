@@ -1471,6 +1471,12 @@ func TestDiffViewerWithReview_LargeFileRendersLoadDiffButton(t *testing.T) {
 	if !strings.Contains(body, "Load diff") {
 		t.Error("expected load diff button")
 	}
+	if !strings.Contains(body, `data-copy-path="big.txt"`) {
+		t.Error("expected deferred large-file header copy path button")
+	}
+	if !strings.Contains(body, `<span class="flex items-center gap-1 min-w-0 flex-1"><span class="font-mono text-sm font-medium truncate min-w-0" title="big.txt">big.txt</span><button`) {
+		t.Error("expected deferred large-file copy button next to filename")
+	}
 	if !strings.Contains(body, `/tasks/task123/changes/file?file_index=0&amp;view=inline&amp;review=true`) {
 		t.Error("expected inline load-diff endpoint")
 	}
