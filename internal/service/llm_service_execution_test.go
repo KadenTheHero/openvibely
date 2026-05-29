@@ -296,6 +296,110 @@ func TestLLMService_CallAgentDirectWithDefinition_PropagatesAgentDefinitionAndSc
 	}
 }
 
+func TestLLMService_CallAgentDirectWithDefinition_GenericHookAgentGetsScopedTools(t *testing.T) {
+	repo := t.TempDir()
+	customMemoryDir := filepath.Join(repo, ".openvibely", "custom-memory")
+	if err := os.MkdirAll(customMemoryDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	capture := &captureProviderAdapter{}
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
+
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test"}
+	agentDef := &models.Agent{
+		ID:      "custom-after-complete-agent",
+		Key:     "custom_memory_hook",
+		Name:    "Custom Memory Hook",
+		Enabled: true,
+		Tools:   []string{models.AgentToolScopedFiles},
+		ToolConfig: models.AgentToolConfig{
+			ScopedFiles:            []models.ScopedFilesConfig{{Directory: ".openvibely/custom-memory", Permissions: []string{"read", "write"}}},
+			SkipDefaultTools:       true,
+			DisableRuntimeWorktree: true,
+		},
+	}
+
+	_, _, err := svc.CallAgentDirectWithDefinition(context.Background(), "update custom memory", nil, agent, repo, agentDef)
+	if err != nil {
+		t.Fatalf("CallAgentDirectWithDefinition error: %v", err)
+	}
+	rt := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx)
+	if rt == nil || !rt.HasDefinition("read_file") || !rt.HasDefinition("write_file") {
+		t.Fatalf("expected generic hook agent scoped file tools, got %#v", rt)
+	}
+	if capture.lastReq.WorkDir != customMemoryDir {
+		t.Fatalf("expected scoped workdir %q, got %q", customMemoryDir, capture.lastReq.WorkDir)
+	}
+	payload, _ := json.Marshal(map[string]string{"file_path": "after_complete_probe.md", "content": "durable hook memory"})
+	if _, handled, isErr, err := rt.Executor(capture.lastReq.Ctx, "write_file", payload); !handled || isErr || err != nil {
+		t.Fatalf("expected generic hook scoped write to succeed handled=%v isErr=%v err=%v", handled, isErr, err)
+	}
+	if _, err := os.Stat(filepath.Join(customMemoryDir, "after_complete_probe.md")); err != nil {
+		t.Fatalf("expected generic hook scoped file write: %v", err)
+	}
+}
+
+func TestLLMService_LifecycleAfterCompleteGenericAgentGetsScopedTools(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	llmRepo := repository.NewLLMConfigRepo(db)
+	if err := llmRepo.Create(ctx, &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-test", IsDefault: true}); err != nil {
+		t.Fatalf("create default model: %v", err)
+	}
+	agentRepo := repository.NewAgentRepo(db)
+	hookAgent := &models.Agent{
+		Key:     "custom_memory_hook",
+		Name:    "Custom Memory Hook",
+		Enabled: true,
+		Tools:   []string{models.AgentToolScopedFiles},
+		ToolConfig: models.AgentToolConfig{
+			ScopedFiles:            []models.ScopedFilesConfig{{Directory: ".openvibely/custom-memory", Permissions: []string{"read", "write"}}},
+			SkipDefaultTools:       true,
+			DisableRuntimeWorktree: true,
+		},
+	}
+	if err := agentRepo.Create(ctx, hookAgent); err != nil {
+		t.Fatalf("create hook agent: %v", err)
+	}
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	if err := lifecycleRepo.CreateHook(ctx, &models.AgentLifecycleHook{AgentID: hookAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "update_custom_memory", OutputContract: models.OutputContractActivitySummary, Enabled: true}); err != nil {
+		t.Fatalf("create lifecycle hook: %v", err)
+	}
+	repoPath := t.TempDir()
+	projectRepo := repository.NewProjectRepo(db)
+	project, err := projectRepo.GetByID(ctx, "default")
+	if err != nil {
+		t.Fatalf("get default project: %v", err)
+	}
+	project.RepoPath = repoPath
+	if err := projectRepo.Update(ctx, project); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+
+	capture := &captureProviderAdapter{}
+	svc := NewLLMService(llmRepo, nil, nil, nil, nil, nil)
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
+	invoker := lifecycle.NewLLMHookInvoker(svc, agentRepo, llmRepo)
+	runner := lifecycle.NewRunner(lifecycleRepo, invoker, nil)
+
+	_, err = runner.RunSlot(ctx, models.LifecycleAfterComplete, lifecycle.HookInput{TaskID: "task-generic-hook", TaskRunID: "run-generic-hook", ProjectID: "default", WorkDir: repoPath})
+	if err != nil {
+		t.Fatalf("RunSlot: %v", err)
+	}
+	rt := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx)
+	if rt == nil || !rt.HasDefinition("write_file") {
+		t.Fatalf("expected after_complete hook agent scoped file tools, got %#v", rt)
+	}
+	payload, _ := json.Marshal(map[string]string{"file_path": "after_complete_probe.md", "content": "durable hook memory"})
+	if _, handled, isErr, err := rt.Executor(capture.lastReq.Ctx, "write_file", payload); !handled || isErr || err != nil {
+		t.Fatalf("expected lifecycle hook scoped write to succeed handled=%v isErr=%v err=%v", handled, isErr, err)
+	}
+	if _, err := os.Stat(filepath.Join(repoPath, ".openvibely", "custom-memory", "after_complete_probe.md")); err != nil {
+		t.Fatalf("expected after_complete hook scoped file write: %v", err)
+	}
+}
+
 func TestLLMService_CallAgentDirectWithDefinition_RequiresScopedFilesToolGrant(t *testing.T) {
 	repo := t.TempDir()
 	capture := &captureProviderAdapter{}

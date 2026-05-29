@@ -198,13 +198,7 @@ func filterRuntimeToolsForAgent(rt *llmcontracts.RuntimeTools, agentDef *models.
 	if rt == nil || agentDef == nil {
 		return rt
 	}
-	allowed := make(map[string]struct{}, len(agentDef.Tools))
-	for _, tool := range agentDef.Tools {
-		name := strings.ToLower(strings.TrimSpace(tool))
-		if name != "" {
-			allowed[name] = struct{}{}
-		}
-	}
+	allowed := allowedRuntimeToolNamesForAgent(agentDef)
 	defs := make([]llmcontracts.RuntimeToolDefinition, 0, len(rt.Definitions))
 	for _, def := range rt.Definitions {
 		if _, ok := allowed[strings.ToLower(strings.TrimSpace(def.Name))]; ok {
@@ -218,6 +212,23 @@ func filterRuntimeToolsForAgent(rt *llmcontracts.RuntimeTools, agentDef *models.
 		Metadata:         rt.Metadata,
 		SkipDefaultTools: rt.SkipDefaultTools,
 	}
+}
+
+func allowedRuntimeToolNamesForAgent(agentDef *models.Agent) map[string]struct{} {
+	allowed := make(map[string]struct{}, len(agentDef.Tools))
+	for _, tool := range agentDef.Tools {
+		name := strings.ToLower(strings.TrimSpace(tool))
+		if name == "" {
+			continue
+		}
+		allowed[name] = struct{}{}
+		if strings.EqualFold(name, models.AgentToolScopedFiles) {
+			for _, scopedTool := range []string{"list_files", "read_file", "write_file", "edit_file", "grep_search", "delete_file"} {
+				allowed[scopedTool] = struct{}{}
+			}
+		}
+	}
+	return allowed
 }
 
 func filteredRuntimeToolExecutor(base llmcontracts.RuntimeToolExecutor, allowed map[string]struct{}) llmcontracts.RuntimeToolExecutor {

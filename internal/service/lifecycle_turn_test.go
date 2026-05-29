@@ -825,6 +825,61 @@ func appendLifecycleTestHeader(t *testing.T, path, header string) {
 	}
 }
 
+func TestPrepareLifecycleTurn_AfterCompleteDoesNotPreExposeScopedFileTools(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	hookAgent := &models.Agent{
+		Key:     "custom_memory_hook",
+		Name:    "Custom Memory Hook",
+		Enabled: true,
+		Tools:   []string{models.AgentToolScopedFiles},
+		ToolConfig: models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{
+			Directory:   ".openvibely/custom-memory",
+			Permissions: []string{"read", "write"},
+		}}},
+	}
+	if err := agentRepo.Create(ctx, hookAgent); err != nil {
+		t.Fatalf("create hook agent: %v", err)
+	}
+
+	done := make(chan error, 1)
+	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{
+		ID:             "custom-memory-update",
+		AgentID:        hookAgent.ID,
+		When:           models.LifecycleAfterComplete,
+		SkillKey:       "update_custom_memory",
+		OutputContract: models.OutputContractActivitySummary,
+		Enabled:        true,
+	}}}
+	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
+		rt := llmcontracts.RuntimeToolsFromContext(ctx)
+		if rt != nil && rt.HasDefinition("write_file") {
+			done <- fmt.Errorf("after_complete worker context must not pre-expose scoped file tools before per-agent direct-call setup: %#v", rt.Definitions)
+			return json.RawMessage(`{"summary":"bad","skipped":true,"skip_reason":"pre-exposed tools"}`), nil
+		}
+		done <- nil
+		return json.RawMessage(`{"summary":"ok","changed_paths":[]}`), nil
+	}), nil)
+
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleRunner(runner)
+	worker.SetLifecycleAgentRepo(agentRepo)
+	worker.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+
+	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-hook-scoped-files", ProjectID: "default"})
+	turn.AfterComplete(nil, llmcontracts.ChatContext{})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for after_complete hook")
+	}
+}
+
 func TestPrepareLifecycleTurn_AfterCompleteIncludesAssignedAgentLearningContextAndTool(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

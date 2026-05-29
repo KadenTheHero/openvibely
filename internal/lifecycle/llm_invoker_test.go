@@ -152,6 +152,34 @@ func TestLLMHookInvoker_FiltersRuntimeToolsByAgentDefinition(t *testing.T) {
 	}
 }
 
+func TestLLMHookInvoker_ScopedFilesGrantAllowsConcreteFileRuntimeTools(t *testing.T) {
+	caller := &fakeCaller{reply: `{"summary":"updated scoped files","changed_paths":["state.md"]}`}
+	agentDef := &models.Agent{Name: "Custom After-Complete Agent", Model: "sonnet", Tools: []string{models.AgentToolScopedFiles}}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"custom-hook-agent": agentDef}}, nil)
+	baseTools := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "read_file"}, {Name: "write_file"}, {Name: "delete_file"}, {Name: "skill_manage"}},
+		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			return `{"ok":true}`, true, false, nil
+		},
+	}
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), baseTools)
+	_, err := inv.Invoke(ctx, models.AgentLifecycleHook{AgentID: "custom-hook-agent", OutputContract: models.OutputContractActivitySummary}, HookInput{})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	for _, allowed := range []string{"read_file", "write_file", "delete_file"} {
+		if caller.lastRuntime == nil || !caller.lastRuntime.HasDefinition(allowed) {
+			t.Fatalf("expected %s from ScopedFiles grant, got %#v", allowed, caller.lastRuntime)
+		}
+		if _, handled, isErr, err := caller.lastRuntime.Executor(ctx, allowed, json.RawMessage(`{}`)); !handled || isErr || err != nil {
+			t.Fatalf("expected %s execution to pass filter handled=%v isErr=%v err=%v", allowed, handled, isErr, err)
+		}
+	}
+	if caller.lastRuntime.HasDefinition("skill_manage") {
+		t.Fatalf("ScopedFiles grant must not expose unrelated runtime tools: %#v", caller.lastRuntime.Definitions)
+	}
+}
+
 func TestLLMHookInvoker_DoesNotExposeRuntimeToolsWithoutAgentGrants(t *testing.T) {
 	caller := &fakeCaller{reply: `{"summary":"reviewed","nothing_to_save":true}`}
 	agentDef := &models.Agent{Name: "Skill Curator", Model: "sonnet"}
