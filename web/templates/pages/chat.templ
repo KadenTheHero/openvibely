@@ -110,9 +110,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				var chatMessages = document.getElementById('chat-messages');
 				if (chatMessages) {
 					if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(chatMessages);
-					if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
-					if (window.maybeShowPlanCompletionPromptFromHistory) window.maybeShowPlanCompletionPromptFromHistory();
-				}
+						if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
+						if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker);
+						if (window.maybeShowPlanCompletionPromptFromHistory) window.maybeShowPlanCompletionPromptFromHistory();				}
 			}, 0);
 
 			// Draft message persistence (scoped per project)
@@ -626,9 +626,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						chatMessages.querySelectorAll('[data-exec-id]').forEach(function(el) {
 							if (window._chatKnownExecIds) window._chatKnownExecIds[el.getAttribute('data-exec-id')] = true;
 						});
-						if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(chatMessages);
-						// During an active stream, this swap can carry partial persisted output.
-						if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory) {
+							if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(chatMessages);
+							if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker);
+							// During an active stream, this swap can carry partial persisted output.						if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory) {
 							window.maybeShowPlanCompletionPromptFromHistory();
 						}
 						// Auto-scroll after swap: always scroll unless user manually scrolled up

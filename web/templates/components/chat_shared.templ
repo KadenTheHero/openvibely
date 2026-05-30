@@ -2,10 +2,10 @@ package components
 
 import (
 	"fmt"
-	"regexp"
-	"strings"
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
+	"regexp"
+	"strings"
 )
 
 // jsStringLength returns the JavaScript string.length for a Go string.
@@ -25,19 +25,19 @@ func jsStringLength(s string) int {
 
 // ChatInputFormConfig holds configuration for the shared chat input form.
 type ChatInputFormConfig struct {
-	FormID        string
-	InputID       string
-	PostEndpoint  string
-	TargetID      string
-	Agents        []models.LLMConfig
+	FormID            string
+	InputID           string
+	PostEndpoint      string
+	TargetID          string
+	Agents            []models.LLMConfig
 	ShowModelSelector bool
 	ShowModeSelector  bool
 	ChatMode          models.ChatMode // default when not persisted
-	TaskID        string // non-empty enables cancel button when IsRunning
-	IsRunning     bool
-		ProjectID       string // non-empty enables model selection persistence via localStorage
-		SelectedAgentID string // initial model selection; defaults to auto when empty
-	}
+	TaskID            string          // non-empty enables cancel button when IsRunning
+	IsRunning         bool
+	ProjectID         string // non-empty enables model selection persistence via localStorage
+	SelectedAgentID   string // initial model selection; defaults to auto when empty
+}
 
 // chatElementIDs returns derived element IDs based on the form ID prefix.
 func chatAttachmentPreviewID(formID string) string { return formID + "-attachments-preview" }
@@ -60,11 +60,14 @@ func chatModeOrDefault(mode models.ChatMode) string {
 }
 
 templ ChatLoadingDots(size string) {
-	<span class={
-		"ov-loading-dots",
-		templ.KV("ov-loading-dots-xs", size == "xs"),
-		templ.KV("ov-loading-dots-sm", size != "xs"),
-	} aria-hidden="true">
+	<span
+		class={
+			"ov-loading-dots",
+			templ.KV("ov-loading-dots-xs", size == "xs"),
+			templ.KV("ov-loading-dots-sm", size != "xs"),
+		}
+		aria-hidden="true"
+	>
 		<span class="ov-loading-dot"></span>
 		<span class="ov-loading-dot"></span>
 		<span class="ov-loading-dot"></span>
@@ -78,10 +81,10 @@ templ ChatBubble(role, content string) {
 			{ role }
 		</div>
 		<div class="chat-bubble-inner">
-				if role == "User" {
-					<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ CleanDisplayContent(content) }</div>
-				} else {
-					<div class="chat-stream-content" data-raw-content={ NormalizeDisplayMarkers(content) }></div>
+			if role == "User" {
+				<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ CleanDisplayContent(content) }</div>
+			} else {
+				<div class="chat-stream-content" data-raw-content={ NormalizeDisplayMarkers(content) }></div>
 				<script>
 					(function() {
 						var el = document.currentScript.previousElementSibling;
@@ -131,8 +134,8 @@ templ ChatBubbleError(role, errorMsg, output string) {
 			if errorMsg != "" {
 				<div class="text-error/80 text-sm font-medium mb-2">{ "Error: " + errorMsg }</div>
 			}
-				if output != "" {
-					<div class="chat-stream-content" data-raw-content={ NormalizeDisplayMarkers(output) }></div>
+			if output != "" {
+				<div class="chat-stream-content" data-raw-content={ NormalizeDisplayMarkers(output) }></div>
 				<script>
 					(function() {
 						var el = document.currentScript.previousElementSibling;
@@ -229,6 +232,7 @@ templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatA
 										class="max-w-full rounded-lg border border-base-content/10 hover:opacity-90 transition-opacity cursor-pointer"
 										style="max-height: 400px; object-fit: contain;"
 										loading="lazy"
+										data-chat-attachment-image="true"
 									/>
 								</a>
 								<div class="flex items-center gap-2 text-xs opacity-60 mt-1.5">
@@ -561,7 +565,7 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 					@ChatLoadingDots("sm")
 				</div>
 			}
-				<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-length={ fmt.Sprintf("%d", jsStringLength(NormalizeDisplayMarkers(partialContent))) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
+			<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-length={ fmt.Sprintf("%d", jsStringLength(NormalizeDisplayMarkers(partialContent))) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
 			<script>
 				(function() {
 					var el = document.currentScript.previousElementSibling;
@@ -592,7 +596,7 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 					}
 				})();
 			</script>
-			<div id={ "streaming-dots-resume-" + execID } class={ "flex items-center gap-1 mt-2 opacity-40", templ.KV("hidden", partialContent == "") } >
+			<div id={ "streaming-dots-resume-" + execID } class={ "flex items-center gap-1 mt-2 opacity-40", templ.KV("hidden", partialContent == "") }>
 				@ChatLoadingDots("xs")
 			</div>
 		</div>
@@ -924,10 +928,25 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			<div class="flex items-center gap-1 -ml-2">
 				if config.ShowModelSelector {
 					<select id={ config.FormID + "-agent-select" } class="chat-model-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 max-w-[140px] rounded-lg" data-agent-input={ config.FormID + "-agent-id" }>
-						<option value="auto" if selectedAgentOrAuto(config.SelectedAgentID) == "auto" { selected }>Auto</option>
-						<option value="default" if config.SelectedAgentID == "default" { selected }>Default</option>
+						<option
+							value="auto"
+							if selectedAgentOrAuto(config.SelectedAgentID) == "auto" {
+								selected
+							}
+						>Auto</option>
+						<option
+							value="default"
+							if config.SelectedAgentID == "default" {
+								selected
+							}
+						>Default</option>
 						for _, agent := range config.Agents {
-							<option value={ agent.ID } if config.SelectedAgentID == agent.ID { selected }>
+							<option
+								value={ agent.ID }
+								if config.SelectedAgentID == agent.ID {
+									selected
+								}
+							>
 								{ agent.Name } ({ agent.Model })
 							</option>
 						}
@@ -1731,22 +1750,63 @@ templ ChatAutoScrollScript() {
 		// rebinding the existing keyed tracker if the element changed (e.g. after a
 		// morph swap). This is the single entry point streaming code should use to
 		// avoid stale-element bugs that "freeze" smart scrolling until refresh.
-		window.resolveScrollTracker = function(trackerKey, messagesEl) {
-			if (!trackerKey || !messagesEl || !window.ChatScrollTracker) return null;
-			var existing = window[trackerKey];
-			if (!existing) {
-				window[trackerKey] = new window.ChatScrollTracker(messagesEl);
-				return window[trackerKey];
-			}
-			// Detect stale (detached or replaced) element and rebind.
-			if (existing.element !== messagesEl || !existing.element || !existing.element.isConnected) {
-				existing.rebind(messagesEl);
-			}
-			return existing;
-		};
+			window.resolveScrollTracker = function(trackerKey, messagesEl) {
+				if (!trackerKey || !messagesEl || !window.ChatScrollTracker) return null;
+				var existing = window[trackerKey];
+				if (!existing) {
+					window[trackerKey] = new window.ChatScrollTracker(messagesEl);
+					return window[trackerKey];
+				}
+				// Detect stale (detached or replaced) element and rebind.
+				if (existing.element !== messagesEl || !existing.element || !existing.element.isConnected) {
+					existing.rebind(messagesEl);
+				}
+				return existing;
+			};
 
-		// Persistent store for thinking section open states (survives DOM replacement by morph:outerHTML)
-		if (!window._thinkingOpenStates) window._thinkingOpenStates = {};
+			window.bindAttachmentImageSmartScroll = function(messagesEl, trackerKey, trackerFallback) {
+				if (!messagesEl || !window.chatAutoScroll) return;
+				var images = messagesEl.querySelectorAll('img[data-chat-attachment-image="true"]');
+				images.forEach(function(img) {
+					if (img.dataset.smartScrollBound === 'true') return;
+					img.dataset.smartScrollBound = 'true';
+					var shouldScroll = false;
+					function snapshotPinnedState() {
+						var liveMessages = messagesEl;
+						if (messagesEl.id) {
+							var resolved = document.getElementById(messagesEl.id);
+							if (resolved) liveMessages = resolved;
+						}
+						var tracker = trackerKey && window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, liveMessages) : trackerFallback;
+						shouldScroll = !tracker || tracker.shouldAutoScroll();
+					}
+					function scrollAfterImageLayout() {
+						if (!shouldScroll) return;
+						requestAnimationFrame(function() {
+							requestAnimationFrame(function() {
+								var liveMessages = messagesEl;
+								if (messagesEl.id) {
+									var resolved = document.getElementById(messagesEl.id);
+									if (resolved) liveMessages = resolved;
+								}
+								if (liveMessages && window.chatAutoScroll) {
+									window.chatAutoScroll.scrollToBottom(liveMessages, false);
+								}
+							});
+						});
+					}
+					snapshotPinnedState();
+					if (img.complete) {
+						scrollAfterImageLayout();
+						return;
+					}
+					img.addEventListener('load', scrollAfterImageLayout, { once: true });
+					img.addEventListener('error', scrollAfterImageLayout, { once: true });
+				});
+			};
+
+			// Persistent store for thinking section open states (survives DOM replacement by morph:outerHTML)
+			if (!window._thinkingOpenStates) window._thinkingOpenStates = {};
 
 		// Generate a stable key for a container to persist thinking states across morph swaps.
 		// Uses container ID (streaming-message-{execID}) or data-raw-content fingerprint.
@@ -2362,17 +2422,17 @@ func IsImageMediaType(mediaType string) bool {
 
 // Regex patterns for cleaning action markers from display content (server-side).
 var (
-	reCreateTask  = regexp.MustCompile(`(?s)\[CREATE_TASK\].*?\[/CREATE_TASK\]`)
-	reEditTask    = regexp.MustCompile(`(?s)\[EDIT_TASK\].*?\[/EDIT_TASK\]`)
-	reExecTasks   = regexp.MustCompile(`(?s)\[EXECUTE_TASKS\].*?\[/EXECUTE_TASKS\]`)
-	reStatus      = regexp.MustCompile(`\[STATUS:\s*(?:SUCCESS|FAILED|NEEDS_FOLLOWUP)(?:\s*\|[^\]]*?)?\]`)
-	reUsingTool     = regexp.MustCompile(`\[Using tool:\s*[^\]]+\]`)
-	reProposedPlan  = regexp.MustCompile(`(?i)</?\s*proposed_plan\s*>`)
-	reToolBlock     = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\]\n?[\s\S]*?\n?\[/Tool\]\n?`)
-	reToolDone      = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\]]*\](?:\n)?`)
-	reProtocolArt   = regexp.MustCompile(`(?m)^[}\s{]*(?:to=)?multi_tool_use\.\S+[^\n]*$`)
-	reThinking      = regexp.MustCompile(`(?s)\n?\[Thinking\][\s\S]*?(?:\[/Thinking\]\n?|$)`)
-	reExcessLines = regexp.MustCompile(`\n{3,}`)
+	reCreateTask   = regexp.MustCompile(`(?s)\[CREATE_TASK\].*?\[/CREATE_TASK\]`)
+	reEditTask     = regexp.MustCompile(`(?s)\[EDIT_TASK\].*?\[/EDIT_TASK\]`)
+	reExecTasks    = regexp.MustCompile(`(?s)\[EXECUTE_TASKS\].*?\[/EXECUTE_TASKS\]`)
+	reStatus       = regexp.MustCompile(`\[STATUS:\s*(?:SUCCESS|FAILED|NEEDS_FOLLOWUP)(?:\s*\|[^\]]*?)?\]`)
+	reUsingTool    = regexp.MustCompile(`\[Using tool:\s*[^\]]+\]`)
+	reProposedPlan = regexp.MustCompile(`(?i)</?\s*proposed_plan\s*>`)
+	reToolBlock    = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\]\n?[\s\S]*?\n?\[/Tool\]\n?`)
+	reToolDone     = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\]]*\](?:\n)?`)
+	reProtocolArt  = regexp.MustCompile(`(?m)^[}\s{]*(?:to=)?multi_tool_use\.\S+[^\n]*$`)
+	reThinking     = regexp.MustCompile(`(?s)\n?\[Thinking\][\s\S]*?(?:\[/Thinking\]\n?|$)`)
+	reExcessLines  = regexp.MustCompile(`\n{3,}`)
 )
 
 // NormalizeDisplayMarkers canonicalizes legacy/provider marker variants for UI rendering.

@@ -379,42 +379,43 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 				window._taskThreadSavedInput = '';
 			}
 
-			// Apply cleaning and scroll on load
-			(function() {
-				var chatMessages = document.getElementById('task-thread-messages');
-				if (chatMessages) {
-					if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
-					var taskId = _taskThreadTaskId();
-					var preservedScrollState = _getTaskThreadScrollState(taskId);
-					var restoredScrollState = _restoreTaskThreadScrollState(chatMessages, preservedScrollState);
-					if (!restoredScrollState && window.chatAutoScroll) {
-						window.chatAutoScroll.scrollToBottom(chatMessages, false);
-					}
-					var preservedUserScrolledUp = restoredScrollState ? !!preservedScrollState.userScrolledUp : false;
+				// Apply cleaning and scroll on load
+				(function() {
+					var chatMessages = document.getElementById('task-thread-messages');
+					if (chatMessages) {
+						if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+						var taskId = _taskThreadTaskId();
+						var preservedScrollState = _getTaskThreadScrollState(taskId);
+						var restoredScrollState = _restoreTaskThreadScrollState(chatMessages, preservedScrollState);
+						if (!restoredScrollState && window.chatAutoScroll) {
+							window.chatAutoScroll.scrollToBottom(chatMessages, false);
+						}
+						var preservedUserScrolledUp = restoredScrollState ? !!preservedScrollState.userScrolledUp : false;
 
-					// Set up page-level scroll tracker for task thread
-					if (window.ChatScrollTracker) {
-						if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
-						window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);
-						window._taskThreadPageTracker.userScrolledUp = preservedUserScrolledUp;
-					}
+						// Set up page-level scroll tracker for task thread before binding attachment image handlers
+						// so cached/complete images respect restored explicit upward scroll intent.
+						if (window.ChatScrollTracker) {
+							if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
+							window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);
+							window._taskThreadPageTracker.userScrolledUp = preservedUserScrolledUp;
+						}
+						if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
 
-					// Keep global flag as fallback source of truth across partial re-inits.
-					window._taskThreadUserScrolledUp = preservedUserScrolledUp;
-				}
-				// Render streaming content markers and initialize SSE for any running executions.
-				// Content is in data-raw-content attribute (not textContent) to prevent raw text flash.
-				var resumeContainers = document.querySelectorAll('[data-streaming-resume="true"]');
-				resumeContainers.forEach(function(c) {
-					var raw = c.getAttribute('data-raw-content') || '';
-					if (raw.trim() && window.renderStreamingContent) {
-						window.renderStreamingContent(c, raw);
+						// Keep global flag as fallback source of truth across partial re-inits.
+						window._taskThreadUserScrolledUp = preservedUserScrolledUp;
 					}
-				});
-				if (window._initThreadStreaming) window._initThreadStreaming();
-				_restoreTaskThreadDraftToTextarea();
-			})();
-
+					// Render streaming content markers and initialize SSE for any running executions.
+					// Content is in data-raw-content attribute (not textContent) to prevent raw text flash.
+					var resumeContainers = document.querySelectorAll('[data-streaming-resume="true"]');
+					resumeContainers.forEach(function(c) {
+						var raw = c.getAttribute('data-raw-content') || '';
+						if (raw.trim() && window.renderStreamingContent) {
+							window.renderStreamingContent(c, raw);
+						}
+					});
+					if (window._initThreadStreaming) window._initThreadStreaming();
+					_restoreTaskThreadDraftToTextarea();
+				})();
 			// Intelligent auto-scroll: only scroll when user hasn't manually scrolled up
 			if (!window._taskThreadScrollHandlerAttached) {
 				window._taskThreadScrollHandlerAttached = true;
@@ -522,69 +523,71 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 					}
 				});
 
-				document.body.addEventListener('htmx:afterSwap', function(event) {
-					var target = event.detail.target;
-					if (target && target.id === 'task-thread-messages') {
-						// Skip expensive DOM work if navigating away via sidebar
-						if (window._sidebarNavigating) return;
-						if (window.cleanAssistantMessages) window.cleanAssistantMessages(target);
-						// Auto-scroll unless user manually scrolled up
-						if (!window._taskThreadUserScrolledUp) {
-							requestAnimationFrame(function() {
-								if (target && window.chatAutoScroll) {
-									window.chatAutoScroll.scrollToBottom(target, true);
-								}
-							});
-						}
-						// Re-attach tracker if the DOM element changed
-						if (target !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {
-							if (window.ChatScrollTracker) {
-								if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
-								window._taskThreadPageTracker = new window.ChatScrollTracker(target);
-								window._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;
-								_saveTaskThreadScrollState();
-							}
-						}
-					}
-					// Handle polling updates to task-thread-view (e.g., task completion status)
-					else if (target && target.id === 'task-thread-view') {
-						// Skip expensive DOM work if navigating away via sidebar
-						if (window._sidebarNavigating) return;
-						var chatMessages = document.getElementById('task-thread-messages');
-						if (chatMessages) {
-							if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+					document.body.addEventListener('htmx:afterSwap', function(event) {
+						var target = event.detail.target;
+						if (target && target.id === 'task-thread-messages') {
+							// Skip expensive DOM work if navigating away via sidebar
+							if (window._sidebarNavigating) return;
+							if (window.cleanAssistantMessages) window.cleanAssistantMessages(target);
+							if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(target, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
 							// Auto-scroll unless user manually scrolled up
 							if (!window._taskThreadUserScrolledUp) {
 								requestAnimationFrame(function() {
-									if (chatMessages && window.chatAutoScroll) {
-										window.chatAutoScroll.scrollToBottom(chatMessages, true);
+									if (target && window.chatAutoScroll) {
+										window.chatAutoScroll.scrollToBottom(target, true);
 									}
 								});
 							}
 							// Re-attach tracker if the DOM element changed
-							if (chatMessages !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {
+							if (target !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {
 								if (window.ChatScrollTracker) {
 									if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
-									window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);
+									window._taskThreadPageTracker = new window.ChatScrollTracker(target);
 									window._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;
 									_saveTaskThreadScrollState();
 								}
 							}
 						}
-						if (window.cleanAssistantMessages) window.cleanAssistantMessages(document.getElementById('task-thread-messages'));
-						if (window._initThreadStreaming) window._initThreadStreaming();
-					}
-					// Also handle full page refreshes on task-detail-content
-					else if (target && target.id === 'task-detail-content') {
-						var chatMessages = document.getElementById('task-thread-messages');
-						if (chatMessages) {
-							if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+						// Handle polling updates to task-thread-view (e.g., task completion status)
+						else if (target && target.id === 'task-thread-view') {
+							// Skip expensive DOM work if navigating away via sidebar
+							if (window._sidebarNavigating) return;
+							var chatMessages = document.getElementById('task-thread-messages');
+							if (chatMessages) {
+								if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+								if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
+								// Auto-scroll unless user manually scrolled up
+								if (!window._taskThreadUserScrolledUp) {
+									requestAnimationFrame(function() {
+										if (chatMessages && window.chatAutoScroll) {
+											window.chatAutoScroll.scrollToBottom(chatMessages, true);
+										}
+									});
+								}
+								// Re-attach tracker if the DOM element changed
+								if (chatMessages !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {
+									if (window.ChatScrollTracker) {
+										if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
+										window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);
+										window._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;
+										_saveTaskThreadScrollState();
+									}
+								}
+							}
+							if (window.cleanAssistantMessages) window.cleanAssistantMessages(document.getElementById('task-thread-messages'));
+							if (window._initThreadStreaming) window._initThreadStreaming();
 						}
-					}
-					// Restore textarea value after morph polling or full page refresh
-					_restoreTaskThreadDraftToTextarea();
-				});
-			}
+						// Also handle full page refreshes on task-detail-content
+						else if (target && target.id === 'task-detail-content') {
+							var chatMessages = document.getElementById('task-thread-messages');
+							if (chatMessages) {
+								if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+								if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
+							}
+						}
+						// Restore textarea value after morph polling or full page refresh
+						_restoreTaskThreadDraftToTextarea();
+					});			}
 			</script>
 		</div>
 }

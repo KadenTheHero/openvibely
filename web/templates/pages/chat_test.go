@@ -182,6 +182,21 @@ func TestChatContent_ClearChatDoesNotRequireConfirmation(t *testing.T) {
 	}
 }
 
+func TestChatContent_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+
+	if count := strings.Count(content, "window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker)"); count < 2 {
+		t.Fatalf("expected chat page to bind attachment image smart-scroll on initial render and HTMX swaps, got %d", count)
+	}
+}
+
 func TestChatContent_ClosesChatStreamEventSourcesOnSwapAndNavigation(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 

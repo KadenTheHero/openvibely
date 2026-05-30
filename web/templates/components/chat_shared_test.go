@@ -383,6 +383,49 @@ func TestChatInputForm_EnterKeyHasRequestSubmitFallback(t *testing.T) {
 	}
 }
 
+func TestChatBubbleWithAttachments_MarksImagesForSmartScroll(t *testing.T) {
+	attachments := []models.ChatAttachment{
+		{ID: "att-image", FileName: "screenshot.png", MediaType: "image/png", FileSize: 1234},
+		{ID: "att-file", FileName: "notes.txt", MediaType: "text/plain", FileSize: 42},
+	}
+
+	var buf bytes.Buffer
+	if err := ChatBubbleWithAttachments("User", "see screenshot", attachments).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatBubbleWithAttachments: %v", err)
+	}
+	content := buf.String()
+
+	if !strings.Contains(content, `data-chat-attachment-image="true"`) {
+		t.Fatal("image attachments must be marked so lazy-load layout growth can trigger smart-scroll correction")
+	}
+	if count := strings.Count(content, `data-chat-attachment-image="true"`); count != 1 {
+		t.Fatalf("expected only image attachments to be marked for smart scroll, got %d markers", count)
+	}
+}
+
+func TestChatAutoScrollScript_BindsAttachmentImageSmartScroll(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	}
+	content := buf.String()
+
+	required := []string{
+		"window.bindAttachmentImageSmartScroll = function(messagesEl, trackerKey, trackerFallback)",
+		`querySelectorAll('img[data-chat-attachment-image="true"]')`,
+		"snapshotPinnedState();",
+		"var tracker = trackerKey && window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, liveMessages) : trackerFallback;",
+		"shouldScroll = !tracker || tracker.shouldAutoScroll();",
+		"img.addEventListener('load', scrollAfterImageLayout, { once: true });",
+		"img.addEventListener('error', scrollAfterImageLayout, { once: true });",
+	}
+	for _, r := range required {
+		if !strings.Contains(content, r) {
+			t.Fatalf("attachment image smart-scroll helper missing %q", r)
+		}
+	}
+}
+
 func TestChatAutoScrollScript_ShowsToolCardsInPlanMode(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatAutoScrollScript().Render(context.Background(), &buf)
@@ -1084,6 +1127,9 @@ func TestRenderStreamingContent_PersistentThinkingState(t *testing.T) {
 	if !strings.Contains(content, "window._thinkingOpenStates") {
 		t.Error("should initialize window._thinkingOpenStates for persistent thinking state storage")
 	}
+	if !strings.Contains(content, "if (!window._thinkingOpenStates) window._thinkingOpenStates = {};") {
+		t.Error("should initialize window._thinkingOpenStates with executable JavaScript, not inside a comment")
+	}
 
 	// Should generate a stable key for containers using ID or data-raw-content
 	if !strings.Contains(content, "_thinkingStateKey") {
@@ -1391,6 +1437,36 @@ func TestTaskThreadView_ClearsDraftBeforeSuccessfulThreadSwap(t *testing.T) {
 	}
 	if !strings.Contains(content, "if (sentKey) delete window._taskThreadDrafts[sentKey];") {
 		t.Fatal("beforeSwap should clear persisted draft key on successful thread form swap")
+	}
+}
+
+func TestTaskThreadView_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *testing.T) {
+	task := &models.Task{
+		ID:        "thread-attachment-scroll-1",
+		ProjectID: "p1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskThreadView(task, nil, nil, nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render TaskThreadView: %v", err)
+	}
+	content := buf.String()
+
+	if count := strings.Count(content, "window.bindAttachmentImageSmartScroll"); count < 4 {
+		t.Fatalf("expected task thread to bind attachment image smart-scroll on initial render and HTMX swap paths, got %d", count)
+	}
+	trackerInit := strings.Index(content, "window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages)")
+	initialBind := strings.Index(content, "window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker)")
+	if initialBind < 0 {
+		t.Fatal("task thread must bind attachment image smart-scroll with the task-thread tracker")
+	}
+	if trackerInit < 0 || trackerInit > initialBind {
+		t.Fatal("task thread must create the tracker before initial attachment image binding so restored upward scroll intent is respected")
+	}
+	if !strings.Contains(content, "window.bindAttachmentImageSmartScroll(target, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker)") {
+		t.Fatal("task thread message-target swaps must bind attachment image smart-scroll on the swapped element")
 	}
 }
 
