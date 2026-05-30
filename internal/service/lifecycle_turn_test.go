@@ -133,6 +133,41 @@ func TestPrepareLifecycleTurn_RouteTaskIgnoresInvalidSelectedSkills(t *testing.T
 	}
 }
 
+func TestPrepareLifecycleTurn_RouteTaskInputIncludesUserTaskText(t *testing.T) {
+	var captured lifecycle.HookInput
+	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{
+		ID:             "route",
+		When:           models.LifecycleRouteTask,
+		SkillKey:       "route_task",
+		OutputContract: models.OutputContractSelectedSkills,
+		Blocking:       true,
+		Enabled:        true,
+	}}}
+	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(_ context.Context, _ models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
+		captured = in
+		return routePayload(nil, 0.8), nil
+	}), nil)
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleRunner(runner)
+
+	worker.PrepareLifecycleTurn(context.Background(), models.Task{
+		ID:        "task-art",
+		ProjectID: "project-1",
+		Title:     "Generate algorithmic dizzy city skyline artwork",
+		Prompt:    "Create an algorithmic art implementation with a dizzy city skyline.",
+	})
+
+	if captured.TaskTitle != "Generate algorithmic dizzy city skyline artwork" {
+		t.Fatalf("route_task input missing task title, got %q", captured.TaskTitle)
+	}
+	if !strings.Contains(captured.TaskPrompt, "dizzy city skyline") {
+		t.Fatalf("route_task input missing task prompt, got %q", captured.TaskPrompt)
+	}
+	if _, ok := captured.Extras["available_skills"]; !ok {
+		t.Fatalf("route_task input missing available_skills: %#v", captured.Extras)
+	}
+}
+
 func TestPrepareLifecycleTurn_UsesDistinctTaskRunIDPerRun(t *testing.T) {
 	runner, store := routeTestRunnerWithStore(map[string]json.RawMessage{
 		"a-low":  routePayload([]string{"skill"}, 0.8),

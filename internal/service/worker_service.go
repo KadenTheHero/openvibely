@@ -331,11 +331,13 @@ func (w *WorkerService) runLifecycleSlotFiltered(ctx context.Context, when model
 		taskRunID = newLifecycleTaskRunID(task.ID)
 	}
 	in := lifecycle.HookInput{
-		When:      when,
-		TaskID:    task.ID,
-		TaskRunID: taskRunID,
-		ProjectID: task.ProjectID,
-		WorkDir:   projectRepoPath(ctx, w.projectRepo, task.ProjectID),
+		When:       when,
+		TaskID:     task.ID,
+		TaskRunID:  taskRunID,
+		ProjectID:  task.ProjectID,
+		TaskTitle:  task.Title,
+		TaskPrompt: task.Prompt,
+		WorkDir:    projectRepoPath(ctx, w.projectRepo, task.ProjectID),
 	}
 	if task.AgentDefinitionID != nil {
 		in.ActiveModeAgent = *task.AgentDefinitionID

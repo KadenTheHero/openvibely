@@ -23,6 +23,8 @@ type HookInput struct {
 	TaskID          string                         `json:"task_id"`
 	TaskRunID       string                         `json:"task_run_id"`
 	ProjectID       string                         `json:"project_id,omitempty"`
+	TaskTitle       string                         `json:"task_title,omitempty"`
+	TaskPrompt      string                         `json:"task_prompt,omitempty"`
 	WorkDir         string                         `json:"work_dir,omitempty"`
 	ActiveModeAgent string                         `json:"active_mode_agent,omitempty"`
 	SkillKey        string                         `json:"skill_key,omitempty"`
