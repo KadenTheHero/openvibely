@@ -1021,15 +1021,19 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				var agentInput = agentSelect ? document.getElementById(agentSelect.getAttribute('data-agent-input')) : null;
 					var modeSelect = form.querySelector('select[id$="-mode-select"]');
 					var modeInput = modeSelect ? document.getElementById(modeSelect.getAttribute('data-mode-input')) : null;
-					var submitBtn = form.querySelector('button[type="submit"]');
-					function safeSubmit() {
-						if (typeof form.requestSubmit === 'function') {
-							form.requestSubmit(submitBtn || undefined);
-							return;
+						var submitBtn = form.querySelector('button[type="submit"]');
+						function markSendScrollIntent() {
+							if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
 						}
-						var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-						form.dispatchEvent(submitEvent);
-					}
+						function safeSubmit() {
+							if (typeof form.requestSubmit === 'function') {
+								form.requestSubmit(submitBtn || undefined);
+								return;
+							}
+							var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+							form.dispatchEvent(submitEvent);
+						}
+						form.addEventListener('submit', markSendScrollIntent);
 
 			// Clear attachments function (registered on window for onclick handlers)
 			window[clearFuncName] = function() {
@@ -1764,46 +1768,89 @@ templ ChatAutoScrollScript() {
 				return existing;
 			};
 
-			window.bindAttachmentImageSmartScroll = function(messagesEl, trackerKey, trackerFallback) {
-				if (!messagesEl || !window.chatAutoScroll) return;
-				var images = messagesEl.querySelectorAll('img[data-chat-attachment-image="true"]');
-				images.forEach(function(img) {
-					if (img.dataset.smartScrollBound === 'true') return;
-					img.dataset.smartScrollBound = 'true';
-					var shouldScroll = false;
-					function snapshotPinnedState() {
-						var liveMessages = messagesEl;
-						if (messagesEl.id) {
-							var resolved = document.getElementById(messagesEl.id);
-							if (resolved) liveMessages = resolved;
-						}
-						var tracker = trackerKey && window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, liveMessages) : trackerFallback;
-						shouldScroll = !tracker || tracker.shouldAutoScroll();
+				window._chatSendScrollIntents = window._chatSendScrollIntents || {};
+
+				window.markChatSendScrollIntent = function(formOrMessagesId) {
+					var messagesId = '';
+					if (typeof formOrMessagesId === 'string') {
+						messagesId = formOrMessagesId;
+					} else if (formOrMessagesId && formOrMessagesId.getAttribute) {
+						var target = formOrMessagesId.getAttribute('hx-target') || '';
+						messagesId = target.charAt(0) === '#' ? target.substring(1) : target;
 					}
-					function scrollAfterImageLayout() {
-						if (!shouldScroll) return;
+					if (!messagesId) return;
+					window._chatSendScrollIntents[messagesId] = true;
+					var messagesEl = document.getElementById(messagesId);
+					var trackerKey = 'scrollTracker_' + messagesId;
+					var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];
+					if (tracker && tracker.resetOnUserSend) tracker.resetOnUserSend();
+				};
+
+				window.consumeChatSendScrollIntent = function(messagesId) {
+					if (!messagesId || !window._chatSendScrollIntents || !window._chatSendScrollIntents[messagesId]) return false;
+					delete window._chatSendScrollIntents[messagesId];
+					return true;
+				};
+
+				window.hasChatSendScrollIntent = function(messagesId) {
+					return !!(messagesId && window._chatSendScrollIntents && window._chatSendScrollIntents[messagesId]);
+				};
+
+				window.scrollChatToBottomAfterLayout = function(messagesEl, smooth) {
+					if (!messagesEl || !window.chatAutoScroll) return;
+					requestAnimationFrame(function() {
 						requestAnimationFrame(function() {
-							requestAnimationFrame(function() {
-								var liveMessages = messagesEl;
-								if (messagesEl.id) {
-									var resolved = document.getElementById(messagesEl.id);
-									if (resolved) liveMessages = resolved;
-								}
-								if (liveMessages && window.chatAutoScroll) {
-									window.chatAutoScroll.scrollToBottom(liveMessages, false);
-								}
-							});
+							var liveMessages = messagesEl;
+							if (messagesEl.id) {
+								var resolved = document.getElementById(messagesEl.id);
+								if (resolved) liveMessages = resolved;
+							}
+							if (liveMessages && window.chatAutoScroll) {
+								window.chatAutoScroll.scrollToBottom(liveMessages, !!smooth);
+							}
 						});
-					}
-					snapshotPinnedState();
-					if (img.complete) {
-						scrollAfterImageLayout();
-						return;
-					}
-					img.addEventListener('load', scrollAfterImageLayout, { once: true });
-					img.addEventListener('error', scrollAfterImageLayout, { once: true });
-				});
-			};
+					});
+				};
+
+				window.bindAttachmentImageSmartScroll = function(messagesEl, trackerKey, trackerFallback) {
+					if (!messagesEl || !window.chatAutoScroll) return;
+					var messagesId = messagesEl.id || '';
+					var hasSendIntent = window.hasChatSendScrollIntent(messagesId);
+					var images = messagesEl.querySelectorAll('img[data-chat-attachment-image="true"]');
+					images.forEach(function(img) {
+						if (img.dataset.smartScrollBound === 'true') return;
+						img.dataset.smartScrollBound = 'true';
+						var shouldScroll = false;
+						function snapshotPinnedState() {
+							var liveMessages = messagesEl;
+							if (messagesEl.id) {
+								var resolved = document.getElementById(messagesEl.id);
+								if (resolved) liveMessages = resolved;
+							}
+							var tracker = trackerKey && window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, liveMessages) : trackerFallback;
+							if (hasSendIntent && tracker) tracker.userScrolledUp = false;
+							shouldScroll = hasSendIntent || !tracker || tracker.shouldAutoScroll();
+						}
+						function scrollAfterImageLayout() {
+							if (!shouldScroll) return;
+							var liveMessages = messagesEl;
+							if (messagesEl.id) {
+								var resolved = document.getElementById(messagesEl.id);
+								if (resolved) liveMessages = resolved;
+							}
+							var tracker = trackerKey && window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, liveMessages) : trackerFallback;
+							if (tracker && !tracker.shouldAutoScroll()) return;
+							window.scrollChatToBottomAfterLayout(liveMessages, false);
+						}
+						snapshotPinnedState();
+						if (img.complete) {
+							scrollAfterImageLayout();
+							return;
+						}
+						img.addEventListener('load', scrollAfterImageLayout, { once: true });
+						img.addEventListener('error', scrollAfterImageLayout, { once: true });
+					});
+				};
 
 			// Persistent store for thinking section open states (survives DOM replacement by morph:outerHTML)
 			if (!window._thinkingOpenStates) window._thinkingOpenStates = {};

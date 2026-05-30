@@ -411,11 +411,18 @@ func TestChatAutoScrollScript_BindsAttachmentImageSmartScroll(t *testing.T) {
 	content := buf.String()
 
 	required := []string{
+		"window.markChatSendScrollIntent = function(formOrMessagesId)",
+		"window.consumeChatSendScrollIntent = function(messagesId)",
+		"window.hasChatSendScrollIntent = function(messagesId)",
+		"window.scrollChatToBottomAfterLayout = function(messagesEl, smooth)",
 		"window.bindAttachmentImageSmartScroll = function(messagesEl, trackerKey, trackerFallback)",
 		`querySelectorAll('img[data-chat-attachment-image="true"]')`,
+		"var hasSendIntent = window.hasChatSendScrollIntent(messagesId);",
 		"snapshotPinnedState();",
 		"var tracker = trackerKey && window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, liveMessages) : trackerFallback;",
-		"shouldScroll = !tracker || tracker.shouldAutoScroll();",
+		"if (hasSendIntent && tracker) tracker.userScrolledUp = false;",
+		"shouldScroll = hasSendIntent || !tracker || tracker.shouldAutoScroll();",
+		"if (tracker && !tracker.shouldAutoScroll()) return;",
 		"img.addEventListener('load', scrollAfterImageLayout, { once: true });",
 		"img.addEventListener('error', scrollAfterImageLayout, { once: true });",
 	}
@@ -423,6 +430,28 @@ func TestChatAutoScrollScript_BindsAttachmentImageSmartScroll(t *testing.T) {
 		if !strings.Contains(content, r) {
 			t.Fatalf("attachment image smart-scroll helper missing %q", r)
 		}
+	}
+}
+
+func TestChatInputForm_MarksSendScrollIntentOnSubmit(t *testing.T) {
+	config := ChatInputFormConfig{
+		FormID:       "chat-form",
+		InputID:      "message-input",
+		PostEndpoint: "/chat/send",
+		TargetID:     "chat-messages",
+	}
+
+	var buf bytes.Buffer
+	if err := ChatInputForm(config).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatInputForm: %v", err)
+	}
+	content := buf.String()
+
+	if !strings.Contains(content, "form.addEventListener('submit', markSendScrollIntent);") {
+		t.Fatal("chat input form should mark scroll intent on any real submit, including button click and Enter")
+	}
+	if !strings.Contains(content, "if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);") {
+		t.Fatal("submit handler should route through the shared send-scroll intent helper")
 	}
 }
 
@@ -1432,6 +1461,9 @@ func TestTaskThreadView_ClearsDraftBeforeSuccessfulThreadSwap(t *testing.T) {
 	if !strings.Contains(content, "window._taskThreadUserScrolledUp = false;") {
 		t.Fatal("beforeRequest should reset thread auto-scroll state for any thread send request")
 	}
+	if !strings.Contains(content, "if (window.markChatSendScrollIntent) window.markChatSendScrollIntent('task-thread-messages');") {
+		t.Fatal("beforeRequest should mark deliberate thread sends for post-swap attachment bottom alignment")
+	}
 	if !strings.Contains(content, "window._taskThreadSavedInput = ''") {
 		t.Fatal("beforeSwap should clear saved thread input on successful thread form swap")
 	}
@@ -1467,6 +1499,28 @@ func TestTaskThreadView_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *tes
 	}
 	if !strings.Contains(content, "window.bindAttachmentImageSmartScroll(target, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker)") {
 		t.Fatal("task thread message-target swaps must bind attachment image smart-scroll on the swapped element")
+	}
+	if !strings.Contains(content, "var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('task-thread-messages') : false;") {
+		t.Fatal("task thread should consume submit scroll intent after HTMX swaps so attachment sends bottom-align")
+	}
+	if !strings.Contains(content, "window.scrollChatToBottomAfterLayout(target, true)") {
+		t.Fatal("task thread message swaps should scroll after layout so variable-sized screenshots are visible")
+	}
+	fullRefreshIdx := strings.Index(content, "target && target.id === 'task-detail-content'")
+	if fullRefreshIdx < 0 {
+		t.Fatal("task thread should handle full task detail content refreshes")
+	}
+	fullRefreshBody := content[fullRefreshIdx:]
+	fullRefreshTrackerInit := strings.Index(fullRefreshBody, "window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages)")
+	fullRefreshBind := strings.Index(fullRefreshBody, "window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker)")
+	if fullRefreshBind < 0 {
+		t.Fatal("task detail content refreshes must bind attachment image smart-scroll")
+	}
+	if fullRefreshTrackerInit < 0 || fullRefreshTrackerInit > fullRefreshBind {
+		t.Fatal("task detail content refreshes must rebind the tracker before attachment image binding")
+	}
+	if !strings.Contains(fullRefreshBody, "window.scrollChatToBottomAfterLayout(chatMessages, true)") {
+		t.Fatal("task detail content refreshes should consume send intent and scroll after layout")
 	}
 }
 

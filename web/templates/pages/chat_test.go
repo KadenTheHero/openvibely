@@ -195,6 +195,15 @@ func TestChatContent_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *testin
 	if count := strings.Count(content, "window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker)"); count < 2 {
 		t.Fatalf("expected chat page to bind attachment image smart-scroll on initial render and HTMX swaps, got %d", count)
 	}
+	if !strings.Contains(content, "var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('chat-messages') : false;") {
+		t.Fatal("chat page should consume submit scroll intent after HTMX swaps so attachment sends bottom-align")
+	}
+	if !strings.Contains(content, "window.scrollChatToBottomAfterLayout(chatMessages, true)") {
+		t.Fatal("chat page should scroll after layout so variable-sized screenshots are visible")
+	}
+	if !strings.Contains(content, "if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory) {") {
+		t.Fatal("chat page should re-evaluate plan prompt after non-streaming swaps")
+	}
 }
 
 func TestChatContent_ClosesChatStreamEventSourcesOnSwapAndNavigation(t *testing.T) {

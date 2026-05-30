@@ -2,8 +2,8 @@ package components
 
 import (
 	"fmt"
-	"time"
 	"github.com/openvibely/openvibely/internal/models"
+	"time"
 )
 
 func derefString(v *string) string {
@@ -119,7 +119,6 @@ templ TaskChainConfigPage(task *models.Task, agents []models.LLMConfig) {
 				<span class="label-text">Enable task chaining</span>
 			</label>
 		</div>
-
 		<div
 			id="chain-config-fields-page"
 			if chainConfig := parseChainConfigForDisplay(task); !chainConfig.Enabled {
@@ -131,34 +130,62 @@ templ TaskChainConfigPage(task *models.Task, agents []models.LLMConfig) {
 					<span class="label-text">Trigger</span>
 				</label>
 				<select name="chain_trigger" class="select select-bordered">
-					<option value="on_completion" if chainConfig := parseChainConfigForDisplay(task); chainConfig.Trigger == "on_completion" || chainConfig.Trigger == "" { selected }>On Task Completion</option>
-					<option value="on_planning_complete" if chainConfig := parseChainConfigForDisplay(task); chainConfig.Trigger == "on_planning_complete" { selected }>On Planning Complete (Opus → Sonnet)</option>
+					<option
+						value="on_completion"
+						if chainConfig := parseChainConfigForDisplay(task); chainConfig.Trigger == "on_completion" || chainConfig.Trigger == "" {
+							selected
+						}
+					>On Task Completion</option>
+					<option
+						value="on_planning_complete"
+						if chainConfig := parseChainConfigForDisplay(task); chainConfig.Trigger == "on_planning_complete" {
+							selected
+						}
+					>On Planning Complete (Opus → Sonnet)</option>
 				</select>
 				<label class="label">
 					<span class="label-text-alt">When should the child task be created?</span>
 				</label>
 			</div>
-
 			<div class="form-control mb-4">
 				<label class="label">
 					<span class="label-text">Child Task Category</span>
 				</label>
 				<select name="chain_child_category" class="select select-bordered">
-					<option value="" if chainConfig := parseChainConfigForDisplay(task); chainConfig.ChildCategory == "" { selected }>Same as parent</option>
-					<option value="active" if chainConfig := parseChainConfigForDisplay(task); chainConfig.ChildCategory == "active" { selected }>Active (run immediately)</option>
-					<option value="backlog" if chainConfig := parseChainConfigForDisplay(task); chainConfig.ChildCategory == "backlog" { selected }>Backlog</option>
+					<option
+						value=""
+						if chainConfig := parseChainConfigForDisplay(task); chainConfig.ChildCategory == "" {
+							selected
+						}
+					>Same as parent</option>
+					<option
+						value="active"
+						if chainConfig := parseChainConfigForDisplay(task); chainConfig.ChildCategory == "active" {
+							selected
+						}
+					>Active (run immediately)</option>
+					<option
+						value="backlog"
+						if chainConfig := parseChainConfigForDisplay(task); chainConfig.ChildCategory == "backlog" {
+							selected
+						}
+					>Backlog</option>
 				</select>
 				<label class="label">
 					<span class="label-text-alt">Which category should the child task be placed in?</span>
 				</label>
 			</div>
-
 			<div class="form-control mb-4">
 				<label class="label">
 					<span class="label-text">Child Task Model</span>
 				</label>
 				<select name="chain_child_agent_id" class="select select-bordered">
-					<option value="" if chainConfig := parseChainConfigForDisplay(task); chainConfig.ChildAgentID == "" { selected }>Use default model</option>
+					<option
+						value=""
+						if chainConfig := parseChainConfigForDisplay(task); chainConfig.ChildAgentID == "" {
+							selected
+						}
+					>Use default model</option>
 					for _, agent := range agents {
 						<option
 							value={ agent.ID }
@@ -177,7 +204,6 @@ templ TaskChainConfigPage(task *models.Task, agents []models.LLMConfig) {
 					<span class="label-text-alt">Which model should execute the child task?</span>
 				</label>
 			</div>
-
 			<div class="form-control mb-4">
 				<label class="label">
 					<span class="label-text">Child Task Model Override</span>
@@ -194,7 +220,6 @@ templ TaskChainConfigPage(task *models.Task, agents []models.LLMConfig) {
 				</label>
 			</div>
 		</div>
-
 		<div class="flex gap-2">
 			<button type="submit" class="btn btn-primary btn-sm">
 				Save Chaining Configuration
@@ -433,20 +458,21 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 					}
 					var detail = event.detail || {};
 					var requestConfig = detail.requestConfig || {};
-					var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
-					var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
-					var isPost = requestMethod === 'POST';
-					var isThreadPath = requestPath.indexOf('/thread') !== -1;
-					var isThreadSendRequest = isPost && isThreadPath;
-					if (isThreadSendRequest) {
-						var tracker = window._taskThreadPageTracker;
-						if (tracker) tracker.resetOnUserSend();
-						var taskId = _taskThreadTaskId();
-						var key = _taskThreadScrollStateKey(taskId);
-						window._taskThreadScrollStates = window._taskThreadScrollStates || {};
-						if (key) window._taskThreadScrollStates[key] = { scrollTop: 0, userScrolledUp: false, pinned: true };
-						window._taskThreadUserScrolledUp = false;
-					}
+						var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
+						var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
+						var isPost = requestMethod === 'POST';
+						var isThreadPath = requestPath.indexOf('/thread') !== -1;
+						var isThreadSendRequest = isPost && isThreadPath;
+						if (isThreadSendRequest) {
+							if (window.markChatSendScrollIntent) window.markChatSendScrollIntent('task-thread-messages');
+							var tracker = window._taskThreadPageTracker;
+							if (tracker) tracker.resetOnUserSend();
+							var taskId = _taskThreadTaskId();
+							var key = _taskThreadScrollStateKey(taskId);
+							window._taskThreadScrollStates = window._taskThreadScrollStates || {};
+							if (key) window._taskThreadScrollStates[key] = { scrollTop: 0, userScrolledUp: false, pinned: true };
+							window._taskThreadUserScrolledUp = false;
+						}
 					// Block polling requests to task-thread-view while SSE streaming
 					// is active or sidebar navigation is in progress
 					if (triggerEl && triggerEl.id === 'task-thread-view') {
@@ -523,48 +549,77 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 					}
 				});
 
-					document.body.addEventListener('htmx:afterSwap', function(event) {
-						var target = event.detail.target;
-						if (target && target.id === 'task-thread-messages') {
-							// Skip expensive DOM work if navigating away via sidebar
-							if (window._sidebarNavigating) return;
-							if (window.cleanAssistantMessages) window.cleanAssistantMessages(target);
-							if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(target, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
-							// Auto-scroll unless user manually scrolled up
-							if (!window._taskThreadUserScrolledUp) {
-								requestAnimationFrame(function() {
-									if (target && window.chatAutoScroll) {
-										window.chatAutoScroll.scrollToBottom(target, true);
+						document.body.addEventListener('htmx:afterSwap', function(event) {
+							var target = event.detail.target;
+							if (target && target.id === 'task-thread-messages') {
+								// Skip expensive DOM work if navigating away via sidebar
+								if (window._sidebarNavigating) return;
+								// Re-attach tracker if the DOM element changed before binding image load handlers.
+								if (target !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {
+									if (window.ChatScrollTracker) {
+										if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
+										window._taskThreadPageTracker = new window.ChatScrollTracker(target);
+										window._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;
+										_saveTaskThreadScrollState();
 									}
-								});
-							}
-							// Re-attach tracker if the DOM element changed
-							if (target !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {
-								if (window.ChatScrollTracker) {
-									if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
-									window._taskThreadPageTracker = new window.ChatScrollTracker(target);
-									window._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;
-									_saveTaskThreadScrollState();
+								}
+								if (window.cleanAssistantMessages) window.cleanAssistantMessages(target);
+								if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(target, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
+								// Auto-scroll on deliberate sends even when attachments change layout;
+								// otherwise respect explicit user scroll-up intent.
+								var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('task-thread-messages') : false;
+								if (sentByUser || !window._taskThreadUserScrolledUp) {
+									if (window.scrollChatToBottomAfterLayout) {
+										window.scrollChatToBottomAfterLayout(target, true);
+									} else {
+										requestAnimationFrame(function() {
+											if (target && window.chatAutoScroll) {
+												window.chatAutoScroll.scrollToBottom(target, true);
+											}
+										});
+									}
 								}
 							}
-						}
-						// Handle polling updates to task-thread-view (e.g., task completion status)
-						else if (target && target.id === 'task-thread-view') {
-							// Skip expensive DOM work if navigating away via sidebar
-							if (window._sidebarNavigating) return;
+							// Handle polling updates to task-thread-view (e.g., task completion status)
+							else if (target && target.id === 'task-thread-view') {
+								// Skip expensive DOM work if navigating away via sidebar
+								if (window._sidebarNavigating) return;
+								var chatMessages = document.getElementById('task-thread-messages');
+								if (chatMessages) {
+									// Re-attach tracker if the DOM element changed before binding image load handlers.
+									if (chatMessages !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {
+										if (window.ChatScrollTracker) {
+											if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
+											window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);
+											window._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;
+											_saveTaskThreadScrollState();
+										}
+									}
+									if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+									if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
+									// Auto-scroll on deliberate sends even when attachments change layout;
+									// otherwise respect explicit user scroll-up intent.
+									var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('task-thread-messages') : false;
+									if (sentByUser || !window._taskThreadUserScrolledUp) {
+										if (window.scrollChatToBottomAfterLayout) {
+											window.scrollChatToBottomAfterLayout(chatMessages, true);
+										} else {
+											requestAnimationFrame(function() {
+												if (chatMessages && window.chatAutoScroll) {
+													window.chatAutoScroll.scrollToBottom(chatMessages, true);
+												}
+											});
+										}
+									}
+								}
+								if (window.cleanAssistantMessages) window.cleanAssistantMessages(document.getElementById('task-thread-messages'));
+								if (window._initThreadStreaming) window._initThreadStreaming();
+							}
+						// Also handle full page refreshes on task-detail-content
+						else if (target && target.id === 'task-detail-content') {
 							var chatMessages = document.getElementById('task-thread-messages');
 							if (chatMessages) {
-								if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
-								if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
-								// Auto-scroll unless user manually scrolled up
-								if (!window._taskThreadUserScrolledUp) {
-									requestAnimationFrame(function() {
-										if (chatMessages && window.chatAutoScroll) {
-											window.chatAutoScroll.scrollToBottom(chatMessages, true);
-										}
-									});
-								}
-								// Re-attach tracker if the DOM element changed
+								// Re-attach tracker if the DOM element changed before binding image load handlers.
 								if (chatMessages !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {
 									if (window.ChatScrollTracker) {
 										if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
@@ -573,23 +628,30 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 										_saveTaskThreadScrollState();
 									}
 								}
-							}
-							if (window.cleanAssistantMessages) window.cleanAssistantMessages(document.getElementById('task-thread-messages'));
-							if (window._initThreadStreaming) window._initThreadStreaming();
-						}
-						// Also handle full page refreshes on task-detail-content
-						else if (target && target.id === 'task-detail-content') {
-							var chatMessages = document.getElementById('task-thread-messages');
-							if (chatMessages) {
 								if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
 								if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
+								// Auto-scroll on deliberate sends even when attachments change layout;
+								// otherwise respect explicit user scroll-up intent.
+								var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('task-thread-messages') : false;
+								if (sentByUser || !window._taskThreadUserScrolledUp) {
+									if (window.scrollChatToBottomAfterLayout) {
+										window.scrollChatToBottomAfterLayout(chatMessages, true);
+									} else {
+										requestAnimationFrame(function() {
+											if (chatMessages && window.chatAutoScroll) {
+												window.chatAutoScroll.scrollToBottom(chatMessages, true);
+											}
+										});
+									}
+								}
 							}
 						}
 						// Restore textarea value after morph polling or full page refresh
 						_restoreTaskThreadDraftToTextarea();
-					});			}
+					});
+			}
 			</script>
-		</div>
+	</div>
 }
 
 // TaskThreadFollowupResponse renders user message + streaming assistant for a task thread follow-up.

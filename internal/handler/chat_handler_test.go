@@ -2962,7 +2962,9 @@ func TestHandler_Chat_PlanCompletionPrompt_SwapDoesNotClearStreamingFlag(t *test
 	// In the afterSwap handler for chat messages, stream flag should NOT be cleared.
 	swapIdx := strings.Index(body, "isChatMessagesSwap || isChatRootSwap")
 	require.NotEqual(t, -1, swapIdx, "afterSwap chat check must exist")
-	swapBody := body[swapIdx : swapIdx+1000]
+	swapEndIdx := strings.Index(body[swapIdx:], "// Plan completion prompt buttons")
+	require.NotEqual(t, -1, swapEndIdx, "afterSwap chat handler end must exist")
+	swapBody := body[swapIdx : swapIdx+swapEndIdx]
 
 	assert.Contains(t, swapBody, "_chatWebSendInProgress = false",
 		"HTMX swap should clear only web send dedupe flag")
