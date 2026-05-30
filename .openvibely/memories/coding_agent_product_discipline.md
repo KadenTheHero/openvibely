@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-05-29
+updated: 2026-05-30
 source: consolidation
-source_id: memory_consolidation_2026_05_29
+source_id: memory_consolidation_2026_05_30
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -24,6 +24,7 @@ Implementation discipline:
 
 Communication and review behavior:
 - When drafting reusable coding-agent context or instructions, favor generalized patterns and broad behavioral rules over narrow examples. The user values useful improvisation, constrained by explicit assumption discipline rather than unsupported product or architecture guesses.
+- When editing project-facing documentation, do not over-trim existing useful README content or remove commented multi-line command examples without a specific reason; the user values those comments because GitHub renders copy buttons for fenced blocks. Prefer targeted enhancements that preserve liked structure and fold in stronger positioning/selling points from source docs. Keep the root `docs/` directory in sync with README/docs-site positioning when documentation changes touch overlapping product concepts. Consolidate duplicate README value/feature sections into a stronger table when possible, and avoid explaining helper-script internals such as `./start.sh` in the README unless specifically requested. For published docs links in README/project-facing docs, prefer markup that requests opening in a new tab (`target="_blank"` with `rel="noopener noreferrer"`) where the renderer supports it, while keeping local relative links as normal Markdown.
 - When summarizing code changes or implementation results, be concrete: cite specific files, symbols/handlers/tests changed, behavior affected, and verification performed when that context is available.
 - When the user asks for a broad review before completion, actively look for mistakes, unintended diff, dead code, and verification gaps. Check the diff plus relevant build/test/vet/static analysis where practical, and report tool limitations rather than implying unsupported confidence.
 - When the user challenges whether prior changes are beneficial, audit each change or commit individually against current code behavior, not only by commit message. Separate unrelated baseline/merge commits from the review, classify changes as keep, partial, redundant, or risky, and recommend cleanup instead of defending all accumulated work.

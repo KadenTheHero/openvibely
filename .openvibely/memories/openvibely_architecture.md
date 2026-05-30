@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-05-29
+updated: 2026-05-30
 source: consolidation
-source_id: memory_consolidation_2026_05_29
+source_id: memory_consolidation_2026_05_30
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -44,3 +44,4 @@ Shared conventions:
 - Use existing components/partials and shared CSS tokens instead of duplicating styles.
 - Swagger/OpenAPI is generated with `swag init`; generated docs live under `docs/` and the UI is mounted at `/swagger/*`.
 - User-facing documentation also lives under `docs/`, generally as concise `*-user-guide.md` Markdown pages that match the existing guide structure.
+- The root README should stay succinct and high-level, pointing readers to the published docs at `https://docs.openvibely.ai` and the docs source repo at `/Users/dubee/go/src/github.com/openvibely/openvibely-doc`; detailed environment-variable reference belongs in `docs/environment.md`, not embedded in the README.
