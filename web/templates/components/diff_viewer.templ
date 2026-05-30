@@ -50,13 +50,13 @@ type DiffLine struct {
 
 const (
 	// Diff rendering load limits.
-	maxDiffFiles               = 300
-	maxLoadableTotalDiffLines  = 20000
-	maxLoadableTotalDiffChars  = 1 * 1024 * 1024
-	maxLoadableFileDiffLines   = 20000
-	maxLoadableFileDiffChars   = 500 * 1024
-	autoLoadFileDiffLines      = 400
-	autoLoadFileDiffChars      = 20 * 1024
+	maxDiffFiles              = 300
+	maxLoadableTotalDiffLines = 20000
+	maxLoadableTotalDiffChars = 1 * 1024 * 1024
+	maxLoadableFileDiffLines  = 20000
+	maxLoadableFileDiffChars  = 500 * 1024
+	autoLoadFileDiffLines     = 400
+	autoLoadFileDiffChars     = 20 * 1024
 )
 
 // DiffFileRenderMeta controls how a file should render under diff limits.
@@ -538,7 +538,6 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				</div>
 			</div>
 		</div>
-
 		<!-- File List -->
 		if len(metas) > 1 {
 			<div class="mb-4 p-3 bg-base-200 rounded-lg">
@@ -566,7 +565,6 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				}
 			}
 		</div>
-
 		<div id="diff-content-split" class="space-y-4 hidden">
 			for _, m := range metas {
 				if m.AutoLoad {
@@ -576,7 +574,6 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				}
 			}
 		</div>
-
 		<!-- Inline review JavaScript -->
 		<script>
 			// Session-level state for diff file expand/collapse, scoped by viewer.
@@ -1352,7 +1349,6 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 			}
 
 		</script>
-
 		<style>
 			/* Sticky file headers within the diff viewer.
 			   The Task Detail page scroll container is #main-content. The
@@ -1609,33 +1605,33 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 				<div class="overflow-x-auto">
 					<table class="diff-table w-full text-xs font-mono border-collapse">
 						for _, hunk := range f.Hunks {
-						<tr class="diff-hunk-header">
-							<td colspan="3" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
-						</tr>
-						for _, line := range hunk.Lines {
-							<tr
-								class={ "diff-review-line", inlineLineClass(line.Type) }
-								data-file-path={ f.Path }
-								data-line-num={ fmt.Sprintf("%d", lineNumForReview(line)) }
-								data-line-type={ lineTypeForDiff(line.Type) }
-							>
-								<td class="diff-line-num text-right px-2 py-0 select-none opacity-40 w-12 border-r border-base-300 relative">
-									if line.OldNum > 0 {
-										{ fmt.Sprintf("%d", line.OldNum) }
-									}
-								</td>
-								<td class="diff-line-num text-right px-2 py-0 select-none opacity-40 w-12 border-r border-base-300 relative">
-									if line.NewNum > 0 {
-										{ fmt.Sprintf("%d", line.NewNum) }
-									}
-									if lineHasComment(commentMap, f.Path, line) {
-									}
-									<button type="button" class="diff-add-comment-btn" onclick="handleAddCommentClick(event)" title="Add comment">+</button>
-								</td>
-								<td class="diff-line-content px-3 py-0 whitespace-pre-wrap break-all">
-									<span class="diff-marker select-none opacity-50 inline-block w-4">{ lineMarker(line.Type) }</span>{ line.Content }
-								</td>
+							<tr class="diff-hunk-header">
+								<td colspan="3" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
 							</tr>
+							for _, line := range hunk.Lines {
+								<tr
+									class={ "diff-review-line", inlineLineClass(line.Type) }
+									data-file-path={ f.Path }
+									data-line-num={ fmt.Sprintf("%d", lineNumForReview(line)) }
+									data-line-type={ lineTypeForDiff(line.Type) }
+								>
+									<td class="diff-line-num text-right px-2 py-0 select-none opacity-40 w-12 border-r border-base-300 relative">
+										if line.OldNum > 0 {
+											{ fmt.Sprintf("%d", line.OldNum) }
+										}
+									</td>
+									<td class="diff-line-num text-right px-2 py-0 select-none opacity-40 w-12 border-r border-base-300 relative">
+										if line.NewNum > 0 {
+											{ fmt.Sprintf("%d", line.NewNum) }
+										}
+										if lineHasComment(commentMap, f.Path, line) {
+										}
+										<button type="button" class="diff-add-comment-btn" onclick="handleAddCommentClick(event)" title="Add comment">+</button>
+									</td>
+									<td class="diff-line-content px-3 py-0 whitespace-pre-wrap break-all">
+										<span class="diff-marker select-none opacity-50 inline-block w-4">{ lineMarker(line.Type) }</span>{ line.Content }
+									</td>
+								</tr>
 								if lineHasComment(commentMap, f.Path, line) {
 									for _, comment := range getLineComments(commentMap, f.Path, line) {
 										<tr
@@ -1669,7 +1665,8 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 	</div>
 }
 
-templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-state-key={ diffViewerStateKey(metas, "") }>
+templ diffViewerContent(metas []DiffFileRenderMeta) {
+	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-state-key={ diffViewerStateKey(metas, "") }>
 		<!-- Toolbar -->
 		<div class="flex items-center justify-between mb-4">
 			<div class="flex items-center gap-2">
@@ -1708,7 +1705,6 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 				</button>
 			</div>
 		</div>
-
 		<!-- File List -->
 		if len(metas) > 1 {
 			<div class="mb-4 p-3 bg-base-200 rounded-lg">
@@ -1736,7 +1732,6 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 				}
 			}
 		</div>
-
 		<div id="diff-content-split" class="space-y-4 hidden">
 			for _, m := range metas {
 				if m.AutoLoad {
@@ -1746,7 +1741,6 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 				}
 			}
 		</div>
-
 		<style>
 			/* Sticky file headers within the diff viewer.
 			   The card cannot use any overflow other than visible —
@@ -1801,7 +1795,7 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {	<div id="diff-viewer" clas
 					color: var(--ov-diff-del-fg);
 				}
 			</style>
-			<script>
+		<script>
 				// Session-level state for diff file expand/collapse, scoped by viewer.
 				if (!window._diffFileState) window._diffFileState = {};
 				function diffFileStateBucket() {
@@ -2167,32 +2161,32 @@ templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 									data-review-layout="split"
 									data-review-side="right"
 								>
-								<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300", splitCellBg(pair.Left.Type) }>
-									if pair.Left.Type != "empty" && pair.Left.OldNum > 0 {
-										{ fmt.Sprintf("%d", pair.Left.OldNum) }
-									}
-								</td>
-								<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all border-r border-base-300", splitCellBg(pair.Left.Type) }>
-									if pair.Left.Type != "empty" {
-										{ pair.Left.Content }
-									}
-								</td>
-								<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300 relative", splitCellBg(pair.Right.Type) }>
-									if pair.Right.Type != "empty" && pair.Right.NewNum > 0 {
-										{ fmt.Sprintf("%d", pair.Right.NewNum) }
-									}
-									if pair.Right.Type != "empty" && lineHasComment(commentMap, f.Path, pair.Right) {
-									}
-									if pair.Right.Type != "empty" {
-										<button type="button" class="diff-add-comment-btn" onclick="handleAddCommentClick(event)" title="Add comment">+</button>
-									}
-								</td>
-								<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all", splitCellBg(pair.Right.Type) }>
-									if pair.Right.Type != "empty" {
-										{ pair.Right.Content }
-									}
-								</td>
-							</tr>
+									<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300", splitCellBg(pair.Left.Type) }>
+										if pair.Left.Type != "empty" && pair.Left.OldNum > 0 {
+											{ fmt.Sprintf("%d", pair.Left.OldNum) }
+										}
+									</td>
+									<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all border-r border-base-300", splitCellBg(pair.Left.Type) }>
+										if pair.Left.Type != "empty" {
+											{ pair.Left.Content }
+										}
+									</td>
+									<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300 relative", splitCellBg(pair.Right.Type) }>
+										if pair.Right.Type != "empty" && pair.Right.NewNum > 0 {
+											{ fmt.Sprintf("%d", pair.Right.NewNum) }
+										}
+										if pair.Right.Type != "empty" && lineHasComment(commentMap, f.Path, pair.Right) {
+										}
+										if pair.Right.Type != "empty" {
+											<button type="button" class="diff-add-comment-btn" onclick="handleAddCommentClick(event)" title="Add comment">+</button>
+										}
+									</td>
+									<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all", splitCellBg(pair.Right.Type) }>
+										if pair.Right.Type != "empty" {
+											{ pair.Right.Content }
+										}
+									</td>
+								</tr>
 								if pair.Right.Type != "empty" && lineHasComment(commentMap, f.Path, pair.Right) {
 									for _, comment := range getLineComments(commentMap, f.Path, pair.Right) {
 										<tr
@@ -2584,41 +2578,34 @@ templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view st
 		id={ diffFileCardID(meta.Index, view) }
 		class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2"
 	>
+		@diffFileHeader(meta.File, meta.Index, true, view == "split")
 		<div
-			class="diff-file-header sticky z-20 bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2"
-			data-diff-status={ diffFileStatusValue(meta.File.Status) }
-		>
-			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-			</svg>
-			<span class={ diffFileStatusBadgeClass(meta.File.Status), "shrink-0" } title={ diffFileStatusLabel(meta.File.Status) }>{ diffFileStatusLabel(meta.File.Status) }</span>
-			if meta.File.IsBinary {
-				<span class="badge badge-ghost badge-sm shrink-0" title="Binary file">Binary</span>
-			}
-			<span class="flex items-center gap-1 min-w-0 flex-1">
-				<span class="font-mono text-sm font-medium truncate min-w-0" title={ diffFileDisplayPath(meta.File) }>{ diffFileDisplayPath(meta.File) }</span>
-				@diffFileCopyPathButton(diffFileDisplayPath(meta.File))
-			</span>
-			@diffStatsBadge(meta.File)
-		</div>
-		<div class="diff-file-body p-6 bg-base-100 text-center">
-			if meta.CanLoadOnDemand {
-				<div class="text-sm font-medium mb-1">Large file diff not shown by default</div>
-				<div class="text-xs opacity-60 mb-4">
-					Auto-load is limited to { fmt.Sprintf("%d lines / %s", autoLoadFileDiffLines, formatByteSize(autoLoadFileDiffChars)) } per file.
-				</div>
-				<button
-					class="btn btn-sm btn-primary"
-					hx-get={ fmt.Sprintf("/tasks/%s/changes/file?file_index=%d&view=%s&review=%t", taskID, meta.Index, view, reviewMode) }
-					hx-target={ diffFileCardTargetSelector(meta.Index, view) }
-					hx-swap="outerHTML"
-				>
-					Load diff
-				</button>
+			if view == "split" {
+				id={ fmt.Sprintf("diff-body-split-%d", meta.Index) }
 			} else {
-				<div class="text-sm font-medium mb-1">Diff not available</div>
-				<div class="text-xs opacity-60">{ meta.BlockedReason }</div>
+				id={ fmt.Sprintf("diff-body-%d", meta.Index) }
 			}
+			class="diff-file-body overflow-hidden transition-all duration-300 ease-in-out"
+		>
+			<div class="p-6 bg-base-100 text-center">
+				if meta.CanLoadOnDemand {
+					<div class="text-sm font-medium mb-1">Large file diff not shown by default</div>
+					<div class="text-xs opacity-60 mb-4">
+						Auto-load is limited to { fmt.Sprintf("%d lines / %s", autoLoadFileDiffLines, formatByteSize(autoLoadFileDiffChars)) } per file.
+					</div>
+					<button
+						class="btn btn-sm btn-primary"
+						hx-get={ fmt.Sprintf("/tasks/%s/changes/file?file_index=%d&view=%s&review=%t", taskID, meta.Index, view, reviewMode) }
+						hx-target={ diffFileCardTargetSelector(meta.Index, view) }
+						hx-swap="outerHTML"
+					>
+						Load diff
+					</button>
+				} else {
+					<div class="text-sm font-medium mb-1">Diff not available</div>
+					<div class="text-xs opacity-60">{ meta.BlockedReason }</div>
+				}
+			</div>
 		</div>
 	</div>
 }
