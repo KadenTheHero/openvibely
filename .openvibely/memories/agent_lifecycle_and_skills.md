@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-05-29
-source: after_complete
-source_id: c1edd16cd37cd6eb87e55f0d70cd26ea
+updated: 2026-05-30
+source: consolidation
+source_id: memory_consolidation_2026_05_30
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -41,8 +41,7 @@ Skill Curator and post-task learning:
 - Hook context/tool descriptions should label assigned agent identity, purpose, selected agent-owned skills, selected standalone skills, provenance, and write policy explicitly; do not rely on path inference.
 - If uncertain about placement, prefer standalone skill updates or a proposed-change outcome rather than mutating. Avoid bulk-copying standalone or unrelated skills into an agent.
 - Assigned-agent skill mutation for post-task learning should use a server-scoped agent-owned mutation path such as `agent_skill_manage`, constrained to the current task’s assigned agent and selected/owned skills, not arbitrary `skill_manage` writes.
-- Ordinary task agents that create or change skills may lack index-file access. Tool descriptions should tell them to update indexes only when they have access; otherwise mention changed skills in the completion summary for the after-complete hook to index.
-- Skill consolidation is a maintenance/mutation action. Merge or retire duplicate skills only when the session has file/mutation tools and preserves affected indexes; output-contract-only hooks should recommend consolidation rather than claiming it was performed.
+- Agents/hooks that create, change, consolidate, or retire skills must have the needed mutation or scoped-file access and preserve affected indexes. If a session lacks write access, it should report the required index/consolidation follow-up rather than claiming the mutation happened.
 
 Lifecycle hooks and routing:
 - Lifecycle hooks are implemented around `internal/lifecycle/` and task execution/server setup. Durable concepts include `route_task`, `before_run`, `after_complete`, `scheduled`, task-mode bookkeeping, blocking versus non-blocking execution, idempotency/audit rows, recursion prevention, and strict validation of hook types/tool access.
@@ -60,10 +59,9 @@ Lifecycle hooks and routing:
 - A lifecycle hook `OutputContract` constrains the final structured result stored/validated by lifecycle code, not the agent’s working notes, tool use, or reasoning during the session.
 
 Scheduled maintenance and UI direction:
-- Prefer modeling scheduled maintenance as normal scheduled tasks assigned to agents and running through the usual task lifecycle, unless a runbook explicitly requires invisible background hooks.
+- Prefer modeling scheduled maintenance as normal scheduled tasks assigned to agents and running through the usual task lifecycle, unless a runbook explicitly requires invisible background hooks. System-agent scheduled tasks should respect explicit assigned agent and selected/manual skill configuration instead of running ordinary `route_task` skill routing.
 - Let loaded agent/skill declarations drive scheduled-task runtime tool grants rather than worker-side hardcoded maintenance tools. Memory-consolidation specifics live in `managed_memory.md`.
 - Skill-library maintenance should use Skill Curator with `maintain_skill_library`. It may inspect agent namespaces and available skills for context, but should not create, edit, archive, route, reassign, or otherwise manage standalone user-controlled agents unless explicitly authorized.
-- System-agent scheduled tasks should respect explicit assigned agent and selected/manual skill configuration instead of running ordinary `route_task` skill routing.
 - Lifecycle direct-call scoped-file setup must pass absolute directories for extra scopes such as `global_agents`, resolving configured/built-in roots before constructing `ScopedFiles` extras.
 - The left navigation includes a standalone Skills page alongside Models, Agents, Channels, etc. It should use shared shell/sidebar conventions, searchable clickable cards, a kebab Edit/Delete menu, Agents-style scope badges, no displayed skill-key metadata line, and a frontmatter-seeded add modal for required `openvibely.agent_skill` YAML.
 - Editing an existing standalone skill should show scope as disabled/read-only unless true project/global move semantics exist. Importing standalone skills should be an explicit Skills-page action that runs `SKILL.md` through the importer so `SKILLS.md` stays consistent, preserves safe package-relative files from the uploaded package, and shows package files read-only in the edit modal.

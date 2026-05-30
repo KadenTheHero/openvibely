@@ -43,5 +43,4 @@ Shared conventions:
 - Do not redeclare shared helpers in templates or JS; reuse existing utilities and feature-detect optional elements.
 - Use existing components/partials and shared CSS tokens instead of duplicating styles.
 - Swagger/OpenAPI is generated with `swag init`; generated docs live under `docs/` and the UI is mounted at `/swagger/*`.
-- User-facing documentation also lives under `docs/`, generally as concise `*-user-guide.md` Markdown pages that match the existing guide structure.
-- The root README should stay succinct and high-level, pointing readers to the published docs at `https://docs.openvibely.ai` and the docs source repo at `/Users/dubee/go/src/github.com/openvibely/openvibely-doc`; detailed environment-variable reference belongs in `docs/environment.md`, not embedded in the README.
+- User-facing documentation also lives under `docs/`, generally as concise `*-user-guide.md` Markdown pages that match the existing guide structure. README editing preferences and docs-site positioning live in `coding_agent_product_discipline.md`.

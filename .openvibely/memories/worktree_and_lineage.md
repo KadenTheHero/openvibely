@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-05-29
-source: consolidation
-source_id: memory_consolidation_2026_05_29
+updated: 2026-05-30
+source: after_complete
+source_id: 25cb5b146d8d578c0885e4e26761bb74
 confidence: high
 title: Worktree and Lineage
 ---
