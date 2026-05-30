@@ -12,6 +12,7 @@ type LifecycleExecutionView struct {
 	Status           string               `json:"status"`
 	OutputContract   string               `json:"output_contract"`
 	Summary          string               `json:"summary,omitempty"`
+	SelectedSkills   []string             `json:"selected_skills,omitempty"`
 	SelectedMemories []SelectedMemoryView `json:"selected_memories,omitempty"`
 	Error            string               `json:"error,omitempty"`
 	StartedAt        time.Time            `json:"started_at"`

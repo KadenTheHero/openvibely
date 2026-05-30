@@ -55,7 +55,8 @@ Lifecycle hooks and routing:
 - Any task with an explicit assigned primary agent should skip skill routing and use that agent’s curated/default or manual skill selection. Skill routing must not override deliberate assignment.
 - Maintenance/system agents should be blocked from auto-routing through `selectable_as_primary=false`, not hardcoded name checks. That flag prevents router auto-selection but should not ban explicit user/API assignment, scheduled tasks, or other deliberate invocations.
 - Task detail UI should show the selected primary task agent from persisted assignment/effective mode. Lifecycle activity rows identify hook executors, not necessarily the routed primary task agent.
-- Lifecycle/task detail visibility should show router-selected skills and enough raw hook execution detail to debug decisions, including prompt snapshots, tool calls, raw final output, validated JSON, duration, model, and provider.
+- Lifecycle/task detail visibility should show prompt-safe structured hook decisions. `route_task` selected skills and `before_run`/`recall_memory` selected memory identifiers should render as compact route-task-style badge/pill rows, while freeform hooks such as `observe_task_for_learning` remain prose summaries. Recall-memory UI should dedupe identifiers across rich `selected_memories` metadata and fallback `sources`, avoid stacked duplicate list entries, and avoid dumping raw memory content.
+- Expanded lifecycle execution detail remains useful for debugging decisions, including prompt snapshots, tool calls, raw final output, validated JSON, duration, model, and provider, but must stay scoped to the selected hook/task context.
 - A lifecycle hook `OutputContract` constrains the final structured result stored/validated by lifecycle code, not the agent’s working notes, tool use, or reasoning during the session.
 
 Scheduled maintenance and UI direction:

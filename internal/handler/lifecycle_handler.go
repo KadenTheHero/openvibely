@@ -253,6 +253,7 @@ func toLifecycleExecutionView(e models.LifecycleExecution) viewmodels.LifecycleE
 	}
 	if e.OutputJSON != "" {
 		v.Summary = extractStructuredSummary(e.OutputContract, e.OutputJSON)
+		v.SelectedSkills = extractSelectedSkills(e.OutputContract, e.OutputJSON)
 		v.SelectedMemories = extractSelectedMemoryViews(e, e.OutputJSON)
 	}
 	return v
@@ -304,20 +305,47 @@ func extractStructuredSummary(contract models.LifecycleOutputContract, raw strin
 }
 
 func selectedSkillsSummary(probe map[string]any) string {
+	parts := selectedSkillsFromProbe(probe)
+	if len(parts) == 0 {
+		return ""
+	}
+	return "Selected skills: " + strings.Join(parts, ", ")
+}
+
+func extractSelectedSkills(contract models.LifecycleOutputContract, raw string) []string {
+	if contract != models.OutputContractSelectedSkills {
+		return nil
+	}
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(raw), &probe); err != nil {
+		return nil
+	}
+	return selectedSkillsFromProbe(probe)
+}
+
+func selectedSkillsFromProbe(probe map[string]any) []string {
 	rawSkills, _ := probe["skills"].([]any)
 	if len(rawSkills) == 0 {
 		rawSkills, _ = probe["selected_skills"].([]any)
 	}
 	parts := make([]string, 0, len(rawSkills))
+	seen := map[string]struct{}{}
 	for _, skill := range rawSkills {
-		if s, ok := skill.(string); ok && strings.TrimSpace(s) != "" {
-			parts = append(parts, strings.TrimSpace(s))
+		s, ok := skill.(string)
+		if !ok {
+			continue
 		}
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		parts = append(parts, s)
 	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "Selected skills: " + strings.Join(parts, ", ")
+	return parts
 }
 
 const maxLifecycleMemoryDetailLen = 240
@@ -337,35 +365,42 @@ func extractSelectedMemoryViews(e models.LifecycleExecution, raw string) []viewm
 		if strings.TrimSpace(memory.File) != "" && file == "" {
 			continue
 		}
-		view := viewmodels.SelectedMemoryView{
+		topic := truncateLifecycleMemoryDetail(memory.Topic)
+		identifier := selectedMemoryIdentifier(file, topic)
+		if identifier == "" {
+			continue
+		}
+		if _, ok := seen[identifier]; ok {
+			continue
+		}
+		seen[identifier] = struct{}{}
+		out = append(out, viewmodels.SelectedMemoryView{
 			File:    file,
-			Topic:   truncateLifecycleMemoryDetail(memory.Topic),
+			Topic:   topic,
 			Summary: truncateLifecycleMemoryDetail(memory.Summary),
 			Snippet: truncateLifecycleMemoryDetail(memory.Snippet),
-		}
-		if view.File == "" && view.Topic == "" && view.Summary == "" && view.Snippet == "" {
-			continue
-		}
-		key := view.File + "\x00" + view.Topic + "\x00" + view.Summary + "\x00" + view.Snippet
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, view)
+		})
 	}
 	for _, source := range cb.Sources {
 		file := sanitizeMemoryIdentifier(source)
 		if file == "" {
 			continue
 		}
-		key := file + "\x00\x00\x00"
-		if _, ok := seen[key]; ok {
+		identifier := selectedMemoryIdentifier(file, "")
+		if _, ok := seen[identifier]; ok {
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[identifier] = struct{}{}
 		out = append(out, viewmodels.SelectedMemoryView{File: file})
 	}
 	return out
+}
+
+func selectedMemoryIdentifier(file, topic string) string {
+	if file != "" {
+		return file
+	}
+	return topic
 }
 
 func sanitizeMemoryIdentifier(value string) string {

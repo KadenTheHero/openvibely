@@ -796,28 +796,29 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 						var cls = map[status] || 'badge-ghost';
 						return '<span class="badge ' + cls + ' badge-sm">' + status + '</span>';
 					}
-					function escapeText(value) {
-						return String(value == null ? '' : value)
-							.replace(/&/g, '&amp;')
-							.replace(/</g, '&lt;')
-							.replace(/>/g, '&gt;');
-					}
-						function renderSelectedMemories(memories) {
-							if (!Array.isArray(memories) || memories.length === 0) return '';
-							var items = memories.map(function(m) {
-								var file = m.file ? '<span class="font-mono text-xs badge badge-outline">' + escapeText(m.file) + '</span>' : '';
-								var topic = m.topic ? '<span class="text-xs opacity-70">' + escapeText(m.topic) + '</span>' : '';
-								var summary = m.summary ? '<p class="text-xs mt-1">' + escapeText(m.summary) + '</p>' : '';
-								var snippet = m.snippet ? '<p class="text-xs opacity-70 mt-1">' + escapeText(m.snippet) + '</p>' : '';
-								return '<li class="rounded-md bg-base-200/60 p-2">' +
-									'<div class="flex items-center gap-2 flex-wrap">' + file + topic + '</div>' +
-									summary + snippet +
-								'</li>';
-							}).join('');
-							return '<div class="mt-3">' +
-								'<p class="text-xs font-semibold opacity-70 mb-1">Selected memories used for injected context</p>' +
-								'<ul class="space-y-1">' + items + '</ul>' +
-							'</div>';
+						function escapeText(value) {
+							return String(value == null ? '' : value)
+								.replace(/&/g, '&amp;')
+								.replace(/</g, '&lt;')
+								.replace(/>/g, '&gt;');
+						}
+						function renderBadgeRow(label, values) {
+							if (!Array.isArray(values) || values.length === 0) return '';
+							var seen = Object.create(null);
+							var badges = [];
+							values.forEach(function(value) {
+								if (!value || seen[value]) return;
+								seen[value] = true;
+								badges.push('<span class="font-mono text-xs badge badge-outline">' + escapeText(value) + '</span>');
+							});
+							if (badges.length === 0) return '';
+							return '<p class="text-sm mt-1 flex items-center gap-2 flex-wrap">' +
+								'<span>' + escapeText(label) + ':</span> ' + badges.join(' ') +
+							'</p>';
+						}
+						function memoryLabels(memories) {
+							if (!Array.isArray(memories)) return [];
+							return memories.map(function(m) { return m.file || m.topic || ''; });
 						}
 						window.refreshLifecycleActivity = async function(taskID) {
 							var container = document.getElementById('lifecycle-activity-list');
@@ -830,23 +831,24 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 									container.innerHTML = '<p class="text-sm opacity-50">No lifecycle activity recorded yet.</p>';
 									return;
 								}
-								container.innerHTML = rows.map(function(r) {
-									var summary = r.summary ? '<p class="text-sm mt-1">' + escapeText(r.summary) + '</p>' : '';
-									var memories = renderSelectedMemories(r.selected_memories);
-									var error = r.error ? '<p class="text-xs text-error mt-1">' + escapeText(r.error) + '</p>' : '';
-									var when = r.completed_at ? new Date(r.completed_at).toLocaleString() : new Date(r.started_at).toLocaleString();
-									return '<div class="border border-base-300 rounded-lg p-3">' +
-										'<div class="flex items-center justify-between flex-wrap gap-2">' +
-											'<div class="flex items-center gap-2 flex-wrap">' +
-												'<span class="font-mono text-xs opacity-70">' + escapeText(r.when || '') + '</span>' +
-												'<span class="text-sm font-medium">' + escapeText(r.skill_key || '') + '</span>' +
-												statusBadge(r.status || '') +
+									container.innerHTML = rows.map(function(r) {
+										var selectedSkills = renderBadgeRow('Selected skills', r.selected_skills);
+										var selectedMemories = renderBadgeRow('Selected memories', memoryLabels(r.selected_memories));
+										var summary = r.summary && !selectedSkills ? '<p class="text-sm mt-1">' + escapeText(r.summary) + '</p>' : '';
+										var error = r.error ? '<p class="text-xs text-error mt-1">' + escapeText(r.error) + '</p>' : '';
+										var when = r.completed_at ? new Date(r.completed_at).toLocaleString() : new Date(r.started_at).toLocaleString();
+										return '<div class="border border-base-300 rounded-lg p-3">' +
+											'<div class="flex items-center justify-between flex-wrap gap-2">' +
+												'<div class="flex items-center gap-2 flex-wrap">' +
+													'<span class="font-mono text-xs opacity-70">' + escapeText(r.when || '') + '</span>' +
+													'<span class="text-sm font-medium">' + escapeText(r.skill_key || '') + '</span>' +
+													statusBadge(r.status || '') +
+												'</div>' +
+												'<span class="text-xs opacity-60">' + escapeText(when) + '</span>' +
 											'</div>' +
-											'<span class="text-xs opacity-60">' + escapeText(when) + '</span>' +
-										'</div>' +
-										summary + memories + error +
-									'</div>';
-								}).join('');
+											summary + selectedSkills + selectedMemories + error +
+										'</div>';
+									}).join('');
 							} catch (err) {
 							container.innerHTML = '<p class="text-sm text-error">' + escapeText(err.message || err) + '</p>';
 						}

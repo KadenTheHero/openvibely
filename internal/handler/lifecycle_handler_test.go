@@ -186,8 +186,13 @@ func TestTaskDetailLifecycleTabRendersSelectedMemoryClientUI(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "Selected memories used for injected context") || !strings.Contains(body, "r.selected_memories") {
-		t.Fatalf("expected lifecycle tab script to render selected memory debug details, got:\n%s", body)
+	for _, want := range []string{"Selected memories", "Selected skills", "badge badge-outline", "renderBadgeRow", "r.selected_skills", "r.selected_memories"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected lifecycle tab script to render lifecycle lists as badge rows containing %q, got:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "Selected memories used for injected context") || strings.Contains(body, "<ul class=\"space-y-1\">") {
+		t.Fatalf("expected lifecycle tab script to avoid stacked selected memory list UI, got:\n%s", body)
 	}
 }
 
@@ -279,7 +284,7 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 		SkillKey:       "recall_memory",
 		OutputContract: models.OutputContractContextBlock,
 		Status:         models.LifecycleExecCompleted,
-		OutputJSON:     `{"content":"private full injected memory context that should not be returned raw","sources":["MEMORIES.md","/tmp/secret.md","../escape.md"],"selected_memories":[{"file":"provider_architecture.md","topic":"Provider lifecycle","summary":"Use mode-driven provider routing.","snippet":"Verify stale memory against current code before relying on it."},{"file":"/tmp/secret.md","summary":"must not expose"}],"confidence":0.8}`,
+		OutputJSON:     `{"content":"private full injected memory context that should not be returned raw","sources":["provider_architecture.md","MEMORIES.md","/tmp/secret.md","../escape.md"],"selected_memories":[{"file":"provider_architecture.md","topic":"Provider lifecycle","summary":"Use mode-driven provider routing.","snippet":"Verify stale memory against current code before relying on it."},{"file":"provider_architecture.md","topic":"Provider lifecycle","summary":"Duplicate summary should collapse by file."},{"file":"/tmp/secret.md","summary":"must not expose"}],"confidence":0.8}`,
 	}
 	if err := lifecycleRepo.CreateExecution(t.Context(), recallExec); err != nil {
 		t.Fatalf("create recall exec: %v", err)
@@ -300,9 +305,13 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 		t.Fatalf("expected 3 views, got %d", len(got))
 	}
 	summaries := map[string]string{}
+	var route viewmodels.LifecycleExecutionView
 	var recall viewmodels.LifecycleExecutionView
 	for _, row := range got {
 		summaries[row.When+"/"+row.SkillKey] = row.Summary
+		if row.When == "route_task" && row.SkillKey == "route_task" {
+			route = row
+		}
 		if row.When == "before_run" && row.SkillKey == "recall_memory" {
 			recall = row
 		}
@@ -313,8 +322,11 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 	if summaries["route_task/route_task"] != "Selected skills: openvibely_agent_skill_architecture, debug_go_tests" {
 		t.Fatalf("expected selected skill summary, got %+v", summaries)
 	}
+	if len(route.SelectedSkills) != 2 || route.SelectedSkills[0] != "openvibely_agent_skill_architecture" || route.SelectedSkills[1] != "debug_go_tests" {
+		t.Fatalf("expected selected skills exposed as badge identifiers, got %+v", route.SelectedSkills)
+	}
 	if len(recall.SelectedMemories) != 2 {
-		t.Fatalf("expected sanitized selected memory details, got %+v", recall.SelectedMemories)
+		t.Fatalf("expected deduped sanitized selected memory identifiers, got %+v", recall.SelectedMemories)
 	}
 	if recall.SelectedMemories[0].File != "provider_architecture.md" || recall.SelectedMemories[0].Summary != "Use mode-driven provider routing." || recall.SelectedMemories[0].Snippet == "" {
 		t.Fatalf("expected compact selected memory metadata, got %+v", recall.SelectedMemories)
