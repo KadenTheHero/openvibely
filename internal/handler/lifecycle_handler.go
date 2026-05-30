@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/viewmodels"
 )
@@ -252,6 +253,7 @@ func toLifecycleExecutionView(e models.LifecycleExecution) viewmodels.LifecycleE
 	}
 	if e.OutputJSON != "" {
 		v.Summary = extractStructuredSummary(e.OutputContract, e.OutputJSON)
+		v.SelectedMemories = extractSelectedMemoryViews(e, e.OutputJSON)
 	}
 	return v
 }
@@ -316,6 +318,70 @@ func selectedSkillsSummary(probe map[string]any) string {
 		return ""
 	}
 	return "Selected skills: " + strings.Join(parts, ", ")
+}
+
+const maxLifecycleMemoryDetailLen = 240
+
+func extractSelectedMemoryViews(e models.LifecycleExecution, raw string) []viewmodels.SelectedMemoryView {
+	if e.When != models.LifecycleBeforeRun || e.SkillKey != "recall_memory" || e.OutputContract != models.OutputContractContextBlock {
+		return nil
+	}
+	var cb lifecycle.ContextBlock
+	if err := json.Unmarshal([]byte(raw), &cb); err != nil {
+		return nil
+	}
+	out := make([]viewmodels.SelectedMemoryView, 0, len(cb.SelectedMemories)+len(cb.Sources))
+	seen := map[string]struct{}{}
+	for _, memory := range cb.SelectedMemories {
+		file := sanitizeMemoryIdentifier(memory.File)
+		if strings.TrimSpace(memory.File) != "" && file == "" {
+			continue
+		}
+		view := viewmodels.SelectedMemoryView{
+			File:    file,
+			Topic:   truncateLifecycleMemoryDetail(memory.Topic),
+			Summary: truncateLifecycleMemoryDetail(memory.Summary),
+			Snippet: truncateLifecycleMemoryDetail(memory.Snippet),
+		}
+		if view.File == "" && view.Topic == "" && view.Summary == "" && view.Snippet == "" {
+			continue
+		}
+		key := view.File + "\x00" + view.Topic + "\x00" + view.Summary + "\x00" + view.Snippet
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, view)
+	}
+	for _, source := range cb.Sources {
+		file := sanitizeMemoryIdentifier(source)
+		if file == "" {
+			continue
+		}
+		key := file + "\x00\x00\x00"
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, viewmodels.SelectedMemoryView{File: file})
+	}
+	return out
+}
+
+func sanitizeMemoryIdentifier(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	if value == "" || strings.HasPrefix(value, "/") || value == "." || value == ".." || strings.Contains(value, "../") || strings.HasPrefix(value, "./") || strings.Contains(value, ":") {
+		return ""
+	}
+	return truncateLifecycleMemoryDetail(value)
+}
+
+func truncateLifecycleMemoryDetail(value string) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if len(value) <= maxLifecycleMemoryDetailLen {
+		return value
+	}
+	return value[:maxLifecycleMemoryDetailLen] + "..."
 }
 
 func isValidLifecycleWhen(s string) bool {

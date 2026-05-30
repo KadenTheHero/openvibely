@@ -5,16 +5,27 @@ import "time"
 // LifecycleExecutionView is the prompt-safe UI shape for lifecycle hook output.
 // It intentionally excludes raw input/output JSON and prompt text.
 type LifecycleExecutionView struct {
-	ID             string     `json:"id"`
-	When           string     `json:"when"`
-	AgentID        string     `json:"agent_id"`
-	SkillKey       string     `json:"skill_key"`
-	Status         string     `json:"status"`
-	OutputContract string     `json:"output_contract"`
-	Summary        string     `json:"summary,omitempty"`
-	Error          string     `json:"error,omitempty"`
-	StartedAt      time.Time  `json:"started_at"`
-	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	ID               string               `json:"id"`
+	When             string               `json:"when"`
+	AgentID          string               `json:"agent_id"`
+	SkillKey         string               `json:"skill_key"`
+	Status           string               `json:"status"`
+	OutputContract   string               `json:"output_contract"`
+	Summary          string               `json:"summary,omitempty"`
+	SelectedMemories []SelectedMemoryView `json:"selected_memories,omitempty"`
+	Error            string               `json:"error,omitempty"`
+	StartedAt        time.Time            `json:"started_at"`
+	CompletedAt      *time.Time           `json:"completed_at,omitempty"`
+}
+
+// SelectedMemoryView is the compact prompt-safe memory recall detail shown in
+// task lifecycle activity. It contains identifiers plus brief summaries/snippets,
+// never raw memory files.
+type SelectedMemoryView struct {
+	File    string `json:"file,omitempty"`
+	Topic   string `json:"topic,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Snippet string `json:"snippet,omitempty"`
 }
 
 // LifecycleExecutionEventView is the prompt-safe trace shape returned by the

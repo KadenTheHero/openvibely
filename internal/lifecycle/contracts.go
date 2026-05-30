@@ -44,9 +44,20 @@ type SelectedSkills struct {
 // ContextBlock is the validated payload for the `context_block` contract used
 // by before_run hooks such as memory recall.
 type ContextBlock struct {
-	Content    string   `json:"content"`
-	Sources    []string `json:"sources,omitempty"`
-	Confidence float64  `json:"confidence,omitempty"`
+	Content          string           `json:"content"`
+	Sources          []string         `json:"sources,omitempty"`
+	SelectedMemories []SelectedMemory `json:"selected_memories,omitempty"`
+	Confidence       float64          `json:"confidence,omitempty"`
+}
+
+// SelectedMemory is optional debug metadata for context_block outputs from
+// recall_memory. It identifies the memory topic/file used without requiring the
+// UI to expose the full memory file contents.
+type SelectedMemory struct {
+	File    string `json:"file,omitempty"`
+	Topic   string `json:"topic,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Snippet string `json:"snippet,omitempty"`
 }
 
 // ActivitySummary is the validated payload for the `activity_summary` contract

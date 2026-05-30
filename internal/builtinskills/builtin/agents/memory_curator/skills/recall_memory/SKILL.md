@@ -32,13 +32,14 @@ Include only durable facts that are directly relevant to the current task turn:
 - Avoid secrets, raw transcripts, stale guesses, task-by-task logs, and procedure-only runbooks.
 - Do not include entire memory files. Extract the smallest useful facts.
 - Cite memory filenames in `sources`; use root-relative filenames only.
+- Also populate `selected_memories` with the exact memory files/topics selected and a brief summary or snippet for each. Keep snippets compact and avoid unrelated/raw memory dumps.
 
-If no memory is relevant, return an empty context block with low confidence.
+If no memory is relevant, return an empty context block with low confidence and no selected memories.
 
 ## Return value
 
 Return only JSON matching the `context_block` contract:
 
 ```json
-{"content":"Relevant remembered context for the task, or an empty string if nothing applies.","sources":["MEMORIES.md","provider_architecture.md"],"confidence":0.8}
+{"content":"Relevant remembered context for the task, or an empty string if nothing applies.","sources":["MEMORIES.md","provider_architecture.md"],"selected_memories":[{"file":"provider_architecture.md","topic":"Provider lifecycle routing","summary":"Provider routing decisions are mode-driven and source-code facts should be verified."}],"confidence":0.8}
 ```
