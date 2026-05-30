@@ -396,9 +396,10 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 				log.Printf("[handler] completeWithSuccess exec=%s error updating diff: %v", execID, err)
 			}
 
-			// Reset merge status when follow-up creates new changes.
-			if task != nil && task.WorktreePath != "" && task.MergeStatus == models.MergeStatusMerged {
-				log.Printf("[handler] completeWithSuccess task=%s resetting merge_status from merged to pending (new changes detected)", taskID)
+			// Reset stale terminal merge states when follow-up creates new changes.
+			if task != nil && task.WorktreePath != "" &&
+				(task.MergeStatus == models.MergeStatusMerged || task.MergeStatus == models.MergeStatusConflict) {
+				log.Printf("[handler] completeWithSuccess task=%s resetting merge_status from %s to pending (new changes detected)", taskID, task.MergeStatus)
 				if err := h.taskRepo.UpdateMergeStatus(ctx, taskID, models.MergeStatusPending); err != nil {
 					log.Printf("[handler] completeWithSuccess task=%s error resetting merge status: %v", taskID, err)
 				}

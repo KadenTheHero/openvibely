@@ -1158,6 +1158,73 @@ func TestFollowupResetsMergeStatus(t *testing.T) {
 	}
 }
 
+func TestFollowupResetsConflictMergeStatus(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name: "Test Agent", Provider: models.ProviderTest,
+		Model: "claude-sonnet-4-5", MaxTokens: 4096, Temperature: 1.0, IsDefault: true,
+	}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("failed to create agent: %v", err)
+	}
+
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Test Project", RepoPath: repoDir}
+	if err := h.projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("failed to create project: %v", err)
+	}
+
+	task := createTask(t, h, project.ID, "Conflicted Task with Followup", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+		tk.AutoMerge = false
+	})
+
+	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+	wtPath, _, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("setup worktree: %v", err)
+	}
+
+	if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err != nil {
+		t.Fatalf("update merge status to conflict: %v", err)
+	}
+
+	followupExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Resolve and continue"
+		ex.IsFollowup = true
+	})
+
+	if err := os.WriteFile(filepath.Join(wtPath, "resolved-followup.txt"), []byte("new followup work\n"), 0644); err != nil {
+		t.Fatalf("write followup change: %v", err)
+	}
+
+	h.completeWithSuccess(ctx, followupExec.ID, task.ID, "done", wtPath, 0, 1)
+
+	updatedExec, err := h.execRepo.GetByID(ctx, followupExec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if updatedExec.Status != models.ExecCompleted {
+		t.Fatalf("expected execution completed, got %s (error: %s)", updatedExec.Status, updatedExec.ErrorMessage)
+	}
+	if updatedExec.DiffOutput == "" {
+		t.Fatal("expected diff output to be captured for followup")
+	}
+
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updatedTask.MergeStatus != models.MergeStatusPending {
+		t.Errorf("expected merge_status=pending after conflict followup with new changes, got %s", updatedTask.MergeStatus)
+	}
+}
+
 // TestFollowupNoChangesDoesNotResetMergeStatus verifies that when a follow-up
 // does NOT create new changes, the merge_status stays as "merged".
 func TestFollowupNoChangesDoesNotResetMergeStatus(t *testing.T) {
