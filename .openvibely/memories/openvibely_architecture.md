@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-05-26
+updated: 2026-05-29
 source: consolidation
-source_id: memory_consolidation_2026_05_25
+source_id: memory_consolidation_2026_05_29
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -15,14 +15,15 @@ The backend uses Echo v4, SQLite via `modernc.org/sqlite`, goose migrations, and
 
 Dual mode architecture:
 - `internal/server.Start(ctx, cfg)` wires the shared backend and returns a server instance with bound address, base URL, and shutdown handle.
-- Local web/server and desktop release-binary runs should default DB/repos/uploads and related runtime state to the same user app-data directory, specifically `$HOME/.openvibely` unless an env override applies, not separate web/desktop directories, the source checkout, or the current working directory. Users should be able to run release binaries without cloning the repo and have web and desktop use the same local database.
-- Hosted/Docker deployments should still use explicit env-driven storage such as mounted `/data` paths where applicable and should not silently fall back to local `$HOME/.openvibely` behavior when the image is meant to persist under `/data`.
+- Local web/server and desktop release-binary runs should default DB/repos/uploads and related runtime state to the same user app-data directory, specifically `$HOME/.openvibely` unless an env override applies, not separate web/desktop directories, the source checkout, or the current working directory.
+- Hosted/Docker deployments should still use explicit env-driven storage such as mounted `/data` paths and should not silently fall back to local `$HOME/.openvibely` behavior when the image is meant to persist under `/data`.
 - Desktop mode (`cmd/desktop`) uses `config.LoadWithMode(ModeDesktop)`, uses ephemeral port `PORT=0`, enables local repo paths, and loads the Wails WebView from the server base URL.
-- `OPENVIBELY_APP_DATA_DIR` is the shared override for the local app-data root when users need both web/server and desktop to point at the same runtime state; if it is set, use it directly and do not run legacy-path migration into another app-data default.
+- `OPENVIBELY_APP_DATA_DIR` is the shared override for the local app-data root when users need both web/server and desktop to point at the same runtime state; if set, use it directly and do not run legacy-path migration into another app-data default.
 - Env vars override mode defaults. Users who set `DATABASE_PATH`, `PROJECT_REPO_ROOT`, or related storage env vars get those explicit paths.
 - Desktop defaults to localhost OAuth callback flow (`APP_BASE_URL` unset). Server/VPS mode should set `APP_BASE_URL` for hosted callbacks.
 - Desktop/Wails GUI launches, especially on macOS, may not inherit the user's interactive shell `PATH`; task execution must use centralized environment/PATH construction. Do not hardcode assumed developer-tool install paths; derive or merge the user's real initialized shell `PATH` for desktop task execution without forking per-command behavior.
 - Desktop external-link handling should not assume desktop-mode detection means the Wails browser bridge is ready. Feature-detect the actual loaded runtime API before calling it, and remember the desktop WebView may be loaded from the local server URL rather than a `wails:` page.
+- Desktop file/folder selection UX should prefer Wails/native dialog APIs for reliability; browser-only upload features such as `webkitdirectory` are not guaranteed consistently across OS-native WebViews.
 - Do not fork backend code between server and desktop; both modes share `internal/server`.
 
 Storage and runtime-state pitfalls:

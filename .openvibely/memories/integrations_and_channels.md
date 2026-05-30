@@ -2,9 +2,9 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-05-21
+updated: 2026-05-29
 source: consolidation
-source_id: memory_consolidation_2026_05_21
+source_id: memory_consolidation_2026_05_29
 confidence: high
 title: Integrations and Channels
 ---

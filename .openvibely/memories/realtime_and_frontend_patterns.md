@@ -2,19 +2,19 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-05-23
+updated: 2026-05-29
 source: consolidation
-source_id: memory_consolidation_2026_05_23
+source_id: memory_consolidation_2026_05_29
 confidence: high
 title: Realtime and Frontend Patterns
 ---
 
 OpenVibely uses server-rendered HTMX/templ UI with shared SSE-style live updates. Prefer one shared per-tab sidebar-managed SSE stream with in-browser event fan-out rather than opening separate long-lived EventSources for each surface.
 
-Realtime/diff updates:
+Realtime and diff updates:
 - Real-time file changes stream to the Changes tab during task execution via SSE using `GetWorktreeDiffWithUncommitted` to show committed branch changes and uncommitted work without auto-committing.
 - Task-thread follow-up executions should run the same periodic diff snapshot broadcast path, persisting `executions.diff_output` and publishing `diff_snapshot` events.
-- Treat live diff snapshot UI indicators as runtime feedback, not durable task artifacts; they may disappear after app restart, while persisted execution diff/task changes are the source of durable review state. Merge success toasts and already-merged banners/markers are also transient feedback; audit/history UI should be backed by persisted merge/execution records, not restart-volatile markers.
+- Treat live diff snapshot UI indicators as runtime feedback, not durable task artifacts; they may disappear after app restart, while persisted execution diff/task changes are the source of durable review state.
 - Changes-tab scroll preservation: SSE diff updates should fetch offscreen DOM, compare fingerprints, and skip live DOM mutation when unchanged. When content changes, save/restore window scroll and active diff mode via `requestAnimationFrame`; preserve `window._diffFileState` file expand/collapse state.
 - Avoid `htmx.ajax()` live swaps for frequent diff refreshes when a fingerprint gate is needed; it can remount DOM before the no-op check.
 
@@ -28,10 +28,11 @@ Task Changes rendering safety:
 - Task-thread SSE completion should finish dynamically in place: force the final streamed render, clear streaming indicators/state, and avoid post-stream reconciliation refreshes of either `#task-thread-view` or the whole task shell.
 - Thread tab content is lazy-loaded via `GET /tasks/:id/thread`; heavy execution transcripts should not be pre-rendered in hidden tabs.
 
-Chat/frontend rendering:
+Chat and thread rendering:
 - For streaming chat and tool cards, batch DOM rendering with `requestAnimationFrame` and force final flush on completion.
-- Active chat/task-thread streaming should use shared smart autoscroll behavior when present: record whether the viewport was pinned before content growth, then only scroll after rendering if it was pinned. Upward user movement is intent to read; do not force-scroll back down until the user returns to the bottom or initiates a new send. Mark/ignore programmatic scrolls so they cannot clear user intent.
+- Active chat/task-thread streaming should use shared smart autoscroll behavior when present: record whether the viewport was pinned before content growth, then only scroll after rendering if it was pinned. Upward user movement is intent to read; do not force-scroll back down until the user returns to the bottom or initiates a new send.
 - Task-thread tab/task navigation should keep per-thread scroll state: returning from Details/Changes or another task should restore remembered position or bottom-align only when the prior thread state was pinned, on fresh initial entry, or for new send/active stream activity. Do not solve navigation scroll bugs with hard remounts or full refreshes that reset task context.
+- Task-thread streaming must keep its HTMX polling fallback resumable across lifecycle hook/status transitions: reactivated/resumed streams should reset stale inactive markers and preserve a valid `/tasks/:id/thread` poll URL/trigger so live updates continue if the per-execution EventSource closes or errors.
 - Avoid expensive full-container reprocessing on polling refreshes; use content signatures and incremental cleaning.
 - Chat/thread markdown rendering escapes raw HTML-like tags outside fenced/inline code before `marked.parse` so malformed model outputs do not break DOM.
 - Avoid destructive `/chat` `outerHTML` history refreshes on tab refocus or SSE reconnect when chat history is already loaded, including after hard refresh where static chat bubble markup is present.
@@ -41,6 +42,7 @@ Chat/frontend rendering:
 Shared UI/page patterns:
 - For HTMX dropdown/menu actions, distinguish user reports of “spinner/toast but then failure” from “click did nothing.” If there is no spinner, toast, or menu close, first suspect that the HTMX request never fired or was not bound. Check rendered attributes, lazy-loaded HTMX processing, and whether menu `<button>` elements are inside a parent `<form>` without `type="button"`.
 - Chat/thread markdown links and task-result links share global link token `--ov-link-color: #7480ff`, with hover/focus/active/visited states.
+- Left sidebar navigation should preserve the original hover-only highlight behavior; avoid persistent selected-item highlight classes/scripts unless the product intentionally redesigns nav active state.
 - Schedule timeline/current-time UI should use shared tokens instead of hardcoded green for light/dark consistency.
 - Schedule `Run At` controls should expose click-anywhere picker behavior using `showPicker()` with focus fallback while preserving keyboard entry.
 - Schedule repeat controls should stay parity-aligned across `/schedule` create modal and task-detail schedule forms. New Scheduled Task defaults Repeat to Daily and treats missing `repeat_type` in schedule-page create submissions as `daily` server-side.

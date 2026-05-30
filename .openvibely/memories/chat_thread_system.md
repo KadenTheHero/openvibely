@@ -2,9 +2,9 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-05-21
+updated: 2026-05-29
 source: consolidation
-source_id: memory_consolidation_2026_05_21
+source_id: memory_consolidation_2026_05_29
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -12,14 +12,13 @@ title: Chat and Task-Thread Behavior
 Interactive chat bypasses worker capacity limits. Task-thread follow-ups respect worker limits and use `processStreamingResponse` with `IsTaskFollowup=true`.
 
 Definitions and routes:
-- Chat = main orchestrator at `/chat` for global/project-level conversation.
-- Thread = task-specific conversation on the task detail Thread tab.
+- Chat is the main orchestrator at `/chat` for global/project-level conversation.
+- Thread is the task-specific conversation on the task detail Thread tab.
 - Root route `/` redirects to `/chat`, preserving `project_id` when provided. Dashboard remains at `/dashboard`.
 
 Chat modes and runtime actions:
 - `/chat` supports `orchestrate` (default) and `plan` (read-only planning).
-- Plan mode enables read-only repo exploration tools and blocks mutating tools.
-- Plan mode disables marker execution (`ProcessMarkers=false`) so no task/settings mutations run from marker blocks.
+- Plan mode enables read-only repo exploration tools, blocks mutating tools, and disables marker execution (`ProcessMarkers=false`) so no task/settings mutations run from marker blocks.
 - Canonical chat capability registry is `internal/chatcontrol/registry.go`; it defines action names, domain, read/write access, allowed modes, surfaces, confirmation requirements, and sensitivity. Tool definitions, mode gating, and surface availability derive from the registry.
 - Web/API chat and channel services should generate runtime action tools from registry helpers rather than hand-crafted tool lists.
 - Runtime tools and marker processing are mutually exclusive per request. When runtime tools are injected, `ProcessMarkers=false` prevents duplicate execution.
@@ -32,7 +31,7 @@ Plan handoff behavior:
 - Plan-mode guidance should be prose-first while still requiring one `<proposed_plan>...</proposed_plan>` output block.
 - Rendered chat/thread output strips `<proposed_plan>` wrapper tags while raw stored output keeps them for CTA detection.
 - Plan completion prompt evaluation is centralized and requires stream complete, mode `plan`, and the latest completed assistant response containing `<proposed_plan>`. Older plan markers should not trigger it.
-- Once an eligible plan handoff card is shown for the latest completed response, client refocus/refresh/hydration evaluations should preserve it. Only a real invalidation should hide it: explicit dismissal, a newer response, active stream, or intentional mode switch.
+- Once an eligible plan handoff card is shown for the latest completed response, client refocus/refresh/hydration evaluations should preserve it. Only explicit dismissal, a newer response, active stream, or intentional mode switch should hide it.
 - Browser tab `focus`/`visibilitychange` and left-nav return flows should re-evaluate plan completion from the latest completed assistant response after mode hydration, rather than clearing or relying only on transient prompt state.
 
 Thread/follow-up behavior:
@@ -47,7 +46,7 @@ Thread/follow-up behavior:
 - Runtime `execute_tasks` filters out completed tasks/statuses by default. Re-running completed tasks requires explicit `include_completed=true`.
 - Runtime `execute_tasks` supports exact single-task targeting by `task_id` or `title`; use exact targeting for specific-task requests instead of broad tag/priority filters.
 
-Task execution/scheduling behavior:
+Task execution and scheduling behavior:
 - Active tasks auto-submit to the worker pool on creation or when moved to Active category.
 - `/tasks/{id}/run` uses an atomic guarded pending update and only submits when that update succeeds, so duplicate run requests cannot downgrade running work back to pending.
 - Scheduled tasks are triggered by the background scheduler when `next_run <= now`.
