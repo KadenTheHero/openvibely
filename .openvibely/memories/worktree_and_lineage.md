@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-05-30
+updated: 2026-06-01
 source: after_complete
-source_id: 25cb5b146d8d578c0885e4e26761bb74
+source_id: 0621a0d6b8d5353c2ce7485c3ef489c2
 confidence: high
 title: Worktree and Lineage
 ---
@@ -20,7 +20,9 @@ Worktree behavior:
 - Local merges should not use a blanket dirty-target guard. Dirty-but-non-overlapping target checkout changes should be allowed; block only when there is an active conflict/merge state or Git reports local changes would be overwritten/conflict.
 - Git overwrite/refusal cases that do not leave unmerged files, such as “local changes would be overwritten by merge,” should be surfaced as merge failures rather than conflict-resolution states: keep user files untouched, set failed status, return an error/toast with Git’s message, and do not show conflict controls. Only active unmerged-file states should show resolve/abort controls.
 - When supporting dirty-but-non-overlapping target changes, merge/squash cleanup and commits need pre-merge status snapshots and ownership-aware handling so OpenVibely does not reset, unstage, delete, or commit pre-existing user work. Continue ignoring OpenVibely-managed untracked `.worktrees/` entries so task worktrees do not falsely dirty the target repository.
-- Sequential local fast-forward merges should auto-update stale task branches before `--ff-only`: rebase task worktree branch onto current target, retry fast-forward merge, preserve true rebase conflicts with abort and actionable messaging. Do not generalize this pre-rebase behavior to merge-commit or squash merges without an explicit product decision.
+- Sequential local fast-forward merges for existing task worktrees should stay in the task worktree for validation/rebase: verify the current branch is the expected task branch, require a clean task worktree, rebase onto the current target branch, and use the post-rebase task worktree `HEAD` because the task commit hash may change. Preserve true rebase conflicts with abort/actionable messaging. Do not generalize this pre-rebase behavior to merge-commit or squash merges without an explicit product decision.
+- After rebasing a task worktree for a local fast-forward merge, update the target branch conditionally. If the target branch is checked out in a worktree, run `git merge --ff-only refs/heads/<task-branch>` inside that target worktree so Git refreshes the files/index normally and preserves/refuses local changes according to normal merge rules; detect this only from an attached symbolic branch `refs/heads/<target>`, not from a detached `HEAD` that happens to equal the branch commit. After the merge, verify the target worktree `HEAD` equals the rebased task worktree `HEAD` (or return the actual merged `HEAD`) before reporting success. If the target branch is not checked out anywhere, use the ref-only fallback `git update-ref refs/heads/<target> <rebased-task-HEAD> <old-target>` with the old target value for atomic stale-ref protection.
+- Do not advance a checked-out target branch with only `git update-ref`: it updates the ref but not that worktree's index/files, so a clean `main` checkout can appear to have staged inverse changes after a fast-forward. Avoid `reset --hard` as the default cleanup because it can destroy real user work.
 - Squash merge failure handling must clean/abort squash state and leave the target checkout clean without hard-resetting the main/default target branch; otherwise staged squash changes can poison later operations and broad cleanup can destroy user work.
 - Changes tab shows worktree branch diff vs target branch when available, falling back to execution diff.
 - Changes-tab diff count triage should distinguish live branch-vs-target tip diffs from merge-base/triple-dot diffs: stale ancestry after squash/manual merges can surface many already-merged files and make the task appear far larger than its real delta.

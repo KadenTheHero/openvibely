@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-05-29
-source: consolidation
-source_id: memory_consolidation_2026_05_29
+updated: 2026-05-31
+source: after_complete
+source_id: 8a474c7b49a4363832169d74bb3c296a
 confidence: high
 title: Provider Architecture
 ---
@@ -32,6 +32,7 @@ Provider-native tools:
 
 Runtime tools and memory:
 - Runtime tools are request-scoped, provider-generic, and carried through the LLM service/provider adapter path.
+- Anthropic and OpenAI Responses agentic loops support a tool-boundary steering callback: after locally executed tool results are appended and before the next internal model request, the provider loop may ask the owning execution path for pending text-only steering and insert it as a user instruction. The owning path still owns durable prepare/commit/requeue state; attachment-bearing steers remain on the outer continuation path until provider-loop attachment injection exists. Do not assume chat/task-thread handlers are the only owners: main task runs through `LLMService.ExecuteTaskWithAgent` also need the callback, `ThreadInputRepo`, and task-thread applied/requeue broadcasts for active-run steering to take effect. Watch retry boundaries around provider adapters: if `callWithRetry` retries after a tool-boundary callback claimed a steer, the retry must not commit that steer as applied unless the successful attempt also received it.
 - When adding or fixing runtime tool profiles such as managed memory, verify both OpenAI and Anthropic API/OAuth adapter paths. A fix that only wires OpenAI can leave scheduled memory consolidation failing for Anthropic-backed agents even when the agent/tool profile is correct.
 - Anthropic orchestrate chat with runtime action tools should send runtime tools without default local coding tools to avoid wasted tool-not-allowed turns. Task follow-up and plan modes keep mode-appropriate tools.
 - Provider adapters should not make memory tools globally available; memory tool exposure is a request/tool-profile decision.

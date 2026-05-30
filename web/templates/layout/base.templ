@@ -463,14 +463,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					font-size: inherit;
 				}
 				/* Chat input container - matches chat bubble styling */
-				.chat-input-container {
-					background-color: hsl(var(--b1));
-					border: none;
-					margin-left: 16px;
-					margin-right: 6px;
-				}
-				/* Thin scrollbar for chat messages to minimize width impact on alignment */
-			#chat-messages,
+					.chat-input-container {
+						background-color: hsl(var(--b1));
+						border: none;
+						margin-left: 16px;
+						margin-right: 6px;
+					}
+					#pending-thread-inputs:has([data-thread-input-id]) {
+						padding-bottom: 1rem;
+					}
+					/* Thin scrollbar for chat messages to minimize width impact on alignment */			#chat-messages,
 			#task-thread-messages {
 				scrollbar-width: thin;
 				scrollbar-color: hsl(var(--bc) / 0.2) transparent;

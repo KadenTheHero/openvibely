@@ -8,12 +8,13 @@ import (
 )
 
 type fakeSlackService struct {
-	statusFn     func(ctx context.Context) (service.SlackConnectionStatus, error)
-	connectURLFn func(ctx context.Context, redirectURI string) (string, error)
-	callbackFn   func(ctx context.Context, code, state, redirectURI string) error
-	disconnectFn func(ctx context.Context) error
-	reloadFn     func(ctx context.Context) error
-	testFn       func(ctx context.Context) error
+	statusFn         func(ctx context.Context) (service.SlackConnectionStatus, error)
+	connectURLFn     func(ctx context.Context, redirectURI string) (string, error)
+	callbackFn       func(ctx context.Context, code, state, redirectURI string) error
+	disconnectFn     func(ctx context.Context) error
+	reloadFn         func(ctx context.Context) error
+	testFn           func(ctx context.Context) error
+	taskCompletionFn func(ctx context.Context, channelID, threadTS, taskTitle, output, errMsg, userID string)
 }
 
 func (f *fakeSlackService) GetConnectionStatus(ctx context.Context) (service.SlackConnectionStatus, error) {
@@ -56,4 +57,10 @@ func (f *fakeSlackService) TestConnection(ctx context.Context) error {
 		return f.testFn(ctx)
 	}
 	return nil
+}
+
+func (f *fakeSlackService) SendTaskCompletionToThread(ctx context.Context, channelID, threadTS, taskTitle, output, errMsg, userID string) {
+	if f != nil && f.taskCompletionFn != nil {
+		f.taskCompletionFn(ctx, channelID, threadTS, taskTitle, output, errMsg, userID)
+	}
 }

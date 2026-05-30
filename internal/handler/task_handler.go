@@ -18,6 +18,7 @@ import (
 	"github.com/labstack/echo/v4"
 	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -1007,6 +1008,11 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	}
 	projectID := task.ProjectID
 
+	if h.threadInputRepo != nil {
+		if err := h.threadInputRepo.CancelPendingForTask(c.Request().Context(), taskID); err != nil {
+			log.Printf("[handler] CancelTask error cancelling pending thread inputs task=%s: %v", taskID, err)
+		}
+	}
 	if err := h.taskSvc.CancelTask(c.Request().Context(), taskID); err != nil {
 		log.Printf("[handler] CancelTask error: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -1505,28 +1511,33 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		}
 	}
 
-	// Set status to "queued" to indicate the task is waiting for worker capacity.
-	// Using "pending" would cause the scheduler to also auto-submit the task to the
-	// worker pool, resulting in a duplicate execution race. The "queued" status
-	// prevents scheduler interference while signaling to the user that the thread
-	// message is queued (the goroutine in processStreamingResponse will update to
-	// "running" once worker slots are acquired).
-	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
-		log.Printf("[handler] TaskThreadSend setting task=%s status=queued (was %s)", taskID, task.Status)
-		if err := h.taskRepo.UpdateStatus(c.Request().Context(), taskID, models.StatusQueued); err != nil {
-			log.Printf("[handler] TaskThreadSend error setting status: %v", err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to update task status")
-		}
+	activeExec, activeErr := h.execRepo.FindActiveTaskExecution(c.Request().Context(), taskID, "")
+	if activeErr != nil {
+		log.Printf("[handler] TaskThreadSend active execution check failed task=%s: %v", taskID, activeErr)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
 	}
-	// Always move to active category so the task appears in the Active column
-	if task.Category != models.CategoryActive {
-		log.Printf("[handler] TaskThreadSend moving task=%s to active (was %s)", taskID, task.Category)
-		if err := h.taskRepo.UpdateCategory(c.Request().Context(), taskID, models.CategoryActive); err != nil {
-			log.Printf("[handler] TaskThreadSend error updating category: %v", err)
+	if activeExec != nil {
+		if h.threadInputRepo == nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
 		}
+		queued := &models.ThreadInput{
+			Scope:               models.ThreadInputScopeTask,
+			ProjectID:           task.ProjectID,
+			TaskID:              taskID,
+			RunExecutionID:      activeExec.ID,
+			AgentConfigID:       agent.ID,
+			InputMode:           models.ThreadInputModeQueued,
+			InputStatus:         models.ThreadInputPending,
+			Content:             message,
+			AttachmentSessionID: sessionID,
+		}
+		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
+			log.Printf("[handler] TaskThreadSend error creating queued input: %v", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue follow-up")
+		}
+		return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID)))
 	}
 
-	// Create execution record for the follow-up
 	exec := &models.Execution{
 		TaskID:        taskID,
 		AgentConfigID: agent.ID,
@@ -1539,8 +1550,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
 	}
 
-	log.Printf("[handler] TaskThreadSend created followup exec=%s for task=%s agent=%s", exec.ID, taskID, agent.Name)
-
+	log.Printf("[handler] TaskThreadSend created followup exec=%s for task=%s agent=%s status=%s", exec.ID, taskID, agent.Name, exec.Status)
 	// Handle file attachments if present (same as ChatSend)
 	var attachmentContext string
 	var imageAttachments []models.Attachment
@@ -1573,6 +1583,24 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		}
 	}
 
+	// Set status only after active-turn checks, execution creation, attachments,
+	// and worktree setup have succeeded. This avoids leaving a task queued/active
+	// without a corresponding execution when setup fails.
+	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
+		log.Printf("[handler] TaskThreadSend setting task=%s status=queued (was %s)", taskID, task.Status)
+		if err := h.taskRepo.UpdateStatus(c.Request().Context(), taskID, models.StatusQueued); err != nil {
+			log.Printf("[handler] TaskThreadSend error setting status: %v", err)
+			h.completeWithFailure(c.Request().Context(), exec.ID, taskID, err.Error(), 0)
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to update task status")
+		}
+	}
+	if task.Category != models.CategoryActive {
+		log.Printf("[handler] TaskThreadSend moving task=%s to active (was %s)", taskID, task.Category)
+		if err := h.taskRepo.UpdateCategory(c.Request().Context(), taskID, models.CategoryActive); err != nil {
+			log.Printf("[handler] TaskThreadSend error updating category: %v", err)
+		}
+	}
+
 	// Spawn LLM processing goroutine (acquires per-model worker slot in processStreamingResponse)
 	go h.processStreamingResponse(streamingResponseParams{
 		ExecID:           exec.ID,
@@ -1590,6 +1618,62 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	})
 
 	return render(c, http.StatusOK, components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments))
+}
+
+func (h *Handler) TaskThreadSteer(c echo.Context) error {
+	taskID := c.Param("taskId")
+	message := strings.TrimSpace(c.FormValue("message"))
+	if message == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
+	}
+	if h.threadInputRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
+	}
+	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	active, err := h.execRepo.FindActiveTaskExecution(c.Request().Context(), taskID, "")
+	if err != nil {
+		log.Printf("[handler] TaskThreadSteer active execution check failed task=%s: %v", taskID, err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
+	}
+	if active == nil {
+		return echo.NewHTTPError(http.StatusConflict, "no active response to steer; send a normal follow-up instead")
+	}
+	expectedTurnID := c.FormValue("expected_turn_id")
+	if expectedTurnID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
+	}
+	if expectedTurnID != active.ID {
+		return echo.NewHTTPError(http.StatusConflict, "active turn changed; queue the message instead")
+	}
+	input := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           task.ProjectID,
+		TaskID:              taskID,
+		RunExecutionID:      active.ID,
+		InputMode:           models.ThreadInputModeSteering,
+		InputStatus:         models.ThreadInputPending,
+		TurnID:              active.ID,
+		ExpectedTurnID:      expectedTurnID,
+		Content:             message,
+		AttachmentSessionID: c.FormValue("attachment_session_id"),
+	}
+	if err := h.threadInputRepo.CreateSteeringForActiveExecution(c.Request().Context(), input, active.ID); err != nil {
+		log.Printf("[handler] TaskThreadSteer error creating steering input: %v", err)
+		if errors.Is(err, repository.ErrExpectedTurnEmpty) {
+			return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
+		}
+		if errors.Is(err, repository.ErrNoActiveTurn) || errors.Is(err, repository.ErrActiveTurnChanged) {
+			return echo.NewHTTPError(http.StatusConflict, "active turn changed; queue the message instead")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save steering input")
+	}
+	return render(c, http.StatusOK, components.ChatSteeringInputRow(input.ID, message))
 }
 
 // GetTaskThread returns the task thread view (for polling updates)
@@ -1618,6 +1702,15 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		chatAttachmentsByExec = make(map[string][]models.ChatAttachment)
 	}
 
+	pendingInputs := []models.ThreadInput{}
+	if h.threadInputRepo != nil {
+		if inputs, inputErr := h.threadInputRepo.ListPendingForTask(c.Request().Context(), taskID); inputErr == nil {
+			pendingInputs = inputs
+		} else {
+			log.Printf("[handler] GetTaskThread error loading pending inputs: %v", inputErr)
+		}
+	}
+
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && h.agentRepo != nil {
 		if ad, adErr := h.agentRepo.GetByID(c.Request().Context(), *task.AgentDefinitionID); adErr == nil && ad != nil {
@@ -1625,5 +1718,32 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		}
 	}
 
-	return render(c, http.StatusOK, components.TaskThreadView(task, executions, agents, agentDef, chatAttachmentsByExec))
+	return render(c, http.StatusOK, components.TaskThreadView(task, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs))
+}
+
+func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {
+	taskID := c.Param("taskId")
+	execID := c.Param("execId")
+	if taskID == "" || execID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "task and execution are required")
+	}
+
+	exec, err := h.execRepo.GetByID(c.Request().Context(), execID)
+	if err != nil {
+		return err
+	}
+	if exec == nil || exec.TaskID != taskID {
+		return echo.NewHTTPError(http.StatusNotFound, "execution not found")
+	}
+
+	attachments := []models.ChatAttachment{}
+	if h.chatAttachmentRepo != nil {
+		byExec, attErr := h.chatAttachmentRepo.ListByExecutionIDs(c.Request().Context(), []string{execID})
+		if attErr != nil {
+			log.Printf("[handler] GetTaskThreadExecutionFragment error loading attachments exec=%s: %v", execID, attErr)
+		} else {
+			attachments = byExec[execID]
+		}
+	}
+	return render(c, http.StatusOK, components.TaskThreadFollowupResponse(exec.PromptSent, exec.ID, attachments))
 }

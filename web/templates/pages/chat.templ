@@ -13,15 +13,32 @@ func planCompleteDataAttr(b bool) string {
 	return "false"
 }
 
+func chatHasActiveTurn(history []models.Execution) bool {
+	return chatActiveTurnID(history) != ""
+}
+
+func chatActiveTurnID(history []models.Execution) string {
+	for _, exec := range history {
+		if exec.Status == models.ExecRunning {
+			return exec.ID
+		}
+	}
+	return ""
+}
+
+func chatQueuedSteerEndpoint(input models.ThreadInput) string {
+	return "/chat/queued/" + input.ID + "/steer"
+}
+
 // Chat renders the full chat page with sidebar
-templ Chat(projects []models.Project, currentProjectID string, agents []models.LLMConfig, chatHistory []models.Execution, chatAttachments map[string][]models.ChatAttachment, latestPlanComplete bool) {
+templ Chat(projects []models.Project, currentProjectID string, agents []models.LLMConfig, chatHistory []models.Execution, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool) {
 	@layout.Base("Chat", projects, currentProjectID) {
-		@ChatContent(agents, chatHistory, currentProjectID, chatAttachments, latestPlanComplete)
+		@ChatContent(agents, chatHistory, currentProjectID, chatAttachments, pendingInputs, latestPlanComplete)
 	}
 }
 
 // ChatContent renders just the chat content (for HTMX)
-templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, latestPlanComplete bool) {
+templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool) {
 	<div id="chat-page-root" class="h-full flex flex-col" data-project-id={ currentProjectID }>
 		<div class="mb-4 flex items-center justify-between">
 			<div>
@@ -35,13 +52,13 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					</svg>
 				</label>
 				<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 z-[100]">
-						<li>
-							<button
-								hx-delete={ "/chat/history?project_id=" + currentProjectID }
-								hx-target="closest #chat-page-root"
-								hx-swap="outerHTML"
-								class="text-error"
-							>
+					<li>
+						<button
+							hx-delete={ "/chat/history?project_id=" + currentProjectID }
+							hx-target="closest #chat-page-root"
+							hx-swap="outerHTML"
+							class="text-error"
+						>
 							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
 							</svg>
@@ -51,10 +68,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				</ul>
 			</div>
 		</div>
-
 		<!-- Chat Messages Container -->
 		<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6">
-			if len(chatHistory) == 0 {
+			if len(chatHistory) == 0 && len(pendingInputs) == 0 {
 				@components.ChatEmptyState("Start a conversation by typing a message below")
 			} else {
 				for _, exec := range chatHistory {
@@ -67,13 +83,15 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						@components.ChatBubble("Assistant", exec.Output)
 					} else if exec.Status == models.ExecFailed {
 						@components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
+					} else if exec.Status == models.ExecCancelled {
+						@components.ChatBubbleError("Assistant", "Cancelled", exec.Output)
 					} else if exec.Status == models.ExecRunning {
 						@components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "")
 					}
 				}
+				@components.PendingThreadInputRows(pendingInputs, chatQueuedSteerEndpoint)
 			}
 		</div>
-
 		<div id="chat-plan-complete-prompt" class="hidden mb-3 alert bg-base-200/60 border border-base-content/10" data-has-plan-completion={ planCompleteDataAttr(latestPlanComplete) }>
 			<div class="w-full flex flex-wrap items-center justify-between gap-3">
 				<div>
@@ -86,23 +104,24 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				</div>
 			</div>
 		</div>
-
 		<!-- Message Input Form (shared component) -->
 		@components.ChatInputForm(components.ChatInputFormConfig{
-			FormID:            "chat-form",
-			InputID:           "message-input",
-			PostEndpoint:      "/chat/send?project_id=" + currentProjectID,
-			TargetID:          "chat-messages",
-			Agents:            agents,
-			ShowModelSelector: true,
-			ShowModeSelector:  true,
-			ChatMode:          models.ChatModeOrchestrate,
-			ProjectID:         currentProjectID,
+			FormID:                 "chat-form",
+			InputID:                "message-input",
+			PostEndpoint:           "/chat/send?project_id=" + currentProjectID,
+			TargetID:               "chat-messages",
+			Agents:                 agents,
+			ShowModelSelector:      true,
+			ShowModeSelector:       true,
+			ChatMode:               models.ChatModeOrchestrate,
+			ProjectID:              currentProjectID,
+			IsRunning:              chatHasActiveTurn(chatHistory),
+			ActiveTurnID:           chatActiveTurnID(chatHistory),
+			PendingInputs:          pendingInputs,
+			QueuedSteerEndpointFor: chatQueuedSteerEndpoint,
 		})
-
 		<!-- Shared auto-scroll and marker cleaning utilities -->
 		@components.ChatAutoScrollScript()
-
 		<!-- Chat-specific: task link conversion, draft persistence, HTMX swap handler -->
 		<script>
 				// Scroll to bottom on page load to show latest messages
@@ -614,6 +633,15 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					}
 				});
 
+				document.body.addEventListener('htmx:afterRequest', function(event) {
+					var triggerEl = event.detail.elt;
+					if (triggerEl && (triggerEl.id === 'chat-form' || triggerEl.closest('#chat-form'))) {
+						// Queued sends can return only out-of-band composer updates, so do
+						// not rely on a chat-messages swap to clear web-send suppression.
+						window._chatWebSendInProgress = false;
+					}
+				});
+
 				document.body.addEventListener('htmx:afterSwap', function(event) {
 					var swapTarget = event.detail.target;
 					var isChatMessagesSwap = !!(swapTarget && swapTarget.id === 'chat-messages');
@@ -692,7 +720,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				});
 			}
 		</script>
-
 		<!-- Real-time chat updates via SSE (receives messages from Telegram, API, other tabs) -->
 		<script>
 			(function() {
@@ -924,7 +951,28 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					}
 				}
 
-				var handleSharedLiveConnected = function(event) {
+					var cleanupEmptyPendingInputs = function() {
+						var pendingContainer = document.getElementById('pending-thread-inputs');
+						if (pendingContainer) {
+							// CSS handles bottom padding while pending rows exist.
+						}
+					};
+
+					var ensureComposerPendingContainer = function() {
+						var pendingContainer = document.getElementById('pending-thread-inputs');
+						if (pendingContainer) return pendingContainer;
+						var form = document.getElementById('chat-form');
+						var textarea = document.getElementById('message-input');
+						if (!form || !textarea) return null;
+						pendingContainer = document.createElement('div');
+						pendingContainer.id = 'pending-thread-inputs';
+						pendingContainer.className = 'space-y-1.5';
+						var textareaWrap = textarea.parentElement;
+						form.insertBefore(pendingContainer, textareaWrap || textarea);
+						return pendingContainer;
+					};
+
+					var handleSharedLiveConnected = function(event) {
 						var detail = event.detail || {};
 						if (!detail.reconnected) return;
 						var chatContainer = document.getElementById('chat-page-root');
@@ -955,41 +1003,147 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							return;
 						}
 
-					if (eventType === 'chat_new_message') {
-						// Skip duplicates: map guard + DOM guard for timing races
-						// between HTMX send swap and live SSE delivery.
-						if (window._chatKnownExecIds[data.exec_id]) return;
-						if (document.querySelector('[data-exec-id="' + data.exec_id + '"]')) {
-							window._chatKnownExecIds[data.exec_id] = true;
+						if (eventType === 'chat_turn_steered') {
+							if (document.querySelector('[data-thread-input-id="' + data.exec_id + '"]')) return;
+							if (data.source === 'web' && window._chatWebSendInProgress) return;
+							if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
+
+							var pendingContainer = ensureComposerPendingContainer();
+							if (!pendingContainer) return;
+							var steeringRow = document.createElement('div');
+							steeringRow.id = 'thread-input-' + data.exec_id;
+							steeringRow.className = 'steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';
+							steeringRow.setAttribute('data-thread-input-id', data.exec_id);
+							steeringRow.setAttribute('data-input-mode', 'steering');
+							steeringRow.title = 'Steering instruction will be applied before the active run\'s next model step';
+							var content = document.createElement('div');
+							content.className = 'min-w-0 flex-1';
+							content.innerHTML = '<div class="text-xs font-semibold opacity-70">Steering pending</div>';
+							var preview = document.createElement('div');
+							preview.className = 'truncate';
+							preview.textContent = data.message || '';
+							content.appendChild(preview);
+							var hint = document.createElement('div');
+							hint.className = 'text-xs opacity-60';
+							hint.textContent = 'Will be applied before the active run\'s next model step.';
+							content.appendChild(hint);
+							var actionWrap = document.createElement('div');
+							actionWrap.className = 'ml-auto flex shrink-0 items-center gap-2';
+							var cancelSteeringBtn = document.createElement('button');
+							cancelSteeringBtn.type = 'button';
+							cancelSteeringBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error';
+							cancelSteeringBtn.setAttribute('hx-post', '/thread-inputs/' + data.exec_id + '/cancel');
+							cancelSteeringBtn.setAttribute('hx-target', '#thread-input-' + data.exec_id);
+							cancelSteeringBtn.setAttribute('hx-swap', 'outerHTML');
+							cancelSteeringBtn.title = 'Cancel pending steering';
+							cancelSteeringBtn.setAttribute('aria-label', 'Cancel pending steering');
+							cancelSteeringBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';
+							actionWrap.appendChild(cancelSteeringBtn);
+							steeringRow.appendChild(content);
+							steeringRow.appendChild(actionWrap);
+							pendingContainer.appendChild(steeringRow);
+							// CSS handles bottom padding while pending rows exist.
+							if (window.htmx) htmx.process(steeringRow);
 							return;
 						}
-						if (data.source === 'web' && window._chatWebSendInProgress) return;
-						window._chatKnownExecIds[data.exec_id] = true;
 
-						// Mark stream in progress so plan prompt stays hidden mid-stream
-						window._chatStreamInProgress = true;
-						if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
+								if (eventType === 'chat_thread_input_applied' || eventType === 'chat_thread_input_cancelled') {
+									if (data.pending_input_id) {
+										var appliedRow = document.getElementById('thread-input-' + data.pending_input_id);
+										if (appliedRow) {
+											appliedRow.remove();
+											cleanupEmptyPendingInputs();
+										}
+									}
+									return;
+								}
+								if (eventType === 'chat_new_message') {
+								// Queued events use durable pending-input IDs, not execution IDs.
+								// Dedupe them by composer DOM row so recovered queued rows can reappear
+								// after a queued-to-steer provider failure.
+								if (data.queued) {
+									if (document.querySelector('[data-thread-input-id="' + data.exec_id + '"]')) return;
+									if (data.source === 'web' && window._chatWebSendInProgress) return;
+								} else {
+									// Skip duplicates: map guard + DOM guard for timing races
+									// between HTMX send swap and live SSE delivery.
+									if (window._chatKnownExecIds[data.exec_id]) return;
+									if (document.querySelector('[data-exec-id="' + data.exec_id + '"]')) {
+										window._chatKnownExecIds[data.exec_id] = true;
+										return;
+									}
+									if (data.source === 'web' && window._chatWebSendInProgress) return;
+									window._chatKnownExecIds[data.exec_id] = true;
+								}
 
-						var chatMessages = document.getElementById('chat-messages');
-						if (!chatMessages) return;
+								// Mark stream in progress so plan prompt stays hidden mid-stream.
+								window._chatStreamInProgress = !data.queued;
+								if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
 
-						// Remove empty state if present
-						var emptyState = chatMessages.querySelector('.flex.flex-col.items-center.justify-center');
-						if (emptyState) emptyState.remove();
+								var chatMessages = document.getElementById('chat-messages');
+								if (!chatMessages) return;
+								if (!data.queued && data.pending_input_id) {
+										var pendingRow = document.getElementById('thread-input-' + data.pending_input_id);
+										if (pendingRow) {
+											pendingRow.remove();
+											cleanupEmptyPendingInputs();
+										}
+								}
 
-						// Append user bubble
-						chatMessages.appendChild(createUserBubble(data.message, data.source));
+							// Remove empty state if present
+							var emptyState = chatMessages.querySelector('.flex.flex-col.items-center.justify-center');
+							if (emptyState) emptyState.remove();
 
-						// Append streaming assistant bubble
-						chatMessages.appendChild(createStreamingBubble(data.exec_id));
+									if (data.queued) {
+										if (document.querySelector('[data-thread-input-id="' + data.exec_id + '"]')) return;
+										var pendingContainer = ensureComposerPendingContainer();
+										if (!pendingContainer) return;
+										var queuedRow = document.createElement('div');
+										queuedRow.id = 'thread-input-' + data.exec_id;
+										queuedRow.className = 'queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';
+										queuedRow.setAttribute('data-thread-input-id', data.exec_id);
+										queuedRow.setAttribute('data-input-mode', 'queued');
+										queuedRow.title = 'Queued follow-up will run after the active response finishes';
+										var queuedPreview = document.createElement('div');
+										queuedPreview.className = 'min-w-0 flex-1 truncate';
+										queuedPreview.textContent = data.message || '';
+										var actionWrap = document.createElement('div');
+										actionWrap.className = 'ml-auto flex shrink-0 items-center gap-2';
+										var steerBtn = document.createElement('button');
+										steerBtn.type = 'button';
+										steerBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs font-medium';
+										steerBtn.setAttribute('hx-post', '/chat/queued/' + data.exec_id + '/steer');
+										steerBtn.setAttribute('hx-target', '#thread-input-' + data.exec_id);
+										steerBtn.setAttribute('hx-swap', 'outerHTML');
+										steerBtn.title = 'Convert queued follow-up to steering';
+										steerBtn.textContent = 'Steer';
+										var cancelBtn = document.createElement('button');
+										cancelBtn.type = 'button';
+										cancelBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error';
+										cancelBtn.setAttribute('hx-post', '/thread-inputs/' + data.exec_id + '/cancel');
+										cancelBtn.setAttribute('hx-target', '#thread-input-' + data.exec_id);
+										cancelBtn.setAttribute('hx-swap', 'outerHTML');
+										cancelBtn.title = 'Cancel queued follow-up';
+											cancelBtn.setAttribute('aria-label', 'Cancel queued follow-up');
+											cancelBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';										actionWrap.appendChild(steerBtn);
+										actionWrap.appendChild(cancelBtn);
+										queuedRow.appendChild(queuedPreview);
+										queuedRow.appendChild(actionWrap);
+										pendingContainer.appendChild(queuedRow);
+										// CSS handles bottom padding while pending rows exist.
+										if (window.htmx) htmx.process(queuedRow);
+									} else {								// Append user bubble and streaming assistant for a real running turn.
+								chatMessages.appendChild(createUserBubble(data.message, data.source));
+								chatMessages.appendChild(createStreamingBubble(data.exec_id));
+							}
 
-						// Scroll to bottom (respect user scroll position)
-						var tracker = window._chatPageTracker;
-						if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
-							window.chatAutoScroll.scrollToBottom(chatMessages, true);
+							// Scroll to bottom (respect user scroll position)
+							var tracker = window._chatPageTracker;
+							if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
+								window.chatAutoScroll.scrollToBottom(chatMessages, true);
+							}
+							return;
 						}
-						return;
-					}
 
 					if (eventType === 'chat_response_done') {
 						// Guard: only act if we're still on the chat page.
@@ -1064,7 +1218,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				};
 			})();
 		</script>
-
 	</div>
 }
 

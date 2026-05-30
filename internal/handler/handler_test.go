@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func setupTestHandler(t *testing.T) (*Handler, *echo.Echo, *repository.LLMConfigRepo) {
@@ -2915,11 +2916,125 @@ func TestHandler_TaskThreadSend(t *testing.T) {
 		t.Error("expected execution to be marked as followup")
 	}
 	updatedTask, _ := h.taskSvc.GetByID(ctx, task.ID)
-	if updatedTask.Status != models.StatusQueued {
-		t.Errorf("expected status queued, got %s", updatedTask.Status)
+	if updatedTask.Status == models.StatusPending {
+		t.Errorf("expected follow-up task to leave pending state, got %s", updatedTask.Status)
 	}
 	if updatedTask.Category != models.CategoryActive {
 		t.Errorf("expected category active, got %s", updatedTask.Category)
+	}
+}
+
+func TestHandler_TaskThreadSend_QueuesBehindActiveTurn(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread FIFO Project")
+	task := createTask(t, h, project.ID, "Thread FIFO Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active turn"
+		ex.IsFollowup = true
+	})
+
+	form := url.Values{}
+	form.Set("message", "queued follow up")
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "queued follow up")
+	assertContains(t, rec, `data-input-mode="queued"`)
+	assertContains(t, rec, `hx-swap-oob="beforeend"`)
+	assertContains(t, rec, `queued-input-row`)
+	assertContains(t, rec, `bg-base-300/45`)
+	assertContains(t, rec, `flex-1`)
+	assertContains(t, rec, `ml-auto`)
+	assertContains(t, rec, `>Steer</button>`)
+	assertContains(t, rec, `aria-label="Cancel queued follow-up"`)
+	assertContains(t, rec, `M19 7l-.867 12.142`)
+	assertNotContains(t, rec, `>Cancel</button>`)
+	assertNotContains(t, rec, `text-[11px]`)
+	assertNotContains(t, rec, `h-4 items-center`)
+	assertNotContains(t, rec, `w-fit`)
+	assertNotContains(t, rec, `>×</button>`)
+	assertNotContains(t, rec, "Queued follow-up</div>")
+	assertNotContains(t, rec, "Will run after the active response finishes.")
+
+	execs, _ := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	if len(execs) != 1 || execs[0].ID != activeExec.ID {
+		t.Fatalf("expected only active execution before queued input is applied, got %#v", execs)
+	}
+	inputs, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, models.ThreadInputModeQueued, inputs[0].InputMode)
+	assert.Equal(t, "queued follow up", inputs[0].Content)
+}
+
+func TestHandler_TaskThreadSteer_CreatesPendingSteeringInput(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Steering Project")
+	task := createTask(t, h, project.ID, "Thread Steering Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active turn"
+		ex.Output = "partial wrong implementation"
+		ex.IsFollowup = true
+	})
+
+	form := url.Values{}
+	form.Set("message", "Stop and use the new interface")
+	form.Set("expected_turn_id", activeExec.ID)
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread/steer", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "Steering pending")
+	assertContains(t, rec, `data-input-mode="steering"`)
+	assertContains(t, rec, `steering-input-row`)
+	assertContains(t, rec, `aria-label="Cancel pending steering"`)
+	assertContains(t, rec, `M19 7l-.867 12.142`)
+	assertNotContains(t, rec, `>Cancel</button>`)
+
+	execs, _ := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	if len(execs) != 1 || execs[0].ID != activeExec.ID || execs[0].Status != models.ExecRunning {
+		t.Fatalf("expected active execution to keep running, got %#v", execs)
+	}
+	inputs, err := h.threadInputRepo.ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, "Stop and use the new interface", inputs[0].Content)
+}
+
+func TestHandler_TaskThreadCancel_CancelsQueuedFollowups(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Cancel Queue Project")
+	task := createTask(t, h, project.ID, "Thread Cancel Queue Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.AgentID = &agent.ID
+	})
+	_ = createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active turn"
+		ex.IsFollowup = true
+	})
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued turn"}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
+	rec := htmxPost(e, "/tasks/"+task.ID+"/cancel", nil)
+	assertCode(t, rec, http.StatusOK)
+	input, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	if input.InputStatus != models.ThreadInputCancelled {
+		t.Fatalf("expected queued input cancelled, got %s", input.InputStatus)
 	}
 }
 
@@ -3166,6 +3281,43 @@ func TestHandler_GetTaskThread(t *testing.T) {
 	assertContains(t, rec, "Test prompt")
 	assertContains(t, rec, "Task output")
 	assertContains(t, rec, "task-thread-form")
+}
+
+func TestHandler_GetTaskThreadExecutionFragment(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Fragment Project")
+	task := createTask(t, h, project.ID, "Thread Fragment Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "queued follow-up now running"
+		ex.IsFollowup = true
+	})
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread/executions/"+exec.ID+"/fragment")
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "queued follow-up now running")
+	assertContains(t, rec, `data-exec-id="`+exec.ID+`"`)
+	assertContains(t, rec, "new EventSource")
+}
+
+func TestHandler_GetTaskThreadExecutionFragmentRejectsWrongTask(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Fragment Wrong Task Project")
+	task := createTask(t, h, project.ID, "Thread Fragment Task A")
+	other := createTask(t, h, project.ID, "Thread Fragment Task B")
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "wrong task"
+	})
+
+	rec := htmxGet(e, "/tasks/"+other.ID+"/thread/executions/"+exec.ID+"/fragment")
+	assertCode(t, rec, http.StatusNotFound)
 }
 
 func TestHandler_GetTaskThread_ShowsPrimaryAgentDefinition(t *testing.T) {

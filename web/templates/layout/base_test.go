@@ -180,6 +180,19 @@ func TestChatMarkdownCSS_WhiteSpaceNormal(t *testing.T) {
 	}
 }
 
+func TestPendingThreadInputsCSS_AddsTextareaGutterOnlyWhenRowsExist(t *testing.T) {
+	var buf bytes.Buffer
+	err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("Failed to render Base: %v", err)
+	}
+
+	html := buf.String()
+	if !strings.Contains(html, `#pending-thread-inputs:has([data-thread-input-id])`) || !strings.Contains(html, "padding-bottom: 1rem;") {
+		t.Error("pending thread inputs should add bottom padding before the textarea whenever queued or steering rows exist")
+	}
+}
+
 // TestLightTheme_UsesLightModernTokens verifies the light theme exposes the
 // Light 2026 token aliases and that key surfaces consume those tokens.
 func TestLightTheme_UsesLightModernTokens(t *testing.T) {
@@ -189,36 +202,36 @@ func TestLightTheme_UsesLightModernTokens(t *testing.T) {
 	}
 	html := buf.String()
 
-		expected := []string{
-			"--ov-l-accent: #7480ff;",
-			"--ov-l-bg: #FAFAFA;",
-			"--ov-l-surface: #F5F5F5;",
-			"--ov-l-border: #E5E5E5;",
-			"--ov-l-text: #3B3B3B;",
-			"[data-theme=\"light\"] body,",
-			"[data-theme=\"light\"] .drawer-content {",
-			"background-color: var(--ov-l-surface);",
-			"[data-theme=\"light\"] #main-content {",
-			"background-color: var(--ov-l-surface);",
-			"[data-theme=\"light\"] .btn-primary {",
-			"background-color: var(--ov-l-accent);",
-			"[data-theme=\"light\"] .sidebar-aside {",
-			"background-color: #FAFAFA;",
-			"[data-theme=\"light\"] .card {",
-			"[data-theme=\"light\"] .hover\\:border-primary:hover,",
-			"[data-theme=\"light\"] [class~=\"hover:border-primary\"]:hover {",
-			"border-color: #3f4981 !important;",
-			"[data-theme=\"light\"] .hover\\:border-primary\\/40:hover,",
-			"[data-theme=\"light\"] [class~=\"hover:border-primary/40\"]:hover {",
-			"border-color: rgba(63, 73, 129, 0.4) !important;",
-			"[data-theme=\"light\"] .chat-input-container {",
-			"background-color: #FFFFFF;",
-			"[data-theme=\"light\"] .bg-base-100 {",
-			"background-color: var(--ov-l-bg);",
+	expected := []string{
+		"--ov-l-accent: #7480ff;",
+		"--ov-l-bg: #FAFAFA;",
+		"--ov-l-surface: #F5F5F5;",
+		"--ov-l-border: #E5E5E5;",
+		"--ov-l-text: #3B3B3B;",
+		"[data-theme=\"light\"] body,",
+		"[data-theme=\"light\"] .drawer-content {",
+		"background-color: var(--ov-l-surface);",
+		"[data-theme=\"light\"] #main-content {",
+		"background-color: var(--ov-l-surface);",
+		"[data-theme=\"light\"] .btn-primary {",
+		"background-color: var(--ov-l-accent);",
+		"[data-theme=\"light\"] .sidebar-aside {",
+		"background-color: #FAFAFA;",
+		"[data-theme=\"light\"] .card {",
+		"[data-theme=\"light\"] .hover\\:border-primary:hover,",
+		"[data-theme=\"light\"] [class~=\"hover:border-primary\"]:hover {",
+		"border-color: #3f4981 !important;",
+		"[data-theme=\"light\"] .hover\\:border-primary\\/40:hover,",
+		"[data-theme=\"light\"] [class~=\"hover:border-primary/40\"]:hover {",
+		"border-color: rgba(63, 73, 129, 0.4) !important;",
+		"[data-theme=\"light\"] .chat-input-container {",
+		"background-color: #FFFFFF;",
+		"[data-theme=\"light\"] .bg-base-100 {",
+		"background-color: var(--ov-l-bg);",
 		"[data-theme=\"light\"] .bg-base-200 {",
 		"[data-theme=\"light\"] .stats {",
 		"background-color: var(--ov-l-bg);",
-		"[data-theme=\"light\"] .chat-bubble-user-msg,",		}
+		"[data-theme=\"light\"] .chat-bubble-user-msg,"}
 	for _, fragment := range expected {
 		if !strings.Contains(html, fragment) {
 			t.Errorf("expected light theme fragment %q to be present", fragment)
@@ -270,10 +283,10 @@ func TestLoadingDots_UsesPrimaryThemeToken(t *testing.T) {
 	}
 	html := buf.String()
 
-		expected := []string{
-			".ov-loading-dots {",
-			"--ov-loading-dot-color: #646fe4;",
-			"--ov-loading-dot-color-soft: rgba(100, 111, 228, 0.45);",		".ov-loading-dot {",
+	expected := []string{
+		".ov-loading-dots {",
+		"--ov-loading-dot-color: #646fe4;",
+		"--ov-loading-dot-color-soft: rgba(100, 111, 228, 0.45);", ".ov-loading-dot {",
 		"animation: ov-loading-dot-bounce 1s ease-in-out infinite, ov-loading-dot-color 1.6s linear infinite;",
 		"@keyframes ov-loading-dot-color {",
 		"background: var(--ov-loading-dot-color-soft);",
@@ -403,16 +416,16 @@ func TestCollapsedSidebar_NoHoverTooltipBoxes(t *testing.T) {
 	}
 	html := buf.String()
 
-		expected := []string{
-			".sidebar-aside.sidebar-collapsed [data-tip]::after {",
-			"content: none !important;",
-			"display: none !important;",
-			".sidebar-aside.sidebar-collapsed [data-tip]:hover::after {",
-			"opacity: 0 !important;",
-			".sidebar-aside .menu a:focus:not(:focus-visible),",
-			".sidebar-aside .menu summary:focus:not(:focus-visible) {",
-			"background-color: transparent !important;",
-		}
+	expected := []string{
+		".sidebar-aside.sidebar-collapsed [data-tip]::after {",
+		"content: none !important;",
+		"display: none !important;",
+		".sidebar-aside.sidebar-collapsed [data-tip]:hover::after {",
+		"opacity: 0 !important;",
+		".sidebar-aside .menu a:focus:not(:focus-visible),",
+		".sidebar-aside .menu summary:focus:not(:focus-visible) {",
+		"background-color: transparent !important;",
+	}
 	for _, fragment := range expected {
 		if !strings.Contains(html, fragment) {
 			t.Errorf("expected collapsed-sidebar tooltip suppression fragment %q to be present", fragment)

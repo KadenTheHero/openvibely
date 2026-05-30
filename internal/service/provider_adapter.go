@@ -67,12 +67,17 @@ func callWithRetry(req llmcontracts.AgentRequest, fn func() (llmcontracts.AgentR
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return llmretry.Do(ctx, policy, func() (llmcontracts.AgentResult, error) {
+	return llmretry.DoWithBeforeRetry(ctx, policy, func() (llmcontracts.AgentResult, error) {
 		res, err := fn()
 		if err != nil && llmretry.IsRetryable(err) {
 			log.Printf("[agent-svc] provider adapter retryable error operation=%s provider=%s model=%s err=%v", req.Operation, req.Agent.Provider, req.Agent.Model, err)
 		}
 		return res, err
+	}, func(retryCtx context.Context) error {
+		if reset := llmcontracts.SteeringRetryResetCallbackFromContext(retryCtx); reset != nil {
+			return reset(retryCtx)
+		}
+		return nil
 	})
 }
 

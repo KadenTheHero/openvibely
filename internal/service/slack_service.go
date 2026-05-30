@@ -82,9 +82,13 @@ type SlackService struct {
 	workerSvc             *WorkerService
 	slackUserProjectRepo  *repository.SlackUserProjectRepo
 	slackTaskContextRepo  *repository.SlackTaskContextRepo
+	threadInputRepo       *repository.ThreadInputRepo
 	customPersonalityRepo *repository.CustomPersonalityRepo
 	slackAuthRepo         *repository.SlackAuthRepo
 	chatBroadcaster       *events.ChatBroadcaster
+	queuedTurnPromoter    func(projectID string)
+	channelChatRunner     ChannelChatRunner
+	channelTaskRunner     ChannelTaskRunner
 	alertSvc              *AlertService
 
 	httpClient   *http.Client
@@ -142,6 +146,22 @@ func (s *SlackService) SetCustomPersonalityRepo(repo *repository.CustomPersonali
 
 func (s *SlackService) SetChatBroadcaster(cb *events.ChatBroadcaster) {
 	s.chatBroadcaster = cb
+}
+
+func (s *SlackService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
+	s.threadInputRepo = repo
+}
+
+func (s *SlackService) SetQueuedTurnPromoter(promoter func(projectID string)) {
+	s.queuedTurnPromoter = promoter
+}
+
+func (s *SlackService) SetChannelChatRunner(runner ChannelChatRunner) {
+	s.channelChatRunner = runner
+}
+
+func (s *SlackService) SetChannelTaskRunner(runner ChannelTaskRunner) {
+	s.channelTaskRunner = runner
 }
 
 func (s *SlackService) SetAlertService(svc *AlertService) {
@@ -364,6 +384,25 @@ func (s *SlackService) IsSendResponsesEnabled(ctx context.Context) bool {
 	return strings.TrimSpace(strings.ToLower(val)) != "false"
 }
 
+func (s *SlackService) SendTaskCompletionToThread(ctx context.Context, channelID, threadTS, taskTitle, output, errMsg, userID string) {
+	if !s.IsSendResponsesEnabled(ctx) || channelID == "" {
+		return
+	}
+	var message string
+	if errMsg != "" {
+		message = fmt.Sprintf("❌ *Task failed:* %s\n\n%s", taskTitle, util.Truncate(errMsg, 500))
+	} else {
+		cleaned := llmoutput.CleanChatOutputForDisplay(output)
+		if cleaned == "" {
+			cleaned = "(No output)"
+		}
+		message = fmt.Sprintf("✅ *Task completed:* %s\n\n%s", taskTitle, util.Truncate(cleaned, 3500))
+	}
+	if err := s.sendSlackMessage(channelID, threadTS, message); err != nil {
+		log.Printf("[slack] send completion notification failed for channel=%s thread=%s user=%s: %v", channelID, threadTS, userID, err)
+	}
+}
+
 func (s *SlackService) SendTaskCompletionNotification(ctx context.Context, task models.Task, output string, errMsg string) {
 	if task.CreatedVia != models.TaskOriginSlack && task.ID != "" && s.taskRepo != nil {
 		loaded, err := s.taskRepo.GetByID(ctx, task.ID)
@@ -531,6 +570,44 @@ func (s *SlackService) processIncoming(msg slackIncomingMessage) {
 	s.processIncomingMessage(msg)
 }
 
+func (s *SlackService) queueChatInput(ctx context.Context, projectID, activeExecID, agentID string, msg slackIncomingMessage) bool {
+	if s.threadInputRepo == nil {
+		return false
+	}
+	queued := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeChat,
+		ProjectID:      projectID,
+		RunExecutionID: activeExecID,
+		AgentConfigID:  agentID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        msg.Text,
+		ChatMode:       models.ChatModeOrchestrate,
+		Source:         models.TaskOriginSlack,
+		SlackTeamID:    msg.TeamID,
+		SlackChannelID: msg.ChannelID,
+		SlackThreadTS:  msg.ThreadTS,
+		SlackUserID:    msg.UserID,
+	}
+	if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
+		log.Printf("[slack] queue chat input failed: %v", err)
+		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error queueing your message. Please try again.")
+		return true
+	}
+	if s.chatBroadcaster != nil {
+		s.chatBroadcaster.Publish(events.ChatEvent{
+			Type:      events.ChatNewMessage,
+			ProjectID: projectID,
+			ExecID:    queued.ID,
+			Message:   msg.Text,
+			Source:    msg.Source,
+			Queued:    true,
+		})
+	}
+	_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Queued. I'll send this after the current response finishes.")
+	return true
+}
+
 func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 	if msg.ChannelID == "" || msg.UserID == "" || strings.TrimSpace(msg.Text) == "" {
 		return
@@ -561,6 +638,16 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		return
 	}
 
+	if activeChatExec, activeErr := s.execRepo.FindLatestActiveChatExecution(ctx, projectID); activeErr != nil {
+		log.Printf("[slack] error checking active chat turn: %v", activeErr)
+		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error checking active chat response. Please try again.")
+		return
+	} else if activeChatExec != nil {
+		if s.queueChatInput(ctx, projectID, activeChatExec.ID, agent.ID, msg) {
+			return
+		}
+	}
+
 	selectedAgentID := agent.ID
 	chatTitle := fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47))
 	task := &models.Task{
@@ -578,6 +665,22 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		return
 	}
 
+	if s.slackTaskContextRepo != nil {
+		if err := s.slackTaskContextRepo.Upsert(ctx, &models.SlackTaskContext{
+			TaskID:         task.ID,
+			SlackTeamID:    msg.TeamID,
+			SlackChannelID: msg.ChannelID,
+			SlackThreadTS:  msg.ThreadTS,
+			SlackUserID:    msg.UserID,
+		}); err != nil {
+			log.Printf("[slack] create chat context failed task=%s: %v", task.ID, err)
+			if delErr := s.taskRepo.Delete(ctx, task.ID); delErr != nil {
+				log.Printf("[slack] cleanup chat task failed task=%s: %v", task.ID, delErr)
+			}
+			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+			return
+		}
+	}
 	exec := &models.Execution{
 		TaskID:        task.ID,
 		AgentConfigID: agent.ID,
@@ -586,6 +689,9 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 	}
 	if err := s.execRepo.Create(ctx, exec); err != nil {
 		log.Printf("[slack] create execution failed: %v", err)
+		if delErr := s.taskRepo.Delete(ctx, task.ID); delErr != nil {
+			log.Printf("[slack] cleanup chat task failed task=%s after execution create failure: %v", task.ID, delErr)
+		}
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
 		return
 	}
@@ -614,58 +720,25 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 	}
 	workDir := s.resolveWorkDir(ctx, projectID)
 
-	callCtx := llmcontracts.WithChatMode(ctx, models.ChatModeOrchestrate)
-	if s.workerSvc != nil {
-		callCtx = s.workerSvc.PrepareRecallOnlyLifecycleTurn(callCtx, *task).Ctx
-	}
-	markerCtx := slackMarkerContext{
-		TeamID:    msg.TeamID,
-		ChannelID: msg.ChannelID,
-		ThreadTS:  msg.ThreadTS,
-		UserID:    msg.UserID,
-	}
-	if supportsRuntimeChatActionTools(*agent) {
-		callCtx = llmcontracts.WithRuntimeTools(callCtx, s.buildSlackActionToolRuntime(projectID, markerCtx, nil))
-	}
-
-	output, tokensUsed, llmErr := s.llmSvc.CallAgentDirectStreaming(
-		callCtx,
-		msg.Text,
-		nil,
-		*agent,
-		exec.ID,
-		priorHistory,
-		systemContext,
-		workDir,
-		false,
-	)
-	durationMs := time.Since(start).Milliseconds()
-
-	if llmErr != nil {
-		s.completeExecution(ctx, exec.ID, task.ID, "", llmErr.Error(), 0, durationMs)
-		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, fmt.Sprintf("Error: %s", util.Truncate(llmErr.Error(), 220)))
+	if s.channelChatRunner == nil {
+		msgText := "Slack chat runner is unavailable. Please restart OpenVibely and try again."
+		s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, time.Since(start).Milliseconds())
+		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, msgText)
 		return
 	}
-
-	s.completeExecution(ctx, exec.ID, task.ID, output, "", tokensUsed, durationMs)
-
-	if s.chatBroadcaster != nil {
-		s.chatBroadcaster.Publish(events.ChatEvent{
-			Type:            events.ChatResponseDone,
-			ProjectID:       projectID,
-			ExecID:          exec.ID,
-			TaskID:          task.ID,
-			Source:          msg.Source,
-			AgentName:       agent.Name,
-			CompletedOutput: output,
-		})
-	}
-
-	cleaned := llmoutput.CleanChatOutputForDisplay(output)
-	if cleaned == "" {
-		cleaned = "(No response)"
-	}
-	_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, cleaned)
+	s.channelChatRunner(context.Background(), ChannelChatRunRequest{
+		ExecID:           exec.ID,
+		TaskID:           task.ID,
+		ProjectID:        projectID,
+		Message:          msg.Text,
+		Agent:            *agent,
+		ChatHistory:      priorHistory,
+		SystemContext:    systemContext,
+		WorkDir:          workDir,
+		ImageAttachments: nil,
+		Surface:          chatcontrol.SurfaceSlack,
+	})
+	return
 }
 
 func (s *SlackService) completeExecution(ctx context.Context, execID, taskID, output, errorMessage string, tokensUsed int, durationMs int64) {
@@ -679,6 +752,7 @@ func (s *SlackService) completeExecution(ctx context.Context, execID, taskID, ou
 		if err := s.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed); err != nil {
 			log.Printf("[slack] update failed task status error: %v", err)
 		}
+		s.promoteQueuedChatAfterCompletion(ctx, taskID)
 		return
 	}
 
@@ -688,6 +762,18 @@ func (s *SlackService) completeExecution(ctx context.Context, execID, taskID, ou
 	if err := s.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted); err != nil {
 		log.Printf("[slack] update task status error: %v", err)
 	}
+	s.promoteQueuedChatAfterCompletion(ctx, taskID)
+}
+
+func (s *SlackService) promoteQueuedChatAfterCompletion(ctx context.Context, taskID string) {
+	if s.queuedTurnPromoter == nil || s.taskRepo == nil {
+		return
+	}
+	task, err := s.taskRepo.GetByID(ctx, taskID)
+	if err != nil || task == nil || task.Category != models.CategoryChat {
+		return
+	}
+	s.queuedTurnPromoter(task.ProjectID)
 }
 
 func (s *SlackService) autoSelectAgent(ctx context.Context, message string) (*models.LLMConfig, error) {
@@ -846,7 +932,7 @@ func (s *SlackService) slackActionHandlers(projectID string, markerCtx slackMark
 			return s.slackViewTaskThread(ctx, projectID, input), nil
 		},
 		"send_to_task": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return s.slackSendToTask(ctx, projectID, input), nil
+			return s.slackSendToTask(ctx, projectID, input, markerCtx), nil
 		},
 		"schedule_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return s.slackScheduleTask(ctx, projectID, input), nil
@@ -1108,7 +1194,7 @@ func (s *SlackService) slackViewTaskThread(ctx context.Context, projectID string
 	return strings.TrimSpace(formatThreadTranscript(task, executions, req.Offset, req.Limit))
 }
 
-func (s *SlackService) slackSendToTask(ctx context.Context, projectID string, input json.RawMessage) string {
+func (s *SlackService) slackSendToTask(ctx context.Context, projectID string, input json.RawMessage, markerCtx slackMarkerContext) string {
 	var req SendToTaskRequest
 	if err := decodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for send_to_task."
@@ -1123,22 +1209,35 @@ func (s *SlackService) slackSendToTask(ctx context.Context, projectID string, in
 	if err != nil {
 		return fmt.Sprintf("Error resolving task: %v", err)
 	}
-	if task.Status == models.StatusRunning {
-		return fmt.Sprintf("Task %q is currently running. Wait for it to finish before sending a message.", task.Title)
-	}
-	if task.Status == models.StatusCompleted || task.Status == models.StatusFailed || task.Status == models.StatusCancelled {
-		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusRunning); err != nil {
-			return fmt.Sprintf("Error reactivating task %q: %v", task.Title, err)
+	if activeExec, activeErr := s.execRepo.FindActiveTaskExecution(ctx, task.ID, ""); activeErr != nil {
+		return fmt.Sprintf("Error checking active turn for task %q: %v", task.Title, activeErr)
+	} else if activeExec != nil {
+		if s.threadInputRepo == nil {
+			return fmt.Sprintf("Task %q is currently running. Queue is unavailable, so wait for it to finish before sending a message.", task.Title)
 		}
-		if task.Category == models.CategoryCompleted {
-			if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
-				log.Printf("[slack] runtime send_to_task error updating category for task %s: %v", task.ID, err)
-			}
+		agentID := ""
+		if task.AgentID != nil {
+			agentID = *task.AgentID
 		}
-	} else if task.Status == models.StatusPending {
-		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusRunning); err != nil {
-			log.Printf("[slack] runtime send_to_task error setting task running task=%s: %v", task.ID, err)
+		queued := &models.ThreadInput{
+			Scope:          models.ThreadInputScopeTask,
+			ProjectID:      task.ProjectID,
+			TaskID:         task.ID,
+			RunExecutionID: activeExec.ID,
+			AgentConfigID:  agentID,
+			InputMode:      models.ThreadInputModeQueued,
+			InputStatus:    models.ThreadInputPending,
+			Content:        req.Message,
+			Source:         models.TaskOriginSlack,
+			SlackTeamID:    markerCtx.TeamID,
+			SlackChannelID: markerCtx.ChannelID,
+			SlackThreadTS:  markerCtx.ThreadTS,
+			SlackUserID:    markerCtx.UserID,
 		}
+		if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
+			return fmt.Sprintf("Error queueing message for task %q: %v", task.Title, err)
+		}
+		return fmt.Sprintf("Queued message to task %q [TASK_ID:%s]. It will run after the active thread turn finishes.", task.Title, task.ID)
 	}
 	var agent *models.LLMConfig
 	if task.AgentID != nil {
@@ -1160,8 +1259,39 @@ func (s *SlackService) slackSendToTask(ctx context.Context, projectID string, in
 	if pCtx := s.getPersonalityContext(ctx, task.ProjectID); pCtx != "" {
 		systemContext += pCtx
 	}
-	workDir := s.resolveWorkDir(ctx, task.ProjectID)
-	go s.processTaskFollowup(exec.ID, task.ID, req.Message, *agent, priorHistory, task.ProjectID, systemContext, workDir)
+	if s.channelTaskRunner == nil {
+		msgText := "shared task runner is unavailable"
+		s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, 0)
+		return fmt.Sprintf("Error sending message to task %q: %s", task.Title, msgText)
+	}
+	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
+		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued); err != nil {
+			s.completeExecution(ctx, exec.ID, task.ID, "", err.Error(), 0, 0)
+			return fmt.Sprintf("Error updating task %q: %v", task.Title, err)
+		}
+	}
+	if task.Category != models.CategoryActive {
+		if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
+			log.Printf("[slack] runtime send_to_task error updating category for task %s: %v", task.ID, err)
+		}
+	}
+	s.channelTaskRunner(context.Background(), ChannelTaskRunRequest{
+		ExecID:        exec.ID,
+		TaskID:        task.ID,
+		ProjectID:     task.ProjectID,
+		Message:       req.Message,
+		Agent:         *agent,
+		ChatHistory:   priorHistory,
+		SystemContext: systemContext,
+		Surface:       chatcontrol.SurfaceSlack,
+		ReplyContext: ChannelReplyContext{
+			Source:         models.TaskOriginSlack,
+			SlackTeamID:    markerCtx.TeamID,
+			SlackChannelID: markerCtx.ChannelID,
+			SlackThreadTS:  markerCtx.ThreadTS,
+			SlackUserID:    markerCtx.UserID,
+		},
+	})
 	return fmt.Sprintf("Sent message to task %q [TASK_ID:%s] and started processing.", task.Title, task.ID)
 }
 
@@ -1533,47 +1663,6 @@ func (s *SlackService) slackToggleAlert(ctx context.Context, input json.RawMessa
 	return fmt.Sprintf("Marked alert %s as read.", req.AlertID)
 }
 
-func (s *SlackService) processTaskFollowup(execID, taskID, message string, agent models.LLMConfig, chatHistory []models.Execution, projectID, systemContext, workDir string) {
-	if s.llmSvc == nil {
-		log.Printf("[slack] processTaskFollowup exec=%s task=%s skipping: llmSvc is nil", execID, taskID)
-		return
-	}
-	timeout := slackProcessTimeout
-	agentConfigID := agent.ID
-	if s.workerSvc != nil {
-		if modelTimeout := s.workerSvc.GetModelWorkerTimeout(agentConfigID); modelTimeout > 0 {
-			timeout = modelTimeout
-		}
-		if !s.workerSvc.TryAcquireProjectSlot(projectID) {
-			s.completeExecution(context.Background(), execID, taskID, "", "project worker limit reached — please wait for a running task to complete", 0, 0)
-			return
-		}
-		defer s.workerSvc.ReleaseProjectSlot(projectID)
-		waitCtx, waitCancel := context.WithTimeout(context.Background(), timeout)
-		if err := s.workerSvc.AcquireModelSlot(waitCtx, agentConfigID); err != nil {
-			waitCancel()
-			s.completeExecution(context.Background(), execID, taskID, "", fmt.Sprintf("model %s at capacity, timed out waiting for slot", agent.Name), 0, 0)
-			return
-		}
-		waitCancel()
-		defer s.workerSvc.ReleaseModelSlot(agentConfigID)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	if s.workerSvc != nil {
-		s.workerSvc.RegisterCancel(taskID, cancel)
-		defer s.workerSvc.DeregisterCancel(taskID)
-	}
-	start := time.Now()
-	output, tokensUsed, err := s.llmSvc.CallAgentDirectStreaming(ctx, message, nil, agent, execID, chatHistory, systemContext, workDir, true)
-	durationMs := time.Since(start).Milliseconds()
-	if err != nil {
-		s.completeExecution(ctx, execID, taskID, "", err.Error(), 0, durationMs)
-		return
-	}
-	s.completeExecution(ctx, execID, taskID, output, "", tokensUsed, durationMs)
-}
-
 func (s *SlackService) resolveTaskReference(ctx context.Context, projectID, taskID, title string) (*models.Task, error) {
 	if taskID != "" {
 		task, err := s.taskRepo.GetByID(ctx, taskID)
@@ -1808,88 +1897,6 @@ func (s *SlackService) resolveScheduleReference(ctx context.Context, projectID, 
 		return nil, nil, fmt.Errorf("no schedules found for task %q", task.Title)
 	}
 	return &schedules[0], task, nil
-}
-
-func (s *SlackService) processChatMarkers(ctx context.Context, execID, projectID, output string, markerCtx slackMarkerContext) string {
-	if output == "" {
-		return output
-	}
-	originalOutput := output
-	if s.taskSvc == nil {
-		return output
-	}
-
-	taskRequests := ParseTaskCreations(output)
-	if len(taskRequests) > 0 {
-		agents := []models.LLMConfig{}
-		if s.llmConfigRepo != nil {
-			agents, _ = s.llmConfigRepo.List(ctx)
-		}
-		createdTasks, summary := ExecuteTaskCreationsWithReturn(ctx, taskRequests, projectID, s.taskSvc, agents)
-		if summary != "" {
-			output += summary
-		}
-		for _, t := range createdTasks {
-			if s.taskRepo != nil {
-				if err := s.taskRepo.UpdateSlackOrigin(ctx, t.ID); err != nil {
-					log.Printf("[slack] update slack origin failed for task=%s: %v", t.ID, err)
-				}
-			}
-			if s.slackTaskContextRepo != nil {
-				_ = s.slackTaskContextRepo.Upsert(ctx, &models.SlackTaskContext{
-					TaskID:         t.ID,
-					SlackTeamID:    markerCtx.TeamID,
-					SlackChannelID: markerCtx.ChannelID,
-					SlackThreadTS:  markerCtx.ThreadTS,
-					SlackUserID:    markerCtx.UserID,
-				})
-			}
-		}
-	}
-
-	editRequests := ParseTaskEdits(output)
-	if len(editRequests) > 0 {
-		if editSummary := ExecuteTaskEdits(ctx, editRequests, projectID, s.taskSvc, nil, ""); editSummary != "" {
-			output += editSummary
-		}
-	}
-
-	execRequests := ParseTaskExecutions(output)
-	if len(execRequests) > 0 {
-		if execSummary := ExecuteTaskExecutions(ctx, execRequests, projectID, s.taskSvc); execSummary != "" {
-			output += execSummary
-		}
-	}
-
-	if s.projectRepo != nil {
-		if newOutput := s.processListProjects(ctx, projectID, output); newOutput != output {
-			output = newOutput
-		}
-	}
-	if s.projectRepo != nil {
-		if newOutput := s.processSwitchProject(ctx, output, markerCtx.TeamID, markerCtx.UserID); newOutput != output {
-			output = newOutput
-		}
-	}
-
-	if warnings := DetectMissingMarkers(originalOutput); len(warnings) > 0 {
-		for _, w := range warnings {
-			log.Printf("[slack] processChatMarkers exec=%s warning promised action=%s without marker=%s", execID, w.Action, w.MarkerName)
-		}
-		output += "\n\n---\nWarning: The assistant appeared to promise an action but did not include the required marker. The following actions were NOT performed:\n"
-		for _, w := range warnings {
-			output += fmt.Sprintf("- %s (no %s marker found)\n", w.Action, w.MarkerName)
-		}
-		output += "\nPlease retry your request."
-	}
-
-	if output != originalOutput && s.execRepo != nil {
-		if updateErr := s.execRepo.UpdateOutput(ctx, execID, output); updateErr != nil {
-			log.Printf("[slack] processChatMarkers update output failed: %v", updateErr)
-		}
-	}
-
-	return output
 }
 
 func (s *SlackService) processListProjects(ctx context.Context, projectID, output string) string {
@@ -2148,4 +2155,33 @@ func (s *SlackService) resolveBotToken(ctx context.Context) string {
 		}
 	}
 	return strings.TrimSpace(s.getSetting(ctx, SlackSettingBotToken))
+}
+
+// SendChatResponse sends a completed chat-orchestrator response back to the
+// originating Slack thread. Unlike task completion notifications, this is only
+// for chat-category tasks that were promoted from queued channel input.
+func (s *SlackService) SendChatResponse(ctx context.Context, task models.Task, output string, errMsg string) {
+	if task.CreatedVia != models.TaskOriginSlack || task.Category != models.CategoryChat || s.slackTaskContextRepo == nil {
+		return
+	}
+	if !s.IsSendResponsesEnabled(ctx) {
+		return
+	}
+	ctxRecord, err := s.slackTaskContextRepo.GetByTaskID(ctx, task.ID)
+	if err != nil || ctxRecord == nil {
+		return
+	}
+	var message string
+	if errMsg != "" {
+		message = fmt.Sprintf("❌ Error: %s", util.Truncate(errMsg, 220))
+	} else {
+		cleaned := llmoutput.CleanChatOutputForDisplay(output)
+		if cleaned == "" {
+			cleaned = "(No response)"
+		}
+		message = cleaned
+	}
+	if err := s.sendSlackMessage(ctxRecord.SlackChannelID, ctxRecord.SlackThreadTS, message); err != nil {
+		log.Printf("[slack] send chat response failed for task=%s: %v", task.ID, err)
+	}
 }

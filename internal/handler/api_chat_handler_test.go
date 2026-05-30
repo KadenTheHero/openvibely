@@ -134,6 +134,7 @@ func TestAPIChatMessage_TextOnly_CreatesTaskAndExecution(t *testing.T) {
 	var resp ChatMessageAcceptedResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Equal(t, "processing", resp.Status)
+	assert.False(t, resp.Queued)
 	assert.NotEmpty(t, resp.MessageID)
 	assert.Contains(t, resp.StatusURL, "/api/chat/message/")
 
@@ -707,6 +708,136 @@ func TestAPIChatMessageStatus_NotFound(t *testing.T) {
 	assert.Equal(t, "message not found", resp["error"])
 }
 
+func TestAPIChatMessage_QueuesBehindActiveTurn(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "API Chat Queue Project")
+	activeTask := createTask(t, h, project.ID, "API Active Chat", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active api chat"
+	})
+
+	form := url.Values{}
+	form.Set("message", "queued api chat")
+	form.Set("project_id", project.ID)
+	form.Set("agent_id", agent.ID)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+	var resp ChatMessageAcceptedResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "queued", resp.Status)
+	assert.True(t, resp.Queued)
+	assert.NotEqual(t, activeExec.ID, resp.MessageID)
+	input, err := h.threadInputRepo.GetByID(ctx, resp.MessageID)
+	require.NoError(t, err)
+	require.NotNil(t, input)
+	assert.Equal(t, models.ThreadInputModeQueued, input.InputMode)
+	assert.Equal(t, models.ThreadInputPending, input.InputStatus)
+	assert.Equal(t, activeExec.ID, input.RunExecutionID)
+}
+
+func TestAPIChatMessage_QueuesBehindActiveTurnWithAttachments(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "API Chat Queue Attachments Project")
+	activeTask := createTask(t, h, project.ID, "API Active Chat Attachments", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active api chat"
+	})
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	require.NoError(t, writer.WriteField("message", "queued api chat with file"))
+	require.NoError(t, writer.WriteField("project_id", project.ID))
+	part, err := writer.CreateFormFile("attachments", "queued.txt")
+	require.NoError(t, err)
+	_, err = part.Write([]byte("queued attachment content"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code)
+	var resp ChatMessageAcceptedResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "queued", resp.Status)
+	input, err := h.threadInputRepo.GetByID(ctx, resp.MessageID)
+	require.NoError(t, err)
+	require.NotNil(t, input)
+	assert.Equal(t, activeExec.ID, input.RunExecutionID)
+	require.NotEmpty(t, input.AttachmentSessionID)
+	entries, err := os.ReadDir(filepath.Join(uploadsDir, "chat", "pending", input.AttachmentSessionID))
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Contains(t, entries[0].Name(), "queued.txt")
+}
+
+func TestAPIChatMessageStatus_Queued(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "API Chat Queued Status Project")
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued"}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/message/"+input.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp ChatMessageStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "queued", resp.Status)
+}
+
+func TestAPIChatMessageStatus_AppliedQueuedFollowsPromotedExecution(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "API Chat Applied Queued Status Project")
+	chatTask := createTask(t, h, project.ID, "Promoted Chat", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, chatTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+	})
+	require.NoError(t, h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "promoted response", "", 7, 11))
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued"}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+	require.NoError(t, h.threadInputRepo.MarkApplied(ctx, input.ID, exec.ID, exec.ID))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/message/"+input.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp ChatMessageStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, exec.ID, resp.MessageID)
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, "promoted response", resp.Response)
+	assert.Equal(t, 7, resp.TokensUsed)
+	assert.Equal(t, int64(11), resp.DurationMs)
+}
+
 func TestAPIChatMessageStatus_Processing(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -867,6 +998,33 @@ func TestAPIChatMessageStatus_Failed(t *testing.T) {
 	assert.Equal(t, exec.ID, resp.MessageID)
 	assert.Equal(t, "LLM connection timeout", resp.Error)
 	assert.Equal(t, int64(5000), resp.DurationMs)
+}
+
+func TestAPIChatMessageStatus_Cancelled(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{Name: "Test Agent", Provider: models.ProviderTest, Model: "test-model", APIKey: "test-key", MaxTokens: 4096, Temperature: 1.0, IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	projects, _ := h.projectSvc.List(ctx)
+	projectID := projects[0].ID
+	task := &models.Task{ProjectID: projectID, Title: "Test Chat", Prompt: "Hello", Status: models.StatusCancelled, Category: models.CategoryChat, AgentID: &agent.ID}
+	require.NoError(t, h.taskRepo.Create(ctx, task))
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Hello"}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+	require.NoError(t, h.execRepo.Complete(ctx, exec.ID, models.ExecCancelled, "partial output", "cancelled", 0, 1500))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/message/"+exec.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp ChatMessageStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "cancelled", resp.Status)
+	assert.Equal(t, "cancelled", resp.Error)
+	assert.Equal(t, "partial output", resp.Response)
+	assert.Equal(t, int64(1500), resp.DurationMs)
 }
 
 func TestAPIChatMessage_AsyncReturns201(t *testing.T) {

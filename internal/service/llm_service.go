@@ -57,6 +57,8 @@ type LLMService struct {
 	providerAdapters      map[models.LLMProvider]ProviderAdapter
 	routing               *agentRoutingStrategy
 	fileChangeBroadcaster *events.FileChangeBroadcaster
+	threadInputRepo       *repository.ThreadInputRepo
+	broadcaster           *events.Broadcaster
 	// globalSkillRoot is the parent directory holding <root>/agents for global
 	// agents/skills. It is used for catalog construction and bounded skill
 	// mutation writes; agents themselves remain user-managed.
@@ -119,6 +121,14 @@ func (s *LLMService) SetSlackService(ss *SlackService) {
 // SetFileChangeBroadcaster sets the file change broadcaster for real-time file change updates.
 func (s *LLMService) SetFileChangeBroadcaster(fcb *events.FileChangeBroadcaster) {
 	s.fileChangeBroadcaster = fcb
+}
+
+func (s *LLMService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
+	s.threadInputRepo = repo
+}
+
+func (s *LLMService) SetBroadcaster(b *events.Broadcaster) {
+	s.broadcaster = b
 }
 
 // SetAgentRepo sets the agent repository for resolving agent definitions on tasks.
@@ -244,6 +254,7 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 
 func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task, agent models.LLMConfig) (*models.Execution, llmcontracts.ChatContext, error) {
 	log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s agent=%s model=%s", task.ID, agent.Name, agent.Model)
+	finalizeCtx := context.Background()
 
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && s.agentRepo != nil {
@@ -303,7 +314,15 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	attachments, err := s.attachmentRepo.ListByTask(ctx, task.ID)
 	if err != nil {
 		log.Printf("[agent-svc] ExecuteTaskWithAgent error loading attachments: %v", err)
-		return nil, llmcontracts.ChatContext{}, fmt.Errorf("loading attachments: %w", err)
+		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", err.Error(), 0, 0); completeErr != nil {
+			log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution after attachment load failure: %v", completeErr)
+		}
+		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
+			log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after attachment load failure: %v", statusErr)
+		}
+		exec.Status = models.ExecFailed
+		exec.ErrorMessage = err.Error()
+		return exec, llmcontracts.ChatContext{}, fmt.Errorf("loading attachments: %w", err)
 	}
 	log.Printf("[agent-svc] ExecuteTaskWithAgent loaded %d attachments for task=%s", len(attachments), task.ID)
 
@@ -334,10 +353,10 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 					errMsg += ". Ensure the local repo path is mounted into the container."
 				}
 				log.Printf("[agent-svc] ExecuteTaskWithAgent ERROR: %s", errMsg)
-				if completeErr := s.execRepo.Complete(ctx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); completeErr != nil {
+				if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); completeErr != nil {
 					log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution after missing repo: %v", completeErr)
 				}
-				if statusErr := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusFailed); statusErr != nil {
+				if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 					log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after missing repo: %v", statusErr)
 				}
 				return exec, llmcontracts.ChatContext{}, fmt.Errorf("repo path missing: %s", errMsg)
@@ -366,31 +385,31 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 
 			if syncErr := s.worktreeSvc.SyncWorktreeFromMainAtStart(ctx, &task, repoDir); syncErr != nil {
 				log.Printf("[agent-svc] ExecuteTaskWithAgent startup worktree auto-merge failed task=%s: %v", task.ID, syncErr)
-				if completeErr := s.execRepo.Complete(ctx, exec.ID, models.ExecFailed, "", syncErr.Error(), 0, 0); completeErr != nil {
+				if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", syncErr.Error(), 0, 0); completeErr != nil {
 					log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution after startup auto-merge failure: %v", completeErr)
 				}
-				if statusErr := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusFailed); statusErr != nil {
+				if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 					log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after startup auto-merge failure: %v", statusErr)
 				}
 				if task.Category == models.CategoryActive {
-					if categoryErr := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryCompleted); categoryErr != nil {
+					if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
 						log.Printf("[agent-svc] ExecuteTaskWithAgent error moving startup-auto-merge-failed task to completed category: %v", categoryErr)
 					} else {
 						log.Printf("[agent-svc] ExecuteTaskWithAgent moved startup-auto-merge-failed task=%s to completed category", task.ID)
 					}
 				}
 				if s.alertSvc != nil {
-					if alertErr := s.alertSvc.CreateTaskFailedAlert(ctx, task.ProjectID, task.ID, exec.ID, task.Title, syncErr.Error()); alertErr != nil {
+					if alertErr := s.alertSvc.CreateTaskFailedAlert(finalizeCtx, task.ProjectID, task.ID, exec.ID, task.Title, syncErr.Error()); alertErr != nil {
 						log.Printf("[agent-svc] ExecuteTaskWithAgent error creating startup auto-merge failure alert: %v", alertErr)
 					}
 				}
 				exec.Status = models.ExecFailed
 				exec.ErrorMessage = syncErr.Error()
 				if s.telegramSvc != nil {
-					s.telegramSvc.SendTaskCompletionNotification(ctx, task, "", syncErr.Error())
+					s.telegramSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
 				}
 				if s.slackSvc != nil {
-					s.slackSvc.SendTaskCompletionNotification(ctx, task, "", syncErr.Error())
+					s.slackSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
 				}
 				return exec, llmcontracts.ChatContext{}, fmt.Errorf("startup worktree auto-merge failed: %w", syncErr)
 			}
@@ -410,10 +429,10 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if prepErr != nil {
 			errMsg := fmt.Sprintf("preparing scoped file tools: %v", prepErr)
 			log.Printf("[agent-svc] ExecuteTaskWithAgent scoped files prep failed task=%s: %v", task.ID, prepErr)
-			if completeErr := s.execRepo.Complete(ctx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); completeErr != nil {
+			if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); completeErr != nil {
 				log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution after scoped files prep failure: %v", completeErr)
 			}
-			if statusErr := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusFailed); statusErr != nil {
+			if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 				log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after scoped files prep failure: %v", statusErr)
 			}
 			exec.Status = models.ExecFailed
@@ -452,6 +471,29 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 
 	// Call the LLM
 	callCtx := ctx
+	var preparedSteering []models.ThreadInput
+	if s.threadInputRepo != nil {
+		callCtx = llmcontracts.WithSteeringCallback(callCtx, func(callbackCtx context.Context) (string, error) {
+			inputs, steeringErr := s.threadInputRepo.PreparePendingTextSteering(callbackCtx, exec.ID, exec.ID)
+			if steeringErr != nil || len(inputs) == 0 {
+				return "", steeringErr
+			}
+			preparedSteering = append(preparedSteering, inputs...)
+			s.publishTaskThreadInputAppliedEvents(exec.ID, inputs)
+			return formatSteeringInstruction(combinedSteeringContent(inputs)), nil
+		})
+		callCtx = llmcontracts.WithSteeringRetryResetCallback(callCtx, func(callbackCtx context.Context) error {
+			if len(preparedSteering) == 0 {
+				return nil
+			}
+			ids := threadInputIDs(preparedSteering)
+			if err := s.threadInputRepo.RestorePreparedSteering(callbackCtx, ids, exec.ID, exec.ID); err != nil {
+				return err
+			}
+			preparedSteering = nil
+			return nil
+		})
+	}
 	if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil {
 		mergedTools := llmcontracts.CompositeRuntimeTools(runtimeTools, ctxTools)
 		callCtx = llmcontracts.WithRuntimeTools(callCtx, mergedTools)
@@ -477,6 +519,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		// Use background context for DB updates since the task context may be cancelled.
 		bgCtx := context.Background()
 		if ctx.Err() == context.Canceled {
+			s.requeuePendingTaskSteeringForExecution(bgCtx, exec.ID)
 			log.Printf("[agent-svc] ExecuteTaskWithAgent CANCELLED task=%s duration=%dms",
 				task.ID, durationMs)
 			// Pass output (may contain partial streamed content) so Complete preserves it
@@ -493,6 +536,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			return exec, result.ChatContext, fmt.Errorf("task cancelled")
 		}
 
+		s.requeuePendingTaskSteeringForExecution(bgCtx, exec.ID)
 		log.Printf("[agent-svc] ExecuteTaskWithAgent LLM call FAILED task=%s duration=%dms error=%v",
 			task.ID, durationMs, err)
 		// For max_tokens failures, preserve the partial output so the user can see
@@ -535,6 +579,20 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		return exec, result.ChatContext, fmt.Errorf("calling LLM: %w", err)
 	}
 
+	if err := s.commitPreparedTaskSteering(ctx, exec.ID, preparedSteering); err != nil {
+		s.requeuePendingTaskSteeringForExecution(finalizeCtx, exec.ID)
+		log.Printf("[agent-svc] ExecuteTaskWithAgent error committing steering task=%s exec=%s: %v", task.ID, exec.ID, err)
+		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, output, err.Error(), tokensUsed, durationMs); completeErr != nil {
+			log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution after steering commit failure: %v", completeErr)
+		}
+		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
+			log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after steering commit failure: %v", statusErr)
+		}
+		exec.Status = models.ExecFailed
+		exec.ErrorMessage = err.Error()
+		return exec, result.ChatContext, fmt.Errorf("committing steering: %w", err)
+	}
+
 	log.Printf("[agent-svc] ExecuteTaskWithAgent LLM call SUCCESS task=%s tokens=%d duration=%dms output_len=%d",
 		task.ID, tokensUsed, durationMs, len(output))
 
@@ -550,22 +608,22 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if reason, found := llmoutput.ExtractMarker(statusCheckOutput, "[STATUS: FAILED |"); found {
 		log.Printf("[agent-svc] ExecuteTaskWithAgent agent reported STATUS FAILED task=%s reason=%q", task.ID, reason)
 		// Clear the execution output on failure — only keep the prompt and error message.
-		if completeErr := s.execRepo.Complete(ctx, exec.ID, models.ExecFailed, "", reason, tokensUsed, durationMs); completeErr != nil {
+		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", reason, tokensUsed, durationMs); completeErr != nil {
 			log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
 		}
-		if statusErr := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusFailed); statusErr != nil {
+		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 			log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status to failed: %v", statusErr)
 		}
 		// Move failed tasks to completed category (same as successful tasks)
 		if task.Category == models.CategoryActive {
-			if categoryErr := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryCompleted); categoryErr != nil {
+			if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
 				log.Printf("[agent-svc] ExecuteTaskWithAgent error moving failed task to completed category: %v", categoryErr)
 			} else {
 				log.Printf("[agent-svc] ExecuteTaskWithAgent moved failed task=%s to completed category", task.ID)
 			}
 		}
 		if s.alertSvc != nil {
-			if alertErr := s.alertSvc.CreateTaskFailedAlert(ctx, task.ProjectID, task.ID, exec.ID, task.Title, reason); alertErr != nil {
+			if alertErr := s.alertSvc.CreateTaskFailedAlert(finalizeCtx, task.ProjectID, task.ID, exec.ID, task.Title, reason); alertErr != nil {
 				log.Printf("[agent-svc] ExecuteTaskWithAgent error creating alert: %v", alertErr)
 			}
 		}
@@ -573,10 +631,10 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		exec.ErrorMessage = reason
 		// Send Telegram notification for tasks created via Telegram
 		if s.telegramSvc != nil {
-			s.telegramSvc.SendTaskCompletionNotification(ctx, task, "", reason)
+			s.telegramSvc.SendTaskCompletionNotification(finalizeCtx, task, "", reason)
 		}
 		if s.slackSvc != nil {
-			s.slackSvc.SendTaskCompletionNotification(ctx, task, "", reason)
+			s.slackSvc.SendTaskCompletionNotification(finalizeCtx, task, "", reason)
 		}
 		return exec, result.ChatContext, nil
 	}
@@ -598,7 +656,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			taskRequests := ParseTaskCreations(output)
 			if len(taskRequests) > 0 {
 				log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s found %d task creation requests", task.ID, len(taskRequests))
-				summary := ExecuteTaskCreations(ctx, taskRequests, task.ProjectID, s.taskSvc)
+				summary := ExecuteTaskCreations(finalizeCtx, taskRequests, task.ProjectID, s.taskSvc)
 				if summary != "" {
 					output += summary
 				}
@@ -607,10 +665,10 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	}
 
 	// Record success
-	if completeErr := s.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, output, "", tokensUsed, durationMs); completeErr != nil {
+	if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecCompleted, output, "", tokensUsed, durationMs); completeErr != nil {
 		log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
 	}
-	if statusErr := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted); statusErr != nil {
+	if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusCompleted); statusErr != nil {
 		log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status to completed: %v", statusErr)
 	}
 
@@ -618,12 +676,12 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if workDir != "" {
 		// For worktree tasks, capture the diff between the task branch and target.
 		if task.WorktreePath != "" && task.WorktreeBranch != "" {
-			diffOutput := s.captureWorktreeDiffAfterExecution(ctx, exec.ID, &task, repoDir)
+			diffOutput := s.captureWorktreeDiffAfterExecution(finalizeCtx, exec.ID, &task, repoDir)
 			if diffOutput != "" {
 				exec.DiffOutput = diffOutput
 			}
 		} else if diffOutput := s.CaptureGitDiff(workDir); diffOutput != "" {
-			if diffErr := s.execRepo.UpdateDiffOutput(ctx, exec.ID, diffOutput); diffErr != nil {
+			if diffErr := s.execRepo.UpdateDiffOutput(finalizeCtx, exec.ID, diffOutput); diffErr != nil {
 				log.Printf("[agent-svc] ExecuteTaskWithAgent error saving diff output: %v", diffErr)
 			} else {
 				exec.DiffOutput = diffOutput
@@ -634,14 +692,14 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 
 	// Handle worktree post-execution (auto-merge, status updates)
 	if s.worktreeSvc != nil && task.WorktreePath != "" && repoDir != "" {
-		s.worktreeSvc.HandlePostExecution(ctx, &task, repoDir)
+		s.worktreeSvc.HandlePostExecution(finalizeCtx, &task, repoDir)
 	}
 
 	// Check for follow-up marker (task still completed, but alert created)
 	if reason, found := llmoutput.ExtractMarker(statusCheckOutput, "[STATUS: NEEDS_FOLLOWUP |"); found {
 		log.Printf("[agent-svc] ExecuteTaskWithAgent agent reported STATUS NEEDS_FOLLOWUP task=%s reason=%q", task.ID, reason)
 		if s.alertSvc != nil {
-			if alertErr := s.alertSvc.CreateTaskNeedsFollowupAlert(ctx, task.ProjectID, task.ID, exec.ID, task.Title, reason); alertErr != nil {
+			if alertErr := s.alertSvc.CreateTaskNeedsFollowupAlert(finalizeCtx, task.ProjectID, task.ID, exec.ID, task.Title, reason); alertErr != nil {
 				log.Printf("[agent-svc] ExecuteTaskWithAgent error creating followup alert: %v", alertErr)
 			}
 		}
@@ -649,7 +707,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 
 	// Automatically move completed tasks from active category to completed category
 	if task.Category == models.CategoryActive {
-		if categoryErr := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryCompleted); categoryErr != nil {
+		if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
 			log.Printf("[agent-svc] ExecuteTaskWithAgent error moving task to completed category: %v", categoryErr)
 		} else {
 			log.Printf("[agent-svc] ExecuteTaskWithAgent moved task=%s to completed category", task.ID)
@@ -657,11 +715,11 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	}
 	// Automatically move completed scheduled tasks with RepeatOnce to completed category
 	if task.Category == models.CategoryScheduled {
-		schedules, err := s.scheduleRepo.ListByTask(ctx, task.ID)
+		schedules, err := s.scheduleRepo.ListByTask(finalizeCtx, task.ID)
 		if err != nil {
 			log.Printf("[agent-svc] ExecuteTaskWithAgent error getting schedules for task %s: %v", task.ID, err)
 		} else if len(schedules) > 0 && schedules[0].RepeatType == models.RepeatOnce {
-			if categoryErr := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryCompleted); categoryErr != nil {
+			if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
 				log.Printf("[agent-svc] ExecuteTaskWithAgent error moving RepeatOnce task to completed category: %v", categoryErr)
 			} else {
 				log.Printf("[agent-svc] ExecuteTaskWithAgent moved RepeatOnce task=%s to completed category", task.ID)
@@ -675,20 +733,104 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 
 	// Trigger task chaining if configured
 	if s.taskSvc != nil {
-		if chainErr := s.triggerTaskChain(ctx, task, textOnlyOutput); chainErr != nil {
+		if chainErr := s.triggerTaskChain(finalizeCtx, task, textOnlyOutput); chainErr != nil {
 			log.Printf("[agent-svc] ExecuteTaskWithAgent error triggering task chain: %v", chainErr)
 		}
 	}
 
 	// Send Telegram notification for tasks created via Telegram
 	if s.telegramSvc != nil {
-		s.telegramSvc.SendTaskCompletionNotification(ctx, task, output, "")
+		s.telegramSvc.SendTaskCompletionNotification(finalizeCtx, task, output, "")
 	}
 	if s.slackSvc != nil {
-		s.slackSvc.SendTaskCompletionNotification(ctx, task, output, "")
+		s.slackSvc.SendTaskCompletionNotification(finalizeCtx, task, output, "")
 	}
 
 	return exec, result.ChatContext, nil
+}
+
+func (s *LLMService) publishTaskThreadInputAppliedEvents(execID string, inputs []models.ThreadInput) {
+	if s.broadcaster == nil {
+		return
+	}
+	for _, input := range inputs {
+		if input.TaskID == "" {
+			continue
+		}
+		s.broadcaster.Publish(events.TaskEvent{
+			Type:           events.TaskThreadInputApplied,
+			ProjectID:      input.ProjectID,
+			TaskID:         input.TaskID,
+			ExecID:         execID,
+			Message:        input.Content,
+			PendingInputID: input.ID,
+		})
+	}
+}
+
+func (s *LLMService) publishTaskThreadInputQueuedEvents(inputs []models.ThreadInput) {
+	if s.broadcaster == nil {
+		return
+	}
+	for _, input := range inputs {
+		if input.TaskID == "" {
+			continue
+		}
+		s.broadcaster.Publish(events.TaskEvent{
+			Type:           events.TaskThreadInputQueued,
+			ProjectID:      input.ProjectID,
+			TaskID:         input.TaskID,
+			ExecID:         input.RunExecutionID,
+			Message:        input.Content,
+			PendingInputID: input.ID,
+		})
+	}
+}
+
+func (s *LLMService) commitPreparedTaskSteering(ctx context.Context, execID string, inputs []models.ThreadInput) error {
+	if s.threadInputRepo == nil || len(inputs) == 0 {
+		return nil
+	}
+	for _, input := range inputs {
+		if err := s.threadInputRepo.MarkApplied(ctx, input.ID, execID, execID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *LLMService) requeuePendingTaskSteeringForExecution(ctx context.Context, execID string) {
+	if s.threadInputRepo == nil {
+		return
+	}
+	requeued, err := s.threadInputRepo.RequeuePendingSteeringForExecution(ctx, execID)
+	if err != nil {
+		log.Printf("[agent-svc] ExecuteTaskWithAgent exec=%s error requeueing pending steering: %v", execID, err)
+		return
+	}
+	s.publishTaskThreadInputQueuedEvents(requeued)
+}
+
+func threadInputIDs(inputs []models.ThreadInput) []string {
+	ids := make([]string, 0, len(inputs))
+	for _, input := range inputs {
+		ids = append(ids, input.ID)
+	}
+	return ids
+}
+
+func combinedSteeringContent(inputs []models.ThreadInput) string {
+	parts := make([]string, 0, len(inputs))
+	for _, input := range inputs {
+		if content := strings.TrimSpace(input.Content); content != "" {
+			parts = append(parts, content)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func formatSteeringInstruction(steeringMessage string) string {
+	return strings.TrimSpace(steeringMessage)
 }
 
 func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, execID string, task *models.Task, repoDir string) string {

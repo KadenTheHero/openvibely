@@ -83,7 +83,9 @@ type AgenticOptions struct {
 	OnThinking   func(text string)                              // called for reasoning/summary deltas
 	OnToolUse    func(name string, input json.RawMessage)       // called when a tool is invoked
 	OnToolResult func(name string, output string, isError bool) // called when a tool completes
-	OnCompaction func(summary string)                           // called when history is compacted
+	// OnToolBoundarySteering is called after local tool results are appended and before the next model request.
+	OnToolBoundarySteering func(ctx context.Context) (string, error)
+	OnCompaction           func(summary string) // called when history is compacted
 }
 
 // AgenticResponse is the result of an agentic send.
@@ -310,6 +312,20 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			}
 			inputItems = append(inputItems, toolResultItem)
 			localItemsAfterResponse = append(localItemsAfterResponse, toolResultItem)
+		}
+
+		if opts.OnToolBoundarySteering != nil {
+			steering, err := opts.OnToolBoundarySteering(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("turn %d tool-boundary steering: %w", turn+1, err)
+			}
+			if steering = strings.TrimSpace(steering); steering != "" {
+				inputItems = append(inputItems, agenticInputItem{
+					"type":    "message",
+					"role":    "user",
+					"content": steering,
+				})
+			}
 		}
 
 		compactedItems, err := compactIfNeeded(inputItems, tokenLedger.projectedTokens(localItemsAfterResponse), false)

@@ -242,6 +242,12 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 		if h.chatBroadcaster != nil {
 			svc.SetChatBroadcaster(h.chatBroadcaster)
 		}
+		if h.threadInputRepo != nil {
+			svc.SetThreadInputRepo(h.threadInputRepo)
+		}
+		svc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
+		svc.SetChannelChatRunner(h.StartChannelChatRun)
+		svc.SetChannelTaskRunner(h.StartChannelTaskRun)
 		svc.Start()
 		h.telegramService = svc
 	}

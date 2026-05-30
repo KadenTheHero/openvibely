@@ -60,12 +60,25 @@ func TestLiveEventsSSE_ReceivesTaskChatAndFileEvents(t *testing.T) {
 			ProjectID: "proj-1",
 			Status:    "running",
 		})
+		taskBroadcaster.Publish(events.TaskEvent{
+			Type:           events.TaskThreadExecutionStarted,
+			TaskID:         "task-1",
+			ProjectID:      "proj-1",
+			ExecID:         "exec-thread-1",
+			PendingInputID: "input-1",
+		})
 		chatBroadcaster.Publish(events.ChatEvent{
 			Type:      events.ChatNewMessage,
 			ExecID:    "exec-1",
 			ProjectID: "proj-1",
 			Message:   "hello",
 			Source:    "telegram",
+		})
+		chatBroadcaster.Publish(events.ChatEvent{
+			Type:           events.ChatThreadInputApplied,
+			ExecID:         "exec-1",
+			ProjectID:      "proj-1",
+			PendingInputID: "input-chat-1",
 		})
 		fileBroadcaster.Publish(events.FileChangeEvent{
 			Type:      events.DiffSnapshot,
@@ -80,7 +93,7 @@ func TestLiveEventsSSE_ReceivesTaskChatAndFileEvents(t *testing.T) {
 	currentType := ""
 	timeout := time.After(3 * time.Second)
 
-	for len(received) < 3 {
+	for len(received) < 5 {
 		select {
 		case <-timeout:
 			t.Fatalf("timeout waiting for multiplexed events, got: %#v", received)
@@ -104,8 +117,14 @@ func TestLiveEventsSSE_ReceivesTaskChatAndFileEvents(t *testing.T) {
 	if _, ok := received["task_status_changed"]; !ok {
 		t.Fatal("expected task_status_changed event from live stream")
 	}
+	if _, ok := received["task_thread_execution_started"]; !ok {
+		t.Fatal("expected task_thread_execution_started event from live stream")
+	}
 	if _, ok := received["chat_new_message"]; !ok {
 		t.Fatal("expected chat_new_message event from live stream")
+	}
+	if _, ok := received["chat_thread_input_applied"]; !ok {
+		t.Fatal("expected chat_thread_input_applied event from live stream")
 	}
 	if _, ok := received["diff_snapshot"]; !ok {
 		t.Fatal("expected diff_snapshot event from live stream")

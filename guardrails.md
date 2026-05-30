@@ -369,7 +369,6 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 ## Telegram Project Commands
 
 - **Regex pattern ordering matters**: When using multiple regex patterns for the same command (e.g., "switch project to X" vs "switch to project X"), put more specific patterns (with explicit "to" after "project") BEFORE less specific patterns (with optional "to" before "project"). Otherwise the less specific pattern greedily captures "to" as part of the project name.
-- **`processChatMarkers` has 6 params**: `(ctx, execID, projectID, output string, chatID int64, userID int64)`. The `userID` is needed for `[SWITCH_PROJECT]` marker processing. All test calls must include the 6th arg.
 
 ## Swagger / OpenAPI Guardrails
 

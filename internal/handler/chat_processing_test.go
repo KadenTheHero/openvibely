@@ -3,20 +3,27 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type chatMemoryHookStore struct {
@@ -456,6 +463,1500 @@ func TestProcessStreamingResponse_InteractiveChatPlanModeRunsMemoryRecallOnly(t 
 		if when == models.LifecycleAfterComplete {
 			t.Fatalf("plan chat must not run after_complete memory extraction, saw slots %#v", store.seen)
 		}
+	}
+	updatedExec, err := h.execRepo.GetByID(context.Background(), exec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if updatedExec.Status != models.ExecCompleted {
+		t.Fatalf("expected plan chat execution completed, got %s", updatedExec.Status)
+	}
+}
+
+func TestProcessStreamingResponse_PromotesQueuedTaskThreadInputsFIFO(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Queued Promotion Project")
+	task := createTask(t, h, project.ID, "Queued Promotion Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	active := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active"
+		ex.IsFollowup = true
+	})
+	firstQueued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "first queued"}
+	secondQueued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "second queued"}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, firstQueued))
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, secondQueued))
+
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	var once sync.Once
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) {
+		if call.Prompt == "active" {
+			return
+		}
+		started <- call.Prompt
+		once.Do(func() { <-release })
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         active.ID,
+		TaskID:         task.ID,
+		Message:        "active",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	})
+
+	select {
+	case got := <-started:
+		if got != "first queued" {
+			t.Fatalf("expected first queued input to start, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first queued turn to start")
+	}
+	first, _ := h.threadInputRepo.GetByID(ctx, firstQueued.ID)
+	second, _ := h.threadInputRepo.GetByID(ctx, secondQueued.ID)
+	if first.InputStatus != models.ThreadInputApplied || second.InputStatus != models.ThreadInputPending {
+		t.Fatalf("expected first applied and second pending, got first=%s second=%s", first.InputStatus, second.InputStatus)
+	}
+	close(release)
+	select {
+	case got := <-started:
+		if got != "second queued" {
+			t.Fatalf("expected second queued input to start after first, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for second queued turn to start")
+	}
+	for i := 0; i < 20; i++ {
+		latestSecond, _ := h.threadInputRepo.GetByID(ctx, secondQueued.ID)
+		if latestSecond.InputStatus == models.ThreadInputApplied {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	latestSecond, _ := h.threadInputRepo.GetByID(ctx, secondQueued.ID)
+	if latestSecond.InputStatus != models.ThreadInputApplied {
+		t.Fatalf("expected second queued input to apply, got %s", latestSecond.InputStatus)
+	}
+}
+
+func TestProcessStreamingResponse_SteeredQueuedInputRunsBeforeRemainingQueuedTurns(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Steered Queue Priority Project")
+	task := createTask(t, h, project.ID, "Steered Queue Priority Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	active := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active"
+		ex.IsFollowup = true
+	})
+	firstQueued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: active.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "first queued"}
+	steeredQueued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: active.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "steered queued"}
+	thirdQueued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: active.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "third queued"}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, firstQueued))
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, steeredQueued))
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, thirdQueued))
+
+	calls := make(chan string, 4)
+	releasePromoted := make(chan struct{})
+	var convertOnce sync.Once
+	var blockPromotedOnce sync.Once
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) {
+		calls <- call.Prompt
+		if call.Prompt == "active" {
+			convertOnce.Do(func() {
+				converted, err := h.threadInputRepo.ConvertQueuedToSteering(ctx, steeredQueued.ID, active.ID, active.ID)
+				require.NoError(t, err)
+				require.NotNil(t, converted)
+			})
+			return
+		}
+		if strings.Contains(call.Prompt, "steered queued") {
+			return
+		}
+		blockPromotedOnce.Do(func() { <-releasePromoted })
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         active.ID,
+		TaskID:         task.ID,
+		Message:        "active",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	})
+
+	var seen []string
+	deadline := time.After(2 * time.Second)
+	for len(seen) < 3 {
+		select {
+		case prompt := <-calls:
+			seen = append(seen, prompt)
+		case <-deadline:
+			t.Fatalf("timed out waiting for active steering and first promoted call, saw %#v", seen)
+		}
+	}
+	if seen[0] != "active" || !strings.Contains(seen[1], "steered queued") || seen[2] != "first queued" {
+		t.Fatalf("expected steered queued input to run before FIFO promotion, got %#v", seen)
+	}
+	if strings.Contains(seen[1], "latest user instruction") || strings.Contains(seen[1], "Start the next visible assistant text") {
+		t.Fatalf("expected steered queued input without wrapper text, got %q", seen[1])
+	}
+
+	steered, err := h.threadInputRepo.GetByID(ctx, steeredQueued.ID)
+	require.NoError(t, err)
+	first, err := h.threadInputRepo.GetByID(ctx, firstQueued.ID)
+	require.NoError(t, err)
+	third, err := h.threadInputRepo.GetByID(ctx, thirdQueued.ID)
+	require.NoError(t, err)
+	if steered.InputStatus != models.ThreadInputApplied || steered.InputMode != models.ThreadInputModeSteering || steered.RunExecutionID != active.ID {
+		t.Fatalf("expected steered row applied to active execution, got %#v", steered)
+	}
+	if first.InputStatus != models.ThreadInputApplied {
+		t.Fatalf("expected first queued row to promote after steered turn completed, got %#v", first)
+	}
+	if third.InputStatus != models.ThreadInputPending || third.InputMode != models.ThreadInputModeQueued {
+		t.Fatalf("expected remaining queued row to stay queued until promoted turn completes, got %#v", third)
+	}
+	close(releasePromoted)
+}
+
+func TestStartQueuedChatInputProcessesSavedAttachmentSession(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Queued Chat Attachment Project")
+	activeTask := createTask(t, h, project.ID, "Active Chat", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active chat"
+	})
+
+	tmpDir := t.TempDir()
+	oldUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	defer func() { uploadsDir = oldUploadsDir }()
+
+	sessionID := "queued-chat-attachments"
+	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
+	require.NoError(t, os.MkdirAll(pendingDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("queued text attachment"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "diagram.png"), []byte("fake-png"), 0644))
+
+	input := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeChat,
+		ProjectID:           project.ID,
+		RunExecutionID:      activeExec.ID,
+		AgentConfigID:       agent.ID,
+		InputMode:           models.ThreadInputModeQueued,
+		InputStatus:         models.ThreadInputPending,
+		Content:             "review queued attachments",
+		AttachmentSessionID: sessionID,
+		ChatMode:            models.ChatModeOrchestrate,
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	h.llmSvc.SetLLMCaller(mock)
+	cb := events.NewChatBroadcaster()
+	h.SetChatBroadcaster(cb)
+	sub, err := cb.Subscribe()
+	require.NoError(t, err)
+	defer cb.Unsubscribe(sub)
+
+	h.startQueuedChatInput(ctx, *input)
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
+
+	var newMessage events.ChatEvent
+	select {
+	case newMessage = <-sub:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for promoted chat new-message event")
+	}
+	require.Equal(t, events.ChatNewMessage, newMessage.Type)
+	require.Equal(t, input.ProjectID, newMessage.ProjectID)
+	require.NotEqual(t, input.ID, newMessage.ExecID)
+	require.Equal(t, input.ID, newMessage.PendingInputID)
+	require.False(t, newMessage.Queued)
+
+	request := mock.LastAgentRequest()
+	require.Len(t, request.Attachments, 1)
+	require.Equal(t, "diagram.png", request.Attachments[0].FileName)
+	require.Contains(t, request.ChatSystemContext, "queued text attachment")
+	attachments, err := h.chatAttachmentRepo.ListByExecutionIDs(ctx, []string{request.ExecID})
+	require.NoError(t, err)
+	require.Len(t, attachments[request.ExecID], 2)
+}
+
+func TestStartQueuedChatInputFallsBackWhenQueuedAgentDeleted(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	queuedAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Queued Deleted Agent"
+		a.IsDefault = false
+	})
+	fallbackAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Fallback Agent"
+		a.IsDefault = true
+	})
+	project := createProject(t, h, "Queued Deleted Agent Project")
+	activeTask := createTask(t, h, project.ID, "Active Chat", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &fallbackAgent.ID
+	})
+	activeExec := createExec(t, h, activeTask.ID, fallbackAgent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active chat"
+	})
+	input := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeChat,
+		ProjectID:      project.ID,
+		RunExecutionID: activeExec.ID,
+		AgentConfigID:  queuedAgent.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        "queued after model deletion",
+		ChatMode:       models.ChatModeOrchestrate,
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+	require.NoError(t, llmConfigRepo.Delete(ctx, queuedAgent.ID))
+	input.AgentConfigID = ""
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.startQueuedChatInput(ctx, *input)
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
+	request := mock.LastAgentRequest()
+	require.Equal(t, fallbackAgent.ID, request.Agent.ID)
+	updated, err := h.threadInputRepo.GetByID(ctx, input.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, updated.InputStatus)
+}
+
+func TestStartQueuedTaskThreadInputCancelsQueuedInputWhenNoModelAvailable(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Queued Missing Agent Project")
+	task := createTask(t, h, project.ID, "Queued Missing Agent Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active task"
+		ex.IsFollowup = true
+	})
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: activeExec.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued with deleted model"}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+	agents, err := llmConfigRepo.List(ctx)
+	require.NoError(t, err)
+	for _, cfg := range agents {
+		require.NoError(t, llmConfigRepo.Delete(ctx, cfg.ID))
+	}
+	input.AgentConfigID = ""
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.startQueuedTaskThreadInput(ctx, *input)
+	updated, err := h.threadInputRepo.GetByID(ctx, input.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputCancelled, updated.InputStatus)
+	require.Equal(t, 0, mock.CallCount())
+}
+
+func TestStartQueuedTaskThreadInputUsesQueuedChannelReplyContext(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Queued Task Channel Reply Project")
+	task := createTask(t, h, project.ID, "Queued Channel Reply Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active task"
+		ex.IsFollowup = true
+	})
+	input := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: activeExec.ID,
+		AgentConfigID:  agent.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        "queued from slack",
+		Source:         models.TaskOriginSlack,
+		SlackChannelID: "C1",
+		SlackThreadTS:  "1710000000.100000",
+		SlackUserID:    "U1",
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+
+	var sentChannel, sentThread, sentTitle, sentOutput, sentErr, sentUser string
+	h.SetSlackService(&fakeSlackService{taskCompletionFn: func(_ context.Context, channelID, threadTS, taskTitle, output, errMsg, userID string) {
+		sentChannel = channelID
+		sentThread = threadTS
+		sentTitle = taskTitle
+		sentOutput = output
+		sentErr = errMsg
+		sentUser = userID
+	}})
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "queued task done"
+	mock.TextOnly = "queued task done"
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.startQueuedTaskThreadInput(ctx, *input)
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
+	require.Eventually(t, func() bool { return sentChannel == "C1" }, 2*time.Second, 25*time.Millisecond)
+	require.Equal(t, "1710000000.100000", sentThread)
+	require.Equal(t, "Queued Channel Reply Task", sentTitle)
+	require.Equal(t, "queued task done", sentOutput)
+	require.Empty(t, sentErr)
+	require.Equal(t, "U1", sentUser)
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, models.TaskOriginSlack, updatedTask.CreatedVia)
+}
+
+func TestStartQueuedTaskThreadInputMovesCompletedTaskBackToActive(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Queued Task Reactivation Project")
+	task := createTask(t, h, project.ID, "Queued Reactivated Task", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "previous run"
+		ex.IsFollowup = true
+	})
+	input := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: activeExec.ID,
+		AgentConfigID:  agent.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        "queued follow-up after completion",
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "reactivated task done"
+	mock.TextOnly = "reactivated task done"
+	mock.OnCall = func(ctx context.Context, _ testutil.MockLLMCall) {
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+	broadcaster := events.NewBroadcaster()
+	h.broadcaster = broadcaster
+	sub, err := broadcaster.Subscribe()
+	require.NoError(t, err)
+	defer broadcaster.Unsubscribe(sub)
+
+	h.startQueuedTaskThreadInput(ctx, *input)
+	var startEvent events.TaskEvent
+	select {
+	case startEvent = <-sub:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued task-thread start event")
+	}
+	require.Equal(t, events.TaskThreadExecutionStarted, startEvent.Type)
+	require.Equal(t, task.ID, startEvent.TaskID)
+	require.Equal(t, input.ID, startEvent.PendingInputID)
+	require.NotEmpty(t, startEvent.ExecID)
+	require.Equal(t, input.Content, startEvent.Message)
+
+	require.Eventually(t, func() bool {
+		select {
+		case <-started:
+			return true
+		default:
+			return false
+		}
+	}, 2*time.Second, 25*time.Millisecond)
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, updatedTask.Category)
+	close(release)
+}
+
+func TestStartQueuedTaskThreadInputFailureUsesQueuedChannelReplyContext(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Queued Task Failure Reply Project", RepoPath: repoDir}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	task := createTask(t, h, project.ID, "Queued Failure Reply Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+	wtPath, wtBranch, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	require.NoError(t, err)
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+	require.NoError(t, os.WriteFile(filepath.Join(wtPath, ".git"), []byte("not a gitdir"), 0644))
+	activeExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "previous run"
+		ex.IsFollowup = true
+	})
+	input := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: activeExec.ID,
+		AgentConfigID:  agent.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        "queued from slack",
+		Source:         models.TaskOriginSlack,
+		SlackChannelID: "Cfail",
+		SlackThreadTS:  "1710000000.200000",
+		SlackUserID:    "Ufail",
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+
+	var sentChannel, sentThread, sentErr, sentUser string
+	h.SetSlackService(&fakeSlackService{taskCompletionFn: func(_ context.Context, channelID, threadTS, taskTitle, output, errMsg, userID string) {
+		sentChannel = channelID
+		sentThread = threadTS
+		sentErr = errMsg
+		sentUser = userID
+	}})
+
+	h.startQueuedTaskThreadInput(ctx, *input)
+	require.Eventually(t, func() bool { return sentChannel == "Cfail" }, 2*time.Second, 25*time.Millisecond)
+	require.Equal(t, "1710000000.200000", sentThread)
+	require.Contains(t, sentErr, "could not check worktree status")
+	require.Equal(t, "Ufail", sentUser)
+}
+
+func TestStartChannelTaskRunSetupFailureUsesReplyContext(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Immediate Channel Failure Reply Project", RepoPath: repoDir}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	task := createTask(t, h, project.ID, "Immediate Failure Reply Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+	wtPath, wtBranch, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	require.NoError(t, err)
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+	require.NoError(t, os.WriteFile(filepath.Join(wtPath, ".git"), []byte("not a gitdir"), 0644))
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "channel follow-up"
+		ex.IsFollowup = true
+	})
+
+	var sentChannel, sentThread, sentErr, sentUser string
+	h.SetSlackService(&fakeSlackService{taskCompletionFn: func(_ context.Context, channelID, threadTS, taskTitle, output, errMsg, userID string) {
+		sentChannel = channelID
+		sentThread = threadTS
+		sentErr = errMsg
+		sentUser = userID
+	}})
+
+	h.StartChannelTaskRun(ctx, service.ChannelTaskRunRequest{
+		ExecID:    exec.ID,
+		TaskID:    task.ID,
+		ProjectID: project.ID,
+		Message:   "channel follow-up",
+		Agent:     *agent,
+		Surface:   "slack",
+		ReplyContext: service.ChannelReplyContext{
+			Source:         models.TaskOriginSlack,
+			SlackChannelID: "Cimmediate",
+			SlackThreadTS:  "1710000000.300000",
+			SlackUserID:    "Uimmediate",
+		},
+	})
+	require.Eventually(t, func() bool { return sentChannel == "Cimmediate" }, 2*time.Second, 25*time.Millisecond)
+	require.Equal(t, "1710000000.300000", sentThread)
+	require.Contains(t, sentErr, "could not check worktree status")
+	require.Equal(t, "Uimmediate", sentUser)
+}
+
+func TestStartQueuedTaskThreadInputProcessesSavedAttachmentSession(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Queued Task Attachment Project")
+	task := createTask(t, h, project.ID, "Queued Attachment Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active task"
+		ex.IsFollowup = true
+	})
+
+	tmpDir := t.TempDir()
+	oldUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	defer func() { uploadsDir = oldUploadsDir }()
+
+	sessionID := "queued-task-attachments"
+	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
+	require.NoError(t, os.MkdirAll(pendingDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "instructions.txt"), []byte("queued task attachment"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "screen.png"), []byte("fake-png"), 0644))
+
+	input := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           project.ID,
+		TaskID:              task.ID,
+		RunExecutionID:      activeExec.ID,
+		AgentConfigID:       agent.ID,
+		InputMode:           models.ThreadInputModeQueued,
+		InputStatus:         models.ThreadInputPending,
+		Content:             "review queued task attachments",
+		AttachmentSessionID: sessionID,
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	h.llmSvc.SetLLMCaller(mock)
+	broadcaster := events.NewBroadcaster()
+	h.broadcaster = broadcaster
+	sub, err := broadcaster.Subscribe()
+	require.NoError(t, err)
+	defer broadcaster.Unsubscribe(sub)
+
+	h.startQueuedTaskThreadInput(ctx, *input)
+
+	var started events.TaskEvent
+	select {
+	case started = <-sub:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for promoted task-thread event")
+	}
+	require.Equal(t, events.TaskThreadExecutionStarted, started.Type)
+	require.Equal(t, input.ID, started.PendingInputID)
+	require.NotEmpty(t, started.ExecID)
+
+	fragment := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/thread/executions/"+started.ExecID+"/fragment", nil)
+	c := echo.New().NewContext(req, fragment)
+	c.SetParamNames("taskId", "execId")
+	c.SetParamValues(task.ID, started.ExecID)
+	require.NoError(t, h.GetTaskThreadExecutionFragment(c))
+	assert.Equal(t, http.StatusOK, fragment.Code)
+	assert.Contains(t, fragment.Body.String(), "review queued task attachments")
+	assert.Contains(t, fragment.Body.String(), "screen.png")
+	assert.Contains(t, fragment.Body.String(), "/chat/attachments/")
+
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
+	request := mock.LastAgentRequest()
+	require.Len(t, request.Attachments, 1)
+	require.Equal(t, "screen.png", request.Attachments[0].FileName)
+	require.Contains(t, request.ChatSystemContext, "queued task attachment")
+	attachments, err := h.chatAttachmentRepo.ListByExecutionIDs(ctx, []string{request.ExecID})
+	require.NoError(t, err)
+	require.Len(t, attachments[request.ExecID], 2)
+}
+
+func TestProcessStreamingResponse_AppliesPendingSteeringBeforeModelCall(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "handled steering"
+	mock.TextOnly = "handled steering"
+	var exec *models.Execution
+	var steering *models.ThreadInput
+	preparedEvent := make(chan events.TaskEvent, 1)
+	mock.OnCall = func(_ context.Context, _ testutil.MockLLMCall) {
+		select {
+		case event := <-preparedEvent:
+			require.Equal(t, events.TaskThreadInputApplied, event.Type)
+			require.Equal(t, exec.ID, event.ExecID)
+			require.Equal(t, steering.ID, event.PendingInputID)
+		default:
+			t.Fatal("expected pending steering removal event before provider call")
+		}
+		stored, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+		require.NoError(t, err)
+		require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+	}
+	h.llmSvc.SetLLMCaller(mock)
+	broadcaster := events.NewBroadcaster()
+	h.broadcaster = broadcaster
+	sub, err := broadcaster.Subscribe()
+	require.NoError(t, err)
+	defer broadcaster.Unsubscribe(sub)
+	go func() {
+		for event := range sub {
+			if event.Type == events.TaskThreadInputApplied {
+				preparedEvent <- event
+				return
+			}
+		}
+	}()
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Steering Project")
+	task := createTask(t, h, project.ID, "Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec = createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	steering = &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         exec.ID,
+		ExpectedTurnID: exec.ID,
+		Content:        "do not change the public API",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "active prompt",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	})
+
+	if mock.CallCount() != 1 {
+		t.Fatalf("expected one model call, got %d", mock.CallCount())
+	}
+	request := mock.LastAgentRequest()
+	if request.Message == "" {
+		t.Fatalf("expected steering request to keep a non-empty current user turn")
+	}
+	if !strings.Contains(request.Message, "active prompt") || !strings.Contains(request.Message, "do not change the public API") {
+		t.Fatalf("expected current request message to combine active prompt and steering, got %q", request.Message)
+	}
+	if strings.Contains(request.Message, "latest user instruction") || strings.Contains(request.Message, "Start the next visible assistant text") {
+		t.Fatalf("expected steering without wrapper text, got %q", request.Message)
+	}
+	for _, turn := range request.ChatHistory {
+		if turn.PromptSent == "do not change the public API" {
+			t.Fatalf("steering should be delivered as the current provider message, not trailing user-only history: %#v", request.ChatHistory)
+		}
+	}
+	applied, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	if applied.InputStatus != models.ThreadInputApplied {
+		t.Fatalf("expected steering input applied, got %s", applied.InputStatus)
+	}
+}
+
+func TestClaimPendingTextSteeringInputsSkipsAttachmentSteering(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Text Boundary Steering Attachment Project")
+	task := createTask(t, h, project.ID, "Text Boundary Steering Attachment Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+
+	textSteer := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         exec.ID,
+		ExpectedTurnID: exec.ID,
+		Content:        "3+2=?",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, textSteer, exec.ID))
+	attachmentSteer := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           project.ID,
+		TaskID:              task.ID,
+		RunExecutionID:      exec.ID,
+		InputMode:           models.ThreadInputModeSteering,
+		InputStatus:         models.ThreadInputPending,
+		TurnID:              exec.ID,
+		ExpectedTurnID:      exec.ID,
+		Content:             "also inspect this screenshot",
+		AttachmentSessionID: "attach-session-1",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, attachmentSteer, exec.ID))
+
+	params := streamingResponseParams{ExecID: exec.ID, TaskID: task.ID, ProjectID: project.ID, Agent: *agent, IsTaskFollowup: true}
+	batch, err := h.claimPendingTextSteeringInputs(ctx, &params)
+	require.NoError(t, err)
+	if batch.count() != 1 || batch.inputs[0].ID != textSteer.ID {
+		t.Fatalf("prepared text-only batch = %#v, want only text steer %s", batch.inputs, textSteer.ID)
+	}
+
+	textStored, err := h.threadInputRepo.GetByID(ctx, textSteer.ID)
+	require.NoError(t, err)
+	if textStored.ExpectedTurnID != "" {
+		t.Fatalf("text steer expected_turn_id = %q, want prepared empty", textStored.ExpectedTurnID)
+	}
+	attachmentStored, err := h.threadInputRepo.GetByID(ctx, attachmentSteer.ID)
+	require.NoError(t, err)
+	if attachmentStored.ExpectedTurnID != exec.ID || attachmentStored.InputStatus != models.ThreadInputPending {
+		t.Fatalf("attachment steer state = status %s expected_turn_id %q, want pending/unprepared", attachmentStored.InputStatus, attachmentStored.ExpectedTurnID)
+	}
+}
+
+func TestProcessStreamingResponse_CancelledContextUpdatesTaskStatus(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "partial before cancel"
+	mock.TextOnly = "partial before cancel"
+	mock.Err = context.Canceled
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Cancelled Shared Runner Project")
+	task := createTask(t, h, project.ID, "Cancelled Shared Runner Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "active prompt",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	})
+
+	updatedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecCancelled, updatedExec.Status)
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, updatedTask.Status)
+}
+
+func TestProcessStreamingResponse_DoesNotApplyPreparedSteeringWhenProviderCallFails(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "partial output"
+	mock.TextOnly = "partial output"
+	mock.Err = errors.New("provider failed")
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Prepared Failed Steering Project")
+	task := createTask(t, h, project.ID, "Prepared Failed Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	steering := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         exec.ID,
+		ExpectedTurnID: exec.ID,
+		Content:        "retry this steering",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "active prompt",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	})
+
+	require.Equal(t, 1, mock.CallCount())
+	require.Contains(t, mock.LastCall().Prompt, "retry this steering")
+	require.NotContains(t, mock.LastCall().Prompt, "latest user instruction")
+	require.NotContains(t, mock.LastCall().Prompt, "Start the next visible assistant text")
+	stillPending, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stillPending)
+	require.Equal(t, models.ThreadInputPending, stillPending.InputStatus)
+	require.Equal(t, models.ThreadInputModeQueued, stillPending.InputMode)
+}
+
+func TestProcessStreamingResponse_RequeuesPendingSteeringWithCancelledContext(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Cancelled Cleanup Steering Project")
+	task := createTask(t, h, project.ID, "Cancelled Cleanup Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	steering := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         exec.ID,
+		ExpectedTurnID: exec.ID,
+		Content:        "recover despite cancelled request context",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+	prepared, err := h.threadInputRepo.PreparePendingTextSteering(ctx, exec.ID, exec.ID)
+	require.NoError(t, err)
+	require.Len(t, prepared, 1)
+
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	h.requeuePendingSteeringForExecution(cancelledCtx, exec.ID)
+
+	requeued, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	require.NotNil(t, requeued)
+	require.Equal(t, models.ThreadInputPending, requeued.InputStatus)
+	require.Equal(t, models.ThreadInputModeQueued, requeued.InputMode)
+	require.Empty(t, requeued.TurnID)
+	require.Empty(t, requeued.ExpectedTurnID)
+}
+
+func TestProcessStreamingResponse_RequeuesUncommittedSteeringWithCancelledContext(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Cancelled Uncommitted Steering Project")
+	task := createTask(t, h, project.ID, "Cancelled Uncommitted Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	steering := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         exec.ID,
+		ExpectedTurnID: exec.ID,
+		Content:        "recover uncommitted despite cancelled request context",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+	prepared, err := h.threadInputRepo.PreparePendingTextSteering(ctx, exec.ID, exec.ID)
+	require.NoError(t, err)
+	require.Len(t, prepared, 1)
+
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	h.requeueUncommittedSteering(cancelledCtx, exec.ID, preparedSteeringBatch{inputs: prepared})
+
+	requeued, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	require.NotNil(t, requeued)
+	require.Equal(t, models.ThreadInputPending, requeued.InputStatus)
+	require.Equal(t, models.ThreadInputModeQueued, requeued.InputMode)
+	require.Empty(t, requeued.TurnID)
+	require.Empty(t, requeued.ExpectedTurnID)
+}
+
+func TestProcessStreamingResponse_AppliesPreparedSteeringAfterSuccessfulProviderCall(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "steered output"
+	mock.TextOnly = "steered output"
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Prepared Successful Steering Project")
+	task := createTask(t, h, project.ID, "Prepared Successful Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	steering := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         exec.ID,
+		ExpectedTurnID: exec.ID,
+		Content:        "apply this steering",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "active prompt",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	})
+
+	require.Equal(t, 1, mock.CallCount())
+	require.Contains(t, mock.LastCall().Prompt, "apply this steering")
+	require.NotContains(t, mock.LastCall().Prompt, "latest user instruction")
+	require.NotContains(t, mock.LastCall().Prompt, "Start the next visible assistant text")
+	applied, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	require.NotNil(t, applied)
+	require.Equal(t, models.ThreadInputApplied, applied.InputStatus)
+}
+
+func TestProcessStreamingResponse_DoesNotMovePreparedSteeringAttachmentsWhenProviderCallFails(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	originalUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	t.Cleanup(func() { uploadsDir = originalUploadsDir })
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "partial output"
+	mock.TextOnly = "partial output"
+	mock.Err = errors.New("provider failed")
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Prepared Failed Steering Attachments Project")
+	task := createTask(t, h, project.ID, "Prepared Failed Steering Attachments Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	sessionID := "steering-session"
+	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
+	require.NoError(t, os.MkdirAll(pendingDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("steering notes"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "screen.png"), []byte("fake-png"), 0644))
+	steering := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           project.ID,
+		TaskID:              task.ID,
+		RunExecutionID:      exec.ID,
+		InputMode:           models.ThreadInputModeSteering,
+		InputStatus:         models.ThreadInputPending,
+		TurnID:              exec.ID,
+		ExpectedTurnID:      exec.ID,
+		Content:             "use attached steering files",
+		AttachmentSessionID: sessionID,
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "active prompt",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	})
+
+	require.Equal(t, 1, mock.CallCount())
+	require.Contains(t, mock.LastCall().Prompt, "steering notes")
+	require.Len(t, mock.LastCall().Attachments, 1)
+	require.Equal(t, filepath.Join(pendingDir, "screen.png"), mock.LastCall().Attachments[0].FilePath)
+	stillPending, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stillPending)
+	require.Equal(t, models.ThreadInputPending, stillPending.InputStatus)
+	require.Equal(t, models.ThreadInputModeQueued, stillPending.InputMode)
+	require.FileExists(t, filepath.Join(pendingDir, "notes.txt"))
+	require.FileExists(t, filepath.Join(pendingDir, "screen.png"))
+}
+
+func TestProcessStreamingResponse_RequeuesPreparedSteeringWhenCommitFailsAfterProviderSuccess(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	originalUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	t.Cleanup(func() { uploadsDir = originalUploadsDir })
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "model used steering"
+	mock.TextOnly = "model used steering"
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Prepared Commit Failed Steering Project")
+	task := createTask(t, h, project.ID, "Prepared Commit Failed Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	sessionID := "steering-commit-fails"
+	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
+	require.NoError(t, os.MkdirAll(pendingDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("steering notes"), 0644))
+	h.chatAttachmentRepo = nil
+	steering := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           project.ID,
+		TaskID:              task.ID,
+		RunExecutionID:      exec.ID,
+		InputMode:           models.ThreadInputModeSteering,
+		InputStatus:         models.ThreadInputPending,
+		TurnID:              exec.ID,
+		ExpectedTurnID:      exec.ID,
+		Content:             "commit should not strand me",
+		AttachmentSessionID: sessionID,
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "active prompt",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	})
+
+	require.Equal(t, 1, mock.CallCount())
+	require.Contains(t, mock.LastCall().Prompt, "commit should not strand me")
+	requeued, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	require.NotNil(t, requeued)
+	require.Equal(t, models.ThreadInputPending, requeued.InputStatus)
+	require.Equal(t, models.ThreadInputModeQueued, requeued.InputMode)
+	require.Empty(t, requeued.TurnID)
+}
+
+func TestProcessStreamingResponse_RequeuesOnlyUncommittedSteeringWhenLaterCommitFails(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	originalUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	t.Cleanup(func() { uploadsDir = originalUploadsDir })
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "model used steering"
+	mock.TextOnly = "model used steering"
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Mixed Commit Failed Steering Project")
+	task := createTask(t, h, project.ID, "Mixed Commit Failed Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	first := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         exec.ID,
+		ExpectedTurnID: exec.ID,
+		Content:        "first steering commits",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, first, exec.ID))
+	sessionID := "mixed-steering-commit-fails"
+	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
+	require.NoError(t, os.MkdirAll(pendingDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("second notes"), 0644))
+	second := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           project.ID,
+		TaskID:              task.ID,
+		RunExecutionID:      exec.ID,
+		InputMode:           models.ThreadInputModeSteering,
+		InputStatus:         models.ThreadInputPending,
+		TurnID:              exec.ID,
+		ExpectedTurnID:      exec.ID,
+		Content:             "second steering recovers",
+		AttachmentSessionID: sessionID,
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, second, exec.ID))
+	h.chatAttachmentRepo = nil
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "active prompt",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	})
+
+	require.Equal(t, 1, mock.CallCount())
+	storedFirst, err := h.threadInputRepo.GetByID(ctx, first.ID)
+	require.NoError(t, err)
+	require.NotNil(t, storedFirst)
+	require.Equal(t, models.ThreadInputApplied, storedFirst.InputStatus)
+	require.Equal(t, models.ThreadInputModeSteering, storedFirst.InputMode)
+	storedSecond, err := h.threadInputRepo.GetByID(ctx, second.ID)
+	require.NoError(t, err)
+	require.NotNil(t, storedSecond)
+	require.Equal(t, models.ThreadInputPending, storedSecond.InputStatus)
+	require.Equal(t, models.ThreadInputModeQueued, storedSecond.InputMode)
+	require.Empty(t, storedSecond.TurnID)
+}
+
+func TestProcessStreamingResponse_DoesNotApplySteeringCreatedDuringFailedModelCall(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "partial output"
+	mock.TextOnly = "partial output"
+	mock.Err = errors.New("provider failed")
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Failed Steering Project")
+	task := createTask(t, h, project.ID, "Failed Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+
+	var steeringID string
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		steering := &models.ThreadInput{
+			Scope:          models.ThreadInputScopeTask,
+			ProjectID:      project.ID,
+			TaskID:         task.ID,
+			RunExecutionID: exec.ID,
+			InputMode:      models.ThreadInputModeSteering,
+			InputStatus:    models.ThreadInputPending,
+			TurnID:         exec.ID,
+			ExpectedTurnID: exec.ID,
+			Content:        "steering during failed call",
+		}
+		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+		steeringID = steering.ID
+	}
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "active prompt",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	})
+
+	require.Equal(t, 1, mock.CallCount())
+	require.NotEmpty(t, steeringID)
+	steering, err := h.threadInputRepo.GetByID(ctx, steeringID)
+	require.NoError(t, err)
+	require.NotNil(t, steering)
+	require.Equal(t, models.ThreadInputPending, steering.InputStatus)
+	require.Equal(t, models.ThreadInputModeQueued, steering.InputMode)
+	require.Empty(t, steering.TurnID)
+}
+
+func TestProcessStreamingResponse_AppliesSteeringCreatedDuringFinalGraceBeforeCompletion(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "initial final response"
+	mock.TextOnly = "initial final response"
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Late Steering Project")
+	task := createTask(t, h, project.ID, "Late Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+
+	created := make(chan struct{})
+	var once sync.Once
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		once.Do(func() {
+			go func() {
+				time.Sleep(finalSteeringPollInterval)
+				steering := &models.ThreadInput{
+					Scope:          models.ThreadInputScopeTask,
+					ProjectID:      project.ID,
+					TaskID:         task.ID,
+					RunExecutionID: exec.ID,
+					InputMode:      models.ThreadInputModeSteering,
+					InputStatus:    models.ThreadInputPending,
+					TurnID:         exec.ID,
+					ExpectedTurnID: exec.ID,
+					Content:        "late steering before completion",
+				}
+				require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+				close(created)
+			}()
+		})
+	}
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "active prompt",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	})
+	<-created
+
+	if mock.CallCount() != 2 {
+		t.Fatalf("expected late steering to extend the active turn with a second model call, got %d", mock.CallCount())
+	}
+	finalRequest := mock.LastAgentRequest()
+	if !strings.Contains(finalRequest.Message, "late steering before completion") {
+		t.Fatalf("expected late steering in provider request, got %q", finalRequest.Message)
+	}
+	if strings.Contains(finalRequest.Message, "latest user instruction") || strings.Contains(finalRequest.Message, "Start the next visible assistant text") {
+		t.Fatalf("expected late steering without wrapper text, got %q", finalRequest.Message)
+	}
+}
+
+func TestProcessStreamingResponse_MultipleSteeringBatchesDoNotDuplicateActiveContext(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "assistant step one"
+	mock.TextOnly = "assistant step one"
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Repeated Steering Project")
+	task := createTask(t, h, project.ID, "Repeated Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	first := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         exec.ID,
+		ExpectedTurnID: exec.ID,
+		Content:        "first steering",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, first, exec.ID))
+
+	secondCreated := make(chan struct{})
+	var once sync.Once
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		once.Do(func() {
+			second := &models.ThreadInput{
+				Scope:          models.ThreadInputScopeTask,
+				ProjectID:      project.ID,
+				TaskID:         task.ID,
+				RunExecutionID: exec.ID,
+				InputMode:      models.ThreadInputModeSteering,
+				InputStatus:    models.ThreadInputPending,
+				TurnID:         exec.ID,
+				ExpectedTurnID: exec.ID,
+				Content:        "second steering",
+			}
+			require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, second, exec.ID))
+			close(secondCreated)
+		})
+	}
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "active prompt",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	})
+	<-secondCreated
+
+	if mock.CallCount() != 2 {
+		t.Fatalf("expected two model calls after second steering, got %d", mock.CallCount())
+	}
+	requests := mock.AgentRequests
+	if len(requests) != 2 {
+		t.Fatalf("expected two recorded provider requests, got %d", len(requests))
+	}
+	firstRequest := requests[0]
+	if !strings.Contains(firstRequest.Message, "active prompt") || !strings.Contains(firstRequest.Message, "first steering") {
+		t.Fatalf("expected first request to combine active prompt and first steering, got %q", firstRequest.Message)
+	}
+	finalRequest := requests[1]
+	finalHistory := finalRequest.ChatHistory
+	var firstTurnOutput string
+	var duplicateSecondSteering bool
+	for _, turn := range finalHistory {
+		if strings.Contains(turn.PromptSent, "first steering") {
+			firstTurnOutput = turn.Output
+		}
+		if turn.PromptSent == "second steering" {
+			duplicateSecondSteering = true
+		}
+	}
+	if firstTurnOutput != "assistant step one" {
+		t.Fatalf("expected first request output attached before second steering, got %q in %#v", firstTurnOutput, finalHistory)
+	}
+	if duplicateSecondSteering {
+		t.Fatalf("second steering should be delivered as current provider message, not trailing user-only history: %#v", finalHistory)
+	}
+	if !strings.Contains(finalRequest.Message, "second steering") {
+		t.Fatalf("expected second steering as current provider message, got %q", finalRequest.Message)
+	}
+	if strings.Contains(finalRequest.Message, "latest user instruction") || strings.Contains(finalRequest.Message, "Start the next visible assistant text") {
+		t.Fatalf("expected second steering without wrapper text, got %q", finalRequest.Message)
 	}
 }
 
@@ -1790,5 +3291,261 @@ func TestProcessStreamingResponse_PhantomCreateTaskRegression(t *testing.T) {
 	}
 	if !strings.Contains(updatedExec.Output, "[TASK_ID:") {
 		t.Errorf("expected execution output to contain [TASK_ID:...] confirmation marker after marker processing, got: %s", updatedExec.Output)
+	}
+}
+
+func TestStartQueuedChatInputPreservesChannelOriginMetadata(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h.workerSvc = nil
+	h.SetSlackTaskContextRepo(repository.NewSlackTaskContextRepo(db))
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Queued Channel Metadata Project")
+	activeTask := createTask(t, h, project.ID, "Active Channel Chat", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active chat"
+	})
+
+	telegramInput := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeChat,
+		ProjectID:      project.ID,
+		RunExecutionID: activeExec.ID,
+		AgentConfigID:  agent.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        "telegram follow-up",
+		ChatMode:       models.ChatModeOrchestrate,
+		Source:         models.TaskOriginTelegram,
+		TelegramChatID: 12345,
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, telegramInput))
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "telegram done"
+	mock.TextOnly = "telegram done"
+	h.llmSvc.SetLLMCaller(mock)
+	h.startQueuedChatInput(ctx, *telegramInput)
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
+
+	telegramReq := mock.LastAgentRequest()
+	telegramExec, err := h.execRepo.GetByID(ctx, telegramReq.ExecID)
+	require.NoError(t, err)
+	require.NotNil(t, telegramExec)
+	telegramTask, err := h.taskRepo.GetByID(ctx, telegramExec.TaskID)
+	require.NoError(t, err)
+	require.NotNil(t, telegramTask)
+	require.Equal(t, models.TaskOriginTelegram, telegramTask.CreatedVia)
+	require.Equal(t, int64(12345), telegramTask.TelegramChatID)
+
+	activeExec2 := createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "second active chat"
+	})
+	slackInput := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeChat,
+		ProjectID:      project.ID,
+		RunExecutionID: activeExec2.ID,
+		AgentConfigID:  agent.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        "slack follow-up",
+		ChatMode:       models.ChatModeOrchestrate,
+		Source:         models.TaskOriginSlack,
+		SlackTeamID:    "T1",
+		SlackChannelID: "C1",
+		SlackThreadTS:  "1710000000.100000",
+		SlackUserID:    "U1",
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, slackInput))
+
+	h.startQueuedChatInput(ctx, *slackInput)
+	require.Eventually(t, func() bool { return mock.CallCount() == 2 }, 2*time.Second, 25*time.Millisecond)
+
+	slackReq := mock.LastAgentRequest()
+	slackExec, err := h.execRepo.GetByID(ctx, slackReq.ExecID)
+	require.NoError(t, err)
+	require.NotNil(t, slackExec)
+	slackTask, err := h.taskRepo.GetByID(ctx, slackExec.TaskID)
+	require.NoError(t, err)
+	require.NotNil(t, slackTask)
+	require.Equal(t, models.TaskOriginSlack, slackTask.CreatedVia)
+	stc, err := h.slackTaskContextRepo.GetByTaskID(ctx, slackTask.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stc)
+	require.Equal(t, "C1", stc.SlackChannelID)
+	require.Equal(t, "1710000000.100000", stc.SlackThreadTS)
+}
+
+func TestProcessStreamingResponse_ReaddsRecoveredPreparedSteeringToRealtimeUI(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "partial output"
+	mock.TextOnly = "partial output"
+	mock.Err = errors.New("provider failed")
+	h.llmSvc.SetLLMCaller(mock)
+	broadcaster := events.NewBroadcaster()
+	h.broadcaster = broadcaster
+	sub, err := broadcaster.Subscribe()
+	require.NoError(t, err)
+	defer broadcaster.Unsubscribe(sub)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Recovered Steering Event Project")
+	task := createTask(t, h, project.ID, "Recovered Steering Event Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	steering := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         exec.ID,
+		ExpectedTurnID: exec.ID,
+		Content:        "recovered steer",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "active prompt",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	})
+
+	var sawRemoval bool
+	var sawReadd bool
+	deadline := time.After(2 * time.Second)
+	for !sawRemoval || !sawReadd {
+		select {
+		case event := <-sub:
+			if event.PendingInputID != steering.ID {
+				continue
+			}
+			if event.Type == events.TaskThreadInputApplied {
+				sawRemoval = true
+			}
+			if event.Type == events.TaskThreadInputQueued {
+				sawReadd = true
+				require.Equal(t, "recovered steer", event.Message)
+				require.Equal(t, exec.ID, event.ExecID)
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for recovery events; removal=%v readd=%v", sawRemoval, sawReadd)
+		}
+	}
+
+	stored, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+	require.Equal(t, models.ThreadInputModeQueued, stored.InputMode)
+}
+
+func TestCancelThreadInputAllowsPendingSteeringBeforePreparation(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	broadcaster := events.NewBroadcaster()
+	h.broadcaster = broadcaster
+	sub, err := broadcaster.Subscribe()
+	require.NoError(t, err)
+	defer broadcaster.Unsubscribe(sub)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Cancel Pending Steering Project")
+	task := createTask(t, h, project.ID, "Cancel Pending Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	steering := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         exec.ID,
+		ExpectedTurnID: exec.ID,
+		Content:        "cancel me before processing",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+
+	req := httptest.NewRequest(http.MethodPost, "/thread-inputs/"+steering.ID+"/cancel", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `id="thread-input-`+steering.ID+`"`)
+
+	select {
+	case event := <-sub:
+		require.Equal(t, events.TaskThreadInputCancelled, event.Type)
+		require.Equal(t, task.ID, event.TaskID)
+		require.Equal(t, project.ID, event.ProjectID)
+		require.Equal(t, steering.ID, event.PendingInputID)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for task thread input cancellation event")
+	}
+
+	stored, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, models.ThreadInputCancelled, stored.InputStatus)
+}
+
+func TestCancelThreadInputBroadcastsChatCancellation(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Cancel Chat Pending Input Project")
+	input := &models.ThreadInput{
+		Scope:       models.ThreadInputScopeChat,
+		ProjectID:   project.ID,
+		InputMode:   models.ThreadInputModeQueued,
+		InputStatus: models.ThreadInputPending,
+		Content:     "cancel queued chat",
+		Source:      "web",
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+	chatBroadcaster := events.NewChatBroadcaster()
+	h.SetChatBroadcaster(chatBroadcaster)
+	sub, err := chatBroadcaster.Subscribe()
+	require.NoError(t, err)
+	defer chatBroadcaster.Unsubscribe(sub)
+
+	req := httptest.NewRequest(http.MethodPost, "/thread-inputs/"+input.ID+"/cancel", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	select {
+	case event := <-sub:
+		require.Equal(t, events.ChatThreadInputCancelled, event.Type)
+		require.Equal(t, project.ID, event.ProjectID)
+		require.Equal(t, input.ID, event.PendingInputID)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for chat thread input cancellation event")
 	}
 }

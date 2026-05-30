@@ -1046,11 +1046,17 @@ func TestHandler_ChatSend_FiltersRunningExecutionsFromHistory(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// Verify the full chat history includes all 3 executions (completed + running + new)
+	// Normal send while a chat response is active queues a pending input rather than
+	// creating a second running execution.
 	allHistory, _ := h.execRepo.ListChatHistory(ctx, projectID, 50)
-	if len(allHistory) != 3 {
-		t.Errorf("expected 3 total executions in DB, got %d", len(allHistory))
+	if len(allHistory) != 2 {
+		t.Errorf("expected 2 total executions in DB, got %d", len(allHistory))
 	}
+	pendingInputs, err := h.threadInputRepo.ListPendingForChat(ctx, projectID)
+	require.NoError(t, err)
+	require.Len(t, pendingInputs, 1)
+	assert.Equal(t, "Tell me about task chaining", pendingInputs[0].Content)
+	assert.Equal(t, models.ThreadInputModeQueued, pendingInputs[0].InputMode)
 
 	// Verify the running execution still exists (it should not be deleted)
 	runningFound := false
@@ -1062,6 +1068,184 @@ func TestHandler_ChatSend_FiltersRunningExecutionsFromHistory(t *testing.T) {
 	if !runningFound {
 		t.Error("running execution should still exist in DB")
 	}
+}
+
+func TestHandler_ChatSend_QueuesBehindActiveChatTurn(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Chat Queue Project")
+	activeTask := createTask(t, h, project.ID, "Active Chat", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active chat"
+	})
+
+	form := url.Values{}
+	form.Set("message", "queued chat")
+	form.Set("agent_id", agent.ID)
+	form.Set("chat_mode", "plan")
+	rec := htmxPost(e, "/chat/send?project_id="+project.ID, form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "queued chat")
+	assertContains(t, rec, `data-input-mode="queued"`)
+	assertContains(t, rec, `hx-swap-oob="beforeend"`)
+	assertContains(t, rec, `queued-input-row`)
+	assertContains(t, rec, `bg-base-300/45`)
+	assertContains(t, rec, `flex-1`)
+	assertContains(t, rec, `ml-auto`)
+	assertContains(t, rec, `>Steer</button>`)
+	assertContains(t, rec, `aria-label="Cancel queued follow-up"`)
+	assertContains(t, rec, `M19 7l-.867 12.142`)
+	assertNotContains(t, rec, `>Cancel</button>`)
+	assertNotContains(t, rec, `text-[11px]`)
+	assertNotContains(t, rec, `h-4 items-center`)
+	assertNotContains(t, rec, `w-fit`)
+	assertNotContains(t, rec, `>×</button>`)
+	assertNotContains(t, rec, "Queued follow-up</div>")
+	assertNotContains(t, rec, "Will run after the active response finishes.")
+
+	history, _ := h.execRepo.ListChatHistory(ctx, project.ID, 10)
+	if len(history) != 1 || history[0].ID != activeExec.ID {
+		t.Fatalf("expected only active chat execution before queued input is applied, got %#v", history)
+	}
+	inputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, models.ThreadInputModeQueued, inputs[0].InputMode)
+	assert.Equal(t, models.ThreadInputPending, inputs[0].InputStatus)
+	assert.Equal(t, "queued chat", inputs[0].Content)
+	assert.Equal(t, models.ChatModePlan, inputs[0].ChatMode)
+}
+
+func TestHandler_Chat_HidesComposerSteeringAffordanceWhileActive(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Chat Queue UI Project")
+	activeTask := createTask(t, h, project.ID, "Active Chat UI", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active chat"
+	})
+
+	rec := htmxGet(e, "/chat?project_id="+project.ID)
+	assertCode(t, rec, http.StatusOK)
+	assertNotContains(t, rec, "Active response running. Press Send to queue the next message")
+	assertNotContains(t, rec, `name="steer_endpoint"`)
+	assertNotContains(t, rec, `data-steer-submit="true"`)
+}
+
+func TestHandler_ChatSteer_CreatesPendingSteeringInput(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Chat Steering Project")
+	activeTask := createTask(t, h, project.ID, "Active Chat Steering", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active chat"
+		ex.Output = "partial wrong answer"
+	})
+
+	form := url.Values{}
+	form.Set("message", "Actually answer about queues")
+	form.Set("agent_id", agent.ID)
+	form.Set("chat_mode", "plan")
+	form.Set("expected_turn_id", activeExec.ID)
+	rec := htmxPost(e, "/chat/steer?project_id="+project.ID, form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "Steering pending")
+	assertContains(t, rec, `data-input-mode="steering"`)
+	assertContains(t, rec, `steering-input-row`)
+	assertContains(t, rec, `aria-label="Cancel pending steering"`)
+	assertContains(t, rec, `M19 7l-.867 12.142`)
+	assertNotContains(t, rec, `>Cancel</button>`)
+
+	oldExec, err := h.execRepo.GetByID(ctx, activeExec.ID)
+	require.NoError(t, err)
+	require.NotNil(t, oldExec)
+	assert.Equal(t, models.ExecRunning, oldExec.Status)
+
+	history, err := h.execRepo.ListChatHistory(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	inputs, err := h.threadInputRepo.ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, "Actually answer about queues", inputs[0].Content)
+	assert.Equal(t, models.ThreadInputModeSteering, inputs[0].InputMode)
+}
+
+func TestHandler_ClearChat_CancelsPendingChatInputs(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Clear Pending Chat Inputs")
+	activeTask := createTask(t, h, project.ID, "Active Chat", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active"
+	})
+
+	queued := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeChat,
+		ProjectID:      project.ID,
+		RunExecutionID: activeExec.ID,
+		AgentConfigID:  agent.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        "queued follow-up",
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
+	steering := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeChat,
+		ProjectID:      project.ID,
+		RunExecutionID: activeExec.ID,
+		AgentConfigID:  agent.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         activeExec.ID,
+		ExpectedTurnID: activeExec.ID,
+		Content:        "steer this",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, activeExec.ID))
+	prepared, err := h.threadInputRepo.PreparePendingSteering(ctx, activeExec.ID, activeExec.ID)
+	require.NoError(t, err)
+	require.Len(t, prepared, 1)
+
+	rec := htmxDelete(e, "/chat/history?project_id="+project.ID)
+	assertCode(t, rec, http.StatusOK)
+
+	pending, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, steering.ID, pending[0].ID)
+
+	queuedAfter, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.NotNil(t, queuedAfter)
+	assert.Equal(t, models.ThreadInputCancelled, queuedAfter.InputStatus)
+	steeringAfter, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	require.NotNil(t, steeringAfter)
+	assert.Equal(t, models.ThreadInputPending, steeringAfter.InputStatus)
+	assert.Equal(t, models.ThreadInputModeSteering, steeringAfter.InputMode)
 }
 
 func TestHandler_ClearChat_CancelsRunningGoroutines(t *testing.T) {
@@ -2845,17 +3029,30 @@ func TestHandler_Chat_PlanCompletionPrompt_NewMessageSetsStreamingFlag(t *testin
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 
-	// Shared live-event chat_new_message branch must set streaming flag.
 	newMsgIdx := strings.Index(body, "if (eventType === 'chat_new_message') {")
 	require.NotEqual(t, -1, newMsgIdx, "chat_new_message handler must exist")
 	newMsgBody := body[newMsgIdx : newMsgIdx+2000]
 
-	assert.Contains(t, newMsgBody, "_chatStreamInProgress = true",
-		"chat_new_message must set streaming flag")
+	assert.Contains(t, newMsgBody, "_chatStreamInProgress = !data.queued",
+		"chat_new_message must set streaming flag for active streams and leave queued inputs non-streaming")
 	assert.Contains(t, newMsgBody, "hidePlanCompletionPrompt",
 		"chat_new_message must hide prompt when new stream starts")
 	assert.Contains(t, newMsgBody, "document.querySelector('[data-exec-id=\"' + data.exec_id + '\"]')",
 		"chat_new_message must guard against duplicate exec bubbles already in DOM")
+
+	steeredIdx := strings.Index(body, "if (eventType === 'chat_turn_steered') {")
+	require.NotEqual(t, -1, steeredIdx, "chat_turn_steered handler must exist")
+	steeredBody := body[steeredIdx : steeredIdx+3200]
+	assert.Contains(t, steeredBody, "ensureComposerPendingContainer",
+		"chat_turn_steered should render pending steering in the composer queue area")
+	assert.Contains(t, steeredBody, "data-thread-input-id",
+		"chat_turn_steered should render a pending steering input row")
+	assert.Contains(t, steeredBody, "Steering pending",
+		"chat_turn_steered should not render an assistant streaming bubble")
+	assert.Contains(t, steeredBody, "aria-label', 'Cancel pending steering'",
+		"chat_turn_steered should use the trash-icon cancel control")
+	assert.NotContains(t, steeredBody, "createStreamingBubble(data.exec_id)",
+		"steering events must not create a new model stream bubble")
 }
 
 func TestHandler_Chat_LiveStreamingUsesRenderStreamingContent(t *testing.T) {

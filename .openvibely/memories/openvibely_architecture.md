@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-05-30
-source: consolidation
-source_id: memory_consolidation_2026_05_30
+updated: 2026-05-31
+source: after_complete
+source_id: a534650fdc1cacacce44aee19c6d154c
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -40,6 +40,7 @@ OAuth and base URLs:
 - Without `APP_BASE_URL`, OAuth keeps localhost callback-server behavior for local development.
 
 Shared conventions:
+- `internal/handler` is the Echo HTTP boundary: `handler.go` owns the shared `Handler` dependency graph and route registration, while feature-specific files attach methods for tasks, projects, chat, models, auth, integrations, SSE, worktrees, and related HTMX/API surfaces.
 - Do not redeclare shared helpers in templates or JS; reuse existing utilities and feature-detect optional elements.
 - Use existing components/partials and shared CSS tokens instead of duplicating styles.
 - Swagger/OpenAPI is generated with `swag init`; generated docs live under `docs/` and the UI is mounted at `/swagger/*`.

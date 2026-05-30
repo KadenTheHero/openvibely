@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -15,15 +16,18 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/util"
 )
 
 const (
-	chatProcessingTimeout = 30 * time.Minute // Timeout for LLM processing in background goroutines
-	chatHistoryLimit      = 50               // Number of recent chat messages to load for conversation context
-	maxFileSize           = 10 << 20         // 10 MB per file
-	maxFilesPerReq        = 10               // Max 10 files per request
+	chatProcessingTimeout     = 30 * time.Minute // Timeout for LLM processing in background goroutines
+	chatHistoryLimit          = 50               // Number of recent chat messages to load for conversation context
+	maxFileSize               = 10 << 20         // 10 MB per file
+	maxFilesPerReq            = 10               // Max 10 files per request
+	finalSteeringGracePeriod  = 150 * time.Millisecond
+	finalSteeringPollInterval = 25 * time.Millisecond
 )
 
 var (
@@ -49,20 +53,25 @@ var (
 //   - ProcessMarkers: true = process [CREATE_TASK]/[EDIT_TASK]/[EXECUTE_TASKS] markers in response
 //   - ChatMode: orchestration mode for interactive chat (orchestrate/plan)
 type streamingResponseParams struct {
-	ExecID           string
-	TaskID           string
-	Message          string
-	Agent            models.LLMConfig
-	AgentDefinition  *models.Agent
-	ChatHistory      []models.Execution
-	ProjectID        string
-	SystemContext    string
-	WorkDir          string
-	ImageAttachments []models.Attachment
-	IsTaskFollowup   bool // true = coding agent prompt; false = orchestration prompt
-	ProcessMarkers   bool // true = process [CREATE_TASK]/[EDIT_TASK]/[EXECUTE_TASKS] markers
-	ChatMode         models.ChatMode
-	Surface          chatcontrol.Surface // chat entry point (web/api/telegram/slack)
+	ExecID                      string
+	TaskID                      string
+	Message                     string
+	Agent                       models.LLMConfig
+	AgentDefinition             *models.Agent
+	ChatHistory                 []models.Execution
+	ProjectID                   string
+	SystemContext               string
+	WorkDir                     string
+	ImageAttachments            []models.Attachment
+	IsTaskFollowup              bool // true = coding agent prompt; false = orchestration prompt
+	ProcessMarkers              bool // true = process [CREATE_TASK]/[EDIT_TASK]/[EXECUTE_TASKS] markers
+	ChatMode                    models.ChatMode
+	Surface                     chatcontrol.Surface // chat entry point (web/api/telegram/slack)
+	TelegramInitialAckMessageID int
+	ChannelReply                service.ChannelReplyContext
+
+	steeringHistoryStarted bool
+	steeringOutputCursor   string
 }
 
 // processStreamingResponse is the shared goroutine that handles LLM streaming for
@@ -95,6 +104,15 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// relevant project memory reaches Chat without triggering after_complete memory
 	// extraction for Chat prompts/mode-control text.
 	timeout := chatProcessingTimeout
+	if params.IsTaskFollowup && h.workerSvc != nil {
+		if modelTimeout := h.workerSvc.GetModelWorkerTimeout(params.Agent.ID); modelTimeout > 0 {
+			timeout = modelTimeout
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	h.registerTaskCancellation(params.TaskID, cancel)
+	defer h.deregisterTaskCancellation(params.TaskID)
 
 	// Enforce per-project and per-model worker constraints for task follow-ups only.
 	// Interactive chat (IsTaskFollowup=false) bypasses worker limits so the chat
@@ -104,11 +122,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	if params.IsTaskFollowup && h.workerSvc != nil {
 		agentConfigID := params.Agent.ID
 
-		// Apply model-specific worker_timeout if configured
-		if modelTimeout := h.workerSvc.GetModelWorkerTimeout(agentConfigID); modelTimeout > 0 {
-			timeout = modelTimeout
-		}
-
 		// Register DispatchNext FIRST so it runs LAST (Go defers are LIFO).
 		// After this thread follow-up releases project+model slots, the worker
 		// pool needs to check if any queued tasks can now be dispatched.
@@ -116,31 +129,32 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 
 		// Block until a per-project slot is available (respects project max_workers limit).
 		// This queues the thread follow-up instead of rejecting it when workers are at capacity.
-		waitCtx, waitCancel := context.WithTimeout(context.Background(), timeout)
+		waitCtx, waitCancel := context.WithTimeout(ctx, timeout)
 		if err := h.workerSvc.AcquireProjectSlot(waitCtx, params.ProjectID); err != nil {
 			waitCancel()
 			log.Printf("[handler] processStreamingResponse exec=%s task=%s timed out waiting for project slot %s: %v",
 				params.ExecID, params.TaskID, params.ProjectID, err)
 			h.completeWithFailure(context.Background(), params.ExecID, params.TaskID,
-				"project worker limit reached — timed out waiting for slot", 0)
+				"project worker limit reached — timed out waiting for slot", 0, 0, params.ChannelReply)
+			h.finalizeStreamingTurn(params, "")
 			return
 		}
 		waitCancel()
 		defer h.workerSvc.ReleaseProjectSlot(params.ProjectID)
 
 		// Block until a model slot is available (respects max_workers)
-		waitCtx2, waitCancel2 := context.WithTimeout(context.Background(), timeout)
+		waitCtx2, waitCancel2 := context.WithTimeout(ctx, timeout)
 		if err := h.workerSvc.AcquireModelSlot(waitCtx2, agentConfigID); err != nil {
 			waitCancel2()
 			log.Printf("[handler] processStreamingResponse exec=%s task=%s failed to acquire model slot for %s: %v",
 				params.ExecID, params.TaskID, agentConfigID, err)
 			h.completeWithFailure(context.Background(), params.ExecID, params.TaskID,
-				fmt.Sprintf("model %s at capacity, timed out waiting for slot", params.Agent.Name), 0)
+				fmt.Sprintf("model %s at capacity, timed out waiting for slot", params.Agent.Name), 0, 0, params.ChannelReply)
+			h.finalizeStreamingTurn(params, "")
 			return
 		}
 		waitCancel2()
 		defer h.workerSvc.ReleaseModelSlot(agentConfigID)
-
 		log.Printf("[handler] processStreamingResponse exec=%s acquired project + model slots for %s", params.ExecID, agentConfigID)
 
 		// Transition task from "queued" to "running" now that worker slots are acquired
@@ -151,9 +165,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			}
 		}
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
 
 	chatMode := params.ChatMode
 	if chatMode == "" {
@@ -193,9 +204,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			params.ExecID, params.Agent.Provider, params.Agent.AuthMethod)
 	}
 
-	h.registerTaskCancellation(params.TaskID, cancel)
-	defer h.deregisterTaskCancellation(params.TaskID)
-
 	log.Printf("[handler] processStreamingResponse exec=%s task=%s agent=%s model=%s followup=%v markers=%v history=%d",
 		params.ExecID, params.TaskID, params.Agent.Name, params.Agent.Model, params.IsTaskFollowup, params.ProcessMarkers, len(params.ChatHistory))
 
@@ -222,20 +230,103 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 	}
 
-	start := time.Now()
-	result, err := h.llmSvc.CallAgentDirectStreamingDetailed(
-		ctx, params.Message, params.ImageAttachments, params.Agent,
-		params.ExecID, params.ChatHistory, params.SystemContext,
-		params.WorkDir, agentDef, params.IsTaskFollowup,
-	)
-	if lifecycleAfter != nil {
-		lifecycleAfter(err, result.ChatContext)
-	}
-	if stopDiffBroadcast != nil {
-		close(stopDiffBroadcast)
-		if diffBroadcastDone != nil {
-			<-diffBroadcastDone
+	var result llmcontracts.AgentResult
+	var err error
+	var pendingSteering preparedSteeringBatch
+	var attemptSteering preparedSteeringBatch
+	var steeringCallbackParams *streamingResponseParams
+	steeringCallback := func(callbackCtx context.Context) (string, error) {
+		if steeringCallbackParams == nil {
+			return "", nil
 		}
+		batch, steeringErr := h.claimPendingTextSteeringInputs(callbackCtx, steeringCallbackParams)
+		if steeringErr != nil || batch.count() == 0 {
+			return "", steeringErr
+		}
+		pendingSteering.inputs = append(pendingSteering.inputs, batch.inputs...)
+		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
+		return formatSteeringInstruction(combinedSteeringContent(batch.inputs)), nil
+	}
+	start := time.Now()
+	finalizeLifecycle := func(runErr error, chatContext llmcontracts.ChatContext) {
+		if lifecycleAfter != nil {
+			lifecycleAfter(runErr, chatContext)
+		}
+		if stopDiffBroadcast != nil {
+			close(stopDiffBroadcast)
+			stopDiffBroadcast = nil
+			if diffBroadcastDone != nil {
+				<-diffBroadcastDone
+				diffBroadcastDone = nil
+			}
+		}
+	}
+modelLoop:
+	for {
+		if pendingSteering.count() == 0 {
+			preparedBefore, steeringErr := h.preparePendingSteeringInputs(ctx, &params, "")
+			if steeringErr != nil {
+				log.Printf("[handler] processStreamingResponse exec=%s error preparing steering before model call: %v", params.ExecID, steeringErr)
+			}
+			if preparedBefore.count() > 0 {
+				log.Printf("[handler] processStreamingResponse exec=%s prepared %d steering inputs before model call", params.ExecID, preparedBefore.count())
+				pendingSteering = preparedBefore
+			}
+		}
+		requestImageAttachments := params.ImageAttachments
+		params.ImageAttachments = nil
+		steeringCallbackParams = &params
+		attemptSteering = preparedSteeringBatch{}
+		ctx = llmcontracts.WithSteeringCallback(ctx, steeringCallback)
+		ctx = llmcontracts.WithSteeringRetryResetCallback(ctx, func(callbackCtx context.Context) error {
+			if attemptSteering.count() == 0 || h.threadInputRepo == nil {
+				return nil
+			}
+			if err := h.threadInputRepo.RestorePreparedSteering(callbackCtx, preparedSteeringInputIDs(attemptSteering), params.ExecID, params.ExecID); err != nil {
+				return err
+			}
+			pendingSteering = removePreparedSteeringInputs(pendingSteering, attemptSteering)
+			attemptSteering = preparedSteeringBatch{}
+			return nil
+		})
+		result, err = h.llmSvc.CallAgentDirectStreamingDetailed(
+			ctx, params.Message, requestImageAttachments, params.Agent,
+			params.ExecID, params.ChatHistory, params.SystemContext,
+			params.WorkDir, agentDef, params.IsTaskFollowup,
+		)
+		steeringCallbackParams = nil
+		attemptSteering = preparedSteeringBatch{}
+		if err != nil || ctx.Err() != nil {
+			h.requeuePendingSteeringForExecution(ctx, params.ExecID)
+			pendingSteering = preparedSteeringBatch{}
+			break
+		}
+		if err := h.commitPreparedSteeringInputs(ctx, params, pendingSteering); err != nil {
+			h.requeueUncommittedSteering(ctx, params.ExecID, pendingSteering)
+			pendingSteering = preparedSteeringBatch{}
+			finalizeLifecycle(err, result.ChatContext)
+			log.Printf("[handler] processStreamingResponse exec=%s error committing steering after successful model call: %v", params.ExecID, err)
+			h.completeWithFailure(ctx, params.ExecID, params.TaskID, err.Error(), time.Since(start).Milliseconds(), params.TelegramInitialAckMessageID, params.ChannelReply)
+			h.finalizeStreamingTurn(params, result.Output)
+			return
+		}
+		pendingSteering = preparedSteeringBatch{}
+		preparedAfter, steeringErr := h.preparePendingSteeringInputs(ctx, &params, result.Output)
+		if steeringErr != nil {
+			log.Printf("[handler] processStreamingResponse exec=%s error preparing steering after model call: %v", params.ExecID, steeringErr)
+		}
+		if preparedAfter.count() == 0 {
+			latePrepared, lateErr := h.waitForFinalSteeringInputs(ctx, &params, result.Output)
+			if lateErr != nil {
+				log.Printf("[handler] processStreamingResponse exec=%s error preparing final steering before completion: %v", params.ExecID, lateErr)
+			}
+			if latePrepared.count() == 0 {
+				break modelLoop
+			}
+			preparedAfter = latePrepared
+		}
+		pendingSteering = preparedAfter
+		log.Printf("[handler] processStreamingResponse exec=%s prepared %d steering inputs for continuation", params.ExecID, pendingSteering.count())
 	}
 	durationMs := time.Since(start).Milliseconds()
 	output := result.Output
@@ -243,22 +334,27 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	tokensUsed := result.Usage.TotalTokens
 
 	if err != nil {
+		finalizeLifecycle(err, result.ChatContext)
 		log.Printf("[handler] processStreamingResponse exec=%s task=%s LLM call failed after %dms: %v", params.ExecID, params.TaskID, durationMs, err)
 		// When max_tokens is hit, partial output is returned. Preserve it in the
 		// execution so the user can see what work was done before the limit.
-		if output != "" {
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			h.completeWithCancellation(params.ExecID, params.TaskID, output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+		} else if output != "" {
 			log.Printf("[handler] processStreamingResponse exec=%s max_tokens failure, preserving partial output (%d bytes)", params.ExecID, len(output))
-			h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, err.Error(), output, tokensUsed, durationMs)
+			h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, err.Error(), output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 		} else {
-			h.completeWithFailure(ctx, params.ExecID, params.TaskID, err.Error(), durationMs)
+			h.completeWithFailure(ctx, params.ExecID, params.TaskID, err.Error(), durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 		}
+		h.finalizeStreamingTurn(params, output)
 		return
 	}
-
 	// Check context before expensive marker processing
 	if ctx.Err() != nil {
+		finalizeLifecycle(ctx.Err(), result.ChatContext)
 		log.Printf("[handler] processStreamingResponse exec=%s task=%s context cancelled, skipping marker processing", params.ExecID, params.TaskID)
-		h.completeWithFailure(ctx, params.ExecID, params.TaskID, "processing cancelled", durationMs)
+		h.completeWithCancellation(params.ExecID, params.TaskID, output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+		h.finalizeStreamingTurn(params, output)
 		return
 	}
 
@@ -279,8 +375,10 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			statusCheckOutput = output
 		}
 		if reason, found := llmoutput.ExtractMarker(statusCheckOutput, "[STATUS: FAILED |"); found {
+			finalizeLifecycle(errors.New(reason), result.ChatContext)
 			log.Printf("[handler] processStreamingResponse exec=%s task=%s agent reported STATUS FAILED reason=%q", params.ExecID, params.TaskID, reason)
-			h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, reason, output, tokensUsed, durationMs)
+			h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, reason, output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+			h.finalizeStreamingTurn(params, output)
 			return
 		}
 	}
@@ -288,8 +386,42 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	log.Printf("[handler] processStreamingResponse exec=%s task=%s success tokens=%d duration=%dms output_len=%d",
 		params.ExecID, params.TaskID, tokensUsed, durationMs, len(output))
 
-	h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs)
-
+	completionOutcome := h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+	if completionOutcome == repository.CompleteSuccessAlreadyTerminal {
+		finalizeLifecycle(nil, result.ChatContext)
+		h.finalizeStreamingTurn(params, output)
+		return
+	}
+	if completionOutcome == repository.CompleteSuccessPendingSteering {
+		prepared, steeringErr := h.preparePendingSteeringInputs(ctx, &params, output)
+		if steeringErr != nil {
+			finalizeLifecycle(steeringErr, result.ChatContext)
+			log.Printf("[handler] processStreamingResponse exec=%s error preparing steering after deferred completion: %v", params.ExecID, steeringErr)
+			h.completeWithFailure(ctx, params.ExecID, params.TaskID, steeringErr.Error(), durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+			h.finalizeStreamingTurn(params, output)
+			return
+		}
+		if prepared.count() > 0 {
+			log.Printf("[handler] processStreamingResponse exec=%s prepared %d steering inputs after deferred completion; continuing active turn", params.ExecID, prepared.count())
+			pendingSteering = prepared
+			goto modelLoop
+		}
+		log.Printf("[handler] processStreamingResponse exec=%s completion deferred but no steering was claimable; retrying completion", params.ExecID)
+		completionOutcome = h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+		if completionOutcome == repository.CompleteSuccessAlreadyTerminal {
+			finalizeLifecycle(nil, result.ChatContext)
+			h.finalizeStreamingTurn(params, output)
+			return
+		}
+		if completionOutcome != repository.CompleteSuccessCompleted {
+			completionErr := errors.New("failed to complete response after steering check")
+			finalizeLifecycle(completionErr, result.ChatContext)
+			h.completeWithFailure(ctx, params.ExecID, params.TaskID, completionErr.Error(), durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+			h.finalizeStreamingTurn(params, output)
+			return
+		}
+	}
+	finalizeLifecycle(nil, result.ChatContext)
 	if params.IsTaskFollowup {
 		statusCheckOutput := textOnlyOutput
 		if statusCheckOutput == "" {
@@ -307,6 +439,282 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 	}
 
+	h.finalizeStreamingTurn(params, output)
+}
+
+type preparedSteeringBatch struct {
+	inputs []models.ThreadInput
+}
+
+func (b preparedSteeringBatch) count() int {
+	return len(b.inputs)
+}
+
+func preparedSteeringInputIDs(batch preparedSteeringBatch) []string {
+	ids := make([]string, 0, batch.count())
+	for _, input := range batch.inputs {
+		ids = append(ids, input.ID)
+	}
+	return ids
+}
+
+func removePreparedSteeringInputs(batch, remove preparedSteeringBatch) preparedSteeringBatch {
+	if batch.count() == 0 || remove.count() == 0 {
+		return batch
+	}
+	removeIDs := make(map[string]struct{}, len(remove.inputs))
+	for _, input := range remove.inputs {
+		removeIDs[input.ID] = struct{}{}
+	}
+	kept := batch.inputs[:0]
+	for _, input := range batch.inputs {
+		if _, ok := removeIDs[input.ID]; !ok {
+			kept = append(kept, input)
+		}
+	}
+	return preparedSteeringBatch{inputs: kept}
+}
+
+func (h *Handler) waitForFinalSteeringInputs(ctx context.Context, params *streamingResponseParams, previousAssistantOutput string) (preparedSteeringBatch, error) {
+	if h.threadInputRepo == nil || params == nil || params.ExecID == "" {
+		return preparedSteeringBatch{}, nil
+	}
+	deadline := time.NewTimer(finalSteeringGracePeriod)
+	defer deadline.Stop()
+	poll := time.NewTicker(finalSteeringPollInterval)
+	defer poll.Stop()
+	for {
+		prepared, err := h.preparePendingSteeringInputs(ctx, params, previousAssistantOutput)
+		if prepared.count() > 0 || err != nil {
+			return prepared, err
+		}
+		select {
+		case <-ctx.Done():
+			return preparedSteeringBatch{}, ctx.Err()
+		case <-deadline.C:
+			return preparedSteeringBatch{}, nil
+		case <-poll.C:
+		}
+	}
+}
+
+func (h *Handler) claimPendingSteeringInputs(ctx context.Context, params *streamingResponseParams) (preparedSteeringBatch, error) {
+	return h.claimPendingSteeringInputsWithOptions(ctx, params, false)
+}
+
+func (h *Handler) claimPendingTextSteeringInputs(ctx context.Context, params *streamingResponseParams) (preparedSteeringBatch, error) {
+	return h.claimPendingSteeringInputsWithOptions(ctx, params, true)
+}
+
+func (h *Handler) claimPendingSteeringInputsWithOptions(ctx context.Context, params *streamingResponseParams, textOnly bool) (preparedSteeringBatch, error) {
+	if h.threadInputRepo == nil || params == nil || params.ExecID == "" {
+		return preparedSteeringBatch{}, nil
+	}
+	var inputs []models.ThreadInput
+	var err error
+	if textOnly {
+		inputs, err = h.threadInputRepo.PreparePendingTextSteering(ctx, params.ExecID, params.ExecID)
+	} else {
+		inputs, err = h.threadInputRepo.PreparePendingSteering(ctx, params.ExecID, params.ExecID)
+	}
+	if err != nil {
+		return preparedSteeringBatch{}, err
+	}
+	if len(inputs) == 0 {
+		return preparedSteeringBatch{}, nil
+	}
+	prepared := make([]models.ThreadInput, 0, len(inputs))
+	for _, input := range inputs {
+		if textOnly && input.AttachmentSessionID != "" {
+			continue
+		}
+		if input.AttachmentSessionID != "" {
+			attachmentContext, imageAttachments, attErr := h.previewPendingAttachments(input.AttachmentSessionID)
+			if attErr != nil {
+				log.Printf("[handler] claimPendingSteeringInputs exec=%s input=%s attachment preview error: %v", params.ExecID, input.ID, attErr)
+				attachmentContext = fmt.Sprintf("⚠️ Attachment processing error: %v", attErr)
+			}
+			if attachmentContext != "" {
+				input.Content = combineContexts(input.Content, attachmentContext)
+			}
+			if len(imageAttachments) > 0 {
+				params.ImageAttachments = append(params.ImageAttachments, imageAttachments...)
+			}
+		}
+		prepared = append(prepared, input)
+	}
+	if len(prepared) == 0 {
+		return preparedSteeringBatch{}, nil
+	}
+	h.publishThreadInputAppliedEvents(*params, prepared)
+	return preparedSteeringBatch{inputs: prepared}, nil
+}
+
+func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *streamingResponseParams, previousAssistantOutput string) (preparedSteeringBatch, error) {
+	batch, err := h.claimPendingSteeringInputs(ctx, params)
+	if err != nil || batch.count() == 0 {
+		return batch, err
+	}
+	steeringMessage := combinedSteeringContent(batch.inputs)
+	steeringInstruction := formatSteeringInstruction(steeringMessage)
+	if previousAssistantOutput != "" {
+		assistantDelta := previousAssistantOutput
+		if strings.HasPrefix(previousAssistantOutput, params.steeringOutputCursor) {
+			assistantDelta = previousAssistantOutput[len(params.steeringOutputCursor):]
+		}
+		if strings.TrimSpace(params.Message) != "" || strings.TrimSpace(assistantDelta) != "" {
+			params.ChatHistory = append(params.ChatHistory, models.Execution{
+				ID:         fmt.Sprintf("%s-steering-context-%d", params.ExecID, len(params.ChatHistory)+1),
+				TaskID:     params.TaskID,
+				Status:     models.ExecCompleted,
+				PromptSent: params.Message,
+				Output:     assistantDelta,
+				IsFollowup: params.IsTaskFollowup,
+			})
+		}
+		params.Message = steeringInstruction
+	} else if !params.steeringHistoryStarted {
+		params.Message = combineActivePromptWithSteering(params.Message, steeringInstruction)
+	} else {
+		params.Message = steeringInstruction
+	}
+	params.steeringHistoryStarted = true
+	params.steeringOutputCursor = previousAssistantOutput
+	return batch, nil
+}
+
+func (h *Handler) publishThreadInputAppliedEvents(params streamingResponseParams, inputs []models.ThreadInput) {
+	for _, input := range inputs {
+		if h.broadcaster != nil && input.TaskID != "" {
+			h.broadcaster.Publish(events.TaskEvent{
+				Type:           events.TaskThreadInputApplied,
+				ProjectID:      input.ProjectID,
+				TaskID:         input.TaskID,
+				ExecID:         params.ExecID,
+				Message:        input.Content,
+				PendingInputID: input.ID,
+			})
+		}
+		if h.chatBroadcaster != nil && input.Scope == models.ThreadInputScopeChat {
+			h.chatBroadcaster.Publish(events.ChatEvent{
+				Type:           events.ChatThreadInputApplied,
+				ProjectID:      input.ProjectID,
+				ExecID:         params.ExecID,
+				TaskID:         params.TaskID,
+				Message:        input.Content,
+				Source:         string(input.Source),
+				Steering:       true,
+				PendingInputID: input.ID,
+			})
+		}
+	}
+}
+
+func (h *Handler) requeueUncommittedSteering(ctx context.Context, execID string, batch preparedSteeringBatch) {
+	if h.threadInputRepo == nil || batch.count() == 0 {
+		return
+	}
+	ids := make([]string, 0, len(batch.inputs))
+	for _, input := range batch.inputs {
+		ids = append(ids, input.ID)
+	}
+	requeued, err := h.threadInputRepo.RequeuePendingSteering(steeringCleanupContext(ctx), ids, execID)
+	if err != nil {
+		log.Printf("[handler] processStreamingResponse exec=%s error requeueing uncommitted steering after failed model call: %v", execID, err)
+		return
+	}
+	h.publishThreadInputQueuedEvents(requeued)
+}
+
+func (h *Handler) requeuePendingSteeringForExecution(ctx context.Context, execID string) {
+	if h.threadInputRepo == nil || execID == "" {
+		return
+	}
+	requeued, err := h.threadInputRepo.RequeuePendingSteeringForExecution(steeringCleanupContext(ctx), execID)
+	if err != nil {
+		log.Printf("[handler] processStreamingResponse exec=%s error requeueing pending steering after failed model call: %v", execID, err)
+		return
+	}
+	h.publishThreadInputQueuedEvents(requeued)
+}
+
+func steeringCleanupContext(ctx context.Context) context.Context {
+	if ctx == nil || ctx.Err() != nil {
+		return context.Background()
+	}
+	return ctx
+}
+
+func (h *Handler) publishThreadInputQueuedEvents(inputs []models.ThreadInput) {
+	for _, input := range inputs {
+		if h.broadcaster != nil && input.TaskID != "" {
+			h.broadcaster.Publish(events.TaskEvent{
+				Type:           events.TaskThreadInputQueued,
+				ProjectID:      input.ProjectID,
+				TaskID:         input.TaskID,
+				ExecID:         input.RunExecutionID,
+				Message:        input.Content,
+				PendingInputID: input.ID,
+			})
+		}
+		if h.chatBroadcaster != nil && input.Scope == models.ThreadInputScopeChat {
+			h.chatBroadcaster.Publish(events.ChatEvent{
+				Type:           events.ChatNewMessage,
+				ProjectID:      input.ProjectID,
+				ExecID:         input.ID,
+				Message:        input.Content,
+				Source:         string(input.Source),
+				Queued:         true,
+				PendingInputID: input.ID,
+			})
+		}
+	}
+}
+
+func (h *Handler) commitPreparedSteeringInputs(ctx context.Context, params streamingResponseParams, batch preparedSteeringBatch) error {
+	if h.threadInputRepo == nil || batch.count() == 0 {
+		return nil
+	}
+	for _, input := range batch.inputs {
+		if input.AttachmentSessionID != "" {
+			if _, _, _, attErr := h.processAttachmentsWithReturn(ctx, input.AttachmentSessionID, params.ExecID); attErr != nil {
+				return fmt.Errorf("committing steering attachments for input %s: %w", input.ID, attErr)
+			}
+		}
+		if err := h.threadInputRepo.MarkApplied(ctx, input.ID, params.ExecID, params.ExecID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func combinedSteeringContent(inputs []models.ThreadInput) string {
+	parts := make([]string, 0, len(inputs))
+	for _, input := range inputs {
+		if content := strings.TrimSpace(input.Content); content != "" {
+			parts = append(parts, content)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func formatSteeringInstruction(steeringMessage string) string {
+	return strings.TrimSpace(steeringMessage)
+}
+
+func combineActivePromptWithSteering(activePrompt, steeringInstruction string) string {
+	activePrompt = strings.TrimSpace(activePrompt)
+	steeringInstruction = strings.TrimSpace(steeringInstruction)
+	if activePrompt == "" {
+		return steeringInstruction
+	}
+	if steeringInstruction == "" {
+		return activePrompt
+	}
+	return activePrompt + "\n\n" + steeringInstruction
+}
+
+func (h *Handler) finalizeStreamingTurn(params streamingResponseParams, output string) {
 	// Broadcast response done for chat messages (not task followups).
 	// Include completed output so chat_response_done SSE fallback can evaluate
 	// plan-completion prompt visibility without a DOM scan.
@@ -319,7 +727,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			CompletedOutput: output,
 		})
 	}
-
+	go h.startNextQueuedTurnAfter(context.Background(), params, "")
 }
 
 func (h *Handler) resolveTaskAgentDefinitionForTask(ctx context.Context, taskID string, current *models.Agent) *models.Agent {
@@ -342,6 +750,300 @@ func (h *Handler) resolveTaskAgentDefinitionForTask(ctx context.Context, taskID 
 
 // registerTaskCancellation registers a cancel function for a task with the worker service.
 // No-op if worker service is unavailable.
+func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed streamingResponseParams, excludeExecID string) {
+	if h.execRepo == nil || h.threadInputRepo == nil {
+		return
+	}
+	if completed.IsTaskFollowup {
+		if completed.TaskID == "" {
+			return
+		}
+		active, activeErr := h.execRepo.HasActiveTaskExecution(ctx, completed.TaskID, excludeExecID)
+		if activeErr != nil {
+			log.Printf("[handler] startNextQueuedTurn error checking active task turn task=%s: %v", completed.TaskID, activeErr)
+			return
+		}
+		if active {
+			return
+		}
+		queued, err := h.threadInputRepo.FindOldestQueuedForTask(ctx, completed.TaskID)
+		if err != nil {
+			log.Printf("[handler] startNextQueuedTurn error finding queued task input task=%s: %v", completed.TaskID, err)
+			return
+		}
+		if queued == nil {
+			return
+		}
+		h.startQueuedTaskThreadInput(ctx, *queued)
+		return
+	}
+	if completed.ProjectID == "" {
+		return
+	}
+	activeChat, activeErr := h.execRepo.FindLatestActiveChatExecution(ctx, completed.ProjectID)
+	if activeErr != nil {
+		log.Printf("[handler] startNextQueuedTurn error checking active chat turn project=%s: %v", completed.ProjectID, activeErr)
+		return
+	}
+	if activeChat != nil && activeChat.ID != excludeExecID {
+		return
+	}
+	queued, err := h.threadInputRepo.FindOldestQueuedForChat(ctx, completed.ProjectID)
+	if err != nil {
+		log.Printf("[handler] startNextQueuedTurn error finding queued chat input project=%s: %v", completed.ProjectID, err)
+		return
+	}
+	if queued == nil {
+		return
+	}
+	h.startQueuedChatInput(ctx, *queued)
+}
+
+func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadInput) {
+	agent, unstartable, err := h.resolveQueuedInputAgent(ctx, input)
+	if err != nil {
+		log.Printf("[handler] startQueuedChatInput input=%s agent=%s load error: %v", input.ID, input.AgentConfigID, err)
+		return
+	}
+	if agent == nil {
+		log.Printf("[handler] startQueuedChatInput input=%s agent=%s no usable model", input.ID, input.AgentConfigID)
+		if unstartable {
+			h.cancelUnstartableQueuedInput(ctx, input)
+			h.startNextQueuedTurnAfter(ctx, streamingResponseParams{ProjectID: input.ProjectID}, "")
+		}
+		return
+	}
+	selectedAgentID := agent.ID
+	task := &models.Task{
+		ProjectID: input.ProjectID,
+		Title:     fmt.Sprintf("Chat %s: %s", time.Now().Format("15:04:05.000"), input.Content[:min(50, len(input.Content))]),
+		Prompt:    input.Content,
+		Status:    models.StatusRunning,
+		Category:  models.CategoryChat,
+		AgentID:   &selectedAgentID,
+	}
+	if input.Source == models.TaskOriginTelegram {
+		task.CreatedVia = models.TaskOriginTelegram
+		task.TelegramChatID = input.TelegramChatID
+	} else if input.Source == models.TaskOriginSlack {
+		task.CreatedVia = models.TaskOriginSlack
+	}
+	exec := &models.Execution{
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    input.Content,
+	}
+	var slackContext *models.SlackTaskContext
+	if input.Source == models.TaskOriginSlack {
+		slackContext = &models.SlackTaskContext{
+			SlackTeamID:    input.SlackTeamID,
+			SlackChannelID: input.SlackChannelID,
+			SlackThreadTS:  input.SlackThreadTS,
+			SlackUserID:    input.SlackUserID,
+		}
+	}
+	if err := h.threadInputRepo.ClaimQueuedForChatExecution(ctx, input.ID, task, exec, slackContext); err != nil {
+		if err != repository.ErrInputNotPending {
+			log.Printf("[handler] startQueuedChatInput input=%s claim error: %v", input.ID, err)
+		}
+		return
+	}
+
+	var attachmentContext string
+	var imageAttachments []models.Attachment
+	if input.AttachmentSessionID != "" {
+		var attErr error
+		attachmentContext, imageAttachments, _, attErr = h.processAttachmentsWithReturn(ctx, input.AttachmentSessionID, exec.ID)
+		if attErr != nil {
+			log.Printf("[handler] startQueuedChatInput exec=%s attachment processing error: %v", exec.ID, attErr)
+			attachmentContext = fmt.Sprintf("⚠️ Attachment processing error: %v", attErr)
+		}
+	}
+	history, err := h.execRepo.ListChatHistory(ctx, input.ProjectID, chatHistoryLimit)
+	if err != nil {
+		log.Printf("[handler] startQueuedChatInput exec=%s history error: %v", exec.ID, err)
+		history = []models.Execution{}
+	}
+	availableModels, _ := h.llmConfigRepo.List(ctx)
+	taskContext := h.buildChatContext(ctx, input.ProjectID, availableModels)
+	personalityContext := h.getPersonalityContext(ctx, input.ProjectID)
+	workDir := h.resolveWorkDir(ctx, input.ProjectID)
+	chatMode := models.NormalizeChatMode(string(input.ChatMode))
+	if chatMode == "" {
+		chatMode = models.ChatModeOrchestrate
+	}
+	if h.chatBroadcaster != nil {
+		h.chatBroadcaster.Publish(events.ChatEvent{
+			Type:           events.ChatNewMessage,
+			ProjectID:      input.ProjectID,
+			ExecID:         exec.ID,
+			TaskID:         task.ID,
+			Message:        input.Content,
+			Source:         string(input.Source),
+			AgentName:      agent.Name,
+			PendingInputID: input.ID,
+		})
+	}
+
+	go h.processStreamingResponse(streamingResponseParams{
+		ExecID:           exec.ID,
+		TaskID:           task.ID,
+		Message:          input.Content,
+		Agent:            *agent,
+		ChatHistory:      filterChatHistory(history, exec.ID),
+		ProjectID:        input.ProjectID,
+		SystemContext:    combineContexts(combineContexts(taskContext, attachmentContext), personalityContext),
+		WorkDir:          workDir,
+		ImageAttachments: imageAttachments,
+		IsTaskFollowup:   false,
+		ProcessMarkers:   false,
+		ChatMode:         chatMode,
+		Surface:          surfaceForThreadInput(input),
+	})
+}
+
+func surfaceForThreadInput(input models.ThreadInput) chatcontrol.Surface {
+	switch input.Source {
+	case models.TaskOriginTelegram:
+		return chatcontrol.SurfaceTelegram
+	case models.TaskOriginSlack:
+		return chatcontrol.SurfaceSlack
+	default:
+		return chatcontrol.SurfaceWeb
+	}
+}
+
+func (h *Handler) resolveQueuedInputAgent(ctx context.Context, input models.ThreadInput) (*models.LLMConfig, bool, error) {
+	if strings.TrimSpace(input.AgentConfigID) != "" {
+		agent, err := h.llmConfigRepo.GetByID(ctx, input.AgentConfigID)
+		if err != nil || agent != nil {
+			return agent, false, err
+		}
+	}
+	agent, err := h.selectDefaultAgent(ctx, false)
+	if err != nil {
+		if strings.Contains(err.Error(), "no agents configured") {
+			return nil, true, nil
+		}
+		return nil, false, err
+	}
+	return agent, agent == nil, nil
+}
+
+func (h *Handler) cancelUnstartableQueuedInput(ctx context.Context, input models.ThreadInput) {
+	if h.threadInputRepo == nil || input.ID == "" {
+		return
+	}
+	if _, err := h.threadInputRepo.CancelPending(ctx, input.ID); err != nil && !errors.Is(err, repository.ErrInputNotPending) {
+		log.Printf("[handler] cancelUnstartableQueuedInput input=%s error: %v", input.ID, err)
+	}
+}
+
+func channelReplyFromThreadInput(input models.ThreadInput) service.ChannelReplyContext {
+	return service.ChannelReplyContext{
+		Source:         input.Source,
+		TelegramChatID: input.TelegramChatID,
+		SlackTeamID:    input.SlackTeamID,
+		SlackChannelID: input.SlackChannelID,
+		SlackThreadTS:  input.SlackThreadTS,
+		SlackUserID:    input.SlackUserID,
+	}
+}
+
+func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.ThreadInput) {
+	task, err := h.taskRepo.GetByID(ctx, input.TaskID)
+	if err != nil || task == nil {
+		log.Printf("[handler] startQueuedTaskThreadInput input=%s task=%s load error: %v", input.ID, input.TaskID, err)
+		return
+	}
+	agent, unstartable, err := h.resolveQueuedInputAgent(ctx, input)
+	if err != nil {
+		log.Printf("[handler] startQueuedTaskThreadInput input=%s agent=%s load error: %v", input.ID, input.AgentConfigID, err)
+		return
+	}
+	if agent == nil {
+		log.Printf("[handler] startQueuedTaskThreadInput input=%s agent=%s no usable model", input.ID, input.AgentConfigID)
+		if unstartable {
+			h.cancelUnstartableQueuedInput(ctx, input)
+			h.startNextQueuedTurnAfter(ctx, streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, "")
+		}
+		return
+	}
+	exec := &models.Execution{
+		TaskID:        input.TaskID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    input.Content,
+		IsFollowup:    true,
+	}
+	if err := h.threadInputRepo.ClaimQueuedForTaskExecution(ctx, input.ID, exec); err != nil {
+		if err != repository.ErrInputNotPending {
+			log.Printf("[handler] startQueuedTaskThreadInput input=%s claim error: %v", input.ID, err)
+		}
+		return
+	}
+	if err := h.taskRepo.UpdateStatus(ctx, input.TaskID, models.StatusQueued); err != nil {
+		log.Printf("[handler] startQueuedTaskThreadInput task=%s error marking queued: %v", input.TaskID, err)
+	}
+	if task.Category != models.CategoryActive {
+		if err := h.taskRepo.UpdateCategory(ctx, input.TaskID, models.CategoryActive); err != nil {
+			log.Printf("[handler] startQueuedTaskThreadInput task=%s error moving to active: %v", input.TaskID, err)
+		}
+	}
+	var attachmentContext string
+	var imageAttachments []models.Attachment
+	if input.AttachmentSessionID != "" {
+		var attErr error
+		attachmentContext, imageAttachments, _, attErr = h.processAttachmentsWithReturn(ctx, input.AttachmentSessionID, exec.ID)
+		if attErr != nil {
+			log.Printf("[handler] startQueuedTaskThreadInput exec=%s attachment processing error: %v", exec.ID, attErr)
+			attachmentContext = fmt.Sprintf("⚠️ Attachment processing error: %v", attErr)
+		}
+	}
+	if h.broadcaster != nil {
+		h.broadcaster.Publish(events.TaskEvent{
+			Type:           events.TaskThreadExecutionStarted,
+			ProjectID:      task.ProjectID,
+			TaskID:         input.TaskID,
+			TaskName:       task.Title,
+			ExecID:         exec.ID,
+			Message:        input.Content,
+			PendingInputID: input.ID,
+		})
+	}
+	priorExecs, _ := h.execRepo.ListByTaskChronological(ctx, exec.TaskID)
+	priorHistory := filterChatHistory(priorExecs, exec.ID)
+	systemContext := buildThreadSystemContext(task.Title, len(priorHistory) > 0, attachmentContext)
+	personalityContext := h.getPersonalityContext(ctx, task.ProjectID)
+	workDir, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
+	if workDirErr != nil {
+		h.completeWithFailure(ctx, exec.ID, exec.TaskID, workDirErr.Error(), 0, channelReplyFromThreadInput(input))
+		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, exec.ID)
+		return
+	}
+	var agentDef *models.Agent
+	if task.AgentDefinitionID != nil && h.agentRepo != nil {
+		if ad, adErr := h.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
+			agentDef = ad
+		}
+	}
+	go h.processStreamingResponse(streamingResponseParams{
+		ExecID:           exec.ID,
+		TaskID:           exec.TaskID,
+		Message:          input.Content,
+		Agent:            *agent,
+		AgentDefinition:  agentDef,
+		ChatHistory:      priorHistory,
+		ProjectID:        task.ProjectID,
+		SystemContext:    combineContexts(systemContext, personalityContext),
+		WorkDir:          workDir,
+		ImageAttachments: imageAttachments,
+		IsTaskFollowup:   true,
+		ProcessMarkers:   false,
+		ChannelReply:     channelReplyFromThreadInput(input),
+	})
+}
+
 func (h *Handler) registerTaskCancellation(taskID string, cancel context.CancelFunc) {
 	if h.workerSvc != nil {
 		h.workerSvc.RegisterCancel(taskID, cancel)
@@ -360,9 +1062,20 @@ func (h *Handler) deregisterTaskCancellation(taskID string) {
 // Also moves Active tasks to the Completed category so they appear in the right column.
 // Logs errors but does not fail since this runs in a background goroutine.
 // Captures git diff if workDir is provided.
-func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64) {
-	if err := h.execRepo.Complete(ctx, execID, models.ExecCompleted, output, "", tokensUsed, durationMs); err != nil {
+func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, completionOptions ...interface{}) repository.CompleteSuccessOutcome {
+	telegramMessageID, channelReply := parseCompletionOptions(completionOptions...)
+	outcome, err := h.execRepo.CompleteSuccessIfNoPendingSteering(ctx, execID, output, tokensUsed, durationMs)
+	if err != nil {
 		log.Printf("[handler] completeWithSuccess exec=%s error completing execution: %v", execID, err)
+		return repository.CompleteSuccessAlreadyTerminal
+	}
+	if outcome == repository.CompleteSuccessPendingSteering {
+		log.Printf("[handler] completeWithSuccess exec=%s deferred completion because pending steering exists", execID)
+		return outcome
+	}
+	if outcome == repository.CompleteSuccessAlreadyTerminal {
+		log.Printf("[handler] completeWithSuccess exec=%s skipped because execution is already terminal", execID)
+		return outcome
 	}
 
 	// Update task status BEFORE git diff capture. The SSE handler detects
@@ -375,6 +1088,7 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 
 	// Move active tasks to the completed category so they appear in the right column
 	task, err := h.taskRepo.GetByID(ctx, taskID)
+	h.sendChannelResponse(ctx, task, channelReply, output, "", telegramMessageID)
 	if err == nil && task != nil && task.Category == models.CategoryActive {
 		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryCompleted); err != nil {
 			log.Printf("[handler] completeWithSuccess task=%s error moving to completed category: %v", taskID, err)
@@ -405,7 +1119,92 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 				}
 			}
 		}
+	}
+	return repository.CompleteSuccessCompleted
+}
 
+func firstInt(values []int) int {
+	if len(values) == 0 {
+		return 0
+	}
+	return values[0]
+}
+
+func parseCompletionOptions(options ...interface{}) (int, service.ChannelReplyContext) {
+	var telegramMessageID int
+	var channelReply service.ChannelReplyContext
+	for _, option := range options {
+		switch v := option.(type) {
+		case int:
+			telegramMessageID = v
+		case service.ChannelReplyContext:
+			channelReply = v
+		}
+	}
+	return telegramMessageID, channelReply
+}
+
+func (h *Handler) completeWithCancellation(execID, taskID, output string, tokensUsed int, durationMs int64, telegramMessageID int, channelReply ...service.ChannelReplyContext) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := h.execRepo.Complete(ctx, execID, models.ExecCancelled, output, "cancelled", tokensUsed, durationMs); err != nil {
+		log.Printf("[handler] completeWithCancellation exec=%s error completing cancelled execution: %v", execID, err)
+	}
+	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusCancelled); err != nil {
+		log.Printf("[handler] completeWithCancellation task=%s error updating status: %v", taskID, err)
+	}
+	task, err := h.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		log.Printf("[handler] completeWithCancellation task=%s error getting task: %v", taskID, err)
+		return
+	}
+	reply := service.ChannelReplyContext{}
+	if len(channelReply) > 0 {
+		reply = channelReply[0]
+	}
+	h.sendChannelResponse(ctx, task, reply, output, "cancelled", telegramMessageID)
+}
+
+func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, reply service.ChannelReplyContext, output, errMsg string, telegramMessageID int) {
+	if task == nil {
+		return
+	}
+	if reply.Source == models.TaskOriginTelegram && task.Category != models.CategoryChat && reply.TelegramChatID != 0 {
+		if h.telegramService != nil {
+			h.telegramService.SendTaskCompletionToChat(ctx, reply.TelegramChatID, task.Title, output, errMsg)
+		}
+		return
+	}
+	if reply.Source == models.TaskOriginSlack && task.Category != models.CategoryChat && reply.SlackChannelID != "" {
+		if svc, ok := h.slackSvc.(interface {
+			SendTaskCompletionToThread(context.Context, string, string, string, string, string, string)
+		}); ok {
+			svc.SendTaskCompletionToThread(ctx, reply.SlackChannelID, reply.SlackThreadTS, task.Title, output, errMsg, reply.SlackUserID)
+		}
+		return
+	}
+	switch task.CreatedVia {
+	case models.TaskOriginTelegram:
+		if h.telegramService == nil {
+			return
+		}
+		if task.Category == models.CategoryChat {
+			h.telegramService.SendChatResponse(ctx, *task, output, errMsg, telegramMessageID)
+		} else {
+			h.telegramService.SendTaskCompletionNotification(ctx, *task, output, errMsg)
+		}
+	case models.TaskOriginSlack:
+		if task.Category == models.CategoryChat {
+			if svc, ok := h.slackSvc.(interface {
+				SendChatResponse(context.Context, models.Task, string, string)
+			}); ok {
+				svc.SendChatResponse(ctx, *task, output, errMsg)
+			}
+		} else if svc, ok := h.slackSvc.(interface {
+			SendTaskCompletionNotification(context.Context, models.Task, string, string)
+		}); ok {
+			svc.SendTaskCompletionNotification(ctx, *task, output, errMsg)
+		}
 	}
 }
 
@@ -520,7 +1319,8 @@ func (h *Handler) captureTaskDiffOutput(ctx context.Context, task *models.Task, 
 // and creates a failure alert. Uses a fresh background context with a 30-second timeout
 // to ensure DB updates succeed even when the original context has expired (e.g., after
 // the 5-minute LLM processing timeout).
-func (h *Handler) completeWithFailure(_ context.Context, execID, taskID, errorMessage string, durationMs int64) {
+func (h *Handler) completeWithFailure(_ context.Context, execID, taskID, errorMessage string, durationMs int64, completionOptions ...interface{}) {
+	telegramMessageID, channelReply := parseCompletionOptions(completionOptions...)
 	// Use a fresh context — the caller's context may already be expired (e.g., after
 	// chatProcessingTimeout). DB updates must still succeed.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -540,6 +1340,7 @@ func (h *Handler) completeWithFailure(_ context.Context, execID, taskID, errorMe
 		log.Printf("[handler] completeWithFailure task=%s error getting task: %v", taskID, err)
 		return
 	}
+	h.sendChannelResponse(ctx, task, channelReply, "", errorMessage, telegramMessageID)
 	if task != nil && (task.Category == models.CategoryActive || task.Category == models.CategoryCompleted) {
 		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryBacklog); err != nil {
 			log.Printf("[handler] completeWithFailure task=%s error moving to backlog: %v", taskID, err)
@@ -558,7 +1359,8 @@ func (h *Handler) completeWithFailure(_ context.Context, execID, taskID, errorMe
 
 // completeWithFailureAndOutput is like completeWithFailure but preserves partial output
 // (e.g., when max_tokens is hit and the LLM produced output before the limit).
-func (h *Handler) completeWithFailureAndOutput(_ context.Context, execID, taskID, errorMessage, output string, tokensUsed int, durationMs int64) {
+func (h *Handler) completeWithFailureAndOutput(_ context.Context, execID, taskID, errorMessage, output string, tokensUsed int, durationMs int64, completionOptions ...interface{}) {
+	telegramMessageID, channelReply := parseCompletionOptions(completionOptions...)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -576,6 +1378,7 @@ func (h *Handler) completeWithFailureAndOutput(_ context.Context, execID, taskID
 		log.Printf("[handler] completeWithFailureAndOutput task=%s error getting task: %v", taskID, err)
 		return
 	}
+	h.sendChannelResponse(ctx, task, channelReply, output, errorMessage, telegramMessageID)
 	if task != nil && (task.Category == models.CategoryActive || task.Category == models.CategoryCompleted) {
 		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryBacklog); err != nil {
 			log.Printf("[handler] completeWithFailureAndOutput task=%s error moving to backlog: %v", taskID, err)
@@ -1046,23 +1849,6 @@ func (h *Handler) processChatSendToTask(ctx context.Context, execID, projectID, 
 			continue
 		}
 
-		// Always set status to running since we're about to execute
-		if task.Status != models.StatusRunning {
-			log.Printf("[handler] processChatSendToTask setting task=%s status=running (was %s)", task.ID, task.Status)
-			if err := h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusRunning); err != nil {
-				log.Printf("[handler] processChatSendToTask error setting status: %v", err)
-				results = append(results, fmt.Sprintf("- Error updating task \"%s\": %v", task.Title, err))
-				continue
-			}
-		}
-		// Always move to active category so the task appears in the Active column
-		if task.Category != models.CategoryActive {
-			log.Printf("[handler] processChatSendToTask moving task=%s to active (was %s)", task.ID, task.Category)
-			if err := h.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
-				log.Printf("[handler] processChatSendToTask error updating category: %v", err)
-			}
-		}
-
 		// Select agent: use task's assigned agent, or fall back to default
 		var agent *models.LLMConfig
 		if task.AgentID != nil {
@@ -1077,21 +1863,36 @@ func (h *Handler) processChatSendToTask(ctx context.Context, execID, projectID, 
 			}
 		}
 
-		// Check per-project and per-model worker capacity before starting execution
-		if h.workerSvc != nil {
-			if !h.workerSvc.HasProjectCapacity(task.ProjectID) {
-				log.Printf("[handler] processChatSendToTask rejected: project %s at worker capacity", task.ProjectID)
-				results = append(results, fmt.Sprintf("- Project worker limit reached for task \"%s\" — please wait for a running task to complete", task.Title))
+		activeExec, activeErr := h.execRepo.FindActiveTaskExecution(ctx, task.ID, "")
+		if activeErr != nil {
+			log.Printf("[handler] processChatSendToTask task=%s active check error: %v", task.ID, activeErr)
+			results = append(results, fmt.Sprintf("- Error checking active turn for task \"%s\": %v", task.Title, activeErr))
+			continue
+		}
+		if activeExec != nil {
+			if h.threadInputRepo == nil {
+				results = append(results, fmt.Sprintf("- Error queueing message for task \"%s\": thread input queue is unavailable", task.Title))
 				continue
 			}
-			if !h.workerSvc.HasModelCapacity(agent.ID) {
-				log.Printf("[handler] processChatSendToTask rejected: model %s is at capacity", agent.ID)
-				results = append(results, fmt.Sprintf("- Model %s is at capacity for task \"%s\" — please wait for a running task to complete", agent.Name, task.Title))
+			queued := &models.ThreadInput{
+				Scope:          models.ThreadInputScopeTask,
+				ProjectID:      task.ProjectID,
+				TaskID:         task.ID,
+				RunExecutionID: activeExec.ID,
+				AgentConfigID:  agent.ID,
+				InputMode:      models.ThreadInputModeQueued,
+				InputStatus:    models.ThreadInputPending,
+				Content:        req.Message,
+			}
+			if err := h.threadInputRepo.CreateQueued(ctx, queued); err != nil {
+				log.Printf("[handler] processChatSendToTask task=%s error creating queued input: %v", task.ID, err)
+				results = append(results, fmt.Sprintf("- Error queueing message for task \"%s\": %v", task.Title, err))
 				continue
 			}
+			results = append(results, fmt.Sprintf("- Queued message to task \"%s\" [TASK_ID:%s] — it will run after the active thread turn finishes.", task.Title, task.ID))
+			continue
 		}
 
-		// Create follow-up execution
 		exec := &models.Execution{
 			TaskID:        task.ID,
 			AgentConfigID: agent.ID,
@@ -1116,6 +1917,21 @@ func (h *Handler) processChatSendToTask(ctx context.Context, execID, projectID, 
 			results = append(results, fmt.Sprintf("- Failed to prepare worktree for task \"%s\": %v", task.Title, workDirErr))
 			continue
 		}
+		if task.Status != models.StatusRunning {
+			log.Printf("[handler] processChatSendToTask setting task=%s status=running (was %s)", task.ID, task.Status)
+			if err := h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusRunning); err != nil {
+				log.Printf("[handler] processChatSendToTask error setting status: %v", err)
+				h.completeWithFailure(ctx, exec.ID, task.ID, err.Error(), 0)
+				results = append(results, fmt.Sprintf("- Error updating task \"%s\": %v", task.Title, err))
+				continue
+			}
+		}
+		if task.Category != models.CategoryActive {
+			log.Printf("[handler] processChatSendToTask moving task=%s to active (was %s)", task.ID, task.Category)
+			if err := h.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
+				log.Printf("[handler] processChatSendToTask error updating category: %v", err)
+			}
+		}
 		var agentDef *models.Agent
 		if task.AgentDefinitionID != nil && h.agentRepo != nil {
 			if ad, adErr := h.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
@@ -1124,7 +1940,6 @@ func (h *Handler) processChatSendToTask(ctx context.Context, execID, projectID, 
 		}
 
 		log.Printf("[handler] processChatSendToTask sending message to task=%s exec=%s agent=%s", task.ID, exec.ID, agent.Name)
-
 		// Spawn background goroutine (same as TaskThreadSend)
 		go h.processStreamingResponse(streamingResponseParams{
 			ExecID:          exec.ID,

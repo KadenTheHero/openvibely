@@ -328,17 +328,18 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 			effectiveWorkDir = "."
 		}
 		resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
-			Model:            agent.Model,
-			MaxOutputTokens:  openAIDirectOutputBudget,
-			System:           applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt("", effectiveWorkDir), agent),
-			ReasoningEffort:  reasoningEffort(agent.ReasoningEffort),
-			ReasoningSummary: "auto",
-			WorkDir:          effectiveWorkDir,
-			Attachments:      oaAttachments,
-			ExtraTools:       runtimeOpenAITools(rt),
-			ToolExecutor:     composeRuntimeToolExecutor(nil, rt),
-			ToolFilter:       composeRuntimeToolFilter(nil, rt, true, models.ChatModeOrchestrate),
-			SkipDefaultTools: rt.SkipDefaultTools,
+			Model:                  agent.Model,
+			MaxOutputTokens:        openAIDirectOutputBudget,
+			System:                 applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt("", effectiveWorkDir), agent),
+			ReasoningEffort:        reasoningEffort(agent.ReasoningEffort),
+			ReasoningSummary:       "auto",
+			WorkDir:                effectiveWorkDir,
+			Attachments:            oaAttachments,
+			ExtraTools:             runtimeOpenAITools(rt),
+			ToolExecutor:           composeRuntimeToolExecutor(nil, rt),
+			ToolFilter:             composeRuntimeToolFilter(nil, rt, true, models.ChatModeOrchestrate),
+			OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
+			SkipDefaultTools:       rt.SkipDefaultTools,
 		})
 		if err != nil {
 			log.Printf("[openai-adapter] CallDirect agentic error: %v", err)
@@ -408,18 +409,19 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	inThinking := false
 
 	resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
-		Model:            agent.Model,
-		MaxOutputTokens:  openAIAgenticOutputBudget,
-		System:           applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
-		ReasoningEffort:  reasoningEffort(agent.ReasoningEffort),
-		ReasoningSummary: "auto",
-		AutoCompaction:   true,
-		WebSearchEnabled: true,
-		WorkDir:          effectiveWorkDir,
-		Attachments:      oaAttachments,
-		ExtraTools:       extraTools,
-		ToolExecutor:     toolExecutor,
-		ToolFilter:       toolFilter,
+		Model:                  agent.Model,
+		MaxOutputTokens:        openAIAgenticOutputBudget,
+		System:                 applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
+		ReasoningEffort:        reasoningEffort(agent.ReasoningEffort),
+		ReasoningSummary:       "auto",
+		AutoCompaction:         true,
+		WebSearchEnabled:       true,
+		WorkDir:                effectiveWorkDir,
+		Attachments:            oaAttachments,
+		ExtraTools:             extraTools,
+		ToolExecutor:           toolExecutor,
+		ToolFilter:             toolFilter,
+		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
 		OnThinking: func(text string) {
 			if !inThinking {
 				inThinking = true
@@ -513,19 +515,20 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
 	resp, err := client.SendAgentic(ctx, message, &openaiclient.AgenticOptions{
-		Model:            agent.Model,
-		MaxOutputTokens:  openAIAgenticOutputBudget,
-		System:           systemPromptStr,
-		ReasoningEffort:  reasoningEffort(agent.ReasoningEffort),
-		ReasoningSummary: "auto",
-		AutoCompaction:   true,
-		WebSearchEnabled: true,
-		DisableTools:     disableTools,
-		WorkDir:          effectiveWorkDir,
-		Attachments:      oaAttachments,
-		ExtraTools:       extraTools,
-		ToolExecutor:     toolExecutor,
-		ToolFilter:       toolFilter,
+		Model:                  agent.Model,
+		MaxOutputTokens:        openAIAgenticOutputBudget,
+		System:                 systemPromptStr,
+		ReasoningEffort:        reasoningEffort(agent.ReasoningEffort),
+		ReasoningSummary:       "auto",
+		AutoCompaction:         true,
+		WebSearchEnabled:       true,
+		DisableTools:           disableTools,
+		WorkDir:                effectiveWorkDir,
+		Attachments:            oaAttachments,
+		ExtraTools:             extraTools,
+		ToolExecutor:           toolExecutor,
+		ToolFilter:             toolFilter,
+		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
 		OnThinking: func(text string) {
 			if !chatInThinking {
 				chatInThinking = true

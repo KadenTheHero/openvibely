@@ -27,6 +27,7 @@ type MockLLMCaller struct {
 	Err           error
 	Calls         []MockLLMCall
 	AgentRequests []llmcontracts.AgentRequest
+	OnCall        func(context.Context, MockLLMCall)
 }
 
 // NewMockLLMCaller creates a mock that returns empty output with no error.
@@ -44,15 +45,22 @@ func (m *MockLLMCaller) RecordAgentRequest(req llmcontracts.AgentRequest) {
 
 // CallModel satisfies the service.LLMCaller interface.
 func (m *MockLLMCaller) CallModel(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.Calls = append(m.Calls, MockLLMCall{
+	call := MockLLMCall{
 		Prompt:      prompt,
 		Attachments: attachments,
 		Agent:       agent,
 		ExecID:      execID,
 		WorkDir:     workDir,
-	})
+	}
+	m.mu.Lock()
+	m.Calls = append(m.Calls, call)
+	onCall := m.OnCall
+	m.mu.Unlock()
+	if onCall != nil {
+		onCall(ctx, call)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.Response, m.TextOnly, m.Tokens, m.Err
 }
 

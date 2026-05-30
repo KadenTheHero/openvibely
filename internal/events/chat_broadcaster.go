@@ -13,6 +13,12 @@ const (
 	ChatNewMessage ChatEventType = "chat_new_message"
 	// ChatResponseDone is sent when the AI response is complete
 	ChatResponseDone ChatEventType = "chat_response_done"
+	// ChatTurnSteered is sent when a steering message is saved for the active turn.
+	ChatTurnSteered ChatEventType = "chat_turn_steered"
+	// ChatThreadInputApplied is sent when a queued/steering row is consumed by a running turn.
+	ChatThreadInputApplied ChatEventType = "chat_thread_input_applied"
+	// ChatThreadInputCancelled is sent when a pending queued/steering row is cancelled.
+	ChatThreadInputCancelled ChatEventType = "chat_thread_input_cancelled"
 )
 
 // ChatEvent represents a chat event for real-time updates
@@ -25,6 +31,9 @@ type ChatEvent struct {
 	Source          string        `json:"source,omitempty"` // "telegram", "web", "api"
 	AgentName       string        `json:"agent_name,omitempty"`
 	CompletedOutput string        `json:"completed_output,omitempty"` // Final assistant output for ChatResponseDone; enables plan-completion prompt without DOM scan
+	Queued          bool          `json:"queued,omitempty"`
+	Steering        bool          `json:"steering,omitempty"`
+	PendingInputID  string        `json:"pending_input_id,omitempty"`
 }
 
 // ToSSE converts a ChatEvent to SSE format

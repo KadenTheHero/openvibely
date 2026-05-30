@@ -53,6 +53,12 @@ func IsRetryable(err error) bool {
 
 // Do executes fn with retry/backoff for retryable errors.
 func Do[T any](ctx context.Context, policy Policy, fn func() (T, error)) (T, error) {
+	return DoWithBeforeRetry(ctx, policy, fn, nil)
+}
+
+// DoWithBeforeRetry executes fn with retry/backoff and calls beforeRetry after a retryable
+// failed attempt, but only when another attempt will actually be made.
+func DoWithBeforeRetry[T any](ctx context.Context, policy Policy, fn func() (T, error), beforeRetry func(context.Context) error) (T, error) {
 	if policy.MaxAttempts <= 0 {
 		policy.MaxAttempts = 1
 	}
@@ -70,6 +76,11 @@ func Do[T any](ctx context.Context, policy Policy, fn func() (T, error)) (T, err
 		lastErr = err
 		if !IsRetryable(err) || attempt == policy.MaxAttempts {
 			return zero, err
+		}
+		if beforeRetry != nil {
+			if beforeErr := beforeRetry(ctx); beforeErr != nil {
+				return zero, beforeErr
+			}
 		}
 
 		delay := policy.BaseDelay * time.Duration(attempt)

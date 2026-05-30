@@ -86,6 +86,7 @@ type ChatMessageAcceptedResponse struct {
 	Status         string   `json:"status" example:"processing"`
 	StatusURL      string   `json:"status_url" example:"/api/chat/message/exec123"`
 	AttachmentURLs []string `json:"attachment_urls,omitempty" example:"/chat/attachments/abc/download"`
+	Queued         bool     `json:"queued,omitempty"`
 }
 
 // ChatMessageStatusResponse represents the status/result of an async chat message
@@ -202,6 +203,59 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		}
 	}
 
+	activeChatExec, err := h.execRepo.FindLatestActiveChatExecution(c.Request().Context(), projectID)
+	if err != nil {
+		log.Printf("[handler] APIChatMessage error checking active chat turn: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to check chat queue"})
+	}
+
+	if activeChatExec != nil {
+		if h.threadInputRepo == nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "chat input queue is unavailable"})
+		}
+		attachmentSessionID := ""
+		if len(savedFiles) > 0 {
+			var sessionErr error
+			attachmentSessionID, sessionErr = saveAPIChatFilesToPendingSession(savedFiles)
+			if sessionErr != nil {
+				log.Printf("[handler] APIChatMessage error saving queued attachment session: %v", sessionErr)
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save queued attachments"})
+			}
+		}
+		queued := &models.ThreadInput{
+			Scope:               models.ThreadInputScopeChat,
+			ProjectID:           projectID,
+			RunExecutionID:      activeChatExec.ID,
+			AgentConfigID:       agent.ID,
+			InputMode:           models.ThreadInputModeQueued,
+			InputStatus:         models.ThreadInputPending,
+			Content:             message,
+			AttachmentSessionID: attachmentSessionID,
+			ChatMode:            models.ChatModeOrchestrate,
+		}
+		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
+			log.Printf("[handler] APIChatMessage error creating queued input: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to queue chat message"})
+		}
+		if h.chatBroadcaster != nil {
+			h.chatBroadcaster.Publish(events.ChatEvent{
+				Type:      events.ChatNewMessage,
+				ProjectID: projectID,
+				ExecID:    queued.ID,
+				Message:   message,
+				Source:    "api",
+				AgentName: agent.Name,
+				Queued:    true,
+			})
+		}
+		return c.JSON(http.StatusCreated, ChatMessageAcceptedResponse{
+			MessageID: queued.ID,
+			Status:    "queued",
+			StatusURL: fmt.Sprintf("/api/chat/message/%s", queued.ID),
+			Queued:    true,
+		})
+	}
+
 	// Create a task record for the chat message
 	chatTitle := fmt.Sprintf("Chat %s: %s", time.Now().Format("15:04:05.000"), message[:min(50, len(message))])
 	agentID := agent.ID
@@ -218,20 +272,23 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create chat task"})
 	}
 
-	// Create execution record
+	// Create execution record for immediate processing.
+	execStatus := models.ExecRunning
 	exec := &models.Execution{
 		TaskID:        task.ID,
 		AgentConfigID: agent.ID,
-		Status:        models.ExecRunning,
+		Status:        execStatus,
 		PromptSent:    message,
 	}
 	if err := h.execRepo.Create(c.Request().Context(), exec); err != nil {
 		log.Printf("[handler] APIChatMessage error creating execution: %v", err)
+		if delErr := h.taskRepo.Delete(c.Request().Context(), task.ID); delErr != nil {
+			log.Printf("[handler] APIChatMessage error cleaning up chat task=%s after execution create failure: %v", task.ID, delErr)
+		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create execution"})
 	}
 
-	log.Printf("[handler] APIChatMessage created exec=%s task=%s", exec.ID, task.ID)
-
+	log.Printf("[handler] APIChatMessage created exec=%s task=%s status=%s", exec.ID, task.ID, exec.Status)
 	// Broadcast new message event
 	if h.chatBroadcaster != nil {
 		h.chatBroadcaster.Publish(events.ChatEvent{
@@ -340,17 +397,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		log.Printf("[handler] APIChatMessage error loading chat history: %v", err)
 		chatHistory = []models.Execution{}
 	}
-	priorHistory := make([]models.Execution, 0, len(chatHistory))
-	for _, ch := range chatHistory {
-		if ch.ID == exec.ID {
-			continue
-		}
-		if ch.Status == models.ExecRunning {
-			continue
-		}
-		priorHistory = append(priorHistory, ch)
-	}
-
+	priorHistory := filterChatHistory(chatHistory, exec.ID)
 	// Build task context using shared function (same as /chat and Telegram)
 	taskContext := h.buildChatContext(c.Request().Context(), projectID, agents)
 
@@ -388,8 +435,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		Surface:          chatcontrol.SurfaceAPI,
 	})
 
-	log.Printf("[handler] APIChatMessage exec=%s queued for async processing", exec.ID)
-
+	log.Printf("[handler] APIChatMessage exec=%s accepted for async processing status=%s", exec.ID, execStatus)
 	// Return 201 immediately with the message ID for polling
 	resp := ChatMessageAcceptedResponse{
 		MessageID: exec.ID,
@@ -426,9 +472,37 @@ func (h *Handler) APIChatMessageStatus(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve message status"})
 	}
 	if exec == nil {
+		if h.threadInputRepo != nil {
+			input, inputErr := h.threadInputRepo.GetByID(c.Request().Context(), execID)
+			if inputErr != nil {
+				log.Printf("[handler] APIChatMessageStatus input=%s error: %v", execID, inputErr)
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve message status"})
+			}
+			if input != nil {
+				if input.InputStatus == models.ThreadInputApplied && input.RunExecutionID != "" {
+					exec, err = h.execRepo.GetByID(c.Request().Context(), input.RunExecutionID)
+					if err != nil {
+						log.Printf("[handler] APIChatMessageStatus promoted exec=%s error: %v", input.RunExecutionID, err)
+						return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve promoted message status"})
+					}
+					if exec != nil {
+						return h.apiChatExecutionStatus(c, exec)
+					}
+				}
+				status := string(input.InputStatus)
+				if input.InputStatus == models.ThreadInputPending && input.InputMode == models.ThreadInputModeQueued {
+					status = "queued"
+				}
+				return c.JSON(http.StatusOK, ChatMessageStatusResponse{MessageID: input.ID, Status: status})
+			}
+		}
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "message not found"})
 	}
 
+	return h.apiChatExecutionStatus(c, exec)
+}
+
+func (h *Handler) apiChatExecutionStatus(c echo.Context, exec *models.Execution) error {
 	resp := ChatMessageStatusResponse{
 		MessageID: exec.ID,
 	}
@@ -440,24 +514,19 @@ func (h *Handler) APIChatMessageStatus(c echo.Context) error {
 		resp.TokensUsed = exec.TokensUsed
 		resp.DurationMs = exec.DurationMs
 
-		// Parse task creation markers from the output to extract task IDs
-		taskRequests := parseChatTaskCreations(exec.Output)
-		if len(taskRequests) > 0 {
-			// The task IDs are embedded in the output after processing;
-			// re-extracting from markers gives the titles, not IDs.
-			// Instead, look up tasks created from this execution.
-			tasks, taskErr := h.taskRepo.ListByProject(c.Request().Context(), exec.TaskID, "")
-			if taskErr == nil {
-				for _, t := range tasks {
-					if t.Category != models.CategoryChat {
-						resp.TaskIDs = append(resp.TaskIDs, t.ID)
-					}
-				}
+		for _, taskID := range extractTaskIDsFromOutput(exec.Output) {
+			if task, taskErr := h.taskRepo.GetByID(c.Request().Context(), taskID); taskErr == nil && task != nil && task.Category != models.CategoryChat {
+				resp.TaskIDs = append(resp.TaskIDs, taskID)
 			}
 		}
 	case models.ExecFailed:
 		resp.Status = "failed"
 		resp.Error = exec.ErrorMessage
+		resp.DurationMs = exec.DurationMs
+	case models.ExecCancelled:
+		resp.Status = "cancelled"
+		resp.Error = exec.ErrorMessage
+		resp.Response = exec.Output
 		resp.DurationMs = exec.DurationMs
 	default:
 		resp.Status = "processing"
@@ -473,6 +542,52 @@ func (h *Handler) APIChatMessageStatus(c echo.Context) error {
 // apiSavedFile holds a multipart file header for deferred processing
 type apiSavedFile struct {
 	header *multipart.FileHeader
+}
+
+func saveAPIChatFilesToPendingSession(savedFiles []apiSavedFile) (string, error) {
+	if len(savedFiles) == 0 {
+		return "", nil
+	}
+	sessionID := generateSessionID()
+	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		return "", fmt.Errorf("creating pending upload directory: %w", err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.RemoveAll(sessionDir)
+		}
+	}()
+	for _, sf := range savedFiles {
+		filename := filepath.Base(sf.header.Filename)
+		uniqueName := fmt.Sprintf("%s_%s", generateShortID(), filename)
+		destPath := filepath.Join(sessionDir, uniqueName)
+		src, err := sf.header.Open()
+		if err != nil {
+			return "", fmt.Errorf("opening %s: %w", filename, err)
+		}
+		dst, err := os.Create(destPath)
+		if err != nil {
+			src.Close()
+			return "", fmt.Errorf("creating %s: %w", filename, err)
+		}
+		if _, err := io.Copy(dst, src); err != nil {
+			dst.Close()
+			src.Close()
+			_ = os.Remove(destPath)
+			return "", fmt.Errorf("saving %s: %w", filename, err)
+		}
+		if err := dst.Close(); err != nil {
+			src.Close()
+			return "", fmt.Errorf("closing %s: %w", filename, err)
+		}
+		if err := src.Close(); err != nil {
+			return "", fmt.Errorf("closing upload %s: %w", filename, err)
+		}
+	}
+	cleanup = false
+	return sessionID, nil
 }
 
 // generateShortID creates a short random hex string for unique filenames

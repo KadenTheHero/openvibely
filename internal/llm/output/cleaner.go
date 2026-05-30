@@ -82,7 +82,7 @@ func IsImageMediaType(mediaType string) bool {
 }
 
 // CleanChatOutputForDisplay strips marker syntax from output but preserves
-// the summary/result sections appended by processChatMarkers/processChatResponse.
+// the summary/result sections appended by chat response post-processing.
 // Used for Telegram display where marker results (Project Info, task summaries, etc.)
 // should be visible to the user.
 func CleanChatOutputForDisplay(output string) string {

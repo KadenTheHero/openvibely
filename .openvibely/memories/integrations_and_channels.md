@@ -2,9 +2,9 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-05-29
+updated: 2026-05-31
 source: consolidation
-source_id: memory_consolidation_2026_05_29
+source_id: memory_consolidation_2026_05_31
 confidence: high
 title: Integrations and Channels
 ---
@@ -13,7 +13,7 @@ OpenVibely has channel integrations for GitHub, Slack, Telegram, and generic inb
 
 Channels page:
 - `/channels` uses an Add Channel chooser (`GitHub`, `Slack`, `Telegram Bot`, `Webhook`) and only renders active cards after a channel is added/configured.
-- Channel-card kebab menus use consistent destructive actions: `Delete`, `text-error`, provider-specific confirmation copy.
+- Channel-card kebab menus use consistent destructive actions: `Delete`, `text-error`, and provider-specific confirmation copy.
 - Telegram card includes first-class delete action `POST /channels/telegram/remove`.
 
 GitHub:
@@ -45,7 +45,16 @@ Slack:
 - Slack OAuth and manual bot-token modes should stay separate so switching modes does not wipe working credentials.
 - Slack inbound behavior requires Socket Mode plus `app_mention` and `message.im` events.
 - Authorized-user enforcement is project-scoped and allow-by-default when no authorized users are configured.
+- Slack socket processing should start only after the pending-input repository, queued-turn promoter, shared channel chat runner, and shared channel task runner callbacks are wired; otherwise early inbound messages can fall back to divergent local behavior.
+- Slack-origin active Chat runs should hand initial responses to the shared steering-aware chat runner in production, not a service-local LLM loop, so web Chat steering can be consumed. Immediate Slack chat handoff must persist `SlackTaskContext` before execution creation; if persistence fails, clean up the chat task.
+- Queued Slack input promotion should persist `SlackTaskContext` in the same transaction that claims the pending input and creates the promoted task/execution, so a queued row cannot become applied and start without reply metadata.
+- Slack `send_to_task` follow-ups use the shared queued task-thread behavior from `chat_thread_system.md`, carry reply metadata on `thread_inputs` or per-run context, use handler-resolved task worktrees, keep marker processing disabled, and should not rewrite the target task origin just to route a reply.
 
 Telegram:
 - Telegram attachment and command behavior should remain project-aware.
 - Tests should not spill runtime upload files into package directories.
+- Telegram services created or restarted from settings must wire the shared channel chat runner before `Start()`; otherwise settings-enabled bots can fall back to service-local LLM loops even if server startup wiring is correct.
+- Telegram-origin active Chat runs should hand initial responses to the shared steering-aware chat runner in production, preserve the initial “Thinking…” acknowledgement message id, and promote queued follow-ups after both success and failure.
+- For shared-runner Telegram Chat, the shared runner owns worker cancellation registration; the Telegram service should register/deregister cancellation only on the fallback local-LLM path so deferred service cleanup cannot remove the handler-owned cancel function after handoff.
+- Telegram `send_to_task` follow-ups use the shared queued task-thread behavior from `chat_thread_system.md`, carry reply metadata on `thread_inputs` or per-run context, use handler-resolved task worktrees, keep marker processing disabled, and should not rewrite the target task origin just to route a reply.
+- Telegram `Start`/`Stop` should be nil-safe for partially constructed/test services.

@@ -72,11 +72,9 @@ func TestChatLoadingDots_RendersThreeDotsAndSizeVariants(t *testing.T) {
 	}
 }
 
-// TestChatBubbleStreaming_ThreadCompletionDoesNotRefresh verifies that when
-// a thread's SSE stream ends (task finished), the already-streamed content is
-// finalized in place instead of issuing any HTMX refresh. Swapping even the
-// thread view can reset visible context; completion should be dynamic.
-func TestChatBubbleStreaming_ThreadCompletionDoesNotRefresh(t *testing.T) {
+// TestChatBubbleStreaming_ThreadCompletionStaysSmooth verifies task completion
+// does not refresh the task-thread fragment; queued promotion is handled by live events.
+func TestChatBubbleStreaming_ThreadCompletionStaysSmooth(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatBubbleStreaming("assistant", "exec-id", "task-thread-messages", "task-thread-view", true).Render(context.Background(), &buf)
 	if err != nil {
@@ -84,23 +82,23 @@ func TestChatBubbleStreaming_ThreadCompletionDoesNotRefresh(t *testing.T) {
 	}
 	content := buf.String()
 
-	if strings.Contains(content, "htmx.ajax") {
-		t.Error("thread completion must not issue a post-stream HTMX refresh")
-	}
 	if strings.Contains(content, "'#task-detail-content'") || strings.Contains(content, `"#task-detail-content"`) {
 		t.Error("thread completion must not target #task-detail-content (hard-refresh UX)")
 	}
 	if strings.Contains(content, "?tab=chat") {
 		t.Error("thread completion must not refresh via ?tab=chat full-detail swap")
 	}
-	if strings.Contains(content, "'/tasks/' + taskIdMatch[1] + '/thread'") {
-		t.Error("thread completion must not refresh the thread endpoint after streaming")
+	if strings.Contains(content, "refreshThreadViewForPendingInputs()") || strings.Contains(content, "hasVisiblePendingThreadInputs()") {
+		t.Error("thread completion must not refresh the thread fragment for pending rows")
+	}
+	if strings.Contains(content, "htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread'") {
+		t.Error("thread completion must not hard-refresh the task thread fragment")
 	}
 	if !strings.Contains(content, "showThreadTerminalStatus('completed')") {
-		t.Error("thread completion should show terminal status dynamically")
+		t.Error("thread completion should show terminal status dynamically when no pending rows exist")
 	}
 	if !strings.Contains(content, "stopThreadPolling()") {
-		t.Error("thread completion should stop thread polling dynamically")
+		t.Error("thread completion should stop thread polling dynamically when no pending rows exist")
 	}
 	if !strings.Contains(content, "restoreThreadPollingFallback()") {
 		t.Error("transport errors should restore polling as a fallback")
@@ -139,29 +137,29 @@ func TestChatBubbleStreaming_NeverTargetsTaskDetailContent(t *testing.T) {
 	}
 }
 
-// TestInitThreadStreamingScript_CompletionDoesNotRefresh verifies the resume
-// SSE handler also finalizes in place and does not refresh the thread view.
-func TestInitThreadStreamingScript_CompletionDoesNotRefresh(t *testing.T) {
+// TestInitThreadStreamingScript_CompletionStaysSmooth verifies the resume SSE
+// handler also avoids fragment refreshes; live events append promoted turns.
+func TestInitThreadStreamingScript_CompletionStaysSmooth(t *testing.T) {
 	var buf bytes.Buffer
 	err := _initThreadStreamingScript().Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("Failed to render _initThreadStreamingScript: %v", err)
 	}
 	content := buf.String()
-	if strings.Contains(content, "htmx.ajax") {
-		t.Error("resume thread stream script must not issue a post-stream HTMX refresh")
-	}
 	if strings.Contains(content, "'#task-detail-content'") || strings.Contains(content, `"#task-detail-content"`) {
 		t.Error("resume thread stream script must not target #task-detail-content (hard-refresh UX)")
 	}
 	if strings.Contains(content, "?tab=chat") {
 		t.Error("resume thread stream script must not refresh via ?tab=chat full-detail swap")
 	}
-	if strings.Contains(content, "'/tasks/' + taskIdMatch[1] + '/thread'") {
-		t.Error("resume thread stream script must not refresh the thread endpoint after streaming")
+	if strings.Contains(content, "refreshThreadViewForPendingInputs()") || strings.Contains(content, "hasVisiblePendingThreadInputs()") {
+		t.Error("resume completion must not refresh the thread fragment for pending rows")
+	}
+	if strings.Contains(content, "htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread'") {
+		t.Error("resume completion must not hard-refresh the task thread fragment")
 	}
 	if !strings.Contains(content, "showThreadTerminalStatus('completed')") {
-		t.Error("resume completion should show terminal status dynamically")
+		t.Error("resume completion should show terminal status dynamically when no pending rows exist")
 	}
 	if !strings.Contains(content, "restoreThreadPollingFallback()") {
 		t.Error("resume transport errors should restore polling as a fallback")
@@ -380,6 +378,112 @@ func TestChatInputForm_EnterKeyHasRequestSubmitFallback(t *testing.T) {
 	}
 	if !strings.Contains(content, "form.dispatchEvent(submitEvent);") {
 		t.Fatal("enter key path must dispatch submit fallback")
+	}
+}
+
+func TestChatInputForm_RunningChatDoesNotExposeComposerSteeringControl(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatInputForm(ChatInputFormConfig{
+		FormID:       "chat-form",
+		InputID:      "message-input",
+		PostEndpoint: "/chat/send",
+		TargetID:     "chat-messages",
+		IsRunning:    true,
+		ActiveTurnID: "exec-active-chat",
+	}).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render ChatInputForm: %v", err)
+	}
+
+	content := buf.String()
+	if !strings.Contains(content, `name="expected_turn_id" value="exec-active-chat"`) {
+		t.Fatal("running chat form should keep the active turn guard for queue safety")
+	}
+	if strings.Contains(content, `name="steer_endpoint"`) || strings.Contains(content, `data-steer-submit="true"`) || strings.Contains(content, ">Steer") {
+		t.Fatal("running chat form must not expose composer steering controls")
+	}
+	if strings.Contains(content, "htmx.ajax('POST', steerEndpoint") {
+		t.Fatal("running chat form must not post directly to the steering endpoint")
+	}
+}
+
+func TestChatInputForm_RunningTaskThreadDoesNotExposeComposerSteeringControl(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatInputForm(ChatInputFormConfig{
+		FormID:       "task-thread-form",
+		InputID:      "task-message-input",
+		PostEndpoint: "/tasks/task-1/thread",
+		TargetID:     "task-thread-messages",
+		TaskID:       "task-1",
+		IsRunning:    true,
+		ActiveTurnID: "exec-active-task",
+	}).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render ChatInputForm: %v", err)
+	}
+
+	content := buf.String()
+	if !strings.Contains(content, `name="expected_turn_id" value="exec-active-task"`) {
+		t.Fatal("running task-thread form should keep the active turn guard for queue safety")
+	}
+	if strings.Contains(content, `name="steer_endpoint"`) || strings.Contains(content, `data-steer-submit="true"`) || strings.Contains(content, ">Steer") {
+		t.Fatal("running task-thread form must not expose composer steering controls")
+	}
+}
+
+func TestPendingThreadInputRows_LeavesComposerOwnedInputsOutOfTranscript(t *testing.T) {
+	inputs := []models.ThreadInput{
+		{ID: "queued-1", TaskID: "task-1", InputMode: models.ThreadInputModeQueued, Content: "queue this"},
+		{ID: "steer-1", TaskID: "task-1", InputMode: models.ThreadInputModeSteering, Content: "steer this"},
+	}
+	var buf bytes.Buffer
+	err := PendingThreadInputRows(inputs, func(input models.ThreadInput) string {
+		return "/tasks/" + input.TaskID + "/thread/queued/" + input.ID + "/steer"
+	}).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render PendingThreadInputRows: %v", err)
+	}
+
+	content := buf.String()
+	if strings.Contains(content, `thread-input-queued-1`) || strings.Contains(content, `thread-input-steer-1`) || strings.Contains(content, `pending-steering-inputs`) {
+		t.Fatal("queued and steering pending rows should render inside the composer, not the chat transcript")
+	}
+}
+
+func TestChatComposerQueuedInputRows_RenderInsideInputBoxStyle(t *testing.T) {
+	inputs := []models.ThreadInput{
+		{ID: "queued-1", TaskID: "task-1", InputMode: models.ThreadInputModeQueued, Content: "queue this"},
+		{ID: "steer-1", TaskID: "task-1", InputMode: models.ThreadInputModeSteering, Content: "steer this"},
+	}
+	var buf bytes.Buffer
+	err := ChatComposerQueuedInputRows(inputs, func(input models.ThreadInput) string {
+		return "/tasks/" + input.TaskID + "/thread/queued/" + input.ID + "/steer"
+	}).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render ChatComposerQueuedInputRows: %v", err)
+	}
+
+	content := buf.String()
+	if !strings.Contains(content, `id="pending-thread-inputs"`) || !strings.Contains(content, `space-y-1.5`) {
+		t.Fatal("pending rows should render in a composer queue container")
+	}
+	if strings.Contains(content, `id="pending-thread-inputs" class="space-y-1.5 mb-3`) || strings.Contains(content, `id="pending-thread-inputs" class="space-y-1.5 pb-4`) {
+		t.Fatal("pending row spacing should be controlled by shared CSS, not per-render classes")
+	}
+	if !strings.Contains(content, `queued-input-row`) || !strings.Contains(content, `steering-input-row`) || !strings.Contains(content, `bg-base-300/45`) || !strings.Contains(content, `flex-1`) || !strings.Contains(content, `ml-auto`) {
+		t.Fatal("pending rows should look like part of the input box with right-aligned actions")
+	}
+	if !strings.Contains(content, `hx-post="/tasks/task-1/thread/queued/queued-1/steer"`) || !strings.Contains(content, "Steer") {
+		t.Fatal("queued pending row must expose Steer action")
+	}
+	if !strings.Contains(content, `hx-post="/thread-inputs/queued-1/cancel"`) || !strings.Contains(content, `aria-label="Cancel queued follow-up"`) || !strings.Contains(content, `M19 7l-.867 12.142`) {
+		t.Fatal("queued pending row must expose the alerts trash icon cancel action")
+	}
+	if !strings.Contains(content, `thread-input-steer-1`) || !strings.Contains(content, "Steering pending") || !strings.Contains(content, `aria-label="Cancel pending steering"`) {
+		t.Fatal("composer pending rows should include steering rows with a trash-icon cancel action")
+	}
+	if strings.Contains(content, "Send now") || strings.Contains(content, "btn-warning") || strings.Contains(content, "bg-warning") || strings.Contains(content, ">Cancel</button>") || strings.Contains(content, ">×</button>") {
+		t.Fatal("composer pending rows should avoid old warning/text/× cancel treatments")
 	}
 }
 
@@ -1380,7 +1484,7 @@ func TestTaskThreadView_SelectsTaskAssignedModelInDropdown(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := TaskThreadView(task, nil, agents, nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskThreadView(task, nil, agents, nil, nil, nil).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render TaskThreadView: %v", err)
 	}
 	content := buf.String()
@@ -1396,6 +1500,61 @@ func TestTaskThreadView_SelectsTaskAssignedModelInDropdown(t *testing.T) {
 	}
 }
 
+func TestTaskThreadView_RunningThreadCanSteerFromPendingRowsOnly(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-steer-ui",
+		ProjectID: "p1",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+	execs := []models.Execution{{ID: "exec-running-task", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "running"}}
+	pending := []models.ThreadInput{{ID: "queued-task", TaskID: task.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued"}}
+
+	var buf bytes.Buffer
+	if err := TaskThreadView(task, execs, nil, nil, nil, pending).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render TaskThreadView: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, `name="expected_turn_id" value="exec-running-task"`) {
+		t.Fatal("task-thread UI should keep the active turn id for queue safety")
+	}
+	if strings.Contains(content, `name="steer_endpoint"`) || strings.Contains(content, `data-steer-submit="true"`) {
+		t.Fatal("task-thread composer must not expose direct steering controls")
+	}
+	if !strings.Contains(content, `id="pending-thread-inputs"`) || !strings.Contains(content, `hx-post="/tasks/task-steer-ui/thread/queued/queued-task/steer"`) || !strings.Contains(content, "Steer") {
+		t.Fatal("task-thread composer queued row must expose Steer action")
+	}
+	messagesStart := strings.Index(content, `id="task-thread-messages"`)
+	formStart := strings.Index(content, `id="task-thread-form"`)
+	if messagesStart < 0 || formStart < 0 || strings.Contains(content[messagesStart:formStart], `thread-input-queued-task`) {
+		t.Fatal("task-thread queued rows should render with the input box, not in the message transcript")
+	}
+	if !strings.Contains(content, `queued-input-row`) || !strings.Contains(content, `ml-auto`) || !strings.Contains(content, `aria-label="Cancel queued follow-up"`) || !strings.Contains(content, `M19 7l-.867 12.142`) {
+		t.Fatal("task-thread queued row should use input-box styling with right-aligned Steer and trash-icon cancel action")
+	}
+	queuedStart := strings.Index(content, `class="queued-input-row`)
+	if queuedStart < 0 {
+		t.Fatal("task-thread queued row should render")
+	}
+	queuedEnd := strings.Index(content[queuedStart:], `</div></div>`)
+	if queuedEnd < 0 {
+		t.Fatal("task-thread queued row markup should be bounded")
+	}
+	queuedMarkup := content[queuedStart : queuedStart+queuedEnd]
+	if strings.Contains(content, "Send now") || strings.Contains(content, "btn-warning") || strings.Contains(content, "bg-warning") || strings.Contains(queuedMarkup, ">Cancel</button>") || strings.Contains(queuedMarkup, ">×</button>") {
+		t.Fatal("task-thread queued rows should not use warning styling, Send now copy, or text/× cancel")
+	}
+	if !strings.Contains(content, "task_thread_execution_started") || !strings.Contains(content, "/thread/executions/") {
+		t.Fatal("task-thread UI must append promoted queued executions smoothly via live event fragments")
+	}
+	if !strings.Contains(content, "data.type === 'task_thread_input_applied' || data.type === 'task_thread_input_cancelled'") {
+		t.Fatal("task-thread UI must remove cancelled pending rows from live events")
+	}
+	if !strings.Contains(content, `data-task-id="task-steer-ui"`) || !strings.Contains(content, "getAttribute('data-task-id')") {
+		t.Fatal("task-thread live script must bind to the rendered task id, not a literal templ placeholder")
+	}
+}
+
 func TestTaskThreadView_SkipsExpensiveWorkDuringNavigation(t *testing.T) {
 	task := &models.Task{
 		ID:        "t1",
@@ -1404,7 +1563,7 @@ func TestTaskThreadView_SkipsExpensiveWorkDuringNavigation(t *testing.T) {
 		Category:  models.CategoryActive,
 	}
 	var buf bytes.Buffer
-	err := TaskThreadView(task, nil, nil, nil, nil).Render(context.Background(), &buf)
+	err := TaskThreadView(task, nil, nil, nil, nil, nil).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("Failed to render TaskThreadView: %v", err)
 	}
@@ -1447,7 +1606,7 @@ func TestTaskThreadView_ClearsDraftBeforeSuccessfulThreadSwap(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := TaskThreadView(task, nil, nil, nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskThreadView(task, nil, nil, nil, nil, nil).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render TaskThreadView: %v", err)
 	}
 	content := buf.String()
@@ -1481,7 +1640,7 @@ func TestTaskThreadView_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *tes
 	}
 
 	var buf bytes.Buffer
-	if err := TaskThreadView(task, nil, nil, nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskThreadView(task, nil, nil, nil, nil, nil).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render TaskThreadView: %v", err)
 	}
 	content := buf.String()
@@ -1783,7 +1942,7 @@ func TestTaskThreadView_PreservesPerTaskScrollState(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := TaskThreadView(task, nil, nil, nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskThreadView(task, nil, nil, nil, nil, nil).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render TaskThreadView: %v", err)
 	}
 	content := buf.String()

@@ -1,0 +1,783 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+type ThreadInputRepo struct {
+	db *sql.DB
+}
+
+var (
+	ErrNoActiveTurn      = errors.New("no active turn")
+	ErrExpectedTurnEmpty = errors.New("expected turn id is required")
+	ErrActiveTurnChanged = errors.New("active turn changed")
+	ErrInputNotPending   = errors.New("input is no longer pending")
+)
+
+func NewThreadInputRepo(db *sql.DB) *ThreadInputRepo {
+	return &ThreadInputRepo{db: db}
+}
+
+const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), COALESCE(source, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), created_at, updated_at, applied_at`
+
+func scanThreadInput(scanner interface {
+	Scan(dest ...interface{}) error
+}) (models.ThreadInput, error) {
+	var input models.ThreadInput
+	err := scanner.Scan(
+		&input.ID,
+		&input.Scope,
+		&input.ProjectID,
+		&input.TaskID,
+		&input.RunExecutionID,
+		&input.AgentConfigID,
+		&input.InputMode,
+		&input.InputStatus,
+		&input.TurnID,
+		&input.ExpectedTurnID,
+		&input.Content,
+		&input.AttachmentSessionID,
+		&input.QueuePosition,
+		&input.ChatMode,
+		&input.Source,
+		&input.TelegramChatID,
+		&input.SlackTeamID,
+		&input.SlackChannelID,
+		&input.SlackThreadTS,
+		&input.SlackUserID,
+		&input.CreatedAt,
+		&input.UpdatedAt,
+		&input.AppliedAt,
+	)
+	return input, err
+}
+
+func (r *ThreadInputRepo) CreateQueued(ctx context.Context, input *models.ThreadInput) error {
+	if input.InputMode == "" {
+		input.InputMode = models.ThreadInputModeQueued
+	}
+	if input.InputStatus == "" {
+		input.InputStatus = models.ThreadInputPending
+	}
+	return r.withImmediateTx(ctx, func(exec sqlExecutor) error {
+		return r.createWithExecutor(ctx, exec, input)
+	})
+}
+
+func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, input *models.ThreadInput, activeExecutionID string) error {
+	if input.ExpectedTurnID == "" {
+		return ErrExpectedTurnEmpty
+	}
+	if input.ExpectedTurnID != activeExecutionID {
+		return ErrActiveTurnChanged
+	}
+	return r.withTx(ctx, func(tx *sql.Tx) error {
+		input.RunExecutionID = activeExecutionID
+		input.TurnID = activeExecutionID
+		input.InputMode = models.ThreadInputModeSteering
+		input.InputStatus = models.ThreadInputPending
+		if input.QueuePosition == 0 {
+			var next sql.NullInt64
+			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(queue_position), 0) + 1 FROM thread_inputs WHERE scope = ? AND project_id = ? AND COALESCE(task_id, '') = ?`, input.Scope, input.ProjectID, input.TaskID).Scan(&next); err != nil {
+				return fmt.Errorf("allocating input queue position: %w", err)
+			}
+			if next.Valid {
+				input.QueuePosition = next.Int64
+			}
+		}
+		row := tx.QueryRowContext(ctx, `
+			INSERT INTO thread_inputs (
+				id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
+				turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
+				source, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id
+			)
+			SELECT lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?
+			WHERE EXISTS (
+				SELECT 1 FROM executions e JOIN tasks t ON t.id = e.task_id
+				WHERE e.id = ? AND e.status = 'running'
+				  AND (
+				    (? = ? AND e.task_id = ?)
+				    OR (? = ? AND t.project_id = ? AND t.category = 'chat')
+				  )
+			)
+			RETURNING `+threadInputSelectColumns,
+			input.Scope,
+			input.ProjectID,
+			input.TaskID,
+			activeExecutionID,
+			input.AgentConfigID,
+			input.InputMode,
+			input.InputStatus,
+			activeExecutionID,
+			activeExecutionID,
+			input.Content,
+			input.AttachmentSessionID,
+			input.QueuePosition,
+			input.ChatMode,
+			input.Source,
+			input.TelegramChatID,
+			input.SlackTeamID,
+			input.SlackChannelID,
+			input.SlackThreadTS,
+			input.SlackUserID,
+			activeExecutionID,
+			input.Scope,
+			models.ThreadInputScopeTask,
+			input.TaskID,
+			input.Scope,
+			models.ThreadInputScopeChat,
+			input.ProjectID,
+		)
+		created, err := scanThreadInput(row)
+		if err == sql.ErrNoRows {
+			return ErrNoActiveTurn
+		}
+		if err != nil {
+			return fmt.Errorf("creating steering input: %w", err)
+		}
+		*input = created
+		return nil
+	})
+}
+
+func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, input *models.ThreadInput) error {
+	if input.QueuePosition == 0 {
+		var next sql.NullInt64
+		if err := exec.QueryRowContext(ctx, `SELECT COALESCE(MAX(queue_position), 0) + 1 FROM thread_inputs WHERE scope = ? AND project_id = ? AND COALESCE(task_id, '') = ?`, input.Scope, input.ProjectID, input.TaskID).Scan(&next); err != nil {
+			return fmt.Errorf("allocating input queue position: %w", err)
+		}
+		if next.Valid {
+			input.QueuePosition = next.Int64
+		}
+	}
+	row := exec.QueryRowContext(ctx, `
+		INSERT INTO thread_inputs (
+				id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
+				turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
+				source, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id
+			) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?)
+		RETURNING `+threadInputSelectColumns,
+		input.Scope,
+		input.ProjectID,
+		input.TaskID,
+		input.RunExecutionID,
+		input.AgentConfigID,
+		input.InputMode,
+		input.InputStatus,
+		input.TurnID,
+		input.ExpectedTurnID,
+		input.Content,
+		input.AttachmentSessionID,
+		input.QueuePosition,
+		input.ChatMode,
+		input.Source,
+		input.TelegramChatID,
+		input.SlackTeamID,
+		input.SlackChannelID,
+		input.SlackThreadTS,
+		input.SlackUserID,
+	)
+	created, err := scanThreadInput(row)
+	if err != nil {
+		return fmt.Errorf("creating thread input: %w", err)
+	}
+	*input = created
+	return nil
+}
+
+func (r *ThreadInputRepo) GetByID(ctx context.Context, id string) (*models.ThreadInput, error) {
+	input, err := scanThreadInput(r.db.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, id))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting thread input: %w", err)
+	}
+	return &input, nil
+}
+
+func (r *ThreadInputRepo) ListPendingForTask(ctx context.Context, taskID string) ([]models.ThreadInput, error) {
+	return r.list(ctx, `WHERE task_id = ? AND input_status = 'pending' ORDER BY queue_position ASC, created_at ASC, rowid ASC`, taskID)
+}
+
+func (r *ThreadInputRepo) ListPendingForChat(ctx context.Context, projectID string) ([]models.ThreadInput, error) {
+	return r.list(ctx, `WHERE scope = 'chat' AND project_id = ? AND input_status = 'pending' ORDER BY queue_position ASC, created_at ASC, rowid ASC`, projectID)
+}
+
+func (r *ThreadInputRepo) ListPendingSteering(ctx context.Context, runExecutionID, turnID string) ([]models.ThreadInput, error) {
+	return r.list(ctx, `WHERE run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND COALESCE(expected_turn_id, '') != '' ORDER BY created_at ASC, rowid ASC`, runExecutionID, turnID)
+}
+
+func (r *ThreadInputRepo) PreparePendingSteering(ctx context.Context, runExecutionID, turnID string) ([]models.ThreadInput, error) {
+	return r.preparePendingSteering(ctx, runExecutionID, turnID, false)
+}
+
+func (r *ThreadInputRepo) PreparePendingTextSteering(ctx context.Context, runExecutionID, turnID string) ([]models.ThreadInput, error) {
+	return r.preparePendingSteering(ctx, runExecutionID, turnID, true)
+}
+
+func (r *ThreadInputRepo) preparePendingSteering(ctx context.Context, runExecutionID, turnID string, textOnly bool) ([]models.ThreadInput, error) {
+	var prepared []models.ThreadInput
+	err := r.withTx(ctx, func(tx *sql.Tx) error {
+		where := `WHERE run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND COALESCE(expected_turn_id, '') != ''`
+		if textOnly {
+			where += ` AND COALESCE(attachment_session_id, '') = ''`
+		}
+		where += ` ORDER BY created_at ASC, rowid ASC`
+		inputs, err := r.listWithExecutor(ctx, tx, where, runExecutionID, turnID)
+		if err != nil {
+			return err
+		}
+		if len(inputs) == 0 {
+			return nil
+		}
+		for _, input := range inputs {
+			res, err := tx.ExecContext(ctx, `
+				UPDATE thread_inputs
+				SET expected_turn_id = NULL, updated_at = datetime('now')
+				WHERE id = ? AND run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND COALESCE(expected_turn_id, '') != ''`, input.ID, runExecutionID, turnID)
+			if err != nil {
+				return fmt.Errorf("preparing steering input: %w", err)
+			}
+			changed, _ := res.RowsAffected()
+			if changed > 0 {
+				input.ExpectedTurnID = ""
+				prepared = append(prepared, input)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return prepared, nil
+}
+
+func (r *ThreadInputRepo) FindOldestQueuedForTask(ctx context.Context, taskID string) (*models.ThreadInput, error) {
+	return r.findOldestQueued(ctx, models.ThreadInputScopeTask, "", taskID)
+}
+
+func (r *ThreadInputRepo) FindOldestQueuedForChat(ctx context.Context, projectID string) (*models.ThreadInput, error) {
+	return r.findOldestQueued(ctx, models.ThreadInputScopeChat, projectID, "")
+}
+
+func (r *ThreadInputRepo) findOldestQueued(ctx context.Context, scope models.ThreadInputScope, projectID, taskID string) (*models.ThreadInput, error) {
+	query := `SELECT ` + threadInputSelectColumns + ` FROM thread_inputs WHERE scope = ? AND input_mode = 'queued' AND input_status = 'pending'`
+	args := []interface{}{scope}
+	if projectID != "" {
+		query += ` AND project_id = ?`
+		args = append(args, projectID)
+	}
+	if taskID != "" {
+		query += ` AND task_id = ?`
+		args = append(args, taskID)
+	}
+	query += ` ORDER BY queue_position ASC, created_at ASC, rowid ASC LIMIT 1`
+	input, err := scanThreadInput(r.db.QueryRowContext(ctx, query, args...))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("finding queued thread input: %w", err)
+	}
+	return &input, nil
+}
+
+func retargetRemainingQueuedInputGuards(ctx context.Context, exec sqlExecutor, promoted models.ThreadInput, newExecutionID string) error {
+	if promoted.RunExecutionID == "" || newExecutionID == "" {
+		return nil
+	}
+	query := `
+		UPDATE thread_inputs
+		SET run_execution_id = ?, updated_at = datetime('now')
+		WHERE scope = ? AND input_mode = 'queued' AND input_status = 'pending' AND run_execution_id = ?`
+	args := []interface{}{newExecutionID, promoted.Scope, promoted.RunExecutionID}
+	switch promoted.Scope {
+	case models.ThreadInputScopeChat:
+		query += ` AND project_id = ? AND COALESCE(task_id, '') = ''`
+		args = append(args, promoted.ProjectID)
+	case models.ThreadInputScopeTask:
+		query += ` AND task_id = ?`
+		args = append(args, promoted.TaskID)
+	default:
+		return nil
+	}
+	if _, err := exec.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("retargeting queued input guards: %w", err)
+	}
+	return nil
+}
+
+func (r *ThreadInputRepo) list(ctx context.Context, where string, args ...interface{}) ([]models.ThreadInput, error) {
+	return r.listWithExecutor(ctx, r.db, where, args...)
+}
+
+func (r *ThreadInputRepo) listWithExecutor(ctx context.Context, exec queryExecutor, where string, args ...interface{}) ([]models.ThreadInput, error) {
+	rows, err := exec.QueryContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs `+where, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing thread inputs: %w", err)
+	}
+	defer rows.Close()
+	var inputs []models.ThreadInput
+	for rows.Next() {
+		input, err := scanThreadInput(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning thread input: %w", err)
+		}
+		inputs = append(inputs, input)
+	}
+	return inputs, rows.Err()
+}
+
+func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runExecutionID, expectedTurnID string) (*models.ThreadInput, error) {
+	if expectedTurnID == "" {
+		return nil, ErrExpectedTurnEmpty
+	}
+	var converted *models.ThreadInput
+	err := r.withTx(ctx, func(tx *sql.Tx) error {
+		queued, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, id))
+		if err == sql.ErrNoRows {
+			return ErrInputNotPending
+		}
+		if err != nil {
+			return fmt.Errorf("loading queued input guard: %w", err)
+		}
+		active, err := r.executionIsRunningForInput(ctx, tx, runExecutionID, &queued)
+		if err != nil {
+			return err
+		}
+		if !active {
+			return ErrNoActiveTurn
+		}
+		if expectedTurnID != runExecutionID {
+			return ErrActiveTurnChanged
+		}
+		res, err := tx.ExecContext(ctx, `
+				UPDATE thread_inputs
+				SET input_mode = 'steering', run_execution_id = ?, turn_id = ?, expected_turn_id = ?, updated_at = datetime('now')
+				WHERE id = ? AND input_mode = 'queued' AND input_status = 'pending' AND run_execution_id = ?
+				  AND EXISTS (SELECT 1 FROM executions WHERE id = ? AND status = 'running')`, runExecutionID, expectedTurnID, expectedTurnID, id, expectedTurnID, runExecutionID)
+		if err != nil {
+			return fmt.Errorf("converting queued input to steering: %w", err)
+		}
+		changed, _ := res.RowsAffected()
+		if changed == 0 {
+			var pendingQueued int
+			if checkErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM thread_inputs WHERE id = ? AND input_mode = 'queued' AND input_status = 'pending'`, id).Scan(&pendingQueued); checkErr != nil {
+				return fmt.Errorf("checking queued input guard: %w", checkErr)
+			}
+			if pendingQueued > 0 {
+				var stillRunning int
+				if runErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM executions WHERE id = ? AND status = 'running'`, runExecutionID).Scan(&stillRunning); runErr != nil {
+					return fmt.Errorf("checking active turn guard: %w", runErr)
+				}
+				if stillRunning == 0 {
+					return ErrNoActiveTurn
+				}
+				return ErrActiveTurnChanged
+			}
+			return ErrInputNotPending
+		}
+		input, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, id))
+		if err != nil {
+			return fmt.Errorf("loading converted queued input: %w", err)
+		}
+		converted = &input
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return converted, nil
+}
+
+func (r *ThreadInputRepo) MarkApplied(ctx context.Context, id, runExecutionID, turnID string) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE thread_inputs
+		SET input_status = 'applied', run_execution_id = NULLIF(?, ''), turn_id = NULLIF(?, ''), applied_at = datetime('now'), updated_at = datetime('now')
+		WHERE id = ? AND input_status = 'pending'`, runExecutionID, turnID, id)
+	if err != nil {
+		return fmt.Errorf("marking thread input applied: %w", err)
+	}
+	changed, _ := res.RowsAffected()
+	if changed == 0 {
+		return ErrInputNotPending
+	}
+	return nil
+}
+
+func (r *ThreadInputRepo) RestorePreparedSteering(ctx context.Context, ids []string, runExecutionID, expectedTurnID string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.withTx(ctx, func(tx *sql.Tx) error {
+		for _, id := range ids {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE thread_inputs
+				SET expected_turn_id = NULLIF(?, ''), updated_at = datetime('now')
+				WHERE id = ? AND input_mode = 'steering' AND input_status = 'pending' AND run_execution_id = ?`, expectedTurnID, id, runExecutionID); err != nil {
+				return fmt.Errorf("restoring prepared steering input: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+func (r *ThreadInputRepo) RequeuePendingSteering(ctx context.Context, ids []string, runExecutionID string) ([]models.ThreadInput, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var requeued []models.ThreadInput
+	err := r.withTx(ctx, func(tx *sql.Tx) error {
+		for _, id := range ids {
+			if _, err := tx.ExecContext(ctx, `
+						UPDATE thread_inputs
+						SET input_mode = 'queued', turn_id = NULL, expected_turn_id = NULL, updated_at = datetime('now')
+						WHERE id = ? AND input_mode = 'steering' AND input_status = 'pending' AND run_execution_id = ?`, id, runExecutionID); err != nil {
+				return fmt.Errorf("requeueing steering input: %w", err)
+			}
+			input, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ? AND input_mode = 'queued' AND input_status = 'pending' AND run_execution_id = ?`, id, runExecutionID))
+			if err == sql.ErrNoRows {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("loading requeued steering input: %w", err)
+			}
+			requeued = append(requeued, input)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return requeued, nil
+}
+
+func (r *ThreadInputRepo) RequeuePendingSteeringForExecution(ctx context.Context, runExecutionID string) ([]models.ThreadInput, error) {
+	if runExecutionID == "" {
+		return nil, nil
+	}
+	var requeued []models.ThreadInput
+	err := r.withTx(ctx, func(tx *sql.Tx) error {
+		inputs, err := r.listWithExecutor(ctx, tx, `WHERE input_mode = 'steering' AND input_status = 'pending' AND run_execution_id = ? ORDER BY queue_position ASC, created_at ASC, rowid ASC`, runExecutionID)
+		if err != nil {
+			return err
+		}
+		for _, input := range inputs {
+			res, err := tx.ExecContext(ctx, `
+				UPDATE thread_inputs
+				SET input_mode = 'queued', turn_id = NULL, expected_turn_id = NULL, updated_at = datetime('now')
+				WHERE id = ? AND input_mode = 'steering' AND input_status = 'pending' AND run_execution_id = ?`, input.ID, runExecutionID)
+			if err != nil {
+				return fmt.Errorf("requeueing steering input for execution: %w", err)
+			}
+			changed, _ := res.RowsAffected()
+			if changed > 0 {
+				input.InputMode = models.ThreadInputModeQueued
+				input.TurnID = ""
+				input.ExpectedTurnID = ""
+				requeued = append(requeued, input)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("requeueing steering inputs for execution: %w", err)
+	}
+	return requeued, nil
+}
+
+func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, inputID string, exec *models.Execution) error {
+	if exec == nil {
+		return fmt.Errorf("execution is required")
+	}
+	return r.withTx(ctx, func(tx *sql.Tx) error {
+		promoted, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
+		if err == sql.ErrNoRows {
+			return ErrInputNotPending
+		}
+		if err != nil {
+			return fmt.Errorf("loading queued input before claim: %w", err)
+		}
+		isFollowup := 0
+		if exec.IsFollowup {
+			isFollowup = 1
+		}
+		if err := tx.QueryRowContext(ctx, `
+				INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
+				VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
+				RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup).Scan(&exec.ID, &exec.StartedAt); err != nil {
+			return fmt.Errorf("creating promoted task execution: %w", err)
+		}
+		res, err := tx.ExecContext(ctx, `
+				UPDATE thread_inputs
+				SET input_status = 'applied', run_execution_id = ?, turn_id = ?, applied_at = datetime('now'), updated_at = datetime('now')
+				WHERE id = ? AND scope = 'task_thread' AND task_id = ? AND input_mode = 'queued' AND input_status = 'pending'`, exec.ID, exec.ID, inputID, exec.TaskID)
+		if err != nil {
+			return fmt.Errorf("claiming queued input: %w", err)
+		}
+		changed, _ := res.RowsAffected()
+		if changed == 0 {
+			return ErrInputNotPending
+		}
+		return retargetRemainingQueuedInputGuards(ctx, tx, promoted, exec.ID)
+	})
+}
+func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, inputID string, task *models.Task, exec *models.Execution, slackContext *models.SlackTaskContext) error {
+	if task == nil || exec == nil {
+		return fmt.Errorf("task and execution are required")
+	}
+	return r.withTx(ctx, func(tx *sql.Tx) error {
+		promoted, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
+		if err == sql.ErrNoRows {
+			return ErrInputNotPending
+		}
+		if err != nil {
+			return fmt.Errorf("loading queued chat input before claim: %w", err)
+		}
+		var maxOrder sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT MAX(display_order) FROM tasks WHERE project_id = ? AND category = ?`, task.ProjectID, task.Category).Scan(&maxOrder); err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("getting max display_order: %w", err)
+		}
+		displayOrder := 0
+		if maxOrder.Valid {
+			displayOrder = int(maxOrder.Int64) + 1
+		}
+		autoMerge := 0
+		if task.AutoMerge {
+			autoMerge = 1
+		}
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id)
+			VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			RETURNING id, created_at, updated_at`, task.ProjectID, task.Title, task.Category, task.Priority, task.Status, task.Prompt, task.AgentID, task.AgentDefinitionID, task.Tag, displayOrder, task.ParentTaskID, task.ChainConfig, task.WorktreePath, task.WorktreeBranch, autoMerge, task.MergeTargetBranch, task.MergeStatus, task.BaseBranch, task.BaseCommitSHA, task.LineageDepth, task.CreatedVia, task.TelegramChatID).Scan(&task.ID, &task.CreatedAt, &task.UpdatedAt); err != nil {
+			return fmt.Errorf("creating queued chat task: %w", err)
+		}
+		task.DisplayOrder = displayOrder
+
+		if slackContext != nil {
+			slackContext.TaskID = task.ID
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO slack_task_context (task_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id, updated_at)
+					 VALUES (?, ?, ?, ?, ?, datetime('now'))
+					 ON CONFLICT(task_id) DO UPDATE SET
+					 slack_team_id = excluded.slack_team_id,
+					 slack_channel_id = excluded.slack_channel_id,
+					 slack_thread_ts = excluded.slack_thread_ts,
+					 slack_user_id = excluded.slack_user_id,
+					 updated_at = datetime('now')`,
+				slackContext.TaskID, slackContext.SlackTeamID, slackContext.SlackChannelID, slackContext.SlackThreadTS, slackContext.SlackUserID); err != nil {
+				return fmt.Errorf("creating queued slack context: %w", err)
+			}
+		}
+
+		isFollowup := 0
+		if exec.IsFollowup {
+			isFollowup = 1
+		}
+		exec.TaskID = task.ID
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
+			VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
+			RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup).Scan(&exec.ID, &exec.StartedAt); err != nil {
+			return fmt.Errorf("creating queued chat execution: %w", err)
+		}
+
+		res, err := tx.ExecContext(ctx, `
+				UPDATE thread_inputs
+				SET input_status = 'applied', run_execution_id = ?, turn_id = ?, applied_at = datetime('now'), updated_at = datetime('now')
+				WHERE id = ? AND scope = 'chat' AND project_id = ? AND input_mode = 'queued' AND input_status = 'pending'`, exec.ID, exec.ID, inputID, task.ProjectID)
+		if err != nil {
+			return fmt.Errorf("claiming queued chat input: %w", err)
+		}
+		changed, _ := res.RowsAffected()
+		if changed == 0 {
+			return ErrInputNotPending
+		}
+		return retargetRemainingQueuedInputGuards(ctx, tx, promoted, exec.ID)
+	})
+}
+
+func (r *ThreadInputRepo) CancelPending(ctx context.Context, id string) (*models.ThreadInput, error) {
+	var cancelled models.ThreadInput
+	err := r.db.QueryRowContext(ctx, `
+		UPDATE thread_inputs
+		SET input_status = 'cancelled', updated_at = datetime('now')
+		WHERE id = ? AND input_status = 'pending'
+			  AND NOT (
+			    input_mode = 'steering'
+			    AND COALESCE(expected_turn_id, '') = ''
+			    AND COALESCE(run_execution_id, '') != ''
+			    AND EXISTS (SELECT 1 FROM executions WHERE id = thread_inputs.run_execution_id AND status = 'running')
+			  )
+		RETURNING `+threadInputSelectColumns, id).Scan(
+		&cancelled.ID,
+		&cancelled.Scope,
+		&cancelled.ProjectID,
+		&cancelled.TaskID,
+		&cancelled.RunExecutionID,
+		&cancelled.AgentConfigID,
+		&cancelled.InputMode,
+		&cancelled.InputStatus,
+		&cancelled.TurnID,
+		&cancelled.ExpectedTurnID,
+		&cancelled.Content,
+		&cancelled.AttachmentSessionID,
+		&cancelled.QueuePosition,
+		&cancelled.ChatMode,
+		&cancelled.Source,
+		&cancelled.TelegramChatID,
+		&cancelled.SlackTeamID,
+		&cancelled.SlackChannelID,
+		&cancelled.SlackThreadTS,
+		&cancelled.SlackUserID,
+		&cancelled.CreatedAt,
+		&cancelled.UpdatedAt,
+		&cancelled.AppliedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrInputNotPending
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cancelling thread input: %w", err)
+	}
+	return &cancelled, nil
+}
+
+func (r *ThreadInputRepo) CancelPendingForTask(ctx context.Context, taskID string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE thread_inputs
+		SET input_status = 'cancelled', updated_at = datetime('now')
+		WHERE task_id = ? AND input_status = 'pending'
+			  AND NOT (
+			    input_mode = 'steering'
+			    AND COALESCE(expected_turn_id, '') = ''
+			    AND COALESCE(run_execution_id, '') != ''
+			    AND EXISTS (SELECT 1 FROM executions WHERE id = thread_inputs.run_execution_id AND status = 'running')
+			  )`, taskID)
+	if err != nil {
+		return fmt.Errorf("cancelling task thread inputs: %w", err)
+	}
+	return nil
+}
+
+func (r *ThreadInputRepo) CancelPendingForChat(ctx context.Context, projectID string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE thread_inputs
+		SET input_status = 'cancelled', updated_at = datetime('now')
+		WHERE scope = 'chat' AND project_id = ? AND input_status = 'pending'
+			  AND NOT (
+			    input_mode = 'steering'
+			    AND COALESCE(expected_turn_id, '') = ''
+			    AND COALESCE(run_execution_id, '') != ''
+			    AND EXISTS (SELECT 1 FROM executions WHERE id = thread_inputs.run_execution_id AND status = 'running')
+			  )`, projectID)
+	if err != nil {
+		return fmt.Errorf("cancelling chat inputs: %w", err)
+	}
+	return nil
+}
+
+type sqlExecutor interface {
+	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
+}
+
+type queryExecutor interface {
+	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
+}
+
+func (r *ThreadInputRepo) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *ThreadInputRepo) withImmediateTx(ctx context.Context, fn func(sqlExecutor) error) error {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	tx := &manualTx{conn: conn}
+	defer tx.Rollback()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+type manualTx struct {
+	conn *sql.Conn
+	done bool
+}
+
+func (t *manualTx) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	return t.conn.ExecContext(ctx, query, args...)
+}
+
+func (t *manualTx) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
+	return t.conn.QueryRowContext(ctx, query, args...)
+}
+
+func (t *manualTx) Commit() error {
+	if t.done {
+		return nil
+	}
+	t.done = true
+	_, err := t.conn.ExecContext(context.Background(), `COMMIT`)
+	return err
+}
+
+func (t *manualTx) Rollback() error {
+	if t.done {
+		return nil
+	}
+	t.done = true
+	_, err := t.conn.ExecContext(context.Background(), `ROLLBACK`)
+	return err
+}
+
+func (r *ThreadInputRepo) executionIsRunningForInput(ctx context.Context, exec sqlExecutor, executionID string, input *models.ThreadInput) (bool, error) {
+	if executionID == "" || input == nil {
+		return false, nil
+	}
+	query := `SELECT COUNT(*) FROM executions e JOIN tasks t ON t.id = e.task_id WHERE e.id = ? AND e.status = 'running'`
+	args := []interface{}{executionID}
+	switch input.Scope {
+	case models.ThreadInputScopeTask:
+		if input.TaskID == "" {
+			return false, nil
+		}
+		query += ` AND e.task_id = ?`
+		args = append(args, input.TaskID)
+	case models.ThreadInputScopeChat:
+		if input.ProjectID == "" {
+			return false, nil
+		}
+		query += ` AND t.project_id = ? AND t.category = 'chat'`
+		args = append(args, input.ProjectID)
+	default:
+		return false, nil
+	}
+	var count int
+	if err := exec.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return false, fmt.Errorf("checking active execution: %w", err)
+	}
+	return count > 0, nil
+}

@@ -754,7 +754,7 @@ func (r *TaskRepo) DeleteAllChat(ctx context.Context, projectID string) (int, er
 // for a project. Used to cancel active goroutines before clearing chat history.
 func (r *TaskRepo) ListRunningChatTaskIDs(ctx context.Context, projectID string) ([]string, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id FROM tasks WHERE category = 'chat' AND project_id = ? AND status IN ('pending', 'running')`, projectID)
+		`SELECT id FROM tasks WHERE category = 'chat' AND project_id = ? AND status IN ('pending', 'queued', 'running')`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing running chat tasks: %w", err)
 	}

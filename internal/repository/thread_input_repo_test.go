@@ -1,0 +1,627 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"testing"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
+)
+
+func TestThreadInputRepo_QueuedFIFOAndApply(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+
+	first := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "first"}
+	second := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "second"}
+	if err := repo.CreateQueued(ctx, first); err != nil {
+		t.Fatalf("CreateQueued first: %v", err)
+	}
+	if err := repo.CreateQueued(ctx, second); err != nil {
+		t.Fatalf("CreateQueued second: %v", err)
+	}
+
+	next, err := repo.FindOldestQueuedForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("FindOldestQueuedForTask: %v", err)
+	}
+	if next == nil || next.ID != first.ID {
+		t.Fatalf("oldest queued = %#v, want first %s", next, first.ID)
+	}
+	if err := repo.MarkApplied(ctx, first.ID, active.ID, active.ID); err != nil {
+		t.Fatalf("MarkApplied: %v", err)
+	}
+	next, err = repo.FindOldestQueuedForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("FindOldestQueuedForTask after apply: %v", err)
+	}
+	if next == nil || next.ID != second.ID {
+		t.Fatalf("oldest queued after apply = %#v, want second %s", next, second.ID)
+	}
+}
+
+func TestThreadInputRepo_ClaimQueuedValidatesPendingSurface(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+
+	chatInput := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "chat queued", ChatMode: models.ChatModePlan}
+	if err := repo.CreateQueued(ctx, chatInput); err != nil {
+		t.Fatalf("CreateQueued chat: %v", err)
+	}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: chatInput.Content, IsFollowup: true}
+	if err := repo.ClaimQueuedForTaskExecution(ctx, chatInput.ID, exec); !errors.Is(err, ErrInputNotPending) {
+		t.Fatalf("expected wrong-surface claim conflict, got %v", err)
+	}
+	if exec.ID != "" {
+		if got, err := NewExecutionRepo(db).GetByID(ctx, exec.ID); err != nil || got != nil {
+			t.Fatalf("claim rollback left execution got=%#v err=%v", got, err)
+		}
+	}
+
+	taskInput := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "task queued"}
+	if err := repo.CreateQueued(ctx, taskInput); err != nil {
+		t.Fatalf("CreateQueued task: %v", err)
+	}
+	chatTask := &models.Task{ProjectID: project.ID, Title: "Queued Chat", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: taskInput.Content}
+	chatExec := &models.Execution{AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: taskInput.Content}
+	if err := repo.ClaimQueuedForChatExecution(ctx, taskInput.ID, chatTask, chatExec, nil); !errors.Is(err, ErrInputNotPending) {
+		t.Fatalf("expected wrong-surface chat claim conflict, got %v", err)
+	}
+	if chatTask.ID != "" {
+		if got, err := NewTaskRepo(db, nil).GetByID(ctx, chatTask.ID); err != nil || got != nil {
+			t.Fatalf("claim rollback left chat task got=%#v err=%v", got, err)
+		}
+	}
+}
+
+func TestThreadInputRepo_ClaimQueuedForTaskExecutionRetargetsRemainingQueuedGuards(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+
+	first := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: active.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "first"}
+	second := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: active.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "second"}
+	if err := repo.CreateQueued(ctx, first); err != nil {
+		t.Fatalf("CreateQueued first: %v", err)
+	}
+	if err := repo.CreateQueued(ctx, second); err != nil {
+		t.Fatalf("CreateQueued second: %v", err)
+	}
+
+	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: first.Content, IsFollowup: true}
+	if err := repo.ClaimQueuedForTaskExecution(ctx, first.ID, promoted); err != nil {
+		t.Fatalf("ClaimQueuedForTaskExecution: %v", err)
+	}
+	storedSecond, err := repo.GetByID(ctx, second.ID)
+	if err != nil {
+		t.Fatalf("GetByID second: %v", err)
+	}
+	if storedSecond == nil || storedSecond.RunExecutionID != promoted.ID {
+		t.Fatalf("remaining queued task input guard = %#v, want promoted exec %s", storedSecond, promoted.ID)
+	}
+	if _, err := repo.ConvertQueuedToSteering(ctx, second.ID, promoted.ID, promoted.ID); err != nil {
+		t.Fatalf("remaining queued task input should steer against promoted turn: %v", err)
+	}
+}
+
+func TestThreadInputRepo_ClaimQueuedForChatExecutionRetargetsRemainingQueuedGuards(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	activeTask := &models.Task{ProjectID: project.ID, Title: "Active Chat", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: "active"}
+	if err := NewTaskRepo(db, nil).Create(ctx, activeTask); err != nil {
+		t.Fatalf("create active chat task: %v", err)
+	}
+	active := &models.Execution{TaskID: activeTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+
+	first := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, RunExecutionID: active.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "first", ChatMode: models.ChatModeOrchestrate}
+	second := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, RunExecutionID: active.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "second", ChatMode: models.ChatModeOrchestrate}
+	if err := repo.CreateQueued(ctx, first); err != nil {
+		t.Fatalf("CreateQueued first: %v", err)
+	}
+	if err := repo.CreateQueued(ctx, second); err != nil {
+		t.Fatalf("CreateQueued second: %v", err)
+	}
+
+	chatTask := &models.Task{ProjectID: project.ID, Title: "Queued Chat", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: first.Content}
+	promoted := &models.Execution{AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: first.Content}
+	if err := repo.ClaimQueuedForChatExecution(ctx, first.ID, chatTask, promoted, nil); err != nil {
+		t.Fatalf("ClaimQueuedForChatExecution: %v", err)
+	}
+	storedSecond, err := repo.GetByID(ctx, second.ID)
+	if err != nil {
+		t.Fatalf("GetByID second: %v", err)
+	}
+	if storedSecond == nil || storedSecond.RunExecutionID != promoted.ID {
+		t.Fatalf("remaining queued chat input guard = %#v, want promoted exec %s", storedSecond, promoted.ID)
+	}
+	if _, err := repo.ConvertQueuedToSteering(ctx, second.ID, promoted.ID, promoted.ID); err != nil {
+		t.Fatalf("remaining queued chat input should steer against promoted turn: %v", err)
+	}
+}
+
+func TestThreadInputRepo_ClaimQueuedChatPersistsSlackContextWithClaim(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+
+	input := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeChat,
+		ProjectID:      project.ID,
+		AgentConfigID:  agent.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		Content:        "queued slack",
+		ChatMode:       models.ChatModeOrchestrate,
+		Source:         models.TaskOriginSlack,
+		SlackTeamID:    "T1",
+		SlackChannelID: "C1",
+		SlackThreadTS:  "1710000000.100000",
+		SlackUserID:    "U1",
+	}
+	if err := repo.CreateQueued(ctx, input); err != nil {
+		t.Fatalf("CreateQueued: %v", err)
+	}
+
+	task := &models.Task{ProjectID: project.ID, Title: "Queued Slack", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: input.Content, CreatedVia: models.TaskOriginSlack}
+	exec := &models.Execution{AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: input.Content}
+	if err := repo.ClaimQueuedForChatExecution(ctx, input.ID, task, exec, &models.SlackTaskContext{
+		SlackTeamID:    "T1",
+		SlackChannelID: "C1",
+		SlackThreadTS:  "1710000000.100000",
+		SlackUserID:    "U1",
+	}); err != nil {
+		t.Fatalf("ClaimQueuedForChatExecution: %v", err)
+	}
+
+	stc, err := NewSlackTaskContextRepo(db).GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByTaskID: %v", err)
+	}
+	if stc == nil || stc.SlackChannelID != "C1" || stc.SlackThreadTS != "1710000000.100000" {
+		t.Fatalf("slack context not persisted with queued claim: %#v", stc)
+	}
+	stored, err := repo.GetByID(ctx, input.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored == nil || stored.InputStatus != models.ThreadInputApplied || stored.RunExecutionID != exec.ID {
+		t.Fatalf("queued input should be applied to created execution, got %#v", stored)
+	}
+}
+
+func TestThreadInputRepo_CancelPendingReportsStaleInputs(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued"}
+	if err := repo.CreateQueued(ctx, input); err != nil {
+		t.Fatalf("CreateQueued: %v", err)
+	}
+	if err := repo.MarkApplied(ctx, input.ID, active.ID, active.ID); err != nil {
+		t.Fatalf("MarkApplied: %v", err)
+	}
+	if _, err := repo.CancelPending(ctx, input.ID); !errors.Is(err, ErrInputNotPending) {
+		t.Fatalf("expected stale cancel conflict, got %v", err)
+	}
+	if _, err := repo.CancelPending(ctx, "missing-input"); !errors.Is(err, ErrInputNotPending) {
+		t.Fatalf("expected missing cancel conflict, got %v", err)
+	}
+}
+
+func TestThreadInputRepo_CancelPendingAllowsUnpreparedSteeringAndPreservesPreparedSteering(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+	steering := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		AgentConfigID:  agent.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		RunExecutionID: active.ID,
+		TurnID:         active.ID,
+		ExpectedTurnID: active.ID,
+		Content:        "active steering",
+	}
+	if err := repo.CreateSteeringForActiveExecution(ctx, steering, active.ID); err != nil {
+		t.Fatalf("CreateSteeringForActiveExecution: %v", err)
+	}
+	cancelled, err := repo.CancelPending(ctx, steering.ID)
+	if err != nil {
+		t.Fatalf("CancelPending unprepared steering: %v", err)
+	}
+	if cancelled == nil || cancelled.ID != steering.ID || cancelled.TaskID != task.ID || cancelled.ProjectID != project.ID {
+		t.Fatalf("CancelPending should return cancelled input metadata, got %#v", cancelled)
+	}
+	stored, err := repo.GetByID(ctx, steering.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored.InputStatus != models.ThreadInputCancelled {
+		t.Fatalf("unprepared active steering should be cancellable, got %#v", stored)
+	}
+
+	prepared := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		AgentConfigID:  agent.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		RunExecutionID: active.ID,
+		TurnID:         active.ID,
+		ExpectedTurnID: active.ID,
+		Content:        "prepared steering",
+	}
+	if err := repo.CreateSteeringForActiveExecution(ctx, prepared, active.ID); err != nil {
+		t.Fatalf("CreateSteeringForActiveExecution prepared: %v", err)
+	}
+	preparedRows, err := repo.PreparePendingSteering(ctx, active.ID, active.ID)
+	if err != nil {
+		t.Fatalf("PreparePendingSteering: %v", err)
+	}
+	if len(preparedRows) != 1 || preparedRows[0].ID != prepared.ID {
+		t.Fatalf("expected prepared steering row, got %#v", preparedRows)
+	}
+	if _, err := repo.CancelPending(ctx, prepared.ID); !errors.Is(err, ErrInputNotPending) {
+		t.Fatalf("expected prepared steering cancel conflict, got %v", err)
+	}
+	stored, err = repo.GetByID(ctx, prepared.ID)
+	if err != nil {
+		t.Fatalf("GetByID prepared: %v", err)
+	}
+	if stored.InputStatus != models.ThreadInputPending || stored.InputMode != models.ThreadInputModeSteering || stored.ExpectedTurnID != "" {
+		t.Fatalf("prepared steering should remain protected, got %#v", stored)
+	}
+	if err := repo.CancelPendingForTask(ctx, task.ID); err != nil {
+		t.Fatalf("CancelPendingForTask: %v", err)
+	}
+	stored, err = repo.GetByID(ctx, prepared.ID)
+	if err != nil {
+		t.Fatalf("GetByID after bulk cancel: %v", err)
+	}
+	if stored.InputStatus != models.ThreadInputPending || stored.InputMode != models.ThreadInputModeSteering {
+		t.Fatalf("bulk cancel should preserve prepared steering, got %#v", stored)
+	}
+	if err := execRepo.Complete(ctx, active.ID, models.ExecCancelled, "", "", 0, 1); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if _, err := repo.CancelPending(ctx, prepared.ID); err != nil {
+		t.Fatalf("CancelPending after terminal execution: %v", err)
+	}
+	stored, err = repo.GetByID(ctx, prepared.ID)
+	if err != nil {
+		t.Fatalf("GetByID after terminal cancel: %v", err)
+	}
+	if stored.InputStatus != models.ThreadInputCancelled {
+		t.Fatalf("terminal prepared steering should be cancellable, got %#v", stored)
+	}
+}
+
+func TestThreadInputRepo_ConvertQueuedToSteeringRequiresActiveExecution(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+
+	chatTask := &models.Task{ProjectID: project.ID, Title: "Chat", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: "active"}
+	if err := NewTaskRepo(db, nil).Create(ctx, chatTask); err != nil {
+		t.Fatalf("create chat task: %v", err)
+	}
+	active := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+	wrongSurfaceActive := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active task"}
+	if err := execRepo.Create(ctx, wrongSurfaceActive); err != nil {
+		t.Fatalf("create wrong-surface active execution: %v", err)
+	}
+	guardedForWrongSurface := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, RunExecutionID: wrongSurfaceActive.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "wrong surface", ChatMode: models.ChatModePlan}
+	if err := repo.CreateQueued(ctx, guardedForWrongSurface); err != nil {
+		t.Fatalf("CreateQueued wrong surface: %v", err)
+	}
+	if _, err := repo.ConvertQueuedToSteering(ctx, guardedForWrongSurface.ID, wrongSurfaceActive.ID, wrongSurfaceActive.ID); !errors.Is(err, ErrNoActiveTurn) {
+		t.Fatalf("expected wrong surface active turn conflict, got %v", err)
+	}
+
+	unguarded := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "missing guard", ChatMode: models.ChatModePlan}
+	if err := repo.CreateQueued(ctx, unguarded); err != nil {
+		t.Fatalf("CreateQueued unguarded: %v", err)
+	}
+	if _, err := repo.ConvertQueuedToSteering(ctx, unguarded.ID, active.ID, active.ID); !errors.Is(err, ErrActiveTurnChanged) {
+		t.Fatalf("expected missing queued guard conflict, got %v", err)
+	}
+
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, RunExecutionID: active.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "correct this", ChatMode: models.ChatModePlan}
+	if err := repo.CreateQueued(ctx, queued); err != nil {
+		t.Fatalf("CreateQueued guarded: %v", err)
+	}
+
+	if _, err := repo.ConvertQueuedToSteering(ctx, queued.ID, active.ID, "stale-turn"); !errors.Is(err, ErrActiveTurnChanged) {
+		t.Fatalf("expected stale turn conflict, got %v", err)
+	}
+	steering, err := repo.ConvertQueuedToSteering(ctx, queued.ID, active.ID, active.ID)
+	if err != nil {
+		t.Fatalf("ConvertQueuedToSteering: %v", err)
+	}
+	if steering == nil {
+		t.Fatal("expected converted steering input")
+	}
+	if steering.InputMode != models.ThreadInputModeSteering || steering.InputStatus != models.ThreadInputPending || steering.TurnID != active.ID || steering.ExpectedTurnID != active.ID {
+		t.Fatalf("unexpected steering state: %#v", steering)
+	}
+	if _, err := repo.RequeuePendingSteering(ctx, []string{steering.ID}, active.ID); err != nil {
+		t.Fatalf("RequeuePendingSteering: %v", err)
+	}
+	requeued, err := repo.GetByID(ctx, steering.ID)
+	if err != nil {
+		t.Fatalf("GetByID requeued: %v", err)
+	}
+	if requeued.InputMode != models.ThreadInputModeQueued || requeued.InputStatus != models.ThreadInputPending || requeued.TurnID != "" || requeued.RunExecutionID != active.ID {
+		t.Fatalf("unexpected requeued state: %#v", requeued)
+	}
+}
+
+func TestThreadInputRepo_RequeuePendingSteeringSkipsAlreadyAppliedRows(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+	first := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: active.ID, Content: "already applied"}
+	if err := repo.CreateSteeringForActiveExecution(ctx, first, active.ID); err != nil {
+		t.Fatalf("CreateSteeringForActiveExecution first: %v", err)
+	}
+	second := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: active.ID, Content: "still pending"}
+	if err := repo.CreateSteeringForActiveExecution(ctx, second, active.ID); err != nil {
+		t.Fatalf("CreateSteeringForActiveExecution second: %v", err)
+	}
+	if err := repo.MarkApplied(ctx, first.ID, active.ID, active.ID); err != nil {
+		t.Fatalf("MarkApplied first: %v", err)
+	}
+	requeuedInputs, err := repo.RequeuePendingSteering(ctx, []string{first.ID, second.ID}, active.ID)
+	if err != nil {
+		t.Fatalf("RequeuePendingSteering mixed batch: %v", err)
+	}
+	if len(requeuedInputs) != 1 || requeuedInputs[0].ID != second.ID {
+		t.Fatalf("expected only pending row returned as requeued, got %#v", requeuedInputs)
+	}
+	storedFirst, err := repo.GetByID(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("GetByID first: %v", err)
+	}
+	if storedFirst.InputStatus != models.ThreadInputApplied || storedFirst.InputMode != models.ThreadInputModeSteering {
+		t.Fatalf("already applied row should be unchanged, got %#v", storedFirst)
+	}
+	storedSecond, err := repo.GetByID(ctx, second.ID)
+	if err != nil {
+		t.Fatalf("GetByID second: %v", err)
+	}
+	if storedSecond.InputStatus != models.ThreadInputPending || storedSecond.InputMode != models.ThreadInputModeQueued || storedSecond.TurnID != "" {
+		t.Fatalf("pending row should be requeued, got %#v", storedSecond)
+	}
+}
+
+func TestThreadInputRepo_RestorePreparedSteeringMakesInputClaimableAgain(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+	steering := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: active.ID, Content: "retry me"}
+	if err := repo.CreateSteeringForActiveExecution(ctx, steering, active.ID); err != nil {
+		t.Fatalf("CreateSteeringForActiveExecution: %v", err)
+	}
+	prepared, err := repo.PreparePendingTextSteering(ctx, active.ID, active.ID)
+	if err != nil {
+		t.Fatalf("PreparePendingTextSteering: %v", err)
+	}
+	if len(prepared) != 1 || prepared[0].ID != steering.ID {
+		t.Fatalf("expected one prepared steering row, got %#v", prepared)
+	}
+	preparedAgain, err := repo.PreparePendingTextSteering(ctx, active.ID, active.ID)
+	if err != nil {
+		t.Fatalf("PreparePendingTextSteering again: %v", err)
+	}
+	if len(preparedAgain) != 0 {
+		t.Fatalf("prepared row should not be claimable before restore, got %#v", preparedAgain)
+	}
+	if err := repo.RestorePreparedSteering(ctx, []string{steering.ID}, active.ID, active.ID); err != nil {
+		t.Fatalf("RestorePreparedSteering: %v", err)
+	}
+	preparedAfterRestore, err := repo.PreparePendingTextSteering(ctx, active.ID, active.ID)
+	if err != nil {
+		t.Fatalf("PreparePendingTextSteering after restore: %v", err)
+	}
+	if len(preparedAfterRestore) != 1 || preparedAfterRestore[0].ID != steering.ID {
+		t.Fatalf("expected restored row claimable again, got %#v", preparedAfterRestore)
+	}
+}
+
+func TestThreadInputRepo_RequeuePendingSteeringForExecutionRecoversUnpreparedRows(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+	steering := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: active.ID, Content: "created during provider call"}
+	if err := repo.CreateSteeringForActiveExecution(ctx, steering, active.ID); err != nil {
+		t.Fatalf("CreateSteeringForActiveExecution: %v", err)
+	}
+	requeuedInputs, err := repo.RequeuePendingSteeringForExecution(ctx, active.ID)
+	if err != nil {
+		t.Fatalf("RequeuePendingSteeringForExecution: %v", err)
+	}
+	if len(requeuedInputs) != 1 || requeuedInputs[0].ID != steering.ID {
+		t.Fatalf("expected recovered steering row returned, got %#v", requeuedInputs)
+	}
+	stored, err := repo.GetByID(ctx, steering.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored.InputStatus != models.ThreadInputPending || stored.InputMode != models.ThreadInputModeQueued || stored.TurnID != "" || stored.RunExecutionID != active.ID {
+		t.Fatalf("unexpected recovered steering state: %#v", stored)
+	}
+}
+
+func TestThreadInputRepo_ConvertQueuedToSteeringFailsAfterTurnCompletes(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: active.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "convert too late"}
+	if err := repo.CreateQueued(ctx, queued); err != nil {
+		t.Fatalf("CreateQueued: %v", err)
+	}
+	if err := execRepo.Complete(ctx, active.ID, models.ExecCompleted, "done", "", 0, 1); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if _, err := repo.ConvertQueuedToSteering(ctx, queued.ID, active.ID, active.ID); !errors.Is(err, ErrNoActiveTurn) {
+		t.Fatalf("expected completed turn conversion to fail with ErrNoActiveTurn, got %v", err)
+	}
+	stored, err := repo.GetByID(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored == nil || stored.InputMode != models.ThreadInputModeQueued || stored.InputStatus != models.ThreadInputPending {
+		t.Fatalf("late conversion should leave input queued/pending for FIFO, got %#v", stored)
+	}
+}
+
+func TestThreadInputRepo_CreateSteeringForActiveExecutionFailsAfterTurnCompletes(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+	if err := execRepo.Complete(ctx, active.ID, models.ExecCompleted, "done", "", 0, 1); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	steering := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: active.ID, Content: "too late"}
+	if err := repo.CreateSteeringForActiveExecution(ctx, steering, active.ID); !errors.Is(err, ErrNoActiveTurn) {
+		t.Fatalf("expected ErrNoActiveTurn, got %v", err)
+	}
+	pending, err := repo.ListPendingSteering(ctx, active.ID, active.ID)
+	if err != nil {
+		t.Fatalf("ListPendingSteering: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("late direct steering should not insert pending rows, got %#v", pending)
+	}
+}
+
+func createThreadInputProject(t *testing.T, ctx context.Context, db *sql.DB) *models.Project {
+	t.Helper()
+	repo := NewProjectRepo(db)
+	project := &models.Project{Name: "Thread Input Project", RepoPath: t.TempDir()}
+	if err := repo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	return project
+}
+
+func createThreadInputTask(t *testing.T, ctx context.Context, db *sql.DB, projectID string) *models.Task {
+	t.Helper()
+	repo := NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: projectID, Title: "Thread Input Task", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "test"}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	return task
+}
+
+func createThreadInputLLMConfig(t *testing.T, ctx context.Context, db *sql.DB) *models.LLMConfig {
+	t.Helper()
+	repo := NewLLMConfigRepo(db)
+	agent, err := repo.GetDefault(ctx)
+	if err != nil {
+		t.Fatalf("get default agent: %v", err)
+	}
+	if agent == nil {
+		t.Fatal("expected default agent")
+	}
+	return agent
+}

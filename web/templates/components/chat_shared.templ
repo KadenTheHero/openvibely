@@ -25,18 +25,21 @@ func jsStringLength(s string) int {
 
 // ChatInputFormConfig holds configuration for the shared chat input form.
 type ChatInputFormConfig struct {
-	FormID            string
-	InputID           string
-	PostEndpoint      string
-	TargetID          string
-	Agents            []models.LLMConfig
-	ShowModelSelector bool
-	ShowModeSelector  bool
-	ChatMode          models.ChatMode // default when not persisted
-	TaskID            string          // non-empty enables cancel button when IsRunning
-	IsRunning         bool
-	ProjectID         string // non-empty enables model selection persistence via localStorage
-	SelectedAgentID   string // initial model selection; defaults to auto when empty
+	FormID                 string
+	InputID                string
+	PostEndpoint           string
+	TargetID               string
+	Agents                 []models.LLMConfig
+	ShowModelSelector      bool
+	ShowModeSelector       bool
+	ChatMode               models.ChatMode // default when not persisted
+	TaskID                 string          // non-empty enables cancel button when IsRunning
+	IsRunning              bool
+	ActiveTurnID           string
+	ProjectID              string // non-empty enables model selection persistence via localStorage
+	SelectedAgentID        string // initial model selection; defaults to auto when empty
+	PendingInputs          []models.ThreadInput
+	QueuedSteerEndpointFor func(models.ThreadInput) string
 }
 
 // chatElementIDs returns derived element IDs based on the form ID prefix.
@@ -57,6 +60,15 @@ func chatModeOrDefault(mode models.ChatMode) string {
 		return string(models.ChatModeOrchestrate)
 	}
 	return string(mode)
+}
+
+func hasPendingComposerInputs(inputs []models.ThreadInput) bool {
+	for _, input := range inputs {
+		if input.InputMode == models.ThreadInputModeQueued || input.InputMode == models.ThreadInputModeSteering {
+			return true
+		}
+	}
+	return false
 }
 
 templ ChatLoadingDots(size string) {
@@ -666,10 +678,9 @@ templ _initThreadStreamingScript() {
 						if (typeof htmx !== 'undefined') htmx.process(pollingEl);
 					}
 
-					function showThreadTerminalStatus(status) {
-						stopThreadPolling();
-						var form = document.getElementById('task-thread-form');
-						if (form) {
+						function showThreadTerminalStatus(status) {
+							stopThreadPolling();
+							var form = document.getElementById('task-thread-form');						if (form) {
 							var textarea = document.getElementById('task-message-input');
 							if (textarea) textarea.setAttribute('placeholder', 'Type your message... (Enter to send, Shift+Enter for new line)');
 							var cancelButton = form.querySelector('button[title="Cancel running task"]');
@@ -822,6 +833,62 @@ templ _initThreadStreamingScript() {
 	</script>
 }
 
+templ ChatQueuedInputRow(inputID, message, steerEndpoint string) {
+	<div id={ "thread-input-" + inputID } class="queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-input-mode="queued" title="Queued follow-up will run after the active response finishes">
+		<div class="min-w-0 flex-1 truncate">{ message }</div>
+		<div class="ml-auto flex shrink-0 items-center gap-2">
+			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs font-medium" hx-post={ steerEndpoint } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Convert queued follow-up to steering">Steer</button>
+			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error" hx-post={ "/thread-inputs/" + inputID + "/cancel" } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Cancel queued follow-up" aria-label="Cancel queued follow-up">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+				</svg>
+			</button>
+		</div>
+	</div>
+}
+
+templ ChatQueuedInputRowOOB(inputID, message, steerEndpoint string) {
+	<div id="pending-thread-inputs" hx-swap-oob="beforeend">
+		@ChatQueuedInputRow(inputID, message, steerEndpoint)
+	</div>
+}
+
+templ ChatSteeringInputRow(inputID, message string) {
+	<div id={ "thread-input-" + inputID } class="steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-input-mode="steering" title="Steering instruction will be applied before the active run's next model step">
+		<div class="min-w-0 flex-1">
+			<div class="text-xs font-semibold opacity-70">Steering pending</div>
+			<div class="truncate">{ message }</div>
+			<div class="text-xs opacity-60">Will be applied before the active run's next model step.</div>
+		</div>
+		<div class="ml-auto flex shrink-0 items-center gap-2">
+			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error" hx-post={ "/thread-inputs/" + inputID + "/cancel" } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Cancel pending steering" aria-label="Cancel pending steering">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+				</svg>
+			</button>
+		</div>
+	</div>
+}
+
+templ ChatComposerQueuedInputRows(inputs []models.ThreadInput, steerEndpointFor func(models.ThreadInput) string) {
+	<div id="pending-thread-inputs" class="space-y-1.5">
+		for _, input := range inputs {
+			if input.InputMode == models.ThreadInputModeQueued && steerEndpointFor != nil {
+				@ChatQueuedInputRow(input.ID, input.Content, steerEndpointFor(input))
+			} else if input.InputMode == models.ThreadInputModeSteering {
+				@ChatSteeringInputRow(input.ID, input.Content)
+			}
+		}
+	</div>
+}
+
+templ PendingThreadInputRows(inputs []models.ThreadInput, steerEndpointFor func(models.ThreadInput) string) {
+}
+
+templ ChatInputCancelledRow(inputID string) {
+	<div id={ "thread-input-" + inputID } class="hidden" data-thread-input-id={ inputID }></div>
+}
+
 // ChatFollowupResponse renders user message + streaming assistant for a follow-up.
 // Used by both ChatSend (main chat) and TaskThreadSend (task thread).
 templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTargetID string, isThread bool, attachments []models.ChatAttachment) {
@@ -899,6 +966,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			<input type="hidden" id={ config.FormID + "-project-id" } name="_project_id" value={ config.ProjectID }/>
 		}
 		<input type="hidden" id={ chatSessionInputID(config.FormID) } name="attachment_session_id" value=""/>
+		if config.ActiveTurnID != "" {
+			<input type="hidden" name="expected_turn_id" value={ config.ActiveTurnID }/>
+		}
 		<!-- File Attachments Preview -->
 		<div id={ chatAttachmentPreviewID(config.FormID) } class="hidden border-b border-base-content/[0.12] -mx-4 px-4 -mt-4 pt-2.5 pb-2.5 mb-3">
 			<div class="flex items-center justify-between mb-1.5">
@@ -907,17 +977,14 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			</div>
 			<div id={ chatAttachmentListID(config.FormID) } class="space-y-1"></div>
 		</div>
+		@ChatComposerQueuedInputRows(config.PendingInputs, config.QueuedSteerEndpointFor)
 		<!-- Textarea -->
 		<div>
 			<textarea
 				id={ config.InputID }
 				name="message"
 				class="w-full resize-none bg-transparent text-sm leading-relaxed focus:outline-none placeholder:opacity-40 p-0 text-left"
-				if config.IsRunning {
-					placeholder="Waiting for response... (you can queue a follow-up)"
-				} else {
-					placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
-				}
+				placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
 				rows="3"
 				enterkeyhint="send"
 				required
@@ -1022,7 +1089,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					var modeSelect = form.querySelector('select[id$="-mode-select"]');
 					var modeInput = modeSelect ? document.getElementById(modeSelect.getAttribute('data-mode-input')) : null;
 						var submitBtn = form.querySelector('button[type="submit"]');
-						function markSendScrollIntent() {
+						var normalPostEndpoint = form.getAttribute('hx-post') || form.getAttribute('action') || '';
+							function markSendScrollIntent() {
 							if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
 						}
 						function safeSubmit() {
@@ -1059,13 +1127,13 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					}
 
 					// Normalize send-button clicks to the same submit path as Enter.
-					if (submitBtn) {
-						submitBtn.addEventListener('click', function(e) {
-							e.preventDefault();
-							safeSubmit();
-						});
-					}
-
+						if (submitBtn) {
+							submitBtn.addEventListener('click', function(e) {
+								e.preventDefault();
+								form.setAttribute('hx-post', normalPostEndpoint);
+								safeSubmit();
+							});
+						}
 			// Model selector -> hidden input sync + localStorage persistence
 			var projectIdInput = form.querySelector('input[name="_project_id"]');
 			var projectId = projectIdInput ? projectIdInput.value : '';
@@ -1530,6 +1598,10 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			})();
 
 			// Clear input and attachments after successful submission
+			form.addEventListener('htmx:beforeRequest', function() {
+				form.setAttribute('hx-post', normalPostEndpoint);
+			});
+
 			form.addEventListener('htmx:afterRequest', function(event) {
 				if (event.detail.successful) {
 					var xhr = event.detail.xhr;

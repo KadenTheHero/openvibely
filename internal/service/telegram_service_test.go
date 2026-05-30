@@ -314,6 +314,7 @@ func newTestTelegramService(t *testing.T) (*TelegramService, *repository.Project
 		chatAttachmentRepo: chatAttachmentRepo,
 		settingsRepo:       settingsRepo,
 		scheduleRepo:       scheduleRepo,
+		threadInputRepo:    repository.NewThreadInputRepo(db),
 		userProjects:       make(map[int64]string),
 	}
 	return svc, projectRepo, taskRepo
@@ -408,53 +409,6 @@ func TestTelegramService_AutoSelectAgent(t *testing.T) {
 	agent, err := svc.autoSelectAgent(ctx, "hello world", false)
 	assert.NoError(t, err)
 	assert.NotNil(t, agent)
-}
-
-func TestTelegramService_ProcessChatMarkers_NoMarkers(t *testing.T) {
-	svc, _, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	// No markers — output should be unchanged
-	output := "Here's a list of your tasks"
-	result := svc.processChatMarkers(ctx, "exec123", "proj123", output, 12345, 12345)
-	assert.Equal(t, output, result)
-}
-
-func TestTelegramService_ProcessChatMarkers_CreateTask(t *testing.T) {
-	svc, projectRepo, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	project := &models.Project{
-		Name:      "Test Project",
-		RepoPath:  "/tmp/test",
-		IsDefault: true,
-	}
-	require.NoError(t, projectRepo.Create(ctx, project))
-
-	output := `Sure, I'll create that task for you.
-
-[CREATE_TASK]
-{"title": "Fix login bug", "prompt": "The login form crashes on empty input", "category": "backlog"}
-[/CREATE_TASK]`
-
-	result := svc.processChatMarkers(ctx, "exec123", project.ID, output, 12345, 12345)
-
-	// Should have created the task and appended a summary
-	assert.Contains(t, result, "Fix login bug")
-
-	// Verify task was created
-	tasks, err := svc.taskSvc.ListByProject(ctx, project.ID, "backlog")
-	require.NoError(t, err)
-
-	var found bool
-	for _, task := range tasks {
-		if task.Title == "Fix login bug" {
-			found = true
-			assert.Equal(t, "The login form crashes on empty input", task.Prompt)
-			break
-		}
-	}
-	assert.True(t, found, "task should have been created from marker")
 }
 
 func TestTelegramService_RuntimeCreateTaskTool_SetsTelegramOrigin(t *testing.T) {
@@ -643,11 +597,13 @@ func TestTelegramService_CompleteExecution_Failure(t *testing.T) {
 	}
 	require.NoError(t, execRepo.Create(ctx, exec))
 
+	promotedProject := ""
 	svc := &TelegramService{
-		taskSvc:      taskSvc,
-		taskRepo:     taskRepo,
-		execRepo:     execRepo,
-		userProjects: make(map[int64]string),
+		taskSvc:            taskSvc,
+		taskRepo:           taskRepo,
+		execRepo:           execRepo,
+		userProjects:       make(map[int64]string),
+		queuedTurnPromoter: func(projectID string) { promotedProject = projectID },
 	}
 
 	svc.completeExecution(ctx, exec.ID, task.ID, "", "something went wrong", 0, 500)
@@ -662,6 +618,7 @@ func TestTelegramService_CompleteExecution_Failure(t *testing.T) {
 	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	assert.Equal(t, models.StatusFailed, updatedTask.Status)
+	assert.Equal(t, project.ID, promotedProject, "failed chat executions should still promote queued follow-ups")
 }
 
 func TestTelegramService_ResolveWorkDir(t *testing.T) {
@@ -1304,64 +1261,6 @@ func TestTelegramService_ProcessViewThread_NotFound(t *testing.T) {
 	assert.Contains(t, result, "Could not find task")
 }
 
-func TestTelegramService_ProcessChatMarkers_ViewThread(t *testing.T) {
-	svc, projectRepo, taskRepo := newTestTelegramService(t)
-	ctx := context.Background()
-
-	project := &models.Project{
-		Name:      "Test Project",
-		RepoPath:  "/tmp/test",
-		IsDefault: true,
-	}
-	require.NoError(t, projectRepo.Create(ctx, project))
-
-	agents, err := svc.llmConfigRepo.List(ctx)
-	require.NoError(t, err)
-	require.NotEmpty(t, agents)
-	agentID := agents[0].ID
-
-	// Create a running task with execution output
-	task := &models.Task{
-		Title:     "Deploy service",
-		Prompt:    "Deploy the service to production",
-		Category:  models.CategoryActive,
-		Status:    models.StatusRunning,
-		ProjectID: project.ID,
-	}
-	require.NoError(t, taskRepo.Create(ctx, task))
-
-	exec := &models.Execution{
-		TaskID:        task.ID,
-		AgentConfigID: agentID,
-		Status:        models.ExecRunning,
-		PromptSent:    "Deploy the service to production",
-	}
-	require.NoError(t, svc.execRepo.Create(ctx, exec))
-	require.NoError(t, svc.execRepo.UpdateOutput(ctx, exec.ID, "Building Docker image... Running tests..."))
-
-	// Create a chat execution to track the marker processing
-	chatExec := &models.Execution{
-		TaskID:        task.ID,
-		AgentConfigID: agentID,
-		Status:        models.ExecRunning,
-		PromptSent:    "What's the status of the deploy task?",
-	}
-	require.NoError(t, svc.execRepo.Create(ctx, chatExec))
-
-	// Full processChatMarkers call with VIEW_TASK_CHAT marker
-	output := fmt.Sprintf(`Let me retrieve the execution output for the running task.
-
-[VIEW_TASK_CHAT]
-{"task_id": "%s"}
-[/VIEW_TASK_CHAT]`, task.ID)
-
-	result := svc.processChatMarkers(ctx, chatExec.ID, project.ID, output, 12345, 12345)
-
-	// Should contain the task's execution history
-	assert.Contains(t, result, "Deploy service")
-	assert.Contains(t, result, "Building Docker image")
-}
-
 func TestTelegramService_ProcessSendToTask(t *testing.T) {
 	svc, projectRepo, taskRepo := newTestTelegramService(t)
 	ctx := context.Background()
@@ -1388,25 +1287,27 @@ func TestTelegramService_ProcessSendToTask(t *testing.T) {
 	}
 	require.NoError(t, taskRepo.Create(ctx, task))
 
-	output := fmt.Sprintf(`I'll send that instruction to the task.
+	req := SendToTaskRequest{TaskID: task.ID, Message: "Also add error handling for empty passwords"}
 
-[SEND_TO_TASK]
-{"task_id": "%s", "message": "Also add error handling for empty passwords"}
-[/SEND_TO_TASK]`, task.ID)
+	var runnerReq ChannelTaskRunRequest
+	runnerCalled := false
+	svc.SetChannelTaskRunner(func(_ context.Context, req ChannelTaskRunRequest) {
+		runnerCalled = true
+		runnerReq = req
+	})
 
-	// Note: processSendToTask spawns a goroutine that needs llmSvc,
-	// but we can still test the marker parsing and execution creation.
-	// We set llmSvc to nil so the goroutine will fail, but the execution record will exist.
-	result := svc.processSendToTask(ctx, "chat-exec-send", project.ID, output)
+	result, err := svc.executeSendToTask(ctx, project.ID, req, 12345)
+	require.NoError(t, err)
 
 	// Should contain confirmation message
 	assert.Contains(t, result, "Sent message to task")
 	assert.Contains(t, result, "Fix login bug")
 
-	// Task should have been reactivated to running
 	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
-	assert.Equal(t, models.StatusRunning, updatedTask.Status)
+	assert.Equal(t, models.StatusQueued, updatedTask.Status)
+	assert.NotEqual(t, models.TaskOriginTelegram, updatedTask.CreatedVia, "channel send_to_task must not rewrite target task origin")
+	assert.Equal(t, int64(0), updatedTask.TelegramChatID)
 
 	// A follow-up execution should have been created
 	executions, err := svc.execRepo.ListByTaskChronological(ctx, task.ID)
@@ -1419,6 +1320,41 @@ func TestTelegramService_ProcessSendToTask(t *testing.T) {
 		}
 	}
 	assert.True(t, foundFollowup, "follow-up execution should have been created")
+	assert.True(t, runnerCalled, "shared channel task runner should process Telegram task follow-ups when wired")
+	assert.Equal(t, task.ID, runnerReq.TaskID)
+	assert.Equal(t, project.ID, runnerReq.ProjectID)
+	assert.Equal(t, chatcontrol.SurfaceTelegram, runnerReq.Surface)
+	assert.Equal(t, models.TaskOriginTelegram, runnerReq.ReplyContext.Source)
+	assert.Equal(t, int64(12345), runnerReq.ReplyContext.TelegramChatID)
+}
+
+func TestTelegramService_ProcessSendToTask_QueuesWhenTaskActive(t *testing.T) {
+	svc, projectRepo, taskRepo := newTestTelegramService(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Test Project", RepoPath: "/tmp/test", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agents, err := svc.llmConfigRepo.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, agents)
+	task := &models.Task{Title: "Running task", Prompt: "work", Category: models.CategoryActive, Status: models.StatusRunning, ProjectID: project.ID, AgentID: &agents[0].ID}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agents[0].ID, Status: models.ExecRunning, PromptSent: "active", IsFollowup: true}
+	require.NoError(t, svc.execRepo.Create(ctx, active))
+	req := SendToTaskRequest{TaskID: task.ID, Message: "queued follow-up"}
+	result, err := svc.executeSendToTask(ctx, project.ID, req, 12345)
+	require.NoError(t, err)
+	assert.Contains(t, result, "Queued message to task")
+	inputs, err := svc.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, "queued follow-up", inputs[0].Content)
+	assert.Equal(t, active.ID, inputs[0].RunExecutionID)
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.NotEqual(t, models.TaskOriginTelegram, updatedTask.CreatedVia, "queued channel follow-up must not hijack active task reply origin")
+	assert.Equal(t, int64(0), updatedTask.TelegramChatID)
+	assert.Equal(t, models.TaskOriginTelegram, inputs[0].Source)
+	assert.Equal(t, int64(12345), inputs[0].TelegramChatID)
 }
 
 func TestTelegramService_ResolveTaskReference_ByID(t *testing.T) {
@@ -1743,212 +1679,7 @@ func TestTelegramService_CheckAuthorization(t *testing.T) {
 	})
 }
 
-// --- App Settings Marker Parity Tests ---
-// These tests verify that Telegram's processChatMarkers handles the same
-// app settings markers as the /chat page's processChatResponse.
-
-func TestTelegramService_ProcessChatMarkers_ListPersonalities(t *testing.T) {
-	svc, _, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	output := "Let me show you the personalities.\n\n[LIST_PERSONALITIES]"
-	result := svc.processChatMarkers(ctx, "exec1", "proj1", output, 12345, 12345)
-
-	assert.Contains(t, result, "Available Personalities")
-	assert.Contains(t, result, "Pirate Captain")
-	assert.Contains(t, result, "Current personality:")
-}
-
-func TestTelegramService_ProcessChatMarkers_ListPersonalities_NoMarker(t *testing.T) {
-	svc, _, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	output := "No marker here."
-	result := svc.processListPersonalities(ctx, "exec1", "proj1", output)
-	assert.Equal(t, output, result)
-}
-
-func TestTelegramService_ProcessChatMarkers_SetPersonality(t *testing.T) {
-	svc, _, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	output := `I'll change the personality for you.
-
-[SET_PERSONALITY]
-{"personality": "pirate_captain"}
-[/SET_PERSONALITY]`
-
-	result := svc.processChatMarkers(ctx, "exec1", "proj1", output, 12345, 12345)
-
-	assert.Contains(t, result, "Personality Settings")
-	assert.Contains(t, result, "Pirate Captain")
-	assert.Contains(t, result, "pirate_captain")
-
-	// Verify setting was stored
-	val, err := svc.settingsRepo.Get(ctx, "personality")
-	require.NoError(t, err)
-	assert.Equal(t, "pirate_captain", val)
-}
-
-func TestTelegramService_ProcessChatMarkers_SetPersonality_Invalid(t *testing.T) {
-	svc, _, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	output := `[SET_PERSONALITY]
-{"personality": "nonexistent_personality"}
-[/SET_PERSONALITY]`
-
-	result := svc.processSetPersonality(ctx, "exec1", "proj1", output)
-	assert.Contains(t, result, "Unknown personality")
-}
-
-func TestTelegramService_ProcessChatMarkers_ListModels(t *testing.T) {
-	svc, _, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	// Create a model config
-	agent := &models.LLMConfig{
-		Name:     "Test Model",
-		Provider: "anthropic",
-		Model:    "claude-3-5-sonnet-20241022",
-	}
-	require.NoError(t, svc.llmConfigRepo.Create(ctx, agent))
-
-	output := "Let me show you the models.\n\n[LIST_MODELS]"
-	result := svc.processChatMarkers(ctx, "exec1", "proj1", output, 12345, 12345)
-
-	assert.Contains(t, result, "Configured Models")
-	assert.Contains(t, result, "Test Model")
-	assert.Contains(t, result, "anthropic")
-}
-
-func TestTelegramService_ProcessChatMarkers_ListModels_NoMarker(t *testing.T) {
-	svc, _, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	output := "No marker here."
-	result := svc.processListModels(ctx, "exec1", "proj1", output)
-	assert.Equal(t, output, result)
-}
-
-func TestTelegramService_ProcessChatMarkers_ViewSettings(t *testing.T) {
-	svc, _, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	// Set up personality
-	require.NoError(t, svc.settingsRepo.Set(ctx, "personality", "zen_debugger"))
-
-	// Create a model
-	agent := &models.LLMConfig{
-		Name:      "Sonnet",
-		Provider:  "anthropic",
-		Model:     "claude-3-5-sonnet-20241022",
-		IsDefault: true,
-	}
-	require.NoError(t, svc.llmConfigRepo.Create(ctx, agent))
-
-	output := "Here are the settings.\n\n[VIEW_SETTINGS]"
-	result := svc.processChatMarkers(ctx, "exec1", "proj1", output, 12345, 12345)
-
-	assert.Contains(t, result, "App Settings")
-	assert.Contains(t, result, "zen_debugger")
-	assert.Contains(t, result, "Configured models")
-	assert.Contains(t, result, "Sonnet")
-	assert.Contains(t, result, "Per-project worker limits")
-	assert.Contains(t, result, "Per-model worker pools")
-}
-
-func TestTelegramService_ProcessChatMarkers_ViewSettings_NoMarker(t *testing.T) {
-	svc, _, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	output := "No marker here."
-	result := svc.processViewSettings(ctx, "exec1", "proj1", output)
-	assert.Equal(t, output, result)
-}
-
-func TestTelegramService_ProcessChatMarkers_ProjectInfo(t *testing.T) {
-	svc, projectRepo, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	// Create a project
-	project := &models.Project{Name: "My Project", Description: "A test project"}
-	require.NoError(t, projectRepo.Create(ctx, project))
-
-	// Create some tasks
-	for _, td := range []struct {
-		title    string
-		category models.TaskCategory
-	}{
-		{"Active Task One", models.CategoryActive},
-		{"Active Task Two", models.CategoryActive},
-		{"Backlog Task One", models.CategoryBacklog},
-	} {
-		task := &models.Task{
-			ProjectID: project.ID,
-			Title:     td.title,
-			Prompt:    "test",
-			Category:  td.category,
-			Status:    models.StatusPending,
-			Priority:  2,
-		}
-		require.NoError(t, svc.taskSvc.Create(ctx, task))
-	}
-
-	output := "Let me get the project details.\n\n[PROJECT_INFO]"
-	result := svc.processChatMarkers(ctx, "exec1", project.ID, output, 12345, 12345)
-
-	assert.Contains(t, result, "Project Info")
-	assert.Contains(t, result, "My Project")
-	assert.Contains(t, result, "A test project")
-	assert.Contains(t, result, "Total tasks")
-}
-
-func TestTelegramService_ProcessChatMarkers_ProjectInfo_NotFound(t *testing.T) {
-	svc, _, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	output := "[PROJECT_INFO]"
-	result := svc.processProjectInfo(ctx, "exec1", "nonexistent", output)
-
-	assert.Contains(t, result, "Error retrieving project details")
-}
-
-func TestTelegramService_ProcessChatMarkers_ProjectInfo_NoMarker(t *testing.T) {
-	svc, _, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	output := "No marker here."
-	result := svc.processProjectInfo(ctx, "exec1", "proj1", output)
-	assert.Equal(t, output, result)
-}
-
-func TestTelegramService_ProcessChatMarkers_ViewSettings_WithWorkerConfig(t *testing.T) {
-	svc, projectRepo, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	// Create a project with per-project worker limit
-	maxW := 3
-	project := &models.Project{Name: "Limited Project", MaxWorkers: &maxW}
-	require.NoError(t, projectRepo.Create(ctx, project))
-
-	// Create a model with per-model worker pool
-	agent := &models.LLMConfig{
-		Name:          "Opus",
-		Provider:      "anthropic",
-		Model:         "claude-opus-4-20250514",
-		IsDefault:     true,
-		MaxWorkers:    2,
-		WorkerTimeout: 300,
-	}
-	require.NoError(t, svc.llmConfigRepo.Create(ctx, agent))
-
-	output := "Settings:\n[VIEW_SETTINGS]"
-	result := svc.processViewSettings(ctx, "exec1", project.ID, output)
-
-	assert.Contains(t, result, "Limited Project: 3")
-	assert.Contains(t, result, "Opus: max_workers=2, timeout=300s")
-}
+// --- App Settings Tests ---
 
 func TestTelegramService_HandleProject_PersistsSelection(t *testing.T) {
 	db := testutil.NewTestDB(t)
@@ -2368,35 +2099,6 @@ func TestTelegramService_SendTaskCompletionNotification_HydrationDBUnavailable_S
 	assert.Equal(t, 0, sentCount)
 }
 
-// TestTelegramService_TaskOriginPropagation verifies that tasks created via the
-// processChatMarkers flow get their Telegram origin set correctly.
-func TestTelegramService_TaskOriginPropagation(t *testing.T) {
-	svc, projectRepo, taskRepo := newTestTelegramService(t)
-	ctx := context.Background()
-
-	project := &models.Project{Name: "Origin Test", RepoPath: "/tmp/test", IsDefault: true}
-	require.NoError(t, projectRepo.Create(ctx, project))
-
-	chatID := int64(99887766)
-
-	// Simulate processChatMarkers with a CREATE_TASK marker
-	output := `Here's your task:
-[CREATE_TASK]
-{"title": "Fix origin tracking", "prompt": "Fix the origin tracking bug", "category": "backlog", "priority": 3}
-[/CREATE_TASK]`
-
-	_ = svc.processChatMarkers(ctx, "exec1", project.ID, output, chatID, 12345)
-
-	// Verify the created task has the correct origin
-	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
-	require.NoError(t, err)
-	require.Len(t, tasks, 1)
-
-	assert.Equal(t, models.TaskOriginTelegram, tasks[0].CreatedVia)
-	assert.Equal(t, chatID, tasks[0].TelegramChatID)
-	assert.Equal(t, "Fix origin tracking", tasks[0].Title)
-}
-
 // TestTelegramService_WebCreatedTasksNeverGetNotifications is an end-to-end test verifying
 // that tasks created via the web UI never trigger Telegram notifications, regardless of settings.
 func TestTelegramService_WebCreatedTasksNeverGetNotifications(t *testing.T) {
@@ -2674,52 +2376,6 @@ func TestTelegramService_ProcessSwitchProject_InvalidProject(t *testing.T) {
 	assert.Equal(t, project1.ID, svc.userProjects[42], "should remain on original project")
 }
 
-func TestTelegramService_ProcessChatMarkers_ListProjects(t *testing.T) {
-	svc, projectRepo, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	project := &models.Project{Name: "Main Project", RepoPath: "/tmp/main", IsDefault: true}
-	require.NoError(t, projectRepo.Create(ctx, project))
-
-	output := "Let me show your projects.\n\n[LIST_PROJECTS]"
-	result := svc.processChatMarkers(ctx, "exec1", project.ID, output, 12345, 12345)
-
-	assert.Contains(t, result, "Available Projects")
-	assert.Contains(t, result, "Main Project")
-}
-
-func TestTelegramService_ProcessChatMarkers_SwitchProject(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	userProjectRepo := repository.NewTelegramUserProjectRepo(db)
-
-	ctx := context.Background()
-	project1 := &models.Project{Name: "First", RepoPath: "/tmp/first", IsDefault: true}
-	require.NoError(t, projectRepo.Create(ctx, project1))
-	project2 := &models.Project{Name: "Second", RepoPath: "/tmp/second"}
-	require.NoError(t, projectRepo.Create(ctx, project2))
-
-	svc := &TelegramService{
-		projectRepo:             projectRepo,
-		telegramUserProjectRepo: userProjectRepo,
-		userProjects:            make(map[int64]string),
-		// Need repos for processChatMarkers which calls other marker processors
-		llmConfigRepo: repository.NewLLMConfigRepo(db),
-		taskRepo:      repository.NewTaskRepo(db, nil),
-		execRepo:      repository.NewExecutionRepo(db),
-		taskSvc:       NewTaskService(repository.NewTaskRepo(db, nil), repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, projectRepo)),
-		scheduleRepo:  repository.NewScheduleRepo(db),
-		settingsRepo:  repository.NewSettingsRepo(db),
-	}
-	svc.userProjects[42] = project1.ID
-
-	output := "[SWITCH_PROJECT]\n{\"project\": \"Second\"}\n[/SWITCH_PROJECT]"
-	result := svc.processChatMarkers(ctx, "exec1", project1.ID, output, 12345, 42)
-
-	assert.Contains(t, result, "Switched to project: **Second**")
-	assert.Equal(t, project2.ID, svc.userProjects[42])
-}
-
 func TestTelegramService_SwitchProjectThenFollowupUsesNewProject(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	projectRepo := repository.NewProjectRepo(db)
@@ -2788,4 +2444,197 @@ func TestTelegramService_ParseSwitchProject_EmptyProjectName(t *testing.T) {
 [/SWITCH_PROJECT]`
 	requests := ParseSwitchProject(output)
 	assert.Empty(t, requests)
+}
+
+func TestTelegramService_ProcessIncomingMessage_QueuesWhenChatActive(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+
+	project := &models.Project{Name: "Telegram Queue Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, agent)
+
+	activeTask := &models.Task{ProjectID: project.ID, Title: "active", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: "active", AgentID: &agent.ID, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+	require.NoError(t, taskRepo.Create(ctx, activeTask))
+	activeExec := &models.Execution{TaskID: activeTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, execRepo.Create(ctx, activeExec))
+
+	var sent []string
+	svc := &TelegramService{
+		projectRepo:     projectRepo,
+		llmConfigRepo:   llmConfigRepo,
+		taskRepo:        taskRepo,
+		execRepo:        execRepo,
+		threadInputRepo: threadInputRepo,
+		sendMessageFunc: func(chatID int64, text string) { sent = append(sent, text) },
+		userProjects:    map[int64]string{7: project.ID},
+	}
+
+	svc.handleChatMessage(&tgbotapi.Message{
+		From: &tgbotapi.User{ID: 7},
+		Chat: &tgbotapi.Chat{ID: 42},
+		Text: "follow up from telegram",
+	})
+
+	inputs, err := threadInputRepo.ListPendingForChat(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	require.Equal(t, models.ThreadInputModeQueued, inputs[0].InputMode)
+	require.Equal(t, activeExec.ID, inputs[0].RunExecutionID)
+	require.Equal(t, models.TaskOriginTelegram, inputs[0].Source)
+	require.Equal(t, int64(42), inputs[0].TelegramChatID)
+	require.Contains(t, strings.Join(sent, "\n"), "Queued")
+
+	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1, "queued channel follow-up must not create a second chat task immediately")
+}
+
+func TestTelegramService_ProcessIncomingMessage_QueuesTelegramAttachmentWhenChatActive(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	oldUploadsDir := telegramUploadsDir
+	telegramUploadsDir = t.TempDir()
+	t.Cleanup(func() { telegramUploadsDir = oldUploadsDir })
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+
+	project := &models.Project{Name: "Telegram Attachment Queue Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, agent)
+	activeTask := &models.Task{ProjectID: project.ID, Title: "active", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: "active", AgentID: &agent.ID, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+	require.NoError(t, taskRepo.Create(ctx, activeTask))
+	activeExec := &models.Execution{TaskID: activeTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, execRepo.Create(ctx, activeExec))
+
+	fileBody := "queued telegram attachment"
+	tmpDir := t.TempDir()
+	sourcePath := filepath.Join(tmpDir, "test.txt")
+	require.NoError(t, os.WriteFile(sourcePath, []byte(fileBody), 0644))
+
+	var sent []string
+	svc := &TelegramService{
+		projectRepo:     projectRepo,
+		llmConfigRepo:   llmConfigRepo,
+		taskRepo:        taskRepo,
+		execRepo:        execRepo,
+		threadInputRepo: threadInputRepo,
+		sendMessageFunc: func(chatID int64, text string) { sent = append(sent, text) },
+		userProjects:    map[int64]string{7: project.ID},
+	}
+
+	require.True(t, svc.queueChatInput(ctx, project.ID, activeExec.ID, agent.ID, "follow up with attachment", 42, []models.ChatAttachment{{
+		FileName:  "test.txt",
+		FilePath:  sourcePath,
+		MediaType: "text/plain",
+		FileSize:  int64(len(fileBody)),
+	}}))
+
+	inputs, err := threadInputRepo.ListPendingForChat(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	require.NotEmpty(t, inputs[0].AttachmentSessionID)
+	entries, err := os.ReadDir(filepath.Join(telegramUploadsDir, "chat", "pending", inputs[0].AttachmentSessionID))
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	staged, err := os.ReadFile(filepath.Join(telegramUploadsDir, "chat", "pending", inputs[0].AttachmentSessionID, entries[0].Name()))
+	require.NoError(t, err)
+	require.Equal(t, fileBody, string(staged))
+	require.Contains(t, strings.Join(sent, "\n"), "Queued")
+}
+
+func TestTelegramService_HandleChatMessage_UsesSharedChannelChatRunner(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, attachmentRepo)
+	workerSvc := NewWorkerService(llmSvc, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+
+	project := &models.Project{Name: "Telegram Shared Runner Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, agent)
+
+	var got *ChannelChatRunRequest
+	svc := &TelegramService{
+		projectRepo:     projectRepo,
+		llmConfigRepo:   llmConfigRepo,
+		taskSvc:         taskSvc,
+		taskRepo:        taskRepo,
+		execRepo:        execRepo,
+		sendMessageFunc: func(chatID int64, text string) {},
+		userProjects:    map[int64]string{7: project.ID},
+	}
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) {
+		got = &req
+	})
+
+	svc.handleChatMessage(&tgbotapi.Message{
+		From: &tgbotapi.User{ID: 7},
+		Chat: &tgbotapi.Chat{ID: 42},
+		Text: "start from telegram",
+	})
+
+	require.NotNil(t, got, "Telegram chat should use the shared steering-aware runner when wired")
+	workerSvc.cancelMu.Lock()
+	_, serviceRegisteredCancel := workerSvc.cancelFuncs[got.TaskID]
+	workerSvc.cancelMu.Unlock()
+	require.False(t, serviceRegisteredCancel, "Telegram service must not register and immediately deregister cancellation when the shared runner owns the run")
+	require.NotEmpty(t, got.ExecID)
+	require.NotEmpty(t, got.TaskID)
+	require.Equal(t, project.ID, got.ProjectID)
+	require.Equal(t, "start from telegram", got.Message)
+	require.Equal(t, agent.ID, got.Agent.ID)
+	require.Equal(t, chatcontrol.SurfaceTelegram, got.Surface)
+	createdExec, err := execRepo.GetByID(ctx, got.ExecID)
+	require.NoError(t, err)
+	require.NotNil(t, createdExec)
+	require.Equal(t, models.ExecRunning, createdExec.Status)
+}
+
+func TestTelegramService_SendChatResponse_SendsChatTaskOutput(t *testing.T) {
+	var sent []string
+	svc := &TelegramService{sendMessageFunc: func(chatID int64, text string) { sent = append(sent, text) }}
+	task := models.Task{ID: "task-1", Category: models.CategoryChat, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+
+	svc.SendChatResponse(context.Background(), task, "hello from queued chat", "")
+
+	require.Equal(t, []string{"hello from queued chat"}, sent)
+}
+
+func TestTelegramService_SendChatResponse_EditsInitialAckMessage(t *testing.T) {
+	var sent []string
+	var edited []string
+	svc := &TelegramService{
+		sendMessageFunc: func(chatID int64, text string) { sent = append(sent, text) },
+		editMessageFunc: func(chatID int64, messageID int, text string) {
+			edited = append(edited, fmt.Sprintf("%d:%d:%s", chatID, messageID, text))
+		},
+	}
+	task := models.Task{ID: "task-1", Category: models.CategoryChat, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+
+	svc.SendChatResponse(context.Background(), task, "hello from initial telegram chat", "", 99)
+
+	require.Empty(t, sent)
+	require.Equal(t, []string{"42:99:hello from initial telegram chat"}, edited)
 }

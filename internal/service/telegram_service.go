@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -48,6 +50,7 @@ type TelegramService struct {
 	execRepo                *repository.ExecutionRepo
 	scheduleRepo            *repository.ScheduleRepo
 	chatAttachmentRepo      *repository.ChatAttachmentRepo
+	threadInputRepo         *repository.ThreadInputRepo
 	telegramAuthRepo        *repository.TelegramAuthRepo
 	telegramUserProjectRepo *repository.TelegramUserProjectRepo
 	settingsRepo            *repository.SettingsRepo
@@ -57,7 +60,11 @@ type TelegramService struct {
 	llmSvc                  *LLMService
 	workerSvc               *WorkerService
 	chatBroadcaster         *events.ChatBroadcaster
+	queuedTurnPromoter      func(projectID string)
+	channelChatRunner       ChannelChatRunner
+	channelTaskRunner       ChannelTaskRunner
 	sendMessageFunc         func(chatID int64, text string)
+	editMessageFunc         func(chatID int64, messageID int, text string)
 	userProjects            map[int64]string // Maps Telegram user ID to active project ID
 	ctx                     context.Context
 	cancel                  context.CancelFunc
@@ -116,6 +123,26 @@ func (s *TelegramService) IsRunning() bool {
 // SetChatBroadcaster sets the chat event broadcaster for real-time chat updates.
 func (s *TelegramService) SetChatBroadcaster(cb *events.ChatBroadcaster) {
 	s.chatBroadcaster = cb
+}
+
+func (s *TelegramService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
+	s.threadInputRepo = repo
+}
+
+func (s *TelegramService) SetQueuedTurnPromoter(promoter func(projectID string)) {
+	s.queuedTurnPromoter = promoter
+}
+
+func (s *TelegramService) SetChannelChatRunner(runner ChannelChatRunner) {
+	s.channelChatRunner = runner
+}
+
+func (s *TelegramService) SetChannelTaskRunner(runner ChannelTaskRunner) {
+	s.channelTaskRunner = runner
+}
+
+func (s *TelegramService) HasChannelChatRunner() bool {
+	return s.channelChatRunner != nil
 }
 
 // SetTelegramAuthRepo sets the Telegram authorization repo for user verification.
@@ -216,6 +243,9 @@ func (s *TelegramService) UpdateToken(token string) error {
 
 // Start begins listening for Telegram updates
 func (s *TelegramService) Start() {
+	if s.bot == nil {
+		return
+	}
 	s.running = true
 	go s.run()
 }
@@ -224,8 +254,12 @@ func (s *TelegramService) Start() {
 func (s *TelegramService) Stop() {
 	log.Println("[telegram] stopping bot")
 	s.running = false
-	s.cancel()
-	s.bot.StopReceivingUpdates()
+	if s.cancel != nil {
+		s.cancel()
+	}
+	if s.bot != nil {
+		s.bot.StopReceivingUpdates()
+	}
 }
 
 // run is the main bot loop
@@ -388,6 +422,52 @@ func (s *TelegramService) handleProject(userID int64, args string) string {
 }
 
 // handleChatMessage forwards a Telegram message to the chat orchestrator
+func (s *TelegramService) queueChatInput(ctx context.Context, projectID, activeExecID, agentID, text string, chatID int64, chatAttachments []models.ChatAttachment) bool {
+	if s.threadInputRepo == nil {
+		return false
+	}
+	attachmentSessionID := ""
+	if len(chatAttachments) > 0 {
+		var err error
+		attachmentSessionID, err = s.saveChatAttachmentsToPendingSession(chatAttachments)
+		if err != nil {
+			log.Printf("[telegram] queue chat attachment staging failed: %v", err)
+			s.sendMessage(chatID, "Error queueing your attachment. Please try again.")
+			return true
+		}
+	}
+	queued := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeChat,
+		ProjectID:           projectID,
+		RunExecutionID:      activeExecID,
+		AgentConfigID:       agentID,
+		InputMode:           models.ThreadInputModeQueued,
+		InputStatus:         models.ThreadInputPending,
+		Content:             text,
+		AttachmentSessionID: attachmentSessionID,
+		ChatMode:            models.ChatModeOrchestrate,
+		Source:              models.TaskOriginTelegram,
+		TelegramChatID:      chatID,
+	}
+	if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
+		log.Printf("[telegram] queue chat input failed: %v", err)
+		s.sendMessage(chatID, "Error queueing your message. Please try again.")
+		return true
+	}
+	if s.chatBroadcaster != nil {
+		s.chatBroadcaster.Publish(events.ChatEvent{
+			Type:      events.ChatNewMessage,
+			ProjectID: projectID,
+			ExecID:    queued.ID,
+			Message:   text,
+			Source:    "telegram",
+			Queued:    true,
+		})
+	}
+	s.sendMessage(chatID, "Queued. I'll send this after the current response finishes.")
+	return true
+}
+
 func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	userID := message.From.ID
 	chatID := message.Chat.ID
@@ -455,6 +535,16 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	// Task worker limits (per-project/per-model) only gate task execution, not chat.
 	// This ensures the chat orchestrator remains responsive even when all task workers are busy.
 
+	if activeChatExec, activeErr := s.execRepo.FindLatestActiveChatExecution(ctx, projectID); activeErr != nil {
+		log.Printf("[telegram] error checking active chat turn: %v", activeErr)
+		s.sendMessage(chatID, "Error checking active chat response. Please try again.")
+		return
+	} else if activeChatExec != nil {
+		if s.queueChatInput(ctx, projectID, activeChatExec.ID, agent.ID, text, chatID, chatAttachments) {
+			return
+		}
+	}
+
 	// Create chat task (same as ChatSend handler)
 	selectedAgentID := agent.ID
 	chatTitle := fmt.Sprintf("Telegram %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(text, 47))
@@ -483,6 +573,9 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	}
 	if err := s.execRepo.Create(ctx, exec); err != nil {
 		log.Printf("[telegram] error creating execution: %v", err)
+		if delErr := s.taskRepo.Delete(ctx, task.ID); delErr != nil {
+			log.Printf("[telegram] cleanup chat task failed task=%s after execution create failure: %v", task.ID, delErr)
+		}
 		s.sendMessage(chatID, "Error processing your message. Please try again.")
 		return
 	}
@@ -521,11 +614,15 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 		}
 	}
 
-	// Send initial "thinking" message that we'll edit later
-	thinkingMsg := tgbotapi.NewMessage(chatID, "⏳ Thinking...")
-	sentMsg, err := s.bot.Send(thinkingMsg)
-	if err != nil {
-		log.Printf("[telegram] error sending thinking message: %v", err)
+	// Send initial "thinking" message that we'll edit later when a real bot is configured.
+	var sentMsg tgbotapi.Message
+	if s.bot != nil {
+		thinkingMsg := tgbotapi.NewMessage(chatID, "⏳ Thinking...")
+		var err error
+		sentMsg, err = s.bot.Send(thinkingMsg)
+		if err != nil {
+			log.Printf("[telegram] error sending thinking message: %v", err)
+		}
 	}
 
 	// Load chat history
@@ -548,78 +645,39 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	// Resolve work directory
 	workDir := s.resolveWorkDir(ctx, projectID)
 
-	callCtx := llmcontracts.WithChatMode(ctx, models.ChatModeOrchestrate)
-	if s.workerSvc != nil {
-		callCtx = s.workerSvc.PrepareRecallOnlyLifecycleTurn(callCtx, *task).Ctx
-	}
-	if supportsRuntimeChatActionTools(*agent) {
-		callCtx = llmcontracts.WithRuntimeTools(callCtx, s.buildTelegramActionToolRuntime(projectID, chatID, userID, nil))
-	}
-
-	// Register cancellation
-	if s.workerSvc != nil {
-		s.workerSvc.RegisterCancel(task.ID, cancel)
-		defer s.workerSvc.DeregisterCancel(task.ID)
-	}
-
 	// Start streaming updates to Telegram in background
 	streamDone := make(chan struct{})
 	if sentMsg.MessageID != 0 {
 		go s.streamUpdatesToTelegram(ctx, chatID, sentMsg.MessageID, exec.ID, streamDone)
 	}
 
-	// Call LLM (blocks until complete)
-	start := time.Now()
-	output, tokensUsed, llmErr := s.llmSvc.CallAgentDirectStreaming(
-		callCtx, text, imageAttachments, *agent, exec.ID, priorHistory, systemContext, workDir, false,
-	)
-	durationMs := time.Since(start).Milliseconds()
-
-	if llmErr != nil {
-		log.Printf("[telegram] LLM call failed exec=%s: %v", exec.ID, llmErr)
-		s.completeExecution(ctx, exec.ID, task.ID, "", llmErr.Error(), 0, durationMs)
+	if sentMsg.MessageID != 0 {
 		close(streamDone)
+	}
+	if s.channelChatRunner == nil {
+		msgText := "Telegram chat runner is unavailable. Please restart OpenVibely and try again."
+		s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, 0)
 		if sentMsg.MessageID != 0 {
-			s.editMessage(chatID, sentMsg.MessageID, fmt.Sprintf("❌ Error: %s", util.Truncate(llmErr.Error(), 197)))
+			s.editMessage(chatID, sentMsg.MessageID, "❌ "+msgText)
 		} else {
-			s.sendMessage(chatID, fmt.Sprintf("❌ Error: %s", util.Truncate(llmErr.Error(), 197)))
+			s.sendMessage(chatID, "❌ "+msgText)
 		}
 		return
 	}
-
-	// Complete execution
-	s.completeExecution(ctx, exec.ID, task.ID, output, "", tokensUsed, durationMs)
-
-	// Broadcast response done event with completed output for plan-completion prompt
-	if s.chatBroadcaster != nil {
-		s.chatBroadcaster.Publish(events.ChatEvent{
-			Type:            events.ChatResponseDone,
-			ProjectID:       projectID,
-			ExecID:          exec.ID,
-			TaskID:          task.ID,
-			Source:          "telegram",
-			AgentName:       agent.Name,
-			CompletedOutput: output,
-		})
-	}
-
-	log.Printf("[telegram] completed exec=%s tokens=%d duration=%dms output_len=%d", exec.ID, tokensUsed, durationMs, len(output))
-
-	// Stop streaming goroutine
-	close(streamDone)
-
-	// Clean markers from output for display (preserve summaries/results)
-	cleaned := llmoutput.CleanChatOutputForDisplay(output)
-	if cleaned == "" {
-		cleaned = "(No response)"
-	}
-
-	// Send final response (or edit the thinking message)
-	if sentMsg.MessageID != 0 {
-		s.editMessage(chatID, sentMsg.MessageID, cleaned)
-	} else {
-		s.sendMessage(chatID, cleaned)
-	}
+	s.channelChatRunner(context.Background(), ChannelChatRunRequest{
+		ExecID:              exec.ID,
+		TaskID:              task.ID,
+		ProjectID:           projectID,
+		Message:             text,
+		Agent:               *agent,
+		ChatHistory:         priorHistory,
+		SystemContext:       systemContext,
+		WorkDir:             workDir,
+		ImageAttachments:    imageAttachments,
+		Surface:             chatcontrol.SurfaceTelegram,
+		InitialAckMessageID: sentMsg.MessageID,
+	})
+	return
 }
 
 // extractTelegramAttachment extracts file information from a Telegram message.
@@ -795,6 +853,38 @@ func (s *TelegramService) downloadAndSaveTelegramAttachment(
 
 // linkAttachmentsToExecution creates database records for chat attachments and moves files
 // to the execution directory for proper storage.
+func generateTelegramPendingSessionID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+func (s *TelegramService) saveChatAttachmentsToPendingSession(attachments []models.ChatAttachment) (string, error) {
+	if len(attachments) == 0 {
+		return "", nil
+	}
+	sessionID := generateTelegramPendingSessionID()
+	sessionDir := filepath.Join(telegramUploadsDir, "chat", "pending", sessionID)
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		return "", fmt.Errorf("creating pending upload directory: %w", err)
+	}
+	for _, att := range attachments {
+		fileName := filepath.Base(att.FileName)
+		if fileName == "." || fileName == string(filepath.Separator) || fileName == "" {
+			fileName = "telegram-attachment"
+		}
+		destPath := filepath.Join(sessionDir, fmt.Sprintf("%s_%s", generateTelegramPendingSessionID()[:8], fileName))
+		if err := moveOrCopyFile(att.FilePath, destPath); err != nil {
+			_ = os.RemoveAll(sessionDir)
+			return "", fmt.Errorf("staging %s: %w", fileName, err)
+		}
+		_ = os.RemoveAll(filepath.Dir(att.FilePath))
+	}
+	return sessionID, nil
+}
+
 func (s *TelegramService) linkAttachmentsToExecution(ctx context.Context, execID string, attachments []models.ChatAttachment) {
 	if s.chatAttachmentRepo == nil {
 		return
@@ -1073,7 +1163,7 @@ func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64,
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			return s.executeSendToTask(ctx, projectID, req)
+			return s.executeSendToTask(ctx, projectID, req, chatID)
 		},
 		"schedule_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return s.executeScheduleTaskChannel(ctx, projectID, input), nil
@@ -1164,7 +1254,7 @@ func (s *TelegramService) executeViewTaskThread(ctx context.Context, projectID s
 	return strings.TrimSpace(formatThreadTranscript(task, executions, req.Offset, req.Limit)), nil
 }
 
-func (s *TelegramService) executeSendToTask(ctx context.Context, projectID string, req SendToTaskRequest) (string, error) {
+func (s *TelegramService) executeSendToTask(ctx context.Context, projectID string, req SendToTaskRequest, chatID int64) (string, error) {
 	if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
 		return "", fmt.Errorf("send_to_task requires task_id or title")
 	}
@@ -1177,23 +1267,32 @@ func (s *TelegramService) executeSendToTask(ctx context.Context, projectID strin
 		return "", err
 	}
 
-	if task.Status == models.StatusRunning {
-		return fmt.Sprintf("Task %q is currently running. Wait for it to finish before sending a message.", task.Title), nil
-	}
-
-	if task.Status == models.StatusCompleted || task.Status == models.StatusFailed || task.Status == models.StatusCancelled {
-		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusRunning); err != nil {
-			return "", fmt.Errorf("reactivating task %q: %w", task.Title, err)
+	if activeExec, activeErr := s.execRepo.FindActiveTaskExecution(ctx, task.ID, ""); activeErr != nil {
+		return "", fmt.Errorf("checking active turn for task %q: %w", task.Title, activeErr)
+	} else if activeExec != nil {
+		if s.threadInputRepo == nil {
+			return fmt.Sprintf("Task %q is currently running. Queue is unavailable, so wait for it to finish before sending a message.", task.Title), nil
 		}
-		if task.Category == models.CategoryCompleted {
-			if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
-				log.Printf("[telegram] runtime send_to_task error updating category for task %s: %v", task.ID, err)
-			}
+		agentID := ""
+		if task.AgentID != nil {
+			agentID = *task.AgentID
 		}
-	} else if task.Status == models.StatusPending {
-		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusRunning); err != nil {
-			log.Printf("[telegram] runtime send_to_task error setting task running task=%s: %v", task.ID, err)
+		queued := &models.ThreadInput{
+			Scope:          models.ThreadInputScopeTask,
+			ProjectID:      task.ProjectID,
+			TaskID:         task.ID,
+			RunExecutionID: activeExec.ID,
+			AgentConfigID:  agentID,
+			InputMode:      models.ThreadInputModeQueued,
+			InputStatus:    models.ThreadInputPending,
+			Content:        req.Message,
+			Source:         models.TaskOriginTelegram,
+			TelegramChatID: chatID,
 		}
+		if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
+			return "", fmt.Errorf("queueing message for task %q: %w", task.Title, err)
+		}
+		return fmt.Sprintf("Queued message to task %q [TASK_ID:%s]. It will run after the active thread turn finishes.", task.Title, task.ID), nil
 	}
 
 	var agent *models.LLMConfig
@@ -1206,7 +1305,6 @@ func (s *TelegramService) executeSendToTask(ctx context.Context, projectID strin
 			return "", fmt.Errorf("selecting agent for task %q: %w", task.Title, err)
 		}
 	}
-
 	exec := &models.Execution{
 		TaskID:        task.ID,
 		AgentConfigID: agent.ID,
@@ -1224,9 +1322,36 @@ func (s *TelegramService) executeSendToTask(ctx context.Context, projectID strin
 	if pCtx := s.getPersonalityContext(ctx, task.ProjectID); pCtx != "" {
 		systemContext += pCtx
 	}
-	workDir := s.resolveWorkDir(ctx, task.ProjectID)
-
-	go s.processTaskMessage(exec.ID, task.ID, req.Message, *agent, priorHistory, task.ProjectID, systemContext, workDir)
+	if s.channelTaskRunner == nil {
+		msgText := "shared task runner is unavailable"
+		s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, 0)
+		return "", fmt.Errorf("sending message to task %q: %s", task.Title, msgText)
+	}
+	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
+		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued); err != nil {
+			s.completeExecution(ctx, exec.ID, task.ID, "", err.Error(), 0, 0)
+			return "", fmt.Errorf("updating task %q: %w", task.Title, err)
+		}
+	}
+	if task.Category != models.CategoryActive {
+		if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
+			log.Printf("[telegram] runtime send_to_task error updating category for task %s: %v", task.ID, err)
+		}
+	}
+	s.channelTaskRunner(context.Background(), ChannelTaskRunRequest{
+		ExecID:        exec.ID,
+		TaskID:        task.ID,
+		ProjectID:     task.ProjectID,
+		Message:       req.Message,
+		Agent:         *agent,
+		ChatHistory:   priorHistory,
+		SystemContext: systemContext,
+		Surface:       chatcontrol.SurfaceTelegram,
+		ReplyContext: ChannelReplyContext{
+			Source:         models.TaskOriginTelegram,
+			TelegramChatID: chatID,
+		},
+	})
 
 	return fmt.Sprintf("Sent message to task %q [TASK_ID:%s] and started processing.", task.Title, task.ID), nil
 }
@@ -1710,163 +1835,6 @@ func formatChannelCapabilities(summaries []chatcontrol.ActionSummary) string {
 	return sb.String()
 }
 
-// processChatMarkers processes all marker types from AI responses:
-// [CREATE_TASK], [EDIT_TASK], [EXECUTE_TASKS], [VIEW_TASK_CHAT], [SEND_TO_TASK],
-// [SCHEDULE_TASK], [LIST_PERSONALITIES], [SET_PERSONALITY], [LIST_MODELS],
-// [VIEW_SETTINGS], [PROJECT_INFO], [LIST_ALERTS], [CREATE_ALERT], [DELETE_ALERT],
-// [TOGGLE_ALERT], [LIST_PROJECTS], [SWITCH_PROJECT]
-func (s *TelegramService) processChatMarkers(ctx context.Context, execID, projectID, output string, chatID int64, userID int64) string {
-	if output == "" {
-		return output
-	}
-
-	originalOutput := output
-
-	// Process task creation markers
-	taskRequests := ParseTaskCreations(output)
-	if len(taskRequests) > 0 {
-		log.Printf("[telegram] processChatMarkers exec=%s found %d task creation requests", execID, len(taskRequests))
-		agents, _ := s.llmConfigRepo.List(ctx)
-		createdTasks, summary := ExecuteTaskCreationsWithReturn(ctx, taskRequests, projectID, s.taskSvc, agents)
-		if summary != "" {
-			output += summary
-		}
-		// Mark all created tasks as originating from Telegram
-		for _, t := range createdTasks {
-			if err := s.taskRepo.UpdateTelegramOrigin(ctx, t.ID, chatID); err != nil {
-				log.Printf("[telegram] processChatMarkers error setting telegram origin for task %s: %v", t.ID, err)
-			}
-		}
-	}
-
-	// Process task edit markers
-	editRequests := ParseTaskEdits(output)
-	if len(editRequests) > 0 {
-		log.Printf("[telegram] processChatMarkers exec=%s found %d task edit requests", execID, len(editRequests))
-		editSummary := ExecuteTaskEdits(ctx, editRequests, projectID, s.taskSvc, nil, "")
-		if editSummary != "" {
-			output += editSummary
-		}
-	}
-
-	// Process task execution markers
-	execRequests := ParseTaskExecutions(output)
-	if len(execRequests) > 0 {
-		log.Printf("[telegram] processChatMarkers exec=%s found %d task execution requests", execID, len(execRequests))
-		execSummary := ExecuteTaskExecutions(ctx, execRequests, projectID, s.taskSvc)
-		if execSummary != "" {
-			output += execSummary
-		}
-	}
-
-	// Process thread view markers
-	if newOutput := s.processViewThread(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process send-to-task markers
-	if newOutput := s.processSendToTask(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process schedule task markers
-	if newOutput := s.processScheduleTask(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process delete schedule markers
-	if newOutput := s.processDeleteSchedule(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process modify schedule markers
-	if newOutput := s.processModifySchedule(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process list personalities markers
-	if newOutput := s.processListPersonalities(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process set personality markers
-	if newOutput := s.processSetPersonality(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process list models markers
-	if newOutput := s.processListModels(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process list agents markers
-	if newOutput := s.processListAgents(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process view settings markers
-	if newOutput := s.processViewSettings(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process project info markers
-	if newOutput := s.processProjectInfo(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process alert markers
-	if newOutput := s.processListAlerts(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	if newOutput := s.processCreateAlert(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	if newOutput := s.processDeleteAlert(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	if newOutput := s.processToggleAlert(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process list projects markers
-	if newOutput := s.processListProjects(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process switch project markers
-	if newOutput := s.processSwitchProject(ctx, execID, projectID, output, userID); newOutput != output {
-		output = newOutput
-	}
-
-	// Detect missing markers: warn when the LLM appears to promise an action
-	// but didn't actually output the corresponding marker block
-	if warnings := DetectMissingMarkers(originalOutput); len(warnings) > 0 {
-		for _, w := range warnings {
-			log.Printf("[telegram] processChatMarkers exec=%s WARNING: LLM promised %s action (matched %q) but no %s marker found in output",
-				execID, w.Action, w.MatchedHint, w.MarkerName)
-		}
-		output += "\n\n---\n**Warning:** The assistant appeared to promise an action but did not include the required marker. The following actions were NOT performed:\n"
-		for _, w := range warnings {
-			output += fmt.Sprintf("- %s (no %s marker found)\n", w.Action, w.MarkerName)
-		}
-		output += "\nPlease retry your request."
-	}
-
-	// Update execution output if modified
-	if output != originalOutput {
-		if updateErr := s.execRepo.UpdateOutput(ctx, execID, output); updateErr != nil {
-			log.Printf("[telegram] processChatMarkers error updating output: %v", updateErr)
-		}
-	}
-
-	return output
-}
-
-// processViewThread handles [VIEW_TASK_CHAT] markers from AI responses.
-// Resolves the target task, fetches execution history, and appends a formatted transcript.
 func (s *TelegramService) processViewThread(ctx context.Context, execID, projectID, output string) string {
 	viewRequests := ParseViewThread(output)
 	if len(viewRequests) == 0 {
@@ -1897,106 +1865,6 @@ func (s *TelegramService) processViewThread(ctx context.Context, execID, project
 	return output
 }
 
-// processSendToTask handles [SEND_TO_TASK] markers from AI responses.
-// Resolves the target task, validates state, creates a follow-up execution,
-// and spawns a background goroutine to process the message.
-func (s *TelegramService) processSendToTask(ctx context.Context, execID, projectID, output string) string {
-	sendRequests := ParseSendToTask(output)
-	if len(sendRequests) == 0 {
-		return output
-	}
-
-	log.Printf("[telegram] processSendToTask exec=%s found %d send requests", execID, len(sendRequests))
-
-	var results []string
-	for _, req := range sendRequests {
-		task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
-		if err != nil {
-			log.Printf("[telegram] processSendToTask error resolving task: %v", err)
-			results = append(results, fmt.Sprintf("- Could not find task: %v", err))
-			continue
-		}
-
-		// Don't send to running tasks — wait for them to finish
-		if task.Status == models.StatusRunning {
-			log.Printf("[telegram] processSendToTask task %s is running, cannot send", task.ID)
-			results = append(results, fmt.Sprintf("- Task \"%s\" is currently running. Wait for it to finish before sending a message.", task.Title))
-			continue
-		}
-
-		// Auto-reactivate completed/failed/cancelled tasks
-		if task.Status == models.StatusCompleted || task.Status == models.StatusFailed || task.Status == models.StatusCancelled {
-			log.Printf("[telegram] processSendToTask reactivating task=%s from status=%s", task.ID, task.Status)
-			if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusRunning); err != nil {
-				log.Printf("[telegram] processSendToTask error reactivating task: %v", err)
-				results = append(results, fmt.Sprintf("- Error reactivating task \"%s\": %v", task.Title, err))
-				continue
-			}
-			if task.Category == models.CategoryCompleted {
-				if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
-					log.Printf("[telegram] processSendToTask error updating category: %v", err)
-				}
-			}
-		} else if task.Status == models.StatusPending {
-			if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusRunning); err != nil {
-				log.Printf("[telegram] processSendToTask error setting task running: %v", err)
-			}
-		}
-
-		// Select agent: use task's assigned agent, or fall back to default
-		var agent *models.LLMConfig
-		if task.AgentID != nil {
-			agent, _ = s.llmConfigRepo.GetByID(ctx, *task.AgentID)
-		}
-		if agent == nil {
-			agent, err = s.selectDefaultAgent(ctx)
-			if err != nil {
-				log.Printf("[telegram] processSendToTask error selecting agent: %v", err)
-				results = append(results, fmt.Sprintf("- Error selecting agent for task \"%s\": %v", task.Title, err))
-				continue
-			}
-		}
-
-		// Create follow-up execution
-		exec := &models.Execution{
-			TaskID:        task.ID,
-			AgentConfigID: agent.ID,
-			Status:        models.ExecRunning,
-			PromptSent:    req.Message,
-			IsFollowup:    true,
-		}
-		if err := s.execRepo.Create(ctx, exec); err != nil {
-			log.Printf("[telegram] processSendToTask error creating execution: %v", err)
-			results = append(results, fmt.Sprintf("- Error creating execution for task \"%s\": %v", task.Title, err))
-			continue
-		}
-
-		// Load conversation history and build context
-		priorExecs, _ := s.execRepo.ListByTaskChronological(ctx, task.ID)
-		priorHistory := filterTelegramChatHistory(priorExecs, exec.ID)
-		systemContext := buildTelegramTaskChatContext(task.Title, len(priorHistory) > 0)
-		if pCtx := s.getPersonalityContext(ctx, task.ProjectID); pCtx != "" {
-			systemContext += pCtx
-		}
-		workDir := s.resolveWorkDir(ctx, task.ProjectID)
-
-		log.Printf("[telegram] processSendToTask sending message to task=%s exec=%s agent=%s", task.ID, exec.ID, agent.Name)
-
-		// Spawn background goroutine to process the message
-		go s.processTaskMessage(exec.ID, task.ID, req.Message, *agent, priorHistory, task.ProjectID, systemContext, workDir)
-
-		results = append(results, fmt.Sprintf("- Sent message to task \"%s\" [TASK_ID:%s] — the agent is now processing your message.", task.Title, task.ID))
-	}
-
-	if len(results) > 0 {
-		output += "\n\n---\nTask Chat Messages:\n" + strings.Join(results, "\n")
-	}
-
-	return output
-}
-
-// processScheduleTask handles [SCHEDULE_TASK] markers from AI responses.
-// It resolves the target task, creates a schedule entry, and moves the task to 'scheduled' category.
 func (s *TelegramService) processScheduleTask(ctx context.Context, execID, projectID, output string) string {
 	scheduleRequests := ParseScheduleTask(output)
 	if len(scheduleRequests) == 0 {
@@ -2988,75 +2856,6 @@ func (s *TelegramService) processSwitchProject(ctx context.Context, execID, proj
 	return output
 }
 
-// processTaskMessage runs a task follow-up message in a background goroutine.
-// Similar to handler.processStreamingResponse but simplified for Telegram.
-func (s *TelegramService) processTaskMessage(execID, taskID, message string, agent models.LLMConfig, chatHistory []models.Execution, projectID, systemContext, workDir string) {
-	if s.llmSvc == nil {
-		log.Printf("[telegram] processTaskMessage exec=%s task=%s skipping: llmSvc is nil", execID, taskID)
-		return
-	}
-
-	timeout := telegramProcessTimeout
-	agentConfigID := agent.ID
-
-	// Enforce per-project and per-model worker constraints for task followups.
-	// Acquires both project and model slots atomically (releases project slot if model fails).
-	if s.workerSvc != nil {
-		// Apply model-specific worker_timeout if configured
-		if modelTimeout := s.workerSvc.GetModelWorkerTimeout(agentConfigID); modelTimeout > 0 {
-			timeout = modelTimeout
-		}
-
-		// Acquire per-project slot (respects project max_workers limit)
-		if !s.workerSvc.TryAcquireProjectSlot(projectID) {
-			log.Printf("[telegram] processTaskMessage exec=%s task=%s project %s at capacity",
-				execID, taskID, projectID)
-			s.completeExecution(context.Background(), execID, taskID, "",
-				"project worker limit reached — please wait for a running task to complete", 0, 0)
-			return
-		}
-		defer s.workerSvc.ReleaseProjectSlot(projectID)
-
-		// Block until a model slot is available (respects max_workers)
-		waitCtx, waitCancel := context.WithTimeout(context.Background(), timeout)
-		if err := s.workerSvc.AcquireModelSlot(waitCtx, agentConfigID); err != nil {
-			waitCancel()
-			log.Printf("[telegram] processTaskMessage exec=%s task=%s failed to acquire model slot for %s: %v",
-				execID, taskID, agentConfigID, err)
-			s.completeExecution(context.Background(), execID, taskID, "",
-				fmt.Sprintf("model %s at capacity, timed out waiting for slot", agent.Name), 0, 0)
-			return
-		}
-		waitCancel()
-		defer s.workerSvc.ReleaseModelSlot(agentConfigID)
-
-		log.Printf("[telegram] processTaskMessage exec=%s acquired project + model slots for %s", execID, agentConfigID)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	if s.workerSvc != nil {
-		s.workerSvc.RegisterCancel(taskID, cancel)
-		defer s.workerSvc.DeregisterCancel(taskID)
-	}
-
-	start := time.Now()
-	output, tokensUsed, err := s.llmSvc.CallAgentDirectStreaming(
-		ctx, message, nil, agent, execID, chatHistory, systemContext, workDir, true,
-	)
-	durationMs := time.Since(start).Milliseconds()
-
-	if err != nil {
-		log.Printf("[telegram] processTaskMessage exec=%s task=%s failed: %v", execID, taskID, err)
-		s.completeExecution(ctx, execID, taskID, "", err.Error(), 0, durationMs)
-		return
-	}
-
-	log.Printf("[telegram] processTaskMessage exec=%s task=%s success tokens=%d duration=%dms", execID, taskID, tokensUsed, durationMs)
-	s.completeExecution(ctx, execID, taskID, output, "", tokensUsed, durationMs)
-}
-
 // resolveTaskReference finds a task by ID or by title search within a project.
 func (s *TelegramService) resolveTaskReference(ctx context.Context, projectID, taskID, title string) (*models.Task, error) {
 	if taskID != "" {
@@ -3207,6 +3006,7 @@ func (s *TelegramService) completeExecution(ctx context.Context, execID, taskID,
 		if err := s.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed); err != nil {
 			log.Printf("[telegram] error updating task status (failed): %v", err)
 		}
+		s.promoteQueuedChatAfterCompletion(ctx, taskID)
 		return
 	}
 
@@ -3216,6 +3016,18 @@ func (s *TelegramService) completeExecution(ctx context.Context, execID, taskID,
 	if err := s.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted); err != nil {
 		log.Printf("[telegram] error updating task status: %v", err)
 	}
+	s.promoteQueuedChatAfterCompletion(ctx, taskID)
+}
+
+func (s *TelegramService) promoteQueuedChatAfterCompletion(ctx context.Context, taskID string) {
+	if s.queuedTurnPromoter == nil || s.taskRepo == nil {
+		return
+	}
+	task, err := s.taskRepo.GetByID(ctx, taskID)
+	if err != nil || task == nil || task.Category != models.CategoryChat {
+		return
+	}
+	s.queuedTurnPromoter(task.ProjectID)
 }
 
 // filterTelegramChatHistory filters executions to exclude the current one and running ones
@@ -3295,6 +3107,10 @@ func (s *TelegramService) sendMessage(chatID int64, text string) {
 
 // editMessage edits an existing Telegram message
 func (s *TelegramService) editMessage(chatID int64, messageID int, text string) {
+	if s.editMessageFunc != nil {
+		s.editMessageFunc(chatID, messageID, text)
+		return
+	}
 	if len(text) > maxMessageLength {
 		text = text[:maxMessageLength-3] + "..."
 	}
@@ -3416,6 +3232,27 @@ func (s *TelegramService) IsSendResponsesEnabled(ctx context.Context) bool {
 	return val != "false"
 }
 
+func (s *TelegramService) SendTaskCompletionToChat(ctx context.Context, chatID int64, taskTitle, output string, errMsg string) {
+	if chatID == 0 {
+		return
+	}
+	if !s.IsSendResponsesEnabled(ctx) {
+		return
+	}
+	var message string
+	if errMsg != "" {
+		message = fmt.Sprintf("❌ *Task failed:* %s\n\n%s", taskTitle, util.Truncate(errMsg, 500))
+	} else {
+		cleaned := llmoutput.CleanChatOutputForDisplay(output)
+		if cleaned == "" {
+			cleaned = "(No output)"
+		}
+		message = fmt.Sprintf("✅ *Task completed:* %s\n\n%s", taskTitle, util.Truncate(cleaned, 3500))
+	}
+	s.sendMessage(chatID, message)
+	log.Printf("[telegram] sent completion notification for task %q to chat %d", taskTitle, chatID)
+}
+
 // SendTaskCompletionNotification sends a task result back to the Telegram user
 // who created it, if send-responses is enabled and the task originated from Telegram.
 func (s *TelegramService) SendTaskCompletionNotification(ctx context.Context, task models.Task, output string, errMsg string) {
@@ -3471,4 +3308,42 @@ func (s *TelegramService) SendTaskCompletionNotification(ctx context.Context, ta
 
 	s.sendMessage(task.TelegramChatID, message)
 	log.Printf("[telegram] sent completion notification for task %s to chat %d", task.ID, task.TelegramChatID)
+}
+
+func firstInt(values []int) int {
+	if len(values) == 0 {
+		return 0
+	}
+	return values[0]
+}
+
+// SendChatResponse sends a completed chat-orchestrator response back to the
+// originating Telegram chat. Unlike task completion notifications, this is only
+// for chat-category tasks that were promoted from queued channel input.
+func (s *TelegramService) SendChatResponse(ctx context.Context, task models.Task, output string, errMsg string, messageID ...int) {
+	if task.CreatedVia != models.TaskOriginTelegram || task.Category != models.CategoryChat || task.TelegramChatID == 0 {
+		return
+	}
+	if !s.IsSendResponsesEnabled(ctx) {
+		return
+	}
+	msgID := firstInt(messageID)
+	if errMsg != "" {
+		message := fmt.Sprintf("❌ Error: %s", util.Truncate(errMsg, 197))
+		if msgID != 0 {
+			s.editMessage(task.TelegramChatID, msgID, message)
+		} else {
+			s.sendMessage(task.TelegramChatID, message)
+		}
+		return
+	}
+	cleaned := llmoutput.CleanChatOutputForDisplay(output)
+	if cleaned == "" {
+		cleaned = "(No response)"
+	}
+	if msgID != 0 {
+		s.editMessage(task.TelegramChatID, msgID, cleaned)
+	} else {
+		s.sendMessage(task.TelegramChatID, cleaned)
+	}
 }

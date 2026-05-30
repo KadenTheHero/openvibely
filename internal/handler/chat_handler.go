@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -52,15 +54,24 @@ func (h *Handler) Chat(c echo.Context) error {
 		chatAttachmentsByExec = make(map[string][]models.ChatAttachment)
 	}
 
+	pendingInputs := []models.ThreadInput{}
+	if h.threadInputRepo != nil && currentProjectID != "" {
+		if inputs, inputErr := h.threadInputRepo.ListPendingForChat(c.Request().Context(), currentProjectID); inputErr == nil {
+			pendingInputs = inputs
+		} else {
+			log.Printf("[handler] Chat error loading pending inputs: %v", inputErr)
+		}
+	}
+
 	latestPlanComplete := chatHistoryHasPlanCompletion(chatHistory)
 
 	// For HTMX requests, return just the chat content
 	if isHTMX {
-		return render(c, http.StatusOK, pages.ChatContent(agents, chatHistory, currentProjectID, chatAttachmentsByExec, latestPlanComplete))
+		return render(c, http.StatusOK, pages.ChatContent(agents, chatHistory, currentProjectID, chatAttachmentsByExec, pendingInputs, latestPlanComplete))
 	}
 
 	projects, _ := h.projectSvc.List(c.Request().Context())
-	return render(c, http.StatusOK, pages.Chat(projects, currentProjectID, agents, chatHistory, chatAttachmentsByExec, latestPlanComplete))
+	return render(c, http.StatusOK, pages.Chat(projects, currentProjectID, agents, chatHistory, chatAttachmentsByExec, pendingInputs, latestPlanComplete))
 }
 
 func (h *Handler) ChatSend(c echo.Context) error {
@@ -106,6 +117,45 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	// Task worker limits (per-project/per-model) only gate task execution, not chat.
 	// This ensures the chat orchestrator remains responsive even when all task workers are busy.
 
+	activeChatExec, err := h.execRepo.FindLatestActiveChatExecution(c.Request().Context(), projectID)
+	if err != nil {
+		log.Printf("[handler] ChatSend error checking active chat turn: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check chat queue")
+	}
+
+	if activeChatExec != nil {
+		if h.threadInputRepo == nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "chat input queue is unavailable")
+		}
+		queued := &models.ThreadInput{
+			Scope:               models.ThreadInputScopeChat,
+			ProjectID:           projectID,
+			RunExecutionID:      activeChatExec.ID,
+			AgentConfigID:       agent.ID,
+			InputMode:           models.ThreadInputModeQueued,
+			InputStatus:         models.ThreadInputPending,
+			Content:             message,
+			AttachmentSessionID: sessionID,
+			ChatMode:            chatMode,
+		}
+		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
+			log.Printf("[handler] ChatSend error creating queued input: %v", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue chat message")
+		}
+		if h.chatBroadcaster != nil {
+			h.chatBroadcaster.Publish(events.ChatEvent{
+				Type:      events.ChatNewMessage,
+				ProjectID: projectID,
+				ExecID:    queued.ID,
+				Message:   message,
+				Source:    "web",
+				AgentName: agent.Name,
+				Queued:    true,
+			})
+		}
+		return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(queued.ID, message, "/chat/queued/"+queued.ID+"/steer"))
+	}
+
 	// Create a task record for the chat message (required for execution tracking)
 	selectedAgentID := agent.ID
 	chatTitle := fmt.Sprintf("Chat %s: %s", time.Now().Format("15:04:05.000"), message[:min(50, len(message))])
@@ -122,20 +172,23 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create chat task")
 	}
 
-	// Create execution record for streaming
+	// Create execution record for immediate streaming delivery.
+	execStatus := models.ExecRunning
 	exec := &models.Execution{
 		TaskID:        task.ID,
 		AgentConfigID: agent.ID,
-		Status:        models.ExecRunning,
+		Status:        execStatus,
 		PromptSent:    message,
 	}
 	if err := h.execRepo.Create(c.Request().Context(), exec); err != nil {
 		log.Printf("[handler] ChatSend error creating execution: %v", err)
+		if delErr := h.taskRepo.Delete(c.Request().Context(), task.ID); delErr != nil {
+			log.Printf("[handler] ChatSend error cleaning up chat task=%s after execution create failure: %v", task.ID, delErr)
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
 	}
 
-	log.Printf("[handler] ChatSend created exec=%s for chat message", exec.ID)
-
+	log.Printf("[handler] ChatSend created exec=%s for chat message status=%s", exec.ID, exec.Status)
 	// Broadcast new message event so other tabs/clients update in real-time
 	if h.chatBroadcaster != nil {
 		h.chatBroadcaster.Publish(events.ChatEvent{
@@ -171,7 +224,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	}
 	priorHistory := filterChatHistory(chatHistory, exec.ID)
 
-	// Render user message and streaming placeholder
+	// Render user message and streaming/queued placeholder
 	var userMsg templ.Component
 	if len(chatAttachments) > 0 {
 		userMsg = components.ChatBubbleWithAttachments("User", message, chatAttachments)
@@ -179,7 +232,6 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		userMsg = components.ChatBubble("User", message)
 	}
 	agentMsg := components.ChatBubbleStreaming("Assistant", exec.ID, "chat-messages", "", false)
-
 	// Build context and spawn LLM processing goroutine
 	availableModels, _ := h.llmConfigRepo.List(c.Request().Context())
 	taskContext := h.buildChatContext(c.Request().Context(), projectID, availableModels)
@@ -201,8 +253,71 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		ChatMode:         chatMode,
 		Surface:          chatcontrol.SurfaceWeb,
 	})
-
 	return render(c, http.StatusOK, templ.Join(userMsg, agentMsg))
+}
+
+func (h *Handler) ChatSteer(c echo.Context) error {
+	message := strings.TrimSpace(c.FormValue("message"))
+	chatMode := models.NormalizeChatMode(c.FormValue("chat_mode"))
+	if message == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
+	}
+	if h.threadInputRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "chat input queue is unavailable")
+	}
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil || projectID == "" {
+		log.Printf("[handler] ChatSteer error getting project: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "no project available")
+	}
+	active, err := h.execRepo.FindLatestActiveChatExecution(c.Request().Context(), projectID)
+	if err != nil {
+		log.Printf("[handler] ChatSteer active execution check failed project=%s: %v", projectID, err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
+	}
+	if active == nil {
+		return echo.NewHTTPError(http.StatusConflict, "no active response to steer; send a normal message instead")
+	}
+	expectedTurnID := c.FormValue("expected_turn_id")
+	if expectedTurnID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
+	}
+	if expectedTurnID != active.ID {
+		return echo.NewHTTPError(http.StatusConflict, "active turn changed; queue the message instead")
+	}
+	input := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeChat,
+		ProjectID:           projectID,
+		RunExecutionID:      active.ID,
+		InputMode:           models.ThreadInputModeSteering,
+		InputStatus:         models.ThreadInputPending,
+		TurnID:              active.ID,
+		ExpectedTurnID:      expectedTurnID,
+		Content:             message,
+		AttachmentSessionID: c.FormValue("attachment_session_id"),
+		ChatMode:            chatMode,
+	}
+	if err := h.threadInputRepo.CreateSteeringForActiveExecution(c.Request().Context(), input, active.ID); err != nil {
+		log.Printf("[handler] ChatSteer error creating steering input: %v", err)
+		if errors.Is(err, repository.ErrExpectedTurnEmpty) {
+			return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
+		}
+		if errors.Is(err, repository.ErrNoActiveTurn) || errors.Is(err, repository.ErrActiveTurnChanged) {
+			return echo.NewHTTPError(http.StatusConflict, "active turn changed; queue the message instead")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save steering input")
+	}
+	if h.chatBroadcaster != nil {
+		h.chatBroadcaster.Publish(events.ChatEvent{
+			Type:      events.ChatTurnSteered,
+			ProjectID: projectID,
+			ExecID:    input.ID,
+			Message:   message,
+			Source:    "web",
+			Steering:  true,
+		})
+	}
+	return render(c, http.StatusOK, components.ChatSteeringInputRow(input.ID, message))
 }
 
 // isImageFile checks if a filename has a common image extension supported by Anthropic's API
@@ -236,6 +351,9 @@ func (h *Handler) processAttachments(ctx context.Context, sessionID, execID stri
 
 // processAttachmentsWithReturn is like processAttachments but also returns the created ChatAttachment records
 func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, execID string) (string, []models.Attachment, []models.ChatAttachment, error) {
+	if h.chatAttachmentRepo == nil {
+		return "", nil, nil, fmt.Errorf("chat attachment repository is unavailable")
+	}
 	pendingDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
 
 	// Check if pending directory exists
@@ -342,6 +460,51 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 	return textContext, imageAttachments, chatAttachments, nil
 }
 
+func (h *Handler) previewPendingAttachments(sessionID string) (string, []models.Attachment, error) {
+	pendingDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+	if _, err := os.Stat(pendingDir); os.IsNotExist(err) {
+		return "", nil, nil
+	}
+	files, err := os.ReadDir(pendingDir)
+	if err != nil {
+		return "", nil, fmt.Errorf("reading pending directory: %w", err)
+	}
+	var attachmentContents []string
+	var imageAttachments []models.Attachment
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+		path := filepath.Join(pendingDir, file.Name())
+		info, err := os.Stat(path)
+		if err != nil {
+			return "", nil, fmt.Errorf("getting file info %s: %w", file.Name(), err)
+		}
+		mediaType := mediaTypeFromExtension(file.Name())
+		if isImageFile(file.Name()) {
+			imageAttachments = append(imageAttachments, models.Attachment{
+				FileName:  file.Name(),
+				FilePath:  path,
+				MediaType: mediaType,
+				FileSize:  info.Size(),
+			})
+		} else if info.Size() <= maxTextAttachmentSize {
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return "", nil, fmt.Errorf("reading file %s: %w", file.Name(), err)
+			}
+			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", file.Name(), string(content)))
+		} else {
+			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", file.Name(), info.Size()))
+		}
+	}
+	var textContext string
+	if len(attachmentContents) > 0 {
+		textContext = "\n\n--- Attached Files ---\n" + strings.Join(attachmentContents, "")
+	}
+	return textContext, imageAttachments, nil
+}
+
 func (h *Handler) ClearChat(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 	log.Printf("[handler] ClearChat project=%s", projectID)
@@ -354,6 +517,12 @@ func (h *Handler) ClearChat(c echo.Context) error {
 		for _, id := range runningIDs {
 			log.Printf("[handler] ClearChat cancelling running chat task=%s", id)
 			h.workerSvc.CancelRunningTask(id)
+		}
+	}
+	if h.threadInputRepo != nil {
+		if err := h.threadInputRepo.CancelPendingForChat(c.Request().Context(), projectID); err != nil {
+			log.Printf("[handler] ClearChat error cancelling pending chat inputs: %v", err)
+			return err
 		}
 	}
 
@@ -372,7 +541,7 @@ func (h *Handler) ClearChat(c echo.Context) error {
 	}
 
 	// Return empty chat content
-	return render(c, http.StatusOK, pages.ChatContent(agents, []models.Execution{}, projectID, make(map[string][]models.ChatAttachment), false))
+	return render(c, http.StatusOK, pages.ChatContent(agents, []models.Execution{}, projectID, make(map[string][]models.ChatAttachment), []models.ThreadInput{}, false))
 }
 
 // chatHistoryHasPlanCompletion checks if the latest completed assistant response

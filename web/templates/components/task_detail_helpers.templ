@@ -13,6 +13,23 @@ func derefString(v *string) string {
 	return *v
 }
 
+func taskThreadHasRunningExecution(executions []models.Execution) bool {
+	return taskThreadActiveTurnID(executions) != ""
+}
+
+func taskThreadActiveTurnID(executions []models.Execution) string {
+	for _, exec := range executions {
+		if exec.Status == models.ExecRunning {
+			return exec.ID
+		}
+	}
+	return ""
+}
+
+func taskQueuedSteerEndpoint(input models.ThreadInput) string {
+	return fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", input.TaskID, input.ID)
+}
+
 func GetScheduleEditTime(s models.Schedule) string {
 	if s.NextRun != nil {
 		return s.NextRun.Local().Format("2006-01-02T15:04")
@@ -284,7 +301,7 @@ templ TaskPrimaryAgentBanner(agentDef *models.Agent) {
 // Uses shared chat components for message bubbles and input form.
 // Accepts agents list to show model selector matching /chat page behavior.
 // chatAttachments map is optional - when nil, no attachment indicators are shown on messages.
-templ TaskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment) {
+templ TaskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput) {
 	<div
 		id="task-thread-view"
 		class="flex flex-col flex-1 min-h-0"
@@ -295,32 +312,38 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 			hx-swap="morph:outerHTML"
 		}
 		data-task-active={ boolStr(task.Status == models.StatusRunning || task.Status == models.StatusQueued) }
+		data-task-id={ task.ID }
 	>
 		<!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) -->
 		<div id="task-thread-messages" class="flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0">
 			@TaskPrimaryAgentBanner(agentDef)
-			if len(executions) == 0 {
+			if len(executions) == 0 && len(pendingInputs) == 0 {
 				@ChatEmptyState("No messages yet. Click \"Run Now\" to start, then follow up here.")
 			} else {
 				@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view")
+				@PendingThreadInputRows(pendingInputs, taskQueuedSteerEndpoint)
 				@TaskThreadStatusIndicator(task, executions)
 			}
 		</div>
 		<!-- Message Input Form (shared component with model selector) -->
 		@ChatInputForm(ChatInputFormConfig{
-			FormID:            "task-thread-form",
-			InputID:           "task-message-input",
-			PostEndpoint:      fmt.Sprintf("/tasks/%s/thread", task.ID),
-			TargetID:          "task-thread-messages",
-			Agents:            agents,
-			ShowModelSelector: true,
-			TaskID:            task.ID,
-			IsRunning:         task.Status == models.StatusRunning,
-			SelectedAgentID:   derefString(task.AgentID),
+			FormID:                 "task-thread-form",
+			InputID:                "task-message-input",
+			PostEndpoint:           fmt.Sprintf("/tasks/%s/thread", task.ID),
+			TargetID:               "task-thread-messages",
+			Agents:                 agents,
+			ShowModelSelector:      true,
+			TaskID:                 task.ID,
+			IsRunning:              taskThreadHasRunningExecution(executions),
+			ActiveTurnID:           taskThreadActiveTurnID(executions),
+			SelectedAgentID:        derefString(task.AgentID),
+			PendingInputs:          pendingInputs,
+			QueuedSteerEndpointFor: taskQueuedSteerEndpoint,
 		})
 		<!-- Shared auto-scroll and marker cleaning utilities -->
 		@ChatAutoScrollScript()
 		@_initThreadStreamingScript()
+		@TaskThreadLiveEventsScript(task.ID)
 		<script>
 			function _taskThreadTaskId() {
 				var threadContent = document.getElementById('thread-content');
@@ -654,10 +677,136 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 	</div>
 }
 
+templ TaskThreadLiveEventsScript(taskID string) {
+	<script type="text/javascript">
+			(function() {
+				var threadView = document.getElementById('task-thread-view');
+				var taskId = threadView ? (threadView.getAttribute('data-task-id') || '') : '';
+				if (!taskId) return;
+				window._taskThreadLiveHandlers = window._taskThreadLiveHandlers || {};
+				if (window._taskThreadLiveHandlers[taskId]) {
+					window.removeEventListener('sse-task-event', window._taskThreadLiveHandlers[taskId]);
+				}
+					function removePendingRow(inputId) {
+						if (!inputId) return;
+						var row = document.getElementById('thread-input-' + inputId);
+						if (row) row.remove();
+					}
+					function ensureComposerPendingContainer() {
+						var pendingContainer = document.getElementById('pending-thread-inputs');
+						if (pendingContainer) return pendingContainer;
+						var form = document.getElementById('task-thread-form');
+						var textarea = document.getElementById('task-thread-message');
+						if (!form || !textarea) return null;
+						pendingContainer = document.createElement('div');
+						pendingContainer.id = 'pending-thread-inputs';
+						pendingContainer.className = 'space-y-1.5';
+						var textareaWrap = textarea.parentElement;
+						form.insertBefore(pendingContainer, textareaWrap || textarea);
+						return pendingContainer;
+					}
+					function renderQueuedRow(data) {
+						if (!data || !data.pending_input_id) return;
+						if (document.querySelector('[data-thread-input-id="' + data.pending_input_id + '"]')) return;
+						var pendingContainer = ensureComposerPendingContainer();
+						if (!pendingContainer) return;
+						var queuedRow = document.createElement('div');
+						queuedRow.id = 'thread-input-' + data.pending_input_id;
+						queuedRow.className = 'queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';
+						queuedRow.setAttribute('data-thread-input-id', data.pending_input_id);
+						queuedRow.setAttribute('data-input-mode', 'queued');
+						queuedRow.title = 'Queued follow-up will run after the active response finishes';
+						var preview = document.createElement('div');
+						preview.className = 'min-w-0 flex-1 truncate';
+						preview.textContent = data.message || '';
+						var actionWrap = document.createElement('div');
+						actionWrap.className = 'ml-auto flex shrink-0 items-center gap-2';
+						var steerBtn = document.createElement('button');
+						steerBtn.type = 'button';
+						steerBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs font-medium';
+						steerBtn.setAttribute('hx-post', '/tasks/' + encodeURIComponent(taskId) + '/thread/queued/' + data.pending_input_id + '/steer');
+						steerBtn.setAttribute('hx-target', '#thread-input-' + data.pending_input_id);
+						steerBtn.setAttribute('hx-swap', 'outerHTML');
+						steerBtn.title = 'Convert queued follow-up to steering';
+						steerBtn.textContent = 'Steer';
+						var cancelBtn = document.createElement('button');
+						cancelBtn.type = 'button';
+						cancelBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error';
+						cancelBtn.setAttribute('hx-post', '/thread-inputs/' + data.pending_input_id + '/cancel');
+						cancelBtn.setAttribute('hx-target', '#thread-input-' + data.pending_input_id);
+						cancelBtn.setAttribute('hx-swap', 'outerHTML');
+						cancelBtn.title = 'Cancel queued follow-up';
+						cancelBtn.setAttribute('aria-label', 'Cancel queued follow-up');
+						cancelBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';
+						actionWrap.appendChild(steerBtn);
+						actionWrap.appendChild(cancelBtn);
+						queuedRow.appendChild(preview);
+						queuedRow.appendChild(actionWrap);
+						pendingContainer.appendChild(queuedRow);
+						if (window.htmx) htmx.process(queuedRow);
+					}
+					function ensureStreamingFragment(data) {
+						var messages = document.getElementById('task-thread-messages');
+					if (!messages || !data || data.task_id !== taskId || !data.exec_id) return;
+					if (document.querySelector('[data-exec-id="' + data.exec_id + '"]')) return;
+					removePendingRow(data.pending_input_id);
+					var terminal = document.getElementById('task-thread-terminal-status');
+					if (terminal) terminal.remove();
+					if (typeof htmx === 'undefined') return;
+					htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/executions/' + encodeURIComponent(data.exec_id) + '/fragment', {
+						target: '#task-thread-messages',
+						swap: 'beforeend'
+					}).then(function() {
+						var view = document.getElementById('task-thread-view');
+						if (view) view.setAttribute('data-task-active', 'true');
+						if (window._initThreadStreaming) window._initThreadStreaming();
+						if (window.htmx) htmx.process(messages);
+						var tracker = window._taskThreadPageTracker;
+						if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
+							window.chatAutoScroll.scrollToBottom(messages, true);
+						}
+					});
+				}
+				var handler = function(event) {
+					var data = event.detail || {};
+					if (data.task_id !== taskId) return;
+					if (data.type === 'task_thread_execution_started') {
+						ensureStreamingFragment(data);
+						return;
+					}
+							if (data.type === 'task_thread_input_applied' || data.type === 'task_thread_input_cancelled') {
+								removePendingRow(data.pending_input_id);
+								return;
+							}						if (data.type === 'task_thread_input_queued') {
+							renderQueuedRow(data);
+						}
+				};
+				window._taskThreadLiveHandlers[taskId] = handler;
+				window.addEventListener('sse-task-event', handler);
+				document.body.addEventListener('htmx:beforeSwap', function(event) {
+					var target = event.detail && event.detail.target;
+					if (target && target.id === 'main-content') {
+						window.removeEventListener('sse-task-event', handler);
+						delete window._taskThreadLiveHandlers[taskId];
+					}
+				}, { once: true });
+			})();
+		</script>
+}
+
 // TaskThreadFollowupResponse renders user message + streaming assistant for a task thread follow-up.
 // Delegates to the shared ChatFollowupResponse component with thread settings.
 templ TaskThreadFollowupResponse(message string, execID string, attachments []models.ChatAttachment) {
 	@ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments)
+}
+
+templ TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatAttachment) {
+	if len(attachments) > 0 {
+		@ChatBubbleWithAttachments("User", message, attachments)
+	} else {
+		@ChatBubble("User", message)
+	}
+	@ChatBubble("Assistant", "Queued. This message will be sent to the model after the active response finishes.")
 }
 
 // TaskExecutionHistory renders just the execution history section for polling updates

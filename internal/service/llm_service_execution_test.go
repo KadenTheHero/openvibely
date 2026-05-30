@@ -21,6 +21,24 @@ type captureProviderAdapter struct {
 	lastReq llmcontracts.AgentRequest
 }
 
+type taskSteeringProviderAdapter struct {
+	steering string
+}
+
+type providerAdapterFunc func(llmcontracts.AgentRequest) (llmcontracts.AgentResult, error)
+
+type retryingProviderAdapterFunc func(llmcontracts.AgentRequest) (llmcontracts.AgentResult, error)
+
+func (f providerAdapterFunc) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	return f(req)
+}
+
+func (f retryingProviderAdapterFunc) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	return callWithRetry(req, func() (llmcontracts.AgentResult, error) {
+		return f(req)
+	})
+}
+
 type runtimeToolWritingLLMCaller struct {
 	workDir string
 }
@@ -58,6 +76,21 @@ func (c *captureProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontrac
 	return llmcontracts.AgentResult{
 		Output:         "ok",
 		TextOnlyOutput: "ok",
+		Usage:          llmcontracts.Usage{TotalTokens: 1},
+	}, nil
+}
+
+func (a *taskSteeringProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	if callback := llmcontracts.SteeringCallbackFromContext(req.Ctx); callback != nil {
+		steering, err := callback(req.Ctx)
+		if err != nil {
+			return llmcontracts.AgentResult{}, err
+		}
+		a.steering = steering
+	}
+	return llmcontracts.AgentResult{
+		Output:         "task output",
+		TextOnlyOutput: "task output",
 		Usage:          llmcontracts.Usage{TotalTokens: 1},
 	}, nil
 }
@@ -566,6 +599,380 @@ func TestLLMService_ExecuteTaskWithAgent_SkipsRunningTask(t *testing.T) {
 	}
 }
 
+func TestLLMService_ExecuteTaskWithAgent_ClaimsToolBoundarySteering(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc.SetThreadInputRepo(threadInputRepo)
+	adapter := &taskSteeringProviderAdapter{}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.LLMProvider("task-steer-test"): adapter}
+
+	task := &models.Task{ProjectID: "default", Title: "Steer Main Run", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = models.LLMProvider("task-steer-test")
+
+	input := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           task.ProjectID,
+		TaskID:              task.ID,
+		InputMode:           models.ThreadInputModeQueued,
+		InputStatus:         models.ThreadInputPending,
+		Content:             "review only",
+		RunExecutionID:      "",
+		ExpectedTurnID:      "",
+		AttachmentSessionID: "",
+	}
+
+	// Create the execution first by starting the task in the fake adapter path, then
+	// inject the pending steer during the provider callback by targeting that active exec.
+	var createdExecID string
+	adapterWithInsert := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		createdExecID = req.ExecID
+		input.RunExecutionID = createdExecID
+		input.TurnID = createdExecID
+		input.ExpectedTurnID = createdExecID
+		if err := threadInputRepo.CreateQueued(ctx, input); err != nil {
+			return llmcontracts.AgentResult{}, err
+		}
+		converted, err := threadInputRepo.ConvertQueuedToSteering(ctx, input.ID, createdExecID, createdExecID)
+		if err != nil {
+			return llmcontracts.AgentResult{}, err
+		}
+		input.ID = converted.ID
+		return adapter.Call(req)
+	})
+	svc.providerAdapters[models.LLMProvider("task-steer-test")] = adapterWithInsert
+	svc.routing = nil
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil || createdExecID == "" {
+		t.Fatal("expected execution")
+	}
+	if adapter.steering != "review only" {
+		t.Fatalf("expected steering injected, got %q", adapter.steering)
+	}
+	updated, err := threadInputRepo.GetByID(ctx, input.ID)
+	if err != nil {
+		t.Fatalf("get input: %v", err)
+	}
+	if updated == nil || updated.InputStatus != models.ThreadInputApplied {
+		t.Fatalf("expected steering applied, got %#v", updated)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_RestoresToolBoundarySteeringBeforeRetry(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc.SetThreadInputRepo(threadInputRepo)
+	testProvider := models.LLMProvider("task-steer-retry-test")
+	task := &models.Task{ProjectID: "default", Title: "Steer Main Run Retry", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	var inputID string
+	var attempts int
+	var steers []string
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		testProvider: retryingProviderAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			attempts++
+			if attempts == 1 {
+				input := &models.ThreadInput{
+					Scope:          models.ThreadInputScopeTask,
+					ProjectID:      task.ProjectID,
+					TaskID:         task.ID,
+					InputMode:      models.ThreadInputModeQueued,
+					InputStatus:    models.ThreadInputPending,
+					Content:        "retry steer",
+					RunExecutionID: req.ExecID,
+				}
+				if err := threadInputRepo.CreateQueued(ctx, input); err != nil {
+					return llmcontracts.AgentResult{}, err
+				}
+				converted, err := threadInputRepo.ConvertQueuedToSteering(ctx, input.ID, req.ExecID, req.ExecID)
+				if err != nil {
+					return llmcontracts.AgentResult{}, err
+				}
+				inputID = converted.ID
+			}
+			callback := llmcontracts.SteeringCallbackFromContext(req.Ctx)
+			if callback == nil {
+				return llmcontracts.AgentResult{}, fmt.Errorf("missing steering callback")
+			}
+			steering, err := callback(req.Ctx)
+			if err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+			steers = append(steers, steering)
+			if attempts == 1 {
+				return llmcontracts.AgentResult{}, fmt.Errorf("503 temporarily unavailable")
+			}
+			return llmcontracts.AgentResult{Output: "ok", TextOnlyOutput: "ok", Usage: llmcontracts.Usage{TotalTokens: 1}}, nil
+		}),
+	}
+	svc.routing = nil
+
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = testProvider
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil || attempts != 2 {
+		t.Fatalf("expected successful retry after 2 attempts, exec=%#v attempts=%d", exec, attempts)
+	}
+	if len(steers) != 2 || steers[0] != "retry steer" || steers[1] != "retry steer" {
+		t.Fatalf("expected steering injected into both attempts, got %#v", steers)
+	}
+	updated, err := threadInputRepo.GetByID(ctx, inputID)
+	if err != nil {
+		t.Fatalf("get input: %v", err)
+	}
+	if updated == nil || updated.InputStatus != models.ThreadInputApplied {
+		t.Fatalf("expected steering applied after successful retry, got %#v", updated)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_RequeuesToolBoundarySteeringOnFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc.SetThreadInputRepo(threadInputRepo)
+	testProvider := models.LLMProvider("task-steer-fail-test")
+	var inputID string
+	task := &models.Task{ProjectID: "default", Title: "Steer Main Run Failure", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		testProvider: providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			input := &models.ThreadInput{
+				Scope:          models.ThreadInputScopeTask,
+				ProjectID:      task.ProjectID,
+				TaskID:         task.ID,
+				InputMode:      models.ThreadInputModeQueued,
+				InputStatus:    models.ThreadInputPending,
+				Content:        "stop editing",
+				RunExecutionID: req.ExecID,
+			}
+			if err := threadInputRepo.CreateQueued(ctx, input); err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+			converted, err := threadInputRepo.ConvertQueuedToSteering(ctx, input.ID, req.ExecID, req.ExecID)
+			if err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+			inputID = converted.ID
+			callback := llmcontracts.SteeringCallbackFromContext(req.Ctx)
+			if callback == nil {
+				return llmcontracts.AgentResult{}, fmt.Errorf("missing steering callback")
+			}
+			if steering, err := callback(req.Ctx); err != nil {
+				return llmcontracts.AgentResult{}, err
+			} else if steering != "stop editing" {
+				return llmcontracts.AgentResult{}, fmt.Errorf("unexpected steering %q", steering)
+			}
+			return llmcontracts.AgentResult{Output: "partial", TextOnlyOutput: "partial", Usage: llmcontracts.Usage{TotalTokens: 1}}, fmt.Errorf("provider failed")
+		}),
+	}
+	svc.routing = nil
+
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = testProvider
+
+	_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err == nil {
+		t.Fatal("expected provider failure")
+	}
+	updated, err := threadInputRepo.GetByID(ctx, inputID)
+	if err != nil {
+		t.Fatalf("get input: %v", err)
+	}
+	if updated == nil || updated.InputMode != models.ThreadInputModeQueued || updated.InputStatus != models.ThreadInputPending {
+		t.Fatalf("expected steering requeued pending, got %#v", updated)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_CommitFailureWithCancelledContextMarksExecutionFailed(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc.SetThreadInputRepo(threadInputRepo)
+	testProvider := models.LLMProvider("task-steer-commit-cancel-test")
+	var inputID string
+	task := &models.Task{ProjectID: "default", Title: "Steer Commit Cancel", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		testProvider: providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			input := &models.ThreadInput{
+				Scope:          models.ThreadInputScopeTask,
+				ProjectID:      task.ProjectID,
+				TaskID:         task.ID,
+				InputMode:      models.ThreadInputModeQueued,
+				InputStatus:    models.ThreadInputPending,
+				Content:        "commit then cancel",
+				RunExecutionID: req.ExecID,
+			}
+			if err := threadInputRepo.CreateQueued(ctx, input); err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+			converted, err := threadInputRepo.ConvertQueuedToSteering(ctx, input.ID, req.ExecID, req.ExecID)
+			if err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+			inputID = converted.ID
+			callback := llmcontracts.SteeringCallbackFromContext(req.Ctx)
+			if callback == nil {
+				return llmcontracts.AgentResult{}, fmt.Errorf("missing steering callback")
+			}
+			if steering, err := callback(req.Ctx); err != nil {
+				return llmcontracts.AgentResult{}, err
+			} else if steering != "commit then cancel" {
+				return llmcontracts.AgentResult{}, fmt.Errorf("unexpected steering %q", steering)
+			}
+			cancel()
+			return llmcontracts.AgentResult{Output: "provider succeeded", TextOnlyOutput: "provider succeeded", Usage: llmcontracts.Usage{TotalTokens: 1}}, nil
+		}),
+	}
+	svc.routing = nil
+
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = testProvider
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err == nil {
+		t.Fatal("expected steering commit failure")
+	}
+	if exec == nil || exec.Status != models.ExecFailed {
+		t.Fatalf("expected returned execution failed, got %#v", exec)
+	}
+	storedExec, err := execRepo.GetByID(context.Background(), exec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if storedExec.Status != models.ExecFailed || storedExec.CompletedAt == nil {
+		t.Fatalf("expected stored execution failed and completed, got %#v", storedExec)
+	}
+	updatedTask, err := taskRepo.GetByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updatedTask.Status != models.StatusFailed {
+		t.Fatalf("expected task failed, got %#v", updatedTask)
+	}
+	updatedInput, err := threadInputRepo.GetByID(context.Background(), inputID)
+	if err != nil {
+		t.Fatalf("get input: %v", err)
+	}
+	if updatedInput == nil || updatedInput.InputMode != models.ThreadInputModeQueued || updatedInput.InputStatus != models.ThreadInputPending {
+		t.Fatalf("expected steering requeued after commit failure, got %#v", updatedInput)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_RequeuesRestoredSteeringOnCancellation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc.SetThreadInputRepo(threadInputRepo)
+	testProvider := models.LLMProvider("task-steer-cancel-after-reset-test")
+	var inputID string
+	task := &models.Task{ProjectID: "default", Title: "Steer Main Run Cancel After Reset", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		testProvider: providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			input := &models.ThreadInput{
+				Scope:          models.ThreadInputScopeTask,
+				ProjectID:      task.ProjectID,
+				TaskID:         task.ID,
+				InputMode:      models.ThreadInputModeQueued,
+				InputStatus:    models.ThreadInputPending,
+				Content:        "retry then cancel",
+				RunExecutionID: req.ExecID,
+			}
+			if err := threadInputRepo.CreateQueued(context.Background(), input); err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+			converted, err := threadInputRepo.ConvertQueuedToSteering(context.Background(), input.ID, req.ExecID, req.ExecID)
+			if err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+			inputID = converted.ID
+			callback := llmcontracts.SteeringCallbackFromContext(req.Ctx)
+			if callback == nil {
+				return llmcontracts.AgentResult{}, fmt.Errorf("missing steering callback")
+			}
+			if steering, err := callback(req.Ctx); err != nil {
+				return llmcontracts.AgentResult{}, err
+			} else if steering != "retry then cancel" {
+				return llmcontracts.AgentResult{}, fmt.Errorf("unexpected steering %q", steering)
+			}
+			reset := llmcontracts.SteeringRetryResetCallbackFromContext(req.Ctx)
+			if reset == nil {
+				return llmcontracts.AgentResult{}, fmt.Errorf("missing steering retry reset callback")
+			}
+			if err := reset(context.Background()); err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+			cancel()
+			return llmcontracts.AgentResult{}, context.Canceled
+		}),
+	}
+	svc.routing = nil
+
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = testProvider
+
+	_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err == nil {
+		t.Fatal("expected cancellation")
+	}
+	updated, err := threadInputRepo.GetByID(context.Background(), inputID)
+	if err != nil {
+		t.Fatalf("get input: %v", err)
+	}
+	if updated == nil || updated.InputMode != models.ThreadInputModeQueued || updated.InputStatus != models.ThreadInputPending || updated.ExpectedTurnID != "" {
+		t.Fatalf("expected restored steering requeued after cancellation, got %#v", updated)
+	}
+}
+
 func TestLLMService_ExecuteTaskWithAgent_RecordsExecution(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
@@ -599,6 +1006,102 @@ func TestLLMService_ExecuteTaskWithAgent_RecordsExecution(t *testing.T) {
 	}
 	if exec.Status != models.ExecFailed {
 		t.Errorf("expected exec status=failed, got %q", exec.Status)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_FinalizesAfterProviderSuccessWhenContextCancelled(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	testProvider := models.LLMProvider("task-finalize-cancel-after-success-test")
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		testProvider: providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			cancel()
+			return llmcontracts.AgentResult{Output: "provider succeeded", TextOnlyOutput: "provider succeeded", Usage: llmcontracts.Usage{TotalTokens: 1}}, nil
+		}),
+	}
+	svc.routing = nil
+
+	task := &models.Task{ProjectID: "default", Title: "Finalize Cancel", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = testProvider
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("execute task: %v", err)
+	}
+	if exec == nil || exec.Status != models.ExecCompleted {
+		t.Fatalf("expected returned execution completed, got %#v", exec)
+	}
+	storedExec, err := execRepo.GetByID(context.Background(), exec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if storedExec.Status != models.ExecCompleted || storedExec.CompletedAt == nil {
+		t.Fatalf("expected stored execution completed despite cancelled request context, got %#v", storedExec)
+	}
+	updatedTask, err := taskRepo.GetByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updatedTask.Status != models.StatusCompleted {
+		t.Fatalf("expected task completed despite cancelled request context, got %#v", updatedTask)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_FinalizesReportedFailureWhenContextCancelled(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	testProvider := models.LLMProvider("task-finalize-cancel-after-status-failed-test")
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		testProvider: providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			cancel()
+			return llmcontracts.AgentResult{Output: "could not finish\n[STATUS: FAILED | blocked]", TextOnlyOutput: "could not finish\n[STATUS: FAILED | blocked]", Usage: llmcontracts.Usage{TotalTokens: 1}}, nil
+		}),
+	}
+	svc.routing = nil
+
+	task := &models.Task{ProjectID: "default", Title: "Finalize Reported Failure", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = testProvider
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("execute task: %v", err)
+	}
+	if exec == nil || exec.Status != models.ExecFailed {
+		t.Fatalf("expected returned execution failed, got %#v", exec)
+	}
+	storedExec, err := execRepo.GetByID(context.Background(), exec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if storedExec.Status != models.ExecFailed || storedExec.CompletedAt == nil || storedExec.ErrorMessage != "blocked" {
+		t.Fatalf("expected stored execution failed despite cancelled request context, got %#v", storedExec)
+	}
+	updatedTask, err := taskRepo.GetByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updatedTask.Status != models.StatusFailed {
+		t.Fatalf("expected task failed despite cancelled request context, got %#v", updatedTask)
 	}
 }
 

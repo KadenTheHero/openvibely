@@ -355,6 +355,91 @@ func TestSendAgentic_TextOnly(t *testing.T) {
 	}
 }
 
+func TestSendAgentic_InjectsToolBoundarySteeringAfterFunctionOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("hello world\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var turnCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turn := int(atomic.AddInt32(&turnCount, 1))
+		body, _ := io.ReadAll(r.Body)
+		var reqBody map[string]any
+		if err := json.Unmarshal(body, &reqBody); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		if turn == 2 {
+			input, ok := reqBody["input"].([]any)
+			if !ok || len(input) < 2 {
+				t.Fatalf("turn 2 input = %#v, want function output plus steering message", reqBody["input"])
+			}
+			var foundOutput bool
+			for _, item := range input {
+				m, _ := item.(map[string]any)
+				if m["type"] == "function_call_output" && m["call_id"] == "call_1" {
+					foundOutput = true
+					if output, _ := m["output"].(string); !strings.Contains(output, "hello world") {
+						t.Fatalf("tool output = %q, want file content", output)
+					}
+				}
+			}
+			if !foundOutput {
+				t.Fatalf("turn 2 missing function_call_output in %#v", input)
+			}
+			last, _ := input[len(input)-1].(map[string]any)
+			if last["type"] != "message" || last["role"] != "user" || last["content"] != "actually only review it" {
+				t.Fatalf("turn 2 last input item = %#v, want steering user message", last)
+			}
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		if turn == 1 {
+			argsJSON, _ := json.Marshal(map[string]string{"file_path": testFile})
+			argsStr, _ := json.Marshal(string(argsJSON))
+			_, _ = w.Write([]byte(
+				`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"read_file"}}` + "\n\n" +
+					fmt.Sprintf(`data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"read_file","arguments":%s}}`, argsStr) + "\n\n" +
+					`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":20,"output_tokens":15}}}` + "\n\n",
+			))
+			return
+		}
+		_, _ = w.Write([]byte(
+			`data: {"type":"response.output_text.delta","delta":"Reviewed only."}` + "\n\n" +
+				`data: {"type":"response.completed","response":{"id":"resp_2","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":30,"output_tokens":10}}}` + "\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	client := NewWithAPIKey("sk-test")
+	var callbackCalls int
+	resp, err := client.SendAgentic(context.Background(), "fix the bug", &AgenticOptions{
+		Model:   "gpt-5.3-codex",
+		WorkDir: tmpDir,
+		OnToolBoundarySteering: func(ctx context.Context) (string, error) {
+			callbackCalls++
+			return "actually only review it", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if callbackCalls != 1 {
+		t.Fatalf("callbackCalls = %d, want 1", callbackCalls)
+	}
+	if resp.Text != "Reviewed only." {
+		t.Fatalf("resp.Text = %q, want Reviewed only.", resp.Text)
+	}
+	if got := atomic.LoadInt32(&turnCount); got != 2 {
+		t.Fatalf("turnCount = %d, want 2", got)
+	}
+}
+
 func TestSendAgentic_ToolCalling(t *testing.T) {
 	// Create a temp file for the tool to read
 	tmpDir := t.TempDir()

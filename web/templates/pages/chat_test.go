@@ -13,7 +13,7 @@ func TestChatContent_PlanSwitchAutoSubmitsImplementationHandoff(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestChatContent_PlanCompletionPromptRestoresFromHistoryOnRefresh(t *testing
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestChatContent_PlanPromptRecoveryRunsForContainerOuterHTMLSwaps(t *testing
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestChatContent_PlanPromptButtonsUseDelegatedHandlers(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestChatContent_KebabTriggerUsesLabelForDesktopWebviewCompatibility(t *test
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestChatContent_ClearChatDoesNotRequireConfirmation(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -182,11 +182,186 @@ func TestChatContent_ClearChatDoesNotRequireConfirmation(t *testing.T) {
 	}
 }
 
+func TestChatContent_RunningChatCanSteerFromPendingRowsOnly(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+	history := []models.Execution{{ID: "exec-running", Status: models.ExecRunning, PromptSent: "hello"}}
+	pending := []models.ThreadInput{{ID: "queued-1", Scope: models.ThreadInputScopeChat, ProjectID: "project-1", InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued"}}
+
+	var buf bytes.Buffer
+	err := ChatContent(agents, history, "project-1", map[string][]models.ChatAttachment{}, pending, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, `name="expected_turn_id" value="exec-running"`) {
+		t.Fatal("chat UI should include the active turn id for queue safety")
+	}
+	if strings.Contains(content, `name="steer_endpoint"`) || strings.Contains(content, `data-steer-submit="true"`) {
+		t.Fatal("chat composer must not expose direct steering controls")
+	}
+	if !strings.Contains(content, `id="pending-thread-inputs"`) || !strings.Contains(content, `hx-post="/chat/queued/queued-1/steer"`) || !strings.Contains(content, "Steer") {
+		t.Fatal("chat composer queued row must expose Steer action")
+	}
+	messagesStart := strings.Index(content, `id="chat-messages"`)
+	formStart := strings.Index(content, `id="chat-form"`)
+	if messagesStart < 0 || formStart < 0 || strings.Contains(content[messagesStart:formStart], `thread-input-queued-1`) {
+		t.Fatal("chat queued rows should render with the input box, not in the message transcript")
+	}
+	if !strings.Contains(content, `queued-input-row`) || !strings.Contains(content, `ml-auto`) || !strings.Contains(content, `aria-label="Cancel queued follow-up"`) || !strings.Contains(content, `M19 7l-.867 12.142`) {
+		t.Fatal("chat queued row should use input-box styling with right-aligned Steer and trash-icon cancel action")
+	}
+	if strings.Contains(content, "Send now") || strings.Contains(content, "btn-warning") || strings.Contains(content, "bg-warning") || strings.Contains(content, ">Cancel</button>") || strings.Contains(content, ">×</button>") {
+		t.Fatal("chat queued/steering rows should not use warning styling, Send now copy, or text/× cancel")
+	}
+}
+
+func TestChatContent_RendersCancelledChatExecutions(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+	history := []models.Execution{{ID: "exec-cancelled", Status: models.ExecCancelled, PromptSent: "hello", Output: "partial"}}
+
+	var buf bytes.Buffer
+	err := ChatContent(agents, history, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, "Cancelled") || !strings.Contains(content, "partial") {
+		t.Fatal("cancelled chat executions must render a terminal assistant state")
+	}
+}
+
+func TestChatContent_LivePromotedQueuedRowsAreRemoved(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, "data.pending_input_id") || !strings.Contains(content, "pendingRow.remove()") {
+		t.Fatal("live promoted chat events must remove the durable queued row")
+	}
+}
+
+func TestChatContent_LiveSteeringRowsAreCancelable(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+
+	steeringStart := strings.Index(content, "if (eventType === 'chat_turn_steered')")
+	if steeringStart == -1 {
+		t.Fatal("expected live steering event branch")
+	}
+	branchEnd := strings.Index(content[steeringStart:], "if (eventType === 'chat_new_message')")
+	if branchEnd == -1 {
+		t.Fatal("expected live steering branch terminator")
+	}
+	branch := content[steeringStart : steeringStart+branchEnd]
+	if strings.Contains(branch, "_chatKnownExecIds[data.exec_id]") {
+		t.Fatal("live steering pending-input ids must not pollute the chat execution duplicate guard")
+	}
+	if !strings.Contains(branch, "'/thread-inputs/' + data.exec_id + '/cancel'") {
+		t.Fatal("live steering row must expose cancel action")
+	}
+	if !strings.Contains(branch, "htmx.process(steeringRow)") {
+		t.Fatal("live steering row must process dynamic HTMX controls")
+	}
+}
+
+func TestChatContent_ClearsWebSendSuppressionOnRequestCompletion(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+
+	beforeRequest := strings.Index(content, "htmx:beforeRequest")
+	afterRequest := strings.Index(content, "htmx:afterRequest")
+	afterSwap := strings.Index(content, "htmx:afterSwap")
+	if beforeRequest == -1 || afterRequest == -1 || afterSwap == -1 {
+		t.Fatal("expected chat form HTMX request lifecycle handlers")
+	}
+	if !(beforeRequest < afterRequest && afterRequest < afterSwap) {
+		t.Fatal("afterRequest clear should be registered between send setup and swap-specific handling")
+	}
+	branch := content[afterRequest:afterSwap]
+	if !strings.Contains(branch, "window._chatWebSendInProgress = false") {
+		t.Fatal("web-send suppression must clear on request completion for OOB-only queued responses")
+	}
+}
+
+func TestChatContent_LiveQueuedRowsDedupeByPendingInputDOMID(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+
+	messageStart := strings.Index(content, "if (eventType === 'chat_new_message')")
+	if messageStart == -1 {
+		t.Fatal("expected live chat message branch")
+	}
+	messageEnd := strings.Index(content[messageStart:], "if (eventType === 'chat_response_done')")
+	if messageEnd == -1 {
+		t.Fatal("expected live chat message branch terminator")
+	}
+	branch := content[messageStart : messageStart+messageEnd]
+
+	queuedStart := strings.Index(branch, "if (data.queued) {")
+	if queuedStart == -1 {
+		t.Fatal("expected queued branch before execution dedupe")
+	}
+	execDedupeStart := strings.Index(branch, "if (window._chatKnownExecIds[data.exec_id]) return;")
+	if execDedupeStart == -1 {
+		t.Fatal("expected non-queued execution dedupe branch")
+	}
+	if queuedStart > execDedupeStart {
+		t.Fatal("queued events must be handled before execution duplicate guard")
+	}
+	queuedBranchEnd := strings.Index(branch[queuedStart:], "} else {")
+	if queuedBranchEnd == -1 {
+		t.Fatal("expected queued branch to terminate before execution dedupe")
+	}
+	queuedBranch := branch[queuedStart : queuedStart+queuedBranchEnd]
+	if !strings.Contains(queuedBranch, "[data-thread-input-id=\"") {
+		t.Fatal("queued events must dedupe by durable pending input DOM id")
+	}
+	if strings.Contains(queuedBranch, "_chatKnownExecIds") {
+		t.Fatal("queued pending-input ids must not pollute the chat execution duplicate guard")
+	}
+}
+
+func TestChatContent_LiveCancelledPendingRowsAreRemoved(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, "eventType === 'chat_thread_input_applied' || eventType === 'chat_thread_input_cancelled'") {
+		t.Fatal("live cancellation events must remove durable pending rows")
+	}
+}
+
 func TestChatContent_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -210,7 +385,7 @@ func TestChatContent_ClosesChatStreamEventSourcesOnSwapAndNavigation(t *testing.
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}

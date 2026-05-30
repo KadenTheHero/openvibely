@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
@@ -17,11 +18,32 @@ func NewExecutionRepo(db *sql.DB) *ExecutionRepo {
 	return &ExecutionRepo{db: db}
 }
 
+func (r *ExecutionRepo) DB() *sql.DB {
+	if r == nil {
+		return nil
+	}
+	return r.db
+}
+
+const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, error_message,
+	tokens_used, duration_ms, is_followup, diff_output, cli_session_id, started_at, completed_at`
+
+const executionSelectColumnsAlias = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.error_message,
+	e.tokens_used, e.duration_ms, e.is_followup, e.diff_output, e.cli_session_id, e.started_at, e.completed_at`
+
+func scanExecutionRow(scanner interface {
+	Scan(dest ...interface{}) error
+}) (models.Execution, error) {
+	var e models.Execution
+	err := scanner.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
+		&e.Output, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup,
+		&e.DiffOutput, &e.CliSessionID, &e.StartedAt, &e.CompletedAt)
+	return e, err
+}
+
 func (r *ExecutionRepo) ListByTask(ctx context.Context, taskID string) ([]models.Execution, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, error_message,
-		 tokens_used, duration_ms, is_followup, diff_output, cli_session_id, started_at, completed_at
-		 FROM executions WHERE task_id = ? ORDER BY started_at DESC`, taskID)
+		`SELECT `+executionSelectColumns+` FROM executions WHERE task_id = ? ORDER BY started_at DESC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("listing executions: %w", err)
 	}
@@ -29,9 +51,8 @@ func (r *ExecutionRepo) ListByTask(ctx context.Context, taskID string) ([]models
 
 	var execs []models.Execution
 	for rows.Next() {
-		var e models.Execution
-		if err := rows.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
-			&e.Output, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup, &e.DiffOutput, &e.CliSessionID, &e.StartedAt, &e.CompletedAt); err != nil {
+		e, err := scanExecutionRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning execution: %w", err)
 		}
 		execs = append(execs, e)
@@ -43,19 +64,14 @@ func (r *ExecutionRepo) ListByTaskIDs(ctx context.Context, taskIDs []string) (ma
 	if len(taskIDs) == 0 {
 		return map[string][]models.Execution{}, nil
 	}
-	placeholders := make([]byte, 0, len(taskIDs)*2-1)
+	placeholders := make([]string, len(taskIDs))
 	args := make([]interface{}, len(taskIDs))
 	for i, id := range taskIDs {
-		if i > 0 {
-			placeholders = append(placeholders, ',')
-		}
-		placeholders = append(placeholders, '?')
+		placeholders[i] = "?"
 		args[i] = id
 	}
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, error_message,
-		 tokens_used, duration_ms, is_followup, diff_output, cli_session_id, started_at, completed_at
-		 FROM executions WHERE task_id IN (`+string(placeholders)+`) ORDER BY started_at DESC`, args...)
+		`SELECT `+executionSelectColumns+` FROM executions WHERE task_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY started_at DESC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("batch listing executions: %w", err)
 	}
@@ -63,9 +79,8 @@ func (r *ExecutionRepo) ListByTaskIDs(ctx context.Context, taskIDs []string) (ma
 
 	result := make(map[string][]models.Execution, len(taskIDs))
 	for rows.Next() {
-		var e models.Execution
-		if err := rows.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
-			&e.Output, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup, &e.DiffOutput, &e.CliSessionID, &e.StartedAt, &e.CompletedAt); err != nil {
+		e, err := scanExecutionRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning execution: %w", err)
 		}
 		result[e.TaskID] = append(result[e.TaskID], e)
@@ -75,8 +90,7 @@ func (r *ExecutionRepo) ListByTaskIDs(ctx context.Context, taskIDs []string) (ma
 
 func (r *ExecutionRepo) ListByProject(ctx context.Context, projectID string, limit int) ([]models.Execution, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.error_message,
-		 e.tokens_used, e.duration_ms, e.is_followup, e.diff_output, e.cli_session_id, e.started_at, e.completed_at
+		`SELECT `+executionSelectColumnsAlias+`
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
 		 WHERE t.project_id = ?
@@ -88,9 +102,8 @@ func (r *ExecutionRepo) ListByProject(ctx context.Context, projectID string, lim
 
 	var execs []models.Execution
 	for rows.Next() {
-		var e models.Execution
-		if err := rows.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
-			&e.Output, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup, &e.DiffOutput, &e.CliSessionID, &e.StartedAt, &e.CompletedAt); err != nil {
+		e, err := scanExecutionRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning execution: %w", err)
 		}
 		execs = append(execs, e)
@@ -105,8 +118,7 @@ func (r *ExecutionRepo) ListByProject(ctx context.Context, projectID string, lim
 // executions are still included.
 func (r *ExecutionRepo) ListByProjectExcludingChat(ctx context.Context, projectID string, limit int) ([]models.Execution, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.error_message,
-		 e.tokens_used, e.duration_ms, e.is_followup, e.diff_output, e.cli_session_id, e.started_at, e.completed_at
+		`SELECT `+executionSelectColumnsAlias+`
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
 		 WHERE t.project_id = ? AND t.category != 'chat'
@@ -118,9 +130,8 @@ func (r *ExecutionRepo) ListByProjectExcludingChat(ctx context.Context, projectI
 
 	var execs []models.Execution
 	for rows.Next() {
-		var e models.Execution
-		if err := rows.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
-			&e.Output, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup, &e.DiffOutput, &e.CliSessionID, &e.StartedAt, &e.CompletedAt); err != nil {
+		e, err := scanExecutionRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning execution: %w", err)
 		}
 		execs = append(execs, e)
@@ -129,13 +140,8 @@ func (r *ExecutionRepo) ListByProjectExcludingChat(ctx context.Context, projectI
 }
 
 func (r *ExecutionRepo) GetByID(ctx context.Context, id string) (*models.Execution, error) {
-	var e models.Execution
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, error_message,
-		 tokens_used, duration_ms, is_followup, diff_output, cli_session_id, started_at, completed_at
-		 FROM executions WHERE id = ?`, id).
-		Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
-			&e.Output, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup, &e.DiffOutput, &e.CliSessionID, &e.StartedAt, &e.CompletedAt)
+	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
+		`SELECT `+executionSelectColumns+` FROM executions WHERE id = ?`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -188,11 +194,96 @@ func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.E
 	return nil
 }
 
-// ListChatHistory returns recent chat messages (CategoryChat tasks) for a project
+type CompleteSuccessOutcome string
+
+const (
+	CompleteSuccessCompleted       CompleteSuccessOutcome = "completed"
+	CompleteSuccessPendingSteering CompleteSuccessOutcome = "pending_steering"
+	CompleteSuccessAlreadyTerminal CompleteSuccessOutcome = "already_terminal"
+)
+
+func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, id string, output string, tokensUsed int, durationMs int64) (CompleteSuccessOutcome, error) {
+	output = llmtranscript.NormalizeMarkers(output)
+	// When output is empty, preserve any partial output already written by the
+	// streaming writer during LLM execution. Failure completion paths frequently
+	// call Complete with empty output while the streamed transcript already exists
+	// in the row; preserving it keeps thread continuity after failures/retries.
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE executions SET status = ?, output = CASE WHEN ? = '' THEN output ELSE ? END, error_message = '',
+		 tokens_used = ?, duration_ms = ?, completed_at = datetime('now')
+		 WHERE id = ?
+		   AND status = 'running'
+		   AND NOT EXISTS (
+		       SELECT 1 FROM thread_inputs
+		       WHERE run_execution_id = executions.id
+		         AND turn_id = executions.id
+		         AND input_mode = 'steering'
+		         AND input_status = 'pending'
+		   )`,
+		models.ExecCompleted, output, output, tokensUsed, durationMs, id)
+	if err != nil {
+		return "", fmt.Errorf("completing execution: %w", err)
+	}
+	changed, _ := res.RowsAffected()
+	if changed > 0 {
+		return CompleteSuccessCompleted, nil
+	}
+
+	var status models.ExecutionStatus
+	if err := r.db.QueryRowContext(ctx, `SELECT status FROM executions WHERE id = ?`, id).Scan(&status); err != nil {
+		if err == sql.ErrNoRows {
+			return CompleteSuccessAlreadyTerminal, nil
+		}
+		return "", fmt.Errorf("checking execution completion state: %w", err)
+	}
+	if status != models.ExecRunning {
+		return CompleteSuccessAlreadyTerminal, nil
+	}
+	return CompleteSuccessPendingSteering, nil
+}
+
+func (r *ExecutionRepo) FindActiveTaskExecution(ctx context.Context, taskID, excludeExecID string) (*models.Execution, error) {
+	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
+		`SELECT `+executionSelectColumns+` FROM executions WHERE task_id = ? AND id != ? AND status = 'running' ORDER BY started_at DESC, rowid DESC LIMIT 1`, taskID, excludeExecID))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("finding active task execution: %w", err)
+	}
+	return &e, nil
+}
+
+func (r *ExecutionRepo) HasActiveTaskExecution(ctx context.Context, taskID, excludeExecID string) (bool, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM executions WHERE task_id = ? AND id != ? AND status = 'running'`, taskID, excludeExecID).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("checking active task execution: %w", err)
+	}
+	return count > 0, nil
+}
+
+func (r *ExecutionRepo) FindLatestActiveChatExecution(ctx context.Context, projectID string) (*models.Execution, error) {
+	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
+		`SELECT `+executionSelectColumnsAlias+`
+		 FROM executions e
+		 JOIN tasks t ON t.id = e.task_id
+		 WHERE t.project_id = ? AND t.category = 'chat' AND e.status = 'running'
+		 ORDER BY e.started_at DESC, e.rowid DESC LIMIT 1`, projectID))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("finding active chat execution: %w", err)
+	}
+	return &e, nil
+}
+
+// ListChatHistory returns recent chat messages (CategoryChat tasks) for a project.
 func (r *ExecutionRepo) ListChatHistory(ctx context.Context, projectID string, limit int) ([]models.Execution, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.error_message,
-		 e.tokens_used, e.duration_ms, e.is_followup, e.diff_output, e.cli_session_id, e.started_at, e.completed_at
+		`SELECT `+executionSelectColumnsAlias+`
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
 		 WHERE t.project_id = ? AND t.category = 'chat'
@@ -204,9 +295,8 @@ func (r *ExecutionRepo) ListChatHistory(ctx context.Context, projectID string, l
 
 	var execs []models.Execution
 	for rows.Next() {
-		var e models.Execution
-		if err := rows.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
-			&e.Output, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup, &e.DiffOutput, &e.CliSessionID, &e.StartedAt, &e.CompletedAt); err != nil {
+		e, err := scanExecutionRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning execution: %w", err)
 		}
 		execs = append(execs, e)
@@ -214,12 +304,10 @@ func (r *ExecutionRepo) ListChatHistory(ctx context.Context, projectID string, l
 	return execs, rows.Err()
 }
 
-// ListByTaskChronological returns all executions for a task ordered chronologically (oldest first)
+// ListByTaskChronological returns all executions for a task ordered chronologically (oldest first).
 func (r *ExecutionRepo) ListByTaskChronological(ctx context.Context, taskID string) ([]models.Execution, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, error_message,
-		 tokens_used, duration_ms, is_followup, diff_output, cli_session_id, started_at, completed_at
-		 FROM executions WHERE task_id = ? ORDER BY started_at ASC, rowid ASC`, taskID)
+		`SELECT `+executionSelectColumns+` FROM executions WHERE task_id = ? ORDER BY started_at ASC, rowid ASC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("listing executions chronological: %w", err)
 	}
@@ -227,9 +315,8 @@ func (r *ExecutionRepo) ListByTaskChronological(ctx context.Context, taskID stri
 
 	var execs []models.Execution
 	for rows.Next() {
-		var e models.Execution
-		if err := rows.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
-			&e.Output, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup, &e.DiffOutput, &e.CliSessionID, &e.StartedAt, &e.CompletedAt); err != nil {
+		e, err := scanExecutionRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning execution: %w", err)
 		}
 		execs = append(execs, e)

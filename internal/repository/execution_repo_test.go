@@ -624,9 +624,9 @@ func TestExecutionRepo_MultiTurnOrderingWithReRuns(t *testing.T) {
 		prompt     string
 		isFollowup bool
 	}{
-		{"original task prompt", false},  // Initial run
-		{"original task prompt", false},  // Re-run (e.g., from scheduler)
-		{"Summarize this", true},         // Follow-up 1
+		{"original task prompt", false},   // Initial run
+		{"original task prompt", false},   // Re-run (e.g., from scheduler)
+		{"Summarize this", true},          // Follow-up 1
 		{"What about performance?", true}, // Follow-up 2
 	}
 
@@ -743,5 +743,44 @@ func TestExecutionRepo_ListByProjectExcludingChat(t *testing.T) {
 	}
 	if !ids[threadExecID] {
 		t.Errorf("task-thread follow-up execution %s must remain in memory consolidation source", threadExecID)
+	}
+}
+
+func TestExecutionRepo_CompleteSuccessIfNoPendingSteeringReportsTerminalState(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := NewTaskRepo(db, nil)
+	agentRepo := NewLLMConfigRepo(db)
+	execRepo := NewExecutionRepo(db)
+
+	task := &models.Task{ProjectID: "default", Title: "Terminal Race Test", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	agent, err := agentRepo.GetDefault(ctx)
+	if err != nil {
+		t.Fatalf("get default agent: %v", err)
+	}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "test"}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	if err := execRepo.Complete(ctx, exec.ID, models.ExecCancelled, "partial", "cancelled", 0, 10); err != nil {
+		t.Fatalf("cancel execution: %v", err)
+	}
+
+	outcome, err := execRepo.CompleteSuccessIfNoPendingSteering(ctx, exec.ID, "late success", 1, 20)
+	if err != nil {
+		t.Fatalf("CompleteSuccessIfNoPendingSteering: %v", err)
+	}
+	if outcome != CompleteSuccessAlreadyTerminal {
+		t.Fatalf("expected already-terminal outcome, got %s", outcome)
+	}
+	stored, err := execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored.Status != models.ExecCancelled || stored.Output != "partial" || stored.ErrorMessage != "cancelled" {
+		t.Fatalf("late success must not overwrite cancelled execution, got status=%s output=%q err=%q", stored.Status, stored.Output, stored.ErrorMessage)
 	}
 }

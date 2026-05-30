@@ -471,18 +471,19 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
 	opts := &anthropicclient.AgenticOptions{
-		Model:            agent.Model,
-		MaxTokens:        maxTokens,
-		System:           llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
-		WorkDir:          workDir,
-		Attachments:      mcAttachments,
-		DisableTools:     disableTools,
-		SkipDefaultTools: skipDefaultTools,
-		AutoCompaction:   true,
-		WebSearchEnabled: true,
-		ExtraTools:       extraTools,
-		ToolExecutor:     toolExecutor,
-		ToolFilter:       toolFilter,
+		Model:                  agent.Model,
+		MaxTokens:              maxTokens,
+		System:                 llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
+		WorkDir:                workDir,
+		Attachments:            mcAttachments,
+		DisableTools:           disableTools,
+		SkipDefaultTools:       skipDefaultTools,
+		AutoCompaction:         true,
+		WebSearchEnabled:       true,
+		ExtraTools:             extraTools,
+		ToolExecutor:           toolExecutor,
+		ToolFilter:             toolFilter,
+		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
 	}
 
 	resp, err := client.SendAgentic(ctx, fullPrompt, opts)
@@ -529,19 +530,20 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	disableTools, skipDefaultTools := resolveChatToolPolicy(isTaskFollowup, chatMode, rt)
 	chatInThinking := false
 	opts := &anthropicclient.AgenticOptions{
-		Model:            agent.Model,
-		MaxTokens:        maxTokens,
-		EnableThinking:   true,
-		DisableTools:     disableTools,
-		SkipDefaultTools: skipDefaultTools,
-		System:           systemPromptStr,
-		WorkDir:          workDir,
-		Attachments:      mcAttachments,
-		AutoCompaction:   true,
-		WebSearchEnabled: true,
-		ExtraTools:       extraTools,
-		ToolExecutor:     toolExecutor,
-		ToolFilter:       toolFilter,
+		Model:                  agent.Model,
+		MaxTokens:              maxTokens,
+		EnableThinking:         true,
+		DisableTools:           disableTools,
+		SkipDefaultTools:       skipDefaultTools,
+		System:                 systemPromptStr,
+		WorkDir:                workDir,
+		Attachments:            mcAttachments,
+		AutoCompaction:         true,
+		WebSearchEnabled:       true,
+		ExtraTools:             extraTools,
+		ToolExecutor:           toolExecutor,
+		ToolFilter:             toolFilter,
+		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
 		OnThinking: func(text string) {
 			if !chatInThinking {
 				chatInThinking = true
@@ -617,18 +619,19 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 
 	inThinking := false
 	opts := &anthropicclient.AgenticOptions{
-		Model:            agent.Model,
-		MaxTokens:        maxTokens,
-		EnableThinking:   true,
-		SkipDefaultTools: skipDefaultTools,
-		System:           llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
-		WorkDir:          workDir,
-		Attachments:      mcAttachments,
-		AutoCompaction:   true,
-		WebSearchEnabled: true,
-		ExtraTools:       extraTools,
-		ToolExecutor:     toolExecutor,
-		ToolFilter:       toolFilter,
+		Model:                  agent.Model,
+		MaxTokens:              maxTokens,
+		EnableThinking:         true,
+		SkipDefaultTools:       skipDefaultTools,
+		System:                 llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
+		WorkDir:                workDir,
+		Attachments:            mcAttachments,
+		AutoCompaction:         true,
+		WebSearchEnabled:       true,
+		ExtraTools:             extraTools,
+		ToolExecutor:           toolExecutor,
+		ToolFilter:             toolFilter,
+		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
 		OnThinking: func(text string) {
 			if !inThinking {
 				inThinking = true

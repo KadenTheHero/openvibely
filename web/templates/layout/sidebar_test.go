@@ -279,3 +279,29 @@ func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
 		}
 	}
 }
+
+func TestSidebar_ForwardsChatTurnSteeredEvents(t *testing.T) {
+	projects := []models.Project{{ID: "p1", Name: "Test"}}
+
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "p1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+	html := buf.String()
+
+	if !strings.Contains(html, "eventType === 'chat_new_message' || eventType === 'chat_response_done' || eventType === 'chat_turn_steered'") {
+		t.Fatal("sidebar dispatcher must forward chat_turn_steered events to chat pages")
+	}
+	if !strings.Contains(html, "|| eventType === 'chat_thread_input_cancelled'") {
+		t.Fatal("sidebar dispatcher must forward chat input cancellation events to chat pages")
+	}
+	if !strings.Contains(html, "|| eventType === 'task_thread_input_cancelled'") {
+		t.Fatal("sidebar dispatcher must forward task thread input cancellation events to task pages")
+	}
+	if !strings.Contains(html, "'chat_turn_steered': handleLiveEvent") {
+		t.Fatal("shared live SSE must subscribe to chat_turn_steered events")
+	}
+	if !strings.Contains(html, "'chat_thread_input_cancelled': handleLiveEvent") || !strings.Contains(html, "'task_thread_input_cancelled': handleLiveEvent") {
+		t.Fatal("shared live SSE must subscribe to pending input cancellation events")
+	}
+}

@@ -419,6 +419,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 
 	llmSvc.SetAlertService(alertSvc)
 	llmSvc.SetTaskService(taskSvc)
+	llmSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	llmSvc.SetBroadcaster(broadcaster)
 
 	// Code review comments
 	reviewCommentRepo := repository.NewReviewCommentRepo(db)
@@ -484,9 +486,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackSvc.SetCustomPersonalityRepo(customPersonalityRepo)
 	slackSvc.SetChatBroadcaster(chatBroadcaster)
 	slackSvc.SetAlertService(alertSvc)
-	if err := slackSvc.Start(); err != nil {
-		log.Printf("warning: failed to start slack socket mode: %v", err)
-	}
+	slackSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 
 	// Git worktree service for task isolation
 	worktreeSvc := service.NewWorktreeService(taskRepo, projectRepo, settingsRepo)
@@ -601,6 +601,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 			telegramSvc.SetSettingsRepo(settingsRepo)
 			telegramSvc.SetCustomPersonalityRepo(customPersonalityRepo)
 			telegramSvc.SetAlertService(alertSvc)
+			telegramSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 			log.Println("telegram bot initialized")
 		}
 	} else {
@@ -665,10 +666,6 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 
 	workerSvc.Start(srvCtx)
 	schedulerSvc.Start(srvCtx)
-	// Start Telegram bot if configured
-	if telegramSvc != nil {
-		telegramSvc.Start()
-	}
 
 	// HTTP Server
 	e := echo.New()
@@ -698,6 +695,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetFileChangeBroadcaster(fileChangeBroadcaster)
 	h.SetTelegramAuthRepo(telegramAuthRepo)
 	h.SetSlackAuthRepo(slackAuthRepo)
+	h.SetSlackTaskContextRepo(slackTaskContextRepo)
 	h.SetReviewCommentRepo(reviewCommentRepo)
 	h.SetCustomPersonalityRepo(customPersonalityRepo)
 	h.SetWorktreeService(worktreeSvc)
@@ -708,6 +706,21 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetTaskPullRequestRepo(taskPullRequestRepo)
 	h.SetGitHubService(githubSvc)
 	h.SetSlackService(slackSvc)
+	slackSvc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
+	slackSvc.SetChannelChatRunner(h.StartChannelChatRun)
+	slackSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
+	if telegramSvc != nil {
+		telegramSvc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
+		telegramSvc.SetChannelChatRunner(h.StartChannelChatRun)
+		telegramSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
+	}
+	if err := slackSvc.Start(); err != nil {
+		log.Printf("warning: failed to start slack socket mode: %v", err)
+	}
+	// Start Telegram bot if configured after the shared channel runner is wired.
+	if telegramSvc != nil {
+		telegramSvc.Start()
+	}
 	h.SetWebhookRepo(webhookRepo)
 	if memorySvc != nil {
 		h.SetMemoryService(memorySvc)

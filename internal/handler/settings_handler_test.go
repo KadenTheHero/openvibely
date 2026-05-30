@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -86,6 +87,36 @@ func TestHandleTelegramSaveErrorDoesNotRefreshOrRedirect(t *testing.T) {
 	token, err := h.settingsRepo.Get(context.Background(), "telegram_bot_token")
 	require.NoError(t, err)
 	assert.Equal(t, "test-token", token)
+}
+
+func TestHandleTelegramSaveNewServiceWiresSharedRunner(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+
+	createdSvc := &service.TelegramService{}
+	origNewTelegramService := newTelegramService
+	t.Cleanup(func() { newTelegramService = origNewTelegramService })
+	newTelegramService = func(
+		token string,
+		taskSvc *service.TaskService,
+		projectRepo *repository.ProjectRepo,
+		llmConfigRepo *repository.LLMConfigRepo,
+		taskRepo *repository.TaskRepo,
+		execRepo *repository.ExecutionRepo,
+		scheduleRepo *repository.ScheduleRepo,
+		chatAttachmentRepo *repository.ChatAttachmentRepo,
+		llmSvc *service.LLMService,
+		workerSvc *service.WorkerService,
+	) (*service.TelegramService, error) {
+		return createdSvc, nil
+	}
+
+	form := url.Values{}
+	form.Set("token", "test-token")
+
+	rec := htmxPost(e, "/channels/telegram", form)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	require.Same(t, createdSvc, h.telegramService)
+	assert.True(t, createdSvc.HasChannelChatRunner(), "settings-created Telegram service must use shared steering-aware runner")
 }
 
 func TestHandleTelegramSaveNonHTMXRedirectsToChannels(t *testing.T) {

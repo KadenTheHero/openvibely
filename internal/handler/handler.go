@@ -35,6 +35,7 @@ type Handler struct {
 	taskRepo                   *repository.TaskRepo
 	scheduleRepo               *repository.ScheduleRepo
 	execRepo                   *repository.ExecutionRepo
+	threadInputRepo            *repository.ThreadInputRepo
 	workerRepo                 *repository.WorkerRepo
 	attachmentRepo             *repository.AttachmentRepo
 	chatAttachmentRepo         *repository.ChatAttachmentRepo
@@ -46,6 +47,7 @@ type Handler struct {
 	telegramService            *service.TelegramService
 	telegramAuthRepo           *repository.TelegramAuthRepo
 	slackAuthRepo              *repository.SlackAuthRepo
+	slackTaskContextRepo       *repository.SlackTaskContextRepo
 	reviewCommentRepo          *repository.ReviewCommentRepo
 	customPersonalityRepo      *repository.CustomPersonalityRepo
 	agentRepo                  *repository.AgentRepo
@@ -121,6 +123,16 @@ func New(
 	broadcaster *events.Broadcaster,
 	telegramSvc *service.TelegramService,
 ) *Handler {
+	var threadInputRepo *repository.ThreadInputRepo
+	if db := execRepo.DB(); db != nil {
+		threadInputRepo = repository.NewThreadInputRepo(db)
+	}
+
+	if llmSvc != nil && threadInputRepo != nil {
+		llmSvc.SetThreadInputRepo(threadInputRepo)
+		llmSvc.SetBroadcaster(broadcaster)
+	}
+
 	return &Handler{
 		projectSvc:           projectSvc,
 		taskSvc:              taskSvc,
@@ -142,6 +154,7 @@ func New(
 		taskRepo:             taskRepo,
 		scheduleRepo:         scheduleRepo,
 		execRepo:             execRepo,
+		threadInputRepo:      threadInputRepo,
 		workerRepo:           workerRepo,
 		attachmentRepo:       attachmentRepo,
 		chatAttachmentRepo:   chatAttachmentRepo,
@@ -158,6 +171,10 @@ func (h *Handler) SetChatBroadcaster(cb *events.ChatBroadcaster) {
 	h.chatBroadcaster = cb
 }
 
+func (h *Handler) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
+	h.threadInputRepo = repo
+}
+
 // SetFileChangeBroadcaster sets the file change event broadcaster for real-time file change updates.
 func (h *Handler) SetFileChangeBroadcaster(fcb *events.FileChangeBroadcaster) {
 	h.fileChangeBroadcaster = fcb
@@ -171,6 +188,10 @@ func (h *Handler) SetTelegramAuthRepo(repo *repository.TelegramAuthRepo) {
 // SetSlackAuthRepo sets the Slack authorization repo for managing authorized users.
 func (h *Handler) SetSlackAuthRepo(repo *repository.SlackAuthRepo) {
 	h.slackAuthRepo = repo
+}
+
+func (h *Handler) SetSlackTaskContextRepo(repo *repository.SlackTaskContextRepo) {
+	h.slackTaskContextRepo = repo
 }
 
 // SetReviewCommentRepo sets the review comment repo for inline code review.
@@ -349,7 +370,11 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/tasks/:taskId/changes/file", h.GetTaskChangesFile)
 	e.POST("/tasks/:taskId/changes/live", h.GetTaskChangesLive)
 	e.GET("/tasks/:taskId/thread", h.GetTaskThread)
+	e.GET("/tasks/:taskId/thread/executions/:execId/fragment", h.GetTaskThreadExecutionFragment)
 	e.POST("/tasks/:taskId/thread", h.TaskThreadSend)
+	e.POST("/tasks/:taskId/thread/steer", h.TaskThreadSteer)
+	e.POST("/thread-inputs/:inputId/cancel", h.CancelThreadInput)
+	e.POST("/tasks/:taskId/thread/queued/:inputId/steer", h.TaskThreadQueuedInputSteer)
 	e.GET("/tasks/:taskId", h.GetTask)
 	e.PUT("/tasks/:taskId", h.UpdateTask)
 	e.DELETE("/tasks/:taskId", h.DeleteTask)
@@ -505,6 +530,8 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Chat
 	e.GET("/chat", h.Chat)
 	e.POST("/chat/send", h.ChatSend)
+	e.POST("/chat/steer", h.ChatSteer)
+	e.POST("/chat/queued/:inputId/steer", h.ChatQueuedInputSteer)
 
 	// API endpoints (for Chrome extension)
 	e.GET("/api/projects", h.APIGetProjects)

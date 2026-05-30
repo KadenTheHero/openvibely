@@ -2,57 +2,78 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-05-29
-source: consolidation
-source_id: memory_consolidation_2026_05_29
+updated: 2026-06-01
+source: after_complete
+source_id: 8a474c7b49a4363832169d74bb3c296a
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
 
 Interactive chat bypasses worker capacity limits. Task-thread follow-ups respect worker limits and use `processStreamingResponse` with `IsTaskFollowup=true`.
 
-Definitions and routes:
-- Chat is the main orchestrator at `/chat` for global/project-level conversation.
-- Thread is the task-specific conversation on the task detail Thread tab.
-- Root route `/` redirects to `/chat`, preserving `project_id` when provided. Dashboard remains at `/dashboard`.
+Queueing and steering:
+- As clarified on 2026-05-30 and updated on 2026-05-31, queueing and steering are distinct product behaviors. Normal Send during an active Chat or task-thread response queues the message for the next turn; steering is an explicit action that amends the in-progress response at OpenVibely-owned provider-call/model-step boundaries. Text-only steering can also be injected at supported agentic tool-result boundaries: after a local tool result such as `read_file` is appended and before the provider/client loop makes its next internal model request. Steering still does not interrupt an already-running provider request or local tool execution. Tool-boundary steering must be wired for all active execution paths that own provider loops, including chat/task-thread streaming and main task runs through `LLMService.ExecuteTaskWithAgent`; otherwise a steer can be saved as pending while the agent continues editing without claiming it.
+- Queueing and steering use persistent `thread_inputs`, not queued execution rows or interrupt-and-replace runs. `executions` remain actual model runs and should not carry queued-turn status or queue metadata.
+- Pending-input statuses are only `pending`, `applied`, and `cancelled`; failed/error state belongs on the resulting execution/task. Queued ordering uses durable queue positions with created-at/rowid fallback, and allocation/promotion must be transactionally guarded.
+- Queued input promotion atomically claims the pending input while creating the next execution/task, validates the exact surface/thread active state inside the transaction, and treats stale/missing/already-applied actions as conflicts rather than silent success.
+- Queued Chat, task-thread, API, Slack, and Telegram inputs may preserve `attachment_session_id`; promoted rows must process saved attachments so text context and image payloads reach the model before first live fragments render.
+- Steering rows target the active execution id with an `expected_turn_id` guard. Steering consumption is two-phase: prepare pending steering into the next provider request, send the realtime UI-removal/applied event when preparation starts, mark the DB row applied only after that provider call succeeds, and requeue as pending queued input on provider failure/cancellation. Pending steers remain cancellable until they are prepared/processing; prepared steering is protected from deletion until success or recovery. Provider retry wrappers must preserve this invariant: a steer claimed/injected inside a failed retry attempt must either be re-injected into the successful retry attempt or requeued before retry, otherwise it can be committed as applied even though the successful provider attempt did not see it. If a failed retry attempt restores prepared steering for the next attempt and the execution then terminates during retry backoff, terminal cleanup must requeue all pending steering for the execution using a non-cancelled cleanup context so hidden `steering` rows are not stranded. As of 2026-05-31 this cleanup requirement applies to both main task runs and chat/task-thread streaming via `processStreamingResponse`. Commit-failure recovery also needs the same non-cancelled cleanup treatment; if `MarkApplied` or attachment commit fails after a successful provider response because the request context was cancelled, `requeueUncommittedSteering` must still recover prepared rows instead of using the cancelled request context and leaving them hidden. Main-task commit-failure handling must also use a non-cancelled cleanup context for terminal `executions`/task status updates after recovering steering rows, otherwise the steering row can be recovered while the execution/task remains non-terminal due to the cancelled task context. As of 2026-05-31, main-task durable post-provider finalization in `ExecuteTaskWithAgent` should use a non-cancelled finalization context for execution completion/failure, task status/category updates, steering recovery, alerts, notifications, task creation markers, diff persistence, worktree post-processing, schedules, and chaining. The attachment-load failure branch after execution creation should also mark the execution/task terminal instead of returning with a running execution.
+- During streaming, steering is checked before each provider call, after successful calls, and during a short final grace period before completion. Guarded completion must continue the model loop instead of closing the turn if late pending steering appears.
+- When steering is consumed after assistant output has streamed, the active prompt plus assistant delta since the steering cursor is added to provider history as a synthetic completed exchange, and the raw steering content becomes the next provider message. If steering arrives before assistant output, combine the active prompt with the raw steering content without explanatory wrapper text.
+- Steering attachments are previewed from pending upload storage for the consuming provider call, then moved/recorded only after success. Failed/cancelled consumption should leave attachments retryable rather than deleting or hiding them. Attachment-bearing steers should not be claimed by the text-only tool-boundary callback; they continue through the outer provider-call continuation path so image/file payloads are not dropped.
+- Thread history for future calls is rebuilt from `executions.PromptSent` and cleaned `executions.Output` as plain user/assistant turns, not replayed as provider-native structured `tool_use`/`tool_result` messages. This is an intentional provider-portability tradeoff: stored history stays durable and replayable across OpenAI, Anthropic, Ollama, etc., but steering continuations only see tool details that were rendered into assistant-visible output. Native structured tool/result blocks are limited to the active provider call loop or provider-specific pause-turn continuations.
+- As of 2026-05-31, steering recovery should handle both prepared and unprepared pending steering rows for a failed/cancelled execution: steering created while a provider call is already in flight must be requeued instead of stranded, and multi-row recovery must be idempotent so already-applied rows do not block pending rows from returning to FIFO.
+- Provider-facing steering should pass through only the user's raw steering content, with no wrapper text or explanatory context added around the steer message. Earlier attempts to add explicit latest-instruction wrapper text were rejected by the user on 2026-05-31.
+- If a queued row is converted to steering while other queued rows exist, the steered row must execute in the current active turn before remaining FIFO queued rows promote. Conversion after the active execution is no longer running should fail and leave the row queued.
+- When a queued input promotes and creates the next active execution, remaining pending queued rows on the same Chat/task-thread surface must be atomically retargeted from the prior active execution guard to the new execution. This keeps their `Steer` actions valid across refresh and live UI updates instead of exposing stale guarded actions.
+- Successful guarded completion distinguishes `completed`, `pending steering exists`, and `already terminal`; concurrent cancellation/completion must not be overwritten as failed. Cancelled executions are terminal `cancelled` API/UI states, not indefinite processing states. As of 2026-06-01, chat/task-thread success finalization should use a fresh/non-cancelled finalization context inside `completeWithSuccess`, matching `completeWithFailure` and `completeWithCancellation`, so a streaming context cancellation after the model returns does not leave the execution/task `running`.
+- As of 2026-06-01, if `completeWithSuccess` defers because pending steering exists, but `preparePendingSteeringInputs` fails or the retry completion still reports `CompleteSuccessPendingSteering`, `processStreamingResponse` must requeue pending steering for the execution before failure terminalization. Otherwise pending `steering` rows can remain tied to a terminal execution.
+- Direct steering endpoints (`/chat/steer` and `/tasks/:id/thread/steer`) still exist even though the composer no longer exposes them. Their insert path should use the same atomic active-turn guard as queued-row-to-steering conversion and return no-active-turn instead of inserting stranded steering.
+- Clearing Chat history should cancel project-scoped pending Chat inputs, because Chat pending rows are not task-scoped and could otherwise redraw or promote after visible history is deleted.
+- Pending queued/steering rows must redraw from database state on Chat/task-thread refresh, not only immediate HTMX responses. Promoted queued Chat turns broadcast `chat_new_message` with `pending_input_id`; API polling by original queued id follows `run_execution_id` after application.
 
-Chat modes and runtime actions:
-- `/chat` supports `orchestrate` (default) and `plan` (read-only planning).
-- Plan mode enables read-only repo exploration tools, blocks mutating tools, and disables marker execution (`ProcessMarkers=false`) so no task/settings mutations run from marker blocks.
-- Canonical chat capability registry is `internal/chatcontrol/registry.go`; it defines action names, domain, read/write access, allowed modes, surfaces, confirmation requirements, and sensitivity. Tool definitions, mode gating, and surface availability derive from the registry.
-- Web/API chat and channel services should generate runtime action tools from registry helpers rather than hand-crafted tool lists.
-- Runtime tools and marker processing are mutually exclusive per request. When runtime tools are injected, `ProcessMarkers=false` prevents duplicate execution.
-- Legacy marker parser helpers remain for compatibility/tests, but normal chat entrypoints should not depend on assistant-emitted marker blocks.
+Routes, modes, and runtime actions:
+- Chat is the main orchestrator at `/chat` for global/project-level conversation. Thread is the task-specific conversation on the task detail Thread tab. Root route `/` redirects to `/chat`, preserving `project_id`; Dashboard remains at `/dashboard`.
+- `/chat` supports `orchestrate` (default) and `plan` (read-only planning). Plan mode enables read-only repo exploration tools, blocks mutating tools, and disables marker execution (`ProcessMarkers=false`).
+- Canonical chat capability registry is `internal/chatcontrol/registry.go`; it defines action names, domain, read/write access, allowed modes, surfaces, confirmation requirements, and sensitivity. Web/API chat and channel services should derive runtime action tools from registry helpers.
+- Runtime tools and marker processing are mutually exclusive per request. When runtime tools are injected, `ProcessMarkers=false` prevents duplicate execution. Legacy marker parser helpers remain for compatibility/tests, but normal chat entrypoints should not depend on assistant-emitted marker blocks.
 - Expected registry actions across surfaces include chat mode, capabilities, alert, model, personality, current project, and project switching actions.
+- Chat orchestrate task creation should distinguish Agent definitions from model configs: `agent` means assign an Agent from the Agents page by exact unique selectable/enabled name, while `agent_id` is internal model config selection. Natural phrasing such as “Have Bob…”, “Ask Bob…”, or “Use Bob…” should set `agent: "Bob"` only when Bob is a clear Agent-definition match; unassigned prompts must not invent an agent from skills or model config ids.
 
-Plan handoff behavior:
+Plan handoff:
 - `/chat` shows a post-plan handoff prompt when a completed assistant response contains `<proposed_plan>` while in plan mode.
 - Clicking `Switch to Orchestrate` flips mode and auto-submits one task-creation handoff message for the first plan step.
 - Plan-mode guidance should be prose-first while still requiring one `<proposed_plan>...</proposed_plan>` output block.
 - Rendered chat/thread output strips `<proposed_plan>` wrapper tags while raw stored output keeps them for CTA detection.
 - Plan completion prompt evaluation is centralized and requires stream complete, mode `plan`, and the latest completed assistant response containing `<proposed_plan>`. Older plan markers should not trigger it.
 - Once an eligible plan handoff card is shown for the latest completed response, client refocus/refresh/hydration evaluations should preserve it. Only explicit dismissal, a newer response, active stream, or intentional mode switch should hide it.
-- Browser tab `focus`/`visibilitychange` and left-nav return flows should re-evaluate plan completion from the latest completed assistant response after mode hydration, rather than clearing or relying only on transient prompt state.
 
-Thread/follow-up behavior:
+Thread and follow-up behavior:
 - Task thread interaction from `/chat` uses `[VIEW_TASK_CHAT]`/`[SEND_TO_TASK]` markers where compatibility requires it.
 - `view_task_thread` supports pagination. Transcripts are size-budgeted with explicit continuation hints when truncated.
 - Task-thread follow-ups should use chronological execution history, not re-inject the original task prompt, and propagate the task agent definition so plugin skills/MCP tools are active on API provider paths.
-- When task execution delegates to separate LLM-backed agents or lifecycle hooks, their outputs should be visible in an appropriate user-facing execution view; lifecycle-agent activity belongs in its dedicated task-detail tab rather than mixed into the main task Thread tab.
+- When task execution delegates to separate LLM-backed agents or lifecycle hooks, their outputs should be visible in an appropriate user-facing execution view; lifecycle-agent activity belongs in its dedicated task-detail tab rather than mixed into the main Thread tab.
 - Follow-up completion inspects streaming text-only output for `[STATUS: FAILED | ...]` and `[STATUS: NEEDS_FOLLOWUP | ...]` markers. A missing/new-empty diff should not turn a successful read-only follow-up into failure.
 - Failure completion preserves already-streamed `executions.output` when the failed completion call returns empty output so thread history is not reset.
-- Retry writer continuity: streaming writer seeds its in-memory buffer from existing `executions.output` for retryable provider retries on the same execution, preventing transient retries from overwriting streamed history.
+- Shared streaming-runner cancellation should update both `executions.status` and the owning task status to cancelled, and should send channel Chat cancellation responses when the cancelled run originated from Slack/Telegram.
+- Retry writer continuity seeds its in-memory buffer from existing `executions.output` for retryable provider retries on the same execution, preventing transient retries from overwriting streamed history.
 - Chat bubble cleanup re-renders raw-content bubbles when rendered DOM is missing, even if signatures match, to avoid blank prior messages after failure/rate-limit refreshes.
-- Runtime `execute_tasks` filters out completed tasks/statuses by default. Re-running completed tasks requires explicit `include_completed=true`.
-- Runtime `execute_tasks` supports exact single-task targeting by `task_id` or `title`; use exact targeting for specific-task requests instead of broad tag/priority filters.
+- Runtime `execute_tasks` filters out completed tasks/statuses by default. Re-running completed tasks requires explicit `include_completed=true`; exact single-task targeting should use `task_id` or exact `title`.
+- Lifecycle hook ordering for queued task messages: `before_run`/routing lifecycle prep for the queued turn must complete before that queued message is sent to the model, but the previous turn's asynchronous `after_complete` hook does not need to finish before queued promotion starts.
 
-Task execution and scheduling behavior:
+Task execution and scheduling:
 - Active tasks auto-submit to the worker pool on creation or when moved to Active category.
 - `/tasks/{id}/run` uses an atomic guarded pending update and only submits when that update succeeds, so duplicate run requests cannot downgrade running work back to pending.
-- Scheduled tasks are triggered by the background scheduler when `next_run <= now`.
-- One-time schedules set `next_run = NULL` after running; repeating schedules compute `next_run` from repeat type and interval.
+- Scheduled tasks are triggered by the background scheduler when `next_run <= now`. One-time schedules set `next_run = NULL` after running; repeating schedules compute `next_run` from repeat type and interval.
 - Tag-based execution allows batch task execution through chat commands.
+- Promoted queued task-thread follow-ups must move the task category back to `active` before starting so active promoted work does not remain under Completed.
+- `processChatSendToTask` and `TaskThreadSend` should not mutate task status/category until active checks, agent selection, execution/queued-input creation, and worktree preparation have succeeded. Immediate Chat creation paths should clean up newly-created chat tasks if execution creation fails.
 
 Model guardrails:
 - Task actions that transition to execution and chat send should block when zero models are configured, emit one `openvibelyToast`, and include a direct `Open Models` action.
 - First created model auto-defaults when no models exist. Deleting a default model auto-promotes another remaining model; deleting the last model is allowed.
+- Pending queued inputs whose stored `agent_config_id` is deleted or becomes `NULL` before promotion should resolve to the current default model. If no model is configured, cancel the unstartable queued row so FIFO promotion is not permanently blocked.
+- API completed status should report task IDs extracted from processed `[TASK_ID:...]` markers, not all non-chat project tasks.
+- Model-specific worker timeouts must be applied before creating the actual streaming context, not only before worker-slot waiting.
+
+Channel-origin runs follow the same queueing/steering and task-thread rules. Provider-specific Slack/Telegram/GitHub/webhook behavior is captured in `integrations_and_channels.md`.

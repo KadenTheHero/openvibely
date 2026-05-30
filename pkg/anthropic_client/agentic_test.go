@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -244,6 +246,105 @@ func TestAgenticMessageMarshal(t *testing.T) {
 			t.Errorf("expected tool_result content block: %s", data)
 		}
 	})
+}
+
+func TestSendAgentic_InjectsToolBoundarySteeringAfterToolResult(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("hello world\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var turnCount int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turn := int(atomic.AddInt32(&turnCount, 1))
+		body, _ := io.ReadAll(r.Body)
+		var reqBody map[string]interface{}
+		if err := json.Unmarshal(body, &reqBody); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		if turn == 2 {
+			msgs, ok := reqBody["messages"].([]interface{})
+			if !ok || len(msgs) == 0 {
+				t.Fatalf("turn 2 missing messages: %#v", reqBody["messages"])
+			}
+			last, ok := msgs[len(msgs)-1].(map[string]interface{})
+			if !ok {
+				t.Fatalf("turn 2 last message type mismatch: %#v", msgs[len(msgs)-1])
+			}
+			if role, _ := last["role"].(string); role != "user" {
+				t.Fatalf("turn 2 last role = %q, want user", role)
+			}
+			blocks, ok := last["content"].([]interface{})
+			if !ok || len(blocks) < 2 {
+				t.Fatalf("turn 2 last content = %#v, want tool_result plus steering text", last["content"])
+			}
+			first, _ := blocks[0].(map[string]interface{})
+			if first["type"] != "tool_result" {
+				t.Fatalf("turn 2 first user block type = %v, want tool_result", first["type"])
+			}
+			lastBlock, _ := blocks[len(blocks)-1].(map[string]interface{})
+			if lastBlock["type"] != "text" || lastBlock["text"] != "actually only review it" {
+				t.Fatalf("turn 2 last user block = %#v, want steering text", lastBlock)
+			}
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if turn == 1 {
+			inputJSON, _ := json.Marshal(map[string]string{"file_path": "test.txt"})
+			inputStr, _ := json.Marshal(string(inputJSON))
+			events := []string{
+				`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":20}}}`,
+				`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"read_file"}}`,
+				fmt.Sprintf(`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":%s}}`, inputStr),
+				`{"type":"content_block_stop","index":0}`,
+				`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":8}}`,
+				`{"type":"message_stop"}`,
+			}
+			for _, evt := range events {
+				fmt.Fprintf(w, "data: %s\n\n", evt)
+			}
+			return
+		}
+		for _, evt := range []string{
+			`{"type":"message_start","message":{"id":"msg_2","model":"claude-sonnet-4-20250514","usage":{"input_tokens":30}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Reviewed only."}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":6}}`,
+			`{"type":"message_stop"}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	client := NewWithAPIKey("test-key")
+	var callbackCalls int
+	resp, err := client.SendAgentic(context.Background(), "fix the bug", &AgenticOptions{
+		Model:   "claude-sonnet-4-20250514",
+		WorkDir: tmpDir,
+		OnToolBoundarySteering: func(ctx context.Context) (string, error) {
+			callbackCalls++
+			return "actually only review it", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if callbackCalls != 1 {
+		t.Fatalf("callbackCalls = %d, want 1", callbackCalls)
+	}
+	if resp.Text != "Reviewed only." {
+		t.Fatalf("resp.Text = %q, want Reviewed only.", resp.Text)
+	}
+	if got := atomic.LoadInt32(&turnCount); got != 2 {
+		t.Fatalf("turnCount = %d, want 2", got)
+	}
 }
 
 func TestStripToolCallTags(t *testing.T) {

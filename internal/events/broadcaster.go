@@ -18,22 +18,29 @@ var ErrMaxSubscribers = errors.New("maximum subscriber limit reached")
 type TaskEventType string
 
 const (
-	TaskStatusChanged   TaskEventType = "task_status_changed"
-	TaskCategoryChanged TaskEventType = "task_category_changed"
-	AlertCreated        TaskEventType = "alert_created"
+	TaskStatusChanged          TaskEventType = "task_status_changed"
+	TaskCategoryChanged        TaskEventType = "task_category_changed"
+	TaskThreadExecutionStarted TaskEventType = "task_thread_execution_started"
+	TaskThreadInputApplied     TaskEventType = "task_thread_input_applied"
+	TaskThreadInputQueued      TaskEventType = "task_thread_input_queued"
+	TaskThreadInputCancelled   TaskEventType = "task_thread_input_cancelled"
+	AlertCreated               TaskEventType = "alert_created"
 )
 
 // TaskEvent represents a task state change event
 type TaskEvent struct {
-	Type        TaskEventType `json:"type"`
-	TaskID      string        `json:"task_id"`
-	TaskName    string        `json:"task_name,omitempty"`
-	ProjectID   string        `json:"project_id,omitempty"`
-	Status      string        `json:"status,omitempty"`
-	Category    string        `json:"category,omitempty"`
-	OldStatus   string        `json:"old_status,omitempty"`
-	OldCategory string        `json:"old_category,omitempty"`
-	AlertID     string        `json:"alert_id,omitempty"`
+	Type           TaskEventType `json:"type"`
+	TaskID         string        `json:"task_id"`
+	TaskName       string        `json:"task_name,omitempty"`
+	ProjectID      string        `json:"project_id,omitempty"`
+	Status         string        `json:"status,omitempty"`
+	Category       string        `json:"category,omitempty"`
+	OldStatus      string        `json:"old_status,omitempty"`
+	OldCategory    string        `json:"old_category,omitempty"`
+	AlertID        string        `json:"alert_id,omitempty"`
+	ExecID         string        `json:"exec_id,omitempty"`
+	Message        string        `json:"message,omitempty"`
+	PendingInputID string        `json:"pending_input_id,omitempty"`
 }
 
 // Subscriber is a channel that receives task events
