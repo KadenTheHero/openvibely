@@ -23,6 +23,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 
 	// HTML <option> elements
 	for _, model := range []string{
+		"claude-opus-4-8",
 		"claude-opus-4-7",
 		"claude-sonnet-4-6",
 	} {
@@ -37,6 +38,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 		"gpt-5.5-pro",
 		"gpt-5.4-mini",
 		"gpt-5.3-codex-spark",
+		"claude-opus-4-8",
 		"claude-opus-4-7",
 		"claude-sonnet-4-6",
 	} {
@@ -59,6 +61,9 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	}
 	if !strings.Contains(out, "{ value: 'claude-opus-4-7', label: 'Claude Opus 4.7', efforts: ['low', 'medium', 'high', 'max']") {
 		t.Error("expected Claude Opus 4.7 effort options")
+	}
+	if !strings.Contains(out, "{ value: 'claude-opus-4-8', label: 'Claude Opus 4.8', efforts: ['low', 'medium', 'high', 'max']") {
+		t.Error("expected Claude Opus 4.8 effort options")
 	}
 }
 

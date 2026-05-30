@@ -8,6 +8,7 @@ func TestClaudeCodeMaxOutputTokens(t *testing.T) {
 		model string
 		want  int
 	}{
+		{"opus 4.8", "claude-opus-4-8", 64000},
 		{"opus 4.7", "claude-opus-4-7-20260514", 64000},
 		{"opus 4.6", "claude-opus-4-6-20260401", 64000},
 		{"sonnet 4.6", "claude-sonnet-4-6-20260514", 32000},
