@@ -2924,6 +2924,75 @@ func TestHandler_TaskThreadSend(t *testing.T) {
 	}
 }
 
+func TestHandler_TaskThreadSend_CompletedTaskIgnoresAndRepairsStaleRunningExecution(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Stale Completed Project")
+	task := createTask(t, h, project.ID, "Thread Stale Completed Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.Category = models.CategoryCompleted
+		tk.AgentID = &agent.ID
+	})
+	staleExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "stale active turn"
+		ex.IsFollowup = true
+	})
+
+	form := url.Values{}
+	form.Set("message", "follow up after completed task")
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "follow up after completed task")
+	assertContains(t, rec, "chat-bubble-assistant-msg")
+	assertNotContains(t, rec, `data-input-mode="queued"`)
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 2)
+	assert.Equal(t, models.ExecFailed, execs[0].Status)
+	assert.Equal(t, staleExec.ID, execs[0].ID)
+	assert.Equal(t, models.ExecRunning, execs[1].Status)
+	assert.Equal(t, "follow up after completed task", execs[1].PromptSent)
+	assert.True(t, execs[1].IsFollowup)
+	pending, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+}
+
+func TestHandler_TaskThreadSend_CancelledTaskIgnoresAndRepairsStaleRunningExecution(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Stale Cancelled Project")
+	task := createTask(t, h, project.ID, "Thread Stale Cancelled Task", func(tk *models.Task) {
+		tk.Status = models.StatusCancelled
+		tk.Category = models.CategoryBacklog
+		tk.AgentID = &agent.ID
+	})
+	staleExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "stale cancelled turn"
+		ex.IsFollowup = true
+	})
+
+	form := url.Values{}
+	form.Set("message", "follow up after cancelled task")
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "follow up after cancelled task")
+	assertNotContains(t, rec, `data-input-mode="queued"`)
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 2)
+	assert.Equal(t, staleExec.ID, execs[0].ID)
+	assert.Equal(t, models.ExecCancelled, execs[0].Status)
+	assert.Equal(t, models.ExecRunning, execs[1].Status)
+	assert.Equal(t, "follow up after cancelled task", execs[1].PromptSent)
+}
+
 func TestHandler_TaskThreadSend_QueuesBehindActiveTurn(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -2971,6 +3040,48 @@ func TestHandler_TaskThreadSend_QueuesBehindActiveTurn(t *testing.T) {
 	require.Len(t, inputs, 1)
 	assert.Equal(t, models.ThreadInputModeQueued, inputs[0].InputMode)
 	assert.Equal(t, "queued follow up", inputs[0].Content)
+}
+
+func TestHandler_RunTask_PromotesPendingTaskThreadInputInsteadOfOriginalPrompt(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Manual Start Queued Thread Project")
+	task := createTask(t, h, project.ID, "Manual Start Queued Thread Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.Category = models.CategoryCompleted
+		tk.Prompt = "original task prompt"
+		tk.AgentID = &agent.ID
+	})
+	queued := &models.ThreadInput{
+		Scope:         models.ThreadInputScopeTask,
+		ProjectID:     project.ID,
+		TaskID:        task.ID,
+		AgentConfigID: agent.ID,
+		InputMode:     models.ThreadInputModeQueued,
+		InputStatus:   models.ThreadInputPending,
+		Content:       "queued follow-up should run",
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
+
+	rec := htmxPost(e, "/tasks/"+task.ID+"/run", nil)
+	assertCode(t, rec, http.StatusNoContent)
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	assert.Equal(t, "queued follow-up should run", execs[0].PromptSent)
+	assert.NotEqual(t, "original task prompt", execs[0].PromptSent)
+	assert.True(t, execs[0].IsFollowup)
+	input, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.NotNil(t, input)
+	assert.Equal(t, models.ThreadInputApplied, input.InputStatus)
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedTask)
+	assert.Equal(t, models.StatusQueued, updatedTask.Status)
+	assert.Equal(t, models.CategoryActive, updatedTask.Category)
 }
 
 func TestHandler_TaskThreadSteer_CreatesPendingSteeringInput(t *testing.T) {

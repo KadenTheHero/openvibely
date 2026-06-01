@@ -242,9 +242,62 @@ func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, 
 	return CompleteSuccessPendingSteering, nil
 }
 
+func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (int64, error) {
+	if _, err := r.db.ExecContext(ctx, `
+		UPDATE thread_inputs
+		SET input_mode = 'queued', turn_id = NULL, expected_turn_id = NULL, updated_at = datetime('now')
+		WHERE input_status = 'pending'
+		  AND input_mode = 'steering'
+		  AND run_execution_id IN (
+		      SELECT e.id
+		      FROM executions e
+		      JOIN tasks t ON t.id = e.task_id
+			      WHERE e.status = 'running'
+			        AND t.category != 'chat'
+			        AND (t.status IN ('completed', 'failed', 'cancelled', 'pending') OR t.category != 'active')
+		  )`); err != nil {
+		return 0, fmt.Errorf("requeueing stale running task steering inputs: %w", err)
+	}
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE executions
+		SET status = CASE
+				WHEN (SELECT t.status FROM tasks t WHERE t.id = executions.task_id) = 'cancelled' THEN 'cancelled'
+				ELSE 'failed'
+			END,
+			error_message = CASE
+				WHEN COALESCE(error_message, '') = '' THEN 'Recovered stale running execution: owning task is terminal or inactive'
+				ELSE error_message
+			END,
+			completed_at = datetime('now')
+		WHERE status = 'running'
+		  AND EXISTS (
+		      SELECT 1
+		      FROM tasks t
+		      WHERE t.id = executions.task_id
+		        AND t.category != 'chat'
+		        AND (t.status IN ('completed', 'failed', 'cancelled', 'pending') OR t.category != 'active')
+		  )`)
+	if err != nil {
+		return 0, fmt.Errorf("recovering stale running task executions: %w", err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("recovering stale running task executions rows affected: %w", err)
+	}
+	return changed, nil
+}
+
 func (r *ExecutionRepo) FindActiveTaskExecution(ctx context.Context, taskID, excludeExecID string) (*models.Execution, error) {
+	if _, err := r.RecoverStaleRunningTaskExecutions(ctx); err != nil {
+		return nil, err
+	}
 	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
-		`SELECT `+executionSelectColumns+` FROM executions WHERE task_id = ? AND id != ? AND status = 'running' ORDER BY started_at DESC, rowid DESC LIMIT 1`, taskID, excludeExecID))
+		`SELECT `+executionSelectColumnsAlias+`
+		 FROM executions e
+		 JOIN tasks t ON t.id = e.task_id
+		 WHERE e.task_id = ? AND e.id != ? AND e.status = 'running'
+		   AND t.category = 'active' AND t.status IN ('queued', 'running')
+		 ORDER BY e.started_at DESC, e.rowid DESC LIMIT 1`, taskID, excludeExecID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -255,9 +308,16 @@ func (r *ExecutionRepo) FindActiveTaskExecution(ctx context.Context, taskID, exc
 }
 
 func (r *ExecutionRepo) HasActiveTaskExecution(ctx context.Context, taskID, excludeExecID string) (bool, error) {
+	if _, err := r.RecoverStaleRunningTaskExecutions(ctx); err != nil {
+		return false, err
+	}
 	var count int
 	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM executions WHERE task_id = ? AND id != ? AND status = 'running'`, taskID, excludeExecID).Scan(&count)
+		`SELECT COUNT(*)
+		 FROM executions e
+		 JOIN tasks t ON t.id = e.task_id
+		 WHERE e.task_id = ? AND e.id != ? AND e.status = 'running'
+		   AND t.category = 'active' AND t.status IN ('queued', 'running')`, taskID, excludeExecID).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("checking active task execution: %w", err)
 	}

@@ -170,6 +170,9 @@ func New(
 		telegramService:      telegramSvc,
 		projectFolderPicker:  pickProjectFolderNative,
 	}
+	if taskSvc != nil {
+		taskSvc.SetQueuedTaskThreadFollowupHook(h.StartPendingTaskThreadFollowup)
+	}
 	return h
 }
 

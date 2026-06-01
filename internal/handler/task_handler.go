@@ -1123,7 +1123,7 @@ func (h *Handler) RunTask(c echo.Context) error {
 		log.Printf("[handler] RunTask error: %v", err)
 		return err
 	}
-	log.Printf("[handler] RunTask submitted task=%s to worker pool", taskID)
+	log.Printf("[handler] RunTask handled task=%s", taskID)
 
 	// Return no content for HTMX requests — the dialog close handler on each page
 	// will refresh relevant content (e.g., kanban board on tasks page)

@@ -14,10 +14,11 @@ import (
 var ErrDuplicateTask = errors.New("task with this name already exists in this project")
 
 type TaskService struct {
-	repo           *repository.TaskRepo
-	attachmentRepo *repository.AttachmentRepo
-	workerSvc      *WorkerService
-	agentRepo      *repository.AgentRepo
+	repo                         *repository.TaskRepo
+	attachmentRepo               *repository.AttachmentRepo
+	workerSvc                    *WorkerService
+	agentRepo                    *repository.AgentRepo
+	queuedTaskThreadFollowupHook func(context.Context, string) (bool, error)
 }
 
 func NewTaskService(repo *repository.TaskRepo, attachmentRepo *repository.AttachmentRepo, workerSvc *WorkerService) *TaskService {
@@ -30,6 +31,10 @@ func NewTaskService(repo *repository.TaskRepo, attachmentRepo *repository.Attach
 
 func (s *TaskService) SetAgentRepo(agentRepo *repository.AgentRepo) {
 	s.agentRepo = agentRepo
+}
+
+func (s *TaskService) SetQueuedTaskThreadFollowupHook(hook func(context.Context, string) (bool, error)) {
+	s.queuedTaskThreadFollowupHook = hook
 }
 
 func (s *TaskService) ListByProject(ctx context.Context, projectID, category string) ([]models.Task, error) {
@@ -128,9 +133,20 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 		}
 	}
 
-	// If moved to Active, always reset status to pending and auto-submit.
-	// ClaimTask provides atomic guard against double execution.
+	// If moved to Active, prefer a pending task-thread follow-up over rerunning the original prompt.
+	// ClaimTask provides atomic guard against double execution for normal task runs.
 	if category == models.CategoryActive {
+		if s.queuedTaskThreadFollowupHook != nil {
+			handled, err := s.queuedTaskThreadFollowupHook(ctx, id)
+			if err != nil {
+				log.Printf("[task-svc] UpdateCategory queued task-thread follow-up promotion failed id=%s: %v", id, err)
+				return err
+			}
+			if handled {
+				log.Printf("[task-svc] UpdateCategory promoted queued task-thread follow-up id=%s", id)
+				return nil
+			}
+		}
 		log.Printf("[task-svc] UpdateCategory resetting status to pending and auto-submitting id=%s (was %s)", id, task.Status)
 		s.repo.UpdateStatus(ctx, id, models.StatusPending)
 		task.Status = models.StatusPending
@@ -198,6 +214,17 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 
 func (s *TaskService) RunTask(ctx context.Context, id string) error {
 	log.Printf("[task-svc] RunTask id=%s", id)
+	if s.queuedTaskThreadFollowupHook != nil {
+		handled, err := s.queuedTaskThreadFollowupHook(ctx, id)
+		if err != nil {
+			log.Printf("[task-svc] RunTask queued task-thread follow-up promotion failed id=%s: %v", id, err)
+			return err
+		}
+		if handled {
+			log.Printf("[task-svc] RunTask promoted queued task-thread follow-up id=%s", id)
+			return nil
+		}
+	}
 	task, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		log.Printf("[task-svc] RunTask error fetching: %v", err)

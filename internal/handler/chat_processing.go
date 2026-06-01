@@ -774,7 +774,9 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 		if queued == nil {
 			return
 		}
-		h.startQueuedTaskThreadInput(ctx, *queued)
+		if startErr := h.startQueuedTaskThreadInput(ctx, *queued); startErr != nil {
+			log.Printf("[handler] startNextQueuedTurn task=%s input=%s start error: %v", completed.TaskID, queued.ID, startErr)
+		}
 		return
 	}
 	if completed.ProjectID == "" {
@@ -950,24 +952,54 @@ func channelReplyFromThreadInput(input models.ThreadInput) service.ChannelReplyC
 	}
 }
 
-func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.ThreadInput) {
+func (h *Handler) StartPendingTaskThreadFollowup(ctx context.Context, taskID string) (bool, error) {
+	if h.threadInputRepo == nil || h.execRepo == nil || taskID == "" {
+		return false, nil
+	}
+	active, err := h.execRepo.HasActiveTaskExecution(ctx, taskID, "")
+	if err != nil {
+		log.Printf("[handler] startPendingTaskThreadFollowup task=%s active check error: %v", taskID, err)
+		return false, err
+	}
+	if active {
+		return false, nil
+	}
+	queued, err := h.threadInputRepo.FindOldestQueuedForTask(ctx, taskID)
+	if err != nil {
+		log.Printf("[handler] startPendingTaskThreadFollowup task=%s queued lookup error: %v", taskID, err)
+		return false, err
+	}
+	if queued == nil {
+		return false, nil
+	}
+	if err := h.startQueuedTaskThreadInput(ctx, *queued); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.ThreadInput) error {
 	task, err := h.taskRepo.GetByID(ctx, input.TaskID)
 	if err != nil || task == nil {
+		if err == nil {
+			err = fmt.Errorf("task not found: %s", input.TaskID)
+		}
 		log.Printf("[handler] startQueuedTaskThreadInput input=%s task=%s load error: %v", input.ID, input.TaskID, err)
-		return
+		return err
 	}
 	agent, unstartable, err := h.resolveQueuedInputAgent(ctx, input)
 	if err != nil {
 		log.Printf("[handler] startQueuedTaskThreadInput input=%s agent=%s load error: %v", input.ID, input.AgentConfigID, err)
-		return
+		return err
 	}
 	if agent == nil {
 		log.Printf("[handler] startQueuedTaskThreadInput input=%s agent=%s no usable model", input.ID, input.AgentConfigID)
 		if unstartable {
 			h.cancelUnstartableQueuedInput(ctx, input)
 			h.startNextQueuedTurnAfter(ctx, streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, "")
+			return nil
 		}
-		return
+		return fmt.Errorf("model not found for queued task-thread input: %s", input.AgentConfigID)
 	}
 	exec := &models.Execution{
 		TaskID:        input.TaskID,
@@ -980,7 +1012,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		if err != repository.ErrInputNotPending {
 			log.Printf("[handler] startQueuedTaskThreadInput input=%s claim error: %v", input.ID, err)
 		}
-		return
+		return err
 	}
 	if err := h.taskRepo.UpdateStatus(ctx, input.TaskID, models.StatusQueued); err != nil {
 		log.Printf("[handler] startQueuedTaskThreadInput task=%s error marking queued: %v", input.TaskID, err)
@@ -1019,7 +1051,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 	if workDirErr != nil {
 		h.completeWithFailure(ctx, exec.ID, exec.TaskID, workDirErr.Error(), 0, channelReplyFromThreadInput(input))
 		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, exec.ID)
-		return
+		return nil
 	}
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && h.agentRepo != nil {
@@ -1040,7 +1072,9 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   true,
 		ProcessMarkers:   false,
-		ChannelReply:     channelReplyFromThreadInput(input)})
+		ChannelReply:     channelReplyFromThreadInput(input),
+	})
+	return nil
 }
 
 func (h *Handler) registerTaskCancellation(taskID string, cancel context.CancelFunc) {

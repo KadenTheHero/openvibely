@@ -615,11 +615,18 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		log.Printf("WARNING: %d project(s) have missing repo paths — tasks using these projects will fail until repos are restored. Ensure PROJECT_REPO_ROOT is on a persistent volume (e.g. /data/repos).", len(missing))
 	}
 
-	// Reset any tasks orphaned in 'running' state from a previous crash
+	// Reset any tasks orphaned in 'running' state from a previous crash, then
+	// terminalize their pre-restart running executions. No task workers survive a
+	// process restart, so any non-chat execution still marked running is stale.
 	if count, resetErr := taskRepo.ResetOrphanedRunning(context.Background()); resetErr != nil {
 		log.Printf("warning: failed to reset orphaned running tasks: %v", resetErr)
 	} else if count > 0 {
 		log.Printf("reset %d orphaned running tasks to pending", count)
+	}
+	if recovered, recoverErr := execRepo.RecoverStaleRunningTaskExecutions(context.Background()); recoverErr != nil {
+		log.Printf("warning: failed to recover stale running task executions: %v", recoverErr)
+	} else if recovered > 0 {
+		log.Printf("recovered %d stale running task execution(s)", recovered)
 	}
 
 	// Clean up orphaned attachment files

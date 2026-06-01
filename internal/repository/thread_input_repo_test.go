@@ -664,6 +664,84 @@ func TestThreadInputRepo_CreateSteeringForActiveExecutionFailsAfterTurnCompletes
 	}
 }
 
+func TestExecutionRepo_FindActiveTaskExecutionTreatsQueuedTaskAsActive(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	taskRepo := NewTaskRepo(db, nil)
+	if err := taskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued); err != nil {
+		t.Fatalf("UpdateStatus queued: %v", err)
+	}
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	queuedExec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "waiting for worker slot", IsFollowup: true}
+	if err := execRepo.Create(ctx, queuedExec); err != nil {
+		t.Fatalf("create queued execution: %v", err)
+	}
+
+	active, err := execRepo.FindActiveTaskExecution(ctx, task.ID, "")
+	if err != nil {
+		t.Fatalf("FindActiveTaskExecution: %v", err)
+	}
+	if active == nil || active.ID != queuedExec.ID {
+		t.Fatalf("expected queued running execution to be active, got %#v", active)
+	}
+	stored, err := execRepo.GetByID(ctx, queuedExec.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored.Status != models.ExecRunning {
+		t.Fatalf("expected queued execution to remain running, got %s", stored.Status)
+	}
+}
+
+func TestExecutionRepo_RecoverStaleRunningTaskExecutionsRepairsPendingTaskCrashLeftover(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	taskRepo := NewTaskRepo(db, nil)
+	if err := taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
+		t.Fatalf("UpdateStatus pending: %v", err)
+	}
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	staleExec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "pre-restart run"}
+	if err := execRepo.Create(ctx, staleExec); err != nil {
+		t.Fatalf("create stale execution: %v", err)
+	}
+	steering := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: staleExec.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeSteering, InputStatus: models.ThreadInputPending, TurnID: staleExec.ID, ExpectedTurnID: staleExec.ID, Content: "pending steer"}
+	if err := NewThreadInputRepo(db).CreateQueued(ctx, steering); err != nil {
+		t.Fatalf("create steering input fixture: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE thread_inputs SET input_mode = 'steering', turn_id = ?, expected_turn_id = ? WHERE id = ?`, staleExec.ID, staleExec.ID, steering.ID); err != nil {
+		t.Fatalf("convert steering fixture: %v", err)
+	}
+
+	recovered, err := execRepo.RecoverStaleRunningTaskExecutions(ctx)
+	if err != nil {
+		t.Fatalf("RecoverStaleRunningTaskExecutions: %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("expected 1 recovered execution, got %d", recovered)
+	}
+	stored, err := execRepo.GetByID(ctx, staleExec.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored.Status != models.ExecFailed {
+		t.Fatalf("expected stale execution failed, got %s", stored.Status)
+	}
+	input, err := NewThreadInputRepo(db).GetByID(ctx, steering.ID)
+	if err != nil {
+		t.Fatalf("GetByID input: %v", err)
+	}
+	if input.InputMode != models.ThreadInputModeQueued || input.InputStatus != models.ThreadInputPending || input.TurnID != "" || input.ExpectedTurnID != "" {
+		t.Fatalf("expected stale steering requeued safely, got %#v", input)
+	}
+}
+
 func createThreadInputProject(t *testing.T, ctx context.Context, db *sql.DB) *models.Project {
 	t.Helper()
 	repo := NewProjectRepo(db)

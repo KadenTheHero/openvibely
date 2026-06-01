@@ -9,6 +9,8 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestWorkerService(t *testing.T) *WorkerService {
@@ -293,6 +295,120 @@ func TestWorkerService_Resize_DecreasesWorkerCount(t *testing.T) {
 	ws.Resize(2)
 	if ws.NumWorkers() != 2 {
 		t.Errorf("expected 2 workers after Resize, got %d", ws.NumWorkers())
+	}
+}
+
+func TestTaskService_UpdateCategory_PromotesQueuedTaskThreadFollowupBeforeOriginalPrompt(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	project := &models.Project{Name: "Manual Active Promotion Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent := &models.LLMConfig{Name: "Test Agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	workerSvc := NewWorkerService(nil, 0, nil)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	task := &models.Task{ProjectID: project.ID, Title: "Manual Active Promotion Task", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "original prompt", AgentID: &agent.ID}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued follow-up"}
+	require.NoError(t, threadInputRepo.CreateQueued(ctx, queued))
+	svc.SetQueuedTaskThreadFollowupHook(func(ctx context.Context, taskID string) (bool, error) {
+		pending, err := threadInputRepo.FindOldestQueuedForTask(ctx, taskID)
+		require.NoError(t, err)
+		require.NotNil(t, pending)
+		exec := &models.Execution{TaskID: taskID, AgentConfigID: pending.AgentConfigID, Status: models.ExecRunning, PromptSent: pending.Content, IsFollowup: true}
+		require.NoError(t, threadInputRepo.ClaimQueuedForTaskExecution(ctx, pending.ID, exec))
+		require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
+		return true, nil
+	})
+
+	require.NoError(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive))
+	execs, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	assert.Equal(t, "queued follow-up", execs[0].PromptSent)
+	assert.True(t, execs[0].IsFollowup)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("expected original task not to be submitted, got %s", submitted.Prompt)
+	default:
+	}
+}
+
+func TestTaskService_RunTask_PromotesQueuedTaskThreadFollowupBeforeOriginalPrompt(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	project := &models.Project{Name: "Manual Run Promotion Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent := &models.LLMConfig{Name: "Test Agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	workerSvc := NewWorkerService(nil, 0, nil)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	task := &models.Task{ProjectID: project.ID, Title: "Manual Run Promotion Task", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "original prompt", AgentID: &agent.ID}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued follow-up"}
+	require.NoError(t, threadInputRepo.CreateQueued(ctx, queued))
+	svc.SetQueuedTaskThreadFollowupHook(func(ctx context.Context, taskID string) (bool, error) {
+		pending, err := threadInputRepo.FindOldestQueuedForTask(ctx, taskID)
+		require.NoError(t, err)
+		if pending == nil {
+			return false, nil
+		}
+		exec := &models.Execution{TaskID: taskID, AgentConfigID: pending.AgentConfigID, Status: models.ExecRunning, PromptSent: pending.Content, IsFollowup: true}
+		if err := threadInputRepo.ClaimQueuedForTaskExecution(ctx, pending.ID, exec); err != nil {
+			return true, err
+		}
+		require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
+		return true, nil
+	})
+
+	require.NoError(t, svc.RunTask(ctx, task.ID))
+	execs, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	assert.Equal(t, "queued follow-up", execs[0].PromptSent)
+	assert.True(t, execs[0].IsFollowup)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("expected original task not to be submitted, got %s", submitted.Prompt)
+	default:
+	}
+}
+
+func TestTaskService_RunTask_DoesNotRerunOriginalPromptWhenQueuedFollowupPromotionFails(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	workerSvc := NewWorkerService(nil, 0, nil)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	task := &models.Task{ProjectID: "default", Title: "Promotion Failure", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "original prompt"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	svc.SetQueuedTaskThreadFollowupHook(func(ctx context.Context, taskID string) (bool, error) {
+		return true, assert.AnError
+	})
+
+	err := svc.RunTask(ctx, task.ID)
+	require.ErrorIs(t, err, assert.AnError)
+	got, getErr := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, getErr)
+	assert.Equal(t, models.StatusCompleted, got.Status)
+	assert.Equal(t, models.CategoryCompleted, got.Category)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("expected original task not to be submitted after promotion failure, got %s", submitted.Prompt)
+	default:
 	}
 }
 

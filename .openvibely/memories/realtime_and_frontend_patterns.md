@@ -19,7 +19,7 @@ Realtime and diff updates:
 - Avoid `htmx.ajax()` live swaps for frequent diff refreshes when a fingerprint gate is needed; it can remount DOM before the no-op check.
 
 Task Changes rendering safety:
-- Task detail lazily loads Changes tab content unless `tab=changes` is active, so Thread/Details do not pre-render heavy hidden diff DOM.
+- Task detail lazily loads Changes tab content unless `tab=changes` is active, so Thread/Details do not pre-render heavy hidden diff DOM. Be careful that direct `?tab=changes` server render can bypass HTMX Changes handlers and any handler-side recovery/revalidation logic; keep initial render and lazy route behavior equivalent for stateful Changes features such as worktree merge controls.
 - Diff viewer uses GitHub-style load envelopes and renders oversized files as explicit `Load diff` or non-loadable placeholders rather than eagerly mounting all diff DOM.
 - Placeholder/non-rendered file entries should reuse the shared file-card header/body collapse contract without mounting heavy tables. Keep padding/background/content spacing on an inner placeholder wrapper, not the collapsible `diff-file-body`, so `max-height: 0` fully collapses non-rendered entries.
 - Diff parsing should synthesize a fallback hunk when diff content lines exist without an explicit `@@` header.

@@ -1031,7 +1031,7 @@ func TestStartQueuedTaskThreadInputCancelsQueuedInputWhenNoModelAvailable(t *tes
 	mock.TextOnly = "done"
 	h.llmSvc.SetLLMCaller(mock)
 
-	h.startQueuedTaskThreadInput(ctx, *input)
+	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
 	updated, err := h.threadInputRepo.GetByID(ctx, input.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ThreadInputCancelled, updated.InputStatus)
@@ -1085,7 +1085,7 @@ func TestStartQueuedTaskThreadInputUsesQueuedChannelReplyContext(t *testing.T) {
 	h.llmSvc.SetLLMCaller(mock)
 
 	require.NoError(t, h.execRepo.Complete(ctx, activeExec.ID, models.ExecCompleted, "active done", "", 0, 0))
-	h.startQueuedTaskThreadInput(ctx, *input)
+	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
 	require.Eventually(t, func() bool { return sentChannel == "C1" }, 2*time.Second, 25*time.Millisecond)
 	require.Equal(t, "1710000000.100000", sentThread)
@@ -1145,7 +1145,7 @@ func TestStartQueuedTaskThreadInputMovesCompletedTaskBackToActive(t *testing.T) 
 	require.NoError(t, err)
 	defer broadcaster.Unsubscribe(sub)
 
-	h.startQueuedTaskThreadInput(ctx, *input)
+	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
 	var startEvent events.TaskEvent
 	select {
 	case startEvent = <-sub:
@@ -1220,7 +1220,7 @@ func TestStartQueuedTaskThreadInputFailureUsesQueuedChannelReplyContext(t *testi
 		sentUser = userID
 	}})
 
-	h.startQueuedTaskThreadInput(ctx, *input)
+	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
 	require.Eventually(t, func() bool { return sentChannel == "Cfail" }, 2*time.Second, 25*time.Millisecond)
 	require.Equal(t, "1710000000.200000", sentThread)
 	require.Contains(t, sentErr, "could not check worktree status")
@@ -1331,7 +1331,7 @@ func TestStartQueuedTaskThreadInputProcessesSavedAttachmentSession(t *testing.T)
 	defer broadcaster.Unsubscribe(sub)
 
 	require.NoError(t, h.execRepo.Complete(ctx, activeExec.ID, models.ExecCompleted, "active done", "", 0, 0))
-	h.startQueuedTaskThreadInput(ctx, *input)
+	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
 
 	var started events.TaskEvent
 	select {
