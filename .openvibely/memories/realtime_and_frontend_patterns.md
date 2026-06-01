@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-05-31
-source: after_complete
-source_id: 8a474c7b49a4363832169d74bb3c296a
+updated: 2026-06-01
+source: consolidation
+source_id: memory_consolidation_2026_06_01
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -20,8 +20,8 @@ Realtime and diff updates:
 
 Task Changes rendering safety:
 - Task detail lazily loads Changes tab content unless `tab=changes` is active, so Thread/Details do not pre-render heavy hidden diff DOM.
-- Diff viewer uses GitHub-style load envelopes and renders oversized files as explicit `Load diff` or non-loadable placeholders rather than eagerly mounting all diff DOM. Placeholder/non-rendered file entries should still reuse the shared file-card header/body collapse contract without mounting heavy tables.
-- Keep padding/background/content spacing on an inner placeholder wrapper, not the collapsible `diff-file-body`, so `max-height: 0` fully collapses non-rendered entries without residual visible padding.
+- Diff viewer uses GitHub-style load envelopes and renders oversized files as explicit `Load diff` or non-loadable placeholders rather than eagerly mounting all diff DOM.
+- Placeholder/non-rendered file entries should reuse the shared file-card header/body collapse contract without mounting heavy tables. Keep padding/background/content spacing on an inner placeholder wrapper, not the collapsible `diff-file-body`, so `max-height: 0` fully collapses non-rendered entries.
 - Diff parsing should synthesize a fallback hunk when diff content lines exist without an explicit `@@` header.
 - Task Changes file-header addition/deletion counts should visually align with the diff card add/delete palette, not raw DaisyUI `oklch()` semantic tokens or separate hardcoded palettes. Keep desktop-WebView-safe plain color/RGBA variables for shared diff rendering.
 - Deleted files in task diffs render as normal file cards with a `Deleted` status badge; textual deletions show removed-line hunks, while deleted binary/empty files without hunks show centered summary text.
@@ -31,14 +31,14 @@ Task Changes rendering safety:
 Chat and thread rendering:
 - For streaming chat and tool cards, batch DOM rendering with `requestAnimationFrame` and force final flush on completion.
 - Chat steering live events such as `chat_turn_steered` should be forwarded by the shared sidebar SSE dispatcher and render or dedupe a pending steering row, not append a normal user message plus assistant streaming placeholder.
-- Queued live Chat events should render the durable pending-input row with `Steer` and `Cancel`, not a generic assistant “queued” bubble, so live UI and refresh-rendered UI have the same controls. Queued/steering pending-row styling should be neutral rather than yellow/warning-colored.
-- The user wants queued message indicators to be genuinely compact so actual chat messages remain the focus: avoid full-height/full-card pending rows that consume a normal message lane. Compactness should come from eliminating surrounding stack gaps, not from making text too small or harder to read.
-- As of 2026-05-31, queued and steering-pending Chat/task-thread messages should render as part of the composer/input-box area rather than inside the chat transcript, including after page refresh. Each pending message should have its own input-box-style container with the prompt/status on the left and right-aligned actions; queued rows show `Steer` plus an icon-only trash cancel button, and steering-pending rows use the same trash icon instead of `Cancel` text, matching the alerts page SVG style.
-- Pending composer rows should preserve readable text and a clear gutter between the last queued/steering row and the textarea. Compactness should come from grouping/placement and consistent shared CSS across server render, SSE, and HTMX out-of-band appends, not from tiny fonts, cramped controls, or live-only margin toggles.
+- Queued live Chat events should render the durable pending-input row with `Steer` and cancel controls, not a generic assistant “queued” bubble, so live UI and refresh-rendered UI have the same controls.
+- Queued and steering-pending Chat/task-thread messages should render as compact composer/input-box rows rather than inside the transcript, including after refresh. Each pending message should have an input-box-style container with prompt/status on the left and right-aligned actions; queued rows show `Steer` plus an icon-only trash cancel button, and steering-pending rows use the same trash icon.
+- Pending composer rows should preserve readable text and a clear gutter between the last queued/steering row and the textarea. Compactness should come from grouping/placement and shared CSS across server render, SSE, and HTMX out-of-band appends, not tiny fonts or cramped controls.
 - Task-thread SSE completion should finish dynamically in place: force the final streamed render, clear streaming indicators/state, and avoid post-stream reconciliation refreshes of either `#task-thread-view` or the whole task shell.
-- Promoted queued task-thread runs should be discovered through live events that append the promoted execution fragment, remove the stale pending row, and attach the new execution stream. Pending steering rows should disappear through live events as soon as they are prepared/started for processing rather than waiting for provider success or a thread refresh. Cancelling pending queued/steering rows should publish chat/task realtime cancellation events so other open tabs remove the stale composer row without refresh.
-- If a prepared steering row is removed from the composer at processing start and the provider call later fails, DB recovery requeues it and publishes a realtime re-add event so the recovered queued row should reappear in the composer without refresh. Chat uses the queued `chat_new_message` path; task threads use a task-thread queued-input live event. Chat duplicate guards must keep execution IDs separate from pending-input IDs: `chat_turn_steered` should not seed execution dedupe with pending input ids, queued rows should dedupe by composer DOM/thread-input id, and `_chatKnownExecIds` should be reserved for real execution ids so direct-steer and queued-to-steer recovery are not suppressed.
-- Chat's web-send dedupe/suppression flag must clear on the form request lifecycle as well as swap lifecycle, because active-response sends can return only out-of-band composer updates instead of swapping `#chat-messages` or `#chat-page-root`. Otherwise same-tab live queued/steering events can remain hidden after OOB-only queued responses.
+- Promoted queued task-thread runs should be discovered through live events that append the promoted execution fragment, remove the stale pending row, and attach the new execution stream.
+- Pending steering rows should disappear through live events as soon as they are prepared/started for processing rather than waiting for provider success or a thread refresh. If provider failure recovery requeues the steer, publish a realtime re-add event so the recovered queued row reappears without refresh.
+- Chat duplicate guards must keep execution IDs separate from pending-input IDs: `chat_turn_steered` should not seed execution dedupe with pending input ids, queued rows should dedupe by composer DOM/thread-input id, and `_chatKnownExecIds` should be reserved for real execution ids.
+- Chat's web-send dedupe/suppression flag must clear on the form request lifecycle as well as swap lifecycle, because active-response sends can return only out-of-band composer updates instead of swapping `#chat-messages` or `#chat-page-root`.
 - Thread tab content is lazy-loaded via `GET /tasks/:id/thread`; heavy execution transcripts should not be pre-rendered in hidden tabs.
 - Active chat/task-thread streaming should use shared smart autoscroll behavior when present: record whether the viewport was pinned before content growth, then only scroll after rendering if it was pinned. Upward user movement is intent to read.
 - For large conversations, avoid clearing scroll intent from programmatic/clamp scroll events during streaming rerenders; derive intent from real user interactions such as wheel/touch/key/pointer and keep pointer/scrollbar drags active until pointerup/cancel/blur.

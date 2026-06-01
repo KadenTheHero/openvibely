@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-05-31
-source: after_complete
-source_id: 2807d40d6c5ad964456c6f0b32a3f2bb
+updated: 2026-06-01
+source: consolidation
+source_id: memory_consolidation_2026_06_01
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -47,7 +47,7 @@ Lifecycle hooks and routing:
 - Lifecycle hooks are implemented around `internal/lifecycle/` and task execution/server setup. Durable concepts include `route_task`, `before_run`, `after_complete`, `scheduled`, task-mode bookkeeping, blocking versus non-blocking execution, idempotency/audit rows, recursion prevention, and strict validation of hook types/tool access.
 - `task_mode` represents the primary active task execution slot/bookkeeping and should not be exposed as an ordinary user-authored lifecycle hook unless deliberately redesigned.
 - The `route_task` hook is an LLM routing decision over the prompt-safe agent index. It should not be confused with catalog/index generation.
-- Route-task inputs must include the actual user task title/prompt being routed, not only `available_skills` and lifecycle metadata; otherwise the Skill Curator can see relevant skills in the index but select unrelated lifecycle skills because it lacks task context.
+- Route-task inputs must include the actual user task title/prompt being routed, not only `available_skills` and lifecycle metadata.
 - Lifecycle hook skill resolution should be scoped to the hook owner. If the hook owner’s skill is missing, fail rather than falling back to the task turn’s selected/available catalog.
 - Router output supports a JSON `skills` array. Preserve multiple selected skills from the winning router result; do not merge multiple route-hook outputs.
 - Routing/effective-mode logic should have one primary agent/effective mode. Do not merge tool permissions across multiple agents or introduce multi-agent execution without explicit redesign.
