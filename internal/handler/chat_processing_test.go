@@ -2082,6 +2082,77 @@ func TestResolveWorktreeWorkDir_SyncsExistingWorktreeFromTargetBeforeFollowup(t 
 	}
 }
 
+func TestResolveWorktreeWorkDir_MergedStaleFollowupStartsFromCurrentTarget(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Merged Stale Followup Project", RepoPath: repoDir}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task := createTask(t, h, project.ID, "Merged stale followup", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+		tk.MergeStatus = models.MergeStatusMerged
+	})
+
+	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+	oldPath, oldBranch, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("setup original worktree: %v", err)
+	}
+	task.WorktreePath = oldPath
+	task.WorktreeBranch = oldBranch
+
+	if err := os.WriteFile(filepath.Join(oldPath, "registry.go"), []byte("package registry\n\nconst value = \"stale task edit\"\n"), 0644); err != nil {
+		t.Fatalf("write stale task edit: %v", err)
+	}
+	if err := service.CommitWorktreeChanges(oldPath, "stale task edit"); err != nil {
+		t.Fatalf("commit stale task edit: %v", err)
+	}
+
+	mainFile := filepath.Join(repoDir, "registry.go")
+	if err := os.WriteFile(mainFile, []byte("package registry\n\nconst value = \"accepted main edit\"\n"), 0644); err != nil {
+		t.Fatalf("write accepted main edit: %v", err)
+	}
+	cmd := exec.Command("git", "add", "registry.go")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add accepted main edit: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "accepted main edit")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit accepted main edit: %v\n%s", err, out)
+	}
+
+	workDir, err := h.resolveWorktreeWorkDir(ctx, task)
+	if err != nil {
+		t.Fatalf("resolve worktree workdir should skip stale startup merge conflict: %v", err)
+	}
+	if workDir == oldPath {
+		t.Fatalf("expected fresh current-target follow-up worktree, got original stale path %q", workDir)
+	}
+	if !strings.Contains(task.WorktreeBranch, "-followup-") {
+		t.Fatalf("expected follow-up branch, got %q", task.WorktreeBranch)
+	}
+	if task.MergeTargetBranch != service.GetDefaultBranch(repoDir) {
+		t.Fatalf("expected merge target %q, got %q", service.GetDefaultBranch(repoDir), task.MergeTargetBranch)
+	}
+	content, err := os.ReadFile(filepath.Join(workDir, "registry.go"))
+	if err != nil {
+		t.Fatalf("read fresh followup file: %v", err)
+	}
+	if !strings.Contains(string(content), "accepted main edit") || strings.Contains(string(content), "stale task edit") {
+		t.Fatalf("expected fresh worktree from current target, got content:\n%s", content)
+	}
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatalf("expected original stale worktree to remain preserved: %v", err)
+	}
+}
+
 func TestProcessStreamingResponse_TaskFollowupWithOnlyPreexistingDiffCompletes(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil

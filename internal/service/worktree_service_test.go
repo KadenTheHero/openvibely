@@ -476,6 +476,391 @@ func TestSyncWorktreeFromMainAtStart_FetchFailureFallsBackToLocalBranch(t *testi
 	}
 }
 
+func TestSyncWorktreeFromMainAtStart_UsesMergeTargetBranchWhenSet(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	runGitTest(t, repoDir, "checkout", "-b", "develop")
+	if err := os.WriteFile(filepath.Join(repoDir, "develop_only.txt"), []byte("from develop\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "develop_only.txt")
+	runGitTest(t, repoDir, "commit", "-m", "develop update")
+	runGitTest(t, repoDir, "checkout", defaultBranch)
+	if err := os.WriteFile(filepath.Join(repoDir, "main_only.txt"), []byte("from main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "main_only.txt")
+	runGitTest(t, repoDir, "commit", "-m", "main-only update")
+
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Startup Sync Develop Target",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: "develop",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, wtBranch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("SetupWorktree: %v", err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+
+	if err := ws.SyncWorktreeFromMainAtStart(ctx, task, repoDir); err != nil {
+		t.Fatalf("SyncWorktreeFromMainAtStart: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wtPath, "develop_only.txt")); err != nil {
+		t.Fatalf("expected develop_only.txt from merge target in worktree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wtPath, "main_only.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected default-branch-only file not to be merged from main")
+	}
+}
+
+func TestSetupFollowupWorktree_CompletedMergedTaskStartsFreshFromCurrentTarget(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Merged Followup",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeStatus:       models.MergeStatusMerged,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	oldPath, oldBranch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("SetupWorktree: %v", err)
+	}
+	task.WorktreePath = oldPath
+	task.WorktreeBranch = oldBranch
+	if err := os.WriteFile(filepath.Join(repoDir, "target.txt"), []byte("current target\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "target.txt")
+	runGitTest(t, repoDir, "commit", "-m", "target update")
+
+	wtPath, wtBranch, skip, err := ws.SetupFollowupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("SetupFollowupWorktree: %v", err)
+	}
+	if !skip {
+		t.Fatal("expected fresh current-target follow-up to skip startup sync")
+	}
+	if wtPath == oldPath || wtBranch == oldBranch {
+		t.Fatalf("expected fresh follow-up worktree/branch, got path=%s branch=%s", wtPath, wtBranch)
+	}
+	if !strings.Contains(wtBranch, "-followup-") {
+		t.Fatalf("expected follow-up branch, got %q", wtBranch)
+	}
+	if _, err := os.Stat(filepath.Join(wtPath, "target.txt")); err != nil {
+		t.Fatalf("expected fresh follow-up worktree based on current target: %v", err)
+	}
+}
+
+func TestSetupFollowupWorktree_FailedConflictRetryStartsFreshFromCurrentTarget(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Failed Conflict Retry",
+		Category:          models.CategoryBacklog,
+		Status:            models.StatusFailed,
+		MergeStatus:       models.MergeStatusConflict,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	oldPath, oldBranch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("SetupWorktree: %v", err)
+	}
+	task.WorktreePath = oldPath
+	task.WorktreeBranch = oldBranch
+	if err := os.WriteFile(filepath.Join(oldPath, "duplicate.txt"), []byte("task version\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(oldPath, "task duplicate version"); err != nil {
+		t.Fatalf("CommitWorktreeChanges: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "duplicate.txt"), []byte("accepted target version\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "duplicate.txt")
+	runGitTest(t, repoDir, "commit", "-m", "accepted duplicate version")
+
+	wtPath, wtBranch, skip, err := ws.SetupFollowupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("SetupFollowupWorktree: %v", err)
+	}
+	if !skip {
+		t.Fatal("expected conflict retry to start from current target and skip startup sync")
+	}
+	if wtPath == oldPath || wtBranch == oldBranch {
+		t.Fatalf("expected retry to avoid stale original worktree, got path=%s branch=%s", wtPath, wtBranch)
+	}
+	status := runGitTest(t, oldPath, "status", "--porcelain")
+	if strings.TrimSpace(status) != "" {
+		t.Fatalf("expected aborted stale worktree to remain clean, got status=%q", status)
+	}
+}
+
+func TestSetupFollowupWorktree_ReusesStoredFollowupWorktree(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Reuse Followup",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeStatus:       models.MergeStatusMerged,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, wtBranch, skip, err := ws.SetupFollowupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("first SetupFollowupWorktree: %v", err)
+	}
+	if !skip {
+		t.Fatal("expected first merged follow-up to create fresh worktree")
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+
+	reusedPath, reusedBranch, reusedSkip, err := ws.SetupFollowupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("second SetupFollowupWorktree: %v", err)
+	}
+	if reusedPath != wtPath || reusedBranch != wtBranch {
+		t.Fatalf("expected clean read-only follow-up worktree reuse, got path=%s branch=%s", reusedPath, reusedBranch)
+	}
+	if reusedSkip {
+		t.Fatal("expected reused worktree to allow normal startup sync")
+	}
+}
+
+func TestSetupFollowupWorktree_DoesNotReuseStaleCommittedFollowupWorktree(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Stale Committed Followup",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeStatus:       models.MergeStatusMerged,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, wtBranch, skip, err := ws.SetupFollowupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("SetupFollowupWorktree: %v", err)
+	}
+	if !skip {
+		t.Fatal("expected initial fresh follow-up")
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "squashed.txt"), []byte("followup version\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "followup stale commit"); err != nil {
+		t.Fatalf("CommitWorktreeChanges: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "squashed.txt"), []byte("accepted target version\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "squashed.txt")
+	runGitTest(t, repoDir, "commit", "-m", "accepted squashed followup")
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+
+	newPath, newBranch, newSkip, err := ws.SetupFollowupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("SetupFollowupWorktree retry: %v", err)
+	}
+	if !newSkip {
+		t.Fatal("expected stale committed follow-up to start fresh from target")
+	}
+	if newPath == wtPath || newBranch == wtBranch {
+		t.Fatalf("expected stale committed follow-up to not be reused, got path=%s branch=%s", newPath, newBranch)
+	}
+}
+
+func TestSetupFollowupWorktree_PreservesDirtyStoredFollowupWorktree(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Dirty Followup",
+		Category:          models.CategoryBacklog,
+		Status:            models.StatusFailed,
+		MergeStatus:       models.MergeStatusMerged,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, wtBranch, skip, err := ws.SetupFollowupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("SetupFollowupWorktree: %v", err)
+	}
+	if !skip {
+		t.Fatal("expected first follow-up to start fresh")
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "dirty.txt"), []byte("unsaved follow-up work\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+
+	reusedPath, reusedBranch, reusedSkip, err := ws.SetupFollowupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("SetupFollowupWorktree retry: %v", err)
+	}
+	if reusedPath != wtPath || reusedBranch != wtBranch {
+		t.Fatalf("expected dirty follow-up worktree to be preserved, got path=%s branch=%s", reusedPath, reusedBranch)
+	}
+	if reusedSkip {
+		t.Fatal("expected reused dirty follow-up worktree not to skip startup sync decision")
+	}
+}
+
+func TestSetupFollowupWorktree_CurrentTargetPersistsResolvedMergeTarget(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	runGitTest(t, repoDir, "checkout", "-b", "historical-base")
+	runGitTest(t, repoDir, "checkout", defaultBranch)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	task := &models.Task{
+		ProjectID:   "default",
+		Title:       "Persist Target",
+		Category:    models.CategoryCompleted,
+		Status:      models.StatusCompleted,
+		MergeStatus: models.MergeStatusMerged,
+		BaseBranch:  "historical-base",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	wtPath, wtBranch, skip, err := ws.SetupFollowupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("SetupFollowupWorktree: %v", err)
+	}
+	if !skip {
+		t.Fatal("expected current-target follow-up setup")
+	}
+	if wtPath == "" || wtBranch == "" {
+		t.Fatalf("expected worktree metadata, got path=%q branch=%q", wtPath, wtBranch)
+	}
+	got, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MergeTargetBranch != defaultBranch {
+		t.Fatalf("expected merge target %q, got %q", defaultBranch, got.MergeTargetBranch)
+	}
+}
+
+func TestSyncWorktreeFromMainAtStart_DoesNotClearDirtyConflictStatus(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Dirty Conflict State",
+		Category:          models.CategoryActive,
+		Status:            models.StatusFailed,
+		MergeStatus:       models.MergeStatusConflict,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, wtBranch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("SetupWorktree: %v", err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+	if err := os.WriteFile(filepath.Join(wtPath, "manual-resolution.txt"), []byte("manual work\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.SyncWorktreeFromMainAtStart(ctx, task, repoDir); err != nil {
+		t.Fatalf("expected dirty worktree to skip startup sync without error: %v", err)
+	}
+	got, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MergeStatus != models.MergeStatusConflict {
+		t.Fatalf("expected dirty conflict status to be preserved, got %q", got.MergeStatus)
+	}
+}
+
 func TestCommitWorktreeChanges(t *testing.T) {
 	repoDir := createTestGitRepo(t)
 

@@ -115,8 +115,140 @@ func GitStatusPorcelain(repoDir string) (string, error) {
 // is created from the parent's commit SHA so child tasks inherit parent code changes.
 // Returns the worktree path and branch name, or error.
 func (ws *WorktreeService) SetupWorktree(ctx context.Context, task *models.Task, repoDir string) (worktreePath string, branchName string, err error) {
+	return ws.setupWorktree(ctx, task, repoDir, false)
+}
+
+// SetupFollowupWorktree resolves the worktree for a task-thread follow-up. Terminal
+// merged/stale tasks continue from the current merge target on a fresh follow-up
+// branch instead of trying to merge current target back into the historical branch.
+// The returned skipStartupSync flag is true when the new branch was just created
+// from the current target and therefore does not need startup auto-sync.
+func (ws *WorktreeService) SetupFollowupWorktree(ctx context.Context, task *models.Task, repoDir string) (worktreePath string, branchName string, skipStartupSync bool, err error) {
+	if repoDir == "" || !IsGitRepo(repoDir) {
+		return "", "", false, fmt.Errorf("not a git repository: %s", repoDir)
+	}
+
+	if ws.shouldReuseStoredFollowupWorktree(task, repoDir) {
+		log.Printf("[worktree] reusing stored follow-up worktree task=%s path=%s branch=%s", task.ID, task.WorktreePath, task.WorktreeBranch)
+		if updateErr := ws.taskRepo.UpdateWorktreeInfo(ctx, task.ID, task.WorktreePath, task.WorktreeBranch); updateErr != nil {
+			log.Printf("[worktree] error updating stored follow-up worktree info: %v", updateErr)
+		}
+		return task.WorktreePath, task.WorktreeBranch, false, nil
+	}
+
+	if ws.shouldContinueFollowupFromCurrentTarget(task, repoDir) {
+		wtPath, wtBranch, setupErr := ws.setupWorktree(ctx, task, repoDir, true)
+		return wtPath, wtBranch, true, setupErr
+	}
+
+	wtPath, wtBranch, setupErr := ws.SetupWorktree(ctx, task, repoDir)
+	return wtPath, wtBranch, false, setupErr
+}
+
+func (ws *WorktreeService) setupWorktree(ctx context.Context, task *models.Task, repoDir string, continueFromCurrentTarget bool) (worktreePath string, branchName string, err error) {
 	if repoDir == "" || !IsGitRepo(repoDir) {
 		return "", "", fmt.Errorf("not a git repository: %s", repoDir)
+	}
+
+	baseRef := ws.resolveWorktreeBaseRef(ctx, task, repoDir, continueFromCurrentTarget)
+	if baseRef == "" {
+		return "", "", fmt.Errorf("could not resolve base ref for task %s", task.ID)
+	}
+
+	// If this is a chained task and we couldn't resolve lineage, log a clear error
+	if !continueFromCurrentTarget && task.ParentTaskID != nil && task.BaseCommitSHA != "" && baseRef != task.BaseCommitSHA {
+		log.Printf("[worktree] WARNING: chained task %s could not use parent lineage SHA %s, using fallback base %s", task.ID, task.BaseCommitSHA, baseRef)
+	}
+
+	// Create branch name from task
+	slug := slugify(task.Title)
+	if slug == "" {
+		slug = task.ID[:8]
+	}
+	branchName = fmt.Sprintf("task/%s-%s", task.ID[:8], slug)
+	if continueFromCurrentTarget {
+		branchName = fmt.Sprintf("task/%s-followup-%d", task.ID[:8], time.Now().UnixNano())
+	}
+
+	// Worktree directory
+	worktreePath = filepath.Join(repoDir, ".worktrees", fmt.Sprintf("task_%s", task.ID))
+	if continueFromCurrentTarget {
+		worktreePath = filepath.Join(repoDir, ".worktrees", fmt.Sprintf("task_%s_followup_%d", task.ID, time.Now().UnixNano()))
+	}
+
+	// Check if worktree already exists
+	if !continueFromCurrentTarget {
+		if storedPath, storedBranch, ok := ws.existingStoredWorktree(task); ok {
+			ws.clearStaleConflictStatusIfClean(ctx, task)
+			log.Printf("[worktree] stored worktree already exists at %s, reusing", storedPath)
+			if updateErr := ws.taskRepo.UpdateWorktreeInfo(ctx, task.ID, storedPath, storedBranch); updateErr != nil {
+				log.Printf("[worktree] error updating worktree info: %v", updateErr)
+			}
+			return storedPath, storedBranch, nil
+		}
+		if _, err := os.Stat(worktreePath); err == nil {
+			log.Printf("[worktree] worktree already exists at %s, reusing", worktreePath)
+			if updateErr := ws.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, branchName); updateErr != nil {
+				log.Printf("[worktree] error updating worktree info: %v", updateErr)
+			}
+			return worktreePath, branchName, nil
+		}
+	}
+
+	// Check if branch already exists
+	checkBranch := exec.Command("git", "rev-parse", "--verify", branchName)
+	checkBranch.Dir = repoDir
+	branchExists := checkBranch.Run() == nil
+
+	if branchExists {
+		// Branch exists, create worktree pointing to it
+		cmd := exec.Command("git", "worktree", "add", worktreePath, branchName)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", "", fmt.Errorf("creating worktree for existing branch: %w: %s", err, string(out))
+		}
+	} else {
+		// Create new branch from the resolved base ref
+		cmd := exec.Command("git", "worktree", "add", "-b", branchName, worktreePath, baseRef)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return "", "", fmt.Errorf("creating worktree from base %s: %w: %s", baseRef, err, string(out))
+		}
+	}
+
+	log.Printf("[worktree] created worktree at %s on branch %s (base: %s) for task %s (lineage_depth=%d)", worktreePath, branchName, baseRef, task.ID, task.LineageDepth)
+
+	// Update task record with worktree info
+	if updateErr := ws.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, branchName); updateErr != nil {
+		log.Printf("[worktree] error updating worktree info: %v", updateErr)
+	}
+	if task.MergeTargetBranch == "" {
+		mergeTarget := baseRef
+		if !continueFromCurrentTarget && task.BaseBranch != "" {
+			// Use parent's branch as merge target so changes merge back correctly.
+			mergeTarget = task.BaseBranch
+		}
+		task.MergeTargetBranch = mergeTarget
+		if updateErr := ws.taskRepo.UpdateAutoMerge(ctx, task.ID, task.AutoMerge, mergeTarget); updateErr != nil {
+			log.Printf("[worktree] error setting merge target branch: %v", updateErr)
+		}
+	}
+
+	return worktreePath, branchName, nil
+}
+
+func (ws *WorktreeService) resolveWorktreeBaseRef(ctx context.Context, task *models.Task, repoDir string, continueFromCurrentTarget bool) string {
+	if continueFromCurrentTarget {
+		baseRef := task.MergeTargetBranch
+		if baseRef == "" {
+			baseRef = ws.getGlobalMergeTarget(ctx)
+		}
+		if baseRef == "" {
+			baseRef = GetDefaultBranch(repoDir)
+		}
+		return baseRef
 	}
 
 	// Determine the base ref to branch from.
@@ -155,76 +287,113 @@ func (ws *WorktreeService) SetupWorktree(ctx context.Context, task *models.Task,
 			baseRef = GetDefaultBranch(repoDir)
 		}
 	}
+	return baseRef
+}
 
-	// If this is a chained task and we couldn't resolve lineage, log a clear error
-	if task.ParentTaskID != nil && task.BaseCommitSHA != "" && baseRef != task.BaseCommitSHA {
-		log.Printf("[worktree] WARNING: chained task %s could not use parent lineage SHA %s, using fallback base %s", task.ID, task.BaseCommitSHA, baseRef)
+func (ws *WorktreeService) existingStoredWorktree(task *models.Task) (string, string, bool) {
+	if task.WorktreePath == "" || task.WorktreeBranch == "" {
+		return "", "", false
 	}
-
-	// Create branch name from task
-	slug := slugify(task.Title)
-	if slug == "" {
-		slug = task.ID[:8]
+	if _, err := os.Stat(task.WorktreePath); err != nil {
+		return "", "", false
 	}
-	branchName = fmt.Sprintf("task/%s-%s", task.ID[:8], slug)
+	return task.WorktreePath, task.WorktreeBranch, true
+}
 
-	// Worktree directory
-	worktreePath = filepath.Join(repoDir, ".worktrees", fmt.Sprintf("task_%s", task.ID))
-
-	// Check if worktree already exists
-	if _, err := os.Stat(worktreePath); err == nil {
-		log.Printf("[worktree] worktree already exists at %s, reusing", worktreePath)
-		// Update task record
-		if updateErr := ws.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, branchName); updateErr != nil {
-			log.Printf("[worktree] error updating worktree info: %v", updateErr)
-		}
-		return worktreePath, branchName, nil
+func (ws *WorktreeService) shouldContinueFollowupFromCurrentTarget(task *models.Task, repoDir string) bool {
+	if task == nil || !models.IsTerminalStatus(task.Status) {
+		return false
 	}
-
-	// Check if branch already exists
-	checkBranch := exec.Command("git", "rev-parse", "--verify", branchName)
-	checkBranch.Dir = repoDir
-	branchExists := checkBranch.Run() == nil
-
-	if branchExists {
-		// Branch exists, create worktree pointing to it
-		cmd := exec.Command("git", "worktree", "add", worktreePath, branchName)
-		cmd.Dir = repoDir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return "", "", fmt.Errorf("creating worktree for existing branch: %w: %s", err, string(out))
-		}
-	} else {
-		// Create new branch from the resolved base ref
-		cmd := exec.Command("git", "worktree", "add", "-b", branchName, worktreePath, baseRef)
-		cmd.Dir = repoDir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return "", "", fmt.Errorf("creating worktree from base %s: %w: %s", baseRef, err, string(out))
-		}
+	if task.MergeStatus == models.MergeStatusMerged || task.MergeStatus == models.MergeStatusConflict {
+		return true
 	}
+	return task.WorktreeBranch != "" && ws.isBranchTipMergedIntoTarget(repoDir, task.WorktreeBranch, task.MergeTargetBranch)
+}
 
-	log.Printf("[worktree] created worktree at %s on branch %s (base: %s) for task %s (lineage_depth=%d)", worktreePath, branchName, baseRef, task.ID, task.LineageDepth)
-
-	// Update task record with worktree info
-	if updateErr := ws.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, branchName); updateErr != nil {
-		log.Printf("[worktree] error updating worktree info: %v", updateErr)
+func (ws *WorktreeService) shouldReuseStoredFollowupWorktree(task *models.Task, repoDir string) bool {
+	if task == nil || task.WorktreePath == "" || task.WorktreeBranch == "" || !strings.Contains(task.WorktreeBranch, "-followup-") {
+		return false
 	}
-	if task.MergeTargetBranch == "" {
-		// For chained tasks, set the merge target to the parent's branch if available,
-		// otherwise use the standard target
-		mergeTarget := baseRef
-		if task.BaseBranch != "" {
-			// Use parent's branch as merge target so changes merge back correctly
-			mergeTarget = task.BaseBranch
-		}
-		task.MergeTargetBranch = mergeTarget
-		if updateErr := ws.taskRepo.UpdateAutoMerge(ctx, task.ID, task.AutoMerge, mergeTarget); updateErr != nil {
-			log.Printf("[worktree] error setting merge target branch: %v", updateErr)
-		}
+	if _, err := os.Stat(task.WorktreePath); err != nil {
+		return false
 	}
+	status, err := GitStatusPorcelain(task.WorktreePath)
+	if err != nil {
+		return false
+	}
+	if strings.TrimSpace(status) != "" {
+		return true
+	}
+	if task.MergeStatus == models.MergeStatusMerged || task.MergeStatus == models.MergeStatusConflict {
+		return !ws.branchHasCommitsBeyondTarget(repoDir, task.WorktreeBranch, task.MergeTargetBranch)
+	}
+	return true
+}
 
-	return worktreePath, branchName, nil
+func (ws *WorktreeService) isBranchTipMergedIntoTarget(repoDir, branchName, targetBranch string) bool {
+	if branchName == "" {
+		return false
+	}
+	if targetBranch == "" {
+		targetBranch = GetDefaultBranch(repoDir)
+	}
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", branchName, targetBranch)
+	cmd.Dir = repoDir
+	return cmd.Run() == nil
+}
+
+func (ws *WorktreeService) branchHasCommitsBeyondTarget(repoDir, branchName, targetBranch string) bool {
+	if branchName == "" {
+		return false
+	}
+	if targetBranch == "" {
+		targetBranch = GetDefaultBranch(repoDir)
+	}
+	cmd := exec.Command("git", "rev-list", "--count", fmt.Sprintf("%s..%s", targetBranch, branchName))
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) != "0"
+}
+
+func worktreeHasActiveMerge(worktreePath string) bool {
+	if worktreePath == "" {
+		return false
+	}
+	cmd := exec.Command("git", "rev-parse", "--git-path", "MERGE_HEAD")
+	cmd.Dir = worktreePath
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	mergeHeadPath := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(mergeHeadPath) {
+		mergeHeadPath = filepath.Join(worktreePath, mergeHeadPath)
+	}
+	_, statErr := os.Stat(mergeHeadPath)
+	return statErr == nil
+}
+
+func worktreeHasConflictFiles(worktreePath string) bool {
+	return len(detectConflicts(worktreePath)) > 0
+}
+
+func (ws *WorktreeService) clearStaleConflictStatusIfClean(ctx context.Context, task *models.Task) {
+	if task == nil || task.MergeStatus != models.MergeStatusConflict || task.WorktreePath == "" || ws.taskRepo == nil {
+		return
+	}
+	status, err := GitStatusPorcelain(task.WorktreePath)
+	if err != nil || strings.TrimSpace(status) != "" || worktreeHasActiveMerge(task.WorktreePath) || worktreeHasConflictFiles(task.WorktreePath) {
+		return
+	}
+	if err := ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
+		log.Printf("[worktree] error clearing stale conflict status for task %s: %v", task.ID, err)
+		return
+	}
+	task.MergeStatus = models.MergeStatusPending
+	log.Printf("[worktree] cleared stale conflict status for task %s after clean aborted merge state", task.ID)
 }
 
 // SyncWorktreeFromMainAtStart updates a task branch with the latest main/default branch
@@ -272,17 +441,21 @@ func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task
 		log.Printf("[worktree] startup auto-merge skipped task=%s branch=%s reason=dirty_worktree", task.ID, currentBranch)
 		return nil
 	}
+	ws.clearStaleConflictStatusIfClean(ctx, task)
 
-	syncBranch := "main"
-	hasMain := false
-	if _, err := runGit(repoDir, "show-ref", "--verify", "--quiet", "refs/heads/main"); err == nil {
-		hasMain = true
-	} else {
-		_, err = runGit(repoDir, "show-ref", "--verify", "--quiet", "refs/remotes/origin/main")
-		hasMain = err == nil
-	}
-	if !hasMain {
-		syncBranch = GetDefaultBranch(repoDir)
+	syncBranch := task.MergeTargetBranch
+	if syncBranch == "" {
+		syncBranch = "main"
+		hasMain := false
+		if _, err := runGit(repoDir, "show-ref", "--verify", "--quiet", "refs/heads/main"); err == nil {
+			hasMain = true
+		} else {
+			_, err = runGit(repoDir, "show-ref", "--verify", "--quiet", "refs/remotes/origin/main")
+			hasMain = err == nil
+		}
+		if !hasMain {
+			syncBranch = GetDefaultBranch(repoDir)
+		}
 	}
 
 	mergeSource := syncBranch

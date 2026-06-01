@@ -1549,13 +1549,18 @@ func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task)
 		return repoDir, nil
 	}
 
-	wtPath, wtBranch, wtErr := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	wtPath, wtBranch, skipStartupSync, wtErr := h.worktreeSvc.SetupFollowupWorktree(ctx, task, repoDir)
 	if wtErr != nil {
 		log.Printf("[handler] resolveWorktreeWorkDir worktree setup failed for task %s, using main repo: %v", task.ID, wtErr)
 		return repoDir, nil
 	}
 	task.WorktreePath = wtPath
 	task.WorktreeBranch = wtBranch
+
+	if skipStartupSync {
+		log.Printf("[handler] resolveWorktreeWorkDir task=%s using fresh current-target follow-up worktree path=%s", task.ID, wtPath)
+		return wtPath, nil
+	}
 
 	if syncErr := h.worktreeSvc.SyncWorktreeFromMainAtStart(ctx, task, repoDir); syncErr != nil {
 		log.Printf("[handler] resolveWorktreeWorkDir startup worktree sync failed for task %s: %v", task.ID, syncErr)
