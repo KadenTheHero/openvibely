@@ -145,6 +145,10 @@ func (s *TelegramService) HasChannelChatRunner() bool {
 	return s.channelChatRunner != nil
 }
 
+func (s *TelegramService) HasAgentRepo() bool {
+	return s.agentRepo != nil
+}
+
 // SetTelegramAuthRepo sets the Telegram authorization repo for user verification.
 func (s *TelegramService) SetTelegramAuthRepo(repo *repository.TelegramAuthRepo) {
 	s.telegramAuthRepo = repo
@@ -1061,7 +1065,19 @@ func (s *TelegramService) buildChatContext(ctx context.Context, projectID string
 		}
 	}
 
-	return BuildChatContext(existingTasks, availableModels, schedules, time.Now())
+	return BuildChatContextWithAgentDefinitions(existingTasks, availableModels, s.listChatAssignableAgentDefinitions(ctx), schedules, time.Now())
+}
+
+func (s *TelegramService) listChatAssignableAgentDefinitions(ctx context.Context) []models.Agent {
+	if s.agentRepo == nil {
+		return nil
+	}
+	agents, err := s.agentRepo.List(ctx)
+	if err != nil {
+		log.Printf("[telegram] error listing agent definitions for context: %v", err)
+		return nil
+	}
+	return UniqueChatAssignableAgentDefinitions(agents)
 }
 
 // resolveWorkDir gets the repo path for the project

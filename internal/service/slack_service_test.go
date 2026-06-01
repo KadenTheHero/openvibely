@@ -213,8 +213,13 @@ func TestSlackService_RuntimeCreateTaskTool_CreatedTasksGetSlackOriginAndContext
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	agentRepo := repository.NewAgentRepo(db)
+	taskSvc.SetAgentRepo(agentRepo)
+	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, agentRepo.Create(ctx, agent))
 
 	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
+	svc.SetAgentRepo(agentRepo)
 
 	collector := newChannelActionSummaryCollector()
 	rt := svc.buildSlackActionToolRuntime(project.ID, slackMarkerContext{
@@ -225,7 +230,7 @@ func TestSlackService_RuntimeCreateTaskTool_CreatedTasksGetSlackOriginAndContext
 	}, collector)
 	require.NotNil(t, rt)
 
-	output, handled, isErr, err := rt.Executor(ctx, "create_task", json.RawMessage(`{"title":"Slack Tool Created","prompt":"Do it"}`))
+	output, handled, isErr, err := rt.Executor(ctx, "create_task", json.RawMessage(`{"title":"Slack Tool Created","prompt":"Do it","agent":"Reviewer"}`))
 	require.True(t, handled)
 	require.False(t, isErr)
 	require.NoError(t, err)
@@ -243,6 +248,8 @@ func TestSlackService_RuntimeCreateTaskTool_CreatedTasksGetSlackOriginAndContext
 	}
 	require.NotNil(t, created)
 	require.Equal(t, models.TaskOriginSlack, created.CreatedVia)
+	require.NotNil(t, created.AgentDefinitionID)
+	require.Equal(t, agent.ID, *created.AgentDefinitionID)
 
 	stc, err := slackTaskContextRepo.GetByTaskID(ctx, created.ID)
 	require.NoError(t, err)

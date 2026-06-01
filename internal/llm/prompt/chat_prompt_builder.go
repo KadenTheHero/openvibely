@@ -563,7 +563,7 @@ CRITICAL — When to use these markers:
 - "What agents do I have?" / "Show me my agents" / "List agents" → [LIST_AGENTS]
 - "Show me the current settings" / "What's the app configured with?" → [VIEW_SETTINGS]
 - "How many tasks are in this project?" / "Show project info" / "Give me a project summary" → [PROJECT_INFO]
-- "Have Bob do X" / "Use agent X to do Y" → [CREATE_TASK] with "agent" field
+- "Have <agent name> do X" / "Use agent <agent name> to do Y" → [CREATE_TASK] with "agent" field
 
 When the user asks about app settings, personalities, models, agents, or project info, output the corresponding marker immediately. Do NOT guess or make up settings — always retrieve the actual data via markers.
 `

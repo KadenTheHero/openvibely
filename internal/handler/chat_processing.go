@@ -1583,22 +1583,6 @@ func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectI
 
 	log.Printf("[handler] processChatTaskCreations exec=%s found %d task creation requests", execID, len(taskRequests))
 
-	// Resolve agent names to agent definition IDs
-	if h.agentRepo != nil {
-		for i := range taskRequests {
-			agentName := taskRequests[i].Agent
-			if agentName == "" {
-				agentName = taskRequests[i].AgentDefinitionID
-			}
-			if agentName != "" && h.agentRepo != nil {
-				if ad, err := h.agentRepo.GetByName(ctx, agentName); err == nil && ad != nil {
-					taskRequests[i].AgentDefinitionID = ad.ID
-					log.Printf("[handler] resolved agent %q → %s for task %q", agentName, ad.ID, taskRequests[i].Title)
-				}
-			}
-		}
-	}
-
 	chatAtts, _ := h.chatAttachmentRepo.ListByExecution(ctx, execID)
 	deferredActiveTitles := h.deferActiveTasksWithAttachments(taskRequests, chatAtts)
 
@@ -3127,7 +3111,20 @@ func (h *Handler) buildChatContext(ctx context.Context, projectID string, availa
 		schedules = []models.Schedule{}
 	}
 
-	return service.BuildChatContext(existingTasks, availableModels, schedules, time.Now())
+	agentDefinitions := h.listChatAssignableAgentDefinitions(ctx)
+	return service.BuildChatContextWithAgentDefinitions(existingTasks, availableModels, agentDefinitions, schedules, time.Now())
+}
+
+func (h *Handler) listChatAssignableAgentDefinitions(ctx context.Context) []models.Agent {
+	if h.agentRepo == nil {
+		return nil
+	}
+	agents, err := h.agentRepo.List(ctx)
+	if err != nil {
+		log.Printf("[handler] buildChatContext error listing agent definitions: %v", err)
+		return nil
+	}
+	return service.UniqueChatAssignableAgentDefinitions(agents)
 }
 
 // buildThreadSystemContext builds the system context string for task thread follow-ups.

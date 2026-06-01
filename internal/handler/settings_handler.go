@@ -233,6 +233,9 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to start Telegram bot: "+err.Error())
 		}
 		svc.SetTelegramAuthRepo(h.telegramAuthRepo)
+		if h.agentRepo != nil {
+			svc.SetAgentRepo(h.agentRepo)
+		}
 		if h.settingsRepo != nil {
 			svc.SetSettingsRepo(h.settingsRepo)
 		}

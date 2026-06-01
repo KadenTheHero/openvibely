@@ -471,6 +471,38 @@ func TestRegistry_EditTaskChainSchemaHasProperties(t *testing.T) {
 	}
 }
 
+func TestRegistry_CreateTaskSchemaDistinguishesAgentDefinitionFromModelConfig(t *testing.T) {
+	def := Get("create_task")
+	if def == nil {
+		t.Fatal("missing create_task")
+	}
+
+	var schema map[string]interface{}
+	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		t.Fatalf("invalid Parameters JSON: %v", err)
+	}
+	props, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing properties in create_task schema")
+	}
+	agent, ok := props["agent"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing agent property")
+	}
+	agentDesc, _ := agent["description"].(string)
+	if !strings.Contains(agentDesc, "Exact name") || !strings.Contains(agentDesc, "Agent definition") || !strings.Contains(agentDesc, "<agent name>") {
+		t.Fatalf("agent description should explain exact Agent-definition name assignment, got %q", agentDesc)
+	}
+	agentID, ok := props["agent_id"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing agent_id property")
+	}
+	agentIDDesc, _ := agentID["description"].(string)
+	if !strings.Contains(agentIDDesc, "Internal model config ID") || !strings.Contains(agentIDDesc, "Do not use for Agent definitions") {
+		t.Fatalf("agent_id description should explain model config separation, got %q", agentIDDesc)
+	}
+}
+
 func TestRegistry_CreateTaskDescriptionMentionsChaining(t *testing.T) {
 	def := Get("create_task")
 	if def == nil {

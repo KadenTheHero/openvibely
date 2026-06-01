@@ -116,6 +116,60 @@ func TestAgentRepo_RoundTripsScopedFilesToolConfig(t *testing.T) {
 	}
 }
 
+func TestAgentRepo_GetUniqueSelectableByNameRequiresUniqueEnabledSelectableExactName(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+
+	bob := &models.Agent{Name: "Bob", Key: "bob", Enabled: true, SelectableAsPrimary: true}
+	if err := repo.Create(ctx, bob); err != nil {
+		t.Fatalf("create Bob: %v", err)
+	}
+	got, err := repo.GetUniqueSelectableByName(ctx, "bob")
+	if err != nil {
+		t.Fatalf("GetUniqueSelectableByName: %v", err)
+	}
+	if got == nil || got.ID != bob.ID {
+		t.Fatalf("expected Bob by exact case-insensitive name, got %+v", got)
+	}
+
+	disabled := &models.Agent{Name: "Disabled", Key: "disabled", Enabled: false, SelectableAsPrimary: true}
+	if err := repo.Create(ctx, disabled); err != nil {
+		t.Fatalf("create disabled: %v", err)
+	}
+	got, err = repo.GetUniqueSelectableByName(ctx, "Disabled")
+	if err != nil {
+		t.Fatalf("GetUniqueSelectableByName disabled: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("disabled agent must not be selectable, got %+v", got)
+	}
+
+	nonPrimary := &models.Agent{Name: "Helper", Key: "helper", Enabled: true, SelectableAsPrimary: false}
+	if err := repo.Create(ctx, nonPrimary); err != nil {
+		t.Fatalf("create helper: %v", err)
+	}
+	got, err = repo.GetUniqueSelectableByName(ctx, "Helper")
+	if err != nil {
+		t.Fatalf("GetUniqueSelectableByName helper: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("non-primary agent must not be selectable, got %+v", got)
+	}
+
+	dup := &models.Agent{Name: "Bob", Key: "bob_two", Enabled: true, SelectableAsPrimary: true}
+	if err := repo.Create(ctx, dup); err != nil {
+		t.Fatalf("create duplicate Bob: %v", err)
+	}
+	got, err = repo.GetUniqueSelectableByName(ctx, "Bob")
+	if err != nil {
+		t.Fatalf("GetUniqueSelectableByName duplicate: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("duplicate agent name must be ambiguous, got %+v", got)
+	}
+}
+
 func TestAgentRepo_GetByKeyIncludingArchivedSeesArchivedRows(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewAgentRepo(db)

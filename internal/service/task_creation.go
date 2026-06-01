@@ -25,8 +25,8 @@ type TaskCreationRequest struct {
 	Category          string                     `json:"category"`            // "active" or "backlog" (default: "backlog")
 	Priority          int                        `json:"priority"`            // 1=Low, 2=Normal, 3=High, 4=Urgent (default: 2)
 	AgentID           string                     `json:"agent_id"`            // Optional: specific LLM config ID (empty = auto-select or default)
-	AgentDefinitionID string                     `json:"agent_definition_id"` // Optional: agent definition ID or name
-	Agent             string                     `json:"agent"`               // Optional: agent name (resolved to AgentDefinitionID)
+	AgentDefinitionID string                     `json:"agent_definition_id"` // Optional: known agent definition ID
+	Agent             string                     `json:"agent"`               // Optional: agent definition name (resolved to AgentDefinitionID)
 	Chain             *models.ChainConfiguration `json:"chain,omitempty"`     // Optional: chain config for sequential task execution
 }
 
@@ -164,9 +164,40 @@ func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreation
 			task.AgentID = &selectedAgentID
 		}
 
-		// Set agent definition ID if provided
+		// Set agent definition ID if provided. The agent field resolves an exact,
+		// unique enabled/selectable Agent definition name; agent_definition_id remains
+		// an explicit ID escape hatch for callers that already know the database ID.
 		if req.AgentDefinitionID != "" {
 			task.AgentDefinitionID = &req.AgentDefinitionID
+		}
+		if req.Agent != "" {
+			if taskSvc != nil && taskSvc.agentRepo != nil {
+				if ad, err := taskSvc.agentRepo.GetUniqueSelectableByName(ctx, req.Agent); err != nil {
+					log.Printf("[task-creation] could not resolve agent %q for task %q: %v", req.Agent, req.Title, err)
+				} else if ad != nil {
+					task.AgentDefinitionID = &ad.ID
+					log.Printf("[task-creation] resolved agent %q → %s for task %q", req.Agent, ad.ID, req.Title)
+				} else {
+					log.Printf("[task-creation] agent %q did not exactly match one unique enabled/selectable Agent definition for task %q", req.Agent, req.Title)
+					if req.AgentDefinitionID == req.Agent {
+						task.AgentDefinitionID = nil
+					}
+				}
+			} else if req.AgentDefinitionID == req.Agent {
+				task.AgentDefinitionID = nil
+				log.Printf("[task-creation] cannot resolve agent %q for task %q without an Agent repository", req.Agent, req.Title)
+			}
+		} else if req.AgentDefinitionID != "" && taskSvc != nil && taskSvc.agentRepo != nil {
+			if existing, err := taskSvc.agentRepo.GetByID(ctx, req.AgentDefinitionID); err != nil {
+				log.Printf("[task-creation] could not validate agent_definition_id %q for task %q: %v", req.AgentDefinitionID, req.Title, err)
+			} else if existing == nil {
+				if ad, err := taskSvc.agentRepo.GetUniqueSelectableByName(ctx, req.AgentDefinitionID); err != nil {
+					log.Printf("[task-creation] could not resolve agent_definition_id name %q for task %q: %v", req.AgentDefinitionID, req.Title, err)
+				} else if ad != nil {
+					task.AgentDefinitionID = &ad.ID
+					log.Printf("[task-creation] resolved agent_definition_id name %q → %s for task %q", req.AgentDefinitionID, ad.ID, req.Title)
+				}
+			}
 		}
 
 		if err := taskSvc.Create(ctx, task); err != nil {
@@ -549,7 +580,7 @@ func BuildModelContextString(configs []models.LLMConfig) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Available models (use the ID in the agent_id field of [EDIT_TASK] to change a task's model):\n")
+	sb.WriteString("Available models (use the ID in the agent_id field of [CREATE_TASK] or [EDIT_TASK] to select an internal model config; this is not an Agent definition assignment):\n")
 	for _, c := range configs {
 		defaultMark := ""
 		if c.IsDefault {
@@ -558,6 +589,64 @@ func BuildModelContextString(configs []models.LLMConfig) string {
 		sb.WriteString(fmt.Sprintf("- [ID:%s] \"%s\" (model: %s, provider: %s)%s\n", c.ID, c.Name, c.Model, c.Provider, defaultMark))
 	}
 	return sb.String()
+}
+
+// BuildAgentDefinitionContextString creates a prompt-safe summary of Agent definitions
+// that can be assigned as a task's primary Agent from chat orchestration.
+func BuildAgentDefinitionContextString(agents []models.Agent) string {
+	assignable := UniqueChatAssignableAgentDefinitions(agents)
+	if len(assignable) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Available Agent definitions (from the Agents page; use the exact Name in the agent field of [CREATE_TASK] to assign one as the task's primary Agent definition):\n")
+	for _, a := range assignable {
+		description := sanitizeAgentContextField(a.Description, 160)
+		parts := []string{fmt.Sprintf("- Name: %q", sanitizeAgentContextField(a.Name, 120))}
+		if key := sanitizeAgentContextField(a.Key, 80); key != "" {
+			parts = append(parts, fmt.Sprintf("key: %s", key))
+		}
+		if description != "" {
+			parts = append(parts, fmt.Sprintf("description: %s", description))
+		}
+		sb.WriteString(strings.Join(parts, "; "))
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+func UniqueChatAssignableAgentDefinitions(agents []models.Agent) []models.Agent {
+	counts := make(map[string]int, len(agents))
+	for _, a := range agents {
+		if isChatAssignableAgentDefinition(a) {
+			counts[strings.ToLower(strings.TrimSpace(a.Name))]++
+		}
+	}
+
+	out := make([]models.Agent, 0, len(agents))
+	for _, a := range agents {
+		key := strings.ToLower(strings.TrimSpace(a.Name))
+		if isChatAssignableAgentDefinition(a) && counts[key] == 1 {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func isChatAssignableAgentDefinition(a models.Agent) bool {
+	return strings.TrimSpace(a.Name) != "" && a.Enabled && a.SelectableAsPrimary && a.GeneratedStatus != models.AgentStatusArchived && a.ArchivedAt == nil
+}
+
+func sanitizeAgentContextField(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if value == "" {
+		return ""
+	}
+	if limit > 0 && len(value) > limit {
+		return value[:limit] + "..."
+	}
+	return value
 }
 
 // BuildTaskContextWithModels creates a summary of existing tasks including their assigned model.
@@ -1604,6 +1693,12 @@ func DetectMissingMarkers(output string) []MissingMarkerWarning {
 //
 // Returns a formatted string with current tasks, available models, and schedule details.
 func BuildChatContext(tasks []models.Task, availableModels []models.LLMConfig, schedules []models.Schedule, now time.Time) string {
+	return BuildChatContextWithAgentDefinitions(tasks, availableModels, nil, schedules, now)
+}
+
+// BuildChatContextWithAgentDefinitions builds the chat context with an optional
+// list of Agent definitions that can be assigned via create_task.agent.
+func BuildChatContextWithAgentDefinitions(tasks []models.Task, availableModels []models.LLMConfig, agentDefinitions []models.Agent, schedules []models.Schedule, now time.Time) string {
 	// Filter out chat tasks
 	var nonChatTasks []models.Task
 	for _, t := range tasks {
@@ -1627,6 +1722,12 @@ func BuildChatContext(tasks []models.Task, availableModels []models.LLMConfig, s
 			taskContext += "\n"
 		}
 		taskContext += modelCtx
+	}
+	if agentCtx := BuildAgentDefinitionContextString(agentDefinitions); agentCtx != "" {
+		if taskContext != "" {
+			taskContext += "\n"
+		}
+		taskContext += agentCtx
 	}
 
 	// Add schedule context

@@ -1138,10 +1138,14 @@ func TestProcessStreamingResponse_AppliesPendingSteeringBeforeModelCall(t *testi
 	mock.TextOnly = "handled steering"
 	var exec *models.Execution
 	var steering *models.ThreadInput
-	preparedEvent := make(chan events.TaskEvent, 1)
+	broadcaster := events.NewBroadcaster()
+	h.broadcaster = broadcaster
+	sub, err := broadcaster.Subscribe()
+	require.NoError(t, err)
+	defer broadcaster.Unsubscribe(sub)
 	mock.OnCall = func(_ context.Context, _ testutil.MockLLMCall) {
 		select {
-		case event := <-preparedEvent:
+		case event := <-sub:
 			require.Equal(t, events.TaskThreadInputApplied, event.Type)
 			require.Equal(t, exec.ID, event.ExecID)
 			require.Equal(t, steering.ID, event.PendingInputID)
@@ -1153,19 +1157,6 @@ func TestProcessStreamingResponse_AppliesPendingSteeringBeforeModelCall(t *testi
 		require.Equal(t, models.ThreadInputPending, stored.InputStatus)
 	}
 	h.llmSvc.SetLLMCaller(mock)
-	broadcaster := events.NewBroadcaster()
-	h.broadcaster = broadcaster
-	sub, err := broadcaster.Subscribe()
-	require.NoError(t, err)
-	defer broadcaster.Unsubscribe(sub)
-	go func() {
-		for event := range sub {
-			if event.Type == events.TaskThreadInputApplied {
-				preparedEvent <- event
-				return
-			}
-		}
-	}()
 
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Steering Project")

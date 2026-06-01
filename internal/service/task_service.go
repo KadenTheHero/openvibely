@@ -17,6 +17,7 @@ type TaskService struct {
 	repo           *repository.TaskRepo
 	attachmentRepo *repository.AttachmentRepo
 	workerSvc      *WorkerService
+	agentRepo      *repository.AgentRepo
 }
 
 func NewTaskService(repo *repository.TaskRepo, attachmentRepo *repository.AttachmentRepo, workerSvc *WorkerService) *TaskService {
@@ -25,6 +26,10 @@ func NewTaskService(repo *repository.TaskRepo, attachmentRepo *repository.Attach
 		attachmentRepo: attachmentRepo,
 		workerSvc:      workerSvc,
 	}
+}
+
+func (s *TaskService) SetAgentRepo(agentRepo *repository.AgentRepo) {
+	s.agentRepo = agentRepo
 }
 
 func (s *TaskService) ListByProject(ctx context.Context, projectID, category string) ([]models.Task, error) {

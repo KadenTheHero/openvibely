@@ -192,9 +192,28 @@ func (r *AgentRepo) GetByName(ctx context.Context, name string) (*models.Agent, 
 	return &agents[0], nil
 }
 
+func (r *AgentRepo) GetUniqueSelectableByName(ctx context.Context, name string) (*models.Agent, error) {
+	agents, err := r.ListSelectableByName(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if len(agents) != 1 {
+		return nil, nil
+	}
+	return &agents[0], nil
+}
+
 func (r *AgentRepo) ListByName(ctx context.Context, name string) ([]models.Agent, error) {
+	return r.listByName(ctx, name, "")
+}
+
+func (r *AgentRepo) ListSelectableByName(ctx context.Context, name string) ([]models.Agent, error) {
+	return r.listByName(ctx, name, ` AND COALESCE(enabled, 1) = 1 AND COALESCE(selectable_as_primary, 1) = 1`)
+}
+
+func (r *AgentRepo) listByName(ctx context.Context, name, extraWhere string) ([]models.Agent, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+agentColumns+` FROM agents WHERE LOWER(name) = LOWER(?) AND COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY created_at ASC`, name)
+		`SELECT `+agentColumns+` FROM agents WHERE LOWER(name) = LOWER(?) AND COALESCE(generated_status, 'user_edited') <> 'archived'`+extraWhere+` ORDER BY created_at ASC`, name)
 	if err != nil {
 		return nil, fmt.Errorf("listing agents by name: %w", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -202,6 +203,93 @@ func TestExecuteChatTaskCreations(t *testing.T) {
 	}
 	if taskOne.Prompt != "Do task one" {
 		t.Errorf("expected Task One prompt 'Do task one', got %q", taskOne.Prompt)
+	}
+}
+
+func TestProcessChatTaskCreations_AssignsExactNamedAgentDefinitionNotModelConfig(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	project := createProject(t, h, "Named Agent Chat Project")
+	modelConfig := createAgent(t, llmConfigRepo, func(c *models.LLMConfig) {
+		c.Name = "Bob"
+		c.Model = "model-config-bob"
+	})
+
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	bob := &models.Agent{Name: "Bob", Key: "bob", Description: "Bug fixer", Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(ctx, bob); err != nil {
+		t.Fatalf("create Bob agent definition: %v", err)
+	}
+
+	chatHostTask := createTask(t, h, project.ID, "chat host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+	})
+	exec := createExec(t, h, chatHostTask.ID, modelConfig.ID)
+	output := `[CREATE_TASK]
+{"title":"Fix blah.go","prompt":"Fix a bug in blah.go","agent":"Bob"}
+[/CREATE_TASK]`
+
+	newOutput, _ := h.processChatTaskCreations(ctx, exec.ID, project.ID, output, []models.LLMConfig{*modelConfig})
+	if !strings.Contains(newOutput, "[TASK_ID:") {
+		t.Fatalf("expected task creation summary, got %q", newOutput)
+	}
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	var created *models.Task
+	for i := range tasks {
+		if tasks[i].Title == "Fix blah.go" {
+			created = &tasks[i]
+			break
+		}
+	}
+	if created == nil {
+		t.Fatalf("expected marker-created task, got %+v", tasks)
+	}
+	if created.AgentDefinitionID == nil || *created.AgentDefinitionID != bob.ID {
+		t.Fatalf("expected Bob agent definition assignment, got %v want %s", created.AgentDefinitionID, bob.ID)
+	}
+	if created.AgentID == nil || *created.AgentID != modelConfig.ID {
+		t.Fatalf("expected model config auto-selection to remain separate agent_id %s, got %v", modelConfig.ID, created.AgentID)
+	}
+}
+
+func TestProcessChatTaskCreations_UnassignedPromptDoesNotInventAgentDefinition(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	project := createProject(t, h, "Unassigned Chat Project")
+	modelConfig := createAgent(t, llmConfigRepo)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	bob := &models.Agent{Name: "Bob", Key: "bob", Description: "Bug fixer", Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(ctx, bob); err != nil {
+		t.Fatalf("create Bob agent definition: %v", err)
+	}
+
+	chatHostTask := createTask(t, h, project.ID, "chat host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+	})
+	exec := createExec(t, h, chatHostTask.ID, modelConfig.ID)
+	output := `[CREATE_TASK]
+{"title":"Fix blah.go","prompt":"Fix a bug in blah.go"}
+[/CREATE_TASK]`
+
+	h.processChatTaskCreations(ctx, exec.ID, project.ID, output, []models.LLMConfig{*modelConfig})
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	for _, task := range tasks {
+		if task.Title == "Fix blah.go" && task.AgentDefinitionID != nil {
+			t.Fatalf("unassigned create_task must not invent Bob assignment, got %s", *task.AgentDefinitionID)
+		}
 	}
 }
 
@@ -926,7 +1014,6 @@ func TestProcessChatTaskEdits_EndToEndWithChatAttachments(t *testing.T) {
 		t.Errorf("expected filename 'error_screenshot.png', got %q", attachments[0].FileName)
 	}
 }
-
 
 func mustParseTime(s string) time.Time {
 	t, err := time.Parse(time.RFC3339, s)

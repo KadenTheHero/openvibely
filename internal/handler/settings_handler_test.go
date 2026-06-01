@@ -90,7 +90,8 @@ func TestHandleTelegramSaveErrorDoesNotRefreshOrRedirect(t *testing.T) {
 }
 
 func TestHandleTelegramSaveNewServiceWiresSharedRunner(t *testing.T) {
-	h, e, _ := setupTestHandler(t)
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetAgentRepo(repository.NewAgentRepo(db))
 
 	createdSvc := &service.TelegramService{}
 	origNewTelegramService := newTelegramService
@@ -117,6 +118,7 @@ func TestHandleTelegramSaveNewServiceWiresSharedRunner(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	require.Same(t, createdSvc, h.telegramService)
 	assert.True(t, createdSvc.HasChannelChatRunner(), "settings-created Telegram service must use shared steering-aware runner")
+	assert.True(t, createdSvc.HasAgentRepo(), "settings-created Telegram service must expose agent definitions in chat context")
 }
 
 func TestHandleTelegramSaveNonHTMXRedirectsToChannels(t *testing.T) {

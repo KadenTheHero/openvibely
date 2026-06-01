@@ -376,6 +376,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 
 	projectSvc := service.NewProjectService(projectRepo)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	taskSvc.SetAgentRepo(agentRepo)
 	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 	alertSvc := service.NewAlertService(alertRepo, broadcaster)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
@@ -487,6 +488,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackSvc.SetChatBroadcaster(chatBroadcaster)
 	slackSvc.SetAlertService(alertSvc)
 	slackSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	slackSvc.SetAgentRepo(agentRepo)
 
 	// Git worktree service for task isolation
 	worktreeSvc := service.NewWorktreeService(taskRepo, projectRepo, settingsRepo)
@@ -713,6 +715,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		telegramSvc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
 		telegramSvc.SetChannelChatRunner(h.StartChannelChatRun)
 		telegramSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
+		telegramSvc.SetChatBroadcaster(chatBroadcaster)
+		telegramSvc.SetAgentRepo(agentRepo)
 	}
 	if err := slackSvc.Start(); err != nil {
 		log.Printf("warning: failed to start slack socket mode: %v", err)
@@ -733,8 +737,6 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	llmSvc.SetFileChangeBroadcaster(fileChangeBroadcaster)
 	llmSvc.SetSlackService(slackSvc)
 	if telegramSvc != nil {
-		telegramSvc.SetChatBroadcaster(chatBroadcaster)
-		telegramSvc.SetAgentRepo(agentRepo)
 		llmSvc.SetTelegramService(telegramSvc)
 	}
 	h.RegisterRoutes(e)

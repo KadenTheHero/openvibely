@@ -348,8 +348,10 @@ func TestTelegramService_BuildChatContext(t *testing.T) {
 	execRepo := repository.NewExecutionRepo(db)
 	attachmentRepo := repository.NewAttachmentRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
 	workerSvc := NewWorkerService(nil, 0, projectRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	taskSvc.SetAgentRepo(agentRepo)
 
 	ctx := context.Background()
 	project := &models.Project{
@@ -370,6 +372,9 @@ func TestTelegramService_BuildChatContext(t *testing.T) {
 	}
 	require.NoError(t, taskSvc.Create(ctx, task))
 
+	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, agentRepo.Create(ctx, agent))
+
 	// Create a chat task (should be excluded from context)
 	chatTask := &models.Task{
 		Title:     "Chat message",
@@ -386,12 +391,15 @@ func TestTelegramService_BuildChatContext(t *testing.T) {
 		llmConfigRepo: llmConfigRepo,
 		taskRepo:      taskRepo,
 		execRepo:      execRepo,
+		agentRepo:     agentRepo,
 		userProjects:  make(map[int64]string),
 	}
 
 	context_ := svc.buildChatContext(ctx, project.ID)
 	assert.Contains(t, context_, "Fix login bug")
 	assert.NotContains(t, context_, "Chat message")
+	assert.Contains(t, context_, "Available Agent definitions")
+	assert.Contains(t, context_, `Name: "Reviewer"`)
 }
 
 func TestTelegramService_AutoSelectAgent(t *testing.T) {

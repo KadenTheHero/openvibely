@@ -85,6 +85,7 @@ type SlackService struct {
 	threadInputRepo       *repository.ThreadInputRepo
 	customPersonalityRepo *repository.CustomPersonalityRepo
 	slackAuthRepo         *repository.SlackAuthRepo
+	agentRepo             *repository.AgentRepo
 	chatBroadcaster       *events.ChatBroadcaster
 	queuedTurnPromoter    func(projectID string)
 	channelChatRunner     ChannelChatRunner
@@ -150,6 +151,10 @@ func (s *SlackService) SetChatBroadcaster(cb *events.ChatBroadcaster) {
 
 func (s *SlackService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
 	s.threadInputRepo = repo
+}
+
+func (s *SlackService) SetAgentRepo(repo *repository.AgentRepo) {
+	s.agentRepo = repo
 }
 
 func (s *SlackService) SetQueuedTurnPromoter(promoter func(projectID string)) {
@@ -820,7 +825,19 @@ func (s *SlackService) buildChatContext(ctx context.Context, projectID string) s
 			schedules = []models.Schedule{}
 		}
 	}
-	return BuildChatContext(existingTasks, availableModels, schedules, time.Now())
+	return BuildChatContextWithAgentDefinitions(existingTasks, availableModels, s.listChatAssignableAgentDefinitions(ctx), schedules, time.Now())
+}
+
+func (s *SlackService) listChatAssignableAgentDefinitions(ctx context.Context) []models.Agent {
+	if s.agentRepo == nil {
+		return nil
+	}
+	agents, err := s.agentRepo.List(ctx)
+	if err != nil {
+		log.Printf("[slack] error listing agent definitions for context: %v", err)
+		return nil
+	}
+	return UniqueChatAssignableAgentDefinitions(agents)
 }
 
 func (s *SlackService) resolveWorkDir(ctx context.Context, projectID string) string {

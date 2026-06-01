@@ -207,6 +207,9 @@ func (h *Handler) SetCustomPersonalityRepo(repo *repository.CustomPersonalityRep
 // SetAgentRepo sets the agent definition repo for managing agents.
 func (h *Handler) SetAgentRepo(repo *repository.AgentRepo) {
 	h.agentRepo = repo
+	if h.taskSvc != nil {
+		h.taskSvc.SetAgentRepo(repo)
+	}
 }
 
 // SetLifecycleRepo sets the lifecycle repo for agent hook management and
