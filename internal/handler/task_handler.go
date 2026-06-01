@@ -9,7 +9,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -460,6 +462,155 @@ func latestNonEmptyDiff(executions []models.Execution) string {
 	return ""
 }
 
+func taskBranchSlug(title string) string {
+	slug := strings.ToLower(title)
+	slug = regexp.MustCompile(`[^a-z0-9-]+`).ReplaceAllString(slug, "-")
+	slug = regexp.MustCompile(`-+`).ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if len(slug) > 50 {
+		slug = slug[:50]
+	}
+	return slug
+}
+
+func expectedTaskBranchName(task *models.Task) string {
+	if task == nil || len(task.ID) < 8 {
+		return ""
+	}
+	slug := taskBranchSlug(task.Title)
+	if slug == "" {
+		slug = task.ID[:8]
+	}
+	return fmt.Sprintf("task/%s-%s", task.ID[:8], slug)
+}
+
+func gitRefExists(repoDir, ref string) bool {
+	if repoDir == "" || ref == "" {
+		return false
+	}
+	cmd := exec.Command("git", "rev-parse", "--verify", ref)
+	cmd.Dir = repoDir
+	return cmd.Run() == nil
+}
+
+func gitIsAncestor(repoDir, ancestorRef, descendantRef string) bool {
+	if repoDir == "" || ancestorRef == "" || descendantRef == "" {
+		return false
+	}
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", ancestorRef, descendantRef)
+	cmd.Dir = repoDir
+	return cmd.Run() == nil
+}
+
+func gitBranchHasCommitsBeyondTarget(repoDir, targetRef, branchRef string) bool {
+	if repoDir == "" || targetRef == "" || branchRef == "" {
+		return false
+	}
+	cmd := exec.Command("git", "rev-list", "--count", fmt.Sprintf("%s..%s", targetRef, branchRef))
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) != "0"
+}
+
+func worktreeCurrentBranch(worktreePath string) string {
+	if worktreePath == "" {
+		return ""
+	}
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = worktreePath
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	branch := strings.TrimSpace(string(out))
+	if branch == "HEAD" {
+		return ""
+	}
+	return branch
+}
+
+// recoverTaskWorktreeState reattaches conventional task worktree metadata and
+// reconciles stale merge_status with current Git ancestry before render/merge
+// decisions hide local actions.
+func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Task, project *models.Project) bool {
+	if task == nil || project == nil || project.RepoPath == "" {
+		return false
+	}
+
+	changed := false
+	worktreePath := task.WorktreePath
+	if worktreePath == "" && task.ID != "" {
+		candidate := filepath.Join(project.RepoPath, ".worktrees", fmt.Sprintf("task_%s", task.ID))
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() && service.IsGitRepo(candidate) {
+			worktreePath = candidate
+			task.WorktreePath = candidate
+			changed = true
+		}
+	}
+
+	worktreeBranch := task.WorktreeBranch
+	if worktreeBranch == "" && worktreePath != "" {
+		worktreeBranch = worktreeCurrentBranch(worktreePath)
+	}
+	if worktreeBranch == "" {
+		candidate := expectedTaskBranchName(task)
+		if gitRefExists(project.RepoPath, candidate) {
+			worktreeBranch = candidate
+		}
+	}
+	if worktreeBranch != "" && task.WorktreeBranch != worktreeBranch {
+		task.WorktreeBranch = worktreeBranch
+		changed = true
+	}
+
+	if changed && task.WorktreeBranch != "" {
+		if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, task.WorktreePath, task.WorktreeBranch); err != nil {
+			log.Printf("[handler] recoverTaskWorktreeState: failed to update worktree info for task %s: %v", task.ID, err)
+		}
+	}
+
+	if task.WorktreeBranch == "" || task.Status == models.StatusRunning || task.Status == models.StatusQueued {
+		return changed
+	}
+	targetBranch := task.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = service.GetDefaultBranch(project.RepoPath)
+	}
+	if targetBranch == "" {
+		return changed
+	}
+
+	branchTipMerged := service.IsBranchTipMergedInto(project.RepoPath, task.WorktreeBranch, targetBranch)
+	if branchTipMerged {
+		if task.WorktreePath != "" {
+			if statusOut, statusErr := service.GitStatusPorcelain(task.WorktreePath); statusErr == nil && strings.TrimSpace(statusOut) != "" {
+				return changed
+			}
+		}
+		if task.MergeStatus != models.MergeStatusMerged {
+			if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusMerged); err != nil {
+				log.Printf("[handler] recoverTaskWorktreeState: failed to update merge_status for task %s: %v", task.ID, err)
+			} else {
+				task.MergeStatus = models.MergeStatusMerged
+			}
+		}
+		return changed
+	}
+
+	if task.MergeStatus == models.MergeStatusMerged && gitBranchHasCommitsBeyondTarget(project.RepoPath, targetBranch, task.WorktreeBranch) {
+		if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
+			log.Printf("[handler] recoverTaskWorktreeState: failed to reset stale merge_status for task %s: %v", task.ID, err)
+		} else {
+			task.MergeStatus = models.MergeStatusPending
+			changed = true
+		}
+	}
+	return changed
+}
+
 // reconcileAlreadyMergedBranch detects task branches that are already
 // reachable from their target branch while stored merge_status is stale. When
 // such a stale state is found, it back-fills `tasks.merge_status = merged` so
@@ -481,6 +632,7 @@ func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models
 	if err != nil || project == nil || project.RepoPath == "" {
 		return false
 	}
+	h.recoverTaskWorktreeState(ctx, task, project)
 	if task.WorktreePath != "" {
 		if statusOut, statusErr := service.GitStatusPorcelain(task.WorktreePath); statusErr == nil && strings.TrimSpace(statusOut) != "" {
 			return false
@@ -495,20 +647,7 @@ func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models
 		return false
 	}
 
-	if !service.IsBranchTipMergedInto(project.RepoPath, task.WorktreeBranch, targetBranch) {
-		return false
-	}
-
-	// Branch is merged in git. Back-fill stale merge_status so future
-	// renders/handlers do not need to repeat the git probe.
-	if task.MergeStatus != models.MergeStatusMerged {
-		if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusMerged); err != nil {
-			log.Printf("[handler] reconcileAlreadyMergedBranch: failed to update merge_status for task %s: %v", task.ID, err)
-		} else {
-			task.MergeStatus = models.MergeStatusMerged
-		}
-	}
-	return true
+	return service.IsBranchTipMergedInto(project.RepoPath, task.WorktreeBranch, targetBranch)
 }
 
 // resolveTaskChangesDiffOutput resolves the diff payload used by the Changes UI.
@@ -579,11 +718,14 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
+	ctx := c.Request().Context()
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	h.recoverTaskWorktreeState(ctx, task, project)
+
 	// If task has a worktree branch, show worktree-specific diff
 	// For merged tasks, show the preserved diff from execution (live diff would be empty)
 	// For pending/conflict tasks, show live diff if worktree still exists
 	if task.WorktreeBranch != "" {
-		ctx := c.Request().Context()
 		// Detect branches that are already reachable from the target and back-fill
 		// stale merge_status so the merge actions in the changes-tab dropdown stay
 		// in sync with reality.
@@ -614,7 +756,6 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 		// For active/unmerged tasks, show live diff if worktree still exists
 		if task.WorktreePath != "" {
 			if _, err := os.Stat(task.WorktreePath); err == nil {
-				project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 				if project != nil && project.RepoPath != "" {
 					targetBranch := task.MergeTargetBranch
 					if targetBranch == "" {

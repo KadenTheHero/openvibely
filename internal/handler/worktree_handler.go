@@ -47,13 +47,14 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	if task.WorktreeBranch == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "task has no worktree branch")
-	}
 	// Get the repo path from the project
 	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
 	if err != nil || project == nil || project.RepoPath == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
+	}
+	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
+	if task.WorktreeBranch == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "task has no worktree branch")
 	}
 
 	// Defense-in-depth: if the branch is already merged into its target,
@@ -358,13 +359,15 @@ func (h *Handler) GetTaskWorktreeInfo(c echo.Context) error {
 
 func (h *Handler) renderWorktreeInfo(c echo.Context, task *models.Task) error {
 	// Resolve project repo path for file stats
+	ctx := c.Request().Context()
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	h.recoverTaskWorktreeState(ctx, task, project)
 	var fileStats []service.WorktreeFileStat
 	if task.WorktreeBranch != "" {
 		// Detect already-merged branches so the worktree panel does not keep
 		// rendering a "Merge to <target>" button for an already-merged branch.
-		h.reconcileAlreadyMergedBranch(c.Request().Context(), task)
+		h.reconcileAlreadyMergedBranch(ctx, task)
 
-		project, _ := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
 		if project != nil && project.RepoPath != "" {
 			targetBranch := task.MergeTargetBranch
 			if targetBranch == "" {
@@ -385,13 +388,15 @@ func (h *Handler) GetTaskChangesWorktree(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
+	ctx := c.Request().Context()
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	h.recoverTaskWorktreeState(ctx, task, project)
+
 	// If task has a worktree branch, show worktree diff instead of execution diff
 	if task.WorktreeBranch != "" {
-		ctx := c.Request().Context()
 		// Detect already-merged branches so the changes-tab dropdown does not
 		// keep offering redundant merge actions.
 		branchAlreadyMerged := h.reconcileAlreadyMergedBranch(ctx, task)
-		project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 		if project != nil && project.RepoPath != "" {
 			targetBranch := task.MergeTargetBranch
 			if targetBranch == "" {

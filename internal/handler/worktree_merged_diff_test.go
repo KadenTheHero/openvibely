@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/service"
 )
 
 // TestHandler_GetTaskChanges_MergedTaskShowsPreservedDiff verifies that after a task is merged,
@@ -411,6 +413,421 @@ func TestHandler_GetTaskChanges_CompletedUnmergedWorktreeShowsUncommittedChanges
 // from the target branch keeps surfacing local merge options on the Changes tab.
 // After the fix, the changes-tab response must NOT include local /worktree/merge
 // endpoint actions, and stale merge_status is back-filled to "merged" when found.
+func TestHandler_GetTaskChanges_StaleMergedBlankMetadataRecoverableBranchShowsFastForwardOption(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	targetBranch := gitCurrentBranch(t, repoDir)
+
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Stale Metadata Project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	taskRepo := repository.NewTaskRepo(db, nil)
+	task := &models.Task{
+		ID:                "f076cd4c16ee53c0a0e05418c388f12f",
+		ProjectID:         project.ID,
+		Title:             "Fix stale running executions causing completed tas",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeTargetBranch: targetBranch,
+		MergeStatus:       models.MergeStatusMerged,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+	taskBranch := "task/f076cd4c-fix-stale-running-executions-causing-completed-tas"
+	runGit(t, repoDir, "worktree", "add", "-b", taskBranch, worktreePath, targetBranch)
+	if err := os.WriteFile(filepath.Join(worktreePath, "stale_metadata.txt"), []byte("recover stale merge metadata\n"), 0644); err != nil {
+		t.Fatalf("write stale metadata file: %v", err)
+	}
+	runGit(t, worktreePath, "add", "stale_metadata.txt")
+	runGit(t, worktreePath, "commit", "-m", "recover stale metadata")
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+
+	if err := h.GetTaskChanges(c); err != nil {
+		t.Fatalf("GetTaskChanges failed: %v", err)
+	}
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	if !strings.Contains(body, "/tasks/"+task.ID+"/worktree/merge") || !strings.Contains(body, "Fast-forward only") {
+		t.Fatalf("expected fast-forward merge action for recoverable ahead branch, body=%s", body)
+	}
+	if !strings.Contains(body, "recover stale merge metadata") {
+		t.Fatalf("expected live worktree diff, body=%s", body)
+	}
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("re-fetch task: %v", err)
+	}
+	if updated.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("expected stale merge_status reset to pending, got %s", updated.MergeStatus)
+	}
+	if updated.WorktreePath != worktreePath {
+		t.Fatalf("expected worktree path recovered to %q, got %q", worktreePath, updated.WorktreePath)
+	}
+	if updated.WorktreeBranch != taskBranch {
+		t.Fatalf("expected worktree branch recovered to %q, got %q", taskBranch, updated.WorktreeBranch)
+	}
+}
+
+func TestHandler_GetTaskChanges_StaleMergedDivergedBranchShowsLocalActions(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	targetBranch := gitCurrentBranch(t, repoDir)
+
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Diverged Stale Merged Project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	taskRepo := repository.NewTaskRepo(db, nil)
+	task := &models.Task{
+		ID:                "f076cd4c16ee53c0a0e05418c388f12f",
+		ProjectID:         project.ID,
+		Title:             "Fix stale running executions causing completed tas",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeTargetBranch: targetBranch,
+		MergeStatus:       models.MergeStatusMerged,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+	taskBranch := "task/f076cd4c-fix-stale-running-executions-causing-completed-tas"
+	runGit(t, repoDir, "worktree", "add", "-b", taskBranch, worktreePath, targetBranch)
+	if err := os.WriteFile(filepath.Join(worktreePath, "task_change.txt"), []byte("task branch change\n"), 0644); err != nil {
+		t.Fatalf("write task change file: %v", err)
+	}
+	runGit(t, worktreePath, "add", "task_change.txt")
+	runGit(t, worktreePath, "commit", "-m", "task branch change")
+
+	if err := os.WriteFile(filepath.Join(repoDir, "target_change.txt"), []byte("target branch moved\n"), 0644); err != nil {
+		t.Fatalf("write target change file: %v", err)
+	}
+	runGit(t, repoDir, "add", "target_change.txt")
+	runGit(t, repoDir, "commit", "-m", "target branch moved")
+	if counts := runGit(t, repoDir, "rev-list", "--left-right", "--count", targetBranch+"..."+taskBranch); counts != "1\t1" {
+		t.Fatalf("expected diverged target/task branches, got counts %q", counts)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+
+	if err := h.GetTaskChanges(c); err != nil {
+		t.Fatalf("GetTaskChanges failed: %v", err)
+	}
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	if !strings.Contains(body, "/tasks/"+task.ID+"/worktree/merge") || !strings.Contains(body, "Fast-forward only") {
+		t.Fatalf("expected local merge actions for stale merged diverged branch with task commits, body=%s", body)
+	}
+	if !strings.Contains(body, "task branch change") {
+		t.Fatalf("expected live worktree diff for diverged branch, body=%s", body)
+	}
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("re-fetch task: %v", err)
+	}
+	if updated.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("expected stale merge_status reset to pending, got %s", updated.MergeStatus)
+	}
+	if updated.WorktreePath != worktreePath || updated.WorktreeBranch != taskBranch {
+		t.Fatalf("expected recovered worktree metadata %q %q, got %q %q", worktreePath, taskBranch, updated.WorktreePath, updated.WorktreeBranch)
+	}
+}
+
+func TestHandler_GetTask_DirectChangesTabLoadsRecoveredChangesRoute(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	targetBranch := gitCurrentBranch(t, repoDir)
+
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Direct Changes Tab Project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	taskRepo := repository.NewTaskRepo(db, nil)
+	task := &models.Task{
+		ID:                "f076cd4c16ee53c0a0e05418c388f12f",
+		ProjectID:         project.ID,
+		Title:             "Fix stale running executions causing completed tas",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeTargetBranch: targetBranch,
+		MergeStatus:       models.MergeStatusMerged,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+	taskBranch := "task/f076cd4c-fix-stale-running-executions-causing-completed-tas"
+	runGit(t, repoDir, "worktree", "add", "-b", taskBranch, worktreePath, targetBranch)
+	if err := os.WriteFile(filepath.Join(worktreePath, "direct_changes.txt"), []byte("direct changes stale metadata\n"), 0644); err != nil {
+		t.Fatalf("write direct changes file: %v", err)
+	}
+	runGit(t, worktreePath, "add", "direct_changes.txt")
+	runGit(t, worktreePath, "commit", "-m", "direct changes stale metadata")
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"?tab=changes", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+
+	if err := h.GetTask(c); err != nil {
+		t.Fatalf("GetTask failed: %v", err)
+	}
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	if !strings.Contains(body, `hx-get="/tasks/`+task.ID+`/changes"`) || !strings.Contains(body, `hx-trigger="load"`) {
+		t.Fatalf("expected direct changes tab to load recovered changes route, body=%s", body)
+	}
+	if strings.Contains(body, "/tasks/"+task.ID+"/worktree/merge") || strings.Contains(body, "Fast-forward only") {
+		t.Fatalf("expected direct render to avoid stale inline merge controls before recovered route load, body=%s", body)
+	}
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("re-fetch task: %v", err)
+	}
+	if updated.MergeStatus != models.MergeStatusMerged || updated.WorktreePath != "" || updated.WorktreeBranch != "" {
+		t.Fatalf("expected direct page render not to mutate stale task before recovered route load, got status=%q path=%q branch=%q", updated.MergeStatus, updated.WorktreePath, updated.WorktreeBranch)
+	}
+}
+
+func TestHandler_GetTaskWorktreeInfo_StaleMergedBlankMetadataShowsFastForwardOption(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	targetBranch := gitCurrentBranch(t, repoDir)
+
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Stale Metadata Worktree Info Project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	taskRepo := repository.NewTaskRepo(db, nil)
+	task := &models.Task{
+		ID:                "f076cd4c16ee53c0a0e05418c388f12f",
+		ProjectID:         project.ID,
+		Title:             "Fix stale running executions causing completed tas",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeTargetBranch: targetBranch,
+		MergeStatus:       models.MergeStatusMerged,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+	taskBranch := "task/f076cd4c-fix-stale-running-executions-causing-completed-tas"
+	runGit(t, repoDir, "worktree", "add", "-b", taskBranch, worktreePath, targetBranch)
+	if err := os.WriteFile(filepath.Join(worktreePath, "worktree_info.txt"), []byte("worktree info stale metadata\n"), 0644); err != nil {
+		t.Fatalf("write worktree info file: %v", err)
+	}
+	runGit(t, worktreePath, "add", "worktree_info.txt")
+	runGit(t, worktreePath, "commit", "-m", "worktree info stale metadata")
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/worktree", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+
+	if err := h.GetTaskWorktreeInfo(c); err != nil {
+		t.Fatalf("GetTaskWorktreeInfo failed: %v", err)
+	}
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	if !strings.Contains(body, "/tasks/"+task.ID+"/worktree/merge") || !strings.Contains(body, "Fast-forward only") {
+		t.Fatalf("expected worktree panel fast-forward action for recoverable ahead branch, body=%s", body)
+	}
+	if !strings.Contains(body, taskBranch) || !strings.Contains(body, worktreePath) {
+		t.Fatalf("expected recovered worktree metadata in panel, body=%s", body)
+	}
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("re-fetch task: %v", err)
+	}
+	if updated.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("expected stale merge_status reset to pending, got %s", updated.MergeStatus)
+	}
+	if updated.WorktreePath != worktreePath || updated.WorktreeBranch != taskBranch {
+		t.Fatalf("expected recovered worktree metadata %q %q, got %q %q", worktreePath, taskBranch, updated.WorktreePath, updated.WorktreeBranch)
+	}
+}
+
+func TestHandler_GetTaskChangesWorktree_StaleMergedBlankMetadataShowsFastForwardOption(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	targetBranch := gitCurrentBranch(t, repoDir)
+
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Stale Metadata Worktree Fragment Project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	taskRepo := repository.NewTaskRepo(db, nil)
+	task := &models.Task{
+		ID:                "f076cd4c16ee53c0a0e05418c388f12f",
+		ProjectID:         project.ID,
+		Title:             "Fix stale running executions causing completed tas",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeTargetBranch: targetBranch,
+		MergeStatus:       models.MergeStatusMerged,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+	taskBranch := "task/f076cd4c-fix-stale-running-executions-causing-completed-tas"
+	runGit(t, repoDir, "worktree", "add", "-b", taskBranch, worktreePath, targetBranch)
+	if err := os.WriteFile(filepath.Join(worktreePath, "worktree_fragment.txt"), []byte("worktree fragment stale metadata\n"), 0644); err != nil {
+		t.Fatalf("write worktree fragment file: %v", err)
+	}
+	runGit(t, worktreePath, "add", "worktree_fragment.txt")
+	runGit(t, worktreePath, "commit", "-m", "worktree fragment stale metadata")
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/worktree", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+
+	if err := h.GetTaskChangesWorktree(c); err != nil {
+		t.Fatalf("GetTaskChangesWorktree failed: %v", err)
+	}
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	if !strings.Contains(body, "/tasks/"+task.ID+"/worktree/merge") || !strings.Contains(body, "Fast-forward only") {
+		t.Fatalf("expected worktree changes fragment fast-forward action for recoverable ahead branch, body=%s", body)
+	}
+	if !strings.Contains(body, "worktree fragment stale metadata") {
+		t.Fatalf("expected live worktree diff, body=%s", body)
+	}
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("re-fetch task: %v", err)
+	}
+	if updated.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("expected stale merge_status reset to pending, got %s", updated.MergeStatus)
+	}
+	if updated.WorktreePath != worktreePath || updated.WorktreeBranch != taskBranch {
+		t.Fatalf("expected recovered worktree metadata %q %q, got %q %q", worktreePath, taskBranch, updated.WorktreePath, updated.WorktreeBranch)
+	}
+}
+
+func TestHandler_MergeTaskBranch_StaleMergedBlankMetadataFastForwardSucceeds(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
+	ctx := context.Background()
+
+	repoDir := createHandlerTestGitRepo(t)
+	targetBranch := gitCurrentBranch(t, repoDir)
+
+	project := &models.Project{Name: "Stale Metadata Merge Project", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task := &models.Task{
+		ID:                "f076cd4c16ee53c0a0e05418c388f12f",
+		ProjectID:         project.ID,
+		Title:             "Fix stale running executions causing completed tas",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeTargetBranch: targetBranch,
+		MergeStatus:       models.MergeStatusMerged,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+	taskBranch := "task/f076cd4c-fix-stale-running-executions-causing-completed-tas"
+	runGit(t, repoDir, "worktree", "add", "-b", taskBranch, worktreePath, targetBranch)
+	if err := os.WriteFile(filepath.Join(worktreePath, "ff_stale_metadata.txt"), []byte("ff stale metadata\n"), 0644); err != nil {
+		t.Fatalf("write ff stale metadata file: %v", err)
+	}
+	runGit(t, worktreePath, "add", "ff_stale_metadata.txt")
+	runGit(t, worktreePath, "commit", "-m", "ff stale metadata")
+	branchTip := runGit(t, repoDir, "rev-parse", taskBranch)
+
+	form := url.Values{
+		"merge_type":   {"ff"},
+		"merge_source": {"changes_tab"},
+	}
+	req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", form)
+	req.Header.Set("HX-Request", "true")
+	rec := worktreeExecute(e, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := runGit(t, repoDir, "rev-parse", targetBranch); got != branchTip {
+		t.Fatalf("expected %s to fast-forward to task branch tip %s, got %s", targetBranch, branchTip, got)
+	}
+	updated, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("re-fetch task: %v", err)
+	}
+	if updated.MergeStatus != models.MergeStatusMerged {
+		t.Fatalf("expected merge_status merged after ff, got %s", updated.MergeStatus)
+	}
+	if updated.WorktreePath != worktreePath || updated.WorktreeBranch != taskBranch {
+		t.Fatalf("expected recovered worktree metadata %q %q, got %q %q", worktreePath, taskBranch, updated.WorktreePath, updated.WorktreeBranch)
+	}
+}
+
 func TestHandler_GetTaskChanges_FastForwardMergedBranchHidesMergeOptions(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	defer db.Close()
