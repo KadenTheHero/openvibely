@@ -128,12 +128,18 @@ func New(
 		threadInputRepo = repository.NewThreadInputRepo(db)
 	}
 
+	var h *Handler
 	if llmSvc != nil && threadInputRepo != nil {
 		llmSvc.SetThreadInputRepo(threadInputRepo)
 		llmSvc.SetBroadcaster(broadcaster)
+		llmSvc.SetQueuedTaskThreadPromoter(func(taskID string) {
+			if h != nil {
+				h.PromoteQueuedTaskThreadInput(taskID)
+			}
+		})
 	}
 
-	return &Handler{
+	h = &Handler{
 		projectSvc:           projectSvc,
 		taskSvc:              taskSvc,
 		llmSvc:               llmSvc,
@@ -164,6 +170,7 @@ func New(
 		telegramService:      telegramSvc,
 		projectFolderPicker:  pickProjectFolderNative,
 	}
+	return h
 }
 
 // SetChatBroadcaster sets the chat event broadcaster for real-time chat updates.

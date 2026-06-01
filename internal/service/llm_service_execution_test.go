@@ -95,6 +95,120 @@ func (a *taskSteeringProviderAdapter) Call(req llmcontracts.AgentRequest) (llmco
 	}, nil
 }
 
+func TestLLMService_ExecuteTaskWithAgent_PromotesQueuedTaskThreadInputAfterCompletion(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	project := &models.Project{Name: "Worker Queue Promotion Service", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Worker queue promotion", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "initial prompt", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued follow-up"}
+	if err := threadInputRepo.CreateQueued(ctx, queued); err != nil {
+		t.Fatalf("CreateQueued: %v", err)
+	}
+	promoted := make(chan string, 1)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "worker complete"
+	mock.TextOnly = "worker complete"
+	svc.SetLLMCaller(mock)
+	svc.SetQueuedTaskThreadPromoter(func(taskID string) { promoted <- taskID })
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil || exec.Status != models.ExecCompleted {
+		t.Fatalf("expected completed worker execution, got %#v", exec)
+	}
+	select {
+	case got := <-promoted:
+		if got != task.ID {
+			t.Fatalf("expected promoted task %s, got %s", task.ID, got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued task-thread promoter")
+	}
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID task: %v", err)
+	}
+	if updatedTask.Status != models.StatusCompleted || updatedTask.Category != models.CategoryCompleted {
+		t.Fatalf("promoter should run after worker terminal state is committed, got status=%s category=%s", updatedTask.Status, updatedTask.Category)
+	}
+	stored, err := threadInputRepo.GetByID(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("GetByID queued: %v", err)
+	}
+	if stored.InputStatus != models.ThreadInputPending {
+		t.Fatalf("service callback wiring should not itself claim queued input, got %s", stored.InputStatus)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_PromotesQueuedTaskThreadInputAfterCompletionWithMultipleQueued(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	project := &models.Project{Name: "Worker Queue Promotion Service Multi", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Worker queue promotion multi", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "initial prompt", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	first := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "first queued follow-up"}
+	second := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "second queued follow-up"}
+	if err := threadInputRepo.CreateQueued(ctx, first); err != nil {
+		t.Fatalf("CreateQueued first: %v", err)
+	}
+	if err := threadInputRepo.CreateQueued(ctx, second); err != nil {
+		t.Fatalf("CreateQueued second: %v", err)
+	}
+	promoted := make(chan string, 1)
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "worker complete"
+	mock.TextOnly = "worker complete"
+	svc.SetLLMCaller(mock)
+	svc.SetQueuedTaskThreadPromoter(func(taskID string) { promoted <- taskID })
+
+	if _, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent); err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	select {
+	case <-promoted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued task-thread promoter")
+	}
+	pending, err := threadInputRepo.ListPendingForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListPendingForTask: %v", err)
+	}
+	if len(pending) != 2 || pending[0].ID != first.ID || pending[1].ID != second.ID {
+		t.Fatalf("expected both queued inputs to remain FIFO pending for shared promoter, got %#v", pending)
+	}
+}
+
 func TestLLMService_ExecuteTask_NoDefaultAgent(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)

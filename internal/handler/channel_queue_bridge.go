@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -18,4 +19,42 @@ func (h *Handler) PromoteQueuedChatInput(projectID string) {
 		ProjectID: projectID,
 		ChatMode:  models.ChatModeOrchestrate,
 	}, "")
+}
+
+// PromoteQueuedTaskThreadInput starts the next pending queued task-thread input
+// after a worker-managed task execution reaches a terminal state.
+func (h *Handler) PromoteQueuedTaskThreadInput(taskID string) {
+	if taskID == "" || h.taskRepo == nil {
+		return
+	}
+	task, err := h.taskRepo.GetByID(context.Background(), taskID)
+	if err != nil {
+		log.Printf("[handler] PromoteQueuedTaskThreadInput task=%s load error: %v", taskID, err)
+		return
+	}
+	if task == nil {
+		log.Printf("[handler] PromoteQueuedTaskThreadInput task=%s not found", taskID)
+		return
+	}
+	log.Printf("[handler] PromoteQueuedTaskThreadInput task=%s checking queue", taskID)
+	h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{
+		ProjectID:      task.ProjectID,
+		TaskID:         task.ID,
+		IsTaskFollowup: true,
+	}, "")
+}
+
+func (h *Handler) RecoverQueuedTaskThreadInputs(ctx context.Context) {
+	if h.threadInputRepo == nil {
+		return
+	}
+	ids, err := h.threadInputRepo.ListRecoverableQueuedTaskIDs(ctx, 100)
+	if err != nil {
+		log.Printf("[handler] RecoverQueuedTaskThreadInputs list error: %v", err)
+		return
+	}
+	for _, taskID := range ids {
+		log.Printf("[handler] RecoverQueuedTaskThreadInputs promoting stranded queued input task=%s", taskID)
+		h.PromoteQueuedTaskThreadInput(taskID)
+	}
 }

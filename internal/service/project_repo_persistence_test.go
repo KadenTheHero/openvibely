@@ -123,10 +123,22 @@ func TestExecuteTaskWithAgent_FailsOnMissingRepoPath(t *testing.T) {
 
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 
+	promoted := make(chan string, 1)
+	svc.SetQueuedTaskThreadPromoter(func(taskID string) { promoted <- taskID })
+
 	// Execute — should not call the LLM at all since repo is missing
 	_, execErr := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
 	if execErr == nil {
 		t.Error("expected error from ExecuteTaskWithAgent when repo path is missing")
+	}
+
+	select {
+	case gotTaskID := <-promoted:
+		if gotTaskID != task.ID {
+			t.Fatalf("expected promoted task ID %q, got %q", task.ID, gotTaskID)
+		}
+	default:
+		t.Fatal("expected queued task-thread promoter after missing repo path failure")
 	}
 
 	if mock.CallCount() != 0 {

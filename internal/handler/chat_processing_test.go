@@ -473,6 +473,239 @@ func TestProcessStreamingResponse_InteractiveChatPlanModeRunsMemoryRecallOnly(t 
 	}
 }
 
+func TestHandler_WorkerCompletionPromotesQueuedTaskThreadInput(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Worker Completion Wired Promotion Project")
+	task := createTask(t, h, project.ID, "Worker Completion Wired Promotion Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusPending
+		tk.Prompt = "Run initial worker task"
+		tk.AgentID = &agent.ID
+	})
+
+	started := make(chan string, 2)
+	queuedCreated := make(chan struct{}, 1)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) {
+		started <- call.Prompt
+		if call.Prompt == "Run initial worker task" {
+			queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: call.ExecID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued while worker runs"}
+			require.NoError(t, h.threadInputRepo.CreateQueued(context.Background(), queued))
+			queuedCreated <- struct{}{}
+		}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	if _, err := h.llmSvc.ExecuteTaskWithAgent(ctx, *task, *agent); err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	select {
+	case <-queuedCreated:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued input fixture")
+	}
+	select {
+	case got := <-started:
+		if got != "Run initial worker task" {
+			t.Fatalf("expected original worker prompt first, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for original worker prompt")
+	}
+	select {
+	case got := <-started:
+		if got != "queued while worker runs" {
+			t.Fatalf("expected queued worker follow-up to start, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued worker follow-up to start")
+	}
+	inputs, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	if len(inputs) != 0 {
+		t.Fatalf("expected no stranded pending queued inputs, got %#v", inputs)
+	}
+}
+
+func TestHandler_RecoverQueuedTaskThreadInputsPromotesStrandedInput(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Recover Stranded Task Thread Queue Project")
+	task := createTask(t, h, project.ID, "Recover Stranded Task Thread Queue Task", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+		tk.Prompt = "original worker prompt"
+		tk.AgentID = &agent.ID
+	})
+	original := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: task.Prompt}
+	require.NoError(t, h.execRepo.Create(ctx, original))
+	require.NoError(t, h.execRepo.Complete(ctx, original.ID, models.ExecCompleted, "done", "", 0, 1))
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: original.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "what's 1+1=?"}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
+
+	started := make(chan string, 1)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "2"
+	mock.TextOnly = "2"
+	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) {
+		started <- call.Prompt
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.RecoverQueuedTaskThreadInputs(ctx)
+	select {
+	case got := <-started:
+		if got != "what's 1+1=?" {
+			t.Fatalf("expected stranded queued follow-up to start, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for stranded queued follow-up to start")
+	}
+	stored, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	if stored.InputStatus != models.ThreadInputApplied {
+		t.Fatalf("expected stranded queued input applied, got %#v", stored)
+	}
+}
+
+func TestHandler_WorkerCompletionPromotesFirstQueuedTaskThreadInputAndRetargetsRest(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Worker Completion Wired Multi Promotion Project")
+	task := createTask(t, h, project.ID, "Worker Completion Wired Multi Promotion Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusPending
+		tk.Prompt = "Run initial worker task"
+		tk.AgentID = &agent.ID
+	})
+
+	started := make(chan string, 2)
+	queuedIDs := make(chan [2]string, 1)
+	releasePromoted := make(chan struct{})
+	var blockPromotedOnce sync.Once
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) {
+		started <- call.Prompt
+		if call.Prompt == "Run initial worker task" {
+			first := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: call.ExecID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "first queued while worker runs"}
+			second := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: call.ExecID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "second queued while worker runs"}
+			require.NoError(t, h.threadInputRepo.CreateQueued(context.Background(), first))
+			require.NoError(t, h.threadInputRepo.CreateQueued(context.Background(), second))
+			queuedIDs <- [2]string{first.ID, second.ID}
+			return
+		}
+		if call.Prompt == "first queued while worker runs" {
+			blockPromotedOnce.Do(func() { <-releasePromoted })
+		}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	if _, err := h.llmSvc.ExecuteTaskWithAgent(ctx, *task, *agent); err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	ids := [2]string{}
+	select {
+	case ids = <-queuedIDs:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued input fixtures")
+	}
+	select {
+	case got := <-started:
+		if got != "Run initial worker task" {
+			t.Fatalf("expected original worker prompt first, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for original worker prompt")
+	}
+	select {
+	case got := <-started:
+		if got != "first queued while worker runs" {
+			t.Fatalf("expected first queued worker follow-up to start, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first queued worker follow-up to start")
+	}
+	first, err := h.threadInputRepo.GetByID(ctx, ids[0])
+	require.NoError(t, err)
+	second, err := h.threadInputRepo.GetByID(ctx, ids[1])
+	require.NoError(t, err)
+	if first.InputStatus != models.ThreadInputApplied || second.InputStatus != models.ThreadInputPending {
+		t.Fatalf("expected first applied and second pending, got first=%s second=%s", first.InputStatus, second.InputStatus)
+	}
+	if second.RunExecutionID == "" || second.RunExecutionID != first.RunExecutionID {
+		t.Fatalf("expected remaining queued input guard retargeted to promoted execution, first=%#v second=%#v", first, second)
+	}
+	close(releasePromoted)
+	select {
+	case got := <-started:
+		if got != "second queued while worker runs" {
+			t.Fatalf("expected second queued worker follow-up to start, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for second queued worker follow-up to start")
+	}
+}
+
+func TestHandler_PromoteQueuedTaskThreadInput_PromotesAfterWorkerCompletion(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Worker Completion Promotion Project")
+	task := createTask(t, h, project.ID, "Worker Completion Promotion Task", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+	})
+	completed := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "initial worker run"
+	})
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: completed.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued after worker"}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
+
+	started := make(chan string, 1)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) {
+		started <- call.Prompt
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.PromoteQueuedTaskThreadInput(task.ID)
+
+	select {
+	case got := <-started:
+		if got != "queued after worker" {
+			t.Fatalf("expected queued worker follow-up to start, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued worker follow-up to start")
+	}
+	stored, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	if stored.InputStatus != models.ThreadInputApplied {
+		t.Fatalf("expected queued worker follow-up applied, got %s", stored.InputStatus)
+	}
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	if updatedTask.Status != models.StatusQueued || updatedTask.Category != models.CategoryActive {
+		t.Fatalf("expected promoted task active/queued, got status=%s category=%s", updatedTask.Status, updatedTask.Category)
+	}
+}
+
 func TestProcessStreamingResponse_PromotesQueuedTaskThreadInputsFIFO(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
@@ -851,6 +1084,7 @@ func TestStartQueuedTaskThreadInputUsesQueuedChannelReplyContext(t *testing.T) {
 	mock.TextOnly = "queued task done"
 	h.llmSvc.SetLLMCaller(mock)
 
+	require.NoError(t, h.execRepo.Complete(ctx, activeExec.ID, models.ExecCompleted, "active done", "", 0, 0))
 	h.startQueuedTaskThreadInput(ctx, *input)
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
 	require.Eventually(t, func() bool { return sentChannel == "C1" }, 2*time.Second, 25*time.Millisecond)
@@ -1096,6 +1330,7 @@ func TestStartQueuedTaskThreadInputProcessesSavedAttachmentSession(t *testing.T)
 	require.NoError(t, err)
 	defer broadcaster.Unsubscribe(sub)
 
+	require.NoError(t, h.execRepo.Complete(ctx, activeExec.ID, models.ExecCompleted, "active done", "", 0, 0))
 	h.startQueuedTaskThreadInput(ctx, *input)
 
 	var started events.TaskEvent

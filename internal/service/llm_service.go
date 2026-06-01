@@ -39,26 +39,27 @@ type LLMCaller interface {
 }
 
 type LLMService struct {
-	llmConfigRepo         *repository.LLMConfigRepo
-	execRepo              *repository.ExecutionRepo
-	taskRepo              *repository.TaskRepo
-	projectRepo           *repository.ProjectRepo
-	scheduleRepo          *repository.ScheduleRepo
-	attachmentRepo        *repository.AttachmentRepo
-	agentRepo             *repository.AgentRepo
-	lifecycleRepo         *repository.LifecycleRepo
-	mutationRecorder      func(models.Task) agentlibrary.MutationRecorder
-	alertSvc              *AlertService
-	taskSvc               *TaskService
-	worktreeSvc           *WorktreeService
-	telegramSvc           *TelegramService
-	slackSvc              *SlackService
-	llmCaller             LLMCaller
-	providerAdapters      map[models.LLMProvider]ProviderAdapter
-	routing               *agentRoutingStrategy
-	fileChangeBroadcaster *events.FileChangeBroadcaster
-	threadInputRepo       *repository.ThreadInputRepo
-	broadcaster           *events.Broadcaster
+	llmConfigRepo            *repository.LLMConfigRepo
+	execRepo                 *repository.ExecutionRepo
+	taskRepo                 *repository.TaskRepo
+	projectRepo              *repository.ProjectRepo
+	scheduleRepo             *repository.ScheduleRepo
+	attachmentRepo           *repository.AttachmentRepo
+	agentRepo                *repository.AgentRepo
+	lifecycleRepo            *repository.LifecycleRepo
+	mutationRecorder         func(models.Task) agentlibrary.MutationRecorder
+	alertSvc                 *AlertService
+	taskSvc                  *TaskService
+	worktreeSvc              *WorktreeService
+	telegramSvc              *TelegramService
+	slackSvc                 *SlackService
+	llmCaller                LLMCaller
+	providerAdapters         map[models.LLMProvider]ProviderAdapter
+	routing                  *agentRoutingStrategy
+	fileChangeBroadcaster    *events.FileChangeBroadcaster
+	threadInputRepo          *repository.ThreadInputRepo
+	broadcaster              *events.Broadcaster
+	queuedTaskThreadPromoter func(taskID string)
 	// globalSkillRoot is the parent directory holding <root>/agents for global
 	// agents/skills. It is used for catalog construction and bounded skill
 	// mutation writes; agents themselves remain user-managed.
@@ -129,6 +130,22 @@ func (s *LLMService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
 
 func (s *LLMService) SetBroadcaster(b *events.Broadcaster) {
 	s.broadcaster = b
+}
+
+func (s *LLMService) SetQueuedTaskThreadPromoter(promoter func(taskID string)) {
+	s.queuedTaskThreadPromoter = promoter
+}
+
+func (s *LLMService) promoteQueuedTaskThreadAfterCompletion(taskID string) {
+	if strings.TrimSpace(taskID) == "" {
+		return
+	}
+	if s.queuedTaskThreadPromoter == nil {
+		log.Printf("[agent-svc] queued task-thread promoter not configured task=%s", taskID)
+		return
+	}
+	log.Printf("[agent-svc] promoting queued task-thread input after completion task=%s", taskID)
+	s.queuedTaskThreadPromoter(taskID)
 }
 
 // SetAgentRepo sets the agent repository for resolving agent definitions on tasks.
@@ -322,6 +339,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		}
 		exec.Status = models.ExecFailed
 		exec.ErrorMessage = err.Error()
+		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, llmcontracts.ChatContext{}, fmt.Errorf("loading attachments: %w", err)
 	}
 	log.Printf("[agent-svc] ExecuteTaskWithAgent loaded %d attachments for task=%s", len(attachments), task.ID)
@@ -359,6 +377,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 				if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 					log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after missing repo: %v", statusErr)
 				}
+				s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 				return exec, llmcontracts.ChatContext{}, fmt.Errorf("repo path missing: %s", errMsg)
 			}
 			repoDir = project.RepoPath
@@ -411,6 +430,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 				if s.slackSvc != nil {
 					s.slackSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
 				}
+				s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 				return exec, llmcontracts.ChatContext{}, fmt.Errorf("startup worktree auto-merge failed: %w", syncErr)
 			}
 		}
@@ -437,6 +457,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			}
 			exec.Status = models.ExecFailed
 			exec.ErrorMessage = errMsg
+			s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 			return exec, llmcontracts.ChatContext{}, fmt.Errorf("preparing scoped file tools: %w", prepErr)
 		}
 		runtimeTools = rt
@@ -533,6 +554,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			}
 			exec.Status = models.ExecCancelled
 			exec.ErrorMessage = "task cancelled by user"
+			s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 			return exec, result.ChatContext, fmt.Errorf("task cancelled")
 		}
 
@@ -576,6 +598,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if s.slackSvc != nil {
 			s.slackSvc.SendTaskCompletionNotification(bgCtx, task, "", err.Error())
 		}
+		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, result.ChatContext, fmt.Errorf("calling LLM: %w", err)
 	}
 
@@ -590,6 +613,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		}
 		exec.Status = models.ExecFailed
 		exec.ErrorMessage = err.Error()
+		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, result.ChatContext, fmt.Errorf("committing steering: %w", err)
 	}
 
@@ -636,6 +660,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if s.slackSvc != nil {
 			s.slackSvc.SendTaskCompletionNotification(finalizeCtx, task, "", reason)
 		}
+		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, result.ChatContext, nil
 	}
 
@@ -745,6 +770,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if s.slackSvc != nil {
 		s.slackSvc.SendTaskCompletionNotification(finalizeCtx, task, output, "")
 	}
+	s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 
 	return exec, result.ChatContext, nil
 }

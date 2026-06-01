@@ -739,6 +739,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	if telegramSvc != nil {
 		llmSvc.SetTelegramService(telegramSvc)
 	}
+	h.RecoverQueuedTaskThreadInputs(context.Background())
 	h.RegisterRoutes(e)
 
 	// Bind listener explicitly so we know the actual port before serving.

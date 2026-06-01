@@ -89,6 +89,77 @@ func TestThreadInputRepo_ClaimQueuedValidatesPendingSurface(t *testing.T) {
 	}
 }
 
+func TestThreadInputRepo_ListRecoverableQueuedTaskIDsFindsPendingInputsBehindTerminalExecutions(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	completed := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "original"}
+	if err := execRepo.Create(ctx, completed); err != nil {
+		t.Fatalf("create completed execution: %v", err)
+	}
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: completed.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued after completed worker"}
+	if err := repo.CreateQueued(ctx, queued); err != nil {
+		t.Fatalf("CreateQueued: %v", err)
+	}
+
+	ids, err := repo.ListRecoverableQueuedTaskIDs(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListRecoverableQueuedTaskIDs: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != task.ID {
+		t.Fatalf("recoverable task ids = %#v, want [%s]", ids, task.ID)
+	}
+
+	running := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "another active"}
+	if err := execRepo.Create(ctx, running); err != nil {
+		t.Fatalf("create running execution: %v", err)
+	}
+	ids, err = repo.ListRecoverableQueuedTaskIDs(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListRecoverableQueuedTaskIDs with active execution: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("recoverable task ids with active execution = %#v, want none", ids)
+	}
+}
+
+func TestThreadInputRepo_ClaimQueuedForTaskExecutionRequiresNoActiveExecution(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := NewExecutionRepo(db).Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: active.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued"}
+	if err := repo.CreateQueued(ctx, queued); err != nil {
+		t.Fatalf("CreateQueued: %v", err)
+	}
+	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: queued.Content, IsFollowup: true}
+	if err := repo.ClaimQueuedForTaskExecution(ctx, queued.ID, promoted); !errors.Is(err, ErrActiveTurnChanged) {
+		t.Fatalf("expected active-turn conflict, got %v", err)
+	}
+	stored, err := repo.GetByID(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("GetByID queued: %v", err)
+	}
+	if stored.InputStatus != models.ThreadInputPending || stored.RunExecutionID != active.ID {
+		t.Fatalf("queued input should remain pending behind active execution, got %#v", stored)
+	}
+	if promoted.ID != "" {
+		if got, err := NewExecutionRepo(db).GetByID(ctx, promoted.ID); err != nil || got != nil {
+			t.Fatalf("claim conflict left promoted execution got=%#v err=%v", got, err)
+		}
+	}
+}
+
 func TestThreadInputRepo_ClaimQueuedForTaskExecutionRetargetsRemainingQueuedGuards(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -97,7 +168,7 @@ func TestThreadInputRepo_ClaimQueuedForTaskExecutionRetargetsRemainingQueuedGuar
 	task := createThreadInputTask(t, ctx, db, project.ID)
 	agent := createThreadInputLLMConfig(t, ctx, db)
 	execRepo := NewExecutionRepo(db)
-	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "active"}
 	if err := execRepo.Create(ctx, active); err != nil {
 		t.Fatalf("create active execution: %v", err)
 	}

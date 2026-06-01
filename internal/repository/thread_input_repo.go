@@ -267,6 +267,45 @@ func (r *ThreadInputRepo) FindOldestQueuedForChat(ctx context.Context, projectID
 	return r.findOldestQueued(ctx, models.ThreadInputScopeChat, projectID, "")
 }
 
+func (r *ThreadInputRepo) ListRecoverableQueuedTaskIDs(ctx context.Context, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT ti.task_id
+		FROM thread_inputs ti
+		JOIN executions guarded ON guarded.id = ti.run_execution_id
+		JOIN tasks t ON t.id = ti.task_id
+		WHERE ti.scope = 'task_thread'
+		  AND ti.input_mode = 'queued'
+		  AND ti.input_status = 'pending'
+		  AND COALESCE(ti.task_id, '') != ''
+		  AND guarded.status IN ('completed', 'failed', 'cancelled')
+		  AND NOT EXISTS (
+		    SELECT 1 FROM executions active
+		    WHERE active.task_id = ti.task_id AND active.status = 'running'
+		  )
+		GROUP BY ti.task_id
+		ORDER BY MIN(ti.queue_position), MIN(ti.created_at), MIN(ti.rowid)
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing recoverable queued task ids: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning recoverable queued task id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listing recoverable queued task ids: %w", err)
+	}
+	return ids, nil
+}
+
 func (r *ThreadInputRepo) findOldestQueued(ctx context.Context, scope models.ThreadInputScope, projectID, taskID string) (*models.ThreadInput, error) {
 	query := `SELECT ` + threadInputSelectColumns + ` FROM thread_inputs WHERE scope = ? AND input_mode = 'queued' AND input_status = 'pending'`
 	args := []interface{}{scope}
@@ -497,28 +536,41 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 	if exec == nil {
 		return fmt.Errorf("execution is required")
 	}
-	return r.withTx(ctx, func(tx *sql.Tx) error {
-		promoted, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
+	return r.withImmediateTx(ctx, func(dbexec sqlExecutor) error {
+		promoted, err := scanThreadInput(dbexec.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
 		if err == sql.ErrNoRows {
 			return ErrInputNotPending
 		}
 		if err != nil {
 			return fmt.Errorf("loading queued input before claim: %w", err)
 		}
-		isFollowup := 0
-		if exec.IsFollowup {
-			isFollowup = 1
+		if promoted.Scope != models.ThreadInputScopeTask || promoted.TaskID != exec.TaskID || promoted.InputMode != models.ThreadInputModeQueued || promoted.InputStatus != models.ThreadInputPending {
+			return ErrInputNotPending
 		}
-		if err := tx.QueryRowContext(ctx, `
-				INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
-				VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
-				RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup).Scan(&exec.ID, &exec.StartedAt); err != nil {
-			return fmt.Errorf("creating promoted task execution: %w", err)
+		if exec.TaskID == "" {
+			return fmt.Errorf("execution task id is required")
 		}
-		res, err := tx.ExecContext(ctx, `
-				UPDATE thread_inputs
-				SET input_status = 'applied', run_execution_id = ?, turn_id = ?, applied_at = datetime('now'), updated_at = datetime('now')
-				WHERE id = ? AND scope = 'task_thread' AND task_id = ? AND input_mode = 'queued' AND input_status = 'pending'`, exec.ID, exec.ID, inputID, exec.TaskID)
+		var surfaceOK int
+		if err := dbexec.QueryRowContext(ctx, `
+			SELECT 1
+			FROM tasks
+			WHERE id = ? AND project_id = ?`, exec.TaskID, promoted.ProjectID).Scan(&surfaceOK); err != nil {
+			if err == sql.ErrNoRows {
+				return ErrInputNotPending
+			}
+			return fmt.Errorf("validating queued input task surface: %w", err)
+		}
+		var activeCount int
+		if err := dbexec.QueryRowContext(ctx, `SELECT COUNT(*) FROM executions WHERE task_id = ? AND status = 'running'`, exec.TaskID).Scan(&activeCount); err != nil {
+			return fmt.Errorf("checking active task execution before queued claim: %w", err)
+		}
+		if activeCount > 0 {
+			return ErrActiveTurnChanged
+		}
+		res, err := dbexec.ExecContext(ctx, `
+			UPDATE thread_inputs
+			SET expected_turn_id = id, updated_at = datetime('now')
+			WHERE id = ? AND scope = 'task_thread' AND task_id = ? AND input_mode = 'queued' AND input_status = 'pending'`, inputID, exec.TaskID)
 		if err != nil {
 			return fmt.Errorf("claiming queued input: %w", err)
 		}
@@ -526,7 +578,28 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 		if changed == 0 {
 			return ErrInputNotPending
 		}
-		return retargetRemainingQueuedInputGuards(ctx, tx, promoted, exec.ID)
+		isFollowup := 0
+		if exec.IsFollowup {
+			isFollowup = 1
+		}
+		if err := dbexec.QueryRowContext(ctx, `
+			INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
+			VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
+			RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup).Scan(&exec.ID, &exec.StartedAt); err != nil {
+			return fmt.Errorf("creating promoted task execution: %w", err)
+		}
+		res, err = dbexec.ExecContext(ctx, `
+			UPDATE thread_inputs
+			SET input_status = 'applied', run_execution_id = ?, turn_id = ?, expected_turn_id = NULL, applied_at = datetime('now'), updated_at = datetime('now')
+			WHERE id = ? AND scope = 'task_thread' AND task_id = ? AND input_mode = 'queued' AND input_status = 'pending' AND expected_turn_id = id`, exec.ID, exec.ID, inputID, exec.TaskID)
+		if err != nil {
+			return fmt.Errorf("applying queued input claim: %w", err)
+		}
+		changed, _ = res.RowsAffected()
+		if changed == 0 {
+			return ErrInputNotPending
+		}
+		return retargetRemainingQueuedInputGuards(ctx, dbexec, promoted, exec.ID)
 	})
 }
 func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, inputID string, task *models.Task, exec *models.Execution, slackContext *models.SlackTaskContext) error {
