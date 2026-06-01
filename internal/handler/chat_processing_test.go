@@ -2012,6 +2012,173 @@ func TestProcessStreamingResponse_TaskFollowupFailedMarkerMarksTaskFailed(t *tes
 	}
 }
 
+func TestResolveWorktreeWorkDir_TerminalUnmergedConflictContinuesInPreservedWorktree(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Terminal Conflict Followup Project", RepoPath: repoDir}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task := createTask(t, h, project.ID, "Terminal unmerged conflict followup", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusFailed
+		tk.MergeStatus = models.MergeStatusPending
+	})
+
+	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+	wtPath, wtBranch, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("setup worktree: %v", err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+
+	conflictFile := filepath.Join(wtPath, "conflict.txt")
+	if err := os.WriteFile(conflictFile, []byte("task version\n"), 0644); err != nil {
+		t.Fatalf("write task conflict file: %v", err)
+	}
+	if err := service.CommitWorktreeChanges(wtPath, "task conflict version"); err != nil {
+		t.Fatalf("commit task conflict version: %v", err)
+	}
+
+	mainConflictFile := filepath.Join(repoDir, "conflict.txt")
+	if err := os.WriteFile(mainConflictFile, []byte("main version\n"), 0644); err != nil {
+		t.Fatalf("write main conflict file: %v", err)
+	}
+	cmd := exec.Command("git", "add", "conflict.txt")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add main conflict file: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "main conflict version")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit main conflict version: %v\n%s", err, out)
+	}
+
+	workDir, worktreeContext, err := h.resolveWorktreeWorkDir(ctx, task)
+	if err != nil {
+		t.Fatalf("terminal followup should continue in preserved worktree after startup conflict: %v", err)
+	}
+	if workDir != wtPath {
+		t.Fatalf("expected preserved worktree %q, got %q", wtPath, workDir)
+	}
+	if !strings.Contains(worktreeContext, "Startup sync could not merge") || !strings.Contains(worktreeContext, "merge was aborted") {
+		t.Fatalf("expected model-visible startup sync warning, got %q", worktreeContext)
+	}
+	content, err := os.ReadFile(conflictFile)
+	if err != nil {
+		t.Fatalf("read conflict file: %v", err)
+	}
+	if string(content) != "task version\n" {
+		t.Fatalf("expected task worktree version preserved, got %q", content)
+	}
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = wtPath
+	out, err := statusCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status after aborted startup conflict: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		t.Fatalf("expected startup conflict to be aborted cleanly, status:\n%s", out)
+	}
+	updated, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updated.MergeStatus != models.MergeStatusConflict {
+		t.Fatalf("expected merge_status conflict, got %q", updated.MergeStatus)
+	}
+}
+
+func TestProcessStreamingResponse_TerminalSyncConflictIncludesWorktreeWarningContext(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "I will inspect the divergence."
+	mock.TextOnly = mock.Response
+	h.llmSvc.SetLLMCaller(mock)
+
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Terminal Conflict Prompt Context Project", RepoPath: repoDir}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	agent := createAgent(t, llmConfigRepo)
+	task := createTask(t, h, project.ID, "Terminal conflict prompt context", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusFailed
+		tk.MergeStatus = models.MergeStatusPending
+		tk.AgentID = &agent.ID
+	})
+
+	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+	wtPath, wtBranch, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("setup worktree: %v", err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+
+	conflictFile := filepath.Join(wtPath, "conflict.txt")
+	if err := os.WriteFile(conflictFile, []byte("task version\n"), 0644); err != nil {
+		t.Fatalf("write task conflict file: %v", err)
+	}
+	if err := service.CommitWorktreeChanges(wtPath, "task conflict version"); err != nil {
+		t.Fatalf("commit task conflict version: %v", err)
+	}
+
+	mainConflictFile := filepath.Join(repoDir, "conflict.txt")
+	if err := os.WriteFile(mainConflictFile, []byte("main version\n"), 0644); err != nil {
+		t.Fatalf("write main conflict file: %v", err)
+	}
+	cmd := exec.Command("git", "add", "conflict.txt")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add main conflict file: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "main conflict version")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit main conflict version: %v\n%s", err, out)
+	}
+
+	workDir, worktreeContext, err := h.resolveWorktreeWorkDir(ctx, task)
+	if err != nil {
+		t.Fatalf("terminal followup should continue in preserved worktree after startup conflict: %v", err)
+	}
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Please reconcile main"
+		ex.IsFollowup = true
+	})
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "Please reconcile main",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		SystemContext:  combineContexts(buildThreadSystemContext(task.Title, true, ""), worktreeContext),
+		WorkDir:        workDir,
+		IsTaskFollowup: true,
+	})
+
+	request := mock.LastAgentRequest()
+	if !strings.Contains(request.ChatSystemContext, "Startup sync could not merge") {
+		t.Fatalf("expected provider system context to include startup sync warning, got %q", request.ChatSystemContext)
+	}
+	if !strings.Contains(request.ChatSystemContext, "merge was aborted") || !strings.Contains(request.ChatSystemContext, "Inspect the current branch") {
+		t.Fatalf("expected provider system context to tell agent how to recover, got %q", request.ChatSystemContext)
+	}
+}
+
 func TestResolveWorktreeWorkDir_SyncsExistingWorktreeFromTargetBeforeFollowup(t *testing.T) {
 	h, _, _ := setupTestHandler(t)
 	ctx := context.Background()
@@ -2054,12 +2221,15 @@ func TestResolveWorktreeWorkDir_SyncsExistingWorktreeFromTargetBeforeFollowup(t 
 		t.Fatalf("expected stale worktree to not have main-only.txt before followup sync, stat err=%v", err)
 	}
 
-	workDir, err := h.resolveWorktreeWorkDir(ctx, task)
+	workDir, worktreeContext, err := h.resolveWorktreeWorkDir(ctx, task)
 	if err != nil {
 		t.Fatalf("resolve worktree workdir: %v", err)
 	}
 	if workDir != wtPath {
 		t.Fatalf("expected workDir %q, got %q", wtPath, workDir)
+	}
+	if worktreeContext != "" {
+		t.Fatalf("expected no worktree warning context, got %q", worktreeContext)
 	}
 	if _, err := os.Stat(filepath.Join(wtPath, "main-only.txt")); err != nil {
 		t.Fatalf("expected followup worktree sync to include main-only.txt: %v", err)
@@ -2119,12 +2289,15 @@ func TestResolveWorktreeWorkDir_MergedStaleFollowupStartsFromCurrentTarget(t *te
 		t.Fatalf("git commit accepted main edit: %v\n%s", err, out)
 	}
 
-	workDir, err := h.resolveWorktreeWorkDir(ctx, task)
+	workDir, worktreeContext, err := h.resolveWorktreeWorkDir(ctx, task)
 	if err != nil {
 		t.Fatalf("resolve worktree workdir should skip stale startup merge conflict: %v", err)
 	}
 	if workDir == oldPath {
 		t.Fatalf("expected fresh current-target follow-up worktree, got original stale path %q", workDir)
+	}
+	if worktreeContext != "" {
+		t.Fatalf("expected no worktree warning context for fresh current-target worktree, got %q", worktreeContext)
 	}
 	if !strings.Contains(task.WorktreeBranch, "-followup-") {
 		t.Fatalf("expected follow-up branch, got %q", task.WorktreeBranch)

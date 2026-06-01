@@ -1570,7 +1570,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	priorHistory := filterChatHistory(priorExecs, exec.ID)
 	systemContext := buildThreadSystemContext(task.Title, len(priorHistory) > 0, attachmentContext)
 	personalityContext := h.getPersonalityContext(c.Request().Context(), task.ProjectID)
-	workDir, workDirErr := h.resolveWorktreeWorkDir(c.Request().Context(), task)
+	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(c.Request().Context(), task)
 	if workDirErr != nil {
 		h.completeWithFailure(c.Request().Context(), exec.ID, taskID, workDirErr.Error(), 0)
 		setHTMXToast(c, workDirErr.Error(), "failed")
@@ -1610,7 +1610,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		AgentDefinition:  agentDef,
 		ChatHistory:      priorHistory,
 		ProjectID:        task.ProjectID,
-		SystemContext:    combineContexts(systemContext, personalityContext),
+		SystemContext:    combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   true,

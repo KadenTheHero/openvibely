@@ -1015,7 +1015,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 	priorHistory := filterChatHistory(priorExecs, exec.ID)
 	systemContext := buildThreadSystemContext(task.Title, len(priorHistory) > 0, attachmentContext)
 	personalityContext := h.getPersonalityContext(ctx, task.ProjectID)
-	workDir, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
+	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 	if workDirErr != nil {
 		h.completeWithFailure(ctx, exec.ID, exec.TaskID, workDirErr.Error(), 0, channelReplyFromThreadInput(input))
 		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, exec.ID)
@@ -1035,13 +1035,12 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		AgentDefinition:  agentDef,
 		ChatHistory:      priorHistory,
 		ProjectID:        task.ProjectID,
-		SystemContext:    combineContexts(systemContext, personalityContext),
+		SystemContext:    combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   true,
 		ProcessMarkers:   false,
-		ChannelReply:     channelReplyFromThreadInput(input),
-	})
+		ChannelReply:     channelReplyFromThreadInput(input)})
 }
 
 func (h *Handler) registerTaskCancellation(taskID string, cancel context.CancelFunc) {
@@ -1534,41 +1533,45 @@ func (h *Handler) resolveWorkDir(ctx context.Context, projectID string) string {
 // resolveWorktreeWorkDir resolves the working directory for a task followup,
 // preferring the task's git worktree. Falls back to project repo path for
 // non-git projects, chat tasks, or when worktree service is unavailable.
-func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task) (string, error) {
+func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task) (string, string, error) {
 	project, err := h.projectSvc.GetByID(ctx, task.ProjectID)
 	if err != nil || project == nil || project.RepoPath == "" {
-		return "", nil
+		return "", "", nil
 	}
 	repoDir := project.RepoPath
 
 	if task.Category == models.CategoryChat || !service.IsGitRepo(repoDir) {
-		return repoDir, nil
+		return repoDir, "", nil
 	}
 
 	if h.worktreeSvc == nil {
-		return repoDir, nil
+		return repoDir, "", nil
 	}
 
 	wtPath, wtBranch, skipStartupSync, wtErr := h.worktreeSvc.SetupFollowupWorktree(ctx, task, repoDir)
 	if wtErr != nil {
 		log.Printf("[handler] resolveWorktreeWorkDir worktree setup failed for task %s, using main repo: %v", task.ID, wtErr)
-		return repoDir, nil
+		return repoDir, "", nil
 	}
 	task.WorktreePath = wtPath
 	task.WorktreeBranch = wtBranch
 
 	if skipStartupSync {
 		log.Printf("[handler] resolveWorktreeWorkDir task=%s using fresh current-target follow-up worktree path=%s", task.ID, wtPath)
-		return wtPath, nil
+		return wtPath, "", nil
 	}
 
 	if syncErr := h.worktreeSvc.SyncWorktreeFromMainAtStart(ctx, task, repoDir); syncErr != nil {
+		if models.IsTerminalStatus(task.Status) && strings.Contains(syncErr.Error(), "startup auto-merge conflict") {
+			log.Printf("[handler] resolveWorktreeWorkDir startup worktree sync conflict for terminal task follow-up %s, continuing in preserved worktree: %v", task.ID, syncErr)
+			return wtPath, buildStartupSyncConflictContext(task, syncErr), nil
+		}
 		log.Printf("[handler] resolveWorktreeWorkDir startup worktree sync failed for task %s: %v", task.ID, syncErr)
-		return "", syncErr
+		return "", "", syncErr
 	}
 
 	log.Printf("[handler] resolveWorktreeWorkDir task=%s using worktree path=%s", task.ID, wtPath)
-	return wtPath, nil
+	return wtPath, "", nil
 }
 
 // processChatTaskCreations handles task creation markers from AI responses.
@@ -1900,7 +1903,7 @@ func (h *Handler) processChatSendToTask(ctx context.Context, execID, projectID, 
 		priorHistory := filterChatHistory(priorExecs, exec.ID)
 		systemContext := buildThreadSystemContext(task.Title, len(priorHistory) > 0, "")
 		pCtx := h.getPersonalityContext(ctx, task.ProjectID)
-		workDir, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
+		workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 		if workDirErr != nil {
 			h.completeWithFailure(ctx, exec.ID, task.ID, workDirErr.Error(), 0)
 			results = append(results, fmt.Sprintf("- Failed to prepare worktree for task \"%s\": %v", task.Title, workDirErr))
@@ -1938,11 +1941,10 @@ func (h *Handler) processChatSendToTask(ctx context.Context, execID, projectID, 
 			AgentDefinition: agentDef,
 			ChatHistory:     priorHistory,
 			ProjectID:       task.ProjectID,
-			SystemContext:   combineContexts(systemContext, pCtx),
+			SystemContext:   combineContexts(combineContexts(systemContext, worktreeContext), pCtx),
 			WorkDir:         workDir,
 			IsTaskFollowup:  true,
-			ProcessMarkers:  false,
-		})
+			ProcessMarkers:  false})
 
 		results = append(results, fmt.Sprintf("- Sent message to task \"%s\" [TASK_ID:%s] — the agent is now processing your message. View the response on the task's thread page.", task.Title, task.ID))
 	}
@@ -3154,6 +3156,17 @@ func buildThreadSystemContext(taskTitle string, hasHistory bool, attachmentConte
 //
 // This standardized context combining ensures consistent formatting across chat
 // and task follow-up scenarios.
+func buildStartupSyncConflictContext(task *models.Task, syncErr error) string {
+	if task == nil || syncErr == nil {
+		return ""
+	}
+	targetBranch := task.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = "the target branch"
+	}
+	return fmt.Sprintf("# Worktree Sync Warning\n\nStartup sync could not merge %s into this task worktree because Git reported a conflict. The merge was aborted before this turn started, so the worktree is clean but may be behind or diverged from %s. Inspect the current branch and reconcile against %s before making or finalizing code changes. Sync error: %v", targetBranch, targetBranch, targetBranch, syncErr)
+}
+
 func combineContexts(taskContext, attachmentContext string) string {
 	fullContext := taskContext
 	if attachmentContext != "" {

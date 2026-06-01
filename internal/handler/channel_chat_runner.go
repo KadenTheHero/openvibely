@@ -45,7 +45,7 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 		h.completeWithFailure(context.Background(), req.ExecID, req.TaskID, msg, 0, req.ReplyContext)
 		return
 	}
-	workDir, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
+	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 	if workDirErr != nil {
 		h.completeWithFailure(context.Background(), req.ExecID, req.TaskID, workDirErr.Error(), 0, req.ReplyContext)
 		return
@@ -58,7 +58,7 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 		AgentDefinition: req.AgentDefinition,
 		ChatHistory:     filterChatHistory(req.ChatHistory, req.ExecID),
 		ProjectID:       req.ProjectID,
-		SystemContext:   req.SystemContext,
+		SystemContext:   combineContexts(req.SystemContext, worktreeContext),
 		WorkDir:         workDir,
 		IsTaskFollowup:  true,
 		ProcessMarkers:  false,
