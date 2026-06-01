@@ -47,6 +47,22 @@ func createTestGitRepo(t *testing.T) string {
 	return dir
 }
 
+func runGitTest(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func gitRevParseTest(t *testing.T, dir string, rev string) string {
+	t.Helper()
+	return runGitTest(t, dir, "rev-parse", rev)
+}
+
 func TestIsGitRepo(t *testing.T) {
 	// Non-git directory
 	tmpDir := t.TempDir()
@@ -1077,6 +1093,12 @@ func TestMergeBranch_FastForward(t *testing.T) {
 	if !IsBranchTipMergedInto(repoDir, branchName, defaultBranch) {
 		t.Fatalf("expected task branch tip to be merged into %s after app fast-forward merge", defaultBranch)
 	}
+	if _, err := os.Stat(filepath.Join(repoDir, "ff_feature.txt")); err != nil {
+		t.Fatalf("expected checked-out target worktree files to be refreshed after ff merge: %v", err)
+	}
+	if staged := runGitTest(t, repoDir, "diff", "--name-only", "--cached"); staged != "" {
+		t.Fatalf("expected no staged changes left in checked-out target worktree after ff merge, got %q", staged)
+	}
 	dbTask, err := taskRepo.GetByID(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("get task after ff merge: %v", err)
@@ -1165,6 +1187,11 @@ func TestMergeBranch_FastForward_SequentialMergesAutoRebaseSecondTask(t *testing
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "task_b.txt")); os.IsNotExist(err) {
 		t.Fatal("expected task_b.txt to exist after sequential merge")
+	}
+	mainHead := gitRevParseTest(t, repoDir, "refs/heads/"+defaultBranch)
+	taskHead := gitRevParseTest(t, wtPathB, "HEAD")
+	if mainHead != taskHead {
+		t.Fatalf("expected target branch to advance to rebased task worktree HEAD, got target=%s task=%s", mainHead, taskHead)
 	}
 }
 
@@ -1278,6 +1305,272 @@ func TestMergeBranch_FastForward_SequentialMergesRebaseConflictPreserved(t *test
 	}
 	if strings.Contains(string(statusOut), "UU ") {
 		t.Fatalf("expected task B worktree conflicts to be aborted after failed auto-rebase, got: %s", string(statusOut))
+	}
+}
+
+func TestMergeBranch_FastForward_DirtyWorktreeRejected(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	task := &models.Task{ProjectID: "default", Title: "Dirty FF", Category: models.CategoryActive, Status: models.StatusPending, MergeTargetBranch: defaultBranch}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+	if err := os.WriteFile(filepath.Join(wtPath, "dirty.txt"), []byte("dirty\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ws.MergeBranch(ctx, task, repoDir, "ff")
+	if err == nil {
+		t.Fatal("expected dirty task worktree to reject fast-forward merge")
+	}
+	if result == nil || !strings.Contains(result.ErrorMessage, "uncommitted changes") {
+		t.Fatalf("expected dirty worktree message, got result=%#v err=%v", result, err)
+	}
+	if gitRevParseTest(t, repoDir, "refs/heads/"+defaultBranch) != gitRevParseTest(t, repoDir, "HEAD") {
+		t.Fatal("expected target branch to remain unchanged after dirty worktree rejection")
+	}
+}
+
+func TestMergeBranch_FastForward_WrongTaskWorktreeBranchRejected(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	task := &models.Task{ProjectID: "default", Title: "Wrong Branch FF", Category: models.CategoryActive, Status: models.StatusPending, MergeTargetBranch: defaultBranch}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+	runGitTest(t, wtPath, "checkout", "-b", "task/wrong-branch")
+
+	result, err := ws.MergeBranch(ctx, task, repoDir, "ff")
+	if err == nil {
+		t.Fatal("expected wrong task worktree branch to reject fast-forward merge")
+	}
+	if result == nil || !strings.Contains(result.ErrorMessage, "expected") {
+		t.Fatalf("expected wrong branch message, got result=%#v err=%v", result, err)
+	}
+}
+
+func TestMergeBranch_FastForward_CheckedOutTargetVerifiesMergedHead(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	task := &models.Task{ProjectID: "default", Title: "Wrong Merge Head FF", Category: models.CategoryActive, Status: models.StatusPending, MergeTargetBranch: defaultBranch}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+	if err := os.WriteFile(filepath.Join(wtPath, "expected_task.txt"), []byte("expected\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "expected task change"); err != nil {
+		t.Fatal(err)
+	}
+	expectedTaskHead := gitRevParseTest(t, wtPath, "HEAD")
+
+	runGitTest(t, repoDir, "checkout", "-b", "wrong-merge-head", defaultBranch)
+	if err := os.WriteFile(filepath.Join(repoDir, "wrong.txt"), []byte("wrong\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "wrong.txt")
+	runGitTest(t, repoDir, "commit", "-m", "wrong merge head")
+	wrongHead := gitRevParseTest(t, repoDir, "HEAD")
+	runGitTest(t, repoDir, "checkout", defaultBranch)
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapperDir := t.TempDir()
+	wrapperPath := filepath.Join(wrapperDir, "git")
+	wrapper := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"merge\" ] && [ \"$2\" = \"--ff-only\" ] && [ \"$3\" = \"refs/heads/" + task.WorktreeBranch + "\" ]; then\n" +
+		"  exec \"" + realGit + "\" reset --hard " + wrongHead + "\n" +
+		"fi\n" +
+		"exec \"" + realGit + "\" \"$@\"\n"
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := ws.MergeBranch(ctx, task, repoDir, "ff")
+	if err == nil {
+		t.Fatal("expected checked-out target merge with wrong HEAD to fail")
+	}
+	if result == nil || result.Success {
+		t.Fatalf("expected failed wrong-head result, got %#v", result)
+	}
+	if !strings.Contains(result.ErrorMessage, "expected rebased task HEAD") {
+		t.Fatalf("expected wrong-head verification message, got %q", result.ErrorMessage)
+	}
+	if got := gitRevParseTest(t, repoDir, "HEAD"); got != wrongHead {
+		t.Fatalf("expected wrapper to leave target worktree at wrong head %s, got %s", wrongHead, got)
+	}
+	if expectedTaskHead == wrongHead {
+		t.Fatal("test setup invalid: expected task head and wrong head should differ")
+	}
+}
+
+func TestMergeBranch_FastForward_UncheckedOutTargetUsesUpdateRef(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	task := &models.Task{ProjectID: "default", Title: "Update Ref FF", Category: models.CategoryActive, Status: models.StatusPending, MergeTargetBranch: defaultBranch}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+	if err := os.WriteFile(filepath.Join(wtPath, "update_ref.txt"), []byte("update-ref\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "add update-ref feature"); err != nil {
+		t.Fatal(err)
+	}
+
+	runGitTest(t, repoDir, "checkout", "-b", "parking")
+	result, err := ws.MergeBranch(ctx, task, repoDir, "ff")
+	if err != nil {
+		t.Fatalf("MergeBranch ff update-ref fallback: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected update-ref fallback success: %s", result.ErrorMessage)
+	}
+	if gitRevParseTest(t, repoDir, "refs/heads/"+defaultBranch) != gitRevParseTest(t, wtPath, "HEAD") {
+		t.Fatal("expected unchecked-out target branch ref to advance to task worktree HEAD")
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "update_ref.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected checked-out parking worktree files not to be refreshed by update-ref fallback, err=%v", err)
+	}
+}
+
+func TestMergeBranch_FastForward_StaleMainUpdateRefRejected(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	task := &models.Task{ProjectID: "default", Title: "Stale Ref FF", Category: models.CategoryActive, Status: models.StatusPending, MergeTargetBranch: defaultBranch}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+	if err := os.WriteFile(filepath.Join(wtPath, "stale_task.txt"), []byte("task\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "task stale ref change"); err != nil {
+		t.Fatal(err)
+	}
+
+	externalCommitBranch := "external-main-advance"
+	runGitTest(t, repoDir, "checkout", "-b", externalCommitBranch, defaultBranch)
+	if err := os.WriteFile(filepath.Join(repoDir, "external.txt"), []byte("external\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "external.txt")
+	runGitTest(t, repoDir, "commit", "-m", "external main advance")
+	externalCommit := gitRevParseTest(t, repoDir, "HEAD")
+	runGitTest(t, repoDir, "checkout", "-b", "parking")
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapperDir := t.TempDir()
+	wrapperPath := filepath.Join(wrapperDir, "git")
+	wrapper := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"update-ref\" ] && [ \"$2\" = \"refs/heads/" + defaultBranch + "\" ]; then\n" +
+		"  \"" + realGit + "\" -C \"" + repoDir + "\" update-ref refs/heads/" + defaultBranch + " " + externalCommit + "\n" +
+		"fi\n" +
+		"exec \"" + realGit + "\" \"$@\"\n"
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := ws.MergeBranch(ctx, task, repoDir, "ff")
+	if err == nil {
+		t.Fatal("expected stale target update-ref to fail")
+	}
+	if result == nil || result.Success {
+		t.Fatalf("expected failed stale-ref result, got %#v", result)
+	}
+	if got := gitRevParseTest(t, repoDir, "refs/heads/"+defaultBranch); got != externalCommit {
+		t.Fatalf("expected stale update to preserve externally advanced target ref %s, got %s", externalCommit, got)
+	}
+}
+
+func TestMergeBranch_FastForward_DetachedTargetCommitUsesUpdateRefFallback(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	head := gitRevParseTest(t, repoDir, "HEAD")
+	runGitTest(t, repoDir, "checkout", "--detach", head)
+
+	worktreePath, err := findWorktreeForBranch(repoDir, defaultBranch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worktreePath != "" {
+		t.Fatalf("expected detached worktree at target commit not to count as checked-out %s, got %q", defaultBranch, worktreePath)
 	}
 }
 

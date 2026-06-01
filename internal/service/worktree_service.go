@@ -397,8 +397,11 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 		targetBranch = GetDefaultBranch(repoDir)
 	}
 
-	// First, commit any uncommitted changes in the worktree
-	if task.WorktreePath != "" {
+	// First, commit any uncommitted changes in the worktree for merge modes
+	// that create a merge/squash commit. Fast-forward task-worktree merges must
+	// reject dirty worktrees so the rebase and ref update operate on committed
+	// task branch state only.
+	if task.WorktreePath != "" && mergeType != "ff" {
 		if err := CommitWorktreeChanges(task.WorktreePath, fmt.Sprintf("Auto-commit changes for task: %s", task.Title)); err != nil {
 			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
 			return &MergeResult{ErrorMessage: err.Error()}, fmt.Errorf("auto-commit before merge failed: %w", err)
@@ -408,15 +411,8 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 	// Update merge status to pending
 	_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending)
 
-	if mergeType == "ff" {
-		updated, updateErr := ws.ensureBranchUpToDateForFastForward(ctx, task, repoDir, targetBranch)
-		if updateErr != nil {
-			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
-			return &MergeResult{ErrorMessage: updateErr.Error()}, fmt.Errorf("preparing fast-forward merge: %w", updateErr)
-		}
-		if updated != nil {
-			return updated, nil
-		}
+	if mergeType == "ff" && task.WorktreePath != "" {
+		return ws.fastForwardTaskWorktreeToTarget(ctx, task, repoDir, targetBranch)
 	}
 
 	var stagedBeforeSquash map[string]bool
@@ -508,20 +504,32 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 	}, nil
 }
 
-func (ws *WorktreeService) ensureBranchUpToDateForFastForward(ctx context.Context, task *models.Task, repoDir string, targetBranch string) (*MergeResult, error) {
-	if task.WorktreePath == "" {
-		return nil, nil
+func (ws *WorktreeService) fastForwardTaskWorktreeToTarget(ctx context.Context, task *models.Task, repoDir string, targetBranch string) (*MergeResult, error) {
+	currentBranchOut, err := gitOutput(task.WorktreePath, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		msg := "task worktree must be on the expected task branch before fast-forward merge"
+		return &MergeResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
+	}
+	currentBranch := strings.TrimSpace(string(currentBranchOut))
+	if currentBranch != task.WorktreeBranch {
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		msg := fmt.Sprintf("task worktree is on branch %q, expected %q", currentBranch, task.WorktreeBranch)
+		return &MergeResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
 	}
 
-	branchBehindCmd := exec.Command("git", "merge-base", "--is-ancestor", targetBranch, task.WorktreeBranch)
-	branchBehindCmd.Dir = repoDir
-	if err := branchBehindCmd.Run(); err == nil {
-		return nil, nil
+	statusOut, err := GitStatusPorcelain(task.WorktreePath)
+	if err != nil {
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		return &MergeResult{ErrorMessage: fmt.Sprintf("checking task worktree status: %s", err.Error())}, fmt.Errorf("checking task worktree status: %w", err)
+	}
+	if strings.TrimSpace(statusOut) != "" {
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		msg := "task worktree has uncommitted changes; commit or discard them before fast-forward merge"
+		return &MergeResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
 	}
 
-	rebaseCmd := exec.Command("git", "rebase", targetBranch)
-	rebaseCmd.Dir = task.WorktreePath
-	rebaseOut, rebaseErr := rebaseCmd.CombinedOutput()
+	rebaseOut, rebaseErr := gitOutput(task.WorktreePath, "rebase", targetBranch)
 	if rebaseErr != nil {
 		conflictFiles := detectConflicts(task.WorktreePath)
 		if len(conflictFiles) > 0 {
@@ -533,10 +541,90 @@ func (ws *WorktreeService) ensureBranchUpToDateForFastForward(ctx context.Contex
 				ErrorMessage:  fmt.Sprintf("Local fast-forward merge requires updating branch from %s. Auto-rebase encountered conflicts; rebase was aborted. Resolve conflicts in worktree and retry merge.", targetBranch),
 			}, nil
 		}
-		return nil, fmt.Errorf("auto-rebase task branch onto %s failed: %s", targetBranch, strings.TrimSpace(string(rebaseOut)))
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		return &MergeResult{ErrorMessage: strings.TrimSpace(string(rebaseOut))}, fmt.Errorf("auto-rebase task branch onto %s failed: %w", targetBranch, rebaseErr)
 	}
 
-	return nil, nil
+	oldTargetOut, err := gitOutput(task.WorktreePath, "rev-parse", "refs/heads/"+targetBranch)
+	if err != nil {
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		return &MergeResult{ErrorMessage: fmt.Sprintf("resolving target branch: %s", strings.TrimSpace(string(oldTargetOut)))}, fmt.Errorf("resolving target branch %s: %w", targetBranch, err)
+	}
+	oldTarget := strings.TrimSpace(string(oldTargetOut))
+
+	newTaskOut, err := gitOutput(task.WorktreePath, "rev-parse", "HEAD")
+	if err != nil {
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		return &MergeResult{ErrorMessage: fmt.Sprintf("resolving task HEAD: %s", strings.TrimSpace(string(newTaskOut)))}, fmt.Errorf("resolving task HEAD: %w", err)
+	}
+	newTask := strings.TrimSpace(string(newTaskOut))
+
+	if out, err := gitOutput(task.WorktreePath, "merge-base", "--is-ancestor", oldTarget, newTask); err != nil {
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		msg := fmt.Sprintf("fast-forward merge requires %s to be an ancestor of task HEAD", targetBranch)
+		if trimmed := strings.TrimSpace(string(out)); trimmed != "" {
+			msg = fmt.Sprintf("%s: %s", msg, trimmed)
+		}
+		return &MergeResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
+	}
+
+	if targetWorktree, err := findWorktreeForBranch(repoDir, targetBranch); err != nil {
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		return &MergeResult{ErrorMessage: err.Error()}, fmt.Errorf("finding target worktree: %w", err)
+	} else if targetWorktree != "" {
+		mergeOut, mergeErr := gitOutput(targetWorktree, "merge", "--ff-only", "refs/heads/"+task.WorktreeBranch)
+		if mergeErr != nil {
+			mergeErrMsg := strings.TrimSpace(string(mergeOut))
+			if mergeErrMsg == "" {
+				mergeErrMsg = mergeErr.Error()
+			}
+			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+			return &MergeResult{ErrorMessage: mergeErrMsg}, fmt.Errorf("fast-forward merge in target worktree failed: %w", mergeErr)
+		}
+
+		mergedHeadOut, err := gitOutput(targetWorktree, "rev-parse", "HEAD")
+		if err != nil {
+			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+			return &MergeResult{ErrorMessage: fmt.Sprintf("resolving merged target HEAD: %s", strings.TrimSpace(string(mergedHeadOut)))}, fmt.Errorf("resolving merged target HEAD: %w", err)
+		}
+		mergedHead := strings.TrimSpace(string(mergedHeadOut))
+		if mergedHead != newTask {
+			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+			msg := fmt.Sprintf("fast-forward merge ended at %s, expected rebased task HEAD %s", mergedHead, newTask)
+			return &MergeResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
+		}
+	} else if out, err := gitOutput(task.WorktreePath, "update-ref", "refs/heads/"+targetBranch, newTask, oldTarget); err != nil {
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return &MergeResult{ErrorMessage: msg}, fmt.Errorf("updating target branch ref: %w", err)
+	}
+
+	_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusMerged)
+	return &MergeResult{Success: true, MergeCommit: newTask}, nil
+}
+
+func findWorktreeForBranch(repoDir string, branch string) (string, error) {
+	worktrees, err := ListGitWorktrees(repoDir)
+	if err != nil {
+		return "", err
+	}
+	expectedRef := "refs/heads/" + branch
+	for _, worktree := range worktrees {
+		if worktree.Branch != branch {
+			continue
+		}
+		out, err := gitOutput(worktree.Path, "symbolic-ref", "--quiet", "HEAD")
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(string(out)) == expectedRef {
+			return worktree.Path, nil
+		}
+	}
+	return "", nil
 }
 
 func AbortRebase(repoDir string) error {
