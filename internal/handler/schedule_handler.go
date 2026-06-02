@@ -86,7 +86,7 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
 		}
 
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, executions, schedules, agents, adefs, attachments, "schedules", rc))
+		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, adefs, attachments, "schedules", rc))
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
@@ -185,7 +185,7 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), schedule.TaskID)
 		}
 
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, executions, schedules, agents, adefs, attachments, "schedules", rc))
+		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), schedule.TaskID), executions, schedules, agents, adefs, attachments, "schedules", rc))
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/")

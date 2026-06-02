@@ -1181,6 +1181,13 @@ func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64,
 			}
 			return s.executeSendToTask(ctx, projectID, req, chatID)
 		},
+		"set_task_goal":            telegramGoalToolUnavailable,
+		"clear_task_goal":          telegramGoalToolUnavailable,
+		"get_task_goal":            telegramGoalToolUnavailable,
+		"pause_task_goal":          telegramGoalToolUnavailable,
+		"resume_task_goal":         telegramGoalToolUnavailable,
+		"mark_task_goal_achieved":  telegramGoalToolUnavailable,
+		"report_task_goal_blocked": telegramGoalToolUnavailable,
 		"schedule_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return s.executeScheduleTaskChannel(ctx, projectID, input), nil
 		},
@@ -3362,4 +3369,8 @@ func (s *TelegramService) SendChatResponse(ctx context.Context, task models.Task
 	} else {
 		s.sendMessage(task.TelegramChatID, cleaned)
 	}
+}
+
+func telegramGoalToolUnavailable(context.Context, json.RawMessage) (string, error) {
+	return "", fmt.Errorf("task goal tools are unavailable on Telegram")
 }

@@ -77,9 +77,10 @@ const (
 
 // TaskOrigin identifies which interface created a task.
 const (
-	TaskOriginWeb      = "web"
-	TaskOriginTelegram = "telegram"
-	TaskOriginSlack    = "slack"
+	TaskOriginWeb         = "web"
+	TaskOriginTelegram    = "telegram"
+	TaskOriginSlack       = "slack"
+	TaskOriginSystemAgent = "system_agent"
 )
 
 type Task struct {
@@ -101,11 +102,12 @@ type Task struct {
 	AutoMerge         bool         `json:"auto_merge"`
 	MergeTargetBranch string       `json:"merge_target_branch"`
 	MergeStatus       MergeStatus  `json:"merge_status"`
-	BaseBranch        string       `json:"base_branch"`      // Git branch this task should base its worktree on (from parent lineage)
-	BaseCommitSHA     string       `json:"base_commit_sha"`  // Git commit SHA to base worktree on (from parent lineage)
-	LineageDepth      int          `json:"lineage_depth"`    // Depth in chain: 0 = root, 1 = child, 2 = grandchild, etc.
-	CreatedVia        string       `json:"created_via"`      // Origin: "web", "telegram", etc.
-	TelegramChatID    int64        `json:"telegram_chat_id"` // Telegram chat ID for sending completion notifications
+	BaseBranch        string       `json:"base_branch"`        // Git branch this task should base its worktree on (from parent lineage)
+	BaseCommitSHA     string       `json:"base_commit_sha"`    // Git commit SHA to base worktree on (from parent lineage)
+	LineageDepth      int          `json:"lineage_depth"`      // Depth in chain: 0 = root, 1 = child, 2 = grandchild, etc.
+	CreatedVia        string       `json:"created_via"`        // Origin: "web", "telegram", etc.
+	TelegramChatID    int64        `json:"telegram_chat_id"`   // Telegram chat ID for sending completion notifications
+	HasGoal           bool         `json:"has_goal,omitempty"` // Derived: task has a non-cleared persisted goal
 	CreatedAt         time.Time    `json:"created_at"`
 	UpdatedAt         time.Time    `json:"updated_at"`
 }

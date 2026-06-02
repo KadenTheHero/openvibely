@@ -150,7 +150,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" hx-target=\"#kanban-board\" hx-swap=\"outerHTML\" hx-encoding=\"multipart/form-data\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Title</span></label> <input type=\"text\" name=\"title\" id=\"task-title-input\" class=\"input input-bordered\" required placeholder=\"Task title\"><div id=\"title-error\" class=\"hidden mt-2 flex items-center gap-2 text-error text-sm\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5 flex-shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z\"></path></svg> <span id=\"title-error-message\"></span></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Prompt</span></label> <textarea name=\"prompt\" class=\"textarea textarea-bordered h-32\" required placeholder=\"The prompt/instruction for the model to execute\"></textarea></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Model</span></label> <select name=\"agent_id\" class=\"select select-bordered\"><option value=\"\">Use Default Model</option> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" hx-target=\"#kanban-board\" hx-swap=\"outerHTML\" hx-encoding=\"multipart/form-data\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Title</span></label> <input type=\"text\" name=\"title\" id=\"task-title-input\" class=\"input input-bordered\" required placeholder=\"Task title\"><div id=\"title-error\" class=\"hidden mt-2 flex items-center gap-2 text-error text-sm\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5 flex-shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z\"></path></svg> <span id=\"title-error-message\"></span></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Prompt</span></label> <textarea name=\"prompt\" class=\"textarea textarea-bordered h-32\" required placeholder=\"The prompt/instruction for the model to execute\"></textarea></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Goal (optional)</span></label> <textarea name=\"goal\" class=\"textarea textarea-bordered h-20\" placeholder=\"Completion condition for automatic continuation\"></textarea></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Model</span></label> <select name=\"agent_id\" class=\"select select-bordered\"><option value=\"\">Use Default Model</option> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -162,7 +162,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(agent.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 77, Col: 33}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 80, Col: 33}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 				if templ_7745c5c3_Err != nil {
@@ -175,7 +175,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 78, Col: 22}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 81, Col: 22}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
@@ -213,7 +213,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 					var templ_7745c5c3_Var8 string
 					templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(ad.ID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 92, Col: 31}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 95, Col: 31}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 					if templ_7745c5c3_Err != nil {
@@ -226,7 +226,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 					var templ_7745c5c3_Var9 string
 					templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(ad.Model)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 92, Col: 61}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 95, Col: 61}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 					if templ_7745c5c3_Err != nil {
@@ -239,7 +239,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 					var templ_7745c5c3_Var10 string
 					templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Name)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 93, Col: 20}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 96, Col: 20}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 					if templ_7745c5c3_Err != nil {
@@ -257,7 +257,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 						var templ_7745c5c3_Var11 string
 						templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Model)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 95, Col: 23}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 98, Col: 23}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 						if templ_7745c5c3_Err != nil {
@@ -290,7 +290,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var12 string
 				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(cat))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 107, Col: 37}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 110, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 				if templ_7745c5c3_Err != nil {
@@ -303,7 +303,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var13 string
 				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(string(cat))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 108, Col: 24}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 111, Col: 24}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 				if templ_7745c5c3_Err != nil {

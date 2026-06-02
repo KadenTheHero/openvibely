@@ -12,6 +12,7 @@ import (
 
 type fakeCaller struct {
 	reply         string
+	lastContext   context.Context
 	lastPrompt    string
 	lastConfig    models.LLMConfig
 	lastWorkDir   string
@@ -24,6 +25,7 @@ type fakeCaller struct {
 
 func (f *fakeCaller) CallAgentDirect(ctx context.Context, message string, _ []models.Attachment, agent models.LLMConfig, workDir string) (string, int, error) {
 	f.calledDirect = true
+	f.lastContext = ctx
 	f.lastPrompt = message
 	f.lastConfig = agent
 	f.lastWorkDir = workDir
@@ -33,6 +35,7 @@ func (f *fakeCaller) CallAgentDirect(ctx context.Context, message string, _ []mo
 
 func (f *fakeCaller) CallAgentDirectWithDefinition(ctx context.Context, message string, _ []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent) (string, int, error) {
 	f.calledWithDef = true
+	f.lastContext = ctx
 	f.lastPrompt = message
 	f.lastConfig = agent
 	f.lastWorkDir = workDir
@@ -340,5 +343,87 @@ func TestLLMHookInvoker_NilCaller(t *testing.T) {
 	inv2 := &LLMHookInvoker{}
 	if _, err := inv2.Invoke(context.Background(), models.AgentLifecycleHook{}, HookInput{}); err == nil {
 		t.Fatal("expected error for nil caller")
+	}
+}
+
+func TestExtractJSONPayloadForContract_ReturnsFirstValidObjectFromConcatenatedReply(t *testing.T) {
+	reply := `{"task_id":"current"}{}{"task_id":"current"}{"summary":"Marked the task goal achieved because current evidence shows README.md was minimally updated with the verified full test suite command and the note was confirmed present.","changed_paths":["README.md"],"created":[],"updated":[],"skipped":false,"skip_reason":""}`
+	got := extractJSONPayloadForContract(reply, models.OutputContractActivitySummary)
+	want := `{"summary":"Marked the task goal achieved because current evidence shows README.md was minimally updated with the verified full test suite command and the note was confirmed present.","changed_paths":["README.md"],"created":[],"updated":[],"skipped":false,"skip_reason":""}`
+	if got != want {
+		t.Fatalf("extractJSONPayloadForContract() = %q, want %q", got, want)
+	}
+	if err := ValidateOutput(models.OutputContractActivitySummary, json.RawMessage(got)); err != nil {
+		t.Fatalf("extracted payload should validate: %v", err)
+	}
+}
+
+func TestRenderHookPrompt_SanitizesInvalidPreviousOutputPayload(t *testing.T) {
+	_, err := renderHookPrompt(models.AgentLifecycleHook{OutputContract: models.OutputContractLearningSummary}, HookInput{
+		TaskID: "task",
+		PreviousOutputs: []HookOutput{{
+			HookID:         "goal-hook",
+			SkillKey:       "evaluate_task_goal",
+			OutputContract: models.OutputContractActivitySummary,
+			Payload:        json.RawMessage(`{"summary":"one"}{"summary":"two"}`),
+			Error:          "validate output: activity_summary: invalid JSON: invalid character '{' after top-level value",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("renderHookPrompt should not fail on invalid previous payload: %v", err)
+	}
+}
+
+func TestLLMHookInvoker_AttachesHookAgentToolsToRuntimeContext(t *testing.T) {
+	caller := &fakeCaller{reply: `{"summary":"ok","changed_paths":[],"skipped":false}`}
+	agentDef := &models.Agent{ID: "custom-agent", Name: "Custom Hook", Tools: []string{"mark_task_goal_achieved", "send_to_task"}}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"custom-agent": agentDef}}, nil)
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "mark_task_goal_achieved"}, {Name: "send_to_task"}}})
+	_, err := inv.Invoke(ctx, models.AgentLifecycleHook{AgentID: "custom-agent", OutputContract: models.OutputContractActivitySummary}, HookInput{})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	hookAgent, ok := HookAgentFromContext(caller.lastContext)
+	if !ok {
+		t.Fatal("expected hook-agent context")
+	}
+	if hookAgent.AgentID != "custom-agent" {
+		t.Fatalf("hook agent id = %q", hookAgent.AgentID)
+	}
+	if strings.Join(hookAgent.Tools, ",") != "mark_task_goal_achieved,send_to_task" {
+		t.Fatalf("hook agent tools = %#v", hookAgent.Tools)
+	}
+}
+
+func TestLLMHookInvoker_GoalAgentRequiresGoalRuntimeTools(t *testing.T) {
+	caller := &fakeCaller{reply: `{"summary":"ok","changed_paths":[],"skipped":false}`}
+	agentDef := &models.Agent{Key: models.AgentSystemKindGoal, SystemKind: models.AgentSystemKindGoal, Name: "System: Goal Agent", Tools: []string{"get_task_goal"}}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"goal-agent": agentDef}}, nil)
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "get_task_goal"}}})
+	_, err := inv.Invoke(ctx, models.AgentLifecycleHook{AgentID: "goal-agent", SkillKey: "evaluate_task_goal", OutputContract: models.OutputContractActivitySummary}, HookInput{})
+	if err == nil || !strings.Contains(err.Error(), "required runtime tools unavailable") {
+		t.Fatalf("expected required-tool preflight error, got %v", err)
+	}
+	if caller.calledDirect || caller.calledWithDef {
+		t.Fatal("missing required tools should fail before calling the model")
+	}
+}
+
+func TestLLMHookInvoker_GoalAgentRequiredRuntimeToolsAvailable(t *testing.T) {
+	caller := &fakeCaller{reply: `{"summary":"ok","changed_paths":[],"skipped":false}`}
+	agentDef := &models.Agent{Key: models.AgentSystemKindGoal, SystemKind: models.AgentSystemKindGoal, Name: "System: Goal Agent", Tools: []string{"get_task_goal", "send_to_task", "mark_task_goal_achieved", "report_task_goal_blocked"}}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"goal-agent": agentDef}}, nil)
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{
+		{Name: "get_task_goal"},
+		{Name: "send_to_task"},
+		{Name: "mark_task_goal_achieved"},
+		{Name: "report_task_goal_blocked"},
+	}})
+	_, err := inv.Invoke(ctx, models.AgentLifecycleHook{AgentID: "goal-agent", SkillKey: "evaluate_task_goal", OutputContract: models.OutputContractActivitySummary}, HookInput{})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if !caller.calledWithDef {
+		t.Fatal("expected model call when required tools are available")
 	}
 }

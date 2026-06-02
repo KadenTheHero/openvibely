@@ -951,6 +951,13 @@ func (s *SlackService) slackActionHandlers(projectID string, markerCtx slackMark
 		"send_to_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return s.slackSendToTask(ctx, projectID, input, markerCtx), nil
 		},
+		"set_task_goal":            slackGoalToolUnavailable,
+		"clear_task_goal":          slackGoalToolUnavailable,
+		"get_task_goal":            slackGoalToolUnavailable,
+		"pause_task_goal":          slackGoalToolUnavailable,
+		"resume_task_goal":         slackGoalToolUnavailable,
+		"mark_task_goal_achieved":  slackGoalToolUnavailable,
+		"report_task_goal_blocked": slackGoalToolUnavailable,
 		"schedule_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return s.slackScheduleTask(ctx, projectID, input), nil
 		},
@@ -2201,4 +2208,8 @@ func (s *SlackService) SendChatResponse(ctx context.Context, task models.Task, o
 	if err := s.sendSlackMessage(ctxRecord.SlackChannelID, ctxRecord.SlackThreadTS, message); err != nil {
 		log.Printf("[slack] send chat response failed for task=%s: %v", task.ID, err)
 	}
+}
+
+func slackGoalToolUnavailable(context.Context, json.RawMessage) (string, error) {
+	return "", fmt.Errorf("task goal tools are unavailable on Slack")
 }

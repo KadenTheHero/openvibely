@@ -189,7 +189,12 @@ const (
 	// skills bound via route_task/after_complete lifecycle hooks plus a normal
 	// visible scheduled task for skill library maintenance.
 	AgentSystemKindSkillCurator = "skill_curator"
-	AgentToolScopedFiles        = "ScopedFiles"
+
+	// AgentSystemKindGoal is the built-in Goal Agent system agent.
+	// It evaluates persisted task goals after task-thread turns and queues
+	// continuation work only through send_to_task.
+	AgentSystemKindGoal  = "goal"
+	AgentToolScopedFiles = "ScopedFiles"
 )
 
 var AllAgentTools = []string{
@@ -201,4 +206,6 @@ var AllAgentTools = []string{
 	// hooks may also improve skills owned by the task's assigned agent through
 	// server-scoped agent_skill_manage.
 	"skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "agent_skill_manage",
+	"send_to_task", "set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal",
+	"mark_task_goal_achieved", "report_task_goal_blocked",
 }

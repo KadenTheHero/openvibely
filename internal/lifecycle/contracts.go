@@ -294,6 +294,9 @@ func ValidateActivitySummary(raw []byte) (ActivitySummary, error) {
 	if out.Skipped && strings.TrimSpace(out.SkipReason) == "" {
 		return out, errors.New("activity_summary: skip_reason required when skipped=true")
 	}
+	if !out.Skipped && strings.TrimSpace(out.Summary) == "" {
+		return out, errors.New("activity_summary: summary required unless skipped=true")
+	}
 	return out, nil
 }
 

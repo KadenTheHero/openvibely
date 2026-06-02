@@ -384,8 +384,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 84 {
-		t.Fatalf("max goose version = %d, want 84", maxVersion)
+	if maxVersion != 86 {
+		t.Fatalf("max goose version = %d, want 86", maxVersion)
 	}
 }
 

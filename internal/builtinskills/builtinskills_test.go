@@ -21,6 +21,8 @@ func TestSyncTo_SeedsDefaultIndexesAndSkillBodies(t *testing.T) {
 		filepath.Join(root, "agents", "skill_curator", "skills", "route_task", "SKILL.md"),
 		filepath.Join(root, "agents", "skill_curator", "skills", "observe_task_for_learning", "SKILL.md"),
 		filepath.Join(root, "agents", "skill_curator", "skills", "maintain_skill_library", "SKILL.md"),
+		filepath.Join(root, "agents", "goal", "SKILLS.md"),
+		filepath.Join(root, "agents", "goal", "skills", "evaluate_task_goal", "SKILL.md"),
 	}
 	for _, p := range mustExist {
 		if _, err := os.Stat(p); err != nil {
@@ -34,6 +36,9 @@ func TestSyncTo_SeedsDefaultIndexesAndSkillBodies(t *testing.T) {
 	}
 	if !strings.Contains(string(agents), "## skill_curator") {
 		t.Fatalf("AGENTS.md missing ## skill_curator header:\n%s", agents)
+	}
+	if !strings.Contains(string(agents), "## goal") {
+		t.Fatalf("AGENTS.md missing ## goal header:\n%s", agents)
 	}
 
 	skills, err := os.ReadFile(filepath.Join(root, "agents", "skill_curator", "SKILLS.md"))
@@ -180,8 +185,12 @@ func TestSyncTo_InstallsSystemHookSkillsButKeepsRoutableCatalogEmpty(t *testing.
 	}
 
 	// Sanity: agent-owned SKILL.md bodies are present so lifecycle hooks can read them.
-	for _, skill := range []string{"route_task", "observe_task_for_learning", "maintain_skill_library"} {
-		p := filepath.Join(root, "agents", "skill_curator", "skills", skill, "SKILL.md")
+	for _, p := range []string{
+		filepath.Join(root, "agents", "skill_curator", "skills", "route_task", "SKILL.md"),
+		filepath.Join(root, "agents", "skill_curator", "skills", "observe_task_for_learning", "SKILL.md"),
+		filepath.Join(root, "agents", "skill_curator", "skills", "maintain_skill_library", "SKILL.md"),
+		filepath.Join(root, "agents", "goal", "skills", "evaluate_task_goal", "SKILL.md"),
+	} {
 		info, err := os.Stat(p)
 		if err != nil {
 			t.Fatalf("missing SKILL.md %s: %v", p, err)

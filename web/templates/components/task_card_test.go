@@ -3,6 +3,7 @@ package components
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -198,5 +199,28 @@ func TestTaskThreadStatusIndicator_Pending_NoIndicator(t *testing.T) {
 	body := buf.String()
 	if body != "" {
 		t.Errorf("expected empty output for pending task, got %q", body)
+	}
+}
+
+func TestTaskCard_RendersGoalBadge(t *testing.T) {
+	task := models.Task{
+		ID:        "task-1",
+		ProjectID: "default",
+		Title:     "Goal task",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+		HasGoal:   true,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskCard(task, "default", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task card: %v", err)
+	}
+	body := buf.String()
+	if !strings.Contains(body, "Task has an active goal") {
+		t.Fatalf("expected goal badge title in task card, got %s", body)
+	}
+	if !strings.Contains(body, ">Goal<") {
+		t.Fatalf("expected goal badge label in task card, got %s", body)
 	}
 }

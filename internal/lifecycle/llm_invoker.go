@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -92,6 +93,11 @@ func (i *LLMHookInvoker) Invoke(ctx context.Context, hook models.AgentLifecycleH
 		return nil, err
 	}
 	callCtx := contextWithAgentRuntimeTools(ctx, agentDef)
+	callCtx = WithHookAgent(callCtx, HookAgent{AgentID: hook.AgentID, SystemKind: systemKindForHookAgent(agentDef), Tools: hookAgentTools(agentDef)})
+	if err := validateRequiredLifecycleRuntimeTools(hook, agentDef, llmcontracts.RuntimeToolsFromContext(callCtx)); err != nil {
+		RecordTraceEvent(callCtx, "available_tools_missing", map[string]any{"error": err.Error(), "tools": runtimeToolNamesForTrace(callCtx)})
+		return nil, err
+	}
 	RecordTraceEvent(callCtx, "llm_prompt", map[string]any{
 		"agent_id":        hook.AgentID,
 		"agent_key":       agentKeyForTrace(agentDef),
@@ -112,7 +118,7 @@ func (i *LLMHookInvoker) Invoke(ctx context.Context, hook models.AgentLifecycleH
 		return nil, fmt.Errorf("lifecycle: LLM call failed: %w", err)
 	}
 	RecordTraceEvent(callCtx, "llm_raw_reply", map[string]any{"reply": reply})
-	extracted := extractJSONPayload(reply)
+	extracted := extractJSONPayloadForContract(reply, hook.OutputContract)
 	RecordTraceEvent(callCtx, "llm_extracted_json", map[string]any{"json": extracted})
 	return json.RawMessage(extracted), nil
 }
@@ -181,7 +187,61 @@ func renderHookPrompt(hook models.AgentLifecycleHook, input HookInput) (string, 
 
 func sanitizedHookInputForPrompt(input HookInput) HookInput {
 	input.SkillBody = ""
+	input.PreviousOutputs = sanitizeHookOutputsForPrompt(input.PreviousOutputs)
 	return input
+}
+
+type HookAgent struct {
+	AgentID    string
+	SystemKind string
+	Tools      []string
+}
+
+type hookAgentCtxKey struct{}
+
+func WithHookAgent(ctx context.Context, agent HookAgent) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, hookAgentCtxKey{}, agent)
+}
+
+func HookAgentFromContext(ctx context.Context) (HookAgent, bool) {
+	if ctx == nil {
+		return HookAgent{}, false
+	}
+	agent, ok := ctx.Value(hookAgentCtxKey{}).(HookAgent)
+	return agent, ok
+}
+
+func systemKindForHookAgent(agentDef *models.Agent) string {
+	if agentDef == nil {
+		return ""
+	}
+	return agentDef.SystemKind
+}
+
+func hookAgentTools(agentDef *models.Agent) []string {
+	if agentDef == nil || len(agentDef.Tools) == 0 {
+		return nil
+	}
+	tools := make([]string, len(agentDef.Tools))
+	copy(tools, agentDef.Tools)
+	return tools
+}
+
+func sanitizeHookOutputsForPrompt(outputs []HookOutput) []HookOutput {
+	if len(outputs) == 0 {
+		return outputs
+	}
+	out := make([]HookOutput, 0, len(outputs))
+	for _, output := range outputs {
+		if len(output.Payload) > 0 && !json.Valid(output.Payload) {
+			output.Payload = json.RawMessage(strconv.Quote(string(output.Payload)))
+		}
+		out = append(out, output)
+	}
+	return out
 }
 
 func contextWithAgentRuntimeTools(ctx context.Context, agentDef *models.Agent) context.Context {
@@ -259,6 +319,22 @@ func filteredRuntimeToolFilter(base llmcontracts.RuntimeToolFilter, allowed map[
 	}
 }
 
+func validateRequiredLifecycleRuntimeTools(hook models.AgentLifecycleHook, agentDef *models.Agent, rt *llmcontracts.RuntimeTools) error {
+	if agentDef == nil || agentDef.SystemKind != models.AgentSystemKindGoal || hook.SkillKey != "evaluate_task_goal" {
+		return nil
+	}
+	missing := []string{}
+	for _, name := range []string{"get_task_goal", "send_to_task", "mark_task_goal_achieved", "report_task_goal_blocked"} {
+		if rt == nil || !rt.HasDefinition(name) {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("goal evaluation required runtime tools unavailable: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
 func runtimeToolNamesForTrace(ctx context.Context) []string {
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	if rt == nil {
@@ -306,78 +382,106 @@ func outputContractPromptSpec(contract models.LifecycleOutputContract) string {
 // object/array. Falling all the way through returns the trimmed reply so the
 // validator can produce the canonical error.
 func extractJSONPayload(reply string) string {
+	return extractJSONPayloadForContract(reply, "")
+}
+
+func extractJSONPayloadForContract(reply string, contract models.LifecycleOutputContract) string {
 	s := strings.TrimSpace(reply)
 	if s == "" {
 		return s
 	}
-	if s[0] == '{' || s[0] == '[' {
-		return s
+	candidates := jsonPayloadCandidates(s)
+	for _, candidate := range candidates {
+		if ValidateOutput(contract, json.RawMessage(candidate)) == nil {
+			return candidate
+		}
+	}
+	if len(candidates) > 0 {
+		return candidates[0]
+	}
+	return s
+}
+
+func jsonPayloadCandidates(s string) []string {
+	var candidates []string
+	addCandidate := func(candidate string) {
+		candidate = normalizeJSONPayloadCandidate(candidate)
+		if candidate == "" {
+			return
+		}
+		for _, existing := range candidates {
+			if existing == candidate {
+				return
+			}
+		}
+		candidates = append(candidates, candidate)
+	}
+	if (s[0] == '{' || s[0] == '[') && json.Valid([]byte(s)) {
+		addCandidate(s)
 	}
 	if idx := strings.Index(s, "```json"); idx >= 0 {
 		rest := s[idx+len("```json"):]
 		if end := strings.Index(rest, "```"); end >= 0 {
-			return strings.TrimSpace(rest[:end])
+			addCandidate(strings.TrimSpace(rest[:end]))
 		}
 	}
 	if idx := strings.Index(s, "```"); idx >= 0 {
 		rest := s[idx+3:]
 		if end := strings.Index(rest, "```"); end >= 0 {
-			return strings.TrimSpace(rest[:end])
+			addCandidate(strings.TrimSpace(rest[:end]))
 		}
 	}
-	if payload := firstBalancedJSONValue(s); payload != "" {
+	for _, candidate := range balancedJSONValues(s) {
+		addCandidate(candidate)
+	}
+	return candidates
+}
+
+func normalizeJSONPayloadCandidate(candidate string) string {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" || json.Valid([]byte(candidate)) {
+		return candidate
+	}
+	if payload := firstBalancedJSONValue(candidate); payload != "" {
 		return payload
 	}
-	return s
+	return candidate
 }
 
 func firstBalancedJSONValue(s string) string {
-	start := -1
-	for i, r := range s {
-		if r == '{' || r == '[' {
-			start = i
-			break
-		}
-	}
-	if start < 0 {
+	values := balancedJSONValues(s)
+	if len(values) == 0 {
 		return ""
 	}
+	return values[0]
+}
 
-	stack := make([]rune, 0, 4)
-	inString := false
-	escaped := false
-	for i, r := range s[start:] {
-		if inString {
-			if escaped {
-				escaped = false
-				continue
+func balancedJSONValues(s string) []string {
+	values := make([]string, 0, 2)
+	for offset := 0; offset < len(s); {
+		start := -1
+		for i := offset; i < len(s); i++ {
+			if s[i] == '{' || s[i] == '[' {
+				start = i
+				break
 			}
-			switch r {
-			case '\\':
-				escaped = true
-			case '"':
-				inString = false
-			}
+		}
+		if start < 0 {
+			break
+		}
+
+		dec := json.NewDecoder(strings.NewReader(s[start:]))
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil || len(raw) == 0 {
+			offset = start + 1
 			continue
 		}
-		switch r {
-		case '"':
-			inString = true
-		case '{', '[':
-			stack = append(stack, r)
-		case '}', ']':
-			if len(stack) == 0 {
-				return ""
-			}
-			open := stack[len(stack)-1]
-			if (open == '{' && r != '}') || (open == '[' && r != ']') {
-				return ""
-			}
-			stack = stack[:len(stack)-1]
-			if len(stack) == 0 {
-				return strings.TrimSpace(s[start : start+i+1])
-			}
+		values = append(values, strings.TrimSpace(string(raw)))
+		next := start + int(dec.InputOffset())
+		if next <= start {
+			next = start + 1
 		}
+		offset = next
 	}
-	return ""
+	return values
 }

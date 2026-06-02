@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-06-01
-source: after_complete
-source_id: 8a474c7b49a4363832169d74bb3c296a
+updated: 2026-06-02
+source: consolidation
+source_id: memory_consolidation_2026_06_02
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -32,6 +32,7 @@ Communication and review behavior:
 - When cleaning up an overgrown or suspicious task branch, reduce it to the minimal root-cause fix rather than preserving accumulated incidental changes. Before destructive reset/checkout/rebase, capture or verify the intended patch; after cleanup, review the final diff for bugs, dead code, and unintended behavior before reporting completion.
 
 Maintenance expectations:
+- For OpenVibely full Go test-suite documentation or validation, the authoritative full-suite command is `go test ./... -count=1 -timeout 60s`; narrower `./internal/...` runs are validation subsets and should not be described as the full suite because tests exist outside `internal/`.
 - For scheduled Go maintenance tasks, inspect all Go version references (`go.mod`, `toolchain`, Dockerfiles, CI workflows, build scripts, docs, and version-manager files), update consistently only when a newer stable toolchain is available, check compatible Go module upgrades, run `go mod tidy`, verify with `go test -count=1 ./...` plus the project's standard build checks, and fix update-caused failures rather than masking them. Summaries should distinguish updated items, already-current items, and follow-up risks/manual steps.
 - When maintaining development tooling commands, avoid duplicating tool versions across scripts and Dockerfiles. Prefer deriving versions from authoritative module metadata such as `go.mod` when practical; `templ` and `swag` previously had drift risk because Dockerfile/Makefile installs could hardcode versions while other scripts resolved from `go.mod`.
 - The last public release boundary the user identified was commit `d654a068ee0b4f146bb9e51dd536728eab49a150`. Schema migrations added only after that boundary and not yet pushed publicly can be consolidated before release instead of preserving every local goose iteration; distinguish this from runtime/local database-file moves such as `openvibely.db` storage migration.

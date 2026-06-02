@@ -86,6 +86,40 @@ func TestBuildRuntimeToolExecutor_EmptyNameFallsThrough(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeToolExecutor_AllowsGrantedGoalStatusActions(t *testing.T) {
+	handlers := map[string]RuntimeActionHandler{
+		"mark_task_goal_achieved": func(_ context.Context, _ json.RawMessage) (string, error) {
+			return "marked", nil
+		},
+	}
+	executor := BuildRuntimeToolExecutor(models.ChatModeOrchestrate, SurfaceWeb, handlers)
+
+	output, handled, isError, err := executor(context.Background(), "mark_task_goal_achieved", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !handled || isError || output != "marked" {
+		t.Fatalf("expected goal status action to execute, handled=%v isError=%v output=%q", handled, isError, output)
+	}
+}
+
+func TestBuildLifecycleRuntimeToolExecutor_AllowsLifecycleOnly(t *testing.T) {
+	handlers := map[string]RuntimeActionHandler{
+		"mark_task_goal_achieved": func(_ context.Context, _ json.RawMessage) (string, error) {
+			return "marked", nil
+		},
+	}
+	executor := BuildLifecycleRuntimeToolExecutor(models.ChatModeOrchestrate, SurfaceWeb, handlers)
+
+	output, handled, isError, err := executor(context.Background(), "mark_task_goal_achieved", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !handled || isError || output != "marked" {
+		t.Fatalf("expected lifecycle action to execute, handled=%v isError=%v output=%q", handled, isError, output)
+	}
+}
+
 func TestBuildRuntimeToolExecutor_PlanModeReadActionsWork(t *testing.T) {
 	// Read-only chatcontrol actions (like list_models) should work in plan mode.
 	handlers := map[string]RuntimeActionHandler{

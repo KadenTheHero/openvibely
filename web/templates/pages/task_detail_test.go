@@ -117,7 +117,7 @@ func TestTaskDetailContent_ChangesTabHidesReviewCommentCountBadge(t *testing.T) 
 	reviewComments := []models.ReviewComment{{ID: "c1", CommentText: "x"}}
 
 	var buf bytes.Buffer
-	err := TaskDetailContent(task, nil, nil, nil, nil, nil, "changes", reviewComments).Render(context.Background(), &buf)
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "changes", reviewComments).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestTaskDetailContent_ReactivatesFileChangesSSEWhenTaskBecomesActive(t *tes
 	}
 
 	var buf bytes.Buffer
-	err := TaskDetailContent(task, nil, nil, nil, nil, nil, "changes", nil).Render(context.Background(), &buf)
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "changes", nil).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestTaskDetailContent_FileChangesRefreshRequiresActiveTab(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := TaskDetailContent(task, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf)
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestTaskDetailContent_FileChangesListenersRebindAndCleanup(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := TaskDetailContent(task, nil, nil, nil, nil, nil, "changes", nil).Render(context.Background(), &buf)
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "changes", nil).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -215,6 +215,54 @@ func TestTaskDetailContent_FileChangesListenersRebindAndCleanup(t *testing.T) {
 	}
 }
 
+func TestTaskDetailContent_DetailsTabRendersScrollableMatchedSectionCards(t *testing.T) {
+	task := &models.Task{
+		ID:                "task-layout-1",
+		Title:             "Task",
+		ProjectID:         "project-1",
+		Status:            models.StatusCompleted,
+		Category:          models.CategoryCompleted,
+		Prompt:            "Do the thing",
+		WorktreeBranch:    "task/layout",
+		WorktreePath:      "/tmp/worktree",
+		MergeTargetBranch: "main",
+	}
+	goal := &models.TaskGoal{
+		GoalID:    "goal-1",
+		TaskID:    task.ID,
+		Status:    models.TaskGoalStatusActive,
+		Objective: "Keep the layout clean",
+	}
+
+	var buf bytes.Buffer
+	err := TaskDetailContent(task, goal, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, `id="task-detail-view" class="flex-1 overflow-y-auto min-h-0 pr-1"`) {
+		t.Fatal("expected Details view to be the scroll container")
+	}
+	for _, id := range []string{`id="task-goal-panel"`, `id="task-prompt-panel"`, `id="worktree-info-panel"`} {
+		if !strings.Contains(output, id) {
+			t.Fatalf("expected details section card %s", id)
+		}
+	}
+	if got := strings.Count(output, `class="card bg-base-200/50 border border-base-300 mb-4"`); got < 3 {
+		t.Fatalf("expected goal, prompt, and worktree cards to share section styling, got %d matching cards", got)
+	}
+	if !strings.Contains(output, `class="textarea textarea-bordered textarea-sm w-full min-h-32 h-auto cursor-default whitespace-pre-wrap overflow-x-auto font-sans text-sm leading-relaxed"`) {
+		t.Fatal("expected prompt content box to match the goal textarea styling")
+	}
+	if strings.Contains(output, `flex-1 min-h-0 flex flex-col mb-6`) {
+		t.Fatal("prompt should not render as an uncontained flex filler")
+	}
+	if strings.Contains(output, `<pre class="p-4 bg-base-100/60 border border-base-300 rounded-lg text-sm`) {
+		t.Fatal("prompt should not render with the old monospace pre styling")
+	}
+}
+
 func TestTaskDetailContent_ThreadTabLazyLoadsOnDemand(t *testing.T) {
 	task := &models.Task{
 		ID:        "task-thread-1",
@@ -225,7 +273,7 @@ func TestTaskDetailContent_ThreadTabLazyLoadsOnDemand(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := TaskDetailContent(task, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf)
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -263,7 +311,7 @@ func TestTaskDetailContent_DiffUpdateUsesPreSwapFingerprint(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := TaskDetailContent(task, nil, nil, nil, nil, nil, "changes", nil).Render(context.Background(), &buf)
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "changes", nil).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -340,7 +388,7 @@ func TestTaskDetailContent_ThreadAutoLoadsWhenChatTabInitiallyActive(t *testing.
 	}
 
 	var buf bytes.Buffer
-	err := TaskDetailContent(task, nil, nil, nil, nil, nil, "chat", nil).Render(context.Background(), &buf)
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -367,7 +415,7 @@ func TestTaskDetailContent_ThreadTabRestoresPerTaskScrollState(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	output := buf.String()
@@ -413,7 +461,7 @@ func TestTaskDetailContent_RunAtFieldsClickablePickerAffordance(t *testing.T) {
 	}}
 
 	var buf bytes.Buffer
-	err := TaskDetailContent(task, nil, schedules, nil, nil, nil, "schedules", nil).Render(context.Background(), &buf)
+	err := TaskDetailContent(task, nil, nil, schedules, nil, nil, nil, "schedules", nil).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -446,7 +494,7 @@ func TestTaskDetailContent_AgentSelectorAllowsNoAgentSelection(t *testing.T) {
 	agentDefs := []models.Agent{{ID: "agent1", Name: "Reviewer", Key: "reviewer", Model: "inherit", Enabled: true, SelectableAsPrimary: true}}
 
 	var buf bytes.Buffer
-	if err := TaskDetailContent(task, nil, nil, nil, agentDefs, nil, "details", nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskDetailContent(task, nil, nil, nil, nil, agentDefs, nil, "details", nil).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render task detail: %v", err)
 	}
 	body := buf.String()

@@ -50,20 +50,24 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 		h.completeWithFailure(context.Background(), req.ExecID, req.TaskID, workDirErr.Error(), 0, req.ReplyContext)
 		return
 	}
+	h.reactivateAchievedGoalForManualFollowup(ctx, req.TaskID, req.ReplyContext.Source, "")
+	agentDef := h.resolveTaskAgentDefinitionForTask(ctx, req.TaskID, req.AgentDefinition)
+	systemContext := combineContexts(combineContexts(req.SystemContext, h.taskGoalContext(ctx, req.TaskID, agentDef)), worktreeContext)
 	go h.processStreamingResponse(streamingResponseParams{
 		ExecID:          req.ExecID,
 		TaskID:          req.TaskID,
 		Message:         req.Message,
 		Agent:           req.Agent,
-		AgentDefinition: req.AgentDefinition,
+		AgentDefinition: agentDef,
 		ChatHistory:     filterChatHistory(req.ChatHistory, req.ExecID),
 		ProjectID:       req.ProjectID,
-		SystemContext:   combineContexts(req.SystemContext, worktreeContext),
+		SystemContext:   systemContext,
 		WorkDir:         workDir,
 		IsTaskFollowup:  true,
 		ProcessMarkers:  false,
 		ChatMode:        models.ChatModeOrchestrate,
 		Surface:         req.Surface,
 		ChannelReply:    req.ReplyContext,
+		InputOrigin:     req.ReplyContext.Source,
 	})
 }

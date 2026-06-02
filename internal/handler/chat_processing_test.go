@@ -58,15 +58,30 @@ func (s *chatMemoryHookStore) FindExecutionByIdempotencyKey(ctx context.Context,
 }
 
 type chatMemoryHookInvoker struct {
-	seen []string
+	mu       sync.Mutex
+	seen     []string
+	onInvoke func(context.Context, models.AgentLifecycleHook, lifecycle.HookInput) error
 }
 
 func (i *chatMemoryHookInvoker) Invoke(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
+	i.mu.Lock()
 	i.seen = append(i.seen, string(hook.When)+"/"+hook.SkillKey)
+	i.mu.Unlock()
+	if i.onInvoke != nil {
+		if err := i.onInvoke(ctx, hook, in); err != nil {
+			return nil, err
+		}
+	}
 	if hook.When == models.LifecycleBeforeRun {
 		return json.Marshal(lifecycle.ContextBlock{Content: "Remember: prefer repo-local managed memory for this project.", Sources: []string{"MEMORIES.md"}, Confidence: 0.9})
 	}
 	return json.Marshal(lifecycle.ActivitySummary{Summary: "updated chat memory", ChangedPaths: []string{"chat.md"}})
+}
+
+func (i *chatMemoryHookInvoker) Seen() []string {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return append([]string(nil), i.seen...)
 }
 
 func createHandlerTestGitRepo(t *testing.T) string {
@@ -389,8 +404,9 @@ func TestProcessStreamingResponse_InteractiveChatRunsMemoryRecallOnly(t *testing
 	if mock.CallCount() != 1 {
 		t.Fatalf("expected one chat model call, got %d", mock.CallCount())
 	}
-	if len(invoker.seen) != 1 || invoker.seen[0] != "before_run/recall_memory" {
-		t.Fatalf("expected only before_run recall hook for chat, got %#v", invoker.seen)
+	seen := invoker.Seen()
+	if len(seen) != 1 || seen[0] != "before_run/recall_memory" {
+		t.Fatalf("expected only before_run recall hook for chat, got %#v", seen)
 	}
 	if chatContext := mock.LastAgentRequest().ChatSystemContext; !strings.Contains(chatContext, "Remember: prefer repo-local managed memory for this project.") || !strings.Contains(chatContext, "[recall_memory]") {
 		t.Fatalf("expected recalled memory in model-facing chat context, got:\n%s", chatContext)
@@ -453,8 +469,9 @@ func TestProcessStreamingResponse_InteractiveChatPlanModeRunsMemoryRecallOnly(t 
 	if mock.CallCount() != 1 {
 		t.Fatalf("expected one plan chat model call, got %d", mock.CallCount())
 	}
-	if len(invoker.seen) != 1 || invoker.seen[0] != "before_run/recall_memory" {
-		t.Fatalf("expected only before_run recall hook for plan chat, got %#v", invoker.seen)
+	seen := invoker.Seen()
+	if len(seen) != 1 || seen[0] != "before_run/recall_memory" {
+		t.Fatalf("expected only before_run recall hook for plan chat, got %#v", seen)
 	}
 	if chatContext := mock.LastAgentRequest().ChatSystemContext; !strings.Contains(chatContext, "Remember: prefer repo-local managed memory for this project.") || !strings.Contains(chatContext, "[recall_memory]") {
 		t.Fatalf("expected recalled memory in model-facing plan chat context, got:\n%s", chatContext)
@@ -471,6 +488,284 @@ func TestProcessStreamingResponse_InteractiveChatPlanModeRunsMemoryRecallOnly(t 
 	if updatedExec.Status != models.ExecCompleted {
 		t.Fatalf("expected plan chat execution completed, got %s", updatedExec.Status)
 	}
+}
+
+func TestProcessStreamingResponse_ManualFollowupReactivatesAchievedGoalForCheckpoint(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	goalRepo := repository.NewTaskGoalRepo(db)
+	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
+	h.SetTaskGoalService(goalSvc)
+	h.taskSvc.SetTaskGoalService(goalSvc)
+	h.workerSvc.SetTaskGoalService(goalSvc)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "manual followup complete"
+	mock.TextOnly = "manual followup complete"
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Achieved Goal Manual Followup Project")
+	task := createTask(t, h, project.ID, "Achieved Goal Manual Followup Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+		tk.Prompt = "Continue task"
+	})
+	goal, err := h.taskGoalSvc.SetGoal(ctx, task.ID, "Keep the invariant satisfied", service.GoalOptions{})
+	require.NoError(t, err)
+	_, err = h.taskGoalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "initially satisfied")
+	require.NoError(t, err)
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "manual followup input"
+	})
+	goalAgent := &models.Agent{Key: models.AgentSystemKindGoal, Name: "System: Goal Agent", Model: "inherit", Tools: []string{"get_task_goal", "send_to_task", "mark_task_goal_achieved", "report_task_goal_blocked"}, SystemKind: models.AgentSystemKindGoal, GeneratedStatus: models.AgentStatusProtected, CreatedBy: models.AgentCreatedBySystem, Enabled: true}
+	require.NoError(t, agentRepo.Create(ctx, goalAgent))
+	store := &chatMemoryHookStore{hooks: []models.AgentLifecycleHook{{ID: "goal-hook-reactivate", AgentID: goalAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "evaluate_task_goal", OutputContract: models.OutputContractActivitySummary, Blocking: true, Enabled: true}}}
+	invoker := &chatMemoryHookInvoker{}
+	h.workerSvc.SetLifecycleRunner(lifecycle.NewRunner(store, invoker, nil))
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "manual followup input",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+		ChatMode:       models.ChatModeOrchestrate,
+		InputOrigin:    models.TaskOriginWeb,
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, seen := range invoker.Seen() {
+			if seen == "after_complete/evaluate_task_goal" {
+				latest, err := goalSvc.GetGoal(ctx, task.ID)
+				require.NoError(t, err)
+				require.NotNil(t, latest)
+				require.Equal(t, models.TaskGoalStatusActive, latest.Status)
+				require.Nil(t, latest.AchievedAt)
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("expected Goal Agent after_complete hook after manual achieved-goal follow-up, seen=%#v", invoker.Seen())
+}
+
+func TestProcessStreamingResponse_GoalAgentQueuedFollowupDoesNotReactivateAchievedGoal(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	goalRepo := repository.NewTaskGoalRepo(db)
+	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
+	h.SetTaskGoalService(goalSvc)
+	h.taskSvc.SetTaskGoalService(goalSvc)
+	h.workerSvc.SetTaskGoalService(goalSvc)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "goal followup complete"
+	mock.TextOnly = "goal followup complete"
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Goal Agent Followup No Reactivate Project")
+	task := createTask(t, h, project.ID, "Goal Agent Followup No Reactivate Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+		tk.Prompt = "Continue task"
+	})
+	goal, err := h.taskGoalSvc.SetGoal(ctx, task.ID, "Already satisfied", service.GoalOptions{})
+	require.NoError(t, err)
+	achieved, err := h.taskGoalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "done")
+	require.NoError(t, err)
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "system continuation"
+	})
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:           exec.ID,
+		TaskID:           task.ID,
+		Message:          "system continuation",
+		Agent:            *agent,
+		ProjectID:        project.ID,
+		IsTaskFollowup:   true,
+		ChatMode:         models.ChatModeOrchestrate,
+		InputOrigin:      models.TaskOriginSystemAgent,
+		InputOriginAgent: models.AgentSystemKindGoal,
+	})
+
+	latest, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, latest)
+	require.Equal(t, models.TaskGoalStatusAchieved, latest.Status)
+	require.Equal(t, achieved.GoalID, latest.GoalID)
+	require.NotNil(t, latest.AchievedAt)
+}
+
+func TestProcessStreamingResponse_GenericAfterCompleteRunsGoalAgentWithoutAutoEnqueue(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	goalRepo := repository.NewTaskGoalRepo(db)
+	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
+	h.SetTaskGoalService(goalSvc)
+	h.taskSvc.SetTaskGoalService(goalSvc)
+	h.workerSvc.SetTaskGoalService(goalSvc)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "followup complete"
+	mock.TextOnly = "followup complete"
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Goal Checkpoint Project")
+	task := createTask(t, h, project.ID, "Goal Checkpoint Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+		tk.Prompt = "Continue task"
+	})
+	goal, err := h.taskGoalSvc.SetGoal(ctx, task.ID, "Ship the persisted goal", service.GoalOptions{})
+	require.NoError(t, err)
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "followup input"
+	})
+	goalAgent := &models.Agent{Key: models.AgentSystemKindGoal, Name: "System: Goal Agent", Model: "inherit", Tools: []string{"get_task_goal", "send_to_task", "mark_task_goal_achieved", "report_task_goal_blocked"}, SystemKind: models.AgentSystemKindGoal, GeneratedStatus: models.AgentStatusProtected, CreatedBy: models.AgentCreatedBySystem, Enabled: true}
+	require.NoError(t, agentRepo.Create(ctx, goalAgent))
+	store := &chatMemoryHookStore{hooks: []models.AgentLifecycleHook{{ID: "goal-hook", AgentID: goalAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "evaluate_task_goal", OutputContract: models.OutputContractActivitySummary, Blocking: true, Enabled: true}}}
+	invoker := &chatMemoryHookInvoker{onInvoke: func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) error {
+		if hook.SkillKey == "evaluate_task_goal" && in.Extras["task_goal"] == nil {
+			return fmt.Errorf("missing task_goal extras in generic after_complete hook input")
+		}
+		return nil
+	}}
+	h.workerSvc.SetLifecycleRunner(lifecycle.NewRunner(store, invoker, nil))
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "followup input",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+		ChatMode:       models.ChatModeOrchestrate,
+	})
+
+	goalRuns := 0
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		goalRuns = 0
+		for _, seen := range invoker.Seen() {
+			if seen == "after_complete/evaluate_task_goal" {
+				goalRuns++
+			}
+		}
+		if goalRuns == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if goalRuns != 1 {
+		t.Fatalf("expected Goal Agent lifecycle hook once, got seen=%#v", invoker.Seen())
+	}
+	pending, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	if len(pending) != 0 {
+		t.Fatalf("generic Goal Agent after_complete must not enqueue without send_to_task tool call, got %#v for goal %#v", pending, goal)
+	}
+}
+
+func TestProcessStreamingResponse_GenericAfterCompletePublishesReloadedGoalStatus(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	broadcaster := events.NewBroadcaster()
+	h.broadcaster = broadcaster
+	sub, err := broadcaster.Subscribe()
+	require.NoError(t, err)
+	defer broadcaster.Unsubscribe(sub)
+	goalRepo := repository.NewTaskGoalRepo(db)
+	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, broadcaster)
+	h.SetTaskGoalService(goalSvc)
+	h.taskSvc.SetTaskGoalService(goalSvc)
+	h.workerSvc.SetTaskGoalService(goalSvc)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "followup complete"
+	mock.TextOnly = "followup complete"
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Goal Checkpoint Reload Project")
+	task := createTask(t, h, project.ID, "Goal Checkpoint Reload Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+		tk.Prompt = "Continue task"
+	})
+	goal, err := h.taskGoalSvc.SetGoal(ctx, task.ID, "Ship the persisted goal", service.GoalOptions{})
+	require.NoError(t, err)
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "followup input"
+	})
+	goalAgent := &models.Agent{Key: models.AgentSystemKindGoal, Name: "System: Goal Agent", Model: "inherit", Tools: []string{"get_task_goal", "send_to_task", "mark_task_goal_achieved", "report_task_goal_blocked"}, SystemKind: models.AgentSystemKindGoal, GeneratedStatus: models.AgentStatusProtected, CreatedBy: models.AgentCreatedBySystem, Enabled: true}
+	require.NoError(t, agentRepo.Create(ctx, goalAgent))
+	store := &chatMemoryHookStore{hooks: []models.AgentLifecycleHook{{ID: "goal-hook-reload", AgentID: goalAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "evaluate_task_goal", OutputContract: models.OutputContractActivitySummary, Blocking: true, Enabled: true}}}
+	invoker := &chatMemoryHookInvoker{onInvoke: func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) error {
+		if hook.SkillKey == "evaluate_task_goal" {
+			_, err := goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "goal satisfied")
+			return err
+		}
+		return nil
+	}}
+	h.workerSvc.SetLifecycleRunner(lifecycle.NewRunner(store, invoker, nil))
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "followup input",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+		ChatMode:       models.ChatModeOrchestrate,
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	var goalEvents []events.TaskEvent
+	for time.Now().Before(deadline) {
+		select {
+		case ev := <-sub:
+			if ev.Type == events.TaskGoalEvaluated && ev.TaskID == task.ID {
+				goalEvents = append(goalEvents, ev)
+			}
+		default:
+			if len(invoker.Seen()) > 0 && len(goalEvents) >= 2 {
+				goto done
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+done:
+	if len(goalEvents) == 0 {
+		t.Fatalf("expected goal evaluation events after generic after_complete")
+	}
+	for _, ev := range goalEvents {
+		if ev.GoalStatus == string(models.TaskGoalStatusActive) {
+			t.Fatalf("generic after_complete published stale active goal event after hook mutation: %#v", goalEvents)
+		}
+	}
+	latest, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, latest)
+	require.Equal(t, models.TaskGoalStatusAchieved, latest.Status)
 }
 
 func TestHandler_WorkerCompletionPromotesQueuedTaskThreadInput(t *testing.T) {
@@ -1225,6 +1520,57 @@ func TestStartQueuedTaskThreadInputFailureUsesQueuedChannelReplyContext(t *testi
 	require.Equal(t, "1710000000.200000", sentThread)
 	require.Contains(t, sentErr, "could not check worktree status")
 	require.Equal(t, "Ufail", sentUser)
+}
+
+func TestStartChannelTaskRunIncludesTaskGoalContext(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	agent := createAgent(t, tc.llmConfigRepo)
+	project := createProject(t, tc.handler, "Channel Goal Context Project")
+	task := createTask(t, tc.handler, project.ID, "Channel Goal Context Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+	})
+	goalObjective := "Channel follow-ups must see this persisted goal"
+	goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, goalObjective, service.GoalOptions{})
+	require.NoError(t, err)
+	_, err = tc.handler.taskGoalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "initially satisfied")
+	require.NoError(t, err)
+	exec := createExec(t, tc.handler, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "channel follow-up"
+		ex.IsFollowup = true
+	})
+	agentDef := &models.Agent{Tools: []string{"mark_task_goal_achieved"}}
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "channel done"
+	mock.TextOnly = "channel done"
+	tc.handler.llmSvc.SetLLMCaller(mock)
+
+	tc.handler.StartChannelTaskRun(ctx, service.ChannelTaskRunRequest{
+		ExecID:          exec.ID,
+		TaskID:          task.ID,
+		ProjectID:       project.ID,
+		Message:         "channel follow-up",
+		Agent:           *agent,
+		AgentDefinition: agentDef,
+		SystemContext:   "Channel task context.",
+		Surface:         "slack",
+		ReplyContext: service.ChannelReplyContext{
+			Source:         models.TaskOriginSlack,
+			SlackChannelID: "Cgoal",
+			SlackThreadTS:  "1710000000.400000",
+			SlackUserID:    "Ugoal",
+		},
+	})
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
+	chatCtx := mock.LastAgentRequest().ChatSystemContext
+	require.Contains(t, chatCtx, "Channel task context.")
+	require.Contains(t, chatCtx, "Task goal (active):")
+	require.Contains(t, chatCtx, goalObjective)
+	require.Contains(t, chatCtx, "This assigned agent is explicitly granted these goal status tools: mark_task_goal_achieved")
+	require.NotContains(t, chatCtx, "report_task_goal_blocked. Use only the granted")
 }
 
 func TestStartChannelTaskRunSetupFailureUsesReplyContext(t *testing.T) {

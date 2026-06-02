@@ -24,6 +24,12 @@ const (
 	TaskThreadInputApplied     TaskEventType = "task_thread_input_applied"
 	TaskThreadInputQueued      TaskEventType = "task_thread_input_queued"
 	TaskThreadInputCancelled   TaskEventType = "task_thread_input_cancelled"
+	TaskGoalUpdated            TaskEventType = "task_goal_updated"
+	TaskGoalPaused             TaskEventType = "task_goal_paused"
+	TaskGoalResumed            TaskEventType = "task_goal_resumed"
+	TaskGoalCleared            TaskEventType = "task_goal_cleared"
+	TaskGoalEvaluated          TaskEventType = "task_goal_evaluated"
+	TaskGoalFollowupQueued     TaskEventType = "task_goal_followup_queued"
 	AlertCreated               TaskEventType = "alert_created"
 )
 
@@ -41,6 +47,12 @@ type TaskEvent struct {
 	ExecID         string        `json:"exec_id,omitempty"`
 	Message        string        `json:"message,omitempty"`
 	PendingInputID string        `json:"pending_input_id,omitempty"`
+	GoalID         string        `json:"goal_id,omitempty"`
+	GoalStatus     string        `json:"goal_status,omitempty"`
+	GoalObjective  string        `json:"goal_objective,omitempty"`
+	GoalReason     string        `json:"goal_reason,omitempty"`
+	BlockerKey     string        `json:"blocker_key,omitempty"`
+	BlockerCount   int           `json:"blocker_count,omitempty"`
 }
 
 // Subscriber is a channel that receives task events

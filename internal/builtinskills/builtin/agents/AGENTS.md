@@ -15,3 +15,9 @@ Skills: see `skill_curator/SKILLS.md`.
 System agent that ships with OpenVibely. It owns the project's managed memory: it recalls relevant memory before task turns, updates durable memory after completed task turns, and consolidates the durable store on a daily schedule. It is not user-selectable as a primary agent and only writes through its scoped memory file tools.
 
 Skills: see `memory_curator/SKILLS.md`.
+
+## goal
+
+System agent that ships with OpenVibely. It evaluates persisted task goals after task-thread turns, marks goals achieved when current evidence proves completion, reports repeatable blockers, and queues continuation work only through `send_to_task`. It is not user-selectable as a primary agent and must not edit files or start task executions directly.
+
+Skills: see `goal/SKILLS.md`.

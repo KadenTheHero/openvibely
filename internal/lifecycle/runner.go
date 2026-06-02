@@ -237,7 +237,7 @@ func (r *Runner) runHook(ctx context.Context, hook models.AgentLifecycleHook, in
 	hookInput.OutputContract = hook.OutputContract
 
 	inputJSON := ""
-	if raw, err := json.Marshal(hookInput); err == nil {
+	if raw, err := json.Marshal(sanitizeHookInputForStorage(hookInput)); err == nil {
 		inputJSON = string(raw)
 	}
 	idempotencyKey := buildIdempotencyKey(input.TaskRunID, hook.ID, inputJSON)
@@ -453,6 +453,11 @@ func joinNonEmpty(parts []string, sep string) string {
 		out += p
 	}
 	return out
+}
+
+func sanitizeHookInputForStorage(input HookInput) HookInput {
+	input.PreviousOutputs = sanitizeHookOutputsForPrompt(input.PreviousOutputs)
+	return input
 }
 
 func stringPtr(s string) *string { return &s }

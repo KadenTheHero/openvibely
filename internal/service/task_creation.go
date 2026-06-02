@@ -22,6 +22,7 @@ import (
 type TaskCreationRequest struct {
 	Title             string                     `json:"title"`
 	Prompt            string                     `json:"prompt"`
+	Goal              string                     `json:"goal"`                // Optional persisted task goal
 	Category          string                     `json:"category"`            // "active" or "backlog" (default: "backlog")
 	Priority          int                        `json:"priority"`            // 1=Low, 2=Normal, 3=High, 4=Urgent (default: 2)
 	AgentID           string                     `json:"agent_id"`            // Optional: specific LLM config ID (empty = auto-select or default)
@@ -200,7 +201,7 @@ func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreation
 			}
 		}
 
-		if err := taskSvc.Create(ctx, task); err != nil {
+		if err := taskSvc.CreateWithGoal(ctx, task, req.Goal); err != nil {
 			log.Printf("[task-creation] error creating task %q: %v", req.Title, err)
 			failed = append(failed, fmt.Sprintf("- \"%s\": %v", req.Title, err))
 		} else {
@@ -218,7 +219,9 @@ func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreation
 
 			createdTasks = append(createdTasks, *task)
 			line := fmt.Sprintf("- \"%s\" (%s) [TASK_ID:%s]", req.Title, category, task.ID)
-			// Auto-selection info logged server-side but not shown to user to reduce clutter
+			if strings.TrimSpace(req.Goal) != "" {
+				line += " [goal:set]"
+			} // Auto-selection info logged server-side but not shown to user to reduce clutter
 			// if selectionInfo != "" {
 			// 	line += " " + selectionInfo
 			// }

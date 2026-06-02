@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 )
 
 func supportsChatActionTools(agent models.LLMConfig) bool {
@@ -215,12 +217,28 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			return toolSummaryFromMarker(marker, updated), nil
 		},
 		"send_to_task": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("SEND_TO_TASK", input, true)
-			if err != nil {
-				return "", err
-			}
-			updated := h.processChatSendToTask(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+			return h.executeSendToTaskTool(ctx, params, input)
+		},
+		"set_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeSetTaskGoalTool(ctx, params, input)
+		},
+		"clear_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeClearTaskGoalTool(ctx, params, input)
+		},
+		"get_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeGetTaskGoalTool(ctx, params, input)
+		},
+		"pause_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executePauseTaskGoalTool(ctx, params, input)
+		},
+		"resume_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeResumeTaskGoalTool(ctx, params, input)
+		},
+		"mark_task_goal_achieved": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeMarkTaskGoalAchievedTool(ctx, params, input)
+		},
+		"report_task_goal_blocked": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeReportTaskGoalBlockedTool(ctx, params, input)
 		},
 		"schedule_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			marker, err := buildToolMarker("SCHEDULE_TASK", input, true)
@@ -364,9 +382,11 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		},
 		"list_capabilities": func(_ context.Context, _ json.RawMessage) (string, error) {
 			summaries := chatcontrol.ListForContext(mode, surface)
+			if params.IsTaskFollowup {
+				summaries = filterTaskThreadCapabilitySummaries(summaries, params.AgentDefinition)
+			}
 			return formatCapabilities(summaries), nil
-		},
-	}
+		}}
 }
 
 // ---- New action executors ----
@@ -575,8 +595,337 @@ func (h *Handler) buildChatActionToolRuntimeFromDefs(params streamingResponsePar
 	}
 }
 
+func (h *Handler) buildLifecycleChatActionToolRuntimeFromDefs(params streamingResponseParams, collector *chatActionSummaryCollector, defs []llmcontracts.RuntimeToolDefinition, mode models.ChatMode, surface chatcontrol.Surface) *llmcontracts.RuntimeTools {
+	handlers := h.chatActionHandlers(params, collector, mode, surface)
+	return &llmcontracts.RuntimeTools{
+		Definitions: defs,
+		Executor:    chatcontrol.BuildLifecycleRuntimeToolExecutor(mode, surface, handlers),
+	}
+}
+
 // chatActionToolDefinitions returns tool definitions from the canonical registry.
 // Kept for backward compatibility with existing tests.
 func chatActionToolDefinitions() []llmcontracts.RuntimeToolDefinition {
 	return chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
+}
+
+type taskGoalToolInput struct {
+	TaskID      string `json:"task_id"`
+	Title       string `json:"title"`
+	Goal        string `json:"goal"`
+	GoalID      string `json:"goal_id"`
+	Reason      string `json:"reason"`
+	BlockerKey  string `json:"blocker_key"`
+	Message     string `json:"message"`
+	Origin      string `json:"origin"`
+	OriginAgent string `json:"origin_agent"`
+}
+
+func (h *Handler) resolveTaskIDForTool(ctx context.Context, params streamingResponseParams, taskID, title string) (string, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "current" {
+		if !params.IsTaskFollowup || params.TaskID == "" {
+			return "", fmt.Errorf("task_id current is only valid in a persisted task thread")
+		}
+		return params.TaskID, nil
+	}
+	if taskID != "" {
+		return taskID, nil
+	}
+	if strings.TrimSpace(title) != "" {
+		task, err := h.resolveTaskReference(ctx, params.ProjectID, "", title)
+		if err != nil {
+			return "", err
+		}
+		return task.ID, nil
+	}
+	return "", fmt.Errorf("task_id is required")
+}
+
+func goalToolJSON(goal *models.TaskGoal) (string, error) {
+	payload := map[string]any{"ok": true, "goal": goal}
+	if goal != nil {
+		payload["task_id"] = goal.TaskID
+	}
+	b, err := json.Marshal(payload)
+	return string(b), err
+}
+
+func (h *Handler) executeSetTaskGoalTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	if h.taskGoalSvc == nil {
+		return "", fmt.Errorf("task goal service unavailable")
+	}
+	var req taskGoalToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	goal, err := h.taskGoalSvc.SetGoal(ctx, taskID, req.Goal, service.GoalOptions{Actor: "assistant"})
+	if err != nil {
+		return "", err
+	}
+	return goalToolJSON(goal)
+}
+
+func (h *Handler) executeGetTaskGoalTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	if h.taskGoalSvc == nil {
+		return "", fmt.Errorf("task goal service unavailable")
+	}
+	var req taskGoalToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	goal, err := h.taskGoalSvc.GetGoal(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	return goalToolJSON(goal)
+}
+
+func (h *Handler) executeClearTaskGoalTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	if h.taskGoalSvc == nil {
+		return "", fmt.Errorf("task goal service unavailable")
+	}
+	var req taskGoalToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	if err := h.taskGoalSvc.ClearGoal(ctx, taskID, "assistant"); err != nil {
+		return "", err
+	}
+	goal, _ := h.taskGoalSvc.GetGoal(ctx, taskID)
+	return goalToolJSON(goal)
+}
+
+func (h *Handler) executePauseTaskGoalTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	return h.executeGoalStatusTool(ctx, params, input, func(taskID string) error {
+		return h.taskGoalSvc.PauseGoal(ctx, taskID, "assistant")
+	})
+}
+
+func (h *Handler) executeResumeTaskGoalTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	return h.executeGoalStatusTool(ctx, params, input, func(taskID string) error {
+		return h.taskGoalSvc.ResumeGoal(ctx, taskID, "assistant")
+	})
+}
+
+func (h *Handler) executeGoalStatusTool(ctx context.Context, params streamingResponseParams, input json.RawMessage, fn func(string) error) (string, error) {
+	if h.taskGoalSvc == nil {
+		return "", fmt.Errorf("task goal service unavailable")
+	}
+	var req taskGoalToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	if err := fn(taskID); err != nil {
+		return "", err
+	}
+	goal, _ := h.taskGoalSvc.GetGoal(ctx, taskID)
+	return goalToolJSON(goal)
+}
+
+func requireGoalStatusToolGrant(ctx context.Context, params streamingResponseParams, toolName string) error {
+	if hookAgent, ok := lifecycle.HookAgentFromContext(ctx); ok {
+		if hookAgent.SystemKind == models.AgentSystemKindGoal {
+			return nil
+		}
+		if hasToolGrant(hookAgent.Tools, toolName) {
+			return nil
+		}
+		return fmt.Errorf("tool %s requires an explicit agent tool grant", toolName)
+	}
+	if hasToolGrant(agentTools(params.AgentDefinition), toolName) {
+		return nil
+	}
+	return fmt.Errorf("tool %s requires an explicit agent tool grant", toolName)
+}
+
+func (h *Handler) executeMarkTaskGoalAchievedTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	if err := requireGoalStatusToolGrant(ctx, params, "mark_task_goal_achieved"); err != nil {
+		return "", err
+	}
+	if h.taskGoalSvc == nil {
+		return "", fmt.Errorf("task goal service unavailable")
+	}
+	var req taskGoalToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	goal, err := h.taskGoalSvc.MarkAchieved(ctx, taskID, req.GoalID, req.Reason)
+	if err != nil {
+		return "", err
+	}
+	return goalToolJSON(goal)
+}
+
+func (h *Handler) executeReportTaskGoalBlockedTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	if err := requireGoalStatusToolGrant(ctx, params, "report_task_goal_blocked"); err != nil {
+		return "", err
+	}
+	if h.taskGoalSvc == nil {
+		return "", fmt.Errorf("task goal service unavailable")
+	}
+	var req taskGoalToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	goal, err := h.taskGoalSvc.RecordBlockedReport(ctx, taskID, req.GoalID, req.BlockerKey, req.Reason)
+	if err != nil {
+		return "", err
+	}
+	return goalToolJSON(goal)
+}
+
+func (h *Handler) executeSendToTaskTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	var req taskGoalToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	taskIDInput := strings.TrimSpace(req.TaskID)
+	if taskIDInput == "" && strings.TrimSpace(req.Title) == "" && params.IsTaskFollowup && params.TaskID != "" {
+		taskIDInput = "current"
+	}
+	taskID, err := h.resolveTaskIDForTool(ctx, params, taskIDInput, req.Title)
+	if err != nil {
+		return "", err
+	}
+	origin, originAgent := sanitizeSendToTaskLineage(ctx, req.Origin, req.OriginAgent, params)
+	queued, err := h.enqueueTaskThreadInput(ctx, taskID, req.Message, origin, originAgent)
+	if err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(map[string]any{"ok": true, "task_id": taskID, "queued_message_id": queued.ID})
+	return string(b), err
+}
+
+func isGoalLifecycleHookAgent(ctx context.Context) bool {
+	agent, ok := lifecycle.HookAgentFromContext(ctx)
+	return ok && agent.SystemKind == models.AgentSystemKindGoal
+}
+
+func agentTools(agentDef *models.Agent) []string {
+	if agentDef == nil {
+		return nil
+	}
+	return agentDef.Tools
+}
+
+func hasToolGrant(tools []string, toolName string) bool {
+	for _, tool := range tools {
+		if strings.EqualFold(strings.TrimSpace(tool), toolName) {
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeSendToTaskLineage(ctx context.Context, requestedOrigin, requestedOriginAgent string, params streamingResponseParams) (string, string) {
+	if isGoalLifecycleHookAgent(ctx) {
+		return models.TaskOriginSystemAgent, models.AgentSystemKindGoal
+	}
+	if strings.TrimSpace(params.RuntimeOrigin) != "" || strings.TrimSpace(params.RuntimeOriginAgent) != "" {
+		origin := strings.TrimSpace(params.RuntimeOrigin)
+		if origin == "" {
+			origin = models.TaskOriginSystemAgent
+		}
+		return origin, strings.TrimSpace(params.RuntimeOriginAgent)
+	}
+	origin := strings.TrimSpace(requestedOrigin)
+	switch origin {
+	case models.TaskOriginSlack, models.TaskOriginTelegram:
+		return origin, ""
+	default:
+		return models.TaskOriginWeb, ""
+	}
+}
+
+func filterTaskThreadRuntimeToolDefs(defs []llmcontracts.RuntimeToolDefinition, agentDef *models.Agent) []llmcontracts.RuntimeToolDefinition {
+	return filterRuntimeToolDefs(defs, taskThreadAllowedRuntimeToolNames(agentDef))
+}
+
+func filterTaskThreadCapabilitySummaries(summaries []chatcontrol.ActionSummary, agentDef *models.Agent) []chatcontrol.ActionSummary {
+	allowed := taskThreadAllowedRuntimeToolNames(agentDef)
+	out := make([]chatcontrol.ActionSummary, 0, len(summaries))
+	for _, summary := range summaries {
+		if allowed[summary.Name] {
+			out = append(out, summary)
+		}
+	}
+	return out
+}
+
+func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
+	allowed := map[string]bool{
+		"view_task_thread":  true,
+		"send_to_task":      true,
+		"set_task_goal":     true,
+		"clear_task_goal":   true,
+		"get_task_goal":     true,
+		"pause_task_goal":   true,
+		"resume_task_goal":  true,
+		"list_capabilities": true,
+	}
+	for _, tool := range explicitlyGrantedGoalStatusTools(agentDef) {
+		allowed[tool] = true
+	}
+	return allowed
+}
+
+func explicitlyGrantedGoalStatusTools(agentDef *models.Agent) []string {
+	if agentDef == nil || len(agentDef.Tools) == 0 {
+		return nil
+	}
+	granted := []string{}
+	for _, tool := range agentDef.Tools {
+		switch strings.ToLower(strings.TrimSpace(tool)) {
+		case "mark_task_goal_achieved":
+			granted = append(granted, "mark_task_goal_achieved")
+		case "report_task_goal_blocked":
+			granted = append(granted, "report_task_goal_blocked")
+		}
+	}
+	return granted
+}
+
+func filterGoalAgentRuntimeToolDefs(defs []llmcontracts.RuntimeToolDefinition) []llmcontracts.RuntimeToolDefinition {
+	return filterRuntimeToolDefs(defs, map[string]bool{
+		"view_task_thread":         true,
+		"send_to_task":             true,
+		"get_task_goal":            true,
+		"mark_task_goal_achieved":  true,
+		"report_task_goal_blocked": true,
+	})
+}
+
+func filterRuntimeToolDefs(defs []llmcontracts.RuntimeToolDefinition, allowed map[string]bool) []llmcontracts.RuntimeToolDefinition {
+	out := make([]llmcontracts.RuntimeToolDefinition, 0, len(defs))
+	for _, def := range defs {
+		if allowed[def.Name] {
+			out = append(out, def)
+		}
+	}
+	return out
 }

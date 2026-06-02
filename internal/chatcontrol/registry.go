@@ -110,6 +110,10 @@ type ActionDef struct {
 	// thread-scoped tools are requested (view_task_thread, send_to_task).
 	IncludeThreadTools bool
 
+	// LifecycleOnly keeps a tool out of normal chat runtimes while allowing
+	// protected lifecycle agents to request it explicitly.
+	LifecycleOnly bool
+
 	// Parameters is the JSON Schema for the tool's input parameters.
 	Parameters json.RawMessage
 }
@@ -120,7 +124,7 @@ type ActionDef struct {
 const chainSchemaProperties = `{"type":"object","properties":{"enabled":{"type":"boolean","description":"true to enable chaining, false to disable"},"trigger":{"type":"string","enum":["on_completion","on_planning_complete"],"description":"When to trigger the child task"},"child_title":{"type":"string","description":"Title for the child task (defaults to '{parent title} (Implementation)')"},"child_prompt_prefix":{"type":"string","description":"Text prepended to parent output to form the child prompt"},"child_category":{"type":"string","enum":["active","backlog"],"description":"Category for child task (defaults to parent category)"},"child_agent_id":{"type":"string","description":"Agent/model config ID for the child task"},"child_chain_config":{"type":"object","description":"Nested chain config for multi-step sequences"}},"required":["enabled"]}`
 
 // createTaskParams is the full JSON Schema for the create_task tool.
-const createTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog"]},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"chain":` + chainSchemaProperties + `},"required":["title","prompt"],"additionalProperties":false}`
+const createTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","description":"Optional completion condition for the task. If set, the Goal Agent may continue the task across turns until this condition is satisfied."},"category":{"type":"string","enum":["active","backlog"]},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"chain":` + chainSchemaProperties + `},"required":["title","prompt"],"additionalProperties":false}`
 
 // editTaskParams is the full JSON Schema for the edit_task tool.
 const editTaskParams = `{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog","scheduled"]},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string"},"agent_id":{"type":"string"},"agent_config_id":{"type":"string"},"chain":` + chainSchemaProperties + `,"attachments":{"type":"array","items":{"type":"string"}}},"required":["id"],"additionalProperties":false}`
@@ -182,9 +186,85 @@ var registry = []ActionDef{
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: true,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"message":{"type":"string"}},"required":["message"],"additionalProperties":false}`),
+		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"message":{"type":"string"},"origin":{"type":"string"},"origin_agent":{"type":"string"}},"required":["message"],"additionalProperties":false}`),
 	},
-
+	{
+		Name:               "set_task_goal",
+		Description:        "Set or replace the stored goal for a task.",
+		Domain:             DomainTasks,
+		Access:             AccessWrite,
+		Sensitivity:        SensitivityNormal,
+		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:           allSurfaces(),
+		IncludeThreadTools: true,
+		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string","description":"Task id, or 'current' in a task thread."},"goal":{"type":"string"}},"required":["task_id","goal"],"additionalProperties":false}`),
+	},
+	{
+		Name:               "clear_task_goal",
+		Description:        "Clear the stored goal for a task.",
+		Domain:             DomainTasks,
+		Access:             AccessWrite,
+		Sensitivity:        SensitivityNormal,
+		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:           allSurfaces(),
+		IncludeThreadTools: true,
+		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"],"additionalProperties":false}`),
+	},
+	{
+		Name:               "get_task_goal",
+		Description:        "Read the current task goal and status.",
+		Domain:             DomainTasks,
+		Access:             AccessRead,
+		Sensitivity:        SensitivityNormal,
+		AllowedModes:       bothModes(),
+		Surfaces:           allSurfaces(),
+		IncludeThreadTools: true,
+		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"],"additionalProperties":false}`),
+	},
+	{
+		Name:               "pause_task_goal",
+		Description:        "Pause automatic continuation for a task goal.",
+		Domain:             DomainTasks,
+		Access:             AccessWrite,
+		Sensitivity:        SensitivityNormal,
+		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:           allSurfaces(),
+		IncludeThreadTools: true,
+		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"],"additionalProperties":false}`),
+	},
+	{
+		Name:               "resume_task_goal",
+		Description:        "Resume automatic continuation for a paused task goal.",
+		Domain:             DomainTasks,
+		Access:             AccessWrite,
+		Sensitivity:        SensitivityNormal,
+		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:           allSurfaces(),
+		IncludeThreadTools: true,
+		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"],"additionalProperties":false}`),
+	},
+	{
+		Name:               "mark_task_goal_achieved",
+		Description:        "Mark the current task goal achieved. Requires an explicit agent tool grant and matching goal_id stale-write guard.",
+		Domain:             DomainTasks,
+		Access:             AccessWrite,
+		Sensitivity:        SensitivityNormal,
+		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:           allSurfaces(),
+		IncludeThreadTools: true,
+		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"goal_id":{"type":"string"},"reason":{"type":"string"}},"required":["task_id","goal_id","reason"],"additionalProperties":false}`),
+	},
+	{
+		Name:               "report_task_goal_blocked",
+		Description:        "Report a repeatable blocker for the task goal. Requires an explicit agent tool grant; the service decides when it becomes blocked.",
+		Domain:             DomainTasks,
+		Access:             AccessWrite,
+		Sensitivity:        SensitivityNormal,
+		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:           allSurfaces(),
+		IncludeThreadTools: true,
+		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"goal_id":{"type":"string"},"blocker_key":{"type":"string"},"reason":{"type":"string"}},"required":["task_id","goal_id","blocker_key","reason"],"additionalProperties":false}`),
+	},
 	// --- Schedules domain (RW in orchestrate) ---
 	{
 		Name:         "schedule_task",
@@ -469,8 +549,21 @@ func Get(name string) *ActionDef {
 // This is the ONLY function that should be used to generate tool definitions
 // for LLM requests — never hand-craft tool definition lists.
 func ToolDefsForContext(mode models.ChatMode, surface Surface, includeThreadTools bool) []llmcontracts.RuntimeToolDefinition {
+	return toolDefsForContext(mode, surface, includeThreadTools, false)
+}
+
+// LifecycleToolDefsForContext returns tool definitions that include lifecycle-only
+// actions. It is intended for protected lifecycle agents, not ordinary chat turns.
+func LifecycleToolDefsForContext(mode models.ChatMode, surface Surface, includeThreadTools bool) []llmcontracts.RuntimeToolDefinition {
+	return toolDefsForContext(mode, surface, includeThreadTools, true)
+}
+
+func toolDefsForContext(mode models.ChatMode, surface Surface, includeThreadTools bool, includeLifecycleOnly bool) []llmcontracts.RuntimeToolDefinition {
 	var defs []llmcontracts.RuntimeToolDefinition
 	for _, a := range registry {
+		if a.LifecycleOnly && !includeLifecycleOnly {
+			continue
+		}
 		if !modeAllowed(a, mode) {
 			continue
 		}
@@ -497,12 +590,23 @@ func ToolDefsForContext(mode models.ChatMode, surface Surface, includeThreadTool
 // IsAllowed checks whether an action is allowed for the given mode and surface.
 // Returns an ActionError if blocked, nil if allowed.
 func IsAllowed(name string, mode models.ChatMode, surface Surface) *ActionError {
+	return isAllowed(name, mode, surface, false)
+}
+
+func isAllowed(name string, mode models.ChatMode, surface Surface, includeLifecycleOnly bool) *ActionError {
 	def := Get(name)
 	if def == nil {
 		return &ActionError{
 			Action:  name,
 			Code:    "unknown_action",
 			Message: fmt.Sprintf("action %q is not a recognized chat capability", name),
+		}
+	}
+	if def.LifecycleOnly && !includeLifecycleOnly {
+		return &ActionError{
+			Action:  name,
+			Code:    "lifecycle_only",
+			Message: fmt.Sprintf("action %q is only available to protected lifecycle agents", name),
 		}
 	}
 	if !modeAllowed(*def, mode) {
@@ -527,7 +631,7 @@ func IsAllowed(name string, mode models.ChatMode, surface Surface) *ActionError 
 func ListForContext(mode models.ChatMode, surface Surface) []ActionSummary {
 	var out []ActionSummary
 	for _, a := range registry {
-		if !modeAllowed(a, mode) || !surfaceAllowed(a, surface) {
+		if a.LifecycleOnly || !modeAllowed(a, mode) || !surfaceAllowed(a, surface) {
 			continue
 		}
 		out = append(out, ActionSummary{

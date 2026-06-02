@@ -36,8 +36,10 @@ func (r *TaskRepo) ListByProjectWithSort(ctx context.Context, projectID string, 
 }
 
 func (r *TaskRepo) ListByProjectWithCategorySorts(ctx context.Context, projectID string, category string, backlogSort string, completedSort string) ([]models.Task, error) {
-	query := `SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at
-		 FROM tasks WHERE project_id = ?`
+	query := `SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
+		EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
+		t.created_at, t.updated_at
+		 FROM tasks t WHERE t.project_id = ?`
 	args := []any{projectID}
 
 	if category != "" {
@@ -58,7 +60,7 @@ func (r *TaskRepo) ListByProjectWithCategorySorts(ctx context.Context, projectID
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.HasGoal, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -201,9 +203,40 @@ func (r *TaskRepo) getOne(ctx context.Context, query string, args ...any) (*mode
 }
 
 func (r *TaskRepo) Create(ctx context.Context, t *models.Task) error {
+	return r.createWithExecutor(ctx, r.db, t)
+}
+
+func (r *TaskRepo) CreateWithGoal(ctx context.Context, t *models.Task, goal *models.TaskGoal) error {
+	if goal == nil || strings.TrimSpace(goal.Objective) == "" {
+		return r.Create(ctx, t)
+	}
+	return r.withImmediateTx(ctx, func(exec sqlExecutor) error {
+		if err := r.createWithExecutor(ctx, exec, t); err != nil {
+			return err
+		}
+		goal.TaskID = t.ID
+		if goal.GoalID == "" {
+			goal.GoalID = NewID()
+		}
+		if goal.Status == "" {
+			goal.Status = models.TaskGoalStatusActive
+		}
+		created, err := scanTaskGoal(exec.QueryRowContext(ctx, `
+			INSERT INTO task_goals (task_id, goal_id, objective, status, reason, blocker_key, blocker_count, blocker_reason, blocker_last_seen_at, last_checked_at, achieved_at)
+			VALUES (?, ?, ?, ?, ?, '', 0, '', NULL, NULL, NULL)
+			RETURNING `+taskGoalSelectColumns, goal.TaskID, goal.GoalID, goal.Objective, goal.Status, goal.Reason))
+		if err != nil {
+			return fmt.Errorf("creating task goal: %w", err)
+		}
+		*goal = *created
+		return nil
+	})
+}
+
+func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *models.Task) error {
 	// Get the max display_order for this project and category, then add 1
 	var maxOrder sql.NullInt64
-	err := r.db.QueryRowContext(ctx,
+	err := exec.QueryRowContext(ctx,
 		`SELECT MAX(display_order) FROM tasks WHERE project_id = ? AND category = ?`,
 		t.ProjectID, t.Category).Scan(&maxOrder)
 	if err != nil && err != sql.ErrNoRows {
@@ -219,7 +252,7 @@ func (r *TaskRepo) Create(ctx context.Context, t *models.Task) error {
 	if t.AutoMerge {
 		autoMerge = 1
 	}
-	err = r.db.QueryRowContext(ctx,
+	err = exec.QueryRowContext(ctx,
 		`INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id)
 		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 RETURNING id, created_at, updated_at`,
@@ -233,6 +266,23 @@ func (r *TaskRepo) Create(ctx context.Context, t *models.Task) error {
 	}
 	t.DisplayOrder = displayOrder
 	return nil
+}
+
+func (r *TaskRepo) withImmediateTx(ctx context.Context, fn func(sqlExecutor) error) error {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	tx := &manualTx{conn: conn}
+	defer tx.Rollback()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {

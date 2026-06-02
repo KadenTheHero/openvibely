@@ -1,0 +1,46 @@
+---
+kind: openvibely.agent_skill
+version: 1
+agent:
+  key: goal
+  name: "System: Goal Agent"
+  description: "Built-in system agent that evaluates persisted task goals after task-thread turns and queues continuation work when goals remain unmet."
+  scope: global
+  selectable_as_primary: false
+  enabled: true
+routing:
+  description: Evaluates active task goals after task-thread turns and continues work through queued follow-ups.
+tools:
+  - get_task_goal
+  - mark_task_goal_achieved
+  - report_task_goal_blocked
+  - send_to_task
+permissions:
+  read_task_prompt: true
+  read_task_execution: true
+model_defaults:
+  model: inherit
+lifecycle_hooks:
+  after_complete:
+    enabled: true
+    skill: evaluate_task_goal
+    blocking: true
+    output_contract: activity_summary
+    run_policy: task_thread_only
+    permissions:
+      read_task_prompt: true
+      read_task_execution: true
+      use_shell_or_tools: true
+---
+
+# System: Goal Agent
+
+Built-in system agent that owns persisted task-goal evaluation. It runs after task-thread turns, checks the latest stored goal, decides whether the objective is achieved, blocked, or still unmet, and acts only through goal tools plus `send_to_task`.
+
+Do not put the evaluation prompt in this root file. Skill prompts live in each `skills/<skill>/SKILL.md` file. Keep this root file compact and focused on the system agent configuration plus its skill index.
+
+This agent is not user-selectable as a primary task agent. It must not edit repository files, run shell commands, replay original prompts, or start task executions directly. Continuation must be persisted as normal queued task-thread input so existing worker, queue, lifecycle, sandbox, and reload behavior remain authoritative.
+
+## goal/evaluate_task_goal
+
+[Evaluate Task Goal](skills/evaluate_task_goal/SKILL.md) — After-complete lifecycle skill that evaluates the current task goal and uses goal tools to mark achieved, report blockers, or enqueue a normal continuation follow-up.

@@ -82,6 +82,18 @@ func (h *Handler) listAgentDefinitions(ctx context.Context) []models.Agent {
 	return agentDefs
 }
 
+func (h *Handler) loadTaskGoal(ctx context.Context, taskID string) *models.TaskGoal {
+	if h.taskGoalSvc == nil || taskID == "" {
+		return nil
+	}
+	goal, err := h.taskGoalSvc.GetGoal(ctx, taskID)
+	if err != nil {
+		log.Printf("[handler] loadTaskGoal task=%s error: %v", taskID, err)
+		return nil
+	}
+	return goal
+}
+
 func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, currentAgentID *string) []models.Agent {
 	agentDefs := h.listAgentDefinitions(ctx)
 	out := selectableTaskAgentDefinitions(agentDefs)
@@ -215,7 +227,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	log.Printf("[handler] CreateTask project=%s title=%q category=%s priority=%d tag=%s prompt_len=%d",
 		projectID, t.Title, t.Category, t.Priority, t.Tag, len(t.Prompt))
 
-	if err := h.taskSvc.Create(c.Request().Context(), t); err != nil {
+	if err := h.taskSvc.CreateWithGoal(c.Request().Context(), t, c.FormValue("goal")); err != nil {
 		if errors.Is(err, service.ErrDuplicateTask) {
 			log.Printf("[handler] CreateTask duplicate title=%q", t.Title)
 			return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
@@ -411,12 +423,12 @@ func (h *Handler) GetTask(c echo.Context) error {
 
 	// HTMX request: return just the task detail content partial
 	if isHTMX {
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, executions, schedules, agents, agentDefs, attachments, defaultTab, reviewComments))
+		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, agentDefs, attachments, defaultTab, reviewComments))
 	}
 
 	// Full page load: wrap in layout
 	projects, _ := h.projectSvc.List(c.Request().Context())
-	return render(c, http.StatusOK, pages.TaskDetailPage(projects, task, executions, schedules, agents, agentDefs, attachments, defaultTab, reviewComments))
+	return render(c, http.StatusOK, pages.TaskDetailPage(projects, task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, agentDefs, attachments, defaultTab, reviewComments))
 }
 
 // GetTaskExecutions returns just the execution history for a task (used for polling updates)
@@ -995,7 +1007,7 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 		if h.reviewCommentRepo != nil {
 			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
 		}
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, executions, schedules, agents, adefs, attachments, "details", rc))
+		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, adefs, attachments, "details", rc))
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+task.ID)
@@ -1608,7 +1620,7 @@ func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 		if h.reviewCommentRepo != nil {
 			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
 		}
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, executions, schedules, agents, adefs, attachments, "chaining", rc))
+		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, adefs, attachments, "chaining", rc))
 	}
 
 	return c.NoContent(http.StatusOK)
@@ -1670,6 +1682,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 			InputMode:           models.ThreadInputModeQueued,
 			InputStatus:         models.ThreadInputPending,
 			Content:             message,
+			Source:              models.TaskOriginWeb,
 			AttachmentSessionID: sessionID,
 		}
 		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
@@ -1706,10 +1719,18 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		}
 	}
 
+	h.reactivateAchievedGoalForManualFollowup(c.Request().Context(), taskID, models.TaskOriginWeb, "")
+
 	// Load conversation history and build system context
 	priorExecs, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
 	priorHistory := filterChatHistory(priorExecs, exec.ID)
-	systemContext := buildThreadSystemContext(task.Title, len(priorHistory) > 0, attachmentContext)
+	var agentDef *models.Agent
+	if task.AgentDefinitionID != nil && h.agentRepo != nil {
+		if ad, adErr := h.agentRepo.GetByID(c.Request().Context(), *task.AgentDefinitionID); adErr == nil && ad != nil {
+			agentDef = ad
+		}
+	}
+	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, attachmentContext), h.taskGoalContext(c.Request().Context(), task.ID, agentDef))
 	personalityContext := h.getPersonalityContext(c.Request().Context(), task.ProjectID)
 	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(c.Request().Context(), task)
 	if workDirErr != nil {
@@ -1717,13 +1738,6 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		setHTMXToast(c, workDirErr.Error(), "failed")
 		return render(c, http.StatusOK, components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments))
 	}
-	var agentDef *models.Agent
-	if task.AgentDefinitionID != nil && h.agentRepo != nil {
-		if ad, adErr := h.agentRepo.GetByID(c.Request().Context(), *task.AgentDefinitionID); adErr == nil && ad != nil {
-			agentDef = ad
-		}
-	}
-
 	// Set status only after active-turn checks, execution creation, attachments,
 	// and worktree setup have succeeded. This avoids leaving a task queued/active
 	// without a corresponding execution when setup fails.
@@ -1756,6 +1770,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   true,
 		ProcessMarkers:   false,
+		InputOrigin:      models.TaskOriginWeb,
 	})
 
 	return render(c, http.StatusOK, components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments))

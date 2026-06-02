@@ -180,9 +180,11 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 	log.Printf("[handler] SubmitReview created review exec=%s for task=%s with %d comments", exec.ID, taskID, len(comments))
 
 	// Build system context and spawn LLM processing
+	h.reactivateAchievedGoalForManualFollowup(c.Request().Context(), taskID, models.TaskOriginWeb, "")
 	priorExecs, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
 	priorHistory := filterChatHistory(priorExecs, exec.ID)
-	systemContext := buildThreadSystemContext(task.Title, len(priorHistory) > 0, "")
+	agentDef := h.resolveTaskAgentDefinitionForTask(c.Request().Context(), taskID, nil)
+	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, ""), h.taskGoalContext(c.Request().Context(), task.ID, agentDef))
 	personalityContext := h.getPersonalityContext(c.Request().Context(), task.ProjectID)
 	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(c.Request().Context(), task)
 	if workDirErr != nil {
@@ -190,12 +192,6 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 		setHTMXToast(c, workDirErr.Error(), "failed")
 		c.Response().Header().Set("HX-Redirect", fmt.Sprintf("/tasks/%s?tab=chat", taskID))
 		return c.NoContent(http.StatusOK)
-	}
-	var agentDef *models.Agent
-	if task.AgentDefinitionID != nil && h.agentRepo != nil {
-		if ad, adErr := h.agentRepo.GetByID(c.Request().Context(), *task.AgentDefinitionID); adErr == nil && ad != nil {
-			agentDef = ad
-		}
 	}
 
 	go h.processStreamingResponse(streamingResponseParams{

@@ -211,6 +211,14 @@ func TestIsAllowed_WriteInOrchestrate(t *testing.T) {
 	}
 }
 
+func TestIsAllowed_GoalStatusActionsAllowedInOrchestrate(t *testing.T) {
+	for _, name := range []string{"mark_task_goal_achieved", "report_task_goal_blocked"} {
+		if err := IsAllowed(name, models.ChatModeOrchestrate, SurfaceWeb); err != nil {
+			t.Fatalf("expected %s allowed in orchestrate mode, got %v", name, err)
+		}
+	}
+}
+
 // ---- ListForContext tests ----
 
 func TestListForContext_Plan(t *testing.T) {
@@ -368,20 +376,34 @@ func TestRegistry_ChatModeActions(t *testing.T) {
 // ---- Anti-drift: all registry actions should have matching tool defs ----
 
 func TestToolDefsForContext_FullOrchestrateCoversAllActions(t *testing.T) {
-	// In full orchestrate mode with thread tools, every action in the registry
-	// should be represented as a tool definition.
+	// In full orchestrate mode with thread tools, every ordinary action in the
+	// registry should be represented as a normal tool definition. Lifecycle-only
+	// actions, if any are added later, remain available only through lifecycle defs.
 	defs := ToolDefsForContext(models.ChatModeOrchestrate, SurfaceWeb, true)
 	defNames := map[string]bool{}
 	for _, d := range defs {
 		defNames[d.Name] = true
 	}
+	lifecycleDefs := LifecycleToolDefsForContext(models.ChatModeOrchestrate, SurfaceWeb, true)
+	lifecycleDefNames := map[string]bool{}
+	for _, d := range lifecycleDefs {
+		lifecycleDefNames[d.Name] = true
+	}
 	for _, a := range Registry() {
-		// All actions that support orchestrate + web should be present
+		// All actions that support orchestrate + web should be present in their
+		// intended tool-definition surface.
 		if modeAllowed(a, models.ChatModeOrchestrate) && surfaceAllowed(a, SurfaceWeb) {
-			if !a.IncludeThreadTools || true { // thread tools included
-				if !defNames[a.Name] {
-					t.Errorf("action %q is in registry but missing from orchestrate/web tool defs", a.Name)
+			if a.LifecycleOnly {
+				if !lifecycleDefNames[a.Name] {
+					t.Errorf("lifecycle-only action %q is missing from lifecycle tool defs", a.Name)
 				}
+				if defNames[a.Name] {
+					t.Errorf("lifecycle-only action %q leaked into ordinary tool defs", a.Name)
+				}
+				continue
+			}
+			if !defNames[a.Name] {
+				t.Errorf("action %q is in registry but missing from orchestrate/web tool defs", a.Name)
 			}
 		}
 	}
@@ -548,4 +570,27 @@ func sortedKeys(m map[string]bool) []string {
 	}
 	_ = fmt.Sprint(keys) // suppress unused import
 	return keys
+}
+
+func TestRegistry_TaskGoalToolsAndCreateTaskGoalSchema(t *testing.T) {
+	defs := ToolDefsForContext(models.ChatModeOrchestrate, SurfaceWeb, true)
+	names := toolDefNames(defs)
+	mustContain(t, names, "set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal", "mark_task_goal_achieved", "report_task_goal_blocked")
+
+	lifecycleDefs := LifecycleToolDefsForContext(models.ChatModeOrchestrate, SurfaceWeb, true)
+	lifecycleNames := toolDefNames(lifecycleDefs)
+	mustContain(t, lifecycleNames, "mark_task_goal_achieved", "report_task_goal_blocked")
+
+	def := Get("create_task")
+	if def == nil {
+		t.Fatal("missing create_task")
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		t.Fatalf("schema unmarshal: %v", err)
+	}
+	props := schema["properties"].(map[string]any)
+	if _, ok := props["goal"]; !ok {
+		t.Fatalf("create_task schema missing goal: %+v", props)
+	}
 }

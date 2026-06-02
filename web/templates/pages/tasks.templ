@@ -65,11 +65,14 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 								<span id="title-error-message"></span>
 							</div>
 						</div>
-						<div class="form-control mb-3">
-							<label class="label"><span class="label-text">Prompt</span></label>
-							<textarea name="prompt" class="textarea textarea-bordered h-32" required placeholder="The prompt/instruction for the model to execute"></textarea>
-						</div>
-						<div class="form-control mb-3">
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Prompt</span></label>
+								<textarea name="prompt" class="textarea textarea-bordered h-32" required placeholder="The prompt/instruction for the model to execute"></textarea>
+							</div>
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Goal (optional)</span></label>
+								<textarea name="goal" class="textarea textarea-bordered h-20" placeholder="Completion condition for automatic continuation"></textarea>
+							</div>						<div class="form-control mb-3">
 							<label class="label"><span class="label-text">Model</span></label>
 							<select name="agent_id" class="select select-bordered">
 								<option value="">Use Default Model</option>

@@ -91,6 +91,58 @@ func TestTaskRepo_ListByProject(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_ListByProject_SetsHasGoalForActiveGoal(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	goalRepo := NewTaskGoalRepo(db)
+	ctx := context.Background()
+
+	withGoal := &models.Task{ProjectID: "default", Title: "With Goal", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "p"}
+	withoutGoal := &models.Task{ProjectID: "default", Title: "Without Goal", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "p"}
+	if err := repo.Create(ctx, withGoal); err != nil {
+		t.Fatalf("create with goal task: %v", err)
+	}
+	if err := repo.Create(ctx, withoutGoal); err != nil {
+		t.Fatalf("create without goal task: %v", err)
+	}
+	if err := goalRepo.CreateOrReplace(ctx, &models.TaskGoal{TaskID: withGoal.ID, GoalID: "goal-1", Objective: "finish", Status: models.TaskGoalStatusActive}); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+
+	tasks, err := repo.ListByProject(ctx, "default", "backlog")
+	if err != nil {
+		t.Fatalf("ListByProject: %v", err)
+	}
+	var seenWithGoal, seenWithoutGoal bool
+	for _, task := range tasks {
+		switch task.ID {
+		case withGoal.ID:
+			seenWithGoal = task.HasGoal
+		case withoutGoal.ID:
+			seenWithoutGoal = task.HasGoal
+		}
+	}
+	if !seenWithGoal {
+		t.Fatalf("expected task with active goal to have HasGoal=true")
+	}
+	if seenWithoutGoal {
+		t.Fatalf("expected task without goal to have HasGoal=false")
+	}
+
+	if err := goalRepo.Clear(ctx, withGoal.ID, "done"); err != nil {
+		t.Fatalf("clear goal: %v", err)
+	}
+	tasks, err = repo.ListByProject(ctx, "default", "backlog")
+	if err != nil {
+		t.Fatalf("ListByProject after clear: %v", err)
+	}
+	for _, task := range tasks {
+		if task.ID == withGoal.ID && task.HasGoal {
+			t.Fatalf("expected cleared goal to hide HasGoal badge")
+		}
+	}
+}
+
 func TestTaskRepo_ListByProject_OrderingFIFO(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)

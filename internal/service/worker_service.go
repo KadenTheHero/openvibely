@@ -58,6 +58,7 @@ type WorkerService struct {
 	execRepo             *repository.ExecutionRepo
 	mutationRecorder     func(models.Task) agentlibrary.MutationRecorder
 	agentRootSyncService *AgentLibraryMaintenanceService
+	taskGoalSvc          *TaskGoalService
 	currentCatalog       atomic.Value // stores *agentskills.Catalog for hook skill resolution
 }
 
@@ -91,6 +92,10 @@ func (w *WorkerService) SetLifecycleMutationRecorderFactory(fn func(models.Task)
 
 func (w *WorkerService) SetAgentRootSyncService(svc *AgentLibraryMaintenanceService) {
 	w.agentRootSyncService = svc
+}
+
+func (w *WorkerService) SetTaskGoalService(svc *TaskGoalService) {
+	w.taskGoalSvc = svc
 }
 
 func (w *WorkerService) CurrentLifecycleCatalog() *agentskills.Catalog {
@@ -366,6 +371,10 @@ func (w *WorkerService) runLifecycleSlot(ctx context.Context, when models.Lifecy
 }
 
 func (w *WorkerService) runLifecycleSlotFiltered(ctx context.Context, when models.LifecycleWhen, task models.Task, taskRunID string, runErr error, chatContext llmcontracts.ChatContext, include func(models.AgentLifecycleHook) bool) lifecycle.SlotResult {
+	return w.runLifecycleSlotWithExtras(ctx, when, task, taskRunID, runErr, chatContext, nil, include)
+}
+
+func (w *WorkerService) runLifecycleSlotWithExtras(ctx context.Context, when models.LifecycleWhen, task models.Task, taskRunID string, runErr error, chatContext llmcontracts.ChatContext, extras map[string]any, include func(models.AgentLifecycleHook) bool) lifecycle.SlotResult {
 	if w.lifecycleRunner == nil {
 		return lifecycle.SlotResult{When: when}
 	}
@@ -380,12 +389,16 @@ func (w *WorkerService) runLifecycleSlotFiltered(ctx context.Context, when model
 		TaskTitle:  task.Title,
 		TaskPrompt: task.Prompt,
 		WorkDir:    projectRepoPath(ctx, w.projectRepo, task.ProjectID),
+		Extras:     copyExtras(extras),
 	}
 	if task.AgentDefinitionID != nil {
 		in.ActiveModeAgent = *task.AgentDefinitionID
 	}
 	if runErr != nil {
-		in.Extras = map[string]any{"execution_error": runErr.Error()}
+		if in.Extras == nil {
+			in.Extras = make(map[string]any)
+		}
+		in.Extras["execution_error"] = runErr.Error()
 	}
 	if when == models.LifecycleRouteTask {
 		if turn := lifecycleTurnFromContext(ctx); turn.SkillIndex != "" {
@@ -401,6 +414,9 @@ func (w *WorkerService) runLifecycleSlotFiltered(ctx context.Context, when model
 		}
 		in.Extras[lifecycle.ConversationTranscriptKey] = chatContext
 		in.Extras[lifecycle.LearningSnapshotKey] = w.buildLearningSnapshot(ctx, task, taskRunID, runErr)
+		if goal := w.evaluableTaskGoal(ctx, task.ID); goal != nil {
+			in.Extras["task_goal"] = goal
+		}
 	}
 	result, err := w.lifecycleRunner.RunSlotFiltered(ctx, when, in, include)
 	if err != nil {
@@ -408,6 +424,17 @@ func (w *WorkerService) runLifecycleSlotFiltered(ctx context.Context, when model
 		return lifecycle.SlotResult{When: when}
 	}
 	return result
+}
+
+func copyExtras(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func (w *WorkerService) QueueSize() int {

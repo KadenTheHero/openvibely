@@ -40,6 +40,7 @@ type ThreadInput struct {
 	QueuePosition       int64             `json:"queue_position"`
 	ChatMode            ChatMode          `json:"chat_mode"`
 	Source              string            `json:"source"`
+	OriginAgent         string            `json:"origin_agent"`
 	TelegramChatID      int64             `json:"telegram_chat_id"`
 	SlackTeamID         string            `json:"slack_team_id"`
 	SlackChannelID      string            `json:"slack_channel_id"`

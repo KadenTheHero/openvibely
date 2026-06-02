@@ -322,6 +322,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	// Repositories
 	projectRepo := repository.NewProjectRepo(db)
 	taskRepo := repository.NewTaskRepo(db, broadcaster)
+	taskGoalRepo := repository.NewTaskGoalRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	if modelsList, listErr := llmConfigRepo.List(context.Background()); listErr != nil {
 		log.Printf("warning: unable to check OAuth model configuration for APP_BASE_URL validation: %v", listErr)
@@ -375,8 +376,11 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	workerSvc.SetExecutionRepo(execRepo)
 
 	projectSvc := service.NewProjectService(projectRepo)
+	taskGoalSvc := service.NewTaskGoalService(taskGoalRepo, taskRepo, broadcaster)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	taskSvc.SetAgentRepo(agentRepo)
+	taskSvc.SetTaskGoalService(taskGoalSvc)
+	workerSvc.SetTaskGoalService(taskGoalSvc)
 	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 	alertSvc := service.NewAlertService(alertRepo, broadcaster)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
@@ -701,6 +705,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, broadcaster, telegramSvc,
 	)
 	h.SetChatBroadcaster(chatBroadcaster)
+	h.SetTaskGoalService(taskGoalSvc)
 	h.SetFileChangeBroadcaster(fileChangeBroadcaster)
 	h.SetTelegramAuthRepo(telegramAuthRepo)
 	h.SetSlackAuthRepo(slackAuthRepo)

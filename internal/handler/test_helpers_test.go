@@ -41,6 +41,7 @@ func NewTestContext(t *testing.T) *TestContext {
 
 	projectRepo := repository.NewProjectRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
+	taskGoalRepo := repository.NewTaskGoalRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	execRepo := repository.NewExecutionRepo(db)
 	scheduleRepo := repository.NewScheduleRepo(db)
@@ -55,7 +56,10 @@ func NewTestContext(t *testing.T) *TestContext {
 	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := service.NewWorkerService(llmSvc, 0, nil)
+	taskGoalSvc := service.NewTaskGoalService(taskGoalRepo, taskRepo, nil)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	taskSvc.SetTaskGoalService(taskGoalSvc)
+	workerSvc.SetTaskGoalService(taskGoalSvc)
 	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 	alertSvc := service.NewAlertService(alertRepo, nil)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
@@ -64,6 +68,7 @@ func NewTestContext(t *testing.T) *TestContext {
 		nil, nil, nil, nil, nil, nil, nil, nil, nil,
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo,
 		attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
+	h.SetTaskGoalService(taskGoalSvc)
 
 	e := echo.New()
 	h.RegisterRoutes(e)

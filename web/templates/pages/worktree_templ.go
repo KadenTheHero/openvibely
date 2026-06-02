@@ -38,7 +38,7 @@ func WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat) 
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"worktree-info-panel\" class=\"card bg-base-100 shadow-sm border border-base-300 mb-4\"><div class=\"card-body p-4\"><div class=\"flex items-center justify-between mb-3\"><h4 class=\"text-sm font-bold flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4\"></path></svg> Git Worktree</h4>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"worktree-info-panel\" class=\"card bg-base-200/50 border border-base-300 mb-4\"><div class=\"card-body p-4 gap-3\"><div class=\"flex items-center justify-between gap-3\"><h4 class=\"text-sm font-semibold flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4\"></path></svg> Git Worktree</h4>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

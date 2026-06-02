@@ -23,7 +23,7 @@ func TestThreadInputRepo_QueuedFIFOAndApply(t *testing.T) {
 		t.Fatalf("create active execution: %v", err)
 	}
 
-	first := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "first"}
+	first := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "first", Source: models.TaskOriginSystemAgent, OriginAgent: models.AgentSystemKindGoal}
 	second := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "second"}
 	if err := repo.CreateQueued(ctx, first); err != nil {
 		t.Fatalf("CreateQueued first: %v", err)
@@ -38,6 +38,9 @@ func TestThreadInputRepo_QueuedFIFOAndApply(t *testing.T) {
 	}
 	if next == nil || next.ID != first.ID {
 		t.Fatalf("oldest queued = %#v, want first %s", next, first.ID)
+	}
+	if next.Source != models.TaskOriginSystemAgent || next.OriginAgent != models.AgentSystemKindGoal {
+		t.Fatalf("oldest queued lineage source=%q origin_agent=%q", next.Source, next.OriginAgent)
 	}
 	if err := repo.MarkApplied(ctx, first.ID, active.ID, active.ID); err != nil {
 		t.Fatalf("MarkApplied: %v", err)

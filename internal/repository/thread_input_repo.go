@@ -24,7 +24,7 @@ func NewThreadInputRepo(db *sql.DB) *ThreadInputRepo {
 	return &ThreadInputRepo{db: db}
 }
 
-const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), COALESCE(source, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), created_at, updated_at, applied_at`
+const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), created_at, updated_at, applied_at`
 
 func scanThreadInput(scanner interface {
 	Scan(dest ...interface{}) error
@@ -46,8 +46,8 @@ func scanThreadInput(scanner interface {
 		&input.QueuePosition,
 		&input.ChatMode,
 		&input.Source,
-		&input.TelegramChatID,
-		&input.SlackTeamID,
+		&input.OriginAgent,
+		&input.TelegramChatID, &input.SlackTeamID,
 		&input.SlackChannelID,
 		&input.SlackThreadTS,
 		&input.SlackUserID,
@@ -92,21 +92,21 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 			}
 		}
 		row := tx.QueryRowContext(ctx, `
-			INSERT INTO thread_inputs (
-				id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
-				turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
-				source, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id
-			)
-			SELECT lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?
-			WHERE EXISTS (
-				SELECT 1 FROM executions e JOIN tasks t ON t.id = e.task_id
-				WHERE e.id = ? AND e.status = 'running'
-				  AND (
-				    (? = ? AND e.task_id = ?)
-				    OR (? = ? AND t.project_id = ? AND t.category = 'chat')
-				  )
-			)
-			RETURNING `+threadInputSelectColumns,
+				INSERT INTO thread_inputs (
+					id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
+					turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
+					source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id
+				)
+				SELECT lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?
+				WHERE EXISTS (
+					SELECT 1 FROM executions e JOIN tasks t ON t.id = e.task_id
+					WHERE e.id = ? AND e.status = 'running'
+					  AND (
+					    (? = ? AND e.task_id = ?)
+					    OR (? = ? AND t.project_id = ? AND t.category = 'chat')
+					  )
+				)
+				RETURNING `+threadInputSelectColumns,
 			input.Scope,
 			input.ProjectID,
 			input.TaskID,
@@ -121,6 +121,7 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 			input.QueuePosition,
 			input.ChatMode,
 			input.Source,
+			input.OriginAgent,
 			input.TelegramChatID,
 			input.SlackTeamID,
 			input.SlackChannelID,
@@ -157,12 +158,12 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 		}
 	}
 	row := exec.QueryRowContext(ctx, `
-		INSERT INTO thread_inputs (
+			INSERT INTO thread_inputs (
 				id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
 				turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
-				source, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id
-			) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?)
-		RETURNING `+threadInputSelectColumns,
+				source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id
+			) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?)
+			RETURNING `+threadInputSelectColumns,
 		input.Scope,
 		input.ProjectID,
 		input.TaskID,
@@ -177,6 +178,7 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 		input.QueuePosition,
 		input.ChatMode,
 		input.Source,
+		input.OriginAgent,
 		input.TelegramChatID,
 		input.SlackTeamID,
 		input.SlackChannelID,
@@ -628,8 +630,7 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id)
-			VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			RETURNING id, created_at, updated_at`, task.ProjectID, task.Title, task.Category, task.Priority, task.Status, task.Prompt, task.AgentID, task.AgentDefinitionID, task.Tag, displayOrder, task.ParentTaskID, task.ChainConfig, task.WorktreePath, task.WorktreeBranch, autoMerge, task.MergeTargetBranch, task.MergeStatus, task.BaseBranch, task.BaseCommitSHA, task.LineageDepth, task.CreatedVia, task.TelegramChatID).Scan(&task.ID, &task.CreatedAt, &task.UpdatedAt); err != nil {
+				VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)			RETURNING id, created_at, updated_at`, task.ProjectID, task.Title, task.Category, task.Priority, task.Status, task.Prompt, task.AgentID, task.AgentDefinitionID, task.Tag, displayOrder, task.ParentTaskID, task.ChainConfig, task.WorktreePath, task.WorktreeBranch, autoMerge, task.MergeTargetBranch, task.MergeStatus, task.BaseBranch, task.BaseCommitSHA, task.LineageDepth, task.CreatedVia, task.TelegramChatID).Scan(&task.ID, &task.CreatedAt, &task.UpdatedAt); err != nil {
 			return fmt.Errorf("creating queued chat task: %w", err)
 		}
 		task.DisplayOrder = displayOrder
@@ -705,8 +706,8 @@ func (r *ThreadInputRepo) CancelPending(ctx context.Context, id string) (*models
 		&cancelled.QueuePosition,
 		&cancelled.ChatMode,
 		&cancelled.Source,
-		&cancelled.TelegramChatID,
-		&cancelled.SlackTeamID,
+		&cancelled.OriginAgent,
+		&cancelled.TelegramChatID, &cancelled.SlackTeamID,
 		&cancelled.SlackChannelID,
 		&cancelled.SlackThreadTS,
 		&cancelled.SlackUserID,

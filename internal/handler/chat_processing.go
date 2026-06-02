@@ -70,6 +70,11 @@ type streamingResponseParams struct {
 	TelegramInitialAckMessageID int
 	ChannelReply                service.ChannelReplyContext
 
+	RuntimeOrigin      string
+	RuntimeOriginAgent string
+	InputOrigin        string
+	InputOriginAgent   string
+
 	steeringHistoryStarted bool
 	steeringOutputCursor   string
 }
@@ -113,6 +118,9 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	defer cancel()
 	h.registerTaskCancellation(params.TaskID, cancel)
 	defer h.deregisterTaskCancellation(params.TaskID)
+	if params.IsTaskFollowup {
+		h.reactivateAchievedGoalForManualFollowup(ctx, params.TaskID, params.InputOrigin, params.InputOriginAgent)
+	}
 
 	// Enforce per-project and per-model worker constraints for task follow-ups only.
 	// Interactive chat (IsTaskFollowup=false) bypasses worker limits so the chat
@@ -170,25 +178,32 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	if chatMode == "" {
 		chatMode = models.ChatModeOrchestrate
 	}
+	agentDef := h.resolveTaskAgentDefinitionForTask(ctx, params.TaskID, params.AgentDefinition)
+	params.AgentDefinition = agentDef
 	ctx = llmcontracts.WithChatMode(ctx, chatMode)
 	// Inject request-scoped action tools when the provider supports runtime tool
 	// calling. Tool definitions are derived from the canonical chatcontrol registry
 	// filtered by mode and surface. In plan mode only read actions are available.
 	// Runtime-tools and marker post-processing are mutually exclusive per request.
 	runtimeToolsInjected := false
-	if !params.IsTaskFollowup && supportsChatActionTools(params.Agent) {
+	if supportsChatActionTools(params.Agent) {
 		surface := params.Surface
 		if surface == "" {
 			surface = chatcontrol.SurfaceWeb
 		}
-		defs := chatcontrol.ToolDefsForContext(chatMode, surface, chatMode == models.ChatModeOrchestrate)
+		var defs []llmcontracts.RuntimeToolDefinition
+		if params.IsTaskFollowup {
+			defs = filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, surface, true), agentDef)
+		} else {
+			defs = chatcontrol.ToolDefsForContext(chatMode, surface, chatMode == models.ChatModeOrchestrate)
+		}
 		if len(defs) > 0 {
 			rt := h.buildChatActionToolRuntimeFromDefs(params, nil, defs, chatMode, surface)
 			ctx = llmcontracts.WithRuntimeTools(ctx, rt)
 			params.ProcessMarkers = false
 			runtimeToolsInjected = true
-			log.Printf("[handler] processStreamingResponse exec=%s injected %d runtime action tools mode=%s surface=%s",
-				params.ExecID, len(defs), chatMode, surface)
+			log.Printf("[handler] processStreamingResponse exec=%s injected %d runtime action tools mode=%s surface=%s followup=%v",
+				params.ExecID, len(defs), chatMode, surface, params.IsTaskFollowup)
 		}
 	}
 	// Fallback: when interactive chat targets a provider/auth path without
@@ -209,8 +224,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 
 	stopDiffBroadcast, diffBroadcastDone := h.startFollowupDiffSnapshotBroadcast(ctx, params.TaskID, params.ExecID, params.WorkDir, params.IsTaskFollowup)
 
-	agentDef := h.resolveTaskAgentDefinitionForTask(ctx, params.TaskID, params.AgentDefinition)
-
 	// Lifecycle integration for task-thread followups: lifecycle hooks must run on
 	// every model turn including followups. Without this block, followups would
 	// never see selected skills, skill runtime tools, or the available-skills
@@ -221,6 +234,8 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	if params.TaskID != "" {
 		if task, terr := h.taskRepo.GetByID(ctx, params.TaskID); terr == nil && task != nil {
 			if params.IsTaskFollowup && h.workerSvc != nil {
+				ctx = service.WithTaskThreadLifecycleTurn(ctx)
+				ctx = h.withGoalAgentLifecycleRuntimeTools(ctx, params)
 				turn := h.workerSvc.PrepareLifecycleTurn(ctx, *task)
 				ctx = turn.Ctx
 				lifecycleAfter = turn.AfterComplete
@@ -1043,21 +1058,22 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			PendingInputID: input.ID,
 		})
 	}
+	h.reactivateAchievedGoalForManualFollowup(ctx, input.TaskID, string(input.Source), input.OriginAgent)
 	priorExecs, _ := h.execRepo.ListByTaskChronological(ctx, exec.TaskID)
 	priorHistory := filterChatHistory(priorExecs, exec.ID)
-	systemContext := buildThreadSystemContext(task.Title, len(priorHistory) > 0, attachmentContext)
+	var agentDef *models.Agent
+	if task.AgentDefinitionID != nil && h.agentRepo != nil {
+		if ad, adErr := h.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
+			agentDef = ad
+		}
+	}
+	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, attachmentContext), h.taskGoalContext(ctx, task.ID, agentDef))
 	personalityContext := h.getPersonalityContext(ctx, task.ProjectID)
 	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 	if workDirErr != nil {
 		h.completeWithFailure(ctx, exec.ID, exec.TaskID, workDirErr.Error(), 0, channelReplyFromThreadInput(input))
 		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, exec.ID)
 		return nil
-	}
-	var agentDef *models.Agent
-	if task.AgentDefinitionID != nil && h.agentRepo != nil {
-		if ad, adErr := h.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
-			agentDef = ad
-		}
 	}
 	go h.processStreamingResponse(streamingResponseParams{
 		ExecID:           exec.ID,
@@ -1073,6 +1089,8 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		IsTaskFollowup:   true,
 		ProcessMarkers:   false,
 		ChannelReply:     channelReplyFromThreadInput(input),
+		InputOrigin:      string(input.Source),
+		InputOriginAgent: input.OriginAgent,
 	})
 	return nil
 }
@@ -1867,126 +1885,18 @@ func (h *Handler) processChatSendToTask(ctx context.Context, execID, projectID, 
 			results = append(results, fmt.Sprintf("- Could not find task: %v", err))
 			continue
 		}
-
-		// Don't send to running tasks — wait for them to finish
-		if task.Status == models.StatusRunning {
-			log.Printf("[handler] processChatSendToTask task %s is running, cannot send", task.ID)
-			results = append(results, fmt.Sprintf("- Task \"%s\" is currently running. Wait for it to finish before sending a message.", task.Title))
+		queued, err := h.enqueueTaskThreadInput(ctx, task.ID, req.Message, models.TaskOriginWeb, "")
+		if err != nil {
+			log.Printf("[handler] processChatSendToTask task=%s error queueing input: %v", task.ID, err)
+			results = append(results, fmt.Sprintf("- Error queueing message for task \"%s\": %v", task.Title, err))
 			continue
 		}
-
-		// Select agent: use task's assigned agent, or fall back to default
-		var agent *models.LLMConfig
-		if task.AgentID != nil {
-			agent, _ = h.llmConfigRepo.GetByID(ctx, *task.AgentID)
-		}
-		if agent == nil {
-			agent, err = h.selectDefaultAgent(ctx, false)
-			if err != nil {
-				log.Printf("[handler] processChatSendToTask error selecting agent: %v", err)
-				results = append(results, fmt.Sprintf("- Error selecting agent for task \"%s\": %v", task.Title, err))
-				continue
-			}
-		}
-
-		activeExec, activeErr := h.execRepo.FindActiveTaskExecution(ctx, task.ID, "")
-		if activeErr != nil {
-			log.Printf("[handler] processChatSendToTask task=%s active check error: %v", task.ID, activeErr)
-			results = append(results, fmt.Sprintf("- Error checking active turn for task \"%s\": %v", task.Title, activeErr))
-			continue
-		}
-		if activeExec != nil {
-			if h.threadInputRepo == nil {
-				results = append(results, fmt.Sprintf("- Error queueing message for task \"%s\": thread input queue is unavailable", task.Title))
-				continue
-			}
-			queued := &models.ThreadInput{
-				Scope:          models.ThreadInputScopeTask,
-				ProjectID:      task.ProjectID,
-				TaskID:         task.ID,
-				RunExecutionID: activeExec.ID,
-				AgentConfigID:  agent.ID,
-				InputMode:      models.ThreadInputModeQueued,
-				InputStatus:    models.ThreadInputPending,
-				Content:        req.Message,
-			}
-			if err := h.threadInputRepo.CreateQueued(ctx, queued); err != nil {
-				log.Printf("[handler] processChatSendToTask task=%s error creating queued input: %v", task.ID, err)
-				results = append(results, fmt.Sprintf("- Error queueing message for task \"%s\": %v", task.Title, err))
-				continue
-			}
-			results = append(results, fmt.Sprintf("- Queued message to task \"%s\" [TASK_ID:%s] — it will run after the active thread turn finishes.", task.Title, task.ID))
-			continue
-		}
-
-		exec := &models.Execution{
-			TaskID:        task.ID,
-			AgentConfigID: agent.ID,
-			Status:        models.ExecRunning,
-			PromptSent:    req.Message,
-			IsFollowup:    true,
-		}
-		if err := h.execRepo.Create(ctx, exec); err != nil {
-			log.Printf("[handler] processChatSendToTask error creating execution: %v", err)
-			results = append(results, fmt.Sprintf("- Error creating execution for task \"%s\": %v", task.Title, err))
-			continue
-		}
-
-		// Load conversation history and build context
-		priorExecs, _ := h.execRepo.ListByTaskChronological(ctx, task.ID)
-		priorHistory := filterChatHistory(priorExecs, exec.ID)
-		systemContext := buildThreadSystemContext(task.Title, len(priorHistory) > 0, "")
-		pCtx := h.getPersonalityContext(ctx, task.ProjectID)
-		workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
-		if workDirErr != nil {
-			h.completeWithFailure(ctx, exec.ID, task.ID, workDirErr.Error(), 0)
-			results = append(results, fmt.Sprintf("- Failed to prepare worktree for task \"%s\": %v", task.Title, workDirErr))
-			continue
-		}
-		if task.Status != models.StatusRunning {
-			log.Printf("[handler] processChatSendToTask setting task=%s status=running (was %s)", task.ID, task.Status)
-			if err := h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusRunning); err != nil {
-				log.Printf("[handler] processChatSendToTask error setting status: %v", err)
-				h.completeWithFailure(ctx, exec.ID, task.ID, err.Error(), 0)
-				results = append(results, fmt.Sprintf("- Error updating task \"%s\": %v", task.Title, err))
-				continue
-			}
-		}
-		if task.Category != models.CategoryActive {
-			log.Printf("[handler] processChatSendToTask moving task=%s to active (was %s)", task.ID, task.Category)
-			if err := h.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
-				log.Printf("[handler] processChatSendToTask error updating category: %v", err)
-			}
-		}
-		var agentDef *models.Agent
-		if task.AgentDefinitionID != nil && h.agentRepo != nil {
-			if ad, adErr := h.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
-				agentDef = ad
-			}
-		}
-
-		log.Printf("[handler] processChatSendToTask sending message to task=%s exec=%s agent=%s", task.ID, exec.ID, agent.Name)
-		// Spawn background goroutine (same as TaskThreadSend)
-		go h.processStreamingResponse(streamingResponseParams{
-			ExecID:          exec.ID,
-			TaskID:          task.ID,
-			Message:         req.Message,
-			Agent:           *agent,
-			AgentDefinition: agentDef,
-			ChatHistory:     priorHistory,
-			ProjectID:       task.ProjectID,
-			SystemContext:   combineContexts(combineContexts(systemContext, worktreeContext), pCtx),
-			WorkDir:         workDir,
-			IsTaskFollowup:  true,
-			ProcessMarkers:  false})
-
-		results = append(results, fmt.Sprintf("- Sent message to task \"%s\" [TASK_ID:%s] — the agent is now processing your message. View the response on the task's thread page.", task.Title, task.ID))
+		results = append(results, fmt.Sprintf("- Queued message to task \"%s\" [TASK_ID:%s] [QUEUED_INPUT:%s] — it will run through the task-thread queue.", task.Title, task.ID, queued.ID))
 	}
 
 	if len(results) > 0 {
 		output += "\n\n---\nThread Messages:\n" + strings.Join(results, "\n")
 	}
-
 	return output
 }
 
@@ -3267,4 +3177,126 @@ func hasPendingImages(sessionID string) bool {
 		}
 	}
 	return false
+}
+
+func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, origin, originAgent string) (*models.ThreadInput, error) {
+	if h.threadInputRepo == nil {
+		return nil, fmt.Errorf("thread input queue is unavailable")
+	}
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return nil, fmt.Errorf("message is required")
+	}
+	task, err := h.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, fmt.Errorf("task not found: %s", taskID)
+	}
+	agentID := ""
+	if task.AgentID != nil {
+		agentID = *task.AgentID
+	} else if h.llmConfigRepo != nil {
+		if agent, err := h.selectDefaultAgent(ctx, false); err == nil && agent != nil {
+			agentID = agent.ID
+		}
+	}
+	if strings.TrimSpace(origin) == "" {
+		origin = models.TaskOriginWeb
+	}
+	queued := &models.ThreadInput{
+		Scope:         models.ThreadInputScopeTask,
+		ProjectID:     task.ProjectID,
+		TaskID:        task.ID,
+		AgentConfigID: agentID,
+		InputMode:     models.ThreadInputModeQueued,
+		InputStatus:   models.ThreadInputPending,
+		Content:       message,
+		Source:        origin,
+		OriginAgent:   originAgent,
+	}
+	if err := h.threadInputRepo.CreateQueued(ctx, queued); err != nil {
+		return nil, err
+	}
+	if h.broadcaster != nil {
+		h.broadcaster.Publish(events.TaskEvent{
+			Type:           events.TaskThreadInputQueued,
+			ProjectID:      task.ProjectID,
+			TaskID:         task.ID,
+			TaskName:       task.Title,
+			PendingInputID: queued.ID,
+			Message:        message,
+		})
+		if originAgent == "goal" {
+			h.broadcaster.Publish(events.TaskEvent{
+				Type:           events.TaskGoalFollowupQueued,
+				ProjectID:      task.ProjectID,
+				TaskID:         task.ID,
+				TaskName:       task.Title,
+				PendingInputID: queued.ID,
+				Message:        message,
+			})
+		}
+	}
+	go h.PromoteQueuedTaskThreadInput(task.ID)
+	return queued, nil
+}
+
+func (h *Handler) reactivateAchievedGoalForManualFollowup(ctx context.Context, taskID, origin, originAgent string) {
+	if h.taskGoalSvc == nil || taskID == "" {
+		return
+	}
+	if strings.TrimSpace(originAgent) != "" {
+		return
+	}
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		origin = models.TaskOriginWeb
+	}
+	if origin == models.TaskOriginSystemAgent {
+		return
+	}
+	goal, err := h.taskGoalSvc.ReactivateAchievedGoal(ctx, taskID, origin)
+	if err != nil {
+		log.Printf("[handler] task=%s error reactivating achieved goal for follow-up: %v", taskID, err)
+		return
+	}
+	if goal != nil {
+		log.Printf("[handler] task=%s goal=%s reactivated achieved goal for %s follow-up", taskID, goal.GoalID, origin)
+	}
+}
+
+func (h *Handler) withGoalAgentLifecycleRuntimeTools(ctx context.Context, params streamingResponseParams) context.Context {
+	if !params.IsTaskFollowup || params.TaskID == "" || h.taskGoalSvc == nil {
+		return ctx
+	}
+	surface := params.Surface
+	if surface == "" {
+		surface = chatcontrol.SurfaceWeb
+	}
+	defs := filterGoalAgentRuntimeToolDefs(chatcontrol.LifecycleToolDefsForContext(models.ChatModeOrchestrate, surface, true))
+	if len(defs) == 0 {
+		return ctx
+	}
+	rt := h.buildLifecycleChatActionToolRuntimeFromDefs(params, nil, defs, models.ChatModeOrchestrate, surface)
+	return service.WithAfterCompleteRuntimeTools(ctx, rt)
+}
+
+func (h *Handler) taskGoalContext(ctx context.Context, taskID string, agentDef *models.Agent) string {
+	if h.taskGoalSvc == nil || taskID == "" {
+		return ""
+	}
+	goal, err := h.taskGoalSvc.GetGoal(ctx, taskID)
+	if err != nil || goal == nil || goal.Status == models.TaskGoalStatusCleared {
+		return ""
+	}
+	guidance := `Goal tools are available for this task thread. Use task_id="current" to read, update, pause, resume, or clear this goal.`
+	grantedStatusTools := explicitlyGrantedGoalStatusTools(agentDef)
+	if len(grantedStatusTools) > 0 {
+		guidance += fmt.Sprintf(` This assigned agent is explicitly granted these goal status tools: %s. Use only the granted status tools when appropriate. Status writes are accepted only for this same goal_id while the goal is still active, so reload the goal first if state may have changed.`, strings.Join(grantedStatusTools, ", "))
+	} else {
+		guidance += ` Goal completion and blocker evaluation are handled by the protected Goal Agent unless this assigned agent is explicitly granted mark_task_goal_achieved or report_task_goal_blocked.`
+	}
+	return fmt.Sprintf("Task goal (%s):\n%s\n\n%s", goal.Status, goal.Objective, guidance)
 }

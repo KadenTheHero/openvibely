@@ -433,6 +433,41 @@ func TestPrepareLifecycleTurn_SelectedTaskSkillsDoNotHideHookSkills(t *testing.T
 	}
 }
 
+func TestPrepareLifecycleTurn_SeparatesTaskTurnAndAfterCompleteRuntimeTools(t *testing.T) {
+	ctx := context.Background()
+	mainTools := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "main_task_tool"}}}
+	afterTools := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "after_complete_tool"}}}
+	ctx = llmcontracts.WithRuntimeTools(ctx, mainTools)
+	ctx = WithAfterCompleteRuntimeTools(ctx, afterTools)
+
+	worker := NewWorkerService(nil, 0, nil)
+	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-runtime-separation"})
+	mainRT := llmcontracts.RuntimeToolsFromContext(turn.Ctx)
+	if mainRT == nil || !mainRT.HasDefinition("main_task_tool") {
+		t.Fatalf("main task turn lost incoming runtime tools: %#v", mainRT)
+	}
+	if mainRT.HasDefinition("after_complete_tool") {
+		t.Fatalf("after-complete-only tools leaked into main task turn: %#v", mainRT.Definitions)
+	}
+
+	seen := make(chan *llmcontracts.RuntimeTools, 1)
+	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{ID: "after-hook", AgentID: "agent", When: models.LifecycleAfterComplete, SkillKey: "observe", OutputContract: models.OutputContractActivitySummary, Blocking: true, Enabled: true}}}
+	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
+		seen <- llmcontracts.RuntimeToolsFromContext(ctx)
+		return json.RawMessage(`{"summary":"ok","changed_paths":[]}`), nil
+	}), nil)
+	worker.SetLifecycleRunner(runner)
+	turn.AfterComplete(nil, llmcontracts.ChatContext{})
+	select {
+	case rt := <-seen:
+		if rt == nil || !rt.HasDefinition("after_complete_tool") {
+			t.Fatalf("after_complete hook did not receive after-complete runtime tools: %#v", rt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for after_complete hook")
+	}
+}
+
 func TestPrepareLifecycleTurn_TaskRuntimeToolsExposeOnlySelectedSkillView(t *testing.T) {
 	root := t.TempDir()
 	writeLifecycleStandaloneSkill(t, root, "task_skill", "task skill body")
@@ -992,4 +1027,54 @@ func stringSliceContains(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestAfterCompleteEligibilityRunsProtectedGoalAgentOnlyForActiveGoal(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	w := &WorkerService{agentRepo: agentRepo, taskGoalSvc: goalSvc}
+
+	project := &models.Project{Name: "Goal Eligibility Project"}
+	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := models.Task{ID: "task-goal-eligibility", ProjectID: project.ID, Title: "Goal eligibility", Prompt: "work", Category: models.CategoryActive, Status: models.StatusRunning}
+	if err := taskRepo.Create(ctx, &task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	otherHook := models.AgentLifecycleHook{ID: "other-hook", AgentID: "other-agent", When: models.LifecycleAfterComplete, SkillKey: "evaluate_task_goal", Enabled: true}
+	if !w.afterCompleteHookEligible(ctx, task)(otherHook) {
+		t.Fatal("generic after_complete must continue to run non-goal hooks sharing the evaluate_task_goal skill key")
+	}
+
+	goalAgent := &models.Agent{Key: models.AgentSystemKindGoal, Name: "System: Goal Agent", Model: "inherit", SystemKind: models.AgentSystemKindGoal, GeneratedStatus: models.AgentStatusProtected, CreatedBy: models.AgentCreatedBySystem, Enabled: true}
+	if err := agentRepo.Create(ctx, goalAgent); err != nil {
+		t.Fatalf("create goal agent: %v", err)
+	}
+	goalHook := models.AgentLifecycleHook{ID: "goal-hook", AgentID: goalAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "evaluate_task_goal", Enabled: true}
+	if w.afterCompleteHookEligible(ctx, task)(goalHook) {
+		t.Fatal("protected Goal Agent hook must not run when the task has no active goal")
+	}
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "Keep the goal active", GoalOptions{})
+	if err != nil {
+		t.Fatalf("set goal: %v", err)
+	}
+	if w.afterCompleteHookEligible(ctx, task)(goalHook) {
+		t.Fatal("protected Goal Agent hook must honor task_thread_only policy and skip ordinary worker turns")
+	}
+	taskThreadCtx := WithTaskThreadLifecycleTurn(ctx)
+	if !w.afterCompleteHookEligible(taskThreadCtx, task)(goalHook) {
+		t.Fatal("protected Goal Agent hook must run through generic after_complete for task-thread turns with an active goal")
+	}
+	_, err = goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "done")
+	if err != nil {
+		t.Fatalf("mark achieved: %v", err)
+	}
+	if w.afterCompleteHookEligible(taskThreadCtx, task)(goalHook) {
+		t.Fatal("protected Goal Agent hook must not run when the goal is no longer active")
+	}
 }

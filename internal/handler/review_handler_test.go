@@ -30,6 +30,7 @@ func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, *repository.ReviewC
 	scheduleRepo := repository.NewScheduleRepo(db)
 	reviewCommentRepo := repository.NewReviewCommentRepo(db)
 	settingsRepo := repository.NewSettingsRepo(db)
+	taskGoalRepo := repository.NewTaskGoalRepo(db)
 
 	mockLLM := testutil.NewMockLLMCaller()
 	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -39,7 +40,10 @@ func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, *repository.ReviewC
 	workerSvc.SetTaskRepo(taskRepo)
 	workerSvc.SetLLMConfigRepo(llmConfigRepo)
 	projectSvc := service.NewProjectService(projectRepo)
+	taskGoalSvc := service.NewTaskGoalService(taskGoalRepo, taskRepo, nil)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	taskSvc.SetTaskGoalService(taskGoalSvc)
+	workerSvc.SetTaskGoalService(taskGoalSvc)
 
 	h := New(
 		projectSvc,
@@ -49,6 +53,7 @@ func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, *repository.ReviewC
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, nil, attachmentRepo, nil, projectRepo, settingsRepo, broadcaster, nil,
 	)
 	h.SetReviewCommentRepo(reviewCommentRepo)
+	h.SetTaskGoalService(taskGoalSvc)
 
 	e := echo.New()
 	h.RegisterRoutes(e)
@@ -310,8 +315,16 @@ func TestAddMultipleComments_SameFile(t *testing.T) {
 }
 
 func TestSubmitReview_CreatesFollowupExecutionAndClearsComments(t *testing.T) {
-	_, e, reviewRepo, execRepo, mockLLM, taskID := setupReviewHandler(t)
+	h, e, reviewRepo, execRepo, mockLLM, taskID := setupReviewHandler(t)
 	ctx := context.Background()
+	reviewGoal := "Review follow-ups must preserve the persisted task goal context"
+	goal, err := h.taskGoalSvc.SetGoal(ctx, taskID, reviewGoal, service.GoalOptions{})
+	if err != nil {
+		t.Fatalf("set goal: %v", err)
+	}
+	if _, err := h.taskGoalSvc.MarkAchieved(ctx, taskID, goal.GoalID, "initially satisfied"); err != nil {
+		t.Fatalf("mark achieved: %v", err)
+	}
 
 	for _, input := range []struct {
 		line string
@@ -384,5 +397,12 @@ func TestSubmitReview_CreatesFollowupExecutionAndClearsComments(t *testing.T) {
 	lastCall := mockLLM.LastCall()
 	if !strings.Contains(lastCall.Prompt, "Fix nil handling") || !strings.Contains(lastCall.Prompt, "Add test coverage") {
 		t.Fatalf("expected LLM prompt to include all comments, got %q", lastCall.Prompt)
+	}
+	chatCtx := mockLLM.LastAgentRequest().ChatSystemContext
+	if !strings.Contains(chatCtx, "Task goal (active):") || !strings.Contains(chatCtx, reviewGoal) {
+		t.Fatalf("expected review follow-up system context to include persisted task goal context, got %q", chatCtx)
+	}
+	if !strings.Contains(chatCtx, "Goal completion and blocker evaluation are handled by the protected Goal Agent") {
+		t.Fatalf("expected ungranted review follow-up system context to include Goal Agent status-tool guidance, got %q", chatCtx)
 	}
 }

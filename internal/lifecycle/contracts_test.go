@@ -69,6 +69,15 @@ func TestValidateActivitySummary_SkippedRequiresReason(t *testing.T) {
 	}
 }
 
+func TestValidateActivitySummary_RequiresSummaryUnlessSkipped(t *testing.T) {
+	if _, err := ValidateActivitySummary([]byte(`{"task_id":"current"}`)); err == nil {
+		t.Fatalf("expected error for tool-argument fragment without summary")
+	}
+	if _, err := ValidateActivitySummary([]byte(`{"summary":"queued continuation","skipped":false}`)); err != nil {
+		t.Fatalf("expected ok with summary, got %v", err)
+	}
+}
+
 func TestValidateLearningSummary_RequiresSummaryUnlessNothingToSave(t *testing.T) {
 	// nothing_to_save=true: summary may be omitted.
 	if _, err := ValidateLearningSummary([]byte(`{"nothing_to_save":true}`)); err != nil {

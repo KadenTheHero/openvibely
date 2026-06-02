@@ -20,11 +20,13 @@ type lifecycleTurnContextKey struct{}
 // lifecycleTurnContext carries the app-owned, frozen-per-turn skill catalog and
 // prepared prompt blocks from lifecycle hooks into LLMService prompt assembly.
 type lifecycleTurnContext struct {
-	Catalog              *agentskills.Catalog
-	SkillIndex           string
-	PreparedBlocks       string
-	SelectedSkillHandles []string
-	AssignedAgent        *models.Agent
+	Catalog                   *agentskills.Catalog
+	SkillIndex                string
+	PreparedBlocks            string
+	SelectedSkillHandles      []string
+	AssignedAgent             *models.Agent
+	AfterCompleteRuntimeTools *llmcontracts.RuntimeTools
+	TaskThreadTurn            bool
 }
 
 func withLifecycleTurnContext(ctx context.Context, turn lifecycleTurnContext) context.Context {
@@ -40,6 +42,18 @@ func lifecycleTurnFromContext(ctx context.Context) lifecycleTurnContext {
 	}
 	turn, _ := ctx.Value(lifecycleTurnContextKey{}).(lifecycleTurnContext)
 	return turn
+}
+
+func WithTaskThreadLifecycleTurn(ctx context.Context) context.Context {
+	turn := lifecycleTurnFromContext(ctx)
+	turn.TaskThreadTurn = true
+	return withLifecycleTurnContext(ctx, turn)
+}
+
+func WithAfterCompleteRuntimeTools(ctx context.Context, rt *llmcontracts.RuntimeTools) context.Context {
+	turn := lifecycleTurnFromContext(ctx)
+	turn.AfterCompleteRuntimeTools = llmcontracts.CompositeRuntimeTools(turn.AfterCompleteRuntimeTools, rt)
+	return withLifecycleTurnContext(ctx, turn)
 }
 
 // CatalogSkillResolver resolves lifecycle hook skill bodies. Hook skills are
@@ -142,7 +156,7 @@ func newAgentInspector(agentRepo *repository.AgentRepo, lifecycleRepo *repositor
 
 func isBuiltInSystemAgentKeyForList(key string) bool {
 	switch strings.TrimSpace(key) {
-	case models.AgentSystemKindSkillCurator, models.AgentSystemKindMemoryCurator:
+	case models.AgentSystemKindSkillCurator, models.AgentSystemKindMemoryCurator, models.AgentSystemKindGoal:
 		return true
 	default:
 		return false

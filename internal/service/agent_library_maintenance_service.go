@@ -24,6 +24,7 @@ Use the skill tools to inspect the standalone skill library, load support files 
 Agents are standalone user-managed configurations. Do not create, edit, archive, route, or reassign agents. Do not change project memory. Prefer small, evidence-backed skill updates. When done, respond with a concise summary of what changed or why nothing changed.`
 
 const bundledSkillCuratorDeclarationPath = "agents/skill_curator/SKILLS.md"
+const bundledGoalAgentDeclarationPath = "agents/goal/SKILLS.md"
 
 type AgentLibraryMaintenanceService struct {
 	taskRepo       *repository.TaskRepo
@@ -54,6 +55,9 @@ func (s *AgentLibraryMaintenanceService) SyncRootDeclarations(ctx context.Contex
 		return nil
 	}
 	if _, err := s.ensureSkillCuratorAgent(ctx); err != nil {
+		return err
+	}
+	if _, err := s.ensureGoalAgent(ctx); err != nil {
 		return err
 	}
 	applier := agentlibrary.NewRepoApplier(s.agentRepo, s.lifecycleRepo)
@@ -98,7 +102,7 @@ func syncRootDeclarationsFromRoot(ctx context.Context, root string, applier *age
 		if !decl.IsAgentRootDeclaration() || decl.Agent.Key == "" {
 			continue
 		}
-		if decl.Agent.Key == "skill_curator" || decl.Agent.Key == "memory_curator" {
+		if decl.Agent.Key == "skill_curator" || decl.Agent.Key == "memory_curator" || decl.Agent.Key == "goal" {
 			// Protected system agents are repaired through their owning services. Generic
 			// root sync must not try to mutate protected system agents or reapply stale
 			// bundled declarations through the user/generated-agent importer path.
@@ -198,7 +202,7 @@ func (s *AgentLibraryMaintenanceService) ensureSkillCuratorAgent(ctx context.Con
 		if err := s.agentRepo.Create(ctx, agent); err != nil {
 			return nil, err
 		}
-		if err := s.ensureSkillCuratorHooks(ctx, agent.ID, decl); err != nil {
+		if err := s.ensureSystemAgentHooks(ctx, agent.ID, decl); err != nil {
 			return nil, err
 		}
 		return agent, nil
@@ -210,40 +214,93 @@ func (s *AgentLibraryMaintenanceService) ensureSkillCuratorAgent(ctx context.Con
 			return nil, err
 		}
 	}
-	if err := s.ensureSkillCuratorHooks(ctx, agent.ID, decl); err != nil {
+	if err := s.ensureSystemAgentHooks(ctx, agent.ID, decl); err != nil {
 		return nil, err
 	}
 	return agent, nil
 }
 
 func (s *AgentLibraryMaintenanceService) loadSkillCuratorDeclaration() (*agentlibrary.SkillDeclaration, error) {
+	decl, err := s.loadBundledSystemAgentDeclaration(bundledSkillCuratorDeclarationPath, "skill_curator", "Skill Curator")
+	if err != nil {
+		return nil, err
+	}
+	sanitizeSystemSkillCuratorDeclaration(decl)
+	return decl, nil
+}
+
+func (s *AgentLibraryMaintenanceService) loadGoalAgentDeclaration() (*agentlibrary.SkillDeclaration, error) {
+	return s.loadBundledSystemAgentDeclaration(bundledGoalAgentDeclarationPath, models.AgentSystemKindGoal, "Goal Agent")
+}
+
+func (s *AgentLibraryMaintenanceService) loadBundledSystemAgentDeclaration(relPath, key, label string) (*agentlibrary.SkillDeclaration, error) {
 	path := ""
 	var data []byte
 	var err error
 	if strings.TrimSpace(s.agentsRootPath) != "" {
-		path = filepath.Join(s.agentsRootPath, bundledSkillCuratorDeclarationPath)
+		path = filepath.Join(s.agentsRootPath, relPath)
 		data, err = os.ReadFile(path)
 	}
 	if len(data) == 0 {
-		path = filepath.ToSlash(filepath.Join("builtin", bundledSkillCuratorDeclarationPath))
+		path = filepath.ToSlash(filepath.Join("builtin", relPath))
 		data, err = builtinskills.FS.ReadFile(path)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read Skill Curator declaration %s: %w", path, err)
+		return nil, fmt.Errorf("read %s declaration %s: %w", label, path, err)
 	}
 	decl, body, err := agentlibrary.ParseDeclaration(string(data))
 	if err != nil {
-		return nil, fmt.Errorf("parse Skill Curator declaration %s: %w", path, err)
+		return nil, fmt.Errorf("parse %s declaration %s: %w", label, path, err)
 	}
-	if decl.Agent.Key != "skill_curator" {
-		return nil, fmt.Errorf("Skill Curator declaration must declare skill_curator, got %s", decl.Agent.Key)
+	if decl.Agent.Key != key {
+		return nil, fmt.Errorf("%s declaration must declare %s, got %s", label, key, decl.Agent.Key)
 	}
 	if decl.Agent.SystemPrompt == "" {
 		decl.Agent.SystemPrompt = strings.TrimSpace(body)
 	}
-	sanitizeSystemSkillCuratorDeclaration(decl)
 	decl.Skill.Key = ""
 	return decl, nil
+}
+
+func (s *AgentLibraryMaintenanceService) ensureGoalAgent(ctx context.Context) (*models.Agent, error) {
+	decl, err := s.loadGoalAgentDeclaration()
+	if err != nil {
+		return nil, err
+	}
+	want := agentFromBundledDeclaration(decl)
+	want.SystemKind = models.AgentSystemKindGoal
+	want.Key = models.AgentSystemKindGoal
+	want.SourceRefs = []string{bundledGoalAgentDeclarationPath}
+
+	agent, err := s.agentRepo.GetBySystemKind(ctx, models.AgentSystemKindGoal)
+	if err != nil {
+		return nil, err
+	}
+	if agent == nil {
+		agent, err = s.agentRepo.GetByKey(ctx, models.AgentSystemKindGoal)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if agent == nil {
+		agent = want
+		if err := s.agentRepo.Create(ctx, agent); err != nil {
+			return nil, err
+		}
+		if err := s.ensureSystemAgentHooks(ctx, agent.ID, decl); err != nil {
+			return nil, err
+		}
+		return agent, nil
+	}
+	if applyBundledSkillCuratorDeclaration(agent, want) {
+		if err := s.agentRepo.Update(ctx, agent); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.ensureSystemAgentHooks(ctx, agent.ID, decl); err != nil {
+		return nil, err
+	}
+	return agent, nil
 }
 
 func sanitizeSystemSkillCuratorDeclaration(decl *agentlibrary.SkillDeclaration) {
@@ -337,7 +394,7 @@ func applyBundledSkillCuratorDeclaration(agent, want *models.Agent) bool {
 	return changed
 }
 
-func (s *AgentLibraryMaintenanceService) ensureSkillCuratorHooks(ctx context.Context, agentID string, decl *agentlibrary.SkillDeclaration) error {
+func (s *AgentLibraryMaintenanceService) ensureSystemAgentHooks(ctx context.Context, agentID string, decl *agentlibrary.SkillDeclaration) error {
 	if s.lifecycleRepo == nil || decl == nil || len(decl.LifecycleHooks) == 0 {
 		return nil
 	}

@@ -165,7 +165,7 @@ func (a *RepoApplier) ArchiveSkill(ctx context.Context, handle, absorbedInto, re
 // Skills inherit their agent's protection state.
 func isBuiltInSystemAgentKey(key string) bool {
 	switch strings.TrimSpace(key) {
-	case models.AgentSystemKindSkillCurator, models.AgentSystemKindMemoryCurator:
+	case models.AgentSystemKindSkillCurator, models.AgentSystemKindMemoryCurator, models.AgentSystemKindGoal:
 		return true
 	default:
 		return false

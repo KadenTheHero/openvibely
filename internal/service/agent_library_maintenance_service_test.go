@@ -93,12 +93,110 @@ func TestAgentLibraryMaintenanceService_SyncRootDeclarationsSkipsProtectedSystem
 	if memoryAgent != nil {
 		t.Fatalf("generic root sync must skip protected Memory Curator, got %#v", memoryAgent)
 	}
+	goalAgent, err := agentRepo.GetByKey(ctx, models.AgentSystemKindGoal)
+	if err != nil || goalAgent == nil {
+		t.Fatalf("expected seeded Goal Agent to remain available: %v %#v", err, goalAgent)
+	}
+	if goalAgent.SystemKind != models.AgentSystemKindGoal || goalAgent.GeneratedStatus != models.AgentStatusProtected || goalAgent.CreatedBy != models.AgentCreatedBySystem {
+		t.Fatalf("generic root sync must not rewrite Goal Agent through importer path: %#v", goalAgent)
+	}
 	skillCurator, err := agentRepo.GetByKey(ctx, "skill_curator")
 	if err != nil || skillCurator == nil {
 		t.Fatalf("expected seeded Skill Curator to remain available: %v %#v", err, skillCurator)
 	}
 	if skillCurator.SystemKind != models.AgentSystemKindSkillCurator || skillCurator.GeneratedStatus != models.AgentStatusProtected {
 		t.Fatalf("generic root sync must not rewrite Skill Curator through importer path: %#v", skillCurator)
+	}
+}
+
+func TestAgentLibraryMaintenanceService_SyncRootDeclarationsSeedsProtectedGoalAgent(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentsRoot := t.TempDir()
+	if err := builtinskills.SyncTo(agentsRoot); err != nil {
+		t.Fatalf("SyncTo: %v", err)
+	}
+	svc := &AgentLibraryMaintenanceService{agentRepo: agentRepo, lifecycleRepo: lifecycleRepo, agentsRootPath: agentsRoot}
+	if err := svc.SyncRootDeclarations(ctx, ""); err != nil {
+		t.Fatalf("SyncRootDeclarations: %v", err)
+	}
+	agent, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindGoal)
+	if err != nil || agent == nil {
+		t.Fatalf("GetBySystemKind(goal): %v %#v", err, agent)
+	}
+	if agent.Key != models.AgentSystemKindGoal || agent.GeneratedStatus != models.AgentStatusProtected || agent.CreatedBy != models.AgentCreatedBySystem || agent.SelectableAsPrimary {
+		t.Fatalf("expected protected non-selectable Goal Agent, got %#v", agent)
+	}
+	for _, want := range []string{"get_task_goal", "mark_task_goal_achieved", "report_task_goal_blocked", "send_to_task"} {
+		if !AgentAllowsTool(agent, want) {
+			t.Fatalf("expected Goal Agent to grant %s, tools=%v", want, agent.Tools)
+		}
+	}
+	if len(agent.SourceRefs) != 1 || agent.SourceRefs[0] != bundledGoalAgentDeclarationPath {
+		t.Fatalf("expected goal source ref, got %#v", agent.SourceRefs)
+	}
+	hooks, err := lifecycleRepo.HooksByAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("HooksByAgent: %v", err)
+	}
+	if len(hooks) != 1 || hooks[0].When != models.LifecycleAfterComplete || hooks[0].SkillKey != "evaluate_task_goal" || hooks[0].OutputContract != models.OutputContractActivitySummary || !hooks[0].Blocking || !hooks[0].Enabled {
+		t.Fatalf("unexpected Goal Agent hook: %#v", hooks)
+	}
+}
+
+func TestAgentLibraryMaintenanceService_SyncRootDeclarationsRepairsLegacyGoalAgentByKey(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	agentsRoot := t.TempDir()
+	if err := builtinskills.SyncTo(agentsRoot); err != nil {
+		t.Fatalf("SyncTo: %v", err)
+	}
+
+	legacy := &models.Agent{
+		Name:                "System: Goal Agent",
+		Key:                 models.AgentSystemKindGoal,
+		SystemKind:          "",
+		Tools:               []string{"get_task_goal", "send_to_task"},
+		Scope:               models.AgentScopeGlobal,
+		SelectableAsPrimary: false,
+		Enabled:             true,
+		CreatedBy:           models.AgentCreatedByAgent,
+		GeneratedStatus:     models.AgentStatusGenerated,
+	}
+	if err := agentRepo.Create(ctx, legacy); err != nil {
+		t.Fatalf("Create legacy Goal Agent: %v", err)
+	}
+
+	svc := &AgentLibraryMaintenanceService{agentRepo: agentRepo, lifecycleRepo: lifecycleRepo, agentsRootPath: agentsRoot}
+	if err := svc.SyncRootDeclarations(ctx, ""); err != nil {
+		t.Fatalf("SyncRootDeclarations: %v", err)
+	}
+
+	agent, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindGoal)
+	if err != nil || agent == nil {
+		t.Fatalf("GetBySystemKind(goal): %v %#v", err, agent)
+	}
+	if agent.ID != legacy.ID {
+		t.Fatalf("expected legacy Goal Agent repaired in place, got id=%s want=%s", agent.ID, legacy.ID)
+	}
+	if agent.Key != models.AgentSystemKindGoal || agent.SystemKind != models.AgentSystemKindGoal || agent.GeneratedStatus != models.AgentStatusProtected || agent.CreatedBy != models.AgentCreatedBySystem || agent.SelectableAsPrimary {
+		t.Fatalf("expected protected repaired Goal Agent, got %#v", agent)
+	}
+	for _, want := range []string{"get_task_goal", "mark_task_goal_achieved", "report_task_goal_blocked", "send_to_task"} {
+		if !AgentAllowsTool(agent, want) {
+			t.Fatalf("expected repaired Goal Agent to grant %s, tools=%v", want, agent.Tools)
+		}
+	}
+	hooks, err := lifecycleRepo.HooksByAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("HooksByAgent: %v", err)
+	}
+	if len(hooks) != 1 || hooks[0].When != models.LifecycleAfterComplete || hooks[0].SkillKey != "evaluate_task_goal" || hooks[0].OutputContract != models.OutputContractActivitySummary || !hooks[0].Blocking || !hooks[0].Enabled {
+		t.Fatalf("unexpected repaired Goal Agent hook: %#v", hooks)
 	}
 }
 

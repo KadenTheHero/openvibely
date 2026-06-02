@@ -52,7 +52,8 @@ func SyncTo(root string) error {
 		isIndex := base == "AGENTS.md" || base == "SKILLS.md"
 		relSlash := filepath.ToSlash(rel)
 		isProtectedSystemDeclaration := relSlash == "agents/skill_curator/SKILLS.md" ||
-			relSlash == "agents/memory_curator/SKILLS.md"
+			relSlash == "agents/memory_curator/SKILLS.md" ||
+			relSlash == "agents/goal/SKILLS.md"
 		if isIndex && !isProtectedSystemDeclaration {
 			if _, err := os.Stat(dst); err == nil {
 				// User-managed once it exists: don't clobber hand edits.

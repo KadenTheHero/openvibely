@@ -89,6 +89,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	}
 
 	runID := newLifecycleTaskRunID(task.ID)
+	incomingTurn := lifecycleTurnFromContext(ctx)
 	projectRoot := projectSkillRoot(ctx, w.projectRepo, task.ProjectID)
 	assignedAgent := w.taskAgentDefinition(ctx, task)
 	if w.agentRootSyncService != nil {
@@ -99,7 +100,9 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	catalog := w.buildSkillCatalog(ctx, task)
 	w.currentCatalog.Store(catalog)
 	fullSkillIndex := w.renderAvailableSkillsForTask(ctx, task, projectRoot)
-	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SkillIndex: fullSkillIndex, AssignedAgent: assignedAgent})
+	taskTurnRuntimeTools := llmcontracts.RuntimeToolsFromContext(ctx)
+	afterCompleteRuntimeTools := incomingTurn.AfterCompleteRuntimeTools
+	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SkillIndex: fullSkillIndex, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn})
 	hookReadTools := w.buildLifecycleReadRuntimeTools(task, catalog)
 	if hookReadTools != nil {
 		ctx = llmcontracts.WithRuntimeTools(ctx, hookReadTools)
@@ -140,7 +143,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		}
 	}
 	taskCatalog := catalog.Filter(runID+":selected", selectedSkillHandles)
-	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SelectedSkillHandles: selectedSkillHandles, AssignedAgent: assignedAgent})
+	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SelectedSkillHandles: selectedSkillHandles, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn})
 
 	// before_run: produce context_blocks the model should see. The runbook
 	// (§Auto-Routing line 130) says these blocks are merged into the system
@@ -155,7 +158,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	}
 
 	skillIndex := agentskills.RenderSelectedSkillsMarkdown(taskCatalog, selectedSkillHandles)
-	taskRuntimeTools := w.buildTaskSkillRuntimeTools(ctx, task, taskCatalog)
+	taskRuntimeTools := llmcontracts.CompositeRuntimeTools(taskTurnRuntimeTools, w.buildTaskSkillRuntimeTools(ctx, task, taskCatalog))
 	if taskRuntimeTools != nil {
 		ctx = llmcontracts.WithRuntimeTools(ctx, taskRuntimeTools)
 	}
@@ -165,6 +168,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		PreparedBlocks:       preparedContext,
 		SelectedSkillHandles: selectedSkillHandles,
 		AssignedAgent:        assignedAgent,
+		TaskThreadTurn:       incomingTurn.TaskThreadTurn,
 	})
 	promptContext := buildLifecyclePromptContext(skillIndex, preparedContext)
 	if promptContext != "" {
@@ -189,10 +193,73 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 			if rt != nil {
 				bgCtx = llmcontracts.WithRuntimeTools(bgCtx, rt)
 			}
-			w.runLifecycleSlot(bgCtx, models.LifecycleAfterComplete, t, taskRunID, runErr, taskChatContext)
-		}(task, runID, err, chatContext, hookMutationTools, lifecycleTurnContext{Catalog: taskCatalog, SelectedSkillHandles: selectedSkillHandles, AssignedAgent: assignedAgent})
+			result := w.runLifecycleSlotFiltered(bgCtx, models.LifecycleAfterComplete, t, taskRunID, runErr, taskChatContext, w.afterCompleteHookEligible(bgCtx, t))
+			w.publishGoalEvaluationAfterComplete(bgCtx, t, result)
+		}(task, runID, err, chatContext, llmcontracts.CompositeRuntimeTools(hookMutationTools, afterCompleteRuntimeTools), lifecycleTurnContext{Catalog: taskCatalog, SelectedSkillHandles: selectedSkillHandles, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn})
 	}
 	return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: after}
+}
+func (w *WorkerService) publishGoalEvaluationAfterComplete(ctx context.Context, task models.Task, result lifecycle.SlotResult) {
+	if w == nil || w.taskGoalSvc == nil || !slotResultContainsGoalAgent(ctx, w, result) {
+		return
+	}
+	if _, err := w.taskGoalSvc.PublishEvaluatedGoal(ctx, task.ID); err != nil {
+		log.Printf("[lifecycle-turn] reload evaluated task goal failed task=%s: %v", task.ID, err)
+	}
+}
+
+func slotResultContainsGoalAgent(ctx context.Context, w *WorkerService, result lifecycle.SlotResult) bool {
+	goalAgentID := w.goalAgentID(ctx)
+	if goalAgentID == "" {
+		return false
+	}
+	for _, out := range result.Outputs {
+		if out.AgentID == goalAgentID && out.SkillKey == "evaluate_task_goal" {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *WorkerService) afterCompleteHookEligible(ctx context.Context, task models.Task) func(models.AgentLifecycleHook) bool {
+	goalAgentID := w.goalAgentID(ctx)
+	isTaskThreadTurn := lifecycleTurnFromContext(ctx).TaskThreadTurn
+	return func(hook models.AgentLifecycleHook) bool {
+		if hook.When != models.LifecycleAfterComplete || !hook.Enabled {
+			return false
+		}
+		if goalAgentID == "" || hook.AgentID != goalAgentID {
+			return true
+		}
+		return isTaskThreadTurn && w.taskHasEvaluableGoal(ctx, task.ID)
+	}
+}
+
+func (w *WorkerService) taskHasEvaluableGoal(ctx context.Context, taskID string) bool {
+	return w.evaluableTaskGoal(ctx, taskID) != nil
+}
+
+func (w *WorkerService) evaluableTaskGoal(ctx context.Context, taskID string) *models.TaskGoal {
+	if w == nil || w.taskGoalSvc == nil || taskID == "" {
+		return nil
+	}
+	goal, err := w.taskGoalSvc.GetEvaluableGoal(ctx, taskID)
+	if err != nil {
+		log.Printf("[lifecycle-turn] load evaluable task goal failed task=%s: %v", taskID, err)
+		return nil
+	}
+	return goal
+}
+
+func (w *WorkerService) goalAgentID(ctx context.Context) string {
+	if w == nil || w.agentRepo == nil {
+		return ""
+	}
+	agent, err := w.agentRepo.GetBySystemKind(ctx, models.AgentSystemKindGoal)
+	if err != nil || agent == nil {
+		return ""
+	}
+	return agent.ID
 }
 
 func (w *WorkerService) isChatMemoryRecallHook(ctx context.Context) func(models.AgentLifecycleHook) bool {

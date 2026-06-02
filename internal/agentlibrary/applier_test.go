@@ -343,6 +343,11 @@ func TestRepoApplier_AgentOwnedSkillsInheritAgentProtection(t *testing.T) {
 		Key:             "memory_curator",
 		GeneratedStatus: models.AgentStatusProtected,
 	}
+	agents.byKey["goal"] = &models.Agent{
+		ID:              "id_goal",
+		Key:             "goal",
+		GeneratedStatus: models.AgentStatusProtected,
+	}
 	agents.byKey["reviewer"] = &models.Agent{
 		ID:              "id_reviewer",
 		Key:             "reviewer",
@@ -365,6 +370,14 @@ func TestRepoApplier_AgentOwnedSkillsInheritAgentProtection(t *testing.T) {
 	}
 	if !protected || reason == "" {
 		t.Fatalf("expected protected memory curator skill, protected=%v reason=%q", protected, reason)
+	}
+
+	protected, reason, err = ap.IsProtected(context.Background(), "skill", "goal/evaluate_task_goal")
+	if err != nil {
+		t.Fatalf("IsProtected goal skill: %v", err)
+	}
+	if !protected || reason == "" {
+		t.Fatalf("expected protected goal skill, protected=%v reason=%q", protected, reason)
 	}
 
 	protected, _, err = ap.IsProtected(context.Background(), "skill", "reviewer/review_migrations")
@@ -421,7 +434,7 @@ func TestRepoApplier_AgentOwnedSkillMaintenanceRequiresActiveAgent(t *testing.T)
 func TestRepoApplier_BuiltInSystemAgentSkillsProtectedWithoutDBRow(t *testing.T) {
 	agents := newMemAgentStore()
 	ap := NewRepoApplier(agents, nil)
-	for _, key := range []string{"skill_curator/maintain_skill_library", "memory_curator/consolidate_memory"} {
+	for _, key := range []string{"skill_curator/maintain_skill_library", "memory_curator/consolidate_memory", "goal/evaluate_task_goal"} {
 		protected, reason, err := ap.IsProtected(context.Background(), "skill", key)
 		if err != nil {
 			t.Fatalf("IsProtected(%s): %v", key, err)

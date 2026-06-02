@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -18,6 +20,7 @@ type TaskService struct {
 	attachmentRepo               *repository.AttachmentRepo
 	workerSvc                    *WorkerService
 	agentRepo                    *repository.AgentRepo
+	goalSvc                      *TaskGoalService
 	queuedTaskThreadFollowupHook func(context.Context, string) (bool, error)
 }
 
@@ -31,6 +34,10 @@ func NewTaskService(repo *repository.TaskRepo, attachmentRepo *repository.Attach
 
 func (s *TaskService) SetAgentRepo(agentRepo *repository.AgentRepo) {
 	s.agentRepo = agentRepo
+}
+
+func (s *TaskService) SetTaskGoalService(goalSvc *TaskGoalService) {
+	s.goalSvc = goalSvc
 }
 
 func (s *TaskService) SetQueuedTaskThreadFollowupHook(hook func(context.Context, string) (bool, error)) {
@@ -63,16 +70,33 @@ func (s *TaskService) GetByID(ctx context.Context, id string) (*models.Task, err
 }
 
 func (s *TaskService) Create(ctx context.Context, t *models.Task) error {
+	return s.CreateWithGoal(ctx, t, "")
+}
+
+func (s *TaskService) CreateWithGoal(ctx context.Context, t *models.Task, objective string) error {
 	if t.Status == "" {
 		t.Status = models.StatusPending
 	}
 	if t.Category == "" {
 		t.Category = models.CategoryActive
 	}
-	log.Printf("[task-svc] Create title=%q category=%s status=%s project=%s",
-		t.Title, t.Category, t.Status, t.ProjectID)
+	objective = strings.TrimSpace(objective)
+	if objective != "" && len(objective) > MaxTaskGoalLength {
+		return ErrTaskGoalTooLong
+	}
+	log.Printf("[task-svc] Create title=%q category=%s status=%s project=%s goal=%v",
+		t.Title, t.Category, t.Status, t.ProjectID, objective != "")
 
-	if err := s.repo.Create(ctx, t); err != nil {
+	var goal *models.TaskGoal
+	if objective != "" {
+		goal = &models.TaskGoal{
+			GoalID:    repository.NewID(),
+			Objective: objective,
+			Status:    models.TaskGoalStatusActive,
+			Reason:    "set at task creation",
+		}
+	}
+	if err := s.repo.CreateWithGoal(ctx, t, goal); err != nil {
 		if errors.Is(err, repository.ErrDuplicateTask) {
 			log.Printf("[task-svc] Create duplicate task title=%q", t.Title)
 			return ErrDuplicateTask
@@ -81,9 +105,12 @@ func (s *TaskService) Create(ctx context.Context, t *models.Task) error {
 		return err
 	}
 	log.Printf("[task-svc] Create success id=%s", t.ID)
+	if goal != nil && s.goalSvc != nil {
+		s.goalSvc.publishGoalEvent(events.TaskGoalUpdated, goal)
+	}
 
 	// Auto-submit if created in Active category (blocked tasks wait for parent to activate them)
-	if t.Category == models.CategoryActive && t.Status != models.StatusBlocked {
+	if t.Category == models.CategoryActive && t.Status != models.StatusBlocked && s.workerSvc != nil {
 		log.Printf("[task-svc] Create auto-submitting active task id=%s to worker pool", t.ID)
 		s.workerSvc.Submit(*t)
 	}

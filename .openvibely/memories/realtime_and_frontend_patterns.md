@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-06-01
+updated: 2026-06-03
 source: consolidation
-source_id: memory_consolidation_2026_06_01
+source_id: memory_consolidation_2026_06_02
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -46,6 +46,7 @@ Chat and thread rendering:
 - Chat/thread attachment sends should mark send intent at the actual form submit gesture, then consume that intent after HTMX swaps/layout settling to bottom-align even when variable-size screenshots or other attachments change height.
 - Render image attachments with a stable marker and bind shared image load/error smart-scroll correction on initial render and relevant swaps; image corrections should snapshot send intent before it is consumed and still stop if the user explicitly scrolls up after sending.
 - Task-thread tab/task navigation should keep per-thread scroll state: returning from Details/Changes or another task should restore remembered position or bottom-align only when the prior thread state was pinned, on fresh initial entry, or for new send/active stream activity.
+- Task detail Details tab should keep Goal, Prompt, and Git Worktree in matching card containers with consistent dark-mode styling. Prompt content should visually match the Goal input container, including container color and UI font/textarea-style treatment. The Details body should be the scroll container so long Goal/Worktree content cannot push the Prompt section out of reach.
 - Task-thread streaming must keep its HTMX polling fallback resumable across lifecycle hook/status transitions: reactivated/resumed streams should reset stale inactive markers and preserve a valid `/tasks/:id/thread` poll URL/trigger.
 - Avoid expensive full-container reprocessing on polling refreshes; use content signatures and incremental cleaning.
 - Chat/thread markdown rendering escapes raw HTML-like tags outside fenced/inline code before `marked.parse` so malformed model outputs do not break DOM.

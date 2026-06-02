@@ -4511,3 +4511,32 @@ func TestAutoStartTasks_SingleAgentAvailable(t *testing.T) {
 		t.Errorf("expected agent ID %s, got %s", agent.ID, *tasks[0].AgentID)
 	}
 }
+
+func TestExecuteTaskCreationsWithReturn_PersistsGoal(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Goal Creation Project", RepoPath: t.TempDir()}
+	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	taskRepo := repository.NewTaskRepo(db, nil)
+	goalRepo := repository.NewTaskGoalRepo(db)
+	goalSvc := NewTaskGoalService(goalRepo, taskRepo, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	taskSvc.SetTaskGoalService(goalSvc)
+
+	created, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{{Title: "Goal create", Prompt: "prompt", Goal: "All tests pass", Category: "backlog"}}, project.ID, taskSvc)
+	if len(created) != 1 {
+		t.Fatalf("created len=%d summary=%s", len(created), summary)
+	}
+	goal, err := goalRepo.GetByTaskID(ctx, created[0].ID)
+	if err != nil {
+		t.Fatalf("get goal: %v", err)
+	}
+	if goal == nil || goal.Objective != "All tests pass" || goal.Status != models.TaskGoalStatusActive {
+		t.Fatalf("goal = %+v", goal)
+	}
+	if !strings.Contains(summary, "[goal:set]") {
+		t.Fatalf("summary missing goal indicator: %s", summary)
+	}
+}

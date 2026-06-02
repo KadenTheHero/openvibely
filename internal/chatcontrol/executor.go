@@ -17,13 +17,23 @@ type RuntimeActionHandler func(ctx context.Context, input json.RawMessage) (stri
 // BuildRuntimeToolExecutor creates a runtime-tools executor with centralized
 // policy gating and handler dispatch.
 func BuildRuntimeToolExecutor(mode models.ChatMode, surface Surface, handlers map[string]RuntimeActionHandler) llmcontracts.RuntimeToolExecutor {
+	return buildRuntimeToolExecutor(mode, surface, handlers, false)
+}
+
+// BuildLifecycleRuntimeToolExecutor creates an executor for protected lifecycle agents.
+// It allows lifecycle-only actions that are intentionally hidden from ordinary chat turns.
+func BuildLifecycleRuntimeToolExecutor(mode models.ChatMode, surface Surface, handlers map[string]RuntimeActionHandler) llmcontracts.RuntimeToolExecutor {
+	return buildRuntimeToolExecutor(mode, surface, handlers, true)
+}
+
+func buildRuntimeToolExecutor(mode models.ChatMode, surface Surface, handlers map[string]RuntimeActionHandler, includeLifecycleOnly bool) llmcontracts.RuntimeToolExecutor {
 	return func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		toolName := strings.ToLower(strings.TrimSpace(name))
 		if toolName == "" {
 			return "", false, false, nil
 		}
 
-		if actionErr := IsAllowed(toolName, mode, surface); actionErr != nil {
+		if actionErr := isAllowed(toolName, mode, surface, includeLifecycleOnly); actionErr != nil {
 			// If the tool is not in the chatcontrol registry at all, return
 			// handled=false so the provider's base executor can handle it
 			// (e.g. grep_search, read_file, list_files are provider-native

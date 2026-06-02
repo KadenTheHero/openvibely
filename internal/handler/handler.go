@@ -17,6 +17,7 @@ import (
 type Handler struct {
 	projectSvc                 *service.ProjectService
 	taskSvc                    *service.TaskService
+	taskGoalSvc                *service.TaskGoalService
 	llmSvc                     *service.LLMService
 	workerSvc                  *service.WorkerService
 	schedulerSvc               *service.SchedulerService
@@ -183,6 +184,10 @@ func (h *Handler) SetChatBroadcaster(cb *events.ChatBroadcaster) {
 
 func (h *Handler) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
 	h.threadInputRepo = repo
+}
+
+func (h *Handler) SetTaskGoalService(svc *service.TaskGoalService) {
+	h.taskGoalSvc = svc
 }
 
 // SetFileChangeBroadcaster sets the file change event broadcaster for real-time file change updates.
@@ -388,6 +393,11 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/tasks/:taskId/thread/steer", h.TaskThreadSteer)
 	e.POST("/thread-inputs/:inputId/cancel", h.CancelThreadInput)
 	e.POST("/tasks/:taskId/thread/queued/:inputId/steer", h.TaskThreadQueuedInputSteer)
+	e.GET("/tasks/:taskId/goal", h.GetTaskGoal)
+	e.POST("/tasks/:taskId/goal", h.SetTaskGoal)
+	e.POST("/tasks/:taskId/goal/pause", h.PauseTaskGoal)
+	e.POST("/tasks/:taskId/goal/resume", h.ResumeTaskGoal)
+	e.POST("/tasks/:taskId/goal/clear", h.ClearTaskGoal)
 	e.GET("/tasks/:taskId", h.GetTask)
 	e.PUT("/tasks/:taskId", h.UpdateTask)
 	e.DELETE("/tasks/:taskId", h.DeleteTask)

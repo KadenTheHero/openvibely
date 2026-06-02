@@ -1,0 +1,98 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
+)
+
+func createGoalTestProject(t *testing.T, ctx context.Context, db *sql.DB) *models.Project {
+	t.Helper()
+	project := &models.Project{Name: "Goal Project", RepoPath: t.TempDir()}
+	if err := NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	return project
+}
+
+func createGoalTestTask(t *testing.T, ctx context.Context, taskRepo *TaskRepo, projectID string) *models.Task {
+	t.Helper()
+	task := &models.Task{ProjectID: projectID, Title: "Goal task", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "prompt", Priority: 2}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	return task
+}
+
+func TestTaskGoalRepo_BlockedAuditAndStaleGoalGuard(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createGoalTestProject(t, ctx, db)
+	taskRepo := NewTaskRepo(db, nil)
+	task := createGoalTestTask(t, ctx, taskRepo, project.ID)
+	repo := NewTaskGoalRepo(db)
+
+	goal := &models.TaskGoal{TaskID: task.ID, GoalID: "goal-1", Objective: "All tests pass", Status: models.TaskGoalStatusActive}
+	if err := repo.CreateOrReplace(ctx, goal); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	for i := 1; i <= 2; i++ {
+		updated, err := repo.RecordBlockedReport(ctx, task.ID, goal.GoalID, "missing_creds", "missing credentials")
+		if err != nil {
+			t.Fatalf("blocked report %d: %v", i, err)
+		}
+		if updated.Status != models.TaskGoalStatusActive || updated.BlockerCount != i {
+			t.Fatalf("report %d status/count = %s/%d", i, updated.Status, updated.BlockerCount)
+		}
+	}
+	updated, err := repo.RecordBlockedReport(ctx, task.ID, goal.GoalID, "missing_creds", "missing credentials")
+	if err != nil {
+		t.Fatalf("third blocked report: %v", err)
+	}
+	if updated.Status != models.TaskGoalStatusBlocked || updated.BlockerCount != 3 {
+		t.Fatalf("third report status/count = %s/%d", updated.Status, updated.BlockerCount)
+	}
+
+	replacement := &models.TaskGoal{TaskID: task.ID, GoalID: "goal-2", Objective: "New goal", Status: models.TaskGoalStatusActive}
+	if err := repo.CreateOrReplace(ctx, replacement); err != nil {
+		t.Fatalf("replace goal: %v", err)
+	}
+	stale, err := repo.MarkAchieved(ctx, task.ID, "goal-1", "old result")
+	if err != nil {
+		t.Fatalf("stale achieved: %v", err)
+	}
+	if stale != nil {
+		t.Fatalf("stale update returned goal: %+v", stale)
+	}
+	current, err := repo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get current: %v", err)
+	}
+	if current.GoalID != "goal-2" || current.Status != models.TaskGoalStatusActive || current.BlockerCount != 0 {
+		t.Fatalf("current goal not preserved/reset: %+v", current)
+	}
+}
+
+func TestTaskRepo_CreateWithGoalAtomic(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createGoalTestProject(t, ctx, db)
+	repo := NewTaskRepo(db, nil)
+	goalRepo := NewTaskGoalRepo(db)
+
+	task := &models.Task{ProjectID: project.ID, Title: "Atomic goal", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "prompt", Priority: 2}
+	goal := &models.TaskGoal{GoalID: "goal-atomic", Objective: "done", Status: models.TaskGoalStatusActive}
+	if err := repo.CreateWithGoal(ctx, task, goal); err != nil {
+		t.Fatalf("create with goal: %v", err)
+	}
+	stored, err := goalRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get goal: %v", err)
+	}
+	if stored == nil || stored.Objective != "done" || stored.GoalID != "goal-atomic" {
+		t.Fatalf("stored goal = %+v", stored)
+	}
+}

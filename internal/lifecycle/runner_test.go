@@ -491,3 +491,41 @@ type fakeInvokerFunc struct {
 func (f *fakeInvokerFunc) Invoke(ctx context.Context, hook models.AgentLifecycleHook, in HookInput) (json.RawMessage, error) {
 	return f.fn(ctx, hook, in)
 }
+
+func TestRunSlot_InvalidBlockingOutputDoesNotPoisonLaterHookPrompt(t *testing.T) {
+	store := &memStore{
+		hooks: []models.AgentLifecycleHook{
+			{ID: "goal", AgentID: "goal-agent", When: models.LifecycleAfterComplete, SkillKey: "evaluate_task_goal", OutputContract: models.OutputContractActivitySummary, Blocking: true, Enabled: true},
+			{ID: "memory", AgentID: "memory-agent", When: models.LifecycleAfterComplete, SkillKey: "update_memory", OutputContract: models.OutputContractLearningSummary, Blocking: true, Enabled: true},
+		},
+	}
+	inv := &fakeInvoker{
+		outputs: map[string]json.RawMessage{
+			"goal":   json.RawMessage(`{"summary":"one"}{"summary":"two"}`),
+			"memory": json.RawMessage(`{"summary":"Nothing to save.","nothing_to_save":true}`),
+		},
+	}
+	runner := NewRunner(store, inv, nil)
+	res, err := runner.RunSlot(context.Background(), models.LifecycleAfterComplete, HookInput{TaskID: "task", TaskRunID: "run"})
+	if err != nil {
+		t.Fatalf("RunSlot: %v", err)
+	}
+	if len(res.Outputs) != 2 {
+		t.Fatalf("expected both hooks to run, got %#v", res.Outputs)
+	}
+	var goalErr, memoryErr string
+	for _, out := range res.Outputs {
+		switch out.HookID {
+		case "goal":
+			goalErr = out.Error
+		case "memory":
+			memoryErr = out.Error
+		}
+	}
+	if goalErr == "" {
+		t.Fatal("expected invalid goal output to fail validation")
+	}
+	if memoryErr != "" {
+		t.Fatalf("later memory hook should not fail from invalid previous output, got %q", memoryErr)
+	}
+}
