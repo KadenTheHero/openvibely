@@ -300,6 +300,39 @@ func TestBuildAgentCatalog_ExcludesDisabledAgentSkills(t *testing.T) {
 	}
 }
 
+// writeDisabledSkill writes a SKILL.md with skill.enabled: false frontmatter
+// and registers the handle in the appropriate SKILLS.md index.
+func writeDisabledSkill(t *testing.T, root, skill string) string {
+	t.Helper()
+	dir := filepath.Join(root, SkillsDir, skill)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	path := filepath.Join(dir, SkillFile)
+	body := "---\nskill:\n  enabled: false\n---\n# " + skill + "\nDisabled skill body.\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	appendHeader(t, SkillsIndexPath(root), skill)
+	return path
+}
+
+// writeDisabledAgentSkill writes a disabled agent-owned SKILL.md.
+func writeDisabledAgentSkill(t *testing.T, root, agent, skill string) string {
+	t.Helper()
+	dir := filepath.Join(root, AgentRootsDir, agent, SkillsDir, skill)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	path := filepath.Join(dir, SkillFile)
+	body := "---\nskill:\n  enabled: false\n---\n# " + skill + "\nDisabled agent skill body.\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	appendHeader(t, AgentSkillsIndexPath(root, agent), agent+"/"+skill)
+	return path
+}
+
 func TestRenderAvailableSkillsMarkdown_ReturnsRawIndexContent(t *testing.T) {
 	global := t.TempDir()
 	project := t.TempDir()
@@ -312,5 +345,75 @@ func TestRenderAvailableSkillsMarkdown_ReturnsRawIndexContent(t *testing.T) {
 	}
 	if strings.Contains(out, filepath.Join(global, SkillsDir)) || strings.Contains(out, filepath.Join(project, SkillsDir)) {
 		t.Fatalf("rendered block leaked filesystem path:\n%s", out)
+	}
+}
+
+func TestRenderAvailableSkillsMarkdown_ExcludesDisabledHandles(t *testing.T) {
+	global := t.TempDir()
+	project := t.TempDir()
+
+	// enabled skill in global scope
+	writeSkill(t, global, "enabled_global", "body")
+	// disabled skill in global scope — must NOT appear in rendered output
+	writeDisabledSkill(t, global, "disabled_global")
+	// enabled skill in project scope
+	writeSkill(t, project, "enabled_project", "body")
+	// disabled skill in project scope — must NOT appear in rendered output
+	writeDisabledSkill(t, project, "disabled_project")
+
+	out := RenderAvailableSkillsMarkdown(global, project)
+
+	if !strings.Contains(out, "## enabled_global") {
+		t.Errorf("expected enabled_global to be present:\n%s", out)
+	}
+	if !strings.Contains(out, "## enabled_project") {
+		t.Errorf("expected enabled_project to be present:\n%s", out)
+	}
+	if strings.Contains(out, "## disabled_global") {
+		t.Errorf("disabled_global must NOT appear in available_skills block:\n%s", out)
+	}
+	if strings.Contains(out, "## disabled_project") {
+		t.Errorf("disabled_project must NOT appear in available_skills block:\n%s", out)
+	}
+}
+
+func TestRenderAvailableSkillsMarkdown_AllDisabledProducesEmptyFallback(t *testing.T) {
+	global := t.TempDir()
+	project := t.TempDir()
+	writeDisabledSkill(t, global, "disabled_only")
+	writeDisabledSkill(t, project, "also_disabled")
+
+	out := RenderAvailableSkillsMarkdown(global, project)
+
+	if strings.Contains(out, "## disabled_only") || strings.Contains(out, "## also_disabled") {
+		t.Errorf("disabled skills must NOT appear:\n%s", out)
+	}
+	if !strings.Contains(out, "_No standalone skills indexed in this turn._") {
+		t.Errorf("expected fallback message when all skills are disabled:\n%s", out)
+	}
+}
+
+func TestRenderAvailableAgentSkillsMarkdown_ExcludesDisabledHandles(t *testing.T) {
+	global := t.TempDir()
+	project := t.TempDir()
+	const agent = "myagent"
+
+	// enabled agent-owned skill
+	writeAgentSkill(t, global, agent, "enabled_skill", "body")
+	// disabled agent-owned skill — must NOT appear in rendered output
+	writeDisabledAgentSkill(t, global, agent, "disabled_skill")
+	// another enabled skill in project scope
+	writeAgentSkill(t, project, agent, "project_skill", "body")
+
+	out := RenderAvailableAgentSkillsMarkdown(global, project, agent)
+
+	if !strings.Contains(out, "## "+agent+"/enabled_skill") {
+		t.Errorf("expected enabled_skill present:\n%s", out)
+	}
+	if !strings.Contains(out, "## "+agent+"/project_skill") {
+		t.Errorf("expected project_skill present:\n%s", out)
+	}
+	if strings.Contains(out, "## "+agent+"/disabled_skill") {
+		t.Errorf("disabled_skill must NOT appear in available_skills block:\n%s", out)
 	}
 }
