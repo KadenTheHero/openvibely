@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-06-02
-source: consolidation
-source_id: memory_consolidation_2026_06_02
+updated: 2026-06-03
+source: after_complete
+source_id: a44fd612920ee5b58f8b58f4cbfbd90e
 confidence: high
 title: Worktree and Lineage
 ---
@@ -27,6 +27,7 @@ Worktree behavior:
 - After rebasing a task worktree for a local fast-forward merge, update the target branch conditionally. If the target branch is checked out in a worktree, run `git merge --ff-only refs/heads/<task-branch>` inside that target worktree so Git refreshes files/index normally and preserves/refuses local changes according to normal merge rules. Detect this only from an attached symbolic branch `refs/heads/<target>`, not from a detached `HEAD` that happens to equal the branch commit.
 - If the target branch is not checked out anywhere, use the ref-only fallback `git update-ref refs/heads/<target> <rebased-task-HEAD> <old-target>` with the old target value for atomic stale-ref protection. Do not advance a checked-out target branch with only `git update-ref`, and avoid `reset --hard` as default cleanup because it can destroy real user work.
 - Squash merge failure handling must clean/abort squash state and leave the target checkout clean without hard-resetting the main/default target branch; otherwise staged squash changes can poison later operations and broad cleanup can destroy user work.
+- Because `internal/database/migrations/068_baseline.sql` seeds `worktree_merge_target` as `main`, tests that create temporary Git repositories for worktree setup/cleanup paths should ensure those repos have a `main` branch (for example via `git init -b main`) rather than relying on the host Git default branch.
 - Changes tab shows worktree branch diff vs target branch when available, falling back to execution diff.
 - Changes-tab diff count triage should distinguish live branch-vs-target tip diffs from merge-base/triple-dot diffs: stale ancestry after squash/manual merges can surface many already-merged files and make the task appear far larger than its real delta.
 - When a follow-up appears to undo already-merged work, verify the real target/default branch and task branch ancestry rather than trusting a linked worktree's local `main` ref alone.

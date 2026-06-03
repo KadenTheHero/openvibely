@@ -235,7 +235,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		if task, terr := h.taskRepo.GetByID(ctx, params.TaskID); terr == nil && task != nil {
 			if params.IsTaskFollowup && h.workerSvc != nil {
 				ctx = service.WithTaskThreadLifecycleTurn(ctx)
-				ctx = h.withGoalAgentLifecycleRuntimeTools(ctx, params)
 				turn := h.workerSvc.PrepareLifecycleTurn(ctx, *task)
 				ctx = turn.Ctx
 				lifecycleAfter = turn.AfterComplete
@@ -3267,20 +3266,22 @@ func (h *Handler) reactivateAchievedGoalForManualFollowup(ctx context.Context, t
 	}
 }
 
-func (h *Handler) withGoalAgentLifecycleRuntimeTools(ctx context.Context, params streamingResponseParams) context.Context {
-	if !params.IsTaskFollowup || params.TaskID == "" || h.taskGoalSvc == nil {
-		return ctx
+func (h *Handler) GoalAgentAfterCompleteRuntimeTools(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
+	if h == nil || h.taskGoalSvc == nil || task.ID == "" {
+		return nil
 	}
-	surface := params.Surface
-	if surface == "" {
-		surface = chatcontrol.SurfaceWeb
+	params := streamingResponseParams{
+		ProjectID:       task.ProjectID,
+		TaskID:          task.ID,
+		IsTaskFollowup:  true,
+		Surface:         chatcontrol.SurfaceWeb,
+		AgentDefinition: h.resolveTaskAgentDefinitionForTask(ctx, task.ID, nil),
 	}
-	defs := filterGoalAgentRuntimeToolDefs(chatcontrol.LifecycleToolDefsForContext(models.ChatModeOrchestrate, surface, true))
+	defs := filterGoalAgentRuntimeToolDefs(chatcontrol.LifecycleToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true))
 	if len(defs) == 0 {
-		return ctx
+		return nil
 	}
-	rt := h.buildLifecycleChatActionToolRuntimeFromDefs(params, nil, defs, models.ChatModeOrchestrate, surface)
-	return service.WithAfterCompleteRuntimeTools(ctx, rt)
+	return h.buildLifecycleChatActionToolRuntimeFromDefs(params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 }
 
 func (h *Handler) taskGoalContext(ctx context.Context, taskID string, agentDef *models.Agent) string {

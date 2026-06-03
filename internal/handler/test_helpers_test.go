@@ -69,6 +69,7 @@ func NewTestContext(t *testing.T) *TestContext {
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo,
 		attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
 	h.SetTaskGoalService(taskGoalSvc)
+	workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
 
 	e := echo.New()
 	h.RegisterRoutes(e)

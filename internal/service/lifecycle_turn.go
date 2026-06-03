@@ -102,6 +102,9 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	fullSkillIndex := w.renderAvailableSkillsForTask(ctx, task, projectRoot)
 	taskTurnRuntimeTools := llmcontracts.RuntimeToolsFromContext(ctx)
 	afterCompleteRuntimeTools := incomingTurn.AfterCompleteRuntimeTools
+	if w.afterCompleteRuntimeToolProvider != nil {
+		afterCompleteRuntimeTools = llmcontracts.CompositeRuntimeTools(afterCompleteRuntimeTools, w.afterCompleteRuntimeToolProvider(ctx, task))
+	}
 	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SkillIndex: fullSkillIndex, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn})
 	hookReadTools := w.buildLifecycleReadRuntimeTools(task, catalog)
 	if hookReadTools != nil {
@@ -223,7 +226,6 @@ func slotResultContainsGoalAgent(ctx context.Context, w *WorkerService, result l
 
 func (w *WorkerService) afterCompleteHookEligible(ctx context.Context, task models.Task) func(models.AgentLifecycleHook) bool {
 	goalAgentID := w.goalAgentID(ctx)
-	isTaskThreadTurn := lifecycleTurnFromContext(ctx).TaskThreadTurn
 	return func(hook models.AgentLifecycleHook) bool {
 		if hook.When != models.LifecycleAfterComplete || !hook.Enabled {
 			return false
@@ -231,7 +233,7 @@ func (w *WorkerService) afterCompleteHookEligible(ctx context.Context, task mode
 		if goalAgentID == "" || hook.AgentID != goalAgentID {
 			return true
 		}
-		return isTaskThreadTurn && w.taskHasEvaluableGoal(ctx, task.ID)
+		return w.taskHasEvaluableGoal(ctx, task.ID)
 	}
 }
 

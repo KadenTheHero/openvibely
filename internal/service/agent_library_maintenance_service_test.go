@@ -144,6 +144,9 @@ func TestAgentLibraryMaintenanceService_SyncRootDeclarationsSeedsProtectedGoalAg
 	if len(hooks) != 1 || hooks[0].When != models.LifecycleAfterComplete || hooks[0].SkillKey != "evaluate_task_goal" || hooks[0].OutputContract != models.OutputContractActivitySummary || !hooks[0].Blocking || !hooks[0].Enabled {
 		t.Fatalf("unexpected Goal Agent hook: %#v", hooks)
 	}
+	if !strings.Contains(hooks[0].RunPolicyJSON, `"always"`) {
+		t.Fatalf("Goal Agent hook must run after any task turn with an active goal, got run policy %s", hooks[0].RunPolicyJSON)
+	}
 }
 
 func TestAgentLibraryMaintenanceService_SyncRootDeclarationsRepairsLegacyGoalAgentByKey(t *testing.T) {
@@ -197,6 +200,9 @@ func TestAgentLibraryMaintenanceService_SyncRootDeclarationsRepairsLegacyGoalAge
 	}
 	if len(hooks) != 1 || hooks[0].When != models.LifecycleAfterComplete || hooks[0].SkillKey != "evaluate_task_goal" || hooks[0].OutputContract != models.OutputContractActivitySummary || !hooks[0].Blocking || !hooks[0].Enabled {
 		t.Fatalf("unexpected repaired Goal Agent hook: %#v", hooks)
+	}
+	if !strings.Contains(hooks[0].RunPolicyJSON, `"always"`) {
+		t.Fatalf("repaired Goal Agent hook must run after any task turn with an active goal, got run policy %s", hooks[0].RunPolicyJSON)
 	}
 }
 

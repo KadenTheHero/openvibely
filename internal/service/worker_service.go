@@ -52,14 +52,15 @@ type WorkerService struct {
 	// slots around task execution per runbook §Runner Changes.
 	lifecycleRunner *lifecycle.Runner
 
-	globalSkillRoot      string
-	agentRepo            *repository.AgentRepo
-	lifecycleRepo        *repository.LifecycleRepo
-	execRepo             *repository.ExecutionRepo
-	mutationRecorder     func(models.Task) agentlibrary.MutationRecorder
-	agentRootSyncService *AgentLibraryMaintenanceService
-	taskGoalSvc          *TaskGoalService
-	currentCatalog       atomic.Value // stores *agentskills.Catalog for hook skill resolution
+	globalSkillRoot                  string
+	agentRepo                        *repository.AgentRepo
+	lifecycleRepo                    *repository.LifecycleRepo
+	execRepo                         *repository.ExecutionRepo
+	mutationRecorder                 func(models.Task) agentlibrary.MutationRecorder
+	agentRootSyncService             *AgentLibraryMaintenanceService
+	taskGoalSvc                      *TaskGoalService
+	afterCompleteRuntimeToolProvider func(context.Context, models.Task) *llmcontracts.RuntimeTools
+	currentCatalog                   atomic.Value // stores *agentskills.Catalog for hook skill resolution
 }
 
 // SetLifecycleRunner attaches the lifecycle runner so the worker can invoke
@@ -96,6 +97,10 @@ func (w *WorkerService) SetAgentRootSyncService(svc *AgentLibraryMaintenanceServ
 
 func (w *WorkerService) SetTaskGoalService(svc *TaskGoalService) {
 	w.taskGoalSvc = svc
+}
+
+func (w *WorkerService) SetAfterCompleteRuntimeToolProvider(fn func(context.Context, models.Task) *llmcontracts.RuntimeTools) {
+	w.afterCompleteRuntimeToolProvider = fn
 }
 
 func (w *WorkerService) CurrentLifecycleCatalog() *agentskills.Catalog {

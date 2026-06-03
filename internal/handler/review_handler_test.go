@@ -54,6 +54,7 @@ func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, *repository.ReviewC
 	)
 	h.SetReviewCommentRepo(reviewCommentRepo)
 	h.SetTaskGoalService(taskGoalSvc)
+	workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
 
 	e := echo.New()
 	h.RegisterRoutes(e)

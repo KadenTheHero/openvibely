@@ -706,6 +706,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	)
 	h.SetChatBroadcaster(chatBroadcaster)
 	h.SetTaskGoalService(taskGoalSvc)
+	workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
 	h.SetFileChangeBroadcaster(fileChangeBroadcaster)
 	h.SetTelegramAuthRepo(telegramAuthRepo)
 	h.SetSlackAuthRepo(slackAuthRepo)

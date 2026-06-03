@@ -437,16 +437,20 @@ func TestPrepareLifecycleTurn_SeparatesTaskTurnAndAfterCompleteRuntimeTools(t *t
 	ctx := context.Background()
 	mainTools := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "main_task_tool"}}}
 	afterTools := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "after_complete_tool"}}}
+	providerTools := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "provider_after_complete_tool"}}}
 	ctx = llmcontracts.WithRuntimeTools(ctx, mainTools)
 	ctx = WithAfterCompleteRuntimeTools(ctx, afterTools)
 
 	worker := NewWorkerService(nil, 0, nil)
+	worker.SetAfterCompleteRuntimeToolProvider(func(context.Context, models.Task) *llmcontracts.RuntimeTools {
+		return providerTools
+	})
 	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-runtime-separation"})
 	mainRT := llmcontracts.RuntimeToolsFromContext(turn.Ctx)
 	if mainRT == nil || !mainRT.HasDefinition("main_task_tool") {
 		t.Fatalf("main task turn lost incoming runtime tools: %#v", mainRT)
 	}
-	if mainRT.HasDefinition("after_complete_tool") {
+	if mainRT.HasDefinition("after_complete_tool") || mainRT.HasDefinition("provider_after_complete_tool") {
 		t.Fatalf("after-complete-only tools leaked into main task turn: %#v", mainRT.Definitions)
 	}
 
@@ -460,11 +464,74 @@ func TestPrepareLifecycleTurn_SeparatesTaskTurnAndAfterCompleteRuntimeTools(t *t
 	turn.AfterComplete(nil, llmcontracts.ChatContext{})
 	select {
 	case rt := <-seen:
-		if rt == nil || !rt.HasDefinition("after_complete_tool") {
+		if rt == nil || !rt.HasDefinition("after_complete_tool") || !rt.HasDefinition("provider_after_complete_tool") {
 			t.Fatalf("after_complete hook did not receive after-complete runtime tools: %#v", rt)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for after_complete hook")
+	}
+}
+
+func TestPrepareLifecycleTurn_OrdinaryTaskWithActiveGoalRunsGoalAgentAfterComplete(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+
+	project := &models.Project{Name: "Ordinary Goal Project"}
+	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := models.Task{ID: "ordinary-goal-task", ProjectID: project.ID, Title: "Ordinary goal task", Prompt: "work", Category: models.CategoryActive, Status: models.StatusRunning}
+	if err := taskRepo.Create(ctx, &task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if _, err := goalSvc.SetGoal(ctx, task.ID, "audit after completion", GoalOptions{}); err != nil {
+		t.Fatalf("set goal: %v", err)
+	}
+	goalAgent := &models.Agent{Key: models.AgentSystemKindGoal, Name: "System: Goal Agent", Model: "inherit", SystemKind: models.AgentSystemKindGoal, GeneratedStatus: models.AgentStatusProtected, CreatedBy: models.AgentCreatedBySystem, Enabled: true}
+	if err := agentRepo.Create(ctx, goalAgent); err != nil {
+		t.Fatalf("create goal agent: %v", err)
+	}
+
+	done := make(chan error, 1)
+	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{ID: "goal-after", AgentID: goalAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "evaluate_task_goal", OutputContract: models.OutputContractActivitySummary, Blocking: true, Enabled: true}}}
+	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
+		if hook.AgentID != goalAgent.ID {
+			done <- fmt.Errorf("unexpected hook agent %s", hook.AgentID)
+			return json.RawMessage(`{"summary":"bad"}`), nil
+		}
+		if _, ok := in.Extras["task_goal"].(*models.TaskGoal); !ok {
+			done <- fmt.Errorf("Goal Agent hook missing task_goal extras: %#v", in.Extras["task_goal"])
+			return json.RawMessage(`{"summary":"missing goal"}`), nil
+		}
+		rt := llmcontracts.RuntimeToolsFromContext(ctx)
+		if rt == nil || !rt.HasDefinition("get_task_goal") {
+			done <- fmt.Errorf("Goal Agent hook missing provider-supplied goal runtime tools: %#v", rt)
+			return json.RawMessage(`{"summary":"missing tools"}`), nil
+		}
+		done <- nil
+		return json.RawMessage(`{"summary":"checked goal"}`), nil
+	}), nil)
+
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleRunner(runner)
+	worker.SetLifecycleAgentRepo(agentRepo)
+	worker.SetTaskGoalService(goalSvc)
+	worker.SetAfterCompleteRuntimeToolProvider(func(context.Context, models.Task) *llmcontracts.RuntimeTools {
+		return &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "get_task_goal"}}}
+	})
+
+	turn := worker.PrepareLifecycleTurn(ctx, task)
+	turn.AfterComplete(nil, llmcontracts.ChatContext{})
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Goal Agent after_complete hook")
 	}
 }
 
@@ -1063,8 +1130,8 @@ func TestAfterCompleteEligibilityRunsProtectedGoalAgentOnlyForActiveGoal(t *test
 	if err != nil {
 		t.Fatalf("set goal: %v", err)
 	}
-	if w.afterCompleteHookEligible(ctx, task)(goalHook) {
-		t.Fatal("protected Goal Agent hook must honor task_thread_only policy and skip ordinary worker turns")
+	if !w.afterCompleteHookEligible(ctx, task)(goalHook) {
+		t.Fatal("protected Goal Agent hook must run through generic after_complete for ordinary task turns with an active goal")
 	}
 	taskThreadCtx := WithTaskThreadLifecycleTurn(ctx)
 	if !w.afterCompleteHookEligible(taskThreadCtx, task)(goalHook) {
