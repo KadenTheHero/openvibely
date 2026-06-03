@@ -47,30 +47,41 @@ func TestManagerEnsureFreshSingleflightsConcurrentRefresh(t *testing.T) {
 	cfg := createOAuthConfig(t, repo, models.LLMConfig{ID: "cfg-singleflight", Provider: models.ProviderOpenAI})
 	mgr := NewManager(repo)
 
+	const workers = 8
+	ready := make(chan struct{}, workers)
+	release := make(chan struct{})
 	start := make(chan struct{})
 	finish := make(chan struct{})
+	var startOnce sync.Once
 	calls := 0
 	var mu sync.Mutex
 	refresh := func(ctx context.Context, cfg models.LLMConfig) (TokenSet, error) {
 		mu.Lock()
 		calls++
 		mu.Unlock()
-		close(start)
+		startOnce.Do(func() { close(start) })
 		<-finish
 		return TokenSet{AccessToken: "new-access", RefreshToken: "new-refresh", ExpiresAt: time.Now().Add(time.Hour).UnixMilli()}, nil
 	}
 
 	var wg sync.WaitGroup
-	results := make([]models.LLMConfig, 2)
-	errs := make([]error, 2)
-	for i := range 2 {
+	results := make([]models.LLMConfig, workers)
+	errs := make([]error, workers)
+	for i := range workers {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			ready <- struct{}{}
+			<-release
 			results[i], errs[i] = mgr.EnsureFresh(context.Background(), cfg, time.Hour, refresh)
 		}(i)
 	}
+	for range workers {
+		<-ready
+	}
+	close(release)
 	<-start
+	time.Sleep(10 * time.Millisecond)
 	close(finish)
 	wg.Wait()
 
