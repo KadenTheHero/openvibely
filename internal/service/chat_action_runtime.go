@@ -97,6 +97,27 @@ func (c *channelActionSummaryCollector) appendToOutput(output string) string {
 	return output + summary
 }
 
+// channelGoalToolInput is the shared input struct for task goal tool calls
+// from channel surfaces (Telegram, Slack).
+type channelGoalToolInput struct {
+	TaskID     string `json:"task_id"`
+	Title      string `json:"title"`
+	Goal       string `json:"goal"`
+	GoalID     string `json:"goal_id"`
+	Reason     string `json:"reason"`
+	BlockerKey string `json:"blocker_key"`
+}
+
+// channelGoalToolJSON serializes a task goal as a JSON string for channel tool responses.
+func channelGoalToolJSON(goal *models.TaskGoal) (string, error) {
+	payload := map[string]any{"ok": true, "goal": goal}
+	if goal != nil {
+		payload["task_id"] = goal.TaskID
+	}
+	b, err := json.Marshal(payload)
+	return string(b), err
+}
+
 func decodeRuntimeToolInput(input json.RawMessage, dst interface{}) error {
 	payload := input
 	if len(strings.TrimSpace(string(payload))) == 0 {

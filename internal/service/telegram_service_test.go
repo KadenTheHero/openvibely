@@ -2646,3 +2646,151 @@ func TestTelegramService_SendChatResponse_EditsInitialAckMessage(t *testing.T) {
 	require.Empty(t, sent)
 	require.Equal(t, []string{"42:99:hello from initial telegram chat"}, edited)
 }
+
+// TestTelegramService_GoalTools_SetGetClearPauseResume verifies that the Telegram
+// goal tool handlers call TaskGoalService and return JSON results, not errors.
+// This is a regression test: before the fix, all goal tool handlers were stubs
+// that always returned "task goal tools are unavailable on Telegram".
+func TestTelegramService_GoalTools_SetGetClearPauseResume(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskGoalRepo := repository.NewTaskGoalRepo(db)
+	workerSvc := NewWorkerService(nil, 0, projectRepo)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	goalSvc := NewTaskGoalService(taskGoalRepo, taskRepo, nil)
+
+	project := &models.Project{Name: "Telegram Goal Test", RepoPath: "/tmp/test", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "goal-test-task",
+		Prompt:    "do something",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	svc := &TelegramService{
+		taskSvc:     taskSvc,
+		taskRepo:    taskRepo,
+		taskGoalSvc: goalSvc,
+		userProjects: make(map[int64]string),
+	}
+
+	taskIDJSON, err := json.Marshal(map[string]string{"task_id": task.ID, "goal": "All tests pass"})
+	require.NoError(t, err)
+
+	// set_task_goal
+	handlers := svc.telegramActionHandlers(project.ID, 12345, 12345, nil)
+	out, err := handlers["set_task_goal"](ctx, taskIDJSON)
+	require.NoError(t, err, "set_task_goal must not return an error on Telegram")
+	require.Contains(t, out, "ok")
+	require.Contains(t, out, "All tests pass")
+
+	// get_task_goal
+	getInput, _ := json.Marshal(map[string]string{"task_id": task.ID})
+	out, err = handlers["get_task_goal"](ctx, getInput)
+	require.NoError(t, err, "get_task_goal must not return an error on Telegram")
+	require.Contains(t, out, "All tests pass")
+
+	// pause_task_goal
+	out, err = handlers["pause_task_goal"](ctx, getInput)
+	require.NoError(t, err, "pause_task_goal must not return an error on Telegram")
+	require.Contains(t, out, "paused")
+
+	// resume_task_goal
+	out, err = handlers["resume_task_goal"](ctx, getInput)
+	require.NoError(t, err, "resume_task_goal must not return an error on Telegram")
+	require.Contains(t, out, "active")
+
+	// clear_task_goal
+	out, err = handlers["clear_task_goal"](ctx, getInput)
+	require.NoError(t, err, "clear_task_goal must not return an error on Telegram")
+	require.Contains(t, out, "ok")
+}
+
+// TestTelegramService_GoalTools_UnavailableWithoutService verifies that when
+// taskGoalSvc is nil (not yet wired), goal tools return a descriptive error
+// rather than panicking.
+func TestTelegramService_GoalTools_UnavailableWithoutService(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	workerSvc := NewWorkerService(nil, 0, projectRepo)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+
+	project := &models.Project{Name: "Telegram Goal Nil Svc", RepoPath: "/tmp/test"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	svc := &TelegramService{
+		taskSvc:      taskSvc,
+		taskRepo:     taskRepo,
+		taskGoalSvc:  nil, // intentionally nil
+		userProjects: make(map[int64]string),
+	}
+
+	handlers := svc.telegramActionHandlers(project.ID, 12345, 12345, nil)
+	input, _ := json.Marshal(map[string]string{"task_id": "any"})
+	for _, name := range []string{"set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal", "mark_task_goal_achieved", "report_task_goal_blocked"} {
+		_, err := handlers[name](ctx, input)
+		require.Error(t, err, "expected error when taskGoalSvc is nil for handler %s", name)
+		require.Contains(t, err.Error(), "task goal service unavailable", "handler %s should report service unavailable", name)
+	}
+}
+
+// TestTelegramService_GoalTools_MarkAchievedReportBlocked verifies that
+// mark_task_goal_achieved and report_task_goal_blocked are callable from Telegram
+// (previously blocked by the unavailable stub).
+func TestTelegramService_GoalTools_MarkAchievedReportBlocked(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskGoalRepo := repository.NewTaskGoalRepo(db)
+	workerSvc := NewWorkerService(nil, 0, projectRepo)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	goalSvc := NewTaskGoalService(taskGoalRepo, taskRepo, nil)
+
+	project := &models.Project{Name: "Telegram Goal Achieved", RepoPath: "/tmp/test", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "mark-achieved-task",
+		Prompt:    "do something",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "ship it", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+
+	svc := &TelegramService{
+		taskSvc:      taskSvc,
+		taskRepo:     taskRepo,
+		taskGoalSvc:  goalSvc,
+		userProjects: make(map[int64]string),
+	}
+
+	handlers := svc.telegramActionHandlers(project.ID, 12345, 12345, nil)
+
+	achievedInput, _ := json.Marshal(map[string]string{
+		"task_id": task.ID,
+		"goal_id": goal.GoalID,
+		"reason":  "done",
+	})
+	out, err := handlers["mark_task_goal_achieved"](ctx, achievedInput)
+	require.NoError(t, err, "mark_task_goal_achieved must work on Telegram when goal service is wired")
+	require.Contains(t, out, "achieved")
+}

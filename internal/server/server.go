@@ -491,6 +491,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackSvc.SetCustomPersonalityRepo(customPersonalityRepo)
 	slackSvc.SetChatBroadcaster(chatBroadcaster)
 	slackSvc.SetAlertService(alertSvc)
+	slackSvc.SetTaskGoalService(taskGoalSvc)
 	slackSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 	slackSvc.SetAgentRepo(agentRepo)
 
@@ -607,6 +608,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 			telegramSvc.SetSettingsRepo(settingsRepo)
 			telegramSvc.SetCustomPersonalityRepo(customPersonalityRepo)
 			telegramSvc.SetAlertService(alertSvc)
+			telegramSvc.SetTaskGoalService(taskGoalSvc)
 			telegramSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 			log.Println("telegram bot initialized")
 		}

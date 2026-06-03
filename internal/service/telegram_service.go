@@ -57,6 +57,7 @@ type TelegramService struct {
 	customPersonalityRepo   *repository.CustomPersonalityRepo
 	agentRepo               *repository.AgentRepo
 	alertSvc                *AlertService
+	taskGoalSvc             *TaskGoalService
 	llmSvc                  *LLMService
 	workerSvc               *WorkerService
 	chatBroadcaster         *events.ChatBroadcaster
@@ -177,6 +178,13 @@ func (s *TelegramService) SetAgentRepo(repo *repository.AgentRepo) {
 // SetAlertService sets the alert service for managing alerts from Telegram chat.
 func (s *TelegramService) SetAlertService(svc *AlertService) {
 	s.alertSvc = svc
+}
+
+// SetTaskGoalService injects the task goal service so Telegram can execute
+// goal-related chat-control tools with the same durable TaskGoalService
+// behavior as web/API chat.
+func (s *TelegramService) SetTaskGoalService(svc *TaskGoalService) {
+	s.taskGoalSvc = svc
 }
 
 // checkAuthorization verifies that a Telegram user is authorized for the given project.
@@ -1181,13 +1189,27 @@ func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64,
 			}
 			return s.executeSendToTask(ctx, projectID, req, chatID)
 		},
-		"set_task_goal":            telegramGoalToolUnavailable,
-		"clear_task_goal":          telegramGoalToolUnavailable,
-		"get_task_goal":            telegramGoalToolUnavailable,
-		"pause_task_goal":          telegramGoalToolUnavailable,
-		"resume_task_goal":         telegramGoalToolUnavailable,
-		"mark_task_goal_achieved":  telegramGoalToolUnavailable,
-		"report_task_goal_blocked": telegramGoalToolUnavailable,
+		"set_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return s.executeChannelSetTaskGoal(ctx, projectID, input)
+		},
+		"clear_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return s.executeChannelClearTaskGoal(ctx, projectID, input)
+		},
+		"get_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return s.executeChannelGetTaskGoal(ctx, projectID, input)
+		},
+		"pause_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return s.executeChannelPauseTaskGoal(ctx, projectID, input)
+		},
+		"resume_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return s.executeChannelResumeTaskGoal(ctx, projectID, input)
+		},
+		"mark_task_goal_achieved": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return s.executeChannelMarkTaskGoalAchieved(ctx, projectID, input)
+		},
+		"report_task_goal_blocked": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return s.executeChannelReportTaskGoalBlocked(ctx, projectID, input)
+		},
 		"schedule_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return s.executeScheduleTaskChannel(ctx, projectID, input), nil
 		},
@@ -3371,6 +3393,146 @@ func (s *TelegramService) SendChatResponse(ctx context.Context, task models.Task
 	}
 }
 
-func telegramGoalToolUnavailable(context.Context, json.RawMessage) (string, error) {
-	return "", fmt.Errorf("task goal tools are unavailable on Telegram")
+// executeChannelSetTaskGoal sets or replaces the goal for a task.
+func (s *TelegramService) executeChannelSetTaskGoal(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	if s.taskGoalSvc == nil {
+		return "", fmt.Errorf("task goal service unavailable")
+	}
+	var req channelGoalToolInput
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	goal, err := s.taskGoalSvc.SetGoal(ctx, task.ID, req.Goal, GoalOptions{Actor: "assistant"})
+	if err != nil {
+		return "", err
+	}
+	return channelGoalToolJSON(goal)
+}
+
+// executeChannelClearTaskGoal clears the stored goal for a task.
+func (s *TelegramService) executeChannelClearTaskGoal(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	if s.taskGoalSvc == nil {
+		return "", fmt.Errorf("task goal service unavailable")
+	}
+	var req channelGoalToolInput
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	if err := s.taskGoalSvc.ClearGoal(ctx, task.ID, "assistant"); err != nil {
+		return "", err
+	}
+	goal, _ := s.taskGoalSvc.GetGoal(ctx, task.ID)
+	return channelGoalToolJSON(goal)
+}
+
+// executeChannelGetTaskGoal reads the current goal and status for a task.
+func (s *TelegramService) executeChannelGetTaskGoal(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	if s.taskGoalSvc == nil {
+		return "", fmt.Errorf("task goal service unavailable")
+	}
+	var req channelGoalToolInput
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	goal, err := s.taskGoalSvc.GetGoal(ctx, task.ID)
+	if err != nil {
+		return "", err
+	}
+	return channelGoalToolJSON(goal)
+}
+
+// executeChannelPauseTaskGoal pauses automatic continuation for a task goal.
+func (s *TelegramService) executeChannelPauseTaskGoal(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	if s.taskGoalSvc == nil {
+		return "", fmt.Errorf("task goal service unavailable")
+	}
+	var req channelGoalToolInput
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	if err := s.taskGoalSvc.PauseGoal(ctx, task.ID, "assistant"); err != nil {
+		return "", err
+	}
+	goal, _ := s.taskGoalSvc.GetGoal(ctx, task.ID)
+	return channelGoalToolJSON(goal)
+}
+
+// executeChannelResumeTaskGoal resumes automatic continuation for a paused task goal.
+func (s *TelegramService) executeChannelResumeTaskGoal(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	if s.taskGoalSvc == nil {
+		return "", fmt.Errorf("task goal service unavailable")
+	}
+	var req channelGoalToolInput
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	if err := s.taskGoalSvc.ResumeGoal(ctx, task.ID, "assistant"); err != nil {
+		return "", err
+	}
+	goal, _ := s.taskGoalSvc.GetGoal(ctx, task.ID)
+	return channelGoalToolJSON(goal)
+}
+
+// executeChannelMarkTaskGoalAchieved marks the current task goal as achieved.
+// In channel contexts the orchestrating user is the principal, so no agent
+// tool grant is required (consistent with web chat where the user drives actions).
+func (s *TelegramService) executeChannelMarkTaskGoalAchieved(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	if s.taskGoalSvc == nil {
+		return "", fmt.Errorf("task goal service unavailable")
+	}
+	var req channelGoalToolInput
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	goal, err := s.taskGoalSvc.MarkAchieved(ctx, task.ID, req.GoalID, req.Reason)
+	if err != nil {
+		return "", err
+	}
+	return channelGoalToolJSON(goal)
+}
+
+// executeChannelReportTaskGoalBlocked records a repeatable blocker for a task goal.
+// In channel contexts the orchestrating user is the principal, so no agent
+// tool grant is required (consistent with web chat where the user drives actions).
+func (s *TelegramService) executeChannelReportTaskGoalBlocked(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	if s.taskGoalSvc == nil {
+		return "", fmt.Errorf("task goal service unavailable")
+	}
+	var req channelGoalToolInput
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	goal, err := s.taskGoalSvc.RecordBlockedReport(ctx, task.ID, req.GoalID, req.BlockerKey, req.Reason)
+	if err != nil {
+		return "", err
+	}
+	return channelGoalToolJSON(goal)
 }

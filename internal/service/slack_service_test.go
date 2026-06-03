@@ -714,3 +714,144 @@ func TestSlackService_SendChatResponse_SendsChatTaskOutput(t *testing.T) {
 
 	require.Equal(t, []string{"C1|1710000000.100000|hello from queued slack"}, sent)
 }
+
+// TestSlackService_GoalTools_SetGetClearPauseResume verifies that the Slack
+// goal tool handlers call TaskGoalService and return JSON results, not errors.
+// This is a regression test: before the fix, all goal tool handlers were stubs
+// that always returned "task goal tools are unavailable on Slack".
+func TestSlackService_GoalTools_SetGetClearPauseResume(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskGoalRepo := repository.NewTaskGoalRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	workerSvc := NewWorkerService(nil, 0, projectRepo)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	goalSvc := NewTaskGoalService(taskGoalRepo, taskRepo, nil)
+
+	project := &models.Project{Name: "Slack Goal Test", RepoPath: "/tmp/test", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "slack-goal-task",
+		Prompt:    "do something",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	svc := NewSlackService(settingsRepo, projectRepo, nil, taskRepo, nil, nil, taskSvc, nil, workerSvc, nil, nil, nil)
+	svc.taskGoalSvc = goalSvc
+
+	markerCtx := slackMarkerContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
+	handlers := svc.slackActionHandlers(project.ID, markerCtx, nil)
+
+	taskIDJSON, err := json.Marshal(map[string]string{"task_id": task.ID, "goal": "All tests pass"})
+	require.NoError(t, err)
+
+	// set_task_goal
+	out, err := handlers["set_task_goal"](ctx, taskIDJSON)
+	require.NoError(t, err, "set_task_goal must not return an error on Slack")
+	require.Contains(t, out, "ok")
+	require.Contains(t, out, "All tests pass")
+
+	// get_task_goal
+	getInput, _ := json.Marshal(map[string]string{"task_id": task.ID})
+	out, err = handlers["get_task_goal"](ctx, getInput)
+	require.NoError(t, err, "get_task_goal must not return an error on Slack")
+	require.Contains(t, out, "All tests pass")
+
+	// pause_task_goal
+	out, err = handlers["pause_task_goal"](ctx, getInput)
+	require.NoError(t, err, "pause_task_goal must not return an error on Slack")
+	require.Contains(t, out, "paused")
+
+	// resume_task_goal
+	out, err = handlers["resume_task_goal"](ctx, getInput)
+	require.NoError(t, err, "resume_task_goal must not return an error on Slack")
+	require.Contains(t, out, "active")
+
+	// clear_task_goal
+	out, err = handlers["clear_task_goal"](ctx, getInput)
+	require.NoError(t, err, "clear_task_goal must not return an error on Slack")
+	require.Contains(t, out, "ok")
+}
+
+// TestSlackService_GoalTools_UnavailableWithoutService verifies that when
+// taskGoalSvc is nil (not yet wired), goal tools return a descriptive error
+// rather than panicking.
+func TestSlackService_GoalTools_UnavailableWithoutService(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	settingsRepo := repository.NewSettingsRepo(db)
+
+	project := &models.Project{Name: "Slack Goal Nil Svc", RepoPath: "/tmp/test"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	svc := NewSlackService(settingsRepo, projectRepo, nil, taskRepo, nil, nil, nil, nil, nil, nil, nil, nil)
+	// taskGoalSvc intentionally not set
+
+	markerCtx := slackMarkerContext{TeamID: "T1", ChannelID: "C1"}
+	handlers := svc.slackActionHandlers(project.ID, markerCtx, nil)
+
+	input, _ := json.Marshal(map[string]string{"task_id": "any"})
+	for _, name := range []string{"set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal", "mark_task_goal_achieved", "report_task_goal_blocked"} {
+		_, err := handlers[name](ctx, input)
+		require.Error(t, err, "expected error when taskGoalSvc is nil for handler %s", name)
+		require.Contains(t, err.Error(), "task goal service unavailable", "handler %s should report service unavailable", name)
+	}
+}
+
+// TestSlackService_GoalTools_MarkAchievedReportBlocked verifies that
+// mark_task_goal_achieved and report_task_goal_blocked are callable from Slack
+// (previously blocked by the unavailable stub).
+func TestSlackService_GoalTools_MarkAchievedReportBlocked(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskGoalRepo := repository.NewTaskGoalRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	workerSvc := NewWorkerService(nil, 0, projectRepo)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	goalSvc := NewTaskGoalService(taskGoalRepo, taskRepo, nil)
+
+	project := &models.Project{Name: "Slack Goal Achieved", RepoPath: "/tmp/test", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "slack-mark-achieved-task",
+		Prompt:    "do something",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "ship it", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+
+	svc := NewSlackService(settingsRepo, projectRepo, nil, taskRepo, nil, nil, taskSvc, nil, workerSvc, nil, nil, nil)
+	svc.taskGoalSvc = goalSvc
+
+	markerCtx := slackMarkerContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
+	handlers := svc.slackActionHandlers(project.ID, markerCtx, nil)
+
+	achievedInput, _ := json.Marshal(map[string]string{
+		"task_id": task.ID,
+		"goal_id": goal.GoalID,
+		"reason":  "done",
+	})
+	out, err := handlers["mark_task_goal_achieved"](ctx, achievedInput)
+	require.NoError(t, err, "mark_task_goal_achieved must work on Slack when goal service is wired")
+	require.Contains(t, out, "achieved")
+}
