@@ -3,8 +3,8 @@ name: worktree_and_lineage
 type: project
 created: 2026-05-09
 updated: 2026-06-03
-source: after_complete
-source_id: a44fd612920ee5b58f8b58f4cbfbd90e
+source: consolidation
+source_id: memory_consolidation_2026_06_03
 confidence: high
 title: Worktree and Lineage
 ---
