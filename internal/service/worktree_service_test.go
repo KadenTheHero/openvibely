@@ -19,7 +19,7 @@ func createTestGitRepo(t *testing.T) string {
 	dir := t.TempDir()
 
 	cmds := [][]string{
-		{"git", "init"},
+		{"git", "init", "-b", "main"},
 		{"git", "config", "user.email", "test@test.com"},
 		{"git", "config", "user.name", "Test"},
 	}
@@ -2494,7 +2494,7 @@ func TestCleanupOrphanedWorktrees(t *testing.T) {
 	// Create a test project with a git repo
 	tempDir := t.TempDir()
 	repoDir := filepath.Join(tempDir, "test-repo")
-	exec.Command("git", "init", repoDir).Run()
+	exec.Command("git", "init", "-b", "main", repoDir).Run()
 	exec.Command("git", "-C", repoDir, "config", "user.email", "test@test.com").Run()
 	exec.Command("git", "-C", repoDir, "config", "user.name", "Test User").Run()
 

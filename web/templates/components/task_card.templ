@@ -255,7 +255,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 								</span>
 							}
 							if task.HasGoal {
-								<span class="badge badge-sm badge-primary badge-outline inline-flex items-center" title="Task has a goal">Goal</span>
+								<span class="badge badge-sm badge-primary badge-outline inline-flex items-center" title="Task has an active goal">Goal</span>
 							}
 							<!-- Model Badge -->
 							if len(llmModels) > 0 {

@@ -89,7 +89,7 @@ func createHandlerTestGitRepo(t *testing.T) string {
 	dir := t.TempDir()
 
 	cmds := [][]string{
-		{"git", "init"},
+		{"git", "init", "-b", "main"},
 		{"git", "config", "user.email", "test@test.com"},
 		{"git", "config", "user.name", "Test"},
 	}

@@ -437,7 +437,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			}
 		}
 		if task.HasGoal {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<span class=\"badge badge-sm badge-primary badge-outline inline-flex items-center\" title=\"Task has a goal\">Goal</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<span class=\"badge badge-sm badge-primary badge-outline inline-flex items-center\" title=\"Task has an active goal\">Goal</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
