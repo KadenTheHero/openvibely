@@ -12,6 +12,7 @@ dev:
 	air
 
 TEMPL_VERSION := $(shell go list -m -f '{{.Version}}' github.com/a-h/templ)
+SWAG_VERSION := $(shell go list -m -f '{{.Version}}' github.com/swaggo/swag)
 
 # Generate templ files (no global binary required)
 templ:
@@ -19,7 +20,7 @@ templ:
 
 # Generate Swagger documentation (no global binary required)
 swagger:
-	go run github.com/swaggo/swag/cmd/swag@v1.16.6 init -g cmd/server/main.go -o docs
+	go run github.com/swaggo/swag/cmd/swag@$(SWAG_VERSION) init -g cmd/server/main.go -o docs
 	@sed -i.bak '/LeftDelim:/d' docs/docs.go && sed -i.bak '/RightDelim:/d' docs/docs.go && rm docs/docs.go.bak || true
 
 # Build production server binary
