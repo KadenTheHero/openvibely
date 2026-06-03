@@ -10,6 +10,8 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func stringPtr(s string) *string { return &s }
+
 func TestTaskDetailMetrics_StatusBadgeVisibility(t *testing.T) {
 	tests := []struct {
 		name               string
@@ -78,7 +80,7 @@ func TestTaskDetailMetrics_StatusBadgeVisibility(t *testing.T) {
 			executions := []models.Execution{}
 
 			var buf bytes.Buffer
-			err := TaskDetailMetrics(task, executions).Render(context.Background(), &buf)
+			err := TaskDetailMetrics(task, executions, nil, nil).Render(context.Background(), &buf)
 			if err != nil {
 				t.Fatalf("render failed: %v", err)
 			}
@@ -223,6 +225,9 @@ func TestTaskDetailContent_DetailsTabRendersScrollableMatchedSectionCards(t *tes
 		Status:            models.StatusCompleted,
 		Category:          models.CategoryCompleted,
 		Prompt:            "Do the thing",
+		AgentID:           stringPtr("model-1"),
+		AgentDefinitionID: stringPtr("agent-1"),
+		Tag:               models.TagFeature,
 		WorktreeBranch:    "task/layout",
 		WorktreePath:      "/tmp/worktree",
 		MergeTargetBranch: "main",
@@ -234,8 +239,11 @@ func TestTaskDetailContent_DetailsTabRendersScrollableMatchedSectionCards(t *tes
 		Objective: "Keep the layout clean",
 	}
 
+	modelsList := []models.LLMConfig{{ID: "model-1", Name: "Model One"}}
+	agentsList := []models.Agent{{ID: "agent-1", Name: "Agent One", Enabled: true, SelectableAsPrimary: true}}
+
 	var buf bytes.Buffer
-	err := TaskDetailContent(task, goal, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf)
+	err := TaskDetailContent(task, goal, nil, nil, modelsList, agentsList, nil, "details", nil).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -244,13 +252,20 @@ func TestTaskDetailContent_DetailsTabRendersScrollableMatchedSectionCards(t *tes
 	if !strings.Contains(output, `id="task-detail-view" class="flex-1 overflow-y-auto min-h-0 pr-1"`) {
 		t.Fatal("expected Details view to be the scroll container")
 	}
-	for _, id := range []string{`id="task-goal-panel"`, `id="task-prompt-panel"`, `id="worktree-info-panel"`} {
-		if !strings.Contains(output, id) {
+	sectionIDs := []string{`id="task-prompt-panel"`, `id="task-goal-panel"`, `id="worktree-info-panel"`}
+	lastIndex := -1
+	for _, id := range sectionIDs {
+		idx := strings.Index(output, id)
+		if idx == -1 {
 			t.Fatalf("expected details section card %s", id)
 		}
+		if idx <= lastIndex {
+			t.Fatalf("expected details sections in Prompt, Goal, Git Worktree order; %s rendered out of order", id)
+		}
+		lastIndex = idx
 	}
 	if got := strings.Count(output, `class="card bg-base-200/50 border border-base-300 mb-4"`); got < 3 {
-		t.Fatalf("expected goal, prompt, and worktree cards to share section styling, got %d matching cards", got)
+		t.Fatalf("expected prompt, goal, and worktree cards to share section styling, got %d matching cards", got)
 	}
 	if !strings.Contains(output, `class="textarea textarea-bordered textarea-sm w-full min-h-32 h-auto cursor-default whitespace-pre-wrap overflow-x-auto font-sans text-sm leading-relaxed"`) {
 		t.Fatal("expected prompt content box to match the goal textarea styling")
@@ -260,6 +275,43 @@ func TestTaskDetailContent_DetailsTabRendersScrollableMatchedSectionCards(t *tes
 	}
 	if strings.Contains(output, `<pre class="p-4 bg-base-100/60 border border-base-300 rounded-lg text-sm`) {
 		t.Fatal("prompt should not render with the old monospace pre styling")
+	}
+	for _, required := range []string{"Model One", "Agent One", "Feature", `name="goal"`, `name="goal_active"`, `name="auto_merge"`} {
+		if !strings.Contains(output, required) {
+			t.Fatalf("expected task details/edit markup to include %q", required)
+		}
+	}
+	viewStart := strings.Index(output, `id="task-detail-view"`)
+	editStart := strings.Index(output, `id="task-detail-edit"`)
+	if viewStart == -1 || editStart == -1 || editStart <= viewStart {
+		t.Fatal("expected task detail view before edit form")
+	}
+	viewOnly := output[viewStart:editStart]
+	for _, forbidden := range []string{"Add goal", "Pause", "Resume", "Clear", "Auto-merge on completion", `name="auto_merge"`} {
+		if strings.Contains(viewOnly, forbidden) {
+			t.Fatalf("read-only details view should not include edit/configuration control %q", forbidden)
+		}
+	}
+}
+
+func TestTaskDetailMetrics_ShowsMissingTagModelAndAgentClearly(t *testing.T) {
+	task := &models.Task{
+		ID:       "task-missing-summary",
+		Title:    "Task",
+		Status:   models.StatusPending,
+		Category: models.CategoryBacklog,
+		Priority: 2,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailMetrics(task, nil, nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	output := buf.String()
+	for _, required := range []string{"Tag:", "None", "Model:", "Default model", "Agent:", "No agent", "Priority:", "Normal"} {
+		if !strings.Contains(output, required) {
+			t.Fatalf("expected metrics to include %q, got: %s", required, output)
+		}
 	}
 }
 

@@ -56,31 +56,6 @@ templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat)
 					</div>
 				}
 
-				// Auto-merge toggle
-				<div class="flex items-center gap-3 mb-3 p-2 bg-base-200 rounded">
-					<form
-						method="post"
-						hx-post={ fmt.Sprintf("/tasks/%s/worktree/auto-merge", task.ID) }
-						hx-target="#worktree-info-panel"
-						hx-swap="outerHTML"
-						class="flex items-center gap-2"
-					>
-						<label class="label cursor-pointer gap-2 p-0">
-							<span class="label-text text-sm">Auto-merge on completion</span>
-							<input
-								type="checkbox"
-								name="auto_merge"
-								class="toggle toggle-sm toggle-primary"
-								if task.AutoMerge {
-									checked
-								}
-								onchange="this.form.requestSubmit()"
-							/>
-						</label>
-						<input type="hidden" name="merge_target_branch" value={ task.MergeTargetBranch }/>
-					</form>
-				</div>
-
 				// Action buttons
 				<div class="flex flex-wrap gap-2">
 					if task.MergeStatus == models.MergeStatusConflict {

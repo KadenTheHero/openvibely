@@ -462,7 +462,10 @@ func (h *Handler) GetTaskDetailStatus(c echo.Context) error {
 
 	executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
 
-	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, executions))
+	agents, _ := h.llmConfigRepo.List(c.Request().Context())
+	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.AgentDefinitionID)
+
+	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, executions, agents, agentDefs))
 }
 
 func latestNonEmptyDiff(executions []models.Execution) string {
@@ -889,6 +892,46 @@ func (h *Handler) GetTaskChangesLive(c echo.Context) error {
 	return render(c, http.StatusOK, component)
 }
 
+func (h *Handler) updateTaskGoalFromEditForm(c echo.Context, taskID string) error {
+	if c.FormValue("goal_present") == "" || h.taskGoalSvc == nil {
+		return nil
+	}
+
+	goalText := strings.TrimSpace(c.FormValue("goal"))
+	existingGoal := h.loadTaskGoal(c.Request().Context(), taskID)
+	if goalText == "" {
+		if existingGoal != nil && existingGoal.Status != models.TaskGoalStatusCleared {
+			return h.taskGoalSvc.ClearGoal(c.Request().Context(), taskID, "user")
+		}
+		return nil
+	}
+
+	if existingGoal == nil || existingGoal.Status == models.TaskGoalStatusCleared || strings.TrimSpace(existingGoal.Objective) != goalText {
+		if _, err := h.taskGoalSvc.SetGoal(c.Request().Context(), taskID, goalText, service.GoalOptions{Actor: "user"}); err != nil {
+			if err == service.ErrTaskGoalEmpty || err == service.ErrTaskGoalTooLong {
+				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			}
+			return err
+		}
+	}
+
+	if c.FormValue("goal_status_present") == "" {
+		return nil
+	}
+	latestGoal := h.loadTaskGoal(c.Request().Context(), taskID)
+	if latestGoal == nil || latestGoal.Status == models.TaskGoalStatusCleared {
+		return nil
+	}
+	goalActive := c.FormValue("goal_active") == "on" || c.FormValue("goal_active") == "true"
+	if goalActive && latestGoal.Status == models.TaskGoalStatusPaused {
+		return h.taskGoalSvc.ResumeGoal(c.Request().Context(), taskID, "user")
+	}
+	if !goalActive && latestGoal.Status == models.TaskGoalStatusActive {
+		return h.taskGoalSvc.PauseGoal(c.Request().Context(), taskID, "user")
+	}
+	return nil
+}
+
 func (h *Handler) UpdateTask(c echo.Context) error {
 	taskID := c.Param("taskId")
 	log.Printf("[handler] UpdateTask id=%s", taskID)
@@ -954,6 +997,9 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
 		}
 		log.Printf("[handler] UpdateTask error: %v", err)
+		return err
+	}
+	if err := h.updateTaskGoalFromEditForm(c, taskID); err != nil {
 		return err
 	}
 

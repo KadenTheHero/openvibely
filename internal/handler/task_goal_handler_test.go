@@ -24,7 +24,7 @@ func TestTaskGoalRoutes_HTMXEditPauseResumeClear(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set goal status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "All checks pass") || !strings.Contains(rec.Body.String(), "Goal active") {
+	if !strings.Contains(rec.Body.String(), "All checks pass") || !strings.Contains(rec.Body.String(), "Active: true") {
 		t.Fatalf("set goal body missing panel content: %s", rec.Body.String())
 	}
 
@@ -40,6 +40,53 @@ func TestTaskGoalRoutes_HTMXEditPauseResumeClear(t *testing.T) {
 	}
 	if goal.Status != models.TaskGoalStatusCleared {
 		t.Fatalf("goal status = %s", goal.Status)
+	}
+}
+
+func TestUpdateTask_EditFormSavesGoalAndRefreshesReadOnlySummary(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := &models.Task{ProjectID: project.ID, Title: "Edit Goal", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "prompt", Priority: 2}
+	if err := tc.taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	form := url.Values{
+		"title":              {task.Title},
+		"category":           {string(task.Category)},
+		"priority":           {"2"},
+		"prompt":             {task.Prompt},
+		"tag":                {""},
+		"agent_id":           {""},
+		"goal_present":       {"1"},
+		"goal":               {"Ship a clearer details UX"},
+		"auto_merge_present": {"1"},
+	}
+	rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(form).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update task status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	goal, err := tc.handler.taskGoalSvc.GetGoal(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("get goal: %v", err)
+	}
+	if goal == nil || goal.Objective != "Ship a clearer details UX" || goal.Status != models.TaskGoalStatusActive {
+		t.Fatalf("unexpected saved goal: %#v", goal)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Ship a clearer details UX") || !strings.Contains(body, "Active: true") {
+		t.Fatalf("expected refreshed read-only goal summary, got: %s", body)
+	}
+	viewStart := strings.Index(body, `id="task-detail-view"`)
+	editStart := strings.Index(body, `id="task-detail-edit"`)
+	if viewStart == -1 || editStart == -1 || editStart <= viewStart {
+		t.Fatal("expected task detail view before edit form")
+	}
+	viewOnly := body[viewStart:editStart]
+	for _, forbidden := range []string{"Add goal", "Pause", "Resume", "Clear"} {
+		if strings.Contains(viewOnly, forbidden) {
+			t.Fatalf("read-only goal summary should not include %q", forbidden)
+		}
 	}
 }
 
