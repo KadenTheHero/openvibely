@@ -316,13 +316,14 @@ func (r *LifecycleRepo) UpdateExecution(ctx context.Context, e *models.Lifecycle
 }
 
 // ListExecutionsForTask returns lifecycle executions attached to a task,
-// ordered by start time so the UI can render them as task activity.
+// ordered newest-first (DESC) so the UI shows the most recent activity without
+// requiring the user to scroll to the bottom.
 func (r *LifecycleRepo) ListExecutionsForTask(ctx context.Context, taskID string) ([]models.LifecycleExecution, error) {
 	rows, err := r.db.QueryContext(ctx, `
         SELECT `+execCols+`
         FROM lifecycle_executions
         WHERE task_id = ?
-        ORDER BY started_at ASC`, taskID)
+        ORDER BY started_at DESC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("listing executions for task %s: %w", taskID, err)
 	}

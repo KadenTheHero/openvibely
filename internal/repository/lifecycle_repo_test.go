@@ -332,6 +332,71 @@ func TestLifecycleRepo_ExecutionEvents(t *testing.T) {
 	}
 }
 
+// TestLifecycleRepo_ListExecutionsForTask_NewestFirst verifies that
+// ListExecutionsForTask returns executions in descending started_at order so
+// the newest lifecycle event is visible at the top of the UI without scrolling.
+func TestLifecycleRepo_ListExecutionsForTask_NewestFirst(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Order Test", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Insert three executions then explicitly backdate started_at so they have
+	// distinct, known timestamps. SQLite datetime('now') has second precision, so
+	// inserting quickly then updating is more reliable than sleeping.
+	skillKeys := []string{"route_task", "recall_memory", "summarize_activity"}
+	var ids []string
+	for i, skillKey := range skillKeys {
+		e := &models.LifecycleExecution{
+			TaskID:   task.ID,
+			AgentID:  agent.ID,
+			When:     models.LifecycleAfterComplete,
+			SkillKey: skillKey,
+			Status:   models.LifecycleExecCompleted,
+		}
+		if err := repo.CreateExecution(ctx, e); err != nil {
+			t.Fatalf("create exec %d: %v", i, err)
+		}
+		ids = append(ids, e.ID)
+	}
+	// Assign distinct timestamps: route_task is oldest, summarize_activity is newest.
+	timestamps := []string{
+		"2000-01-01 10:00:00", // route_task — oldest
+		"2000-01-01 11:00:00", // recall_memory
+		"2000-01-01 12:00:00", // summarize_activity — newest
+	}
+	for i, id := range ids {
+		if _, err := db.ExecContext(ctx, `UPDATE lifecycle_executions SET started_at = ? WHERE id = ?`, timestamps[i], id); err != nil {
+			t.Fatalf("backdate exec %d: %v", i, err)
+		}
+	}
+
+	list, err := repo.ListExecutionsForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 3 {
+		t.Fatalf("expected 3 executions, got %d", len(list))
+	}
+	// Newest (summarize_activity) must be first (DESC ordering).
+	if list[0].SkillKey != "summarize_activity" {
+		t.Fatalf("expected newest execution first (summarize_activity), got %s", list[0].SkillKey)
+	}
+	if list[1].SkillKey != "recall_memory" {
+		t.Fatalf("expected second execution (recall_memory) at index 1, got %s", list[1].SkillKey)
+	}
+	if list[2].SkillKey != "route_task" {
+		t.Fatalf("expected oldest execution last (route_task), got %s", list[2].SkillKey)
+	}
+}
+
 func TestLifecycleRepo_IdempotencyAllowsRetryAfterFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	agentRepo := NewAgentRepo(db)
