@@ -44,5 +44,8 @@ jobs:
       - name: Build server
         run: go build ./cmd/server
 
-      - name: Run internal tests
-        run: go test ./... -count=1 -timeout 120s
+      - name: Run all tests with coverage
+        run: go test ./... -count=1 -timeout 120s -coverprofile=coverage.out
+
+      - name: Show coverage summary
+        run: go tool cover -func=coverage.out
