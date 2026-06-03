@@ -348,6 +348,11 @@ modelLoop:
 	tokensUsed := result.Usage.TotalTokens
 
 	if err != nil {
+		status := string(models.ExecFailed)
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			status = string(models.ExecCancelled)
+		}
+		h.recordStreamingUsage(ctx, params, result, status, err.Error(), durationMs)
 		finalizeLifecycle(err, result.ChatContext)
 		log.Printf("[handler] processStreamingResponse exec=%s task=%s LLM call failed after %dms: %v", params.ExecID, params.TaskID, durationMs, err)
 		// When max_tokens is hit, partial output is returned. Preserve it in the
@@ -391,6 +396,7 @@ modelLoop:
 		if reason, found := llmoutput.ExtractMarker(statusCheckOutput, "[STATUS: FAILED |"); found {
 			finalizeLifecycle(errors.New(reason), result.ChatContext)
 			log.Printf("[handler] processStreamingResponse exec=%s task=%s agent reported STATUS FAILED reason=%q", params.ExecID, params.TaskID, reason)
+			h.recordStreamingUsage(ctx, params, result, string(models.ExecFailed), reason, durationMs)
 			h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, reason, output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 			h.finalizeStreamingTurn(params, output)
 			return
@@ -401,6 +407,9 @@ modelLoop:
 		params.ExecID, params.TaskID, tokensUsed, durationMs, len(output))
 
 	completionOutcome := h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+	if completionOutcome == repository.CompleteSuccessCompleted {
+		h.recordStreamingUsage(ctx, params, result, string(models.ExecCompleted), "", durationMs)
+	}
 	if completionOutcome == repository.CompleteSuccessAlreadyTerminal {
 		finalizeLifecycle(nil, result.ChatContext)
 		h.finalizeStreamingTurn(params, output)
@@ -1171,6 +1180,28 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 		}
 	}
 	return repository.CompleteSuccessCompleted
+}
+
+func (h *Handler) recordStreamingUsage(ctx context.Context, params streamingResponseParams, result llmcontracts.AgentResult, status, errMsg string, durationMs int64) {
+	if ctx == nil || ctx.Err() != nil {
+		ctx = context.Background()
+	}
+	operation := string(llmcontracts.OperationStreaming)
+	if params.IsTaskFollowup {
+		operation = "task_followup"
+	}
+	service.RecordUsageFromResult(ctx, h.usageRepo, service.UsageCapture{
+		ProjectID:    params.ProjectID,
+		TaskID:       params.TaskID,
+		ExecutionID:  params.ExecID,
+		ChatThreadID: params.TaskID,
+		TurnID:       params.ExecID,
+		Operation:    operation,
+		Status:       status,
+		ErrorMessage: errMsg,
+		LatencyMs:    durationMs,
+		OccurredAt:   time.Now().UTC(),
+	}, params.Agent, result)
 }
 
 func firstInt(values []int) int {

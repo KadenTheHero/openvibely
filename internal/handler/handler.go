@@ -37,11 +37,13 @@ type Handler struct {
 	scheduleRepo               *repository.ScheduleRepo
 	execRepo                   *repository.ExecutionRepo
 	threadInputRepo            *repository.ThreadInputRepo
+	usageRepo                  *repository.UsageRepo
 	workerRepo                 *repository.WorkerRepo
 	attachmentRepo             *repository.AttachmentRepo
 	chatAttachmentRepo         *repository.ChatAttachmentRepo
 	projectRepo                *repository.ProjectRepo
 	settingsRepo               *repository.SettingsRepo
+	usageAnalyticsSvc          *service.UsageAnalyticsService
 	broadcaster                *events.Broadcaster
 	chatBroadcaster            *events.ChatBroadcaster
 	fileChangeBroadcaster      *events.FileChangeBroadcaster
@@ -125,11 +127,18 @@ func New(
 	telegramSvc *service.TelegramService,
 ) *Handler {
 	var threadInputRepo *repository.ThreadInputRepo
+	var usageRepo *repository.UsageRepo
+	var usageAnalyticsSvc *service.UsageAnalyticsService
 	if db := execRepo.DB(); db != nil {
 		threadInputRepo = repository.NewThreadInputRepo(db)
+		usageRepo = repository.NewUsageRepo(db)
+		usageAnalyticsSvc = service.NewUsageAnalyticsService(usageRepo, llmConfigRepo)
 	}
 
 	var h *Handler
+	if llmSvc != nil && usageRepo != nil {
+		llmSvc.SetUsageRepo(usageRepo)
+	}
 	if llmSvc != nil && threadInputRepo != nil {
 		llmSvc.SetThreadInputRepo(threadInputRepo)
 		llmSvc.SetBroadcaster(broadcaster)
@@ -162,6 +171,8 @@ func New(
 		scheduleRepo:         scheduleRepo,
 		execRepo:             execRepo,
 		threadInputRepo:      threadInputRepo,
+		usageRepo:            usageRepo,
+		usageAnalyticsSvc:    usageAnalyticsSvc,
 		workerRepo:           workerRepo,
 		attachmentRepo:       attachmentRepo,
 		chatAttachmentRepo:   chatAttachmentRepo,
@@ -184,6 +195,20 @@ func (h *Handler) SetChatBroadcaster(cb *events.ChatBroadcaster) {
 
 func (h *Handler) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
 	h.threadInputRepo = repo
+}
+
+func (h *Handler) SetUsageRepo(repo *repository.UsageRepo) {
+	h.usageRepo = repo
+	if h.llmSvc != nil {
+		h.llmSvc.SetUsageRepo(repo)
+	}
+	if h.usageAnalyticsSvc == nil && repo != nil {
+		h.usageAnalyticsSvc = service.NewUsageAnalyticsService(repo, h.llmConfigRepo)
+	}
+}
+
+func (h *Handler) SetUsageAnalyticsService(svc *service.UsageAnalyticsService) {
+	h.usageAnalyticsSvc = svc
 }
 
 func (h *Handler) SetTaskGoalService(svc *service.TaskGoalService) {
@@ -350,6 +375,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/analytics", h.Analytics)
 
 	// Analytics API endpoints
+	e.GET("/api/analytics/usage", h.GetAnalyticsUsage)
 	e.GET("/api/analytics/success-failure-rates", h.GetSuccessFailureRates)
 	e.GET("/api/analytics/avg-execution-time-by-task", h.GetAvgExecutionTimeByTask)
 	e.GET("/api/analytics/avg-execution-time-by-agent", h.GetAvgExecutionTimeByAgent)

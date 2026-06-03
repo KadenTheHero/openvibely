@@ -83,11 +83,15 @@ func (rt *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 		return resp, nil
 	}
 
-	trimmed := strings.TrimSpace(string(body))
-	if trimmed == "" {
-		log.Printf("[openai-client] non-2xx response status=%d method=%s url=%s body=<empty>", resp.StatusCode, req.Method, req.URL.String())
+	if strings.Contains(req.URL.Host, "auth.openai.com") {
+		log.Printf("[openai-client] non-2xx response status=%d method=%s url=%s body=<redacted>", resp.StatusCode, req.Method, req.URL.String())
 	} else {
-		log.Printf("[openai-client] non-2xx response status=%d method=%s url=%s body=%s", resp.StatusCode, req.Method, req.URL.String(), trimmed)
+		trimmed := strings.TrimSpace(string(body))
+		if trimmed == "" {
+			log.Printf("[openai-client] non-2xx response status=%d method=%s url=%s body=<empty>", resp.StatusCode, req.Method, req.URL.String())
+		} else {
+			log.Printf("[openai-client] non-2xx response status=%d method=%s url=%s body=%s", resp.StatusCode, req.Method, req.URL.String(), trimmed)
+		}
 	}
 
 	resp.Body = io.NopCloser(bytes.NewReader(body))
@@ -295,11 +299,11 @@ func RefreshToken(refreshToken string) (*StoredAuth, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		if resp.StatusCode == 401 || resp.StatusCode == 403 {
-			return nil, fmt.Errorf("%w: OAuth refresh failed %d: %s", ErrTokenExpired, resp.StatusCode, string(body))
+			return nil, fmt.Errorf("%w: OAuth refresh failed with HTTP %d", ErrTokenExpired, resp.StatusCode)
 		}
-		return nil, fmt.Errorf("OAuth refresh failed %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("OAuth refresh failed with HTTP %d", resp.StatusCode)
 	}
 
 	var tokenResult struct {
@@ -498,7 +502,7 @@ func (c *Client) applyAuthHeaders(req *http.Request, isChatGPTOAuth bool) {
 
 	accountID := strings.TrimSpace(c.auth.AccountID)
 	if accountID == "" {
-		accountID = extractChatGPTAccountID(c.auth.Token)
+		accountID = ExtractChatGPTAccountID(c.auth.Token)
 	}
 	if accountID != "" {
 		req.Header.Set("ChatGPT-Account-ID", accountID)
@@ -1476,7 +1480,7 @@ func newSessionID() string {
 	return hex.EncodeToString(buf[:])
 }
 
-func extractChatGPTAccountID(token string) string {
+func ExtractChatGPTAccountID(token string) string {
 	token = strings.TrimSpace(token)
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 || parts[1] == "" {

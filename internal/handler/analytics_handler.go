@@ -4,9 +4,11 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -43,6 +45,81 @@ func (h *Handler) Analytics(c echo.Context) error {
 	}
 
 	return render(c, http.StatusOK, pages.Analytics(projects, currentProject))
+}
+
+// GetAnalyticsUsage returns detailed LLM usage analytics.
+// @Summary Get LLM usage analytics
+// @Description Returns token/cache/reasoning/cost totals, daily usage, usage rate, model breakdowns, and account limit snapshots.
+// @Tags analytics
+// @Produce json
+// @Param project_id query string false "Project ID filter"
+// @Param provider query string false "Provider filter"
+// @Param range query string false "Convenience range: 7d, 30d, month, all" default(30d)
+// @Param group_by query string false "Usage rate grouping: hour, day, week, month" default(day)
+// @Param date_from query string false "Optional start datetime filter"
+// @Param date_to query string false "Optional end datetime filter"
+// @Success 200 {object} models.AnalyticsUsageViewModel "Usage analytics"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /api/analytics/usage [get]
+func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
+	if h.usageAnalyticsSvc == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "usage analytics service is not configured")
+	}
+	filter := parseUsageFilter(c)
+	view, err := h.usageAnalyticsSvc.BuildAnalyticsUsage(c.Request().Context(), filter)
+	if err != nil {
+		log.Printf("[handler] GetAnalyticsUsage error: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, view)
+}
+
+func parseUsageFilter(c echo.Context) repository.UsageFilter {
+	filter := repository.UsageFilter{
+		ProjectID: c.QueryParam("project_id"),
+		Provider:  c.QueryParam("provider"),
+		GroupBy:   c.QueryParam("group_by"),
+		Refresh:   c.QueryParam("refresh") == "true" || c.QueryParam("refresh") == "1",
+	}
+	if filter.GroupBy == "" {
+		filter.GroupBy = "day"
+	}
+	if from := parseAnalyticsTime(c.QueryParam("date_from")); !from.IsZero() {
+		filter.DateFrom = from
+	}
+	if to := parseAnalyticsTime(c.QueryParam("date_to")); !to.IsZero() {
+		filter.DateTo = to
+	}
+	if filter.DateFrom.IsZero() && filter.DateTo.IsZero() {
+		now := time.Now().UTC()
+		switch c.QueryParam("range") {
+		case "7d":
+			filter.DateFrom = now.AddDate(0, 0, -7)
+			filter.DateTo = now
+		case "month":
+			filter.DateFrom = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+			filter.DateTo = now
+		case "all":
+			// no date bounds
+		default:
+			filter.DateFrom = now.AddDate(0, 0, -30)
+			filter.DateTo = now
+		}
+	}
+	return filter
+}
+
+func parseAnalyticsTime(value string) time.Time {
+	if value == "" {
+		return time.Time{}
+	}
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t.UTC()
+	}
+	if t, err := time.Parse("2006-01-02", value); err == nil {
+		return t.UTC()
+	}
+	return time.Time{}
 }
 
 // GetSuccessFailureRates returns success/failure rates data

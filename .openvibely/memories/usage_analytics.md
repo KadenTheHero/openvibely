@@ -27,18 +27,17 @@ Analytics surface:
 - The Analytics usage widget loads all local model usage by default rather than constraining the summary to the currently selected project; project-specific filtering remains an API concern.
 - Direct/background model calls infer `project_id` from the call `workDir` when it exactly matches a known project repo path, so lifecycle/direct calls can appear in project-specific analytics without risky broad path matching.
 - Analytics load/manual refresh attempts live OAuth account usage refreshes and keeps showing local usage plus the latest successful snapshot if live refresh fails; account-limit refresh warnings are separate from local usage visibility.
-- The Analytics page should show provider account cards first in a responsive side-by-side grid, then independent Daily Token Usage and Usage Rate chart containers, followed by the Token Usage table.
-- The Token Usage table card should size to its table, keep `Provider`, `Model`, `Input`, `Output`, `Cache`, `Reasoning`, `Total`, and `Cost` headers, and show an aggregate Total row instead of separate high-level token summary cards.
-- Daily Token Usage renders as a line chart. Combined mode shows separate Input, Output, and Cache lines across all models; each-model mode shows one total-token line per model; individual provider/model mode shows that model's Input, Output, and Cache lines.
-- Daily Token Usage and Usage Rate each have one independent model dropdown. Dropdown options include all models combined, each model as separate series, and individual provider/model choices; changing one chart must not refresh the other chart, token table, or breakdown cards.
-- Individual provider/model option values should use a safe printable key such as JSON-encoded `[provider, model]`, not NUL/control-character separators. The API provides per-model time-series fields (`daily_usage_by_model` and `usage_rate_by_model`).
-- Token-count breakdowns should be labeled `Model Breakdown by Tokens`, use standard Analytics chart-card sizing, and render as a full pie chart with no doughnut hole. Execution-count breakdowns should be labeled `Model Breakdown by Executions`.
+- The Analytics page should show provider account cards first in a responsive side-by-side grid, then `Token Usage` beside `Model Breakdown by Tokens`, followed by the `Token Usage Breakdown` table. The old `Daily Token Usage` graph should not appear on the page.
+- The `Token Usage Breakdown` table card should size to its table, keep `Provider`, `Model`, `Input`, `Output`, `Cache`, `Reasoning`, `Total`, and `Cost` headers, and show an aggregate Total row instead of separate high-level token summary cards.
+- The `Token Usage` chart has one independent model dropdown. Dropdown options include all models combined, each model as separate series, and individual provider/model choices; changing the dropdown must redraw only the Token Usage chart and must not refresh the token table or breakdown cards.
+- Individual provider/model option values should use a safe printable key such as JSON-encoded `[provider, model]`, not NUL/control-character separators. The API may still expose rate-series fields such as `usage_rate_by_model` even though the UI label is `Token Usage`.
+- Token-count breakdowns should be labeled `Model Breakdown by Tokens`, sit in the standard Analytics chart position next to `Token Usage`, use standard chart-card sizing/radius matching `Model Breakdown by Executions`, and render as a full pie chart with no doughnut hole. Execution-count breakdowns should be labeled `Model Breakdown by Executions`.
 - Account-limit cards should use the provider as the heading and normalized plan/subscription metadata underneath. Do not title/display cards with raw `plan_type`, account IDs, config IDs, or user emails.
 - Account-limit reset timestamps should render as relative countdown text like `Resets: 6 days, 4 hours, 12 minutes`, hiding non-applicable zero units; past or near reset times may show `Resets: 0 minutes`.
 
 Historical/backfill behavior:
-- Migration `088_backfill_llm_usage_events.go` backfills historical Anthropic/OpenAI OAuth/API-key `executions.tokens_used` totals into `llm_usage_events`, including databases that already applied the original usage table migration `087` before the backfill existed.
-- The Go migration normalizes older local `087` schemas that used `request_status` into canonical `status` shape before backfilling.
+- Consolidated migration `091_llm_usage_tracking.go` creates usage analytics tables and backfills historical Anthropic/OpenAI OAuth/API-key `executions.tokens_used` totals into `llm_usage_events`.
+- The Go migration normalizes older local unreleased usage schemas that used `request_status` into canonical `status` shape before backfilling, so dev DBs that already applied the removed `087`-`090` chain remain migratable.
 - Historical backfilled rows are total-only; OpenVibely does not invent input/output/cache/cost breakdowns for old execution token counts.
 
 OAuth account snapshot behavior:

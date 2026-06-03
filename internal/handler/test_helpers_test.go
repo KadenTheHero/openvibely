@@ -27,6 +27,7 @@ type TestContext struct {
 	projectRepo    *repository.ProjectRepo
 	taskRepo       *repository.TaskRepo
 	execRepo       *repository.ExecutionRepo
+	usageRepo      *repository.UsageRepo
 	scheduleRepo   *repository.ScheduleRepo
 	workerRepo     *repository.WorkerRepo
 	attachmentRepo *repository.AttachmentRepo
@@ -44,6 +45,7 @@ func NewTestContext(t *testing.T) *TestContext {
 	taskGoalRepo := repository.NewTaskGoalRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	execRepo := repository.NewExecutionRepo(db)
+	usageRepo := repository.NewUsageRepo(db)
 	scheduleRepo := repository.NewScheduleRepo(db)
 	workerRepo := repository.NewWorkerRepo(db)
 	attachmentRepo := repository.NewAttachmentRepo(db)
@@ -83,6 +85,7 @@ func NewTestContext(t *testing.T) *TestContext {
 		projectRepo:    projectRepo,
 		taskRepo:       taskRepo,
 		execRepo:       execRepo,
+		usageRepo:      usageRepo,
 		scheduleRepo:   scheduleRepo,
 		workerRepo:     workerRepo,
 		attachmentRepo: attachmentRepo,

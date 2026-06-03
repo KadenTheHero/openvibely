@@ -2286,6 +2286,35 @@ func TestHandler_Analytics_FullPage(t *testing.T) {
 	assertNotContains(t, rec, "templ.JSONString")
 	assertContains(t, rec, "flex items-center justify-between gap-3")
 	assertContains(t, rec, "badge badge-primary shrink-0 inline-flex items-center justify-center whitespace-nowrap h-auto min-h-6 px-3 py-1 leading-none text-center")
+	assertContains(t, rec, "Token Usage Breakdown")
+	assertNotContains(t, rec, "Daily Token Usage")
+	assertContains(t, rec, "Token Usage")
+	assertContains(t, rec, `id="accountUsageCards" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6"`)
+	assertNotContains(t, rec, "dailyUsageModelSelect")
+	assertNotContains(t, rec, "dailyUsageChart")
+	assertNotContains(t, rec, "renderDailyUsageChart")
+	assertContains(t, rec, "usageRateModelSelect")
+	assertNotContains(t, rec, "dailyUsageSeriesMode")
+	assertNotContains(t, rec, "usageRateSeriesMode")
+	assertContains(t, rec, "fillModelChoiceSelect")
+	assertContains(t, rec, "JSON.stringify([row.provider")
+	assertContains(t, rec, "escapeHTML(key)")
+	assertContains(t, rec, "renderUsageRateChart(latestUsageAnalytics)")
+	assertContains(t, rec, "Model Breakdown by Tokens")
+	assertContains(t, rec, "Model Breakdown by Executions")
+	assertContains(t, rec, "modelTokenBreakdownChart")
+	assertContains(t, rec, "agentUsageChart")
+	assertContains(t, rec, "<th>Provider</th><th>Model</th><th>Input</th><th>Output</th><th>Cache</th><th>Reasoning</th><th>Total</th><th>Cost</th>")
+	assertContains(t, rec, "All models</td><td>' + formatNumber(totals.input_tokens)")
+	assertNotContains(t, rec, "Account Limits")
+	assertContains(t, rec, "type: 'line'")
+	assertContains(t, rec, "/api/analytics/usage")
+	assertNotContains(t, rec, "daily_usage_by_model")
+	assertContains(t, rec, "usage_rate_by_model")
+	assertContains(t, rec, "new URLSearchParams({ range: usageRangeParam(), group_by: groupBy })")
+	assertNotContains(t, rec, "new URLSearchParams({ project_id: projectID, range: usageRangeParam(), group_by: groupBy })")
+	assertContains(t, rec, "refresh', 'true'")
+	assertNotContains(t, rec, "usageReasoningTokens")
 }
 
 func TestHandler_Analytics_ExecutionTimeDisplayedInMinutes(t *testing.T) {
@@ -2327,6 +2356,14 @@ func TestHandler_Analytics_APIEndpoints_ReturnJSON(t *testing.T) {
 	if err := h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "output", "", 100, 5000); err != nil {
 		t.Fatal(err)
 	}
+	if err := h.usageRepo.RecordUsageEvent(ctx, &models.LLMUsageEvent{Provider: "anthropic", ProjectID: project.ID, TaskID: task.ID, ExecutionID: exec.ID, AgentConfigID: agent.ID, Model: agent.Model, Operation: "task", Status: "completed", InputTokens: 80, OutputTokens: 20, TotalTokens: 100}); err != nil {
+		t.Fatal(err)
+	}
+
+	usageRec := htmxGet(e, "/api/analytics/usage?project_id="+project.ID+"&range=all&refresh=true")
+	assertCode(t, usageRec, http.StatusOK)
+	assertContains(t, usageRec, `"total_tokens":100`)
+	assertContains(t, usageRec, `"model_breakdown"`)
 
 	endpoints := []string{
 		"/api/analytics/success-failure-rates", "/api/analytics/avg-execution-time-by-task",

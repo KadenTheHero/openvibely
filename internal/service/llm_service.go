@@ -58,6 +58,7 @@ type LLMService struct {
 	routing                  *agentRoutingStrategy
 	fileChangeBroadcaster    *events.FileChangeBroadcaster
 	threadInputRepo          *repository.ThreadInputRepo
+	usageRepo                *repository.UsageRepo
 	broadcaster              *events.Broadcaster
 	queuedTaskThreadPromoter func(taskID string)
 	// globalSkillRoot is the parent directory holding <root>/agents for global
@@ -126,6 +127,10 @@ func (s *LLMService) SetFileChangeBroadcaster(fcb *events.FileChangeBroadcaster)
 
 func (s *LLMService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
 	s.threadInputRepo = repo
+}
+
+func (s *LLMService) SetUsageRepo(repo *repository.UsageRepo) {
+	s.usageRepo = repo
 }
 
 func (s *LLMService) SetBroadcaster(b *events.Broadcaster) {
@@ -544,9 +549,10 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			log.Printf("[agent-svc] ExecuteTaskWithAgent CANCELLED task=%s duration=%dms",
 				task.ID, durationMs)
 			// Pass output (may contain partial streamed content) so Complete preserves it
-			if completeErr := s.execRepo.Complete(bgCtx, exec.ID, models.ExecCancelled, output, "task cancelled by user", 0, durationMs); completeErr != nil {
+			if completeErr := s.execRepo.Complete(bgCtx, exec.ID, models.ExecCancelled, output, "task cancelled by user", tokensUsed, durationMs); completeErr != nil {
 				log.Printf("[agent-svc] ExecuteTaskWithAgent error completing cancelled execution: %v", completeErr)
 			}
+			RecordUsageFromResult(bgCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecCancelled), ErrorMessage: "task cancelled by user", LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 			// Task status is already set to cancelled by CancelTask, but set it again
 			// in case the cancellation came from a different path (e.g., server shutdown).
 			if statusErr := s.taskRepo.UpdateStatus(bgCtx, task.ID, models.StatusCancelled); statusErr != nil {
@@ -572,6 +578,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if completeErr := s.execRepo.Complete(bgCtx, exec.ID, models.ExecFailed, failedOutput, err.Error(), tokensUsed, durationMs); completeErr != nil {
 			log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
 		}
+		RecordUsageFromResult(bgCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: err.Error(), LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 		if statusErr := s.taskRepo.UpdateStatus(bgCtx, task.ID, models.StatusFailed); statusErr != nil {
 			log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status to failed: %v", statusErr)
 		}
@@ -608,6 +615,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, output, err.Error(), tokensUsed, durationMs); completeErr != nil {
 			log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution after steering commit failure: %v", completeErr)
 		}
+		RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: err.Error(), LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 			log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after steering commit failure: %v", statusErr)
 		}
@@ -635,6 +643,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", reason, tokensUsed, durationMs); completeErr != nil {
 			log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
 		}
+		RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: reason, LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 			log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status to failed: %v", statusErr)
 		}
@@ -693,6 +702,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecCompleted, output, "", tokensUsed, durationMs); completeErr != nil {
 		log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
 	}
+	RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecCompleted), LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 	if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusCompleted); statusErr != nil {
 		log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status to completed: %v", statusErr)
 	}
@@ -1005,7 +1015,17 @@ func (s *LLMService) callAgentDirectWithDefinition(ctx context.Context, message 
 	if err != nil {
 		return "", 0, err
 	}
+	start := time.Now()
 	res, err := adapter.Call(req)
+	durationMs := time.Since(start).Milliseconds()
+	status := string(models.ExecCompleted)
+	errMsg := ""
+	if err != nil {
+		status = string(models.ExecFailed)
+		errMsg = err.Error()
+	}
+	projectID := s.projectIDForWorkDir(context.Background(), workDir)
+	RecordUsageFromResult(context.Background(), s.usageRepo, UsageCapture{ProjectID: projectID, Operation: string(llmcontracts.OperationDirect), Status: status, ErrorMessage: errMsg, LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, res)
 	if err != nil {
 		if res.StopReason == "max_tokens" {
 			return res.Output, res.Usage.TotalTokens, err
@@ -1013,6 +1033,27 @@ func (s *LLMService) callAgentDirectWithDefinition(ctx context.Context, message 
 		return "", 0, err
 	}
 	return res.Output, res.Usage.TotalTokens, nil
+}
+
+func (s *LLMService) projectIDForWorkDir(ctx context.Context, workDir string) string {
+	if s == nil || s.projectRepo == nil || strings.TrimSpace(workDir) == "" {
+		return ""
+	}
+	want := filepath.Clean(workDir)
+	projects, err := s.projectRepo.List(ctx)
+	if err != nil {
+		log.Printf("[usage] error resolving project for workDir=%s: %v", workDir, err)
+		return ""
+	}
+	for _, project := range projects {
+		if strings.TrimSpace(project.RepoPath) == "" {
+			continue
+		}
+		if filepath.Clean(project.RepoPath) == want {
+			return project.ID
+		}
+	}
+	return ""
 }
 
 func (s *LLMService) directScopedFilesRuntime(ctx context.Context, agentDef *models.Agent, workDir string) (string, *llmcontracts.RuntimeTools, error) {

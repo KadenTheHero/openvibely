@@ -335,6 +335,72 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/analytics/usage": {
+            "get": {
+                "description": "Returns token/cache/reasoning/cost totals, daily usage, usage rate, model breakdowns, and account limit snapshots.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get LLM usage analytics",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project ID filter",
+                        "name": "project_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Provider filter",
+                        "name": "provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "30d",
+                        "description": "Convenience range: 7d, 30d, month, all",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "day",
+                        "description": "Usage rate grouping: hour, day, week, month",
+                        "name": "group_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional start datetime filter",
+                        "name": "date_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional end datetime filter",
+                        "name": "date_to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Usage analytics",
+                        "schema": {
+                            "$ref": "#/definitions/models.AnalyticsUsageViewModel"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/autonomous/chain/{taskId}": {
             "get": {
                 "description": "Returns build-chain status HTML for an autonomous build root task.",
@@ -2016,6 +2082,9 @@ const docTemplate = `{
                     "type": "string",
                     "example": "exec123"
                 },
+                "queued": {
+                    "type": "boolean"
+                },
                 "status": {
                     "type": "string",
                     "example": "processing"
@@ -2178,6 +2247,82 @@ const docTemplate = `{
                 }
             }
         },
+        "models.AccountLimitView": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
+                },
+                "limit_key": {
+                    "type": "string"
+                },
+                "resets_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "used_percent": {
+                    "type": "number"
+                },
+                "window_minutes": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.AccountUsageView": {
+            "type": "object",
+            "properties": {
+                "account_detail": {
+                    "type": "string"
+                },
+                "billing_label": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "extra_limits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AccountLimitView"
+                    }
+                },
+                "extra_usage_label": {
+                    "type": "string"
+                },
+                "extra_usage_monthly_usd": {
+                    "type": "number"
+                },
+                "extra_usage_used_usd": {
+                    "type": "number"
+                },
+                "limits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AccountLimitView"
+                    }
+                },
+                "plan_type": {
+                    "type": "string"
+                },
+                "primary_limit": {
+                    "$ref": "#/definitions/models.AccountLimitView"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "secondary_limit": {
+                    "$ref": "#/definitions/models.AccountLimitView"
+                },
+                "status_label": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "models.AgentPerformanceMetric": {
             "type": "object",
             "properties": {
@@ -2209,6 +2354,59 @@ const docTemplate = `{
                 "task_type": {
                     "description": "\"frontend\", \"backend\", \"testing\", \"refactor\", \"bugfix\", \"architecture\"",
                     "type": "string"
+                }
+            }
+        },
+        "models.AnalyticsUsageViewModel": {
+            "type": "object",
+            "properties": {
+                "account_limits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AccountUsageView"
+                    }
+                },
+                "daily_usage": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.DailyUsagePoint"
+                    }
+                },
+                "daily_usage_by_model": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.DailyUsagePoint"
+                    }
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "last_updated_at": {
+                    "type": "string"
+                },
+                "model_breakdown": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ModelUsagePoint"
+                    }
+                },
+                "totals": {
+                    "$ref": "#/definitions/models.UsageTotals"
+                },
+                "usage_rate": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.UsageRatePoint"
+                    }
+                },
+                "usage_rate_by_model": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.UsageRatePoint"
+                    }
                 }
             }
         },
@@ -2369,6 +2567,38 @@ const docTemplate = `{
                 "ConflictTypeSemantic"
             ]
         },
+        "models.DailyUsagePoint": {
+            "type": "object",
+            "properties": {
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
+                "call_count": {
+                    "type": "integer"
+                },
+                "cost_usd": {
+                    "type": "number"
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "period": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "total_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "models.ExecutionOrderRecommendation": {
             "type": "object",
             "properties": {
@@ -2448,6 +2678,41 @@ const docTemplate = `{
                 }
             }
         },
+        "models.ModelUsagePoint": {
+            "type": "object",
+            "properties": {
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
+                "call_count": {
+                    "type": "integer"
+                },
+                "cost_usd": {
+                    "type": "number"
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "percent": {
+                    "type": "number"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "reasoning_output_tokens": {
+                    "type": "integer"
+                },
+                "total_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "models.RecommendationStatus": {
             "type": "string",
             "enum": [
@@ -2462,6 +2727,61 @@ const docTemplate = `{
                 "RecommendationRejected",
                 "RecommendationExpired"
             ]
+        },
+        "models.UsageRatePoint": {
+            "type": "object",
+            "properties": {
+                "call_count": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "period": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "total_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.UsageTotals": {
+            "type": "object",
+            "properties": {
+                "cache_creation_input_tokens": {
+                    "type": "integer"
+                },
+                "cache_read_input_tokens": {
+                    "type": "integer"
+                },
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
+                "call_count": {
+                    "type": "integer"
+                },
+                "cost_available": {
+                    "type": "boolean"
+                },
+                "cost_usd": {
+                    "type": "number"
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "reasoning_output_tokens": {
+                    "type": "integer"
+                },
+                "total_tokens": {
+                    "type": "integer"
+                }
+            }
         },
         "models.VoteRecord": {
             "type": "object",
@@ -2652,6 +2972,18 @@ const docTemplate = `{
                 "output_contract": {
                     "type": "string"
                 },
+                "selected_memories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/viewmodels.SelectedMemoryView"
+                    }
+                },
+                "selected_skills": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "skill_key": {
                     "type": "string"
                 },
@@ -2665,6 +2997,23 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "when": {
+                    "type": "string"
+                }
+            }
+        },
+        "viewmodels.SelectedMemoryView": {
+            "type": "object",
+            "properties": {
+                "file": {
+                    "type": "string"
+                },
+                "snippet": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "topic": {
                     "type": "string"
                 }
             }
@@ -2712,6 +3061,8 @@ var SwaggerInfo = &swag.Spec{
 	Description:      "REST API for OpenVibely - AI-powered task scheduling and management\nThis API provides endpoints for managing projects, tasks, and chat interactions with AI agents.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
+	LeftDelim:        "{{",
+	RightDelim:       "}}",
 }
 
 func init() {

@@ -10,7 +10,14 @@ func FromIO(inputTokens, outputTokens int) contracts.Usage {
 
 // FromOpenAI builds canonical usage with OpenAI-specific optional fields.
 func FromOpenAI(inputTokens, outputTokens, cachedInputTokens, reasoningTokens int) contracts.Usage {
-	total := inputTokens + outputTokens
+	return FromOpenAIWithTotal(inputTokens, outputTokens, cachedInputTokens, reasoningTokens, 0)
+}
+
+// FromOpenAIWithTotal builds canonical usage with an optional provider-reported total.
+func FromOpenAIWithTotal(inputTokens, outputTokens, cachedInputTokens, reasoningTokens, totalTokens int) contracts.Usage {
+	if totalTokens == 0 {
+		totalTokens = inputTokens + outputTokens
+	}
 	raw := map[string]int{}
 	if cachedInputTokens > 0 {
 		raw["cached_input_tokens"] = cachedInputTokens
@@ -21,7 +28,7 @@ func FromOpenAI(inputTokens, outputTokens, cachedInputTokens, reasoningTokens in
 	return contracts.Usage{
 		InputTokens:       inputTokens,
 		OutputTokens:      outputTokens,
-		TotalTokens:       total,
+		TotalTokens:       totalTokens,
 		CachedInputTokens: cachedInputTokens,
 		ReasoningTokens:   reasoningTokens,
 		ProviderRaw:       raw,

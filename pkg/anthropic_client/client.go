@@ -31,12 +31,15 @@ import (
 // It is a variable (not a constant) to allow overriding in tests.
 var AnthropicAPIHost = "https://api.anthropic.com"
 
+// OAuthTokenURL is the Anthropic OAuth token endpoint used for refresh.
+// It is a variable (not a constant) to allow overriding in tests.
+var OAuthTokenURL = "https://platform.claude.com/v1/oauth/token"
+
 const (
 	AnthropicAPIVersion = "2023-06-01"
 	OAuthBetaHeader     = "oauth-2025-04-20"
 	DefaultModel        = "claude-sonnet-4-20250514"
 
-	oauthTokenURL = "https://platform.claude.com/v1/oauth/token"
 	oauthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 	oauthScope    = "user:profile user:inference user:sessions:claude_code user:mcp_servers"
 	tokenFileName = ".claude-max-client.json"
@@ -523,7 +526,7 @@ func RefreshToken(refreshTok string) (*StoredAuth, error) {
 		"scope":         oauthScope,
 	})
 
-	req, _ := http.NewRequest("POST", oauthTokenURL, bytes.NewReader(reqBody))
+	req, _ := http.NewRequest("POST", OAuthTokenURL, bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", AnthropicAPIVersion)
 
@@ -534,8 +537,8 @@ func RefreshToken(refreshTok string) (*StoredAuth, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("refresh failed %d: %s", resp.StatusCode, string(body))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		return nil, fmt.Errorf("refresh failed with HTTP %d", resp.StatusCode)
 	}
 
 	var result struct {

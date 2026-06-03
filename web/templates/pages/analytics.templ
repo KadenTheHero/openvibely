@@ -53,9 +53,49 @@ templ analyticsContent(currentProject *models.Project) {
 					</div>
 				</div>
 			</div>
-			<!-- Charts Grid -->
-			<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-				<!-- Success/Failure Rates -->
+				<!-- Provider Account Cards -->
+				<div id="accountUsageCards" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+					<p class="opacity-50 lg:col-span-2">No connected OAuth account snapshots yet.</p>
+				</div>
+				<!-- Usage Charts -->
+				<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+					<div class="card bg-base-100 shadow-sm border border-base-300">
+						<div class="card-body">
+							<div class="flex flex-wrap items-end justify-between gap-3 mb-2">
+								<h3 class="card-title text-lg">Token Usage</h3>
+								<div class="form-control">
+									<select id="usageRateModelSelect" class="select select-bordered select-xs min-w-48"></select>
+								</div>
+							</div>
+							<div class="h-64"><canvas id="usageRateChart"></canvas></div>
+						</div>
+					</div>
+					<div class="card bg-base-100 shadow-sm border border-base-300">
+						<div class="card-body">
+							<h3 class="card-title text-lg">Model Breakdown by Tokens</h3>
+							<div class="h-64">
+								<canvas id="modelTokenBreakdownChart"></canvas>
+							</div>
+						</div>
+					</div>
+				</div>
+				<!-- Token Usage Tracking -->
+				<div class="card bg-base-100 shadow-sm border border-base-300 mb-6 self-start h-fit">
+					<div class="card-body">
+						<div class="flex items-center justify-between gap-3 mb-2">
+							<h3 class="card-title text-lg">Token Usage Breakdown</h3>
+							<span id="usageLastUpdated" class="text-xs opacity-60">Usage loading…</span>
+						</div>
+						<div class="overflow-x-auto">
+							<table class="table table-sm">
+								<thead><tr><th>Provider</th><th>Model</th><th>Input</th><th>Output</th><th>Cache</th><th>Reasoning</th><th>Total</th><th>Cost</th></tr></thead>
+								<tbody id="usageBreakdownTable"><tr><td colspan="8" class="text-center opacity-50">No usage recorded yet</td></tr></tbody>
+							</table>
+						</div>
+					</div>
+				</div>
+				<!-- Charts Grid -->
+				<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">				<!-- Success/Failure Rates -->
 				<div class="card bg-base-100 shadow-sm border border-base-300">
 					<div class="card-body">
 						<h3 class="card-title text-lg">Success/Failure Rates Over Time</h3>
@@ -82,25 +122,25 @@ templ analyticsContent(currentProject *models.Project) {
 						</div>
 					</div>
 				</div>
-				<!-- Average Execution Time by Model -->
-				<div class="card bg-base-100 shadow-sm border border-base-300">
-					<div class="card-body">
-						<h3 class="card-title text-lg">Average Execution Time by Model</h3>
-						<div class="h-64">
-							<canvas id="avgTimeAgentChart"></canvas>
+					<!-- Average Execution Time by Model -->
+					<div class="card bg-base-100 shadow-sm border border-base-300">
+						<div class="card-body">
+							<h3 class="card-title text-lg">Average Execution Time by Model</h3>
+							<div class="h-64">
+								<canvas id="avgTimeAgentChart"></canvas>
+							</div>
 						</div>
 					</div>
-				</div>
-				<!-- Model Usage Breakdown -->
-				<div class="card bg-base-100 shadow-sm border border-base-300">
-					<div class="card-body">
-						<h3 class="card-title text-lg">Model Usage Breakdown</h3>
-						<div class="h-64">
-							<canvas id="agentUsageChart"></canvas>
+					<!-- Model Breakdown by Executions -->
+					<div class="card bg-base-100 shadow-sm border border-base-300">
+						<div class="card-body">
+							<h3 class="card-title text-lg">Model Breakdown by Executions</h3>
+							<div class="h-64">
+								<canvas id="agentUsageChart"></canvas>
+							</div>
 						</div>
 					</div>
-				</div>
-				<!-- Most Frequent Tasks -->
+					<!-- Most Frequent Tasks -->
 				<div class="card bg-base-100 shadow-sm border border-base-300">
 					<div class="card-body">
 						<h3 class="card-title text-lg">Most Frequently Run Tasks</h3>
@@ -144,6 +184,7 @@ templ analyticsContent(currentProject *models.Project) {
 					if (!dataEl) return;
 					var projectID = dataEl.dataset.projectId;
 					var charts = window._analyticsCharts;
+					var latestUsageAnalytics = null;
 
 					// Helper to safely fetch JSON arrays from API
 					async function fetchJSON(url) {
@@ -153,7 +194,99 @@ templ analyticsContent(currentProject *models.Project) {
 						return Array.isArray(data) ? data : [];
 					}
 
-					// Format milliseconds as human-readable duration (e.g., "5m 30s", "2h 15m")
+						function formatNumber(value) {
+							return new Intl.NumberFormat().format(value || 0);
+						}
+
+						function formatCost(value) {
+							if (value === null || value === undefined) return 'cost unavailable';
+							return '$' + Number(value).toFixed(4);
+						}
+
+						function formatResetCountdown(value) {
+							if (!value) return '';
+							const resetAt = new Date(value);
+							if (Number.isNaN(resetAt.getTime())) return '';
+							const totalMinutes = Math.max(0, Math.ceil((resetAt.getTime() - Date.now()) / 60000));
+							const days = Math.floor(totalMinutes / 1440);
+							const hours = Math.floor((totalMinutes % 1440) / 60);
+							const minutes = totalMinutes % 60;
+							const parts = [];
+							if (days > 0) parts.push(days + ' ' + (days === 1 ? 'day' : 'days'));
+							if (hours > 0) parts.push(hours + ' ' + (hours === 1 ? 'hour' : 'hours'));
+							if (minutes > 0 || parts.length === 0) parts.push(minutes + ' ' + (minutes === 1 ? 'minute' : 'minutes'));
+							return 'Resets: ' + parts.join(', ');
+						}
+
+
+								function usageModelKey(row) {
+									return JSON.stringify([row.provider || 'unknown', row.model || 'unknown']);
+								}
+
+								function usageModelParts(rowOrKey) {
+									if (typeof rowOrKey !== 'string') return [rowOrKey.provider || 'unknown', rowOrKey.model || 'unknown'];
+									try {
+										const parts = JSON.parse(rowOrKey);
+										if (Array.isArray(parts) && parts.length >= 2) return [parts[0] || 'unknown', parts[1] || 'unknown'];
+									} catch (e) {}
+									const fallback = rowOrKey.split('/');
+									return [fallback[0] || 'unknown', fallback.slice(1).join('/') || 'unknown'];
+								}
+
+								function usageModelLabel(rowOrKey) {
+									const parts = usageModelParts(rowOrKey);
+									return parts[0] + '/' + parts[1];
+								}
+
+								function escapeHTML(value) {
+									return String(value).replace(/[&<>"']/g, function(ch) {
+										return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+									});
+								}
+
+								function modelSeriesKeys(rows) {
+									return Array.from(new Set((rows || []).map(usageModelKey))).sort(function(a, b) { return usageModelLabel(a).localeCompare(usageModelLabel(b)); });
+								}
+
+								function fillModelChoiceSelect(selectID, keys) {
+									const select = document.getElementById(selectID);
+									if (!select) return 'combined';
+									const previous = select.value || 'combined';
+									const validChoices = ['combined', 'all'].concat(keys || []);
+									const keep = validChoices.includes(previous) ? previous : 'combined';
+									const modelOptions = (keys || []).map(key => '<option value="' + escapeHTML(key) + '">' + escapeHTML(usageModelLabel(key)) + '</option>').join('');
+									select.innerHTML = '<option value="combined">All models combined</option><option value="all">Each model</option>' + modelOptions;
+									select.value = keep;
+									select.disabled = (keys || []).length === 0;
+									return keep;
+								}
+
+							const usageSeriesColors = [
+								'rgb(59, 130, 246)',
+								'rgb(34, 197, 94)',
+								'rgb(251, 146, 60)',
+								'rgb(147, 51, 234)',
+								'rgb(239, 68, 68)',
+								'rgb(20, 184, 166)',
+								'rgb(236, 72, 153)',
+								'rgb(132, 204, 22)'
+							];
+
+							function colorForIndex(index, alpha) {
+								const color = usageSeriesColors[index % usageSeriesColors.length];
+								return color.replace('rgb(', 'rgba(').replace(')', ', ' + alpha + ')');
+							}
+
+							function uniquePeriods(rows) {
+								return Array.from(new Set((rows || []).map(row => row.period))).sort();
+							}
+							function usageRangeParam() {
+							const range = document.getElementById('dateRange').value;
+							if (range === '7') return '7d';
+							if (range === 'all') return 'all';
+							return '30d';
+						}
+						// Format milliseconds as human-readable duration (e.g., "5m 30s", "2h 15m")
 					function formatDuration(ms) {
 						if (ms < 1000) return ms.toFixed(0) + 'ms';
 						var totalSeconds = Math.round(ms / 1000);
@@ -180,7 +313,129 @@ templ analyticsContent(currentProject *models.Project) {
 						};
 					}
 
-					// Load Success/Failure Rates
+								function renderUsageRateChart(data) {
+									const rate = data?.usage_rate || [];
+									const rateByModel = data?.usage_rate_by_model || [];
+									const rateKeys = modelSeriesKeys(rateByModel);
+									const choice = fillModelChoiceSelect('usageRateModelSelect', rateKeys);
+									if (charts.usageRate) charts.usageRate.destroy();
+									const rateCtx = document.getElementById('usageRateChart');
+									if (!rateCtx) return;
+									let labels = [];
+									let datasets = [];
+									if (choice === 'combined' || rateByModel.length === 0) {
+										labels = rate.map(d => d.period);
+										datasets = [{ label: 'All models', data: rate.map(d => d.total_tokens || 0), borderColor: 'rgb(147, 51, 234)', backgroundColor: 'rgba(147, 51, 234, 0.12)', tension: 0.25 }];
+									} else {
+										const rows = choice === 'all' ? rateByModel : rateByModel.filter(row => usageModelKey(row) === choice);
+										labels = uniquePeriods(rows);
+										const keys = choice === 'all' ? rateKeys : (choice ? [choice] : []);
+										datasets = keys.map((key, index) => {
+											const totalsByPeriod = new Map(rows.filter(row => usageModelKey(row) === key).map(row => [row.period, row.total_tokens || 0]));
+											return { label: usageModelLabel(key), data: labels.map(period => totalsByPeriod.get(period) || 0), borderColor: usageSeriesColors[index % usageSeriesColors.length], backgroundColor: colorForIndex(index, 0.12), tension: 0.25 };
+										});
+									}
+									charts.usageRate = new Chart(rateCtx.getContext('2d'), {
+										type: 'line',
+										data: { labels: labels, datasets: datasets },
+										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
+									});
+								}
+
+								function renderUsageAnalytics(data) {
+									const totals = data.totals || {};
+									const lastUpdated = document.getElementById('usageLastUpdated');
+									lastUpdated.textContent = data.last_updated_at ? 'Last updated ' + new Date(data.last_updated_at).toLocaleString() : 'Local usage history';
+										renderUsageRateChart(data);
+
+									const breakdown = data.model_breakdown || [];
+									const table = document.getElementById('usageBreakdownTable');
+									if (table) {
+										if (breakdown.length === 0 && (totals.call_count || 0) === 0) {
+											table.innerHTML = '<tr><td colspan="8" class="text-center opacity-50">No usage recorded yet</td></tr>';
+										} else {
+											const rows = breakdown.map(row => '<tr><td>' + escapeHTML(row.provider || 'unknown') + '</td><td>' + escapeHTML(row.model || 'unknown') + '</td><td>' + formatNumber(row.input_tokens) + '</td><td>' + formatNumber(row.output_tokens) + '</td><td>' + formatNumber(row.cached_input_tokens) + '</td><td>' + formatNumber(row.reasoning_output_tokens) + '</td><td>' + formatNumber(row.total_tokens) + '</td><td>' + formatCost(row.cost_usd) + '</td></tr>');
+											const totalCost = totals.cost_available ? formatCost(totals.cost_usd) : 'cost unavailable';
+											rows.push('<tr class="font-semibold border-t border-base-300"><td>Total</td><td>All models</td><td>' + formatNumber(totals.input_tokens) + '</td><td>' + formatNumber(totals.output_tokens) + '</td><td>' + formatNumber(totals.cached_input_tokens) + '</td><td>' + formatNumber(totals.reasoning_output_tokens) + '</td><td>' + formatNumber(totals.total_tokens) + '</td><td>' + totalCost + '</td></tr>');
+											table.innerHTML = rows.join('');
+										}
+									}
+									if (charts.modelTokenBreakdown) charts.modelTokenBreakdown.destroy();
+									const modelCtx = document.getElementById('modelTokenBreakdownChart');
+									if (modelCtx) {
+										charts.modelTokenBreakdown = new Chart(modelCtx.getContext('2d'), {
+											type: 'pie',
+											data: {
+												labels: breakdown.map(row => `${row.provider}/${row.model}`),
+												datasets: [{
+													data: breakdown.map(row => row.total_tokens || 0),
+													backgroundColor: [
+														'rgba(239, 68, 68, 0.7)',
+														'rgba(34, 197, 94, 0.7)',
+														'rgba(59, 130, 246, 0.7)',
+														'rgba(251, 146, 60, 0.7)',
+														'rgba(147, 51, 234, 0.7)',
+														'rgba(20, 184, 166, 0.7)'
+													]
+												}]
+											},
+											options: {
+												responsive: true,
+												maintainAspectRatio: false,
+												plugins: { legend: { position: 'bottom' } }
+											}
+										});
+									}
+									const accountContainer = document.getElementById('accountUsageCards');
+									const accounts = data.account_limits || [];
+									if (accountContainer) {
+										if (accounts.length === 0) {
+											accountContainer.innerHTML = '<p class="opacity-50 lg:col-span-2">No connected OAuth account snapshots yet.</p>';
+										} else {
+											accountContainer.innerHTML = accounts.map(account => {
+												let accountLimits = [];
+												if (account.primary_limit) accountLimits.push(account.primary_limit);
+												if (account.secondary_limit) accountLimits.push(account.secondary_limit);
+												accountLimits = accountLimits.concat(account.extra_limits || []);
+												if (accountLimits.length === 0) accountLimits = account.limits || [];
+												const limits = accountLimits.map(limit => {
+													const pct = limit.used_percent === null || limit.used_percent === undefined ? null : Number(limit.used_percent);
+													const width = pct === null ? 0 : Math.max(0, Math.min(100, pct));
+													const resetLabel = formatResetCountdown(limit.resets_at);
+													const reset = resetLabel ? `<div class="text-xs opacity-60">${resetLabel}</div>` : '';
+													return `<div class="mt-2"><div class="flex justify-between text-xs"><span>${escapeHTML(limit.label || 'limit')}</span><span>${pct === null ? 'unknown' : pct.toFixed(1) + '%'}</span></div><progress class="progress progress-primary w-full" value="${width}" max="100"></progress>${reset}</div>`;
+												}).join('');
+												const error = account.error ? `<div class="alert alert-warning py-2 text-xs mt-2">${escapeHTML(account.error)}</div>` : '';
+												const providerName = (account.provider || '').toLowerCase();
+												const providerTitle = providerName === 'openai' ? 'OpenAI' : (providerName === 'anthropic' ? 'Anthropic' : 'OAuth account');
+												const subscription = account.plan_type || '';
+												const metaParts = providerName === 'anthropic' ? [account.extra_usage_label] : [account.status_label, account.billing_label, account.extra_usage_label];
+												const meta = metaParts.filter(Boolean).join(' · ');
+												const detail = providerName === 'anthropic' ? '' : (account.account_detail || '');
+												const usedCredits = account.extra_usage_used_usd !== null && account.extra_usage_used_usd !== undefined ? ' · Used: $' + Number(account.extra_usage_used_usd).toFixed(2) : '';
+												const extraUsage = account.extra_usage_monthly_usd !== null && account.extra_usage_monthly_usd !== undefined ? '<div class="text-xs opacity-60">Monthly limit: $' + Number(account.extra_usage_monthly_usd).toFixed(2) + usedCredits + '</div>' : '';
+													const subscriptionHtml = subscription ? '<div class="text-sm opacity-90">' + escapeHTML(subscription) + '</div>' : '';
+													const metaHtml = meta ? '<div class="text-xs opacity-80">' + escapeHTML(meta) + '</div>' : '';
+													const detailHtml = detail ? '<div class="text-xs opacity-60">' + escapeHTML(detail) + '</div>' : '';
+													return '<div class="card bg-base-100 shadow-sm border border-base-300 h-full"><div class="card-body"><div class="font-semibold">' + escapeHTML(providerTitle) + '</div>' + subscriptionHtml + metaHtml + detailHtml + extraUsage + (limits || '<div class="text-xs opacity-50 mt-2">No live limit snapshot yet</div>') + error + '</div></div>';
+												}).join('');
+										}
+									}
+								}
+
+								async function loadUsageAnalytics(refreshUsage) {
+									try {
+										const groupBy = document.getElementById('groupBy').value;
+										const params = new URLSearchParams({ range: usageRangeParam(), group_by: groupBy });
+										if (refreshUsage) params.append('refresh', 'true');
+										const response = await fetch(`/api/analytics/usage?${params}`);
+										if (!response.ok) return;
+										latestUsageAnalytics = await response.json();
+										renderUsageAnalytics(latestUsageAnalytics);
+									} catch (e) { console.error('loadUsageAnalytics:', e); }
+								}
+
+								// Load Success/Failure Rates
 					async function loadSuccessFailureRates() {
 						try {
 						const groupBy = document.getElementById('groupBy').value;
@@ -431,9 +686,10 @@ templ analyticsContent(currentProject *models.Project) {
 					}
 
 					// Load all data - use Promise.allSettled to prevent one failure from blocking others
-					async function loadAllData() {
-						await Promise.allSettled([
-							loadSuccessFailureRates(),
+						async function loadAllData(refreshUsage) {
+								await Promise.allSettled([
+									loadUsageAnalytics(refreshUsage),
+								loadSuccessFailureRates(),
 							loadHourlyTrends(),
 							loadAvgTimeByTask(),
 							loadAvgTimeByAgent(),
@@ -443,15 +699,22 @@ templ analyticsContent(currentProject *models.Project) {
 						]);
 					}
 
-					// Event listeners
-					document.getElementById('refreshBtn').addEventListener('click', loadAllData);
-					document.getElementById('dateRange').addEventListener('change', () => {
-						loadSuccessFailureRates();
-						loadHourlyTrends();
-					});
-					document.getElementById('groupBy').addEventListener('change', loadSuccessFailureRates);
-
-					// Initial load
+						// Event listeners
+						document.getElementById('refreshBtn').addEventListener('click', function() { loadAllData(true); });
+						document.getElementById('dateRange').addEventListener('change', () => {
+							loadUsageAnalytics();
+							loadSuccessFailureRates();
+							loadHourlyTrends();
+						});
+							document.getElementById('groupBy').addEventListener('change', () => {
+								loadUsageAnalytics();
+								loadSuccessFailureRates();
+							});
+								const usageRateSelect = document.getElementById('usageRateModelSelect');
+								if (usageRateSelect) usageRateSelect.addEventListener('change', () => {
+									if (latestUsageAnalytics) renderUsageRateChart(latestUsageAnalytics);
+								});
+						// Initial load
 					loadAllData();
 				}
 

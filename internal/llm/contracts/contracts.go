@@ -43,6 +43,7 @@ type Usage struct {
 	CachedInputTokens int
 	ReasoningTokens   int
 	ProviderRaw       map[string]int
+	ProviderIDs       map[string]string
 }
 
 // AgentResult is the canonical provider-agnostic adapter response.

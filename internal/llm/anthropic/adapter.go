@@ -408,28 +408,28 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 
 	switch req.Operation {
 	case llmcontracts.OperationTask:
-		output, textOnly, tokens, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter)
+		output, textOnly, usage, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter)
 		return llmcontracts.AgentResult{
 			Output:         output,
 			TextOnlyOutput: textOnly,
-			Usage:          llmusage.FromTotal(tokens),
+			Usage:          usage,
 			StopReason:     stopReasonIfMaxTokens(err),
 		}, err
 
 	case llmcontracts.OperationStreaming:
 		if req.ChatHistory != nil {
-			output, tokens, err := a.callChatStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, workDir, extraTools, toolExecutor, toolFilter)
+			output, usage, err := a.callChatStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, workDir, extraTools, toolExecutor, toolFilter)
 			return llmcontracts.AgentResult{
 				Output:     output,
-				Usage:      llmusage.FromTotal(tokens),
+				Usage:      usage,
 				StopReason: stopReasonIfMaxTokens(err),
 			}, err
 		}
-		output, textOnly, tokens, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter)
+		output, textOnly, usage, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter)
 		return llmcontracts.AgentResult{
 			Output:         output,
 			TextOnlyOutput: textOnly,
-			Usage:          llmusage.FromTotal(tokens),
+			Usage:          usage,
 			StopReason:     stopReasonIfMaxTokens(err),
 		}, err
 
@@ -442,10 +442,10 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 			req.DisableTools = false
 		}
 		skipDefaultTools := rt != nil && rt.SkipDefaultTools
-		output, tokens, err := a.callDirect(ctx, req.Message, req.Attachments, agent, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter, req.DisableTools, skipDefaultTools)
+		output, usage, err := a.callDirect(ctx, req.Message, req.Attachments, agent, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter, req.DisableTools, skipDefaultTools)
 		return llmcontracts.AgentResult{
 			Output:     output,
-			Usage:      llmusage.FromTotal(tokens),
+			Usage:      usage,
 			StopReason: stopReasonIfMaxTokens(err),
 		}, err
 
@@ -455,18 +455,18 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 }
 
 // callDirect calls the Anthropic API using OAuth tokens.
-func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, disableTools bool, skipDefaultTools bool) (string, int, error) {
+func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, disableTools bool, skipDefaultTools bool) (string, llmcontracts.Usage, error) {
 	maxTokens := claudeCodeMaxOutputTokens(agent.Model)
 	log.Printf("[anthropic] callDirect model=%s max_tokens=%d workDir=%s attachments=%d disable_tools=%v", agent.Model, maxTokens, workDir, len(attachments), disableTools)
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
-		return "", 0, err
+		return "", llmusage.FromTotal(0), err
 	}
 
 	mcAttachments, err := convertAttachments(attachments)
 	if err != nil {
-		return "", 0, fmt.Errorf("convert attachments: %w", err)
+		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
@@ -489,25 +489,25 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	resp, err := client.SendAgentic(ctx, fullPrompt, opts)
 	if err != nil {
 		log.Printf("[anthropic] callDirect error: %v", err)
-		return "", 0, fmt.Errorf("anthropicclient agentic call: %w", err)
+		return "", llmusage.FromTotal(0), fmt.Errorf("anthropicclient agentic call: %w", err)
 	}
 
-	tokensUsed := resp.InputTokens + resp.OutputTokens
+	usage := llmusage.FromAnthropic(resp.InputTokens, resp.OutputTokens, resp.CacheCreationInputTokens, resp.CacheReadInputTokens)
 	log.Printf("[anthropic] callDirect success model=%s input=%d output=%d tools=%d stop=%s compacted=%v", resp.Model, resp.InputTokens, resp.OutputTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if resp.StopReason == "max_tokens" {
-		return resp.Text, tokensUsed, errMaxTokens
+		return resp.Text, usage, errMaxTokens
 	}
-	return resp.Text, tokensUsed, nil
+	return resp.Text, usage, nil
 }
 
 // callChatStreaming calls the Anthropic API with streaming for chat/followup.
-func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool) (string, int, error) {
+func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool) (string, llmcontracts.Usage, error) {
 	maxTokens := claudeCodeMaxOutputTokens(agent.Model)
 	log.Printf("[anthropic] callChatStreaming model=%s max_tokens=%d history=%d exec=%s isTaskFollowup=%v workDir=%s attachments=%d", agent.Model, maxTokens, len(chatHistory), execID, isTaskFollowup, workDir, len(attachments))
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
-		return "", 0, err
+		return "", llmusage.FromTotal(0), err
 	}
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
@@ -518,7 +518,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 
 	mcAttachments, err := convertAttachments(attachments)
 	if err != nil {
-		return "", 0, fmt.Errorf("convert attachments: %w", err)
+		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
 
 	sw := llmstream.NewWriter(execID, "", a.execRepo, ctx, 500*time.Millisecond)
@@ -578,34 +578,34 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	if err != nil {
 		sw.Flush()
 		log.Printf("[anthropic] callChatStreaming error: %v", err)
-		return "", 0, fmt.Errorf("anthropicclient agentic chat streaming call: %w", err)
+		return "", llmusage.FromTotal(0), fmt.Errorf("anthropicclient agentic chat streaming call: %w", err)
 	}
 
 	sw.Flush()
 
 	output := sw.String()
-	tokensUsed := resp.InputTokens + resp.OutputTokens
-	log.Printf("[anthropic] callChatStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), tokensUsed, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
+	usage := llmusage.FromAnthropic(resp.InputTokens, resp.OutputTokens, resp.CacheCreationInputTokens, resp.CacheReadInputTokens)
+	log.Printf("[anthropic] callChatStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if resp.StopReason == "max_tokens" {
-		return output, tokensUsed, errMaxTokens
+		return output, usage, errMaxTokens
 	}
-	return output, tokensUsed, nil
+	return output, usage, nil
 }
 
 // callStreaming calls the Anthropic API with streaming.
-func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool) (string, string, int, error) {
+func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool) (string, string, llmcontracts.Usage, error) {
 	maxTokens := claudeCodeMaxOutputTokens(agent.Model)
 	log.Printf("[anthropic] callStreaming model=%s max_tokens=%d exec=%s workDir=%s attachments=%d", agent.Model, maxTokens, execID, workDir, len(attachments))
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", llmusage.FromTotal(0), err
 	}
 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
 	mcAttachments, err := convertAttachments(attachments)
 	if err != nil {
-		return "", "", 0, fmt.Errorf("convert attachments: %w", err)
+		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
 
 	sw := llmstream.NewWriter(execID, "", a.execRepo, ctx, 500*time.Millisecond)
@@ -666,19 +666,19 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	if err != nil {
 		sw.Flush()
 		log.Printf("[anthropic] callStreaming error: %v", err)
-		return "", "", 0, fmt.Errorf("anthropicclient agentic streaming call: %w", err)
+		return "", "", llmusage.FromTotal(0), fmt.Errorf("anthropicclient agentic streaming call: %w", err)
 	}
 
 	sw.Flush()
 
 	output := sw.String()
 	textOnly := sw.TextString()
-	tokensUsed := resp.InputTokens + resp.OutputTokens
-	log.Printf("[anthropic] callStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), tokensUsed, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
+	usage := llmusage.FromAnthropic(resp.InputTokens, resp.OutputTokens, resp.CacheCreationInputTokens, resp.CacheReadInputTokens)
+	log.Printf("[anthropic] callStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if resp.StopReason == "max_tokens" {
-		return output, textOnly, tokensUsed, errMaxTokens
+		return output, textOnly, usage, errMaxTokens
 	}
-	return output, textOnly, tokensUsed, nil
+	return output, textOnly, usage, nil
 }
 
 func (a *Adapter) anthropicRefreshFunc() llmoauth.RefreshFunc {

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/database/migrations"
@@ -384,8 +385,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 86 {
-		t.Fatalf("max goose version = %d, want 86", maxVersion)
+	if maxVersion != 91 {
+		t.Fatalf("max goose version = %d, want 91", maxVersion)
 	}
 }
 
@@ -623,6 +624,236 @@ func TestMigration071_RebuildsAgentConfigsWithReferences(t *testing.T) {
 			t.Fatalf("%s reference = %q, want agent-071", name, got)
 		}
 	}
+}
+
+func TestMigration091_BackfillsHistoricalLLMUsageFromExecutions(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("failed to set dialect: %v", err)
+	}
+	if err := goose.UpTo(db, ".", 86); err != nil {
+		t.Fatalf("failed to run migrations through 086: %v", err)
+	}
+
+	if _, err := db.Exec(`INSERT INTO agent_configs (id, name, provider, model, auth_method, api_key) VALUES ('agent-091', 'OpenAI API', 'openai', 'gpt-test', 'api_key', 'key')`); err != nil {
+		t.Fatalf("failed to insert agent config: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO projects (id, name) VALUES ('project-091', 'Usage Project')`); err != nil {
+		t.Fatalf("failed to insert project: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO tasks (id, project_id, title, category, status) VALUES ('task-091', 'project-091', 'Task 091', 'active', 'completed')`); err != nil {
+		t.Fatalf("failed to insert task: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO executions (id, task_id, agent_config_id, status, tokens_used, duration_ms, started_at, completed_at) VALUES ('execution-091', 'task-091', 'agent-091', 'completed', 123, 456, datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("failed to insert execution: %v", err)
+	}
+
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("failed to run migration 091: %v", err)
+	}
+
+	assertUsageTrackingSchema091(t, db)
+
+	var provider, projectID, executionID, operation string
+	var totalTokens, inputTokens, outputTokens int
+	if err := db.QueryRow(`SELECT provider, project_id, execution_id, operation, total_tokens, input_tokens, output_tokens FROM llm_usage_events WHERE execution_id = 'execution-091'`).Scan(&provider, &projectID, &executionID, &operation, &totalTokens, &inputTokens, &outputTokens); err != nil {
+		t.Fatalf("failed to read backfilled usage: %v", err)
+	}
+	if provider != "openai" || projectID != "project-091" || executionID != "execution-091" || operation != "task" || totalTokens != 123 || inputTokens != 0 || outputTokens != 0 {
+		t.Fatalf("unexpected backfilled usage provider=%s project=%s exec=%s op=%s total=%d input=%d output=%d", provider, projectID, executionID, operation, totalTokens, inputTokens, outputTokens)
+	}
+}
+
+func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("failed to set dialect: %v", err)
+	}
+	if err := goose.UpTo(db, ".", 86); err != nil {
+		t.Fatalf("failed to run migrations through 086: %v", err)
+	}
+	if err := applyPreviouslyUnreleasedUsageSchemaForTest(db); err != nil {
+		t.Fatalf("failed to simulate old usage migration chain: %v", err)
+	}
+	for version := 87; version <= 90; version++ {
+		if _, err := db.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, 1)`, version); err != nil {
+			t.Fatalf("failed to mark old unreleased migration %d applied: %v", version, err)
+		}
+	}
+
+	if _, err := db.Exec(`INSERT INTO agent_configs (id, name, provider, model, auth_method, api_key) VALUES ('agent-old-091', 'OpenAI API', 'openai', 'gpt-test', 'api_key', 'key')`); err != nil {
+		t.Fatalf("failed to insert agent config: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO projects (id, name) VALUES ('project-old-091', 'Usage Project')`); err != nil {
+		t.Fatalf("failed to insert project: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO tasks (id, project_id, title, category, status) VALUES ('task-old-091', 'project-old-091', 'Task 091', 'active', 'completed')`); err != nil {
+		t.Fatalf("failed to insert task: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO executions (id, task_id, agent_config_id, status, tokens_used, duration_ms, started_at, completed_at) VALUES ('execution-old-091', 'task-old-091', 'agent-old-091', 'completed', 321, 654, datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("failed to insert execution: %v", err)
+	}
+
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("failed to run consolidated migration 091 from old usage chain: %v", err)
+	}
+
+	assertUsageTrackingSchema091(t, db)
+	if testColumnExists(t, db, "llm_usage_events", "request_status") {
+		t.Fatal("expected request_status to be normalized away")
+	}
+
+	var totalTokens int
+	if err := db.QueryRow(`SELECT total_tokens FROM llm_usage_events WHERE execution_id = 'execution-old-091'`).Scan(&totalTokens); err != nil {
+		t.Fatalf("failed to read backfilled usage: %v", err)
+	}
+	if totalTokens != 321 {
+		t.Fatalf("backfilled total tokens = %d, want 321", totalTokens)
+	}
+
+	var maxVersion int
+	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
+		t.Fatalf("failed to read max goose version: %v", err)
+	}
+	if maxVersion != 91 {
+		t.Fatalf("max goose version = %d, want 91", maxVersion)
+	}
+}
+
+func assertUsageTrackingSchema091(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for _, table := range []string{"llm_usage_events", "account_usage_snapshots", "account_usage_extra_limits"} {
+		var tableName string
+		if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&tableName); err != nil {
+			t.Fatalf("%s table missing: %v", table, err)
+		}
+	}
+	for _, column := range []string{"status", "input_tokens", "output_tokens", "cached_input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "reasoning_output_tokens", "total_tokens", "cost_usd", "latency_ms", "raw_usage_json", "occurred_at"} {
+		if !testColumnExists(t, db, "llm_usage_events", column) {
+			t.Fatalf("expected llm_usage_events.%s column", column)
+		}
+	}
+	for _, column := range []string{"account_display_name", "account_detail", "billing_label", "subscription_status", "extra_usage_label", "extra_usage_monthly_limit_usd", "extra_usage_used_usd"} {
+		if !testColumnExists(t, db, "account_usage_snapshots", column) {
+			t.Fatalf("expected account_usage_snapshots.%s column", column)
+		}
+	}
+	for _, column := range []string{"snapshot_id", "provider", "account_id", "agent_config_id", "limit_key", "label", "used_percent", "window_minutes", "reset_at", "raw_json"} {
+		if !testColumnExists(t, db, "account_usage_extra_limits", column) {
+			t.Fatalf("expected account_usage_extra_limits.%s column", column)
+		}
+	}
+
+	if _, err := db.Exec(`
+		INSERT INTO agent_configs (id, name, provider, model, auth_method) VALUES ('agent-schema-091', 'Anthropic', 'anthropic', 'claude-test', 'oauth');
+		INSERT INTO account_usage_snapshots (id, provider, account_id, agent_config_id, plan_type, account_display_name, account_detail, billing_label, subscription_status, extra_usage_label, extra_usage_monthly_limit_usd, extra_usage_used_usd, raw_json)
+		VALUES ('snapshot-schema-091', 'anthropic', 'organization:org-091', 'agent-schema-091', 'Claude Max (20x)', 'James', 'james@example.com', 'Subscription billing', 'Active', 'Usage credits enabled', 200.0, 0.0, '{}');
+		INSERT INTO account_usage_extra_limits (id, snapshot_id, provider, account_id, agent_config_id, limit_key, label, used_percent, raw_json)
+		VALUES ('limit-schema-091', 'snapshot-schema-091', 'anthropic', 'organization:org-091', 'agent-schema-091', 'claude-test', 'Claude limit', 12.5, '{}');
+	`); err != nil && !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		t.Fatalf("failed to insert usage schema rows: %v", err)
+	}
+}
+
+func applyPreviouslyUnreleasedUsageSchemaForTest(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE llm_usage_events (
+			id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+			provider TEXT NOT NULL,
+			account_id TEXT,
+			project_id TEXT,
+			task_id TEXT,
+			execution_id TEXT,
+			chat_thread_id TEXT,
+			turn_id TEXT,
+			agent_config_id TEXT,
+			model TEXT NOT NULL DEFAULT '',
+			operation TEXT NOT NULL DEFAULT '',
+			request_status TEXT NOT NULL DEFAULT '',
+			error_message TEXT NOT NULL DEFAULT '',
+			stop_reason TEXT NOT NULL DEFAULT '',
+			rate_limit_reached_type TEXT NOT NULL DEFAULT '',
+			input_tokens INTEGER NOT NULL DEFAULT 0,
+			output_tokens INTEGER NOT NULL DEFAULT 0,
+			cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+			cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+			cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+			reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
+			total_tokens INTEGER NOT NULL DEFAULT 0,
+			cost_usd REAL,
+			latency_ms INTEGER NOT NULL DEFAULT 0,
+			context_window INTEGER,
+			max_output_tokens INTEGER,
+			provider_response_id TEXT,
+			raw_usage_json TEXT NOT NULL DEFAULT '{}',
+			occurred_at TEXT NOT NULL DEFAULT (datetime('now')),
+			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		);
+		CREATE TABLE account_usage_snapshots (
+			id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+			provider TEXT NOT NULL,
+			account_id TEXT,
+			agent_config_id TEXT,
+			plan_type TEXT NOT NULL DEFAULT '',
+			credits_remaining REAL,
+			primary_label TEXT NOT NULL DEFAULT '',
+			primary_used_percent REAL,
+			primary_window_minutes INTEGER,
+			primary_resets_at TEXT,
+			secondary_label TEXT NOT NULL DEFAULT '',
+			secondary_used_percent REAL,
+			secondary_window_minutes INTEGER,
+			secondary_resets_at TEXT,
+			model_limit_label TEXT NOT NULL DEFAULT '',
+			model_limit_used_percent REAL,
+			model_limit_window_minutes INTEGER,
+			model_limit_resets_at TEXT,
+			rate_limit_reached_type TEXT NOT NULL DEFAULT '',
+			raw_json TEXT NOT NULL DEFAULT '{}',
+			fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			account_display_name TEXT NOT NULL DEFAULT '',
+			account_detail TEXT NOT NULL DEFAULT '',
+			billing_label TEXT NOT NULL DEFAULT '',
+			subscription_status TEXT NOT NULL DEFAULT '',
+			extra_usage_label TEXT NOT NULL DEFAULT '',
+			extra_usage_monthly_limit_usd REAL,
+			extra_usage_used_usd REAL
+		);
+		CREATE TABLE account_usage_extra_limits (
+			id TEXT PRIMARY KEY,
+			snapshot_id TEXT NOT NULL,
+			provider TEXT NOT NULL,
+			account_id TEXT,
+			agent_config_id TEXT,
+			limit_key TEXT NOT NULL,
+			label TEXT NOT NULL DEFAULT '',
+			used_percent REAL,
+			window_minutes INTEGER,
+			reset_at TEXT,
+			raw_json TEXT NOT NULL DEFAULT '{}',
+			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		);
+	`)
+	return err
 }
 
 func TestMain(m *testing.M) {

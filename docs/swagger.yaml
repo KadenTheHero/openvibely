@@ -11,6 +11,8 @@ definitions:
       message_id:
         example: exec123
         type: string
+      queued:
+        type: boolean
       status:
         example: processing
         type: string
@@ -121,6 +123,56 @@ definitions:
           $ref: '#/definitions/handler.ProjectResponse'
         type: array
     type: object
+  models.AccountLimitView:
+    properties:
+      label:
+        type: string
+      limit_key:
+        type: string
+      resets_at:
+        type: string
+      status:
+        type: string
+      used_percent:
+        type: number
+      window_minutes:
+        type: integer
+    type: object
+  models.AccountUsageView:
+    properties:
+      account_detail:
+        type: string
+      billing_label:
+        type: string
+      error:
+        type: string
+      extra_limits:
+        items:
+          $ref: '#/definitions/models.AccountLimitView'
+        type: array
+      extra_usage_label:
+        type: string
+      extra_usage_monthly_usd:
+        type: number
+      extra_usage_used_usd:
+        type: number
+      limits:
+        items:
+          $ref: '#/definitions/models.AccountLimitView'
+        type: array
+      plan_type:
+        type: string
+      primary_limit:
+        $ref: '#/definitions/models.AccountLimitView'
+      provider:
+        type: string
+      secondary_limit:
+        $ref: '#/definitions/models.AccountLimitView'
+      status_label:
+        type: string
+      updated_at:
+        type: string
+    type: object
   models.AgentPerformanceMetric:
     properties:
       agent_config_id:
@@ -143,6 +195,41 @@ definitions:
       task_type:
         description: '"frontend", "backend", "testing", "refactor", "bugfix", "architecture"'
         type: string
+    type: object
+  models.AnalyticsUsageViewModel:
+    properties:
+      account_limits:
+        items:
+          $ref: '#/definitions/models.AccountUsageView'
+        type: array
+      daily_usage:
+        items:
+          $ref: '#/definitions/models.DailyUsagePoint'
+        type: array
+      daily_usage_by_model:
+        items:
+          $ref: '#/definitions/models.DailyUsagePoint'
+        type: array
+      errors:
+        items:
+          type: string
+        type: array
+      last_updated_at:
+        type: string
+      model_breakdown:
+        items:
+          $ref: '#/definitions/models.ModelUsagePoint'
+        type: array
+      totals:
+        $ref: '#/definitions/models.UsageTotals'
+      usage_rate:
+        items:
+          $ref: '#/definitions/models.UsageRatePoint'
+        type: array
+      usage_rate_by_model:
+        items:
+          $ref: '#/definitions/models.UsageRatePoint'
+        type: array
     type: object
   models.CollisionReport:
     properties:
@@ -255,6 +342,27 @@ definitions:
     - ConflictTypeSchema
     - ConflictTypeComponent
     - ConflictTypeSemantic
+  models.DailyUsagePoint:
+    properties:
+      cached_input_tokens:
+        type: integer
+      call_count:
+        type: integer
+      cost_usd:
+        type: number
+      input_tokens:
+        type: integer
+      model:
+        type: string
+      output_tokens:
+        type: integer
+      period:
+        type: string
+      provider:
+        type: string
+      total_tokens:
+        type: integer
+    type: object
   models.ExecutionOrderRecommendation:
     properties:
       batch_groups:
@@ -309,6 +417,29 @@ definitions:
       updated_at:
         type: string
     type: object
+  models.ModelUsagePoint:
+    properties:
+      cached_input_tokens:
+        type: integer
+      call_count:
+        type: integer
+      cost_usd:
+        type: number
+      input_tokens:
+        type: integer
+      model:
+        type: string
+      output_tokens:
+        type: integer
+      percent:
+        type: number
+      provider:
+        type: string
+      reasoning_output_tokens:
+        type: integer
+      total_tokens:
+        type: integer
+    type: object
   models.RecommendationStatus:
     enum:
     - pending
@@ -321,6 +452,42 @@ definitions:
     - RecommendationAccepted
     - RecommendationRejected
     - RecommendationExpired
+  models.UsageRatePoint:
+    properties:
+      call_count:
+        type: integer
+      model:
+        type: string
+      period:
+        type: string
+      provider:
+        type: string
+      total_tokens:
+        type: integer
+    type: object
+  models.UsageTotals:
+    properties:
+      cache_creation_input_tokens:
+        type: integer
+      cache_read_input_tokens:
+        type: integer
+      cached_input_tokens:
+        type: integer
+      call_count:
+        type: integer
+      cost_available:
+        type: boolean
+      cost_usd:
+        type: number
+      input_tokens:
+        type: integer
+      output_tokens:
+        type: integer
+      reasoning_output_tokens:
+        type: integer
+      total_tokens:
+        type: integer
+    type: object
   models.VoteRecord:
     properties:
       agent_config_id:
@@ -447,6 +614,14 @@ definitions:
         type: string
       output_contract:
         type: string
+      selected_memories:
+        items:
+          $ref: '#/definitions/viewmodels.SelectedMemoryView'
+        type: array
+      selected_skills:
+        items:
+          type: string
+        type: array
       skill_key:
         type: string
       started_at:
@@ -456,6 +631,17 @@ definitions:
       summary:
         type: string
       when:
+        type: string
+    type: object
+  viewmodels.SelectedMemoryView:
+    properties:
+      file:
+        type: string
+      snippet:
+        type: string
+      summary:
+        type: string
+      topic:
         type: string
     type: object
 host: localhost:3001
@@ -679,6 +865,51 @@ paths:
           schema:
             $ref: '#/definitions/handler.ErrorResponse'
       summary: Get success/failure rates
+      tags:
+      - analytics
+  /api/analytics/usage:
+    get:
+      description: Returns token/cache/reasoning/cost totals, daily usage, usage rate,
+        model breakdowns, and account limit snapshots.
+      parameters:
+      - description: Project ID filter
+        in: query
+        name: project_id
+        type: string
+      - description: Provider filter
+        in: query
+        name: provider
+        type: string
+      - default: 30d
+        description: 'Convenience range: 7d, 30d, month, all'
+        in: query
+        name: range
+        type: string
+      - default: day
+        description: 'Usage rate grouping: hour, day, week, month'
+        in: query
+        name: group_by
+        type: string
+      - description: Optional start datetime filter
+        in: query
+        name: date_from
+        type: string
+      - description: Optional end datetime filter
+        in: query
+        name: date_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Usage analytics
+          schema:
+            $ref: '#/definitions/models.AnalyticsUsageViewModel'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get LLM usage analytics
       tags:
       - analytics
   /api/autonomous/chain/{taskId}:
