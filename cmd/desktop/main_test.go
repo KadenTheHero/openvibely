@@ -39,8 +39,16 @@ func TestEnsureDesktopPATHMakesGoLocatable(t *testing.T) {
 	}
 
 	// Simulate a Wails GUI launch with a restricted desktop-session PATH.
-	minimal := "/usr/bin" + string(os.PathListSeparator) + "/bin" +
-		string(os.PathListSeparator) + "/usr/sbin" + string(os.PathListSeparator) + "/sbin"
+	// Use temp directories so the test is independent of runner image contents.
+	minimalBin := filepath.Join(tmp, "minimal-bin")
+	minimalSbin := filepath.Join(tmp, "minimal-sbin")
+	if err := os.MkdirAll(minimalBin, 0o755); err != nil {
+		t.Fatalf("mkdir minimal bin: %v", err)
+	}
+	if err := os.MkdirAll(minimalSbin, 0o755); err != nil {
+		t.Fatalf("mkdir minimal sbin: %v", err)
+	}
+	minimal := minimalBin + string(os.PathListSeparator) + minimalSbin
 	t.Setenv("PATH", minimal)
 	t.Setenv("SHELL", shell)
 
