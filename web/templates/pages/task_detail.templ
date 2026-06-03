@@ -112,24 +112,25 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 		<div id="tab-details" class={ "task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "details") }>
 			<div class="card bg-base-100 shadow-sm border border-base-300 flex-1 flex flex-col min-h-0 overflow-hidden">
 				<div class="card-body flex-1 flex flex-col min-h-0">
-						<!-- View Mode -->
-						<div id="task-detail-view" class="flex-1 overflow-y-auto min-h-0 pr-1">
-							@TaskDetailMetrics(task, executions, agents, agentDefs)
-							@TaskPromptPanel(task)
-							@TaskGoalPanel(task.ID, goal)
-							// Worktree info panel (shown when task has worktree or is in a git project)
-							if task.WorktreeBranch != "" || task.WorktreePath != "" {
-								<div
-									id="worktree-info-wrapper"
-									hx-get={ fmt.Sprintf("/tasks/%s/worktree", task.ID) }
-									hx-trigger="load"
-									hx-target="#worktree-info-wrapper"
-									hx-swap="innerHTML"
-								>
-									@WorktreeInfoPanel(task, nil)
-								</div>
-							}
-							<div class="flex gap-2">							if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
+					<!-- View Mode -->
+					<div id="task-detail-view" class="flex-1 overflow-y-auto min-h-0 pr-1">
+						@TaskDetailMetrics(task, executions, agents, agentDefs)
+						@TaskPromptPanel(task)
+						@TaskGoalPanel(task.ID, goal)
+						// Worktree info panel (shown when task has worktree or is in a git project)
+						if task.WorktreeBranch != "" || task.WorktreePath != "" {
+							<div
+								id="worktree-info-wrapper"
+								hx-get={ fmt.Sprintf("/tasks/%s/worktree", task.ID) }
+								hx-trigger="load"
+								hx-target="#worktree-info-wrapper"
+								hx-swap="innerHTML"
+							>
+								@WorktreeInfoPanel(task, nil)
+							</div>
+						}
+						<div class="flex gap-2">
+							if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
 								<button
 									class="btn btn-primary btn-sm"
 									disabled
@@ -286,50 +287,51 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 									}
 								</select>
 							</div>
-								<div class="form-control mb-4">
-									<label class="label">
-										<span class="label-text">Prompt</span>
+							<div class="form-control mb-4">
+								<label class="label">
+									<span class="label-text">Prompt</span>
+								</label>
+								<textarea
+									name="prompt"
+									class="textarea textarea-bordered font-mono"
+									rows="8"
+								>{ task.Prompt }</textarea>
+							</div>
+							<div class="form-control mb-4">
+								<label class="label">
+									<span class="label-text">Goal</span>
+								</label>
+								<input type="hidden" name="goal_present" value="1"/>
+								<textarea
+									name="goal"
+									class="textarea textarea-bordered textarea-sm w-full"
+									rows="3"
+									placeholder="Add goal"
+								>{ goalValue(goal) }</textarea>
+								<label class="label">
+									<span class="label-text-alt text-base-content/50">Leave empty to clear the goal.</span>
+								</label>
+								if goal != nil && goal.Status != models.TaskGoalStatusCleared {
+									<input type="hidden" name="goal_status_present" value="1"/>
+									<label class="label cursor-pointer justify-start gap-2 pt-0">
+										<input
+											type="checkbox"
+											name="goal_active"
+											class="toggle toggle-sm toggle-primary"
+											if goal.Status == models.TaskGoalStatusActive {
+												checked
+											}
+										/>
+										<span class="label-text">Goal active</span>
 									</label>
-									<textarea
-										name="prompt"
-										class="textarea textarea-bordered font-mono"
-										rows="8"
-									>{ task.Prompt }</textarea>
-								</div>
-								<div class="form-control mb-4">
-									<label class="label">
-										<span class="label-text">Goal</span>
-									</label>
-									<input type="hidden" name="goal_present" value="1"/>
-									<textarea
-										name="goal"
-										class="textarea textarea-bordered textarea-sm w-full"
-										rows="3"
-										placeholder="Add goal"
-									>{ goalValue(goal) }</textarea>
-									<label class="label">
-										<span class="label-text-alt text-base-content/50">Leave empty to clear the goal.</span>
-									</label>
-									if goal != nil && goal.Status != models.TaskGoalStatusCleared {
-										<input type="hidden" name="goal_status_present" value="1"/>
-										<label class="label cursor-pointer justify-start gap-2 pt-0">
-											<input
-												type="checkbox"
-												name="goal_active"
-												class="toggle toggle-sm toggle-primary"
-												if goal.Status == models.TaskGoalStatusActive {
-													checked
-												}
-											/>
-											<span class="label-text">Goal active</span>
-										</label>
-									}
-								</div>
-								<div class="form-control mb-4">
-									<label class="label">
-										<span class="label-text">Model</span>
-									</label>
-									<select name="agent_id" class="select select-bordered">									<option
+								}
+							</div>
+							<div class="form-control mb-4">
+								<label class="label">
+									<span class="label-text">Model</span>
+								</label>
+								<select name="agent_id" class="select select-bordered">
+									<option
 										value=""
 										if task.AgentID == nil {
 											selected
@@ -1485,7 +1487,7 @@ templ TaskDetailMetrics(task *models.Task, executions []models.Execution, agents
 	>
 		<div>
 			<span class="text-sm opacity-60">Category:</span>
-			<span class="ml-2 badge badge-sm">{ string(task.Category) }</span>
+			<span class="ml-2 badge badge-sm badge-outline">{ string(task.Category) }</span>
 		</div>
 		// Only show status badge if it provides meaningful information beyond category
 		// For backlog/scheduled tasks with pending status, the category badge is sufficient
@@ -1498,9 +1500,9 @@ templ TaskDetailMetrics(task *models.Task, executions []models.Execution, agents
 		<div>
 			<span class="text-sm opacity-60">Tag:</span>
 			if task.Tag != "" {
-				<span class={ "ml-2 badge badge-sm inline-flex items-center", components.TagBadgeClass(task.Tag) }>{ components.TagLabel(task.Tag) }</span>
+				<span class="ml-2 badge badge-sm badge-outline inline-flex items-center">{ components.TagLabel(task.Tag) }</span>
 			} else {
-				<span class="ml-2 badge badge-sm badge-ghost">None</span>
+				<span class="ml-2 badge badge-sm badge-outline opacity-70">None</span>
 			}
 		</div>
 		if components.PriorityLabel(task.Priority) != "" {
@@ -1555,8 +1557,6 @@ templ TaskGoalPanel(taskID string, goal *models.TaskGoal) {
 					<div class="text-sm font-semibold">Goal</div>
 					if goal == nil || goal.Status == models.TaskGoalStatusCleared {
 						<div class="text-sm opacity-60">No goal set</div>
-					} else {
-						<div class="text-xs uppercase tracking-wide opacity-60">Active: { fmt.Sprintf("%t", goal.Status == models.TaskGoalStatusActive) }</div>
 					}
 				</div>
 				if goal != nil && goal.Status != models.TaskGoalStatusCleared {

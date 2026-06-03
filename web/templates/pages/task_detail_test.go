@@ -276,10 +276,13 @@ func TestTaskDetailContent_DetailsTabRendersScrollableMatchedSectionCards(t *tes
 	if strings.Contains(output, `<pre class="p-4 bg-base-100/60 border border-base-300 rounded-lg text-sm`) {
 		t.Fatal("prompt should not render with the old monospace pre styling")
 	}
-	for _, required := range []string{"Model One", "Agent One", "Feature", `name="goal"`, `name="goal_active"`, `name="auto_merge"`} {
+	for _, required := range []string{"Model One", "Agent One", "Feature", `name="goal"`, `name="goal_active"`, `name="auto_merge"`, `>active</span>`} {
 		if !strings.Contains(output, required) {
 			t.Fatalf("expected task details/edit markup to include %q", required)
 		}
+	}
+	if strings.Contains(output, "Active: true") || strings.Contains(output, "Active: false") {
+		t.Fatal("goal panel should use the status pill instead of redundant boolean active text")
 	}
 	viewStart := strings.Index(output, `id="task-detail-view"`)
 	editStart := strings.Index(output, `id="task-detail-edit"`)
@@ -311,6 +314,14 @@ func TestTaskDetailMetrics_ShowsMissingTagModelAndAgentClearly(t *testing.T) {
 	for _, required := range []string{"Tag:", "None", "Model:", "Default model", "Agent:", "No agent", "Priority:", "Normal"} {
 		if !strings.Contains(output, required) {
 			t.Fatalf("expected metrics to include %q, got: %s", required, output)
+		}
+	}
+	for _, requiredClass := range []string{
+		`<span class="ml-2 badge badge-sm badge-outline">backlog</span>`,
+		`<span class="ml-2 badge badge-sm badge-outline opacity-70">None</span>`,
+	} {
+		if !strings.Contains(output, requiredClass) {
+			t.Fatalf("expected neutral metadata badge class %q, got: %s", requiredClass, output)
 		}
 	}
 }

@@ -24,8 +24,11 @@ func TestTaskGoalRoutes_HTMXEditPauseResumeClear(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set goal status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "All checks pass") || !strings.Contains(rec.Body.String(), "Active: true") {
+	if !strings.Contains(rec.Body.String(), "All checks pass") || !strings.Contains(rec.Body.String(), `>active</span>`) {
 		t.Fatalf("set goal body missing panel content: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "Active: true") || strings.Contains(rec.Body.String(), "Active: false") {
+		t.Fatalf("goal panel should use the status pill instead of redundant boolean active text: %s", rec.Body.String())
 	}
 
 	for _, path := range []string{"/pause", "/resume", "/clear"} {
@@ -74,8 +77,11 @@ func TestUpdateTask_EditFormSavesGoalAndRefreshesReadOnlySummary(t *testing.T) {
 		t.Fatalf("unexpected saved goal: %#v", goal)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "Ship a clearer details UX") || !strings.Contains(body, "Active: true") {
+	if !strings.Contains(body, "Ship a clearer details UX") || !strings.Contains(body, `>active</span>`) {
 		t.Fatalf("expected refreshed read-only goal summary, got: %s", body)
+	}
+	if strings.Contains(body, "Active: true") || strings.Contains(body, "Active: false") {
+		t.Fatalf("read-only goal summary should use the status pill instead of redundant boolean active text: %s", body)
 	}
 	viewStart := strings.Index(body, `id="task-detail-view"`)
 	editStart := strings.Index(body, `id="task-detail-edit"`)
