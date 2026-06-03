@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
+	"github.com/openvibely/openvibely/internal/agentskills"
 )
 
 func TestSkillsPageListsGlobalAndProjectStandaloneSkillCards(t *testing.T) {
@@ -385,6 +386,189 @@ func TestCreateSkillWritesStandaloneSkillAndReturnsCards(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "debug_tests") {
 		t.Fatalf("expected response to include new skill card")
+	}
+}
+
+func TestSetSkillEnabledDisablesAndEnablesSkill(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+	writeStandaloneSkill(t, root, "debug_tests", "Debug Tests", "Find and fix tests", "global")
+
+	// Disable the skill
+	disableBody := `{"enabled":false,"scope":"global"}`
+	req := httptest.NewRequest(http.MethodPost, "/skills/debug_tests/enabled", strings.NewReader(disableBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("disable: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify the SKILL.md now has enabled: false
+	data, err := os.ReadFile(filepath.Join(root, "skills", "debug_tests", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read skill after disable: %v", err)
+	}
+	if !strings.Contains(string(data), "enabled: false") {
+		t.Fatalf("expected SKILL.md to contain 'enabled: false', got:\n%s", data)
+	}
+
+	// Verify the response shows the Disabled badge
+	body := rec.Body.String()
+	if !strings.Contains(body, "Disabled") {
+		t.Fatalf("expected response to show Disabled badge for disabled skill")
+	}
+	if !strings.Contains(body, "debug_tests") {
+		t.Fatalf("expected disabled skill to remain visible in management page")
+	}
+
+	// Re-enable the skill
+	enableBody := `{"enabled":true,"scope":"global"}`
+	req2 := httptest.NewRequest(http.MethodPost, "/skills/debug_tests/enabled", strings.NewReader(enableBody))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("HX-Request", "true")
+	rec2 := httptest.NewRecorder()
+	e.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("enable: expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+
+	data2, err := os.ReadFile(filepath.Join(root, "skills", "debug_tests", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read skill after enable: %v", err)
+	}
+	if strings.Contains(string(data2), "enabled: false") {
+		t.Fatalf("expected SKILL.md to not contain 'enabled: false' after re-enable, got:\n%s", data2)
+	}
+	body2 := rec2.Body.String()
+	if strings.Contains(body2, "Disabled") {
+		t.Fatalf("expected Disabled badge to be gone after re-enable")
+	}
+}
+
+func TestSetSkillEnabledRejectsInvalidHandle(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetAgentSkillRoot(t.TempDir())
+
+	req := httptest.NewRequest(http.MethodPost, "/skills/../etc/enabled", strings.NewReader(`{"enabled":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	// The router won't match the path with traversal, so we just verify a
+	// well-formed bad handle returns 400 or 404
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected non-200 for invalid handle traversal, got %d", rec.Code)
+	}
+}
+
+func TestSetSkillEnabledReturns404ForMissingSkill(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetAgentSkillRoot(t.TempDir())
+
+	req := httptest.NewRequest(http.MethodPost, "/skills/nonexistent/enabled", strings.NewReader(`{"enabled":false,"scope":"global"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing skill, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSkillsPageShowsDisabledBadgeAndKebabToggle(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+	// Write an enabled skill
+	writeStandaloneSkill(t, root, "global_enabled", "Enabled Skill", "enabled", "global")
+	// Write a disabled skill directly
+	writeDisabledStandaloneSkill(t, root, "global_disabled", "Disabled Skill", "disabled", "global")
+
+	req := httptest.NewRequest(http.MethodGet, "/skills", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+
+	// Both skills should appear (disabled skills are visible on the management page)
+	if !strings.Contains(body, "global_enabled") {
+		t.Fatalf("expected enabled skill to appear on skills page")
+	}
+	if !strings.Contains(body, "global_disabled") {
+		t.Fatalf("expected disabled skill to remain visible on skills page")
+	}
+
+	// Disabled badge should appear for the disabled skill
+	if !strings.Contains(body, "Disabled") {
+		t.Fatalf("expected Disabled badge in skill cards")
+	}
+	if !strings.Contains(body, `data-skill-enabled="false"`) {
+		t.Fatalf("expected data-skill-enabled=false attribute on disabled card")
+	}
+	if !strings.Contains(body, `data-skill-enabled="true"`) {
+		t.Fatalf("expected data-skill-enabled=true attribute on enabled card")
+	}
+
+	// Enable/Disable buttons should appear in kebab menus
+	if !strings.Contains(body, "setSkillEnabled") {
+		t.Fatalf("expected setSkillEnabled JS call in skill card kebab menu")
+	}
+}
+
+func TestSkillsPageDisabledSkillExcludedFromRuntimeCatalog(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+	writeStandaloneSkill(t, root, "enabled_skill", "Enabled", "desc", "global")
+	writeDisabledStandaloneSkill(t, root, "disabled_skill", "Disabled", "desc", "global")
+
+	// The skills page (management) should show both
+	req := httptest.NewRequest(http.MethodGet, "/skills", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, "enabled_skill") || !strings.Contains(body, "disabled_skill") {
+		t.Fatalf("management page should show both skills; body excerpt: %s", body[:min(500, len(body))])
+	}
+
+	// Runtime catalog via BuildCatalog should exclude disabled skills
+	catalog, err := agentskills.BuildCatalog("test-turn", root, "")
+	if err != nil {
+		t.Fatalf("build catalog: %v", err)
+	}
+	if _, ok := catalog.Lookup("enabled_skill"); !ok {
+		t.Fatalf("enabled skill must be in runtime catalog")
+	}
+	if _, ok := catalog.Lookup("disabled_skill"); ok {
+		t.Fatalf("disabled skill must NOT be in runtime catalog")
+	}
+}
+
+func writeDisabledStandaloneSkill(t *testing.T, root, handle, name, description, scope string) {
+	t.Helper()
+	enabled := false
+	decl := &agentlibrary.SkillDeclaration{
+		Kind:    "openvibely.agent_skill",
+		Version: 1,
+		Skill: agentlibrary.SkillBlock{
+			Key:         handle,
+			Name:        name,
+			Scope:       scope,
+			Description: description,
+			Enabled:     &enabled,
+		},
+	}
+	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: root, Project: root}, nil)
+	if _, err := importer.WriteSkill(context.Background(), decl, "Use this skill when appropriate."); err != nil {
+		t.Fatalf("write disabled skill %s: %v", handle, err)
 	}
 }
 

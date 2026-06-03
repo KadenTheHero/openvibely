@@ -144,6 +144,49 @@ func (h *Handler) DeleteSkill(c echo.Context) error {
 	return h.ListSkills(c)
 }
 
+type skillEnabledRequest struct {
+	Enabled bool   `json:"enabled"`
+	Scope   string `json:"scope"`
+}
+
+func (h *Handler) SetSkillEnabled(c echo.Context) error {
+	handle := strings.TrimSpace(c.Param("skill"))
+	if !validDialogSkillKey(handle) {
+		return echo.NewHTTPError(http.StatusBadRequest, "skill handle must be a slug")
+	}
+	var req skillEnabledRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON")
+	}
+	scope := h.dialogStandaloneSkillScope(c, req.Scope)
+	root, err := h.rootForDialogScope(c, scope)
+	if err != nil {
+		return err
+	}
+	skillPath := filepath.Join(root, "skills", handle, "SKILL.md")
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return echo.NewHTTPError(http.StatusNotFound, "skill not found at selected scope")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	decl, body, parseErr := agentlibrary.ParseDeclaration(string(data))
+	if parseErr != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, parseErr.Error())
+	}
+	enabled := req.Enabled
+	decl.Skill.Enabled = &enabled
+	decl.Agent.Key = ""
+	decl.Skill.Key = handle
+	decl.Skill.Scope = scope
+	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: h.agentSkillRoot, Project: h.currentProjectSkillRoot(c)}, nil)
+	if _, writeErr := importer.WriteSkill(c.Request().Context(), decl, body); writeErr != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, writeErr.Error())
+	}
+	return h.ListSkills(c)
+}
+
 func removeStandaloneSkillIndexEntry(path, handle string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -459,7 +502,7 @@ func listStandaloneSkillPackageFiles(skillPath string) []string {
 
 func (h *Handler) listStandaloneSkills(c echo.Context) ([]pages.SkillCard, error) {
 	projectRoot := h.currentProjectSkillRoot(c)
-	catalog, err := agentskills.BuildCatalog("skills-page", h.agentSkillRoot, projectRoot)
+	catalog, err := agentskills.BuildCatalogAll("skills-page", h.agentSkillRoot, projectRoot)
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -472,12 +515,14 @@ func (h *Handler) listStandaloneSkills(c echo.Context) ([]pages.SkillCard, error
 			Source: string(entry.Source),
 			Files:  listStandaloneSkillPackageFiles(entry.AbsolutePath),
 		}
+		card.Enabled = true // default to enabled when frontmatter is absent
 		if data, readErr := os.ReadFile(entry.AbsolutePath); readErr == nil {
 			card.Content = string(data)
 			if decl, body, parseErr := agentlibrary.ParseDeclaration(string(data)); parseErr == nil && decl != nil {
 				card.Name = firstDialogNonEmpty(decl.Skill.Name, decl.Skill.Key, entry.Skill)
 				card.Description = firstNonEmpty(decl.Skill.Description, decl.Routing.Description)
 				card.Archived = decl.Skill.Archived
+				card.Enabled = decl.Skill.Enabled == nil || *decl.Skill.Enabled
 				card.Content, _ = agentlibrary.RenderSkillMarkdown(decl, body)
 			}
 		}

@@ -242,6 +242,64 @@ func TestBuildCatalog_RequiresSkillBody(t *testing.T) {
 	}
 }
 
+func TestBuildCatalog_ExcludesDisabledSkills(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "enabled_skill", "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n    key: enabled_skill\n    enabled: true\n---\nbody")
+	writeSkill(t, root, "disabled_skill", "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n    key: disabled_skill\n    enabled: false\n---\nbody")
+	writeSkill(t, root, "nil_enabled_skill", "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n    key: nil_enabled_skill\n---\nbody")
+
+	cat, err := BuildCatalog("t", root, "")
+	if err != nil {
+		t.Fatalf("build catalog: %v", err)
+	}
+	if _, ok := cat.Lookup("enabled_skill"); !ok {
+		t.Fatalf("enabled skill must be in catalog")
+	}
+	if _, ok := cat.Lookup("nil_enabled_skill"); !ok {
+		t.Fatalf("skill without enabled field must be in catalog")
+	}
+	if _, ok := cat.Lookup("disabled_skill"); ok {
+		t.Fatalf("disabled skill must NOT be in runtime catalog")
+	}
+}
+
+func TestBuildCatalogAll_IncludesDisabledSkills(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "enabled_skill", "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n    key: enabled_skill\n    enabled: true\n---\nbody")
+	writeSkill(t, root, "disabled_skill", "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n    key: disabled_skill\n    enabled: false\n---\nbody")
+
+	cat, err := BuildCatalogAll("t", root, "")
+	if err != nil {
+		t.Fatalf("build catalog all: %v", err)
+	}
+	if _, ok := cat.Lookup("enabled_skill"); !ok {
+		t.Fatalf("enabled skill must be in catalog")
+	}
+	if _, ok := cat.Lookup("disabled_skill"); !ok {
+		t.Fatalf("disabled skill must appear in BuildCatalogAll for management UI")
+	}
+	if len(cat.Entries()) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(cat.Entries()))
+	}
+}
+
+func TestBuildAgentCatalog_ExcludesDisabledAgentSkills(t *testing.T) {
+	root := t.TempDir()
+	writeAgentSkill(t, root, "task_agent", "enabled_skill", "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n    key: enabled_skill\n    enabled: true\n---\nbody")
+	writeAgentSkill(t, root, "task_agent", "disabled_skill", "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n    key: disabled_skill\n    enabled: false\n---\nbody")
+
+	cat, err := BuildAgentCatalog("t", root, "", "task_agent")
+	if err != nil {
+		t.Fatalf("build agent catalog: %v", err)
+	}
+	if _, ok := cat.Lookup("enabled_skill"); !ok {
+		t.Fatalf("enabled agent skill must be in catalog")
+	}
+	if _, ok := cat.Lookup("disabled_skill"); ok {
+		t.Fatalf("disabled agent skill must NOT be in runtime catalog")
+	}
+}
+
 func TestRenderAvailableSkillsMarkdown_ReturnsRawIndexContent(t *testing.T) {
 	global := t.TempDir()
 	project := t.TempDir()

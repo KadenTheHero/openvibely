@@ -24,6 +24,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // AgentsIndexFile is the per-root narrative agent index filename.
@@ -250,22 +252,34 @@ func (c *Catalog) Filter(turnID string, handles []string) *Catalog {
 
 // BuildCatalog enumerates standalone skill handles authorized in this turn by
 // reading <root>/skills/SKILLS.md in each root. The SKILL.md files themselves
-// must exist on disk for an indexed handle to be loadable.
+// must exist on disk for an indexed handle to be loadable. Disabled skills
+// (skill.enabled: false in frontmatter) are excluded from the runtime catalog.
 //
 // Project entries override global entries for the same handle. Missing SKILLS.md
 // is treated as "no standalone skills at this scope"; skill mutations maintain
 // a minimal top-level SKILLS.md link index.
 func BuildCatalog(turnID, globalRoot, projectRoot string) (*Catalog, error) {
+	return buildCatalog(turnID, globalRoot, projectRoot, false)
+}
+
+// BuildCatalogAll enumerates all indexed standalone skills including disabled
+// ones. Use this for management UIs that need to display and act on disabled
+// skills; use BuildCatalog for runtime/task-execution catalogs.
+func BuildCatalogAll(turnID, globalRoot, projectRoot string) (*Catalog, error) {
+	return buildCatalog(turnID, globalRoot, projectRoot, true)
+}
+
+func buildCatalog(turnID, globalRoot, projectRoot string, includeDisabled bool) (*Catalog, error) {
 	var entries []Entry
 	if globalRoot != "" {
-		got, err := loadStandaloneSkills(globalRoot, SourceGlobal)
+		got, err := loadStandaloneSkills(globalRoot, SourceGlobal, includeDisabled)
 		if err != nil {
 			return nil, fmt.Errorf("read global skill index: %w", err)
 		}
 		entries = append(entries, got...)
 	}
 	if projectRoot != "" {
-		got, err := loadStandaloneSkills(projectRoot, SourceProject)
+		got, err := loadStandaloneSkills(projectRoot, SourceProject, includeDisabled)
 		if err != nil {
 			return nil, fmt.Errorf("read project skill index: %w", err)
 		}
@@ -287,14 +301,14 @@ func BuildCatalog(turnID, globalRoot, projectRoot string) (*Catalog, error) {
 	return NewCatalog(turnID, deduped), nil
 }
 
-func loadStandaloneSkills(root string, source Source) ([]Entry, error) {
+func loadStandaloneSkills(root string, source Source, includeDisabled bool) ([]Entry, error) {
 	skillsDir := filepath.Join(root, SkillsDir)
-	return loadSkillIndexEntries(SkillsIndexPath(root), skillsDir, source, "")
+	return loadSkillIndexEntries(SkillsIndexPath(root), skillsDir, source, "", includeDisabled)
 }
 
 // BuildAgentCatalog enumerates skills owned by one assigned agent from
 // <root>/agents/<agent>/SKILLS.md. Project entries override global entries for
-// the same skill key.
+// the same skill key. Disabled skills are excluded from the runtime catalog.
 func BuildAgentCatalog(turnID, globalRoot, projectRoot, agentKey string) (*Catalog, error) {
 	agentKey = strings.TrimSpace(agentKey)
 	if agentKey == "" || !isValidSlug(agentKey) {
@@ -302,14 +316,14 @@ func BuildAgentCatalog(turnID, globalRoot, projectRoot, agentKey string) (*Catal
 	}
 	var entries []Entry
 	if globalRoot != "" {
-		got, err := loadAgentSkills(globalRoot, agentKey, SourceGlobal)
+		got, err := loadAgentSkills(globalRoot, agentKey, SourceGlobal, false)
 		if err != nil {
 			return nil, fmt.Errorf("read global agent skill index: %w", err)
 		}
 		entries = append(entries, got...)
 	}
 	if projectRoot != "" {
-		got, err := loadAgentSkills(projectRoot, agentKey, SourceProject)
+		got, err := loadAgentSkills(projectRoot, agentKey, SourceProject, false)
 		if err != nil {
 			return nil, fmt.Errorf("read project agent skill index: %w", err)
 		}
@@ -331,13 +345,13 @@ func BuildAgentCatalog(turnID, globalRoot, projectRoot, agentKey string) (*Catal
 	return newCatalog(turnID, deduped, true), nil
 }
 
-func loadAgentSkills(root, agentKey string, source Source) ([]Entry, error) {
+func loadAgentSkills(root, agentKey string, source Source, includeDisabled bool) ([]Entry, error) {
 	agentDir := filepath.Join(root, AgentRootsDir, agentKey)
 	skillsDir := filepath.Join(agentDir, SkillsDir)
-	return loadSkillIndexEntries(AgentSkillsIndexPath(root, agentKey), skillsDir, source, agentKey)
+	return loadSkillIndexEntries(AgentSkillsIndexPath(root, agentKey), skillsDir, source, agentKey, includeDisabled)
 }
 
-func loadSkillIndexEntries(indexPath, skillsDir string, source Source, agentKey string) ([]Entry, error) {
+func loadSkillIndexEntries(indexPath, skillsDir string, source Source, agentKey string, includeDisabled bool) ([]Entry, error) {
 	if info, err := os.Stat(skillsDir); err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -370,9 +384,43 @@ func loadSkillIndexEntries(indexPath, skillsDir string, source Source, agentKey 
 		if _, err := os.Stat(absPath); err != nil {
 			continue
 		}
+		if !includeDisabled && skillDisabledOnDisk(absPath) {
+			continue
+		}
 		out = append(out, Entry{Handle: skill, Skill: skill, Source: source, AgentKey: agentKey, AbsolutePath: absPath})
 	}
 	return out, nil
+}
+
+// skillDisabledOnDisk reads the SKILL.md at path and returns true only when
+// the frontmatter explicitly sets skill.enabled: false. Missing files, parse
+// errors, or an absent enabled field default to enabled (returns false).
+func skillDisabledOnDisk(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	content := string(data)
+	if !strings.HasPrefix(content, "---") {
+		return false
+	}
+	rest := strings.TrimPrefix(content, "---")
+	rest = strings.TrimPrefix(rest, "\r")
+	rest = strings.TrimPrefix(rest, "\n")
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return false
+	}
+	front := rest[:end]
+	var parsed struct {
+		Skill struct {
+			Enabled *bool `yaml:"enabled"`
+		} `yaml:"skill"`
+	}
+	if err := yaml.Unmarshal([]byte(front), &parsed); err != nil {
+		return false
+	}
+	return parsed.Skill.Enabled != nil && !*parsed.Skill.Enabled
 }
 
 // h2HeaderRegexp captures the slug on a "## <slug>" line. The slug character

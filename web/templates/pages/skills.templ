@@ -16,6 +16,7 @@ type SkillCard struct {
 	Content     string
 	Files       []string
 	Archived    bool
+	Enabled     bool
 }
 
 templ Skills(projects []models.Project, currentProjectID string, skills []SkillCard, canManage bool) {
@@ -33,7 +34,11 @@ func skillSearchText(skill SkillCard) string {
 	if skill.Archived {
 		status = "archived"
 	}
-	return strings.TrimSpace(skill.Handle + " " + skill.Name + " " + skill.Description + " " + skill.Scope + " " + skill.Source + " " + status)
+	enabledStatus := "enabled"
+	if !skill.Enabled {
+		enabledStatus = "disabled"
+	}
+	return strings.TrimSpace(skill.Handle + " " + skill.Name + " " + skill.Description + " " + skill.Scope + " " + skill.Source + " " + status + " " + enabledStatus)
 }
 
 func defaultSkillBodyTemplate() string {
@@ -91,7 +96,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 			<div class="grid gap-4">
 				for _, skill := range skills {
 					<div
-						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+						class={ "card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all" + func() string { if !skill.Enabled { return " opacity-60" } else { return "" } }() }
 						data-skill-handle={ skill.Handle }
 						data-skill-name={ skill.Name }
 						data-skill-description={ skill.Description }
@@ -99,6 +104,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 						data-skill-source={ skill.Source }
 						data-skill-content={ skill.Content }
 						data-skill-files={ strings.Join(skill.Files, "\n") }
+						data-skill-enabled={ func() string { if skill.Enabled { return "true" } else { return "false" } }() }
 						data-search-card
 						data-search-text={ skillSearchText(skill) }
 						onclick="editSkillFromData(this)"
@@ -115,6 +121,15 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 										<li>
 											<button onclick="editSkillFromData(this.closest('[data-skill-handle]'))">Edit</button>
 										</li>
+										if skill.Enabled {
+											<li>
+												<button data-skill-handle={ skill.Handle } data-skill-scope={ skill.Scope } onclick="setSkillEnabled(this, false)">Disable</button>
+											</li>
+										} else {
+											<li>
+												<button data-skill-handle={ skill.Handle } data-skill-scope={ skill.Scope } onclick="setSkillEnabled(this, true)">Enable</button>
+											</li>
+										}
 										<li>
 											<button class="text-error" data-skill-handle={ skill.Handle } data-skill-name={ firstSkillNonEmpty(skill.Name, skill.Handle) } data-skill-scope={ skill.Scope } onclick="deleteSkill(this)">Delete</button>
 										</li>
@@ -130,6 +145,9 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 								}
 								<div class="flex flex-wrap gap-2 mt-2">
 									<span class="badge badge-outline badge-sm">{ skill.Scope }</span>
+									if !skill.Enabled {
+										<span class="badge badge-warning badge-sm">Disabled</span>
+									}
 									if skill.Archived {
 										<span class="badge badge-outline badge-sm">Archived</span>
 									}
@@ -338,6 +356,32 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 					swap: 'outerHTML'
 				}).catch(function(xhr) {
 					alert((xhr && xhr.responseText) || 'Failed to delete skill.');
+				});
+			}
+
+			function setSkillEnabled(button, enable) {
+				var handle = button.dataset.skillHandle || '';
+				var scope = button.dataset.skillScope || 'project';
+				if (!handle) return;
+				var action = enable ? 'Enable' : 'Disable';
+				if (!confirm(action + ' skill "' + handle + '"?')) return;
+				fetch('/skills/' + encodeURIComponent(handle) + '/enabled' + currentSkillsProjectQuery(), {
+					method: 'POST',
+					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
+					body: JSON.stringify({enabled: enable, scope: scope})
+				}).then(function(resp) {
+					if (!resp.ok) {
+						return resp.text().then(function(text) { throw new Error(text || 'Failed to ' + action.toLowerCase() + ' skill.'); });
+					}
+					return resp.text();
+				}).then(function(html) {
+					var container = document.getElementById('skills-container');
+					if (container) {
+						container.outerHTML = html;
+						if (window.htmx) htmx.process(document.getElementById('skills-container'));
+					}
+				}).catch(function(err) {
+					alert(err.message || 'Failed to ' + action.toLowerCase() + ' skill.');
 				});
 			}
 
