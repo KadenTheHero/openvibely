@@ -25,6 +25,7 @@ type skillSaveRequest struct {
 	Description string `json:"description"`
 	Scope       string `json:"scope"`
 	Body        string `json:"body"`
+	Enabled     *bool  `json:"enabled"`
 }
 
 func (h *Handler) ListSkills(c echo.Context) error {
@@ -591,6 +592,9 @@ func (h *Handler) writeStandaloneSkillFromDialog(c echo.Context, req skillSaveRe
 	}
 	if strings.TrimSpace(req.Description) != "" {
 		decl.Skill.Description = strings.TrimSpace(req.Description)
+	}
+	if req.Enabled != nil {
+		decl.Skill.Enabled = req.Enabled
 	}
 	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: h.agentSkillRoot, Project: h.currentProjectSkillRoot(c)}, nil)
 	res, err := importer.WriteSkill(c.Request().Context(), decl, body)

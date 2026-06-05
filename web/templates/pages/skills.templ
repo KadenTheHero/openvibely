@@ -96,7 +96,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 			<div class="grid gap-4">
 				for _, skill := range skills {
 					<div
-						class={ "card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all" + func() string { if !skill.Enabled { return " opacity-60" } else { return "" } }() }
+						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-skill-handle={ skill.Handle }
 						data-skill-name={ skill.Name }
 						data-skill-description={ skill.Description }
@@ -184,9 +184,14 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 						<span class="label-text mb-1">Description</span>
 						<input id="skill_description" class="input input-bordered" placeholder="When to use this skill" oninput="syncNewSkillTemplate()"/>
 					</label>
-					<label class="form-control mt-3">
-						<span class="label-text mb-1">Skill body</span>
-						<textarea id="skill_body" class="textarea textarea-bordered font-mono text-sm min-h-72" required placeholder="Instructions for this skill..." oninput="markSkillTemplateEdited()">{ defaultSkillBodyTemplate() }</textarea>
+						<div class="form-control mt-3">
+							<label class="label cursor-pointer justify-start gap-3">
+								<input id="skill_enabled" type="checkbox" class="toggle toggle-primary toggle-sm" checked/>
+								<span class="label-text">Enabled</span>
+							</label>
+						</div>
+						<label class="form-control mt-3">
+							<span class="label-text mb-1">Skill body</span>						<textarea id="skill_body" class="textarea textarea-bordered font-mono text-sm min-h-72" required placeholder="Instructions for this skill..." oninput="markSkillTemplateEdited()">{ defaultSkillBodyTemplate() }</textarea>
 					</label>
 					<div id="skill_files_section" class="hidden mt-3">
 						<div class="text-sm font-medium mb-2">Package files</div>
@@ -313,6 +318,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				document.getElementById('skill_name').value = 'OpenVibely Database Migration Workflow';
 				document.getElementById('skill_description').value = 'Manage OpenVibely goose schema migrations, consolidation, and validation safely.';
 				document.getElementById('skill_body').value = defaultSkillTemplate('', '', '', '');
+				document.getElementById('skill_enabled').checked = true;
 				renderSkillPackageFiles('');
 				setSkillModalError('');
 				skill_modal.showModal();
@@ -340,6 +346,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				document.getElementById('skill_name').value = card.dataset.skillName || '';
 				document.getElementById('skill_description').value = card.dataset.skillDescription || '';
 				document.getElementById('skill_body').value = card.dataset.skillContent || '';
+				document.getElementById('skill_enabled').checked = card.dataset.skillEnabled !== 'false';
 				renderSkillPackageFiles(card.dataset.skillFiles || '');
 				setSkillModalError('');
 				skill_modal.showModal();
@@ -435,7 +442,8 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 					scope: document.getElementById('skill_scope').value,
 					name: document.getElementById('skill_name').value.trim(),
 					description: document.getElementById('skill_description').value.trim(),
-					body: document.getElementById('skill_body').value
+					body: document.getElementById('skill_body').value,
+					enabled: document.getElementById('skill_enabled').checked
 				};
 				var mode = form.dataset.mode || 'create';
 				var originalHandle = form.dataset.originalHandle || handle;
