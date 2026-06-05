@@ -176,8 +176,13 @@ func (h *Handler) SetSkillEnabled(c echo.Context) error {
 	if parseErr != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, parseErr.Error())
 	}
-	enabled := req.Enabled
-	decl.Skill.Enabled = &enabled
+	if req.Enabled {
+		// Enabling — normalize to nil (absence = enabled, keeps frontmatter clean)
+		decl.Skill.Enabled = nil
+	} else {
+		disabled := false
+		decl.Skill.Enabled = &disabled
+	}
 	decl.Agent.Key = ""
 	decl.Skill.Key = handle
 	decl.Skill.Scope = scope
@@ -350,7 +355,6 @@ func parseUploadedStandaloneSkillDeclaration(content, packageName, scope string)
 	if !validDialogSkillKey(handle) {
 		return nil, body, fmt.Errorf("standard skill frontmatter name %q is not a valid skill key", name)
 	}
-	enabled := true
 	decl = &agentlibrary.SkillDeclaration{
 		Kind:    "openvibely.agent_skill",
 		Version: 1,
@@ -359,7 +363,7 @@ func parseUploadedStandaloneSkillDeclaration(content, packageName, scope string)
 			Name:        name,
 			Scope:       scope,
 			Description: strings.TrimSpace(standard.Description),
-			Enabled:     &enabled,
+			// Enabled left nil: absence = enabled, keeps frontmatter clean
 		},
 	}
 	return decl, body, nil
@@ -572,7 +576,6 @@ func (h *Handler) writeStandaloneSkillFromDialog(c echo.Context, req skillSaveRe
 		decl = parsed
 		body = parsedBody
 	} else {
-		enabled := true
 		decl = &agentlibrary.SkillDeclaration{
 			Kind:    "openvibely.agent_skill",
 			Version: 1,
@@ -580,7 +583,7 @@ func (h *Handler) writeStandaloneSkillFromDialog(c echo.Context, req skillSaveRe
 				Key:         handle,
 				Name:        firstDialogNonEmpty(strings.TrimSpace(req.Name), handle),
 				Description: strings.TrimSpace(req.Description),
-				Enabled:     &enabled,
+				// Enabled left nil: absence = enabled, keeps frontmatter clean
 			},
 		}
 	}
@@ -594,7 +597,13 @@ func (h *Handler) writeStandaloneSkillFromDialog(c echo.Context, req skillSaveRe
 		decl.Skill.Description = strings.TrimSpace(req.Description)
 	}
 	if req.Enabled != nil {
-		decl.Skill.Enabled = req.Enabled
+		if !*req.Enabled {
+			// Explicitly disable — write enabled: false
+			decl.Skill.Enabled = req.Enabled
+		} else {
+			// Enabled (default) — use nil so omitempty keeps frontmatter clean
+			decl.Skill.Enabled = nil
+		}
 	}
 	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: h.agentSkillRoot, Project: h.currentProjectSkillRoot(c)}, nil)
 	res, err := importer.WriteSkill(c.Request().Context(), decl, body)

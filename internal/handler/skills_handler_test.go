@@ -389,6 +389,137 @@ func TestCreateSkillWritesStandaloneSkillAndReturnsCards(t *testing.T) {
 	}
 }
 
+func TestCreateSkillDoesNotWriteEnabledTrueToFrontmatter(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+
+	// Simulate modal submit with enabled=true (the default toggle state)
+	trueVal := true
+	payload := skillSaveRequest{
+		Handle:      "clean_skill",
+		Name:        "Clean Skill",
+		Description: "A skill created via modal",
+		Scope:       "global",
+		Body:        "Do the thing.",
+		Enabled:     &trueVal,
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/skills", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	data, err := os.ReadFile(filepath.Join(root, "skills", "clean_skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read skill: %v", err)
+	}
+	if strings.Contains(string(data), "enabled:") {
+		t.Fatalf("enabled skill must not have 'enabled:' in frontmatter; got:\n%s", data)
+	}
+}
+
+func TestEditSkillViaModalWithEnabledFalseWritesEnabledFalse(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+
+	writeStandaloneSkill(t, root, "my_skill", "My Skill", "desc", "global")
+
+	falseVal := false
+	payload := skillSaveRequest{
+		Handle:      "my_skill",
+		Name:        "My Skill",
+		Description: "desc",
+		Scope:       "global",
+		Body:        "Do the thing.",
+		Enabled:     &falseVal,
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPut, "/skills/my_skill", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	data, err := os.ReadFile(filepath.Join(root, "skills", "my_skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read skill: %v", err)
+	}
+	if !strings.Contains(string(data), "enabled: false") {
+		t.Fatalf("expected 'enabled: false' in frontmatter after disabling via modal; got:\n%s", data)
+	}
+}
+
+func TestEditSkillViaModalWithEnabledTrueDoesNotWriteEnabledTrue(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+
+	// Start with a disabled skill
+	writeDisabledSkill(t, root, "was_disabled", "Was Disabled", "desc", "global")
+
+	// Re-enable via modal (toggle=true)
+	trueVal := true
+	payload := skillSaveRequest{
+		Handle:      "was_disabled",
+		Name:        "Was Disabled",
+		Description: "desc",
+		Scope:       "global",
+		Body:        "Do the thing.",
+		Enabled:     &trueVal,
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPut, "/skills/was_disabled", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	data, err := os.ReadFile(filepath.Join(root, "skills", "was_disabled", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read skill: %v", err)
+	}
+	if strings.Contains(string(data), "enabled:") {
+		t.Fatalf("re-enabled skill must not have 'enabled:' in frontmatter (absence = enabled); got:\n%s", data)
+	}
+}
+
+func TestSetSkillEnabledEnableNormalizesToAbsent(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+
+	writeDisabledSkill(t, root, "was_off", "Was Off", "desc", "global")
+
+	req := httptest.NewRequest(http.MethodPost, "/skills/was_off/enabled", strings.NewReader(`{"enabled":true,"scope":"global"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	data, err := os.ReadFile(filepath.Join(root, "skills", "was_off", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read skill: %v", err)
+	}
+	if strings.Contains(string(data), "enabled:") {
+		t.Fatalf("re-enabled skill must not have 'enabled:' in frontmatter (absence = enabled); got:\n%s", data)
+	}
+}
+
 func TestSetSkillEnabledDisablesAndEnablesSkill(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	root := t.TempDir()
@@ -585,7 +716,6 @@ func addMultipartFile(t *testing.T, writer *multipart.Writer, fieldName, filenam
 
 func writeStandaloneSkill(t *testing.T, root, handle, name, description, scope string) {
 	t.Helper()
-	enabled := true
 	decl := &agentlibrary.SkillDeclaration{
 		Kind:    "openvibely.agent_skill",
 		Version: 1,
@@ -594,11 +724,30 @@ func writeStandaloneSkill(t *testing.T, root, handle, name, description, scope s
 			Name:        name,
 			Scope:       scope,
 			Description: description,
-			Enabled:     &enabled,
 		},
 	}
 	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: root, Project: root}, nil)
 	if _, err := importer.WriteSkill(context.Background(), decl, "Use this skill when appropriate."); err != nil {
 		t.Fatalf("write skill %s: %v", handle, err)
+	}
+}
+
+func writeDisabledSkill(t *testing.T, root, handle, name, description, scope string) {
+	t.Helper()
+	disabled := false
+	decl := &agentlibrary.SkillDeclaration{
+		Kind:    "openvibely.agent_skill",
+		Version: 1,
+		Skill: agentlibrary.SkillBlock{
+			Key:         handle,
+			Name:        name,
+			Scope:       scope,
+			Description: description,
+			Enabled:     &disabled,
+		},
+	}
+	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: root, Project: root}, nil)
+	if _, err := importer.WriteSkill(context.Background(), decl, "Use this skill when appropriate."); err != nil {
+		t.Fatalf("write disabled skill %s: %v", handle, err)
 	}
 }
