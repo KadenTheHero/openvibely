@@ -2,18 +2,18 @@
 name: managed_memory
 type: project
 created: 2026-05-09
-updated: 2026-06-02
+updated: 2026-06-05
 source: consolidation
-source_id: memory_consolidation_2026_06_02
+source_id: memory_consolidation_2026_06_05
 confidence: high
 title: Managed Memory
 ---
 
-OpenVibely managed memory is model-backed, tool-driven, project-scoped, and stored under the selected project's repo-local `.openvibely/memories/` directory. The directory stays flat: `MEMORIES.md` is the compact index and focused top-level topic markdown files hold durable context. Do not recreate old `user/`, `feedback/`, `project/`, or `runs/` subdirectories.
+OpenVibely managed memory is model-backed, tool-driven, project-scoped, and stored under the selected project's repo-local `.openvibely/memories/` directory. The directory stays flat: `MEMORIES.md` is the compact index and focused top-level topic files hold durable context. Do not recreate old `user/`, `feedback/`, `project/`, or `runs/` subdirectories.
 
 Storage and access boundaries:
 - Scoped memory file tools may already be rooted at `.openvibely/memories`; if that path appears missing, list `.` before assuming memory is absent or creating nested paths.
-- Memory requires a selected project with a valid local `repo_path`. Do not use app-owned fallbacks such as `memory/projects/<project_id>/` or `OPENVIBELY_MEMORY_ROOT`.
+- Memory requires a selected project with a valid local `repo_path`; do not use app-owned fallbacks such as `memory/projects/<project_id>/` or `OPENVIBELY_MEMORY_ROOT`.
 - `MemoryService` owns path resolution, file storage, context building, extraction, consolidation, and DB metadata. Use existing SQLite task/chat execution history as transcript source; do not add JSONL transcript storage or unreleased layout migrations unless explicitly requested.
 - Initialization is idempotent in web/server and Wails desktop modes. Startup/runtime paths may create `.openvibely/memories/` and `MEMORIES.md` when missing; topic files should be created only by explicit durable-memory writes.
 - Managed-memory tools must be scoped to the memory directory and reject traversal, absolute paths, and symlink escapes. Keep memory-specific policy in prompts/config rather than generic scoped-file enforcement.

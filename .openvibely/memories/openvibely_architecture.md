@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-06-02
+updated: 2026-06-05
 source: consolidation
-source_id: memory_consolidation_2026_06_02
+source_id: memory_consolidation_2026_06_05
 confidence: high
 title: OpenVibely Architecture
 ---

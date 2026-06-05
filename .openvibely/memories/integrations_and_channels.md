@@ -2,14 +2,14 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-06-03
+updated: 2026-06-05
 source: consolidation
-source_id: memory_consolidation_2026_06_03
+source_id: memory_consolidation_2026_06_05
 confidence: high
 title: Integrations and Channels
 ---
 
-OpenVibely has channel integrations for GitHub, Slack, Telegram, and generic inbound webhooks. Integration UIs should separate discovery/add flows from management cards, render explicit connection states, and keep destructive action language consistent as `Delete` with confirmation.
+OpenVibely has channel integrations for GitHub, Slack, Telegram, and generic inbound webhooks. Integration UIs should separate discovery/add flows from management cards, render explicit connection states, and keep destructive action language consistent as `Delete` with confirmation. Supported channel integrations should keep task-goal controls at parity with web/API chat; Slack and Telegram runtime goal actions are wired through the durable `TaskGoalService` rather than surface-specific stubs.
 
 Channels page:
 - `/channels` uses an Add Channel chooser (`GitHub`, `Slack`, `Telegram Bot`, `Webhook`) and only renders active cards after a channel is added/configured.
@@ -53,7 +53,9 @@ Slack:
 Telegram:
 - Telegram attachment and command behavior should remain project-aware.
 - Tests should not spill runtime upload files into package directories.
-- Telegram services created or restarted from settings must wire the shared channel chat runner before `Start()`; otherwise settings-enabled bots can fall back to service-local LLM loops even if server startup wiring is correct. Startup-created and settings-created Telegram services should also set AgentRepo before `Start()` so channel orchestration can advertise and resolve explicit Agent-definition names consistently from the first inbound message. Settings-created Telegram services must also wire the task-thread queued promoter, not just the chat queued promoter, so `send_to_task` can promote idle pending task-thread follow-ups after appending behind them.
+- Telegram services created or restarted from settings must wire the shared channel chat runner before `Start()`; otherwise settings-enabled bots can fall back to service-local LLM loops even if server startup wiring is correct.
+- Startup-created and settings-created Telegram services should set AgentRepo before `Start()` so channel orchestration can advertise and resolve explicit Agent-definition names consistently from the first inbound message.
+- Settings-created Telegram services must also wire the task-thread queued promoter, not just the chat queued promoter, so `send_to_task` can promote idle pending task-thread follow-ups after appending behind them.
 - Telegram-origin active Chat runs should hand initial responses to the shared steering-aware chat runner in production, preserve the initial “Thinking…” acknowledgement message id, and promote queued follow-ups after both success and failure.
 - For shared-runner Telegram Chat, the shared runner owns worker cancellation registration; the Telegram service should register/deregister cancellation only on the fallback local-LLM path so deferred service cleanup cannot remove the handler-owned cancel function after handoff.
 - Telegram `send_to_task` follow-ups use the shared queued task-thread behavior from `chat_thread_system.md`, carry reply metadata on `thread_inputs` or per-run context, use handler-resolved task worktrees, keep marker processing disabled, and preserve the target task origin.
