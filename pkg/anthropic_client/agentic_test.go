@@ -1966,6 +1966,73 @@ func TestAgenticRequestMarshalJSON_WithoutRawTools(t *testing.T) {
 	}
 }
 
+func TestSendAgentic_ToolFilterRemovesDeniedToolsFromRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req map[string]interface{}
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+
+		toolsVal, ok := req["tools"].([]interface{})
+		if !ok {
+			t.Fatalf("expected tools array, got %#v", req["tools"])
+		}
+		seen := map[string]bool{}
+		for _, item := range toolsVal {
+			m, ok := item.(map[string]interface{})
+			if !ok {
+				t.Fatalf("tool item type mismatch: %#v", item)
+			}
+			if name, _ := m["name"].(string); name != "" {
+				seen[name] = true
+			}
+		}
+		if !seen["memory_view"] || seen["list_files"] || seen["bash"] || seen["read_file"] {
+			t.Fatalf("expected memory_view only, got %#v", seen)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":12}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Done."}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	client := NewWithAPIKey("test-key")
+	resp, err := client.SendAgentic(context.Background(), "read memory", &AgenticOptions{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 2048,
+		ExtraTools: []ToolDefinition{
+			{
+				Name:        "memory_view",
+				Description: "Load an authorized selected memory",
+				InputSchema: json.RawMessage(`{"type":"object"}`),
+			},
+		},
+		ToolFilter: func(name string) bool { return name == "memory_view" },
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if !strings.Contains(resp.Text, "Done.") {
+		t.Fatalf("response text = %q, want Done.", resp.Text)
+	}
+}
+
 func TestSendAgentic_SkipDefaultToolsUsesOnlyExtraTools(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)

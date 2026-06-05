@@ -280,11 +280,11 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 	recallExec := &models.LifecycleExecution{
 		TaskID:         task.ID,
 		AgentID:        agent.ID,
-		When:           models.LifecycleBeforeRun,
+		When:           models.LifecycleRouteTask,
 		SkillKey:       "recall_memory",
-		OutputContract: models.OutputContractContextBlock,
+		OutputContract: models.OutputContractSelectedMemories,
 		Status:         models.LifecycleExecCompleted,
-		OutputJSON:     `{"content":"private full injected memory context that should not be returned raw","sources":["provider_architecture.md","MEMORIES.md","/tmp/secret.md","../escape.md"],"selected_memories":[{"file":"provider_architecture.md","topic":"Provider lifecycle","summary":"Use mode-driven provider routing.","snippet":"Verify stale memory against current code before relying on it."},{"file":"provider_architecture.md","topic":"Provider lifecycle","summary":"Duplicate summary should collapse by file."},{"file":"/tmp/secret.md","summary":"must not expose"}],"confidence":0.8}`,
+		OutputJSON:     `{"memories":[{"file":"provider_architecture.md","topic":"Provider lifecycle","summary":"Use mode-driven provider routing.","snippet":"Verify stale memory against current code before relying on it."},{"file":"provider_architecture.md","topic":"Provider lifecycle","summary":"Duplicate summary should collapse by file."},{"file":"/tmp/secret.md","summary":"must not expose"}],"content":"private full injected memory context that should not be returned raw","confidence":0.8,"reason":"matches prompt"}`,
 	}
 	if err := lifecycleRepo.CreateExecution(t.Context(), recallExec); err != nil {
 		t.Fatalf("create recall exec: %v", err)
@@ -312,7 +312,7 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 		if row.When == "route_task" && row.SkillKey == "route_task" {
 			route = row
 		}
-		if row.When == "before_run" && row.SkillKey == "recall_memory" {
+		if row.When == "route_task" && row.SkillKey == "recall_memory" {
 			recall = row
 		}
 	}
@@ -325,14 +325,11 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 	if len(route.SelectedSkills) != 2 || route.SelectedSkills[0] != "openvibely_agent_skill_architecture" || route.SelectedSkills[1] != "debug_go_tests" {
 		t.Fatalf("expected selected skills exposed as badge identifiers, got %+v", route.SelectedSkills)
 	}
-	if len(recall.SelectedMemories) != 2 {
+	if len(recall.SelectedMemories) != 1 {
 		t.Fatalf("expected deduped sanitized selected memory identifiers, got %+v", recall.SelectedMemories)
 	}
 	if recall.SelectedMemories[0].File != "provider_architecture.md" || recall.SelectedMemories[0].Summary != "Use mode-driven provider routing." || recall.SelectedMemories[0].Snippet == "" {
 		t.Fatalf("expected compact selected memory metadata, got %+v", recall.SelectedMemories)
-	}
-	if recall.SelectedMemories[1].File != "MEMORIES.md" {
-		t.Fatalf("expected source filenames to remain visible when selected_memories omits them, got %+v", recall.SelectedMemories)
 	}
 	// Prompt-safe view must not leak the raw OutputJSON or any internal fields
 	// that the dialog should never display.

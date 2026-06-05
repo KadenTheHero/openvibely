@@ -2,9 +2,9 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-06-05
-source: consolidation
-source_id: memory_consolidation_2026_06_05
+updated: 2026-06-06
+source: after_complete
+source_id: a21a336579af2b853222744d738f51f0
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -36,8 +36,9 @@ Queueing and steering:
 Routes, modes, and runtime actions:
 - Chat is the main orchestrator at `/chat` for global/project-level conversation. Thread is the task-specific conversation on the task detail Thread tab. Root route `/` redirects to `/chat`, preserving `project_id`; Dashboard remains at `/dashboard`.
 - `/chat` supports `orchestrate` (default) and `plan` (read-only planning). Plan mode enables read-only repo exploration tools, blocks mutating tools, and disables marker execution (`ProcessMarkers=false`).
-- Canonical chat capability registry is `internal/chatcontrol/registry.go`; it defines action names, domain, read/write access, allowed modes, surfaces, confirmation requirements, and sensitivity. Web/API chat and channel services should derive runtime action tools from registry helpers.
+- Canonical chat capability registry is `internal/chatcontrol/registry.go`; it defines action names, domain, read/write access, allowed modes, surfaces, confirmation requirements, and sensitivity. Web/API chat and channel services should derive runtime action tools from registry helpers. `memory_view` belongs in this registry as a read-only `memory` capability for Orchestrate and Plan so chat modes advertise selected-memory access even when default filesystem/shell tools are hidden.
 - Runtime tools and marker processing are mutually exclusive per request. When runtime tools are injected, `ProcessMarkers=false` prevents duplicate execution. Legacy marker parser helpers remain for compatibility/tests, but normal chat entrypoints should not depend on assistant-emitted marker blocks.
+- Task-thread follow-ups sent through the UI route still need legacy marker fallback for agents/providers that cannot receive OpenVibely runtime tools. The fallback should be gated on absence of injected runtime tools, not on `IsTaskFollowup=false`, so `[CREATE_TASK]` blocks emitted during `/tasks/:id/thread` follow-ups can persist child tasks and return canonical `[TASK_ID:...]` confirmations without double-executing tool-capable turns.
 - Expected registry actions across surfaces include chat mode, capabilities, alert, model, personality, current project, and project switching actions.
 - Chat orchestrate task creation should distinguish Agent definitions from model configs: `agent` means assign an Agent from the Agents page by exact unique selectable/enabled name, while `agent_id` is internal model config selection. Natural phrasing should set `agent` only when there is a clear Agent-definition match; unassigned prompts must not invent an agent from skills or model config ids.
 - Agent-definition prompt context for task creation should advertise only names the backend can resolve safely. If duplicate enabled/selectable Agent definitions share a name, omit or disambiguate them. Normalize or escape user-editable Agent fields before injecting them into orchestration prompt context.
@@ -54,6 +55,8 @@ Thread and follow-up behavior:
 - Task thread interaction from `/chat` uses `[VIEW_TASK_CHAT]`/`[SEND_TO_TASK]` markers where compatibility requires it.
 - `view_task_thread` supports pagination. Transcripts are size-budgeted with explicit continuation hints when truncated.
 - Task-thread follow-ups should use chronological execution history, not re-inject the original task prompt, and propagate the task agent definition so plugin skills/MCP tools are active on API provider paths.
+- User-facing task-thread follow-up bugs must be reproduced through the actual task thread send/queued input path, such as `TaskThreadSend`, `/tasks/:id/thread`, `thread_inputs` promotion, or `startQueuedTaskThreadInput`; directly calling the `send_to_task` runtime tool is a separate chat/action-tool path and is not valid evidence for UI task-thread follow-up behavior.
+- Task-thread follow-ups run the normal task lifecycle routing path and can receive selected skill handles plus selected memory handles before the follow-up model call. Interactive Chat uses a narrower recall-only lifecycle preparation path: Memory Curator may select indexed memory handles, but Skill Curator routing/`skill_view` are not part of the normal chat memory recall path. When chat action tools and selected-memory runtime tools are composed, selected-memory execution should take precedence so `memory_view` is handled by the scoped memory executor rather than swallowed by a generic chat action fallback. Detailed `memory_view` exposure and handle-safety rules live in `managed_memory.md`.
 - When task execution delegates to separate LLM-backed agents or lifecycle hooks, their outputs should be visible in an appropriate user-facing execution view; lifecycle-agent activity belongs in its dedicated task-detail tab rather than mixed into the main Thread tab.
 - Follow-up completion inspects streaming text-only output for `[STATUS: FAILED | ...]` and `[STATUS: NEEDS_FOLLOWUP | ...]` markers. A missing/new-empty diff should not turn a successful read-only follow-up into failure.
 - Failure completion preserves already-streamed `executions.output` when the failed completion call returns empty output so thread history is not reset.
@@ -70,7 +73,7 @@ Task goals:
 - Goal status writes must retain stale `goal_id` plus current `status='active'` guards so paused/cleared/replaced goals reject stale evaluator writes. Stale guarded updates should return a stale-update error rather than reporting success with a null goal.
 - Lifecycle hook status-tool execution should authorize against the actual lifecycle hook agent's grants when hook-agent context is present; protected Goal Agent authority comes from `system_kind=goal` hook identity, not caller-supplied runtime-origin fields.
 - Task-thread goal prompt/context and `list_capabilities` output should reflect the assigned agent's actual goal status tool grants: ungranted agents are told the protected Goal Agent handles completion/blocker evaluation, while granted agents are told exactly which status tools they may use.
-- Task-goal prompt context should be present across task-follow-up entry points, including web direct sends, queued task-thread sends, review submissions, and channel-origin task runs. Review and channel-origin runs should reactivate an achieved goal before prompt construction when appropriate.
+- Task-goal prompt context should be present across task-follow-up entry points, including web direct sends, queued task-thread sends, review submissions, and channel-origin task runs. Review and channel-origin runs should reactivate an achieved goal before prompt construction when appropriate. Supported channel parity details live in `integrations_and_channels.md`.
 - Generic runtime `send_to_task` callers must not be able to spoof protected Goal Agent lineage by passing `origin="system_agent"` or `origin_agent="goal"`; only the internal Goal Agent runtime override may persist `source='system_agent'` with `origin_agent='goal'`.
 - Goal Agent `send_to_task` should infer the current task in real task-thread runtimes. Durable queued/reloaded Goal Agent follow-ups retain lineage through `thread_inputs.origin_agent` alongside `source='system_agent'`.
 - `ResumeGoal` only resumes paused goals, preserves the same `goal_id`, and clears blocked audit state.

@@ -1,6 +1,63 @@
 package anthropic
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+func TestComposeRuntimeToolFilter_AllowsFilteredReadOnlyRuntimeToolInPlanMode(t *testing.T) {
+	rt := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{
+			{Name: "memory_view", Description: "read selected memory", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessRead},
+			{Name: "write_file", Description: "write selected file", Parameters: json.RawMessage(`{"type":"object"}`)},
+		},
+		Filter: func(name string) (bool, bool) {
+			switch name {
+			case "memory_view", "write_file":
+				return true, true
+			default:
+				return false, false
+			}
+		},
+	}
+	filter := composeRuntimeToolFilter(nil, rt, false, models.ChatModePlan)
+	if !filter("memory_view") {
+		t.Fatal("expected filtered selected-memory runtime tools to be allowed in plan mode")
+	}
+	if filter("write_file") {
+		t.Fatal("did not expect unrelated runtime action tool in plan mode")
+	}
+}
+
+func TestComposeRuntimeToolFilter_OrchestrateAllowsMemoryViewWithoutFilesystemRead(t *testing.T) {
+	rt := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{
+			{Name: "memory_view", Description: "read selected memory", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessRead},
+			{Name: "create_task", Description: "create task", Parameters: json.RawMessage(`{"type":"object"}`)},
+		},
+		Filter: func(name string) (bool, bool) {
+			switch name {
+			case "memory_view", "create_task":
+				return true, true
+			default:
+				return false, false
+			}
+		},
+	}
+	filter := composeRuntimeToolFilter(func(name string) bool { return true }, rt, false, models.ChatModeOrchestrate)
+	if !filter("memory_view") {
+		t.Fatal("expected selected-memory runtime tools to be allowed in orchestrate mode")
+	}
+	if !filter("create_task") {
+		t.Fatal("expected action runtime tool to be allowed in orchestrate mode")
+	}
+	if filter("read_file") || filter("Read") || filter("list_files") {
+		t.Fatal("did not expect filesystem/default read tools to be allowed in orchestrate mode")
+	}
+}
 
 func TestClaudeCodeMaxOutputTokens(t *testing.T) {
 	tests := []struct {

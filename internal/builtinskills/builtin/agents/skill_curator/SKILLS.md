@@ -29,7 +29,7 @@ lifecycle_hooks:
   route_task:
     enabled: true
     skill: route_task
-    blocking: true
+    blocking: false
     output_contract: selected_skills
     run_policy: always
     permissions:

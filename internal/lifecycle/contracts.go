@@ -41,8 +41,20 @@ type SelectedSkills struct {
 	ClarifyingQuestion string   `json:"clarifying_question,omitempty"`
 }
 
+// SelectedMemories is the validated payload for the `selected_memories` route_task
+// contract. It selects memory handles from the current available_memories index
+// for the next task turn; full bodies are load-on-demand through memory_view.
+type SelectedMemories struct {
+	Memories           []SelectedMemory `json:"memories"`
+	Content            string           `json:"content,omitempty"` // optional route/debug note; task prompt uses selected handles plus memory_view
+	Confidence         float64          `json:"confidence"`
+	Reason             string           `json:"reason"`
+	NeedsClarification bool             `json:"needs_clarification"`
+	ClarifyingQuestion string           `json:"clarifying_question,omitempty"`
+}
+
 // ContextBlock is the validated payload for the `context_block` contract used
-// by before_run hooks such as memory recall.
+// by before_run hooks.
 type ContextBlock struct {
 	Content          string           `json:"content"`
 	Sources          []string         `json:"sources,omitempty"`
@@ -265,6 +277,63 @@ func ValidateSelectedSkills(raw []byte) (SelectedSkills, error) {
 		return out, fmt.Errorf("selected_skills: confidence %v out of range [0,1]", out.Confidence)
 	}
 	return out, nil
+}
+
+// ValidateSelectedMemories parses and validates a `selected_memories` payload.
+func ValidateSelectedMemories(raw []byte) (SelectedMemories, error) {
+	var out SelectedMemories
+	if len(raw) == 0 {
+		return out, errors.New("selected_memories: empty payload")
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return out, fmt.Errorf("selected_memories: invalid JSON: %w", err)
+	}
+	if out.NeedsClarification {
+		if strings.TrimSpace(out.ClarifyingQuestion) == "" {
+			return out, errors.New("selected_memories: clarifying_question required when needs_clarification=true")
+		}
+		return out, nil
+	}
+	seen := map[string]struct{}{}
+	cleaned := make([]SelectedMemory, 0, len(out.Memories))
+	for _, memory := range out.Memories {
+		memory.File = strings.TrimSpace(strings.ReplaceAll(memory.File, "\\", "/"))
+		memory.Topic = strings.TrimSpace(memory.Topic)
+		memory.Summary = strings.TrimSpace(memory.Summary)
+		memory.Snippet = strings.TrimSpace(memory.Snippet)
+		if memory.File == "" {
+			continue
+		}
+		if !isSafeRelativeMemoryIdentifier(memory.File) {
+			return out, fmt.Errorf("selected_memories: unsafe memory file %q", memory.File)
+		}
+		key := memory.File
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		cleaned = append(cleaned, memory)
+	}
+	out.Memories = cleaned
+	out.Content = strings.TrimSpace(out.Content)
+	out.Reason = strings.TrimSpace(out.Reason)
+	if out.Confidence < 0 || out.Confidence > 1 {
+		return out, fmt.Errorf("selected_memories: confidence %v out of range [0,1]", out.Confidence)
+	}
+	return out, nil
+}
+
+func isSafeRelativeMemoryIdentifier(value string) bool {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	if value == "" || strings.HasPrefix(value, "/") || strings.HasPrefix(value, "./") || strings.Contains(value, ":") {
+		return false
+	}
+	cleaned := strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	cleaned = strings.TrimPrefix(cleaned, "./")
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.Contains(cleaned, "/../") || strings.HasSuffix(cleaned, "/..") {
+		return false
+	}
+	return true
 }
 
 // ValidateContextBlock parses and validates a `context_block` payload.

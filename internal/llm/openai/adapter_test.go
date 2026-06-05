@@ -74,6 +74,57 @@ func TestToolSecondaryInfo_WebSearchFindInPageDetail(t *testing.T) {
 	}
 }
 
+func TestRuntimeToolFilter_AllowsFilteredReadOnlyRuntimeToolInPlanMode(t *testing.T) {
+	rt := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{
+			{Name: "memory_view", Description: "read selected memory", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessRead},
+			{Name: "write_file", Description: "write selected file", Parameters: json.RawMessage(`{"type":"object"}`)},
+		},
+		Filter: func(name string) (bool, bool) {
+			switch name {
+			case "memory_view", "write_file":
+				return true, true
+			default:
+				return false, false
+			}
+		},
+	}
+	filter := composeRuntimeToolFilter(nil, rt, false, models.ChatModePlan)
+	if !filter("memory_view") {
+		t.Fatal("expected filtered selected-memory runtime tools to be allowed in plan mode")
+	}
+	if filter("write_file") {
+		t.Fatal("did not expect unrelated runtime action tool in plan mode")
+	}
+}
+
+func TestRuntimeToolFilter_OrchestrateAllowsMemoryViewWithoutFilesystemRead(t *testing.T) {
+	rt := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{
+			{Name: "memory_view", Description: "read selected memory", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessRead},
+			{Name: "create_task", Description: "create task", Parameters: json.RawMessage(`{"type":"object"}`)},
+		},
+		Filter: func(name string) (bool, bool) {
+			switch name {
+			case "memory_view", "create_task":
+				return true, true
+			default:
+				return false, false
+			}
+		},
+	}
+	filter := composeRuntimeToolFilter(func(name string) bool { return true }, rt, false, models.ChatModeOrchestrate)
+	if !filter("memory_view") {
+		t.Fatal("expected selected-memory runtime tools to be allowed in orchestrate mode")
+	}
+	if !filter("create_task") {
+		t.Fatal("expected action runtime tool to be allowed in orchestrate mode")
+	}
+	if filter("read_file") || filter("Read") || filter("list_files") {
+		t.Fatal("did not expect filesystem/default read tools to be allowed in orchestrate mode")
+	}
+}
+
 func TestRuntimeToolFilter_SkipDefaultToolsAllowsOnlyRuntimeTools(t *testing.T) {
 	rt := &llmcontracts.RuntimeTools{
 		SkipDefaultTools: true,
@@ -93,6 +144,30 @@ func TestRuntimeToolFilter_SkipDefaultToolsAllowsOnlyRuntimeTools(t *testing.T) 
 	}
 	if filter("bash") {
 		t.Fatalf("expected default tool to be blocked by runtime filter")
+	}
+}
+
+func TestAgentSkipDefaultToolsBlocksDefaultsButKeepsRuntimeMemoryTool(t *testing.T) {
+	agent := &models.Agent{ToolConfig: models.AgentToolConfig{SkipDefaultTools: true}}
+	if agentAllowsBuiltInTool(agent, "list_files") || agentAllowsBuiltInTool(agent, "bash") || agentAllowsBuiltInTool(agent, "read_file") {
+		t.Fatalf("expected agent SkipDefaultTools to block default built-in tools")
+	}
+
+	rt := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "memory_view", Access: llmcontracts.RuntimeToolAccessRead}},
+		Filter: func(name string) (bool, bool) {
+			if name == "memory_view" {
+				return true, true
+			}
+			return false, true
+		},
+	}
+	filter := composeRuntimeToolFilter(func(name string) bool { return agentAllowsBuiltInTool(agent, name) }, rt, true, models.ChatModeOrchestrate)
+	if !filter("memory_view") {
+		t.Fatalf("expected selected memory runtime tool to remain available")
+	}
+	if filter("list_files") || filter("bash") || filter("read_file") {
+		t.Fatalf("expected default tools to stay blocked")
 	}
 }
 

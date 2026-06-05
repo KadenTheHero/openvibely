@@ -448,6 +448,19 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 	return result, nil
 }
 
+func (c *Client) completionsEndpoint() (string, error) {
+	base := strings.TrimSpace(OpenAIAPIBaseURL)
+	if base == "" {
+		return "", fmt.Errorf("missing base URL")
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return "", fmt.Errorf("parse base URL %q: %w", base, err)
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/chat/completions"
+	return u.String(), nil
+}
+
 func (c *Client) responsesEndpoint(isChatGPTOAuth bool) (string, error) {
 	base := strings.TrimSpace(OpenAIAPIBaseURL)
 	if isChatGPTOAuth {

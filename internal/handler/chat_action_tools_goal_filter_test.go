@@ -11,16 +11,23 @@ import (
 func TestFilterTaskThreadRuntimeToolDefs_GoalStatusToolsRequireExplicitGrant(t *testing.T) {
 	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
 
-	ungranted := toolDefNameSet(filterTaskThreadRuntimeToolDefs(defs, nil))
+	ungranted := toolDefNameSet(filterTaskThreadRuntimeToolDefs(defs, nil, false))
 	if ungranted["mark_task_goal_achieved"] || ungranted["report_task_goal_blocked"] {
 		t.Fatalf("ungranted task agent got goal status tools: %+v", ungranted)
 	}
 	if !ungranted["get_task_goal"] || !ungranted["send_to_task"] {
 		t.Fatalf("base task goal tools missing for ungranted agent: %+v", ungranted)
 	}
+	if ungranted["memory_view"] {
+		t.Fatalf("unselected memory_view runtime tool was exposed: %+v", ungranted)
+	}
+	withMemory := toolDefNameSet(filterTaskThreadRuntimeToolDefs(defs, nil, true))
+	if !withMemory["memory_view"] {
+		t.Fatalf("selected memory_view runtime tool missing: %+v", withMemory)
+	}
 
 	agentDef := &models.Agent{Tools: []string{"mark_task_goal_achieved"}}
-	granted := toolDefNameSet(filterTaskThreadRuntimeToolDefs(defs, agentDef))
+	granted := toolDefNameSet(filterTaskThreadRuntimeToolDefs(defs, agentDef, false))
 	if !granted["mark_task_goal_achieved"] {
 		t.Fatalf("explicitly granted goal achieved tool missing: %+v", granted)
 	}
@@ -32,16 +39,24 @@ func TestFilterTaskThreadRuntimeToolDefs_GoalStatusToolsRequireExplicitGrant(t *
 func TestFilterTaskThreadCapabilitySummaries_GoalStatusToolsRequireExplicitGrant(t *testing.T) {
 	summaries := chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 
-	ungranted := capabilityNameSet(filterTaskThreadCapabilitySummaries(summaries, nil))
+	ungranted := capabilityNameSet(filterTaskThreadCapabilitySummaries(summaries, nil, false))
 	if ungranted["mark_task_goal_achieved"] || ungranted["report_task_goal_blocked"] {
 		t.Fatalf("ungranted task agent capabilities advertised goal status tools: %+v", ungranted)
+	}
+	if ungranted["memory_view"] {
+		t.Fatalf("unselected memory_view capability was advertised: %+v", ungranted)
 	}
 	if !ungranted["get_task_goal"] || !ungranted["send_to_task"] || !ungranted["list_capabilities"] {
 		t.Fatalf("base task-thread capabilities missing for ungranted agent: %+v", ungranted)
 	}
 
+	withMemory := capabilityNameSet(filterTaskThreadCapabilitySummaries(summaries, nil, true))
+	if !withMemory["memory_view"] {
+		t.Fatalf("selected memory_view capability missing: %+v", withMemory)
+	}
+
 	agentDef := &models.Agent{Tools: []string{"report_task_goal_blocked"}}
-	granted := capabilityNameSet(filterTaskThreadCapabilitySummaries(summaries, agentDef))
+	granted := capabilityNameSet(filterTaskThreadCapabilitySummaries(summaries, agentDef, false))
 	if !granted["report_task_goal_blocked"] {
 		t.Fatalf("explicitly granted blocked-report capability missing: %+v", granted)
 	}

@@ -27,6 +27,7 @@ type lifecycleTurnContext struct {
 	AssignedAgent             *models.Agent
 	AfterCompleteRuntimeTools *llmcontracts.RuntimeTools
 	TaskThreadTurn            bool
+	TurnPrompt                string
 }
 
 func withLifecycleTurnContext(ctx context.Context, turn lifecycleTurnContext) context.Context {
@@ -45,8 +46,13 @@ func lifecycleTurnFromContext(ctx context.Context) lifecycleTurnContext {
 }
 
 func WithTaskThreadLifecycleTurn(ctx context.Context) context.Context {
+	return WithTaskThreadLifecycleTurnPrompt(ctx, "")
+}
+
+func WithTaskThreadLifecycleTurnPrompt(ctx context.Context, prompt string) context.Context {
 	turn := lifecycleTurnFromContext(ctx)
 	turn.TaskThreadTurn = true
+	turn.TurnPrompt = strings.TrimSpace(prompt)
 	return withLifecycleTurnContext(ctx, turn)
 }
 

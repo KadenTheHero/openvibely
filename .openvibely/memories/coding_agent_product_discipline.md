@@ -2,7 +2,7 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-06-05
+updated: 2026-06-06
 source: consolidation
 source_id: memory_consolidation_2026_06_05
 confidence: high
@@ -26,7 +26,7 @@ Implementation discipline:
 Communication and review behavior:
 - Favor generalized reusable instructions over narrow examples. Treat example names as illustrative unless explicitly defined as product fixtures; do not hardcode them into app-facing behavior or prompts.
 - Summaries should be concrete: cite specific files/symbols/handlers/tests changed, behavior affected, and verification performed when that context is available.
-- The user prefers plain, direct explanations over jargon-heavy phrasing; explain compactly with concrete examples when clarifying concepts such as stale guards, authorization, or lifecycle behavior.
+- The user prefers plain, direct explanations over jargon-heavy phrasing; explain compactly with concrete examples when clarifying concepts such as stale guards, authorization, or lifecycle behavior. When they ask to explain a bug in detail, do not substitute a terse “short version”; give the full causal chain, concrete failure mode, and exact affected path without padding.
 - When the user asks for a broad review before completion, actively look for mistakes, unintended diff, dead code, and verification gaps. Check the diff plus relevant build/test/vet/static analysis where practical, and report tool limitations.
 - If repeated reviews keep finding one issue at a time, switch to audit-only mode when asked: stop editing, collect a consolidated ranked list of concrete problems with file/symbol references, and let the user choose what to fix afterward.
 - When fixing a repeated class of lifecycle/recovery bugs, harden the entire class in one pass rather than patching one branch at a time.

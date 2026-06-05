@@ -113,6 +113,30 @@ func TestComposeTaskRuntimeToolFilter_AllowsDefaultToolsWithoutRuntimeTools(t *t
 	}
 }
 
+func TestAgentSkipDefaultToolsBlocksDefaultsButKeepsRuntimeMemoryTool(t *testing.T) {
+	agent := &models.Agent{ToolConfig: models.AgentToolConfig{SkipDefaultTools: true}}
+	if agentAllowsBuiltInTool(agent, "list_files") || agentAllowsBuiltInTool(agent, "bash") || agentAllowsBuiltInTool(agent, "read_file") {
+		t.Fatalf("expected agent SkipDefaultTools to block default built-in tools")
+	}
+
+	rt := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "memory_view", Access: llmcontracts.RuntimeToolAccessRead}},
+		Filter: func(name string) (bool, bool) {
+			if name == "memory_view" {
+				return true, true
+			}
+			return false, true
+		},
+	}
+	filter := composeTaskRuntimeToolFilter(func(name string) bool { return agentAllowsBuiltInTool(agent, name) }, rt)
+	if !filter("memory_view") {
+		t.Fatalf("expected selected memory runtime tool to remain available")
+	}
+	if filter("list_files") || filter("bash") || filter("read_file") {
+		t.Fatalf("expected default tools to stay blocked")
+	}
+}
+
 func TestTaskStreamingRuntimeToolComposition_AllowsScopedFilesRuntimeTools(t *testing.T) {
 	rt := &llmcontracts.RuntimeTools{
 		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_files"}},

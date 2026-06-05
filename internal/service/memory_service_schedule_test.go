@@ -214,8 +214,23 @@ func TestMemoryServiceEnsureProjectCreatesMemoryCuratorAgentAndSchedule(t *testi
 			t.Fatalf("expected Memory Curator skill %q in %#v", skill, agent.Skills)
 		}
 	}
+	existingHooks, err := repos.lifecycles.HooksByAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("list initial memory hooks: %v", err)
+	}
+	for _, hook := range existingHooks {
+		if hook.When == models.LifecycleRouteTask && hook.SkillKey == "recall_memory" {
+			hook.Blocking = true
+			if err := repos.lifecycles.UpdateHook(ctx, &hook); err != nil {
+				t.Fatalf("make recall route hook stale blocking: %v", err)
+			}
+		}
+	}
 	if err := repos.lifecycles.CreateHook(ctx, &models.AgentLifecycleHook{AgentID: agent.ID, When: models.LifecycleScheduled, SkillKey: "consolidate_memory", OutputContract: models.OutputContractActivitySummary, Blocking: true, Enabled: true}); err != nil {
 		t.Fatalf("create stale scheduled hook: %v", err)
+	}
+	if err := repos.lifecycles.CreateHook(ctx, &models.AgentLifecycleHook{AgentID: agent.ID, When: models.LifecycleBeforeRun, SkillKey: "recall_memory", OutputContract: models.OutputContractContextBlock, Blocking: true, Enabled: true}); err != nil {
+		t.Fatalf("create stale before_run recall hook: %v", err)
 	}
 	if err := svc.EnsureProject(ctx, repos.projectID); err != nil {
 		t.Fatalf("repair project after stale hook: %v", err)
@@ -225,7 +240,7 @@ func TestMemoryServiceEnsureProjectCreatesMemoryCuratorAgentAndSchedule(t *testi
 		t.Fatalf("list memory hooks: %v", err)
 	}
 	wantHooks := map[models.LifecycleWhen]string{
-		models.LifecycleBeforeRun:     "recall_memory",
+		models.LifecycleRouteTask:     "recall_memory",
 		models.LifecycleAfterComplete: "update_memory",
 	}
 	for _, hook := range hooks {
@@ -239,6 +254,12 @@ func TestMemoryServiceEnsureProjectCreatesMemoryCuratorAgentAndSchedule(t *testi
 	for _, hook := range hooks {
 		if hook.When == models.LifecycleScheduled {
 			t.Fatalf("Memory Curator should not declare a scheduled lifecycle hook; scheduled consolidation uses a normal scheduled task: %#v", hook)
+		}
+		if hook.When == models.LifecycleBeforeRun && hook.SkillKey == "recall_memory" {
+			t.Fatalf("Memory Curator recall should be route_task selected_memories, not stale before_run context_block: %#v", hook)
+		}
+		if hook.When == models.LifecycleRouteTask && hook.SkillKey == "recall_memory" && hook.Blocking {
+			t.Fatalf("Memory Curator recall route hook should be non-blocking for parallel routing: %#v", hook)
 		}
 	}
 
@@ -490,6 +511,9 @@ func TestMemoryServiceEnsureProjectRepairsLegacyMemoryAgents(t *testing.T) {
 	}
 	if len(canonical.ToolConfig.ScopedFiles) != 1 || canonical.ToolConfig.ScopedFiles[0].Directory != ".openvibely/memories" {
 		t.Fatalf("canonical scoped dir was not repaired: %+v", canonical.ToolConfig)
+	}
+	if !stringSliceContains(canonical.Tools, "memory_view") {
+		t.Fatalf("canonical memory curator tools missing memory_view: %+v", canonical.Tools)
 	}
 	liveCurators, err := repos.agents.ListBySystemKind(ctx, models.AgentSystemKindMemoryCurator)
 	if err != nil {

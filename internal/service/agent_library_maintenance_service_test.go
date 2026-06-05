@@ -281,11 +281,28 @@ func TestAgentLibraryMaintenanceService_EnsureProjectCreatesVisibleScheduledTask
 	for _, hook := range hooks {
 		have[string(hook.When)+"/"+hook.SkillKey] = hook
 	}
-	if hook, ok := have["route_task/route_task"]; !ok || hook.OutputContract != models.OutputContractSelectedSkills || !hook.Blocking || !hook.Enabled {
+	if hook, ok := have["route_task/route_task"]; !ok || hook.OutputContract != models.OutputContractSelectedSkills || hook.Blocking || !hook.Enabled {
 		t.Fatalf("bad route_task hook: %#v", hook)
 	}
 	if hook, ok := have["after_complete/observe_task_for_learning"]; !ok || hook.OutputContract != models.OutputContractLearningSummary || hook.Blocking || !hook.Enabled {
 		t.Fatalf("bad observe hook: %#v", hook)
+	}
+	staleRoute := have["route_task/route_task"]
+	staleRoute.Blocking = true
+	if err := lifecycleRepo.UpdateHook(ctx, &staleRoute); err != nil {
+		t.Fatalf("make route hook stale blocking: %v", err)
+	}
+	if err := svc.EnsureProject(ctx, projectID); err != nil {
+		t.Fatalf("EnsureProject repairs route blocking: %v", err)
+	}
+	repairedHooks, err := lifecycleRepo.HooksByAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("HooksByAgent after repair: %v", err)
+	}
+	for _, hook := range repairedHooks {
+		if hook.When == models.LifecycleRouteTask && hook.SkillKey == "route_task" && hook.Blocking {
+			t.Fatalf("Skill Curator route hook should repair to non-blocking: %#v", hook)
+		}
 	}
 	task, err := taskRepo.GetByProjectAndTitle(ctx, projectID, agentLibraryMaintenanceTaskTitle)
 	if err != nil {

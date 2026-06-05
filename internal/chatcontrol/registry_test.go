@@ -51,7 +51,7 @@ func TestRegistry_AllActionsHaveDomain(t *testing.T) {
 	validDomains := map[Domain]bool{
 		DomainTasks: true, DomainSchedules: true, DomainAlerts: true,
 		DomainPersonality: true, DomainModels: true, DomainAgents: true,
-		DomainProjects: true, DomainSettings: true, DomainChat: true,
+		DomainProjects: true, DomainSettings: true, DomainMemory: true, DomainChat: true,
 	}
 	for _, a := range Registry() {
 		if !validDomains[a.Domain] {
@@ -121,7 +121,7 @@ func TestToolDefsForContext_OrchestrateWeb(t *testing.T) {
 	// Must have new actions
 	mustContain(t, names, "switch_project", "get_chat_mode", "set_chat_mode", "list_capabilities")
 	// Must have new read actions
-	mustContain(t, names, "get_alert", "get_model", "get_personality", "get_current_project")
+	mustContain(t, names, "get_alert", "get_model", "get_personality", "get_current_project", "memory_view")
 	// Must have thread tools when requested
 	mustContain(t, names, "view_task_thread", "send_to_task")
 }
@@ -150,9 +150,8 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 	mustContain(t, names, "list_projects", "list_models", "list_alerts",
 		"list_personalities", "view_settings", "project_info",
 		"get_chat_mode", "list_capabilities", "get_alert", "get_model",
-		"get_personality", "get_current_project", "view_task_thread")
+		"get_personality", "get_current_project", "memory_view", "view_task_thread")
 }
-
 func TestToolDefsForContext_Telegram(t *testing.T) {
 	defs := ToolDefsForContext(models.ChatModeOrchestrate, SurfaceTelegram, true)
 	names := toolDefNames(defs)
@@ -201,6 +200,14 @@ func TestIsAllowed_ReadInPlan(t *testing.T) {
 	err := IsAllowed("list_models", models.ChatModePlan, SurfaceWeb)
 	if err != nil {
 		t.Errorf("expected list_models allowed in plan mode, got error: %v", err)
+	}
+}
+
+func TestIsAllowed_MemoryViewInPlanAndOrchestrate(t *testing.T) {
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		if err := IsAllowed("memory_view", mode, SurfaceWeb); err != nil {
+			t.Errorf("expected memory_view allowed in %s mode, got error: %v", mode, err)
+		}
 	}
 }
 
@@ -267,6 +274,7 @@ func TestRegistry_CoversCoreActions(t *testing.T) {
 		// new actions
 		"get_chat_mode", "set_chat_mode", "list_capabilities",
 		"get_alert", "get_model", "get_personality", "get_current_project",
+		"memory_view",
 	}
 	names := map[string]bool{}
 	for _, a := range Registry() {
@@ -374,6 +382,19 @@ func TestRegistry_ChatModeActions(t *testing.T) {
 }
 
 // ---- Anti-drift: all registry actions should have matching tool defs ----
+
+func TestToolDefsForContext_ReadActionsCarryReadAccess(t *testing.T) {
+	defs := ToolDefsForContext(models.ChatModePlan, SurfaceWeb, true)
+	for _, def := range defs {
+		a := Get(def.Name)
+		if a == nil {
+			t.Fatalf("missing registry action for tool def %q", def.Name)
+		}
+		if a.Access == AccessRead && def.Access != llmcontracts.RuntimeToolAccessRead {
+			t.Errorf("read action %q generated Access=%q, want %q", def.Name, def.Access, llmcontracts.RuntimeToolAccessRead)
+		}
+	}
+}
 
 func TestToolDefsForContext_FullOrchestrateCoversAllActions(t *testing.T) {
 	// In full orchestrate mode with thread tools, every ordinary action in the

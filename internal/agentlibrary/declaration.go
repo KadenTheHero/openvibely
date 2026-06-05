@@ -203,7 +203,7 @@ func (d *SkillDeclaration) Validate() error {
 			continue
 		}
 		switch hook.OutputContract {
-		case "", "selected_mode", "selected_skills", "context_block", "activity_summary", "learning_summary", "library_update_summary":
+		case "", "selected_mode", "selected_skills", "selected_memories", "context_block", "activity_summary", "learning_summary", "library_update_summary":
 		default:
 			return fmt.Errorf("declaration: hook %s has unknown output_contract %q", when, hook.OutputContract)
 		}

@@ -146,6 +146,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if len(opts.ExtraTools) > 0 {
 			tools = append(tools, opts.ExtraTools...)
 		}
+		tools = filterToolDefinitions(tools, opts.ToolFilter)
 	}
 
 	// Build initial input items from prior history.

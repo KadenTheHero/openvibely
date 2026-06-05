@@ -12,6 +12,7 @@ routing:
   description: Selects, updates, and consolidates managed project memory.
 tools:
   - ScopedFiles
+  - memory_view
 tool_config:
   scoped_files:
     - directory: .openvibely/memories
@@ -29,11 +30,11 @@ permissions:
 model_defaults:
   model: inherit
 lifecycle_hooks:
-  before_run:
+  route_task:
     enabled: true
     skill: recall_memory
-    blocking: true
-    output_contract: context_block
+    blocking: false
+    output_contract: selected_memories
     run_policy: always
     permissions:
       read_task_prompt: true
@@ -57,7 +58,7 @@ lifecycle_hooks:
 
 Built-in system agent that owns OpenVibely's managed project memory. The same agent handles all memory lifecycle work:
 
-- Select relevant memory before task turns and return concise context blocks.
+- Select relevant memory during task routing and return compact selected-memory JSON.
 - Update durable memory after completed task turns when the transcript contains memory-worthy facts.
 - Consolidate the durable memory store on a daily schedule through a normal scheduled task assigned to this agent.
 
@@ -67,7 +68,7 @@ This agent is not user-selectable as a primary task agent. It writes only throug
 
 ## memory_curator/recall_memory
 
-[Recall Memory](skills/recall_memory/SKILL.md) — Before-run lifecycle skill that selects relevant managed memory and returns a compact context block for the task turn.
+[Recall Memory](skills/recall_memory/SKILL.md) — Route-task lifecycle skill that selects relevant managed memory from the compact memory index and returns selected-memory JSON for the task turn.
 
 ## memory_curator/update_memory
 

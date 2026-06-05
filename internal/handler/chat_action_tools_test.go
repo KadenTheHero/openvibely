@@ -59,6 +59,34 @@ func TestSupportsChatActionTools(t *testing.T) {
 	}
 }
 
+func TestFormatCapabilitiesIncludesSelectedMemoryHandles(t *testing.T) {
+	out := formatCapabilities([]chatcontrol.ActionSummary{{Domain: "memory", Name: "memory_view", Description: "Load selected memory.", Access: "read"}}, []string{"usage_analytics.md"})
+	if !strings.Contains(out, "Selected memories for this turn") || !strings.Contains(out, "usage_analytics.md") {
+		t.Fatalf("expected selected memory handles in capabilities output, got:\n%s", out)
+	}
+}
+
+func TestListCapabilitiesExecutorIncludesSelectedMemoryHandles(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{IsTaskFollowup: true},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true),
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)
+	ctx := service.WithSelectedMemoryHandles(context.Background(), []string{"chat_memory.md"})
+	out, handled, isErr, err := rt.Executor(ctx, "list_capabilities", nil)
+	if !handled || isErr || err != nil {
+		t.Fatalf("list_capabilities failed handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	for _, want := range []string{"Selected memories for this turn", "chat_memory.md", "memory_view"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected list_capabilities output to contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
 func TestBuildToolMarker_WithBody(t *testing.T) {
 	input := json.RawMessage(`{"title":"Fix login","prompt":"Investigate auth flow"}`)
 	got, err := buildToolMarker("CREATE_TASK", input, true)

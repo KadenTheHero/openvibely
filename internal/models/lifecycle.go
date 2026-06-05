@@ -23,6 +23,7 @@ type LifecycleOutputContract string
 const (
 	OutputContractSelectedMode         LifecycleOutputContract = "selected_mode" // legacy; do not use for Skill Curator route_task.
 	OutputContractSelectedSkills       LifecycleOutputContract = "selected_skills"
+	OutputContractSelectedMemories     LifecycleOutputContract = "selected_memories"
 	OutputContractContextBlock         LifecycleOutputContract = "context_block"
 	OutputContractActivitySummary      LifecycleOutputContract = "activity_summary"
 	OutputContractLearningSummary      LifecycleOutputContract = "learning_summary"

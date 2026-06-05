@@ -6,6 +6,16 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestDefaultAgentToolsIncludesSelectedMemoryView(t *testing.T) {
+	tools := defaultAgentTools()
+	if !agentToolsInclude(tools, "memory_view") {
+		t.Fatalf("defaultAgentTools() = %#v, missing memory_view", tools)
+	}
+	if !agentToolsInclude(models.AllAgentTools, "memory_view") {
+		t.Fatalf("models.AllAgentTools missing memory_view")
+	}
+}
+
 func TestNormalizeAgentToolsKeepsTaskGoalRuntimeTools(t *testing.T) {
 	input := []string{
 		"get_task_goal",

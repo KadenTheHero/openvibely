@@ -329,11 +329,15 @@ func TestMigration082_NormalizesUnreleasedSkillCuratorNames(t *testing.T) {
 		t.Fatalf("skill curator tools not normalized: %s", tools)
 	}
 	var routeContract string
-	if err := db.QueryRow(`SELECT output_contract FROM agent_lifecycle_hooks WHERE id = 'hk_old_route'`).Scan(&routeContract); err != nil {
+	var routeBlocking int
+	if err := db.QueryRow(`SELECT output_contract, blocking FROM agent_lifecycle_hooks WHERE id = 'hk_old_route'`).Scan(&routeContract, &routeBlocking); err != nil {
 		t.Fatalf("failed to load route hook: %v", err)
 	}
 	if routeContract != "selected_skills" {
 		t.Fatalf("route hook output contract = %q, want selected_skills", routeContract)
+	}
+	if routeBlocking != 0 {
+		t.Fatalf("route hook blocking = %d, want 0 for parallel routing", routeBlocking)
 	}
 	var oldCount int
 	if err := db.QueryRow(`
@@ -385,8 +389,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 91 {
-		t.Fatalf("max goose version = %d, want 91", maxVersion)
+	if maxVersion != 92 {
+		t.Fatalf("max goose version = %d, want 92", maxVersion)
 	}
 }
 
@@ -423,17 +427,21 @@ func TestMigration082_AppliesAfterPublic074(t *testing.T) {
 		}
 	}
 	var contract string
+	var blocking int
 	if err := db.QueryRow(`
-		SELECT output_contract
+		SELECT output_contract, blocking
 		FROM agent_lifecycle_hooks
 		WHERE agent_id = 'sys_skill_curator_00000000000000000001'
 		  AND when_slot = 'route_task'
 		  AND skill_key = 'route_task'
-	`).Scan(&contract); err != nil {
+	`).Scan(&contract, &blocking); err != nil {
 		t.Fatalf("failed to load seeded route hook: %v", err)
 	}
 	if contract != "selected_skills" {
 		t.Fatalf("seeded route hook contract = %q, want selected_skills", contract)
+	}
+	if blocking != 0 {
+		t.Fatalf("seeded route hook blocking = %d, want 0 for parallel routing", blocking)
 	}
 }
 
@@ -733,8 +741,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 91 {
-		t.Fatalf("max goose version = %d, want 91", maxVersion)
+	if maxVersion != 92 {
+		t.Fatalf("max goose version = %d, want 92", maxVersion)
 	}
 }
 

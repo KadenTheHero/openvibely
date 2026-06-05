@@ -2,16 +2,22 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-06-05
+updated: 2026-06-06
 source: consolidation
 source_id: memory_consolidation_2026_06_05
 confidence: high
 title: Realtime and Frontend Patterns
 ---
 
-OpenVibely uses server-rendered HTMX/templ UI with shared SSE-style live updates. Prefer one shared per-tab sidebar-managed SSE stream with in-browser event fan-out rather than opening separate long-lived EventSources for each surface.
+OpenVibely uses server-rendered HTMX/templ UI with shared SSE-style live updates. Prefer one shared per-tab sidebar-managed SSE stream with in-browser event fan-out rather than opening separate long-lived EventSources for each surface. The broad UI contract is that SSE announces "something changed," then HTMX/server-rendered templ fragments provide authoritative state; reserve narrow per-execution SSE streams for high-frequency output where whole-fragment swaps would be disruptive.
 
 Realtime and diff updates:
+- The shared `/events/live` stream multiplexes task, chat, and file-change events; sidebar-managed client code fans those into browser `CustomEvent`s such as `sse-task-event`, `sse-chat-live-event`, `sse-file-change-event`, and `sse-live-connected` rather than each page owning a separate broad EventSource.
+- The layout-level `window._tabVisibility` manager registers realtime connections, closes them while the tab is hidden, reconnects on visibility return, and pauses HTMX polling while hidden.
+- Task pages consume shared events and refresh HTMX fragments after filtering/debouncing; defer refresh while dragging, while a modal is open, or while the tab is hidden.
+- Per-execution `/events/chat/:exec_id` streams are the token-style output path: the server polls persisted execution output, emits appended deltas, then sends `done`/`error`. Streamed output should be persisted first so refresh/reconnect can resume from execution rows instead of volatile browser state.
+- Explicitly close per-execution EventSources on chat/thread/root swaps, navigation, completion, or errors so browser SSE connection limits are not exhausted.
+- Task/detail HTMX polling may remain as fallback for active states, but polling should pause or be cancelled while an active SSE stream is attached so morph swaps do not destroy live EventSources.
 - Real-time file changes stream to the Changes tab during task execution via SSE using `GetWorktreeDiffWithUncommitted` to show committed branch changes and uncommitted work without auto-committing.
 - Task-thread follow-up executions should run the same periodic diff snapshot broadcast path, persisting `executions.diff_output` and publishing `diff_snapshot` events.
 - Treat live diff snapshot UI indicators as runtime feedback, not durable task artifacts; they may disappear after app restart, while persisted execution diff/task changes are the source of durable review state.

@@ -44,6 +44,17 @@ func (s *LLMService) adapterFor(provider models.LLMProvider) (ProviderAdapter, b
 	return adapter, ok
 }
 
+func requestUsesChatStreaming(req llmcontracts.AgentRequest) bool {
+	if req.Operation != llmcontracts.OperationStreaming {
+		return false
+	}
+	mode := strings.TrimSpace(string(req.ChatMode))
+	if !req.Followup {
+		return mode == string(models.ChatModeOrchestrate) || mode == string(models.ChatModePlan)
+	}
+	return len(req.ChatHistory) > 0 || strings.TrimSpace(req.ChatSystemContext) != ""
+}
+
 func canonicalResult(output, textOnly string, usage llmcontracts.Usage, err error) (llmcontracts.AgentResult, error) {
 	if textOnly == "" {
 		textOnly = output
@@ -135,14 +146,14 @@ func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontr
 				return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
 			}
 			if req.Agent.IsAnthropicCLI() {
-				if req.ChatHistory != nil {
+				if requestUsesChatStreaming(req) {
 					output, tokens, err := a.svc.callClaudeCLIChat(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.WorkDir, req.Followup, req.ChatMode, req.PluginDirs)
 					return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
 				}
 				output, textOnly, tokens, err := a.svc.callClaudeCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.PluginDirs, rawAgentDef)
 				return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), err)
 			}
-			if req.ChatHistory != nil {
+			if requestUsesChatStreaming(req) {
 				output, tokens, err := a.svc.callAnthropicChat(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode)
 				return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
 			}
@@ -215,7 +226,7 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 
 		case llmcontracts.OperationStreaming:
 			if openAIDirectClientEnabled(req.Agent) {
-				if req.ChatHistory != nil {
+				if requestUsesChatStreaming(req) {
 					output, usage, err := a.adapter.CallChatStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, req.WorkDir, req.AgentDefinition)
 					if shouldFallbackOpenAI(req.Agent, err) {
 						log.Printf("[agent-svc] openai chat fallback to completions operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
@@ -240,7 +251,7 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 				}
 				return canonicalResult(output, textOnly, usage, err)
 			}
-			if req.ChatHistory != nil {
+			if requestUsesChatStreaming(req) {
 				output, tokens, err := a.svc.callCodexCLIChat(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.WorkDir, req.Followup, req.ChatMode)
 				return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
 			}

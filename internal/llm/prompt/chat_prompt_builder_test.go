@@ -58,6 +58,20 @@ func TestBuildChatSystemPrompt_IncludesSystemContext(t *testing.T) {
 	}
 }
 
+func TestBuildChatSystemPrompt_TaskFollowupIncludesSelectedMemoryContext(t *testing.T) {
+	selectedMemoryContext := "## Selected Memories For This Task\n\nThe lifecycle router selected these managed memories for this turn.\n\n<selected_memories>\n- `chat_memory.md`\n</selected_memories>"
+	prompt := BuildChatSystemPrompt(true, models.ChatModeOrchestrate, selectedMemoryContext, false)
+
+	if !strings.Contains(prompt, "coding agent") {
+		t.Error("task follow-up provider prompt should keep coding-agent system prompt")
+	}
+	for _, want := range []string{"## Selected Memories For This Task", "<selected_memories>", "`chat_memory.md`"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("task follow-up provider prompt missing selected memory context %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestBuildChatSystemPrompt_IncludesMarkerReinforcement(t *testing.T) {
 	prompt := BuildChatSystemPrompt(false, models.ChatModeOrchestrate, "", false)
 

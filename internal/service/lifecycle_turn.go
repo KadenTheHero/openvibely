@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/agentskills"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -38,15 +40,21 @@ type LifecycleTurn struct {
 	AfterComplete func(err error, chatContext llmcontracts.ChatContext)
 }
 
-// PrepareRecallOnlyLifecycleTurn runs only before_run context-block hooks for
-// an interactive chat turn. It deliberately skips route_task, selected skills,
-// task runtime tools, and after_complete so Chat can recall managed memory
-// without letting Chat prompts or mode-control text update memory.
+// PrepareRecallOnlyLifecycleTurn runs only Memory Curator recall hooks for an
+// interactive chat turn. It deliberately skips skill selection, task runtime
+// tools, and after_complete so Chat can recall managed memory without letting
+// Chat prompts or mode-control text update memory.
 func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task models.Task) LifecycleTurn {
 	if w == nil {
 		return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: func(error, llmcontracts.ChatContext) {}}
 	}
 
+	incomingTurn := lifecycleTurnFromContext(ctx)
+	effectiveTask := task
+	if incomingTurn.TurnPrompt != "" {
+		effectiveTask.Prompt = incomingTurn.TurnPrompt
+	}
+	explicitMemoryEntries := w.explicitIndexedMemoryEntries(ctx, effectiveTask)
 	runID := newLifecycleTaskRunID(task.ID)
 	if projectRoot := projectSkillRoot(ctx, w.projectRepo, task.ProjectID); projectRoot != "" && w.agentRootSyncService != nil {
 		if err := w.agentRootSyncService.SyncRootDeclarations(ctx, projectRoot); err != nil {
@@ -60,16 +68,30 @@ func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task
 		hookCtx = llmcontracts.WithRuntimeTools(hookCtx, hookReadTools)
 	}
 	preparedContext := ""
+	selectedMemoryEntries := []memory.SelectedMemory{}
 	if w.lifecycleRunner != nil {
+		if route := w.runLifecycleSlotFiltered(hookCtx, models.LifecycleRouteTask, task, runID, nil, llmcontracts.ChatContext{}, w.isChatMemoryRecallHook(ctx)); len(route.Outputs) > 0 {
+			if selected, ok := bestSelectedMemories(route.Outputs); ok {
+				selectedMemoryEntries = w.mergeSelectedMemoryEntries(explicitMemoryEntries, w.filterSelectedMemoryEntries(ctx, task, memoryEntriesFromLifecycle(selected)))
+			}
+		}
+		preparedContext = memory.RenderSelectedMemoriesMarkdown(selectedMemoryEntries)
 		before := w.runLifecycleSlotFiltered(hookCtx, models.LifecycleBeforeRun, task, runID, nil, llmcontracts.ChatContext{}, w.isChatMemoryRecallHook(ctx))
-		preparedContext = lifecycle.MergeContextBlocks(before.Outputs)
+		legacyContext := lifecycle.MergeContextBlocks(before.Outputs)
+		preparedContext = joinLifecyclePromptBlocks(preparedContext, legacyContext)
 		if preparedContext != "" {
-			log.Printf("[lifecycle-turn] chat before_run prepared_context task=%s bytes=%d outputs=%d", task.ID, len(preparedContext), len(before.Outputs))
+			log.Printf("[lifecycle-turn] chat memory prepared_context task=%s bytes=%d", task.ID, len(preparedContext))
 		}
 	}
 	promptContext := buildLifecyclePromptContext("", preparedContext)
 	if promptContext != "" {
 		ctx = withAdditionalProjectInstructions(ctx, promptContext)
+	}
+	if len(selectedMemoryEntries) > 0 {
+		ctx = WithSelectedMemoryHandles(ctx, selectedMemoryHandles(selectedMemoryEntries))
+	}
+	if memoryTools := w.buildTaskMemoryRuntimeTools(ctx, task, selectedMemoryEntries); memoryTools != nil {
+		ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(memoryTools, llmcontracts.RuntimeToolsFromContext(ctx)))
 	}
 	return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: func(error, llmcontracts.ChatContext) {}}
 }
@@ -105,48 +127,75 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	if w.afterCompleteRuntimeToolProvider != nil {
 		afterCompleteRuntimeTools = llmcontracts.CompositeRuntimeTools(afterCompleteRuntimeTools, w.afterCompleteRuntimeToolProvider(ctx, task))
 	}
-	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SkillIndex: fullSkillIndex, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn})
+	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SkillIndex: fullSkillIndex, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt})
 	hookReadTools := w.buildLifecycleReadRuntimeTools(task, catalog)
 	if hookReadTools != nil {
 		ctx = llmcontracts.WithRuntimeTools(ctx, hookReadTools)
 	}
 	hookMutationTools := w.buildLifecycleRuntimeTools(task, catalog)
 	log.Printf("[lifecycle-turn] prepared task=%s catalog_skills=%d runtime_tools=%t", task.ID, len(catalog.Entries()), hookReadTools != nil)
+	effectiveTask := task
+	if incomingTurn.TaskThreadTurn && incomingTurn.TurnPrompt != "" {
+		effectiveTask.Prompt = incomingTurn.TurnPrompt
+	}
+	explicitMemoryEntries := w.explicitIndexedMemoryEntries(ctx, effectiveTask)
 
 	// route_task selects relevant skill handles for this turn. It never changes
 	// Task.AgentDefinitionID. No-agent tasks route standalone skills; assigned-agent
 	// tasks route skills owned by the assigned agent.
 	selectedSkillHandles := []string{}
+	var selectedMemories lifecycle.SelectedMemories
+	haveSelectedMemories := false
 	if w.lifecycleRunner != nil {
 		if route := w.runLifecycleSlot(ctx, models.LifecycleRouteTask, task, runID, nil, llmcontracts.ChatContext{}); len(route.Outputs) > 0 {
 			var best lifecycle.SelectedSkills
 			haveBest := false
 			for _, out := range route.Outputs {
-				if out.OutputContract != models.OutputContractSelectedSkills || len(out.Payload) == 0 || out.Error != "" {
+				if len(out.Payload) == 0 || out.Error != "" {
 					continue
 				}
-				selected, err := lifecycle.ValidateSelectedSkills(out.Payload)
-				if err != nil {
-					log.Printf("[lifecycle-turn] route_task invalid selected_skills task=%s: %v", task.ID, err)
-					continue
-				}
-				if selected.NeedsClarification {
-					log.Printf("[lifecycle-turn] route_task clarification requested task=%s question=%q", task.ID, selected.ClarifyingQuestion)
-					continue
-				}
-				if !haveBest || selected.Confidence > best.Confidence {
-					best = selected
-					haveBest = true
+				switch out.OutputContract {
+				case models.OutputContractSelectedSkills:
+					selected, err := lifecycle.ValidateSelectedSkills(out.Payload)
+					if err != nil {
+						log.Printf("[lifecycle-turn] route_task invalid selected_skills task=%s: %v", task.ID, err)
+						continue
+					}
+					if selected.NeedsClarification {
+						log.Printf("[lifecycle-turn] route_task clarification requested task=%s question=%q", task.ID, selected.ClarifyingQuestion)
+						continue
+					}
+					if !haveBest || selected.Confidence > best.Confidence {
+						best = selected
+						haveBest = true
+					}
+				case models.OutputContractSelectedMemories:
+					selected, err := lifecycle.ValidateSelectedMemories(out.Payload)
+					if err != nil {
+						log.Printf("[lifecycle-turn] route_task invalid selected_memories task=%s: %v", task.ID, err)
+						continue
+					}
+					if selected.NeedsClarification {
+						log.Printf("[lifecycle-turn] route_task memory clarification requested task=%s question=%q", task.ID, selected.ClarifyingQuestion)
+						continue
+					}
+					if !haveSelectedMemories || selected.Confidence > selectedMemories.Confidence {
+						selectedMemories = selected
+						haveSelectedMemories = true
+					}
 				}
 			}
 			if haveBest {
 				selectedSkillHandles = filterCatalogHandles(catalog, best.Skills)
 				log.Printf("[lifecycle-turn] route_task selected_skills task=%s handles=%d confidence=%.2f", task.ID, len(selectedSkillHandles), best.Confidence)
 			}
+			if haveSelectedMemories {
+				log.Printf("[lifecycle-turn] route_task selected_memories task=%s memories=%d confidence=%.2f", task.ID, len(selectedMemories.Memories), selectedMemories.Confidence)
+			}
 		}
 	}
 	taskCatalog := catalog.Filter(runID+":selected", selectedSkillHandles)
-	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SelectedSkillHandles: selectedSkillHandles, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn})
+	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SelectedSkillHandles: selectedSkillHandles, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt})
 
 	// before_run: produce context_blocks the model should see. The runbook
 	// (§Auto-Routing line 130) says these blocks are merged into the system
@@ -172,8 +221,21 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		SelectedSkillHandles: selectedSkillHandles,
 		AssignedAgent:        assignedAgent,
 		TaskThreadTurn:       incomingTurn.TaskThreadTurn,
+		TurnPrompt:           incomingTurn.TurnPrompt,
 	})
-	promptContext := buildLifecyclePromptContext(skillIndex, preparedContext)
+	selectedMemoryEntries := explicitMemoryEntries
+	if haveSelectedMemories {
+		selectedMemoryEntries = w.mergeSelectedMemoryEntries(selectedMemoryEntries, w.filterSelectedMemoryEntries(ctx, task, memoryEntriesFromLifecycle(selectedMemories)))
+	}
+	memoryIndex := memory.RenderSelectedMemoriesMarkdown(selectedMemoryEntries)
+	if len(selectedMemoryEntries) > 0 {
+		ctx = WithSelectedMemoryHandles(ctx, selectedMemoryHandles(selectedMemoryEntries))
+	}
+	if memoryTools := w.buildTaskMemoryRuntimeTools(ctx, task, selectedMemoryEntries); memoryTools != nil {
+		taskRuntimeTools = llmcontracts.CompositeRuntimeTools(memoryTools, taskRuntimeTools)
+		ctx = llmcontracts.WithRuntimeTools(ctx, taskRuntimeTools)
+	}
+	promptContext := buildLifecyclePromptContext(skillIndex, joinLifecyclePromptBlocks(memoryIndex, preparedContext))
 	if promptContext != "" {
 		ctx = withAdditionalProjectInstructions(ctx, promptContext)
 	}
@@ -198,7 +260,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 			}
 			result := w.runLifecycleSlotFiltered(bgCtx, models.LifecycleAfterComplete, t, taskRunID, runErr, taskChatContext, w.afterCompleteHookEligible(bgCtx, t))
 			w.publishGoalEvaluationAfterComplete(bgCtx, t, result)
-		}(task, runID, err, chatContext, llmcontracts.CompositeRuntimeTools(hookMutationTools, afterCompleteRuntimeTools), lifecycleTurnContext{Catalog: taskCatalog, SelectedSkillHandles: selectedSkillHandles, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn})
+		}(task, runID, err, chatContext, llmcontracts.CompositeRuntimeTools(hookMutationTools, afterCompleteRuntimeTools), lifecycleTurnContext{Catalog: taskCatalog, SelectedSkillHandles: selectedSkillHandles, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt})
 	}
 	return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: after}
 }
@@ -272,7 +334,10 @@ func (w *WorkerService) isChatMemoryRecallHook(ctx context.Context) func(models.
 		}
 	}
 	return func(hook models.AgentLifecycleHook) bool {
-		if hook.When != models.LifecycleBeforeRun || hook.SkillKey != "recall_memory" || hook.OutputContract != models.OutputContractContextBlock {
+		if hook.SkillKey != "recall_memory" {
+			return false
+		}
+		if !(hook.When == models.LifecycleRouteTask && hook.OutputContract == models.OutputContractSelectedMemories) && !(hook.When == models.LifecycleBeforeRun && hook.OutputContract == models.OutputContractContextBlock) {
 			return false
 		}
 		if memoryAgentID == "" {
@@ -280,6 +345,172 @@ func (w *WorkerService) isChatMemoryRecallHook(ctx context.Context) func(models.
 		}
 		return hook.AgentID == memoryAgentID
 	}
+}
+
+func bestSelectedMemories(outputs []lifecycle.HookOutput) (lifecycle.SelectedMemories, bool) {
+	var best lifecycle.SelectedMemories
+	haveBest := false
+	for _, out := range outputs {
+		if out.OutputContract != models.OutputContractSelectedMemories || len(out.Payload) == 0 || out.Error != "" {
+			continue
+		}
+		selected, err := lifecycle.ValidateSelectedMemories(out.Payload)
+		if err != nil || selected.NeedsClarification {
+			continue
+		}
+		if !haveBest || selected.Confidence > best.Confidence {
+			best = selected
+			haveBest = true
+		}
+	}
+	return best, haveBest
+}
+
+func memoryEntriesFromLifecycle(selected lifecycle.SelectedMemories) []memory.SelectedMemory {
+	if len(selected.Memories) == 0 {
+		return nil
+	}
+	out := make([]memory.SelectedMemory, 0, len(selected.Memories))
+	for _, entry := range selected.Memories {
+		out = append(out, memory.SelectedMemory{
+			File:    entry.File,
+			Topic:   entry.Topic,
+			Summary: entry.Summary,
+			Snippet: entry.Snippet,
+		})
+	}
+	return out
+}
+
+func selectedMemoryHandles(entries []memory.SelectedMemory) []string {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(entries))
+	seen := map[string]struct{}{}
+	for _, entry := range entries {
+		handle := memory.NormalizeMemoryHandle(entry.File)
+		if handle == "" {
+			continue
+		}
+		if _, ok := seen[handle]; ok {
+			continue
+		}
+		seen[handle] = struct{}{}
+		out = append(out, handle)
+	}
+	return out
+}
+
+func (w *WorkerService) filterSelectedMemoryEntries(ctx context.Context, task models.Task, entries []memory.SelectedMemory) []memory.SelectedMemory {
+	if len(entries) == 0 {
+		return nil
+	}
+	allowed := memory.IndexedMemoryHandles(w.availableMemoryIndex(ctx, task))
+	if len(allowed) == 0 {
+		for _, entry := range entries {
+			if entry.File != "" {
+				log.Printf("[lifecycle-turn] route_task selected memory without MEMORIES.md index task=%s handle=%s", task.ID, entry.File)
+			}
+		}
+		return nil
+	}
+	out := make([]memory.SelectedMemory, 0, len(entries))
+	for _, entry := range entries {
+		handle := memory.NormalizeMemoryHandle(entry.File)
+		if _, ok := allowed[handle]; !ok {
+			log.Printf("[lifecycle-turn] route_task selected memory not in MEMORIES.md task=%s handle=%s", task.ID, strings.TrimSpace(entry.File))
+			continue
+		}
+		out = append(out, memory.SelectedMemory{File: handle})
+	}
+	return out
+}
+
+func (w *WorkerService) explicitIndexedMemoryEntries(ctx context.Context, task models.Task) []memory.SelectedMemory {
+	index := w.availableMemoryIndex(ctx, task)
+	allowed := memory.IndexedMemoryHandles(index)
+	if len(allowed) == 0 {
+		return nil
+	}
+	requested := explicitMemoryViewHandles(task.Prompt)
+	if len(requested) == 0 {
+		return nil
+	}
+	out := make([]memory.SelectedMemory, 0, len(requested))
+	seen := map[string]struct{}{}
+	for _, handle := range requested {
+		if _, ok := allowed[handle]; !ok {
+			continue
+		}
+		if _, ok := seen[handle]; ok {
+			continue
+		}
+		seen[handle] = struct{}{}
+		out = append(out, memory.SelectedMemory{File: handle})
+	}
+	return out
+}
+
+func explicitMemoryViewHandles(prompt string) []string {
+	if !strings.Contains(strings.ToLower(prompt), "memory_view") {
+		return nil
+	}
+	out := []string{}
+	seen := map[string]struct{}{}
+	for _, raw := range strings.FieldsFunc(prompt, func(ch rune) bool {
+		return !(ch == '_' || ch == '-' || ch == '.' || ch == '/' || ch == '\\' || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9'))
+	}) {
+		handle := memory.NormalizeMemoryHandle(raw)
+		if handle == "" || !strings.HasSuffix(strings.ToLower(handle), ".md") {
+			continue
+		}
+		if _, ok := seen[handle]; ok {
+			continue
+		}
+		seen[handle] = struct{}{}
+		out = append(out, handle)
+	}
+	return out
+}
+
+func (w *WorkerService) mergeSelectedMemoryEntries(first, second []memory.SelectedMemory) []memory.SelectedMemory {
+	if len(first) == 0 {
+		return second
+	}
+	if len(second) == 0 {
+		return first
+	}
+	out := make([]memory.SelectedMemory, 0, len(first)+len(second))
+	seen := map[string]struct{}{}
+	for _, entries := range [][]memory.SelectedMemory{first, second} {
+		for _, entry := range entries {
+			handle := memory.NormalizeMemoryHandle(entry.File)
+			if handle == "" {
+				continue
+			}
+			if _, ok := seen[handle]; ok {
+				continue
+			}
+			seen[handle] = struct{}{}
+			out = append(out, memory.SelectedMemory{File: handle})
+		}
+	}
+	return out
+}
+
+func joinLifecyclePromptBlocks(parts ...string) string {
+	out := ""
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		if out != "" {
+			out += "\n\n"
+		}
+		out += part
+	}
+	return out
 }
 
 func filterCatalogHandles(catalog *agentskills.Catalog, handles []string) []string {

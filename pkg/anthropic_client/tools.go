@@ -39,6 +39,19 @@ func DefaultTools() []ToolDefinition {
 	}
 }
 
+func filterToolDefinitions(tools []ToolDefinition, filter func(string) bool) []ToolDefinition {
+	if filter == nil || len(tools) == 0 {
+		return tools
+	}
+	out := tools[:0]
+	for _, tool := range tools {
+		if filter(strings.TrimSpace(tool.Name)) {
+			out = append(out, tool)
+		}
+	}
+	return out
+}
+
 func readFileTool() ToolDefinition {
 	return ToolDefinition{
 		Name:        "read_file",

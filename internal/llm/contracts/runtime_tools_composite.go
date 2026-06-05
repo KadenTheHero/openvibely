@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 // CompositeRuntimeTools merges multiple request-scoped RuntimeTools into one
@@ -23,8 +24,16 @@ func CompositeRuntimeTools(tools ...*RuntimeTools) *RuntimeTools {
 		return filtered[0]
 	}
 	out := &RuntimeTools{}
+	seenDefinitions := map[string]bool{}
 	for _, rt := range filtered {
-		out.Definitions = append(out.Definitions, rt.Definitions...)
+		for _, def := range rt.Definitions {
+			name := strings.ToLower(strings.TrimSpace(def.Name))
+			if name == "" || seenDefinitions[name] {
+				continue
+			}
+			seenDefinitions[name] = true
+			out.Definitions = append(out.Definitions, def)
+		}
 		out.SkipDefaultTools = out.SkipDefaultTools || rt.SkipDefaultTools
 	}
 	out.Executor = func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {

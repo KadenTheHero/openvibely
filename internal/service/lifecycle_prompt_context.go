@@ -3,6 +3,7 @@ package service
 import "context"
 
 type additionalProjectInstructionsKey struct{}
+type selectedMemoryHandlesKey struct{}
 
 func withAdditionalProjectInstructions(ctx context.Context, value string) context.Context {
 	if ctx == nil {
@@ -31,4 +32,26 @@ func combineAdditionalProjectInstructions(ctx context.Context, base string) stri
 		return extra
 	}
 	return extra + "\n\n" + base
+}
+
+// WithSelectedMemoryHandles annotates ctx with the managed memory handles selected
+// for the current model turn.
+func WithSelectedMemoryHandles(ctx context.Context, handles []string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if len(handles) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, selectedMemoryHandlesKey{}, append([]string(nil), handles...))
+}
+
+// SelectedMemoryHandlesFromContext returns the managed memory handles selected
+// for the current model turn, if lifecycle memory recall selected any.
+func SelectedMemoryHandlesFromContext(ctx context.Context) []string {
+	if ctx == nil {
+		return nil
+	}
+	handles, _ := ctx.Value(selectedMemoryHandlesKey{}).([]string)
+	return append([]string(nil), handles...)
 }

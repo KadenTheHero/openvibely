@@ -2961,6 +2961,52 @@ func TestHandler_TaskThreadSend(t *testing.T) {
 	}
 }
 
+func TestHandler_TaskThreadSend_ProcessesCreateTaskMarkerFromUIFollowup(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Marker Followup Project")
+	task := createTask(t, h, project.ID, "Thread Marker Followup Task", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+	})
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "I'll create that task.\n\n[CREATE_TASK]\n" +
+		`{"title":"UI thread marker child","prompt":"Created from a task thread UI follow-up"}` +
+		"\n[/CREATE_TASK]"
+	mock.TextOnly = mock.Response
+	h.llmSvc.SetLLMCaller(mock)
+
+	form := url.Values{}
+	form.Set("message", "Create a follow-up task from this thread")
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "Create a follow-up task from this thread")
+
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
+	require.Eventually(t, func() bool {
+		tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+		if err != nil {
+			return false
+		}
+		for _, candidate := range tasks {
+			if candidate.Title == "UI thread marker child" {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 25*time.Millisecond)
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	require.True(t, execs[0].IsFollowup)
+	require.Contains(t, execs[0].Output, "[TASK_ID:")
+}
+
 func TestHandler_TaskThreadSend_CompletedTaskIgnoresAndRepairsStaleRunningExecution(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

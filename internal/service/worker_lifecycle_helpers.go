@@ -7,6 +7,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -55,6 +56,30 @@ func (w *WorkerService) buildTaskSkillRuntimeTools(_ context.Context, _ models.T
 		return nil
 	}
 	return agentskills.SelectedSkillRuntimeTools(catalog)
+}
+
+func (w *WorkerService) buildTaskMemoryRuntimeTools(ctx context.Context, task models.Task, memories []memory.SelectedMemory) *llmcontracts.RuntimeTools {
+	if w == nil || len(memories) == 0 || !w.taskAgentAllowsMemoryView(ctx, task) {
+		return nil
+	}
+	repoPath := projectRepoPath(ctx, w.projectRepo, task.ProjectID)
+	if strings.TrimSpace(repoPath) == "" {
+		return nil
+	}
+	return memory.SelectedMemoryRuntimeTools(repoPath, memories)
+}
+
+func (w *WorkerService) taskAgentAllowsMemoryView(ctx context.Context, task models.Task) bool {
+	agent := w.taskAgentDefinition(ctx, task)
+	if agent == nil {
+		return true
+	}
+	for _, tool := range agent.Tools {
+		if strings.EqualFold(strings.TrimSpace(tool), "memory_view") {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *WorkerService) taskAgentDefinition(ctx context.Context, task models.Task) *models.Agent {

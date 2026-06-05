@@ -54,7 +54,7 @@ type generatedAgentResponse struct {
 var titleWordPattern = regexp.MustCompile(`[A-Za-z0-9]+`)
 
 func defaultAgentTools() []string {
-	return []string{"Read", "Grep", "Glob", "Bash"}
+	return []string{"Read", "Grep", "Glob", "Bash", "memory_view"}
 }
 
 func containsAnyTerm(text string, terms ...string) bool {

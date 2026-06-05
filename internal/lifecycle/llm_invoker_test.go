@@ -11,16 +11,17 @@ import (
 )
 
 type fakeCaller struct {
-	reply         string
-	lastContext   context.Context
-	lastPrompt    string
-	lastConfig    models.LLMConfig
-	lastWorkDir   string
-	lastAgentDef  *models.Agent
-	lastRuntime   *llmcontracts.RuntimeTools
-	calledDirect  bool
-	calledWithDef bool
-	returnErr     error
+	reply                string
+	lastContext          context.Context
+	lastPrompt           string
+	lastConfig           models.LLMConfig
+	lastWorkDir          string
+	lastAgentDef         *models.Agent
+	lastRuntime          *llmcontracts.RuntimeTools
+	calledDirect         bool
+	calledWithDef        bool
+	calledWithDefNoTools bool
+	returnErr            error
 }
 
 func (f *fakeCaller) CallAgentDirect(ctx context.Context, message string, _ []models.Attachment, agent models.LLMConfig, workDir string) (string, int, error) {
@@ -35,6 +36,17 @@ func (f *fakeCaller) CallAgentDirect(ctx context.Context, message string, _ []mo
 
 func (f *fakeCaller) CallAgentDirectWithDefinition(ctx context.Context, message string, _ []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent) (string, int, error) {
 	f.calledWithDef = true
+	f.lastContext = ctx
+	f.lastPrompt = message
+	f.lastConfig = agent
+	f.lastWorkDir = workDir
+	f.lastAgentDef = agentDef
+	f.lastRuntime = llmcontracts.RuntimeToolsFromContext(ctx)
+	return f.reply, 0, f.returnErr
+}
+
+func (f *fakeCaller) CallAgentDirectWithDefinitionNoTools(ctx context.Context, message string, _ []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent) (string, int, error) {
+	f.calledWithDefNoTools = true
 	f.lastContext = ctx
 	f.lastPrompt = message
 	f.lastConfig = agent
@@ -183,6 +195,51 @@ func TestLLMHookInvoker_ScopedFilesGrantAllowsConcreteFileRuntimeTools(t *testin
 	}
 }
 
+func TestLLMHookInvoker_MemoryRecallRouteDoesNotExposeFileTools(t *testing.T) {
+	caller := &fakeCaller{reply: `{"memories":[],"content":"","confidence":0,"reason":"none","needs_clarification":false}`}
+	agentDef := &models.Agent{Key: models.AgentSystemKindMemoryCurator, Name: "Memory Curator", Model: "sonnet", SystemKind: models.AgentSystemKindMemoryCurator, Tools: []string{models.AgentToolScopedFiles}}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"memory-curator": agentDef}}, nil)
+	baseTools := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_files"}, {Name: "read_file"}, {Name: "grep_search"}},
+		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			return `{"ok":true}`, true, false, nil
+		},
+	}
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), baseTools)
+	_, err := inv.Invoke(ctx, models.AgentLifecycleHook{AgentID: "memory-curator", When: models.LifecycleRouteTask, SkillKey: "recall_memory", OutputContract: models.OutputContractSelectedMemories}, HookInput{})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if caller.lastRuntime == nil {
+		t.Fatal("expected runtime tools")
+	}
+	if !caller.calledWithDefNoTools || caller.calledWithDef {
+		t.Fatalf("expected memory recall route hook to use no-tools definition caller, calledWithDefNoTools=%v calledWithDef=%v", caller.calledWithDefNoTools, caller.calledWithDef)
+	}
+	if !caller.lastRuntime.SkipDefaultTools {
+		t.Fatal("expected memory recall route hook to suppress provider default tools")
+	}
+	if caller.lastAgentDef == nil {
+		t.Fatal("expected sanitized agent definition")
+	}
+	if len(caller.lastAgentDef.Tools) != 0 || len(caller.lastAgentDef.ToolConfig.ScopedFiles) != 0 || len(caller.lastAgentDef.Plugins) != 0 || len(caller.lastAgentDef.MCPServers) != 0 {
+		t.Fatalf("expected sanitized memory route agent definition, got tools=%v config=%#v plugins=%v mcp=%v", caller.lastAgentDef.Tools, caller.lastAgentDef.ToolConfig, caller.lastAgentDef.Plugins, caller.lastAgentDef.MCPServers)
+	}
+	if caller.lastAgentDef.SystemKind != models.AgentSystemKindMemoryCurator || caller.lastAgentDef.Name != "Memory Curator" {
+		t.Fatalf("expected sanitized definition to preserve identity, got %#v", caller.lastAgentDef)
+	}
+	for _, denied := range []string{"list_files", "read_file", "grep_search"} {
+		if caller.lastRuntime.HasDefinition(denied) {
+			t.Fatalf("memory recall route hook must not expose %s: %#v", denied, caller.lastRuntime.Definitions)
+		}
+		if caller.lastRuntime.Executor != nil {
+			if _, handled, _, err := caller.lastRuntime.Executor(ctx, denied, json.RawMessage(`{}`)); handled || err != nil {
+				t.Fatalf("memory recall route hook should not execute %s handled=%v err=%v", denied, handled, err)
+			}
+		}
+	}
+}
+
 func TestLLMHookInvoker_DoesNotExposeRuntimeToolsWithoutAgentGrants(t *testing.T) {
 	caller := &fakeCaller{reply: `{"summary":"reviewed","nothing_to_save":true}`}
 	agentDef := &models.Agent{Name: "Skill Curator", Model: "sonnet"}
@@ -238,6 +295,48 @@ func TestLLMHookInvoker_RecordsRuntimeToolTrace(t *testing.T) {
 			t.Fatalf("expected trace event %q in %v", want, eventTypes)
 		}
 	}
+}
+
+func TestLLMHookInvoker_RedactsMemoryCuratorFileToolTraceOutputs(t *testing.T) {
+	secretMemory := "durable preference that should not be persisted raw in lifecycle traces"
+	caller := &fakeCaller{reply: `{"content":"remember compactly","sources":["topic.md"],"confidence":0.8}`}
+	agentDef := &models.Agent{Name: "Memory Curator", Model: "sonnet", SystemKind: models.AgentSystemKindMemoryCurator, Tools: []string{models.AgentToolScopedFiles}}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"memory-curator": agentDef}}, nil)
+	baseTools := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "read_file"}},
+		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			return secretMemory, true, false, nil
+		},
+	}
+	store := &memStore{}
+	recorder := NewTraceRecorder(store, "exec-1", nil)
+	ctx := context.Background()
+	ctx = WithTraceRecorder(ctx, recorder)
+	ctx = llmcontracts.WithRuntimeToolTraceRecorder(ctx, recorder)
+	ctx = llmcontracts.WithRuntimeTools(ctx, baseTools)
+	_, err := inv.Invoke(ctx, models.AgentLifecycleHook{AgentID: "memory-curator", SkillKey: "recall_memory", OutputContract: models.OutputContractContextBlock}, HookInput{})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if caller.lastRuntime == nil || caller.lastRuntime.Executor == nil {
+		t.Fatal("expected traced runtime executor")
+	}
+	if _, handled, _, err := caller.lastRuntime.Executor(caller.lastContext, "read_file", json.RawMessage(`{"file_path":"topic.md","limit":80}`)); err != nil || !handled {
+		t.Fatalf("execute traced tool handled=%v err=%v", handled, err)
+	}
+	for _, event := range store.events {
+		if event.EventType != "tool_result" {
+			continue
+		}
+		if strings.Contains(event.PayloadJSON, secretMemory) {
+			t.Fatalf("memory tool trace leaked raw output: %s", event.PayloadJSON)
+		}
+		if !strings.Contains(event.PayloadJSON, "[redacted memory tool output]") || !strings.Contains(event.PayloadJSON, "output_bytes") {
+			t.Fatalf("memory tool trace missing redaction metadata: %s", event.PayloadJSON)
+		}
+		return
+	}
+	t.Fatal("expected tool_result trace event")
 }
 
 func TestLLMHookInvoker_RendersConversationTranscript(t *testing.T) {

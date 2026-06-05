@@ -86,11 +86,14 @@ type EffectiveMode struct {
 
 // Runner owns lifecycle timing. It does not start new `when` values from
 // hook executions, which prevents recursion (see runbook).
+type HookInputCustomizer func(ctx context.Context, hook models.AgentLifecycleHook, input HookInput) HookInput
+
 type Runner struct {
-	store    HookStore
-	invoker  HookInvoker
-	resolver SkillResolver
-	logger   *log.Logger
+	store           HookStore
+	invoker         HookInvoker
+	resolver        SkillResolver
+	logger          *log.Logger
+	inputCustomizer HookInputCustomizer
 }
 
 // NewRunner constructs a runner. invoker, resolver, and modes may be nil for
@@ -102,6 +105,13 @@ func NewRunner(store HookStore, invoker HookInvoker, resolver SkillResolver) *Ru
 		resolver: resolver,
 		logger:   log.Default(),
 	}
+}
+
+func (r *Runner) SetInputCustomizer(customizer HookInputCustomizer) {
+	if r == nil {
+		return
+	}
+	r.inputCustomizer = customizer
 }
 
 // SlotResult bundles every hook output produced inside one `when` slot.
@@ -232,6 +242,9 @@ func (r *Runner) RunSlotFiltered(ctx context.Context, when models.LifecycleWhen,
 // and returned as a HookOutput with Error set; the slot continues.
 func (r *Runner) runHook(ctx context.Context, hook models.AgentLifecycleHook, input HookInput) (out HookOutput) {
 	hookInput := input
+	if r.inputCustomizer != nil {
+		hookInput = r.inputCustomizer(ctx, hook, hookInput)
+	}
 	hookInput.SkillKey = hook.SkillKey
 	hookInput.PromptOverride = hook.PromptOverride
 	hookInput.OutputContract = hook.OutputContract
@@ -405,6 +418,9 @@ func ValidateOutput(contract models.LifecycleOutputContract, raw json.RawMessage
 		return err
 	case models.OutputContractSelectedSkills:
 		_, err := ValidateSelectedSkills(raw)
+		return err
+	case models.OutputContractSelectedMemories:
+		_, err := ValidateSelectedMemories(raw)
 		return err
 	case models.OutputContractContextBlock:
 		_, err := ValidateContextBlock(raw)

@@ -22,6 +22,7 @@
 //   - alerts: list_alerts, get_alert
 //   - personality: list_personalities, get_personality
 //   - settings: view_settings
+//   - memory: memory_view (only when selected-memory runtime tools authorize a handle)
 //   - chat: get_chat_mode, list_capabilities
 //
 // NOT chat-controllable (excluded by design):
@@ -85,6 +86,7 @@ const (
 	DomainAgents      Domain = "agents"
 	DomainProjects    Domain = "projects"
 	DomainSettings    Domain = "settings"
+	DomainMemory      Domain = "memory"
 	DomainChat        Domain = "chat"
 )
 
@@ -471,6 +473,18 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 	},
 
+	// --- Memory domain (read-only, scoped by selected-memory runtime tools) ---
+	{
+		Name:         "memory_view",
+		Description:  "Load an authorized managed memory selected for this turn. Use only handles listed in the selected memory index.",
+		Domain:       DomainMemory,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"handle":{"type":"string","description":"Selected memory handle/file, e.g. provider_architecture.md"}},"required":["handle"],"additionalProperties":false}`),
+	},
+
 	// --- Chat domain ---
 	{
 		Name:         "get_chat_mode",
@@ -581,6 +595,7 @@ func toolDefsForContext(mode models.ChatMode, surface Surface, includeThreadTool
 				Name:        a.Name,
 				Description: a.Description,
 				Parameters:  a.Parameters,
+				Access:      runtimeToolAccessForAction(a.Access),
 			})
 		}
 	}
@@ -696,4 +711,11 @@ func surfaceAllowed(a ActionDef, surface Surface) bool {
 		}
 	}
 	return false
+}
+
+func runtimeToolAccessForAction(access AccessLevel) llmcontracts.RuntimeToolAccess {
+	if access == AccessRead {
+		return llmcontracts.RuntimeToolAccessRead
+	}
+	return llmcontracts.RuntimeToolAccessWrite
 }

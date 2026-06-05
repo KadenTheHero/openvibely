@@ -51,6 +51,28 @@ func TestValidateSelectedSkills_AcceptsStandaloneHandlesAndClarification(t *test
 	}
 }
 
+func TestValidateSelectedMemories_AcceptsCompactIndexSelections(t *testing.T) {
+	got, err := ValidateSelectedMemories([]byte(`{"memories":[{"file":"provider_architecture.md","topic":"Provider","summary":"Use mode-driven routing."},{"file":"provider_architecture.md","summary":"duplicate"},{"topic":"User preference","snippet":"ignored without file handle"}],"content":"Remembered context only from the index.","confidence":0.7,"reason":"matches prompt"}`))
+	if err != nil {
+		t.Fatalf("expected ok, got %v", err)
+	}
+	if len(got.Memories) != 1 {
+		t.Fatalf("expected deduped memories, got %#v", got.Memories)
+	}
+	if got.Content != "Remembered context only from the index." {
+		t.Fatalf("expected compact route content to be preserved as metadata, got %q", got.Content)
+	}
+	if _, err := ValidateSelectedMemories([]byte(`{"memories":[{"file":"../secret.md"}],"confidence":0.7}`)); err == nil {
+		t.Fatalf("expected unsafe memory path rejection")
+	}
+	if _, err := ValidateSelectedMemories([]byte(`{"needs_clarification":true,"clarifying_question":"which project?"}`)); err != nil {
+		t.Fatalf("expected clarification ok, got %v", err)
+	}
+	if _, err := ValidateSelectedMemories([]byte(`{"confidence":2}`)); err == nil {
+		t.Fatalf("expected bad confidence rejection")
+	}
+}
+
 func TestValidateContextBlock_RejectsBadConfidence(t *testing.T) {
 	if _, err := ValidateContextBlock([]byte(`{"content":"hi","confidence":0.5}`)); err != nil {
 		t.Fatalf("expected ok, got %v", err)

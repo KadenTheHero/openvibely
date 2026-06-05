@@ -298,7 +298,7 @@ INSERT INTO agent_lifecycle_hooks (
  ('hk_skill_curator_route_0000000001',
   'sys_skill_curator_00000000000000000001', 'route_task',
   'route_task', '', 'selected_skills',
-  1, 1, '{"read_agents":true,"read_skills":true,"read_task_prompt":true}', '{"when":"auto_routing_enabled"}', NULL),
+  0, 1, '{"read_agents":true,"read_skills":true,"read_task_prompt":true}', '{"when":"auto_routing_enabled"}', NULL),
  ('hk_skill_curator_after_complete_01',
   'sys_skill_curator_00000000000000000001', 'after_complete',
   'observe_task_for_learning', '', 'learning_summary',
@@ -322,6 +322,7 @@ WHERE system_kind = 'skill_curator' OR id = 'sys_skill_curator_00000000000000000
 
 UPDATE agent_lifecycle_hooks
 SET output_contract = 'selected_skills',
+    blocking = 0,
     permissions_json = '{"read_agents":true,"read_skills":true,"read_task_prompt":true}',
     updated_at = datetime('now')
 WHERE when_slot = 'route_task'

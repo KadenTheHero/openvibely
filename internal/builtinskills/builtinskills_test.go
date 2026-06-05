@@ -23,6 +23,8 @@ func TestSyncTo_SeedsDefaultIndexesAndSkillBodies(t *testing.T) {
 		filepath.Join(root, "agents", "skill_curator", "skills", "maintain_skill_library", "SKILL.md"),
 		filepath.Join(root, "agents", "goal", "SKILLS.md"),
 		filepath.Join(root, "agents", "goal", "skills", "evaluate_task_goal", "SKILL.md"),
+		filepath.Join(root, "agents", "memory_curator", "SKILLS.md"),
+		filepath.Join(root, "agents", "memory_curator", "skills", "recall_memory", "SKILL.md"),
 	}
 	for _, p := range mustExist {
 		if _, err := os.Stat(p); err != nil {
@@ -46,6 +48,7 @@ func TestSyncTo_SeedsDefaultIndexesAndSkillBodies(t *testing.T) {
 		t.Fatalf("read SKILLS.md: %v", err)
 	}
 	for _, want := range []string{
+		"blocking: false",
 		"## skill_curator/route_task",
 		"skills/route_task/SKILL.md",
 		"## skill_curator/observe_task_for_learning",
@@ -126,6 +129,53 @@ func TestSyncTo_PreservesUserManagedIndexesButRefreshesSystemDeclaration(t *test
 	}
 	if string(gotUserSkills) != userSkills {
 		t.Fatalf("user-managed SKILLS.md clobbered by SyncTo.\nwant:\n%s\ngot:\n%s", userSkills, gotUserSkills)
+	}
+}
+
+func TestSyncTo_MemoryRecallSkillUsesIndexSelectionContract(t *testing.T) {
+	root := t.TempDir()
+	if err := SyncTo(root); err != nil {
+		t.Fatalf("SyncTo: %v", err)
+	}
+
+	recall, err := os.ReadFile(filepath.Join(root, "agents", "memory_curator", "skills", "recall_memory", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read recall_memory SKILL.md: %v", err)
+	}
+	decl, err := os.ReadFile(filepath.Join(root, "agents", "memory_curator", "SKILLS.md"))
+	if err != nil {
+		t.Fatalf("read memory_curator SKILLS.md: %v", err)
+	}
+	declBody := string(decl)
+	for _, want := range []string{"route_task:", "skill: recall_memory", "blocking: false", "output_contract: selected_memories", "- ScopedFiles", "- memory_view"} {
+		if !strings.Contains(declBody, want) {
+			t.Fatalf("memory_curator declaration missing route selected-memory hook %q:\n%s", want, declBody)
+		}
+	}
+	if strings.Contains(declBody, "output_contract: context_block") {
+		t.Fatalf("memory_curator recall should not install as before_run context_block:\n%s", declBody)
+	}
+
+	body := string(recall)
+	for _, want := range []string{
+		"route_task",
+		"selected_memories",
+		"extras.available_memories",
+		"compact project memory index from `MEMORIES.md`",
+		"analogous to the Skill Curator's `available_skills` index",
+		"If no listed memory is relevant",
+		"Use root-relative memory filenames from the index as `file` handles",
+		"Leave `content`, `summary`, and `snippet` empty",
+		"memory_view",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("recall_memory skill missing index-selection instruction %q:\n%s", want, body)
+		}
+	}
+	for _, forbidden := range []string{"read only the topic files", "bounded `read_file`", "read all memory files", "read every memory file", "dump all memory"} {
+		if strings.Contains(strings.ToLower(body), forbidden) {
+			t.Fatalf("recall_memory skill should not encourage broad memory dumps via %q:\n%s", forbidden, body)
+		}
 	}
 }
 

@@ -151,7 +151,18 @@ func mapBuiltInToolName(name string) string {
 	}
 }
 
+func agentSkipDefaultTools(agentDef *models.Agent) bool {
+	return agentDef != nil && agentDef.ToolConfig.SkipDefaultTools
+}
+
+func runtimeSkipDefaultTools(rt *llmcontracts.RuntimeTools) bool {
+	return rt != nil && rt.SkipDefaultTools
+}
+
 func agentAllowsBuiltInTool(agentDef *models.Agent, toolName string) bool {
+	if agentSkipDefaultTools(agentDef) {
+		return false
+	}
 	if agentDef == nil || len(agentDef.Tools) == 0 {
 		return true
 	}
@@ -212,27 +223,31 @@ func runtimeAnthropicTools(rt *llmcontracts.RuntimeTools) []anthropicclient.Tool
 	return out
 }
 
-func runtimeToolNameSet(rt *llmcontracts.RuntimeTools) map[string]struct{} {
+func runtimeToolAccessMap(rt *llmcontracts.RuntimeTools) map[string]llmcontracts.RuntimeToolAccess {
 	if rt == nil || len(rt.Definitions) == 0 {
 		return nil
 	}
-	names := make(map[string]struct{}, len(rt.Definitions))
+	out := make(map[string]llmcontracts.RuntimeToolAccess, len(rt.Definitions))
 	for _, def := range rt.Definitions {
 		n := strings.ToLower(strings.TrimSpace(def.Name))
 		if n == "" {
 			continue
 		}
-		names[n] = struct{}{}
+		access := def.Access
+		if access == "" {
+			access = llmcontracts.RuntimeToolAccessWrite
+		}
+		out[n] = access
 	}
-	return names
+	return out
 }
 
-func isRuntimeTool(runtimeNames map[string]struct{}, name string) bool {
-	if len(runtimeNames) == 0 {
-		return false
+func runtimeToolAccess(runtimeTools map[string]llmcontracts.RuntimeToolAccess, name string) (llmcontracts.RuntimeToolAccess, bool) {
+	if len(runtimeTools) == 0 {
+		return "", false
 	}
-	_, ok := runtimeNames[strings.ToLower(strings.TrimSpace(name))]
-	return ok
+	access, ok := runtimeTools[strings.ToLower(strings.TrimSpace(name))]
+	return access, ok
 }
 
 func composeRuntimeToolExecutor(base func(context.Context, string, json.RawMessage) (string, bool, error), rt *llmcontracts.RuntimeTools) func(context.Context, string, json.RawMessage) (string, bool, error) {
@@ -251,29 +266,28 @@ func composeRuntimeToolExecutor(base func(context.Context, string, json.RawMessa
 }
 
 func composeRuntimeToolFilter(base func(string) bool, rt *llmcontracts.RuntimeTools, isTaskFollowup bool, chatMode models.ChatMode) func(string) bool {
-	runtimeNames := runtimeToolNameSet(rt)
+	runtimeTools := runtimeToolAccessMap(rt)
 	return func(name string) bool {
-		isActionTool := isRuntimeTool(runtimeNames, name)
-
+		access, isRuntimeTool := runtimeToolAccess(runtimeTools, name)
 		if !isTaskFollowup {
 			switch chatMode {
 			case models.ChatModePlan:
-				// Plan mode: read-only exploration tools only; no action tools.
-				if isActionTool {
+				// Plan mode: read-only exploration tools only; no write/action tools.
+				if isRuntimeTool && access != llmcontracts.RuntimeToolAccessRead {
 					return false
 				}
-				if !planModeAllowsReadOnlyTool(name) {
+				if !isRuntimeTool && !planModeAllowsReadOnlyTool(name) {
 					return false
 				}
 			default:
-				// Orchestrate mode: action tools only (no filesystem/mcp tools).
-				if !isActionTool {
+				// Orchestrate mode: action/runtime tools only (no filesystem/mcp tools).
+				if !isRuntimeTool {
 					return false
 				}
 			}
 		}
 
-		if isActionTool {
+		if isRuntimeTool {
 			if rt != nil && rt.Filter != nil {
 				allow, handled := rt.Filter(name)
 				if handled {
@@ -405,10 +419,11 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildAnthropicRuntime(ctx, workDir, req.AgentDefinition)
 	defer cleanupRuntime()
+	agentSkipDefaults := agentSkipDefaultTools(req.AgentDefinition)
 
 	switch req.Operation {
 	case llmcontracts.OperationTask:
-		output, textOnly, usage, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter)
+		output, textOnly, usage, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter, agentSkipDefaults)
 		return llmcontracts.AgentResult{
 			Output:         output,
 			TextOnlyOutput: textOnly,
@@ -418,14 +433,14 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 
 	case llmcontracts.OperationStreaming:
 		if req.ChatHistory != nil {
-			output, usage, err := a.callChatStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, workDir, extraTools, toolExecutor, toolFilter)
+			output, usage, err := a.callChatStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, workDir, extraTools, toolExecutor, toolFilter, agentSkipDefaults)
 			return llmcontracts.AgentResult{
 				Output:     output,
 				Usage:      usage,
 				StopReason: stopReasonIfMaxTokens(err),
 			}, err
 		}
-		output, textOnly, usage, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter)
+		output, textOnly, usage, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter, agentSkipDefaults)
 		return llmcontracts.AgentResult{
 			Output:         output,
 			TextOnlyOutput: textOnly,
@@ -441,7 +456,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		if rt != nil && len(rt.Definitions) > 0 {
 			req.DisableTools = false
 		}
-		skipDefaultTools := rt != nil && rt.SkipDefaultTools
+		skipDefaultTools := agentSkipDefaultTools(req.AgentDefinition) || runtimeSkipDefaultTools(rt)
 		output, usage, err := a.callDirect(ctx, req.Message, req.Attachments, agent, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter, req.DisableTools, skipDefaultTools)
 		return llmcontracts.AgentResult{
 			Output:     output,
@@ -501,7 +516,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 }
 
 // callChatStreaming calls the Anthropic API with streaming for chat/followup.
-func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool) (string, llmcontracts.Usage, error) {
+func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, agentSkipDefaults bool) (string, llmcontracts.Usage, error) {
 	maxTokens := claudeCodeMaxOutputTokens(agent.Model)
 	log.Printf("[anthropic] callChatStreaming model=%s max_tokens=%d history=%d exec=%s isTaskFollowup=%v workDir=%s attachments=%d", agent.Model, maxTokens, len(chatHistory), execID, isTaskFollowup, workDir, len(attachments))
 
@@ -528,6 +543,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = composeRuntimeToolFilter(toolFilter, rt, isTaskFollowup, chatMode)
 	disableTools, skipDefaultTools := resolveChatToolPolicy(isTaskFollowup, chatMode, rt)
+	skipDefaultTools = skipDefaultTools || agentSkipDefaults || runtimeSkipDefaultTools(rt)
 	chatInThinking := false
 	opts := &anthropicclient.AgenticOptions{
 		Model:                  agent.Model,
@@ -593,7 +609,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 }
 
 // callStreaming calls the Anthropic API with streaming.
-func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool) (string, string, llmcontracts.Usage, error) {
+func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, agentSkipDefaults bool) (string, string, llmcontracts.Usage, error) {
 	maxTokens := claudeCodeMaxOutputTokens(agent.Model)
 	log.Printf("[anthropic] callStreaming model=%s max_tokens=%d exec=%s workDir=%s attachments=%d", agent.Model, maxTokens, execID, workDir, len(attachments))
 
@@ -615,7 +631,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	extraTools = append(extraTools, runtimeAnthropicTools(rt)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = composeTaskRuntimeToolFilter(toolFilter, rt)
-	skipDefaultTools := rt != nil && rt.SkipDefaultTools
+	skipDefaultTools := agentSkipDefaults || runtimeSkipDefaultTools(rt)
 
 	inThinking := false
 	opts := &anthropicclient.AgenticOptions{

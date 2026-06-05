@@ -7,10 +7,18 @@ import (
 )
 
 // RuntimeToolDefinition is a provider-agnostic tool definition injected at request time.
+type RuntimeToolAccess string
+
+const (
+	RuntimeToolAccessWrite RuntimeToolAccess = "write"
+	RuntimeToolAccessRead  RuntimeToolAccess = "read"
+)
+
 type RuntimeToolDefinition struct {
 	Name        string
 	Description string
 	Parameters  json.RawMessage
+	Access      RuntimeToolAccess
 }
 
 // RuntimeToolExecutor runs request-scoped tools.

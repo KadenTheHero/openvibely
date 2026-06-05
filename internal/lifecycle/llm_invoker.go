@@ -40,6 +40,17 @@ type AgentDefinitionCaller interface {
 	) (string, int, error)
 }
 
+type AgentDefinitionNoToolsCaller interface {
+	CallAgentDirectWithDefinitionNoTools(
+		ctx context.Context,
+		message string,
+		attachments []models.Attachment,
+		agent models.LLMConfig,
+		workDir string,
+		agentDef *models.Agent,
+	) (string, int, error)
+}
+
 // AgentLookup resolves a persisted agent by ID so the invoker can pick the
 // correct system prompt and tool grants for the hook. Optional: when nil the
 // invoker emits a default-shaped LLMConfig populated only from the model
@@ -92,7 +103,7 @@ func (i *LLMHookInvoker) Invoke(ctx context.Context, hook models.AgentLifecycleH
 	if err != nil {
 		return nil, err
 	}
-	callCtx := contextWithAgentRuntimeTools(ctx, agentDef)
+	callCtx := contextWithHookRuntimeTools(ctx, hook, agentDef)
 	callCtx = WithHookAgent(callCtx, HookAgent{AgentID: hook.AgentID, SystemKind: systemKindForHookAgent(agentDef), Tools: hookAgentTools(agentDef)})
 	if err := validateRequiredLifecycleRuntimeTools(hook, agentDef, llmcontracts.RuntimeToolsFromContext(callCtx)); err != nil {
 		RecordTraceEvent(callCtx, "available_tools_missing", map[string]any{"error": err.Error(), "tools": runtimeToolNamesForTrace(callCtx)})
@@ -108,8 +119,11 @@ func (i *LLMHookInvoker) Invoke(ctx context.Context, hook models.AgentLifecycleH
 	})
 	RecordTraceEvent(callCtx, "available_tools", map[string]any{"tools": runtimeToolNamesForTrace(callCtx)})
 	var reply string
-	if defCaller, ok := i.caller.(AgentDefinitionCaller); ok && agentDef != nil {
-		reply, _, err = defCaller.CallAgentDirectWithDefinition(callCtx, prompt, nil, cfg, input.WorkDir, agentDef)
+	callAgentDef := agentDefinitionForHookCall(hook, agentDef)
+	if noToolsCaller, ok := i.caller.(AgentDefinitionNoToolsCaller); ok && callAgentDef != nil && isMemoryRecallRouteHook(hook, agentDef) {
+		reply, _, err = noToolsCaller.CallAgentDirectWithDefinitionNoTools(callCtx, prompt, nil, cfg, input.WorkDir, callAgentDef)
+	} else if defCaller, ok := i.caller.(AgentDefinitionCaller); ok && callAgentDef != nil {
+		reply, _, err = defCaller.CallAgentDirectWithDefinition(callCtx, prompt, nil, cfg, input.WorkDir, callAgentDef)
 	} else {
 		reply, _, err = i.caller.CallAgentDirect(callCtx, prompt, nil, cfg, input.WorkDir)
 	}
@@ -244,14 +258,19 @@ func sanitizeHookOutputsForPrompt(outputs []HookOutput) []HookOutput {
 	return out
 }
 
-func contextWithAgentRuntimeTools(ctx context.Context, agentDef *models.Agent) context.Context {
+func contextWithHookRuntimeTools(ctx context.Context, hook models.AgentLifecycleHook, agentDef *models.Agent) context.Context {
 	base := llmcontracts.RuntimeToolsFromContext(ctx)
 	filtered := filterRuntimeToolsForAgent(base, agentDef)
+	filtered = filterRuntimeToolsForHook(filtered, hook, agentDef)
 	filtered = llmcontracts.TraceRuntimeTools(filtered, TraceRecorderFromContext(ctx))
 	if filtered == base {
 		return ctx
 	}
 	return llmcontracts.WithRuntimeTools(ctx, filtered)
+}
+
+func contextWithAgentRuntimeTools(ctx context.Context, agentDef *models.Agent) context.Context {
+	return contextWithHookRuntimeTools(ctx, models.AgentLifecycleHook{}, agentDef)
 }
 
 func filterRuntimeToolsForAgent(rt *llmcontracts.RuntimeTools, agentDef *models.Agent) *llmcontracts.RuntimeTools {
@@ -272,6 +291,32 @@ func filterRuntimeToolsForAgent(rt *llmcontracts.RuntimeTools, agentDef *models.
 		Metadata:         rt.Metadata,
 		SkipDefaultTools: rt.SkipDefaultTools,
 	}
+}
+
+func filterRuntimeToolsForHook(rt *llmcontracts.RuntimeTools, hook models.AgentLifecycleHook, agentDef *models.Agent) *llmcontracts.RuntimeTools {
+	if rt == nil || agentDef == nil {
+		return rt
+	}
+	if isMemoryRecallRouteHook(hook, agentDef) {
+		return &llmcontracts.RuntimeTools{SkipDefaultTools: true}
+	}
+	return rt
+}
+
+func agentDefinitionForHookCall(hook models.AgentLifecycleHook, agentDef *models.Agent) *models.Agent {
+	if agentDef == nil || !isMemoryRecallRouteHook(hook, agentDef) {
+		return agentDef
+	}
+	copyDef := *agentDef
+	copyDef.Tools = nil
+	copyDef.ToolConfig = models.AgentToolConfig{SkipDefaultTools: true}
+	copyDef.Plugins = nil
+	copyDef.MCPServers = nil
+	return &copyDef
+}
+
+func isMemoryRecallRouteHook(hook models.AgentLifecycleHook, agentDef *models.Agent) bool {
+	return agentDef != nil && agentDef.SystemKind == models.AgentSystemKindMemoryCurator && hook.When == models.LifecycleRouteTask && hook.OutputContract == models.OutputContractSelectedMemories
 }
 
 func allowedRuntimeToolNamesForAgent(agentDef *models.Agent) map[string]struct{} {
@@ -365,6 +410,8 @@ func outputContractPromptSpec(contract models.LifecycleOutputContract) string {
 		return "Required JSON shape: {\"mode\":\"agent_key\",\"action\":\"continue|switch\",\"confidence\":0.0,\"reason\":\"string\",\"needs_clarification\":false,\"clarifying_question\":\"string\"}."
 	case models.OutputContractSelectedSkills:
 		return "Required JSON shape: {\"skills\":[\"skill_key\"],\"confidence\":0.0,\"reason\":\"Why these skills fit the task\",\"needs_clarification\":false,\"clarifying_question\":\"string\"}. Choose only handles listed in available_skills for this turn. Return an empty skills array when no listed skill is relevant."
+	case models.OutputContractSelectedMemories:
+		return "Required JSON shape: {\"memories\":[{\"file\":\"memory_file.md\",\"topic\":\"optional debug label\"}],\"confidence\":0.0,\"reason\":\"Why these memory handles fit the task\",\"needs_clarification\":false,\"clarifying_question\":\"string\"}. Choose only memory file handles listed in available_memories for this turn. Task context will receive selected file handles only; topic is debug metadata and content, summary, or snippet fields must stay empty. Return an empty memories array when no listed memory is relevant."
 	case models.OutputContractContextBlock:
 		return "Required JSON shape: {\"content\":\"string\",\"sources\":[\"source\"],\"confidence\":0.0}."
 	case models.OutputContractActivitySummary:

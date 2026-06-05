@@ -26,6 +26,10 @@ func BuildLifecycleRuntimeToolExecutor(mode models.ChatMode, surface Surface, ha
 	return buildRuntimeToolExecutor(mode, surface, handlers, true)
 }
 
+func isExternalRuntimeTool(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), "memory_view")
+}
+
 func buildRuntimeToolExecutor(mode models.ChatMode, surface Surface, handlers map[string]RuntimeActionHandler, includeLifecycleOnly bool) llmcontracts.RuntimeToolExecutor {
 	return func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		toolName := strings.ToLower(strings.TrimSpace(name))
@@ -66,6 +70,9 @@ func ValidateHandlerCoverage(mode models.ChatMode, surface Surface, includeThrea
 	defs := ToolDefsForContext(mode, surface, includeThreadTools)
 	missing := make([]string, 0)
 	for _, d := range defs {
+		if isExternalRuntimeTool(d.Name) {
+			continue
+		}
 		if _, ok := handlers[d.Name]; !ok {
 			missing = append(missing, d.Name)
 		}

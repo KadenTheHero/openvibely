@@ -139,6 +139,24 @@ func TestOpenAIProviderAdapter_DirectDisableToolsRejectsCLITransport(t *testing.
 	}
 }
 
+func TestRequestUsesChatStreamingTreatsFirstTurnChatAsChat(t *testing.T) {
+	if !requestUsesChatStreaming(llmcontracts.AgentRequest{Operation: llmcontracts.OperationStreaming, ChatMode: models.ChatModeOrchestrate}) {
+		t.Fatal("expected first-turn orchestrate chat with nil history to use chat streaming")
+	}
+	if !requestUsesChatStreaming(llmcontracts.AgentRequest{Operation: llmcontracts.OperationStreaming, ChatMode: models.ChatModePlan}) {
+		t.Fatal("expected first-turn plan chat with nil history to use chat streaming")
+	}
+	if !requestUsesChatStreaming(llmcontracts.AgentRequest{Operation: llmcontracts.OperationStreaming, ChatMode: models.ChatModeOrchestrate, Followup: true, ChatHistory: []models.Execution{{PromptSent: "previous", Output: "done"}}}) {
+		t.Fatal("expected task followup with chat history to use chat streaming")
+	}
+	if !requestUsesChatStreaming(llmcontracts.AgentRequest{Operation: llmcontracts.OperationStreaming, Followup: true, ChatSystemContext: "## Selected Memories For This Task"}) {
+		t.Fatal("expected task followup with selected-memory system context to use chat streaming")
+	}
+	if requestUsesChatStreaming(llmcontracts.AgentRequest{Operation: llmcontracts.OperationStreaming}) {
+		t.Fatal("streaming task without explicit chat mode/history/context must not use chat streaming")
+	}
+}
+
 func TestShouldFallbackOpenAI(t *testing.T) {
 	oauth := models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth}
 	apiKey := models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey}

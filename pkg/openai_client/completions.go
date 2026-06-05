@@ -23,7 +23,10 @@ type CompletionsOptions struct {
 	WorkDir         string
 	MaxTurns        int
 	DisableTools    bool
-	Attachments     []*FileAttachment
+	// SkipDefaultTools suppresses built-in local tools while still allowing
+	// ExtraTools (for example request-scoped runtime tools) to be sent.
+	SkipDefaultTools bool
+	Attachments      []*FileAttachment
 	// ExtraTools are appended to the default local tools (for example MCP tools).
 	ExtraTools []ToolDefinition
 	// ToolExecutor overrides tool execution. It should return (output, isError, err).
@@ -80,20 +83,17 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		return nil, err
 	}
 
-	var tools []map[string]interface{}
+	var toolDefs []ToolDefinition
 	if !opts.DisableTools {
-		for _, td := range DefaultTools() {
-			tools = append(tools, map[string]interface{}{
-				"type": "function",
-				"function": map[string]interface{}{
-					"name":        td.Name,
-					"description": td.Description,
-					"parameters":  td.Parameters,
-				},
-			})
+		if !opts.SkipDefaultTools {
+			toolDefs = append(toolDefs, DefaultTools()...)
 		}
+		toolDefs = append(toolDefs, opts.ExtraTools...)
+		toolDefs = filterToolDefinitions(toolDefs, opts.ToolFilter)
 	}
-	for _, td := range opts.ExtraTools {
+
+	tools := make([]map[string]interface{}, 0, len(toolDefs))
+	for _, td := range toolDefs {
 		tools = append(tools, map[string]interface{}{
 			"type": "function",
 			"function": map[string]interface{}{
@@ -296,7 +296,10 @@ func (c *Client) sendCompletionsTurn(ctx context.Context, messages []completions
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	endpoint := "https://api.openai.com/v1/chat/completions"
+	endpoint, err := c.completionsEndpoint()
+	if err != nil {
+		return nil, err
+	}
 	buildReq := func() (*http.Request, error) {
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {

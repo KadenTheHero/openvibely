@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentskills"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -69,6 +72,9 @@ type WorkerService struct {
 // before.
 func (w *WorkerService) SetLifecycleRunner(r *lifecycle.Runner) {
 	w.lifecycleRunner = r
+	if r != nil {
+		r.SetInputCustomizer(w.lifecycleHookInput)
+	}
 }
 
 func (w *WorkerService) SetLifecycleSkillRoot(root string) {
@@ -386,15 +392,22 @@ func (w *WorkerService) runLifecycleSlotWithExtras(ctx context.Context, when mod
 	if taskRunID == "" {
 		taskRunID = newLifecycleTaskRunID(task.ID)
 	}
+	baseExtras := copyExtras(extras)
+	turn := lifecycleTurnFromContext(ctx)
+	taskPrompt := task.Prompt
+	if turn.TaskThreadTurn && turn.TurnPrompt != "" {
+		taskPrompt = turn.TurnPrompt
+		baseExtras = withHookExtra(baseExtras, "original_task_prompt", task.Prompt)
+	}
 	in := lifecycle.HookInput{
 		When:       when,
 		TaskID:     task.ID,
 		TaskRunID:  taskRunID,
 		ProjectID:  task.ProjectID,
 		TaskTitle:  task.Title,
-		TaskPrompt: task.Prompt,
+		TaskPrompt: taskPrompt,
 		WorkDir:    projectRepoPath(ctx, w.projectRepo, task.ProjectID),
-		Extras:     copyExtras(extras),
+		Extras:     baseExtras,
 	}
 	if task.AgentDefinitionID != nil {
 		in.ActiveModeAgent = *task.AgentDefinitionID
@@ -404,14 +417,6 @@ func (w *WorkerService) runLifecycleSlotWithExtras(ctx context.Context, when mod
 			in.Extras = make(map[string]any)
 		}
 		in.Extras["execution_error"] = runErr.Error()
-	}
-	if when == models.LifecycleRouteTask {
-		if turn := lifecycleTurnFromContext(ctx); turn.SkillIndex != "" {
-			if in.Extras == nil {
-				in.Extras = make(map[string]any)
-			}
-			in.Extras["available_skills"] = turn.SkillIndex
-		}
 	}
 	if when == models.LifecycleAfterComplete {
 		if in.Extras == nil {
@@ -431,6 +436,22 @@ func (w *WorkerService) runLifecycleSlotWithExtras(ctx context.Context, when mod
 	return result
 }
 
+func (w *WorkerService) lifecycleHookInput(ctx context.Context, hook models.AgentLifecycleHook, input lifecycle.HookInput) lifecycle.HookInput {
+	if hook.When != models.LifecycleRouteTask {
+		return input
+	}
+	input.Extras = withoutRouteIndexes(input.Extras)
+	switch hook.OutputContract {
+	case models.OutputContractSelectedSkills:
+		if turn := lifecycleTurnFromContext(ctx); turn.SkillIndex != "" {
+			input.Extras = withHookExtra(input.Extras, "available_skills", turn.SkillIndex)
+		}
+	case models.OutputContractSelectedMemories:
+		input.Extras = withHookExtra(input.Extras, "available_memories", w.availableMemoryIndex(ctx, models.Task{ID: input.TaskID, ProjectID: input.ProjectID}))
+	}
+	return input
+}
+
 func copyExtras(in map[string]any) map[string]any {
 	if len(in) == 0 {
 		return nil
@@ -440,6 +461,43 @@ func copyExtras(in map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func withoutRouteIndexes(in map[string]any) map[string]any {
+	out := copyExtras(in)
+	if out == nil {
+		return nil
+	}
+	delete(out, "available_skills")
+	delete(out, "available_memories")
+	return out
+}
+
+func withHookExtra(extras map[string]any, key string, value any) map[string]any {
+	if extras == nil {
+		extras = make(map[string]any)
+	}
+	extras[key] = value
+	return extras
+}
+
+func (w *WorkerService) availableMemoryIndex(ctx context.Context, task models.Task) string {
+	if w == nil || w.projectRepo == nil || task.ProjectID == "" {
+		return ""
+	}
+	repoPath := projectRepoPath(ctx, w.projectRepo, task.ProjectID)
+	if repoPath == "" {
+		return ""
+	}
+	path := filepath.Join(repoPath, ".openvibely", memory.MemoryDirName, memory.IndexFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("[worker] read memory index failed task=%s path=%s: %v", task.ID, path, err)
+		}
+		return ""
+	}
+	return string(data)
 }
 
 func (w *WorkerService) QueueSize() int {

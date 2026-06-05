@@ -37,7 +37,38 @@ func NewTraceRecorder(store ExecutionEventAppender, executionID string, logger *
 
 // RecordRuntimeToolEvent implements llm/contracts.RuntimeToolTraceRecorder.
 func (r *TraceRecorder) RecordRuntimeToolEvent(ctx context.Context, eventType string, payload any) {
-	r.Record(ctx, eventType, payload)
+	r.Record(ctx, eventType, redactMemoryToolTracePayload(ctx, eventType, payload))
+}
+
+func redactMemoryToolTracePayload(ctx context.Context, eventType string, payload any) any {
+	if eventType != "tool_result" || !isMemoryCuratorHook(ctx) {
+		return payload
+	}
+	m, ok := payload.(map[string]any)
+	if !ok {
+		return payload
+	}
+	name, _ := m["name"].(string)
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "read_file", "grep_search":
+	default:
+		return payload
+	}
+	out := make(map[string]any, len(m)+1)
+	for k, v := range m {
+		out[k] = v
+	}
+	if s, ok := m["output"].(string); ok {
+		out["output_bytes"] = len(s)
+	}
+	out["output"] = "[redacted memory tool output]"
+	out["redacted"] = true
+	return out
+}
+
+func isMemoryCuratorHook(ctx context.Context) bool {
+	agent, ok := HookAgentFromContext(ctx)
+	return ok && agent.SystemKind == models.AgentSystemKindMemoryCurator
 }
 
 func (r *TraceRecorder) Record(ctx context.Context, eventType string, payload any) {

@@ -29,8 +29,7 @@ import (
 //   - Reconcile the protected Memory Curator agent DB row from its
 //     embedded on-disk declaration (mirroring SkillCuratorService).
 //   - Reconcile the Memory Curator lifecycle hook rows from that
-//     declaration so before_run / after_complete bindings exist.
-//   - Create and maintain the visible per-project "System: Memory
+//     declaration so route_task / after_complete bindings exist.//   - Create and maintain the visible per-project "System: Memory
 //     Consolidation" scheduled task assigned to the Memory Curator agent.
 type MemoryService struct {
 	taskRepo      *repository.TaskRepo
@@ -533,6 +532,12 @@ func (s *MemoryService) ensureMemoryHooks(ctx context.Context, agentID string, d
 	}
 	for _, hook := range existing {
 		if _, ok := desired[string(hook.When)+"/"+hook.SkillKey]; ok {
+			continue
+		}
+		if hook.AgentID == agentID && hook.SkillKey == "recall_memory" && hook.When == models.LifecycleBeforeRun {
+			if err := s.lifecycleRepo.DeleteHook(ctx, hook.ID); err != nil {
+				return err
+			}
 			continue
 		}
 		if hook.AgentID == agentID && hook.SkillKey == "consolidate_memory" && hook.When == models.LifecycleScheduled {

@@ -2210,6 +2210,56 @@ func TestSendAgentic_DisableToolsWithExtraTools(t *testing.T) {
 	}
 }
 
+func TestSendAgentic_ToolFilterRemovesDeniedToolsFromRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var reqBody map[string]any
+		_ = json.Unmarshal(body, &reqBody)
+
+		tools, ok := reqBody["tools"].([]any)
+		if !ok || len(tools) != 1 {
+			t.Fatalf("expected memory_view runtime tool only, got %#v", reqBody["tools"])
+		}
+		seen := map[string]bool{}
+		for _, rawTool := range tools {
+			tool, _ := rawTool.(map[string]any)
+			seen[fmt.Sprint(tool["name"])] = true
+		}
+		if !seen["memory_view"] || seen["list_files"] || seen["Bash"] {
+			t.Fatalf("expected memory_view only, got %#v", seen)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"Done.\"}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	client := NewWithAPIKey("sk-test")
+	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
+		Model: "gpt-5.3-codex",
+		ExtraTools: []ToolDefinition{
+			{
+				Type:        "function",
+				Name:        "memory_view",
+				Description: "Load an authorized selected memory",
+			},
+		},
+		ToolFilter: func(name string) bool { return name == "memory_view" }})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if resp.Text != "Done." {
+		t.Errorf("Text = %q", resp.Text)
+	}
+}
+
 func TestSendAgentic_SkipDefaultToolsUsesOnlyExtraTools(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)

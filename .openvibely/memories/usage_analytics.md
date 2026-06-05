@@ -2,14 +2,14 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-06-05
+updated: 2026-06-06
 source: consolidation
 source_id: memory_consolidation_2026_06_05
 confidence: high
 title: Usage Analytics
 ---
 
-OpenVibely has persistent model-usage analytics for Anthropic and OpenAI OAuth/API-key paths. Usage is stored locally in `llm_usage_events`; OAuth account-limit snapshots are stored in `account_usage_snapshots`, with extra/model-specific account limits stored as child rows in `account_usage_extra_limits`.
+OpenVibely usage analytics are local operational analytics, not third-party product telemetry; no PostHog/Segment/Mixpanel/Google Analytics-style frontend tracking was found in source as of 2026-06-06. The app has persistent model-usage analytics for Anthropic and OpenAI OAuth/API-key paths. Usage is stored locally in `llm_usage_events`; OAuth account-limit snapshots are stored in `account_usage_snapshots`, with extra/model-specific account limits stored as child rows in `account_usage_extra_limits`.
 
 Usage capture boundaries:
 - Capture one final usage row per completed provider model call at the owning execution/call-site boundary, not per streamed chunk.
@@ -23,8 +23,9 @@ Provider usage normalization:
 - Provider response IDs, model/provider/account/config identifiers, timestamps, latency, status/failure/truncation/rate-limit metadata, and raw provider usage JSON are part of the analytics model when available.
 
 Analytics surface:
+- `/analytics` also includes execution/productivity analytics derived from local task/execution/project/agent-config data, such as success/failure rates, hourly execution trends, average execution time, model/agent execution share, frequent tasks, and failed task patterns.
 - `/api/analytics/usage` backs the Analytics page usage section.
-- The Analytics usage widget loads all local model usage by default rather than constraining the summary to the currently selected project; project-specific filtering remains an API concern.
+- As of the 2026-06-06 code inspection, the Analytics page's LLM usage fetch does not send `project_id` even though `/api/analytics/usage` supports it, so token/account usage appears global while execution analytics are project-scoped.
 - Direct/background model calls infer `project_id` from the call `workDir` when it exactly matches a known project repo path, so lifecycle/direct calls can appear in project-specific analytics without risky broad path matching.
 - Analytics load/manual refresh attempts live OAuth account usage refreshes and keeps showing local usage plus the latest successful snapshot if live refresh fails; account-limit refresh warnings are separate from local usage visibility.
 - The Analytics page should show provider account cards first in a responsive side-by-side grid, then `Token Usage` beside `Model Breakdown by Tokens`, followed by the `Token Usage Breakdown` table. The old `Daily Token Usage` graph should not appear on the page.

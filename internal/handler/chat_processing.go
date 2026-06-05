@@ -181,49 +181,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	agentDef := h.resolveTaskAgentDefinitionForTask(ctx, params.TaskID, params.AgentDefinition)
 	params.AgentDefinition = agentDef
 	ctx = llmcontracts.WithChatMode(ctx, chatMode)
-	// Inject request-scoped action tools when the provider supports runtime tool
-	// calling. Tool definitions are derived from the canonical chatcontrol registry
-	// filtered by mode and surface. In plan mode only read actions are available.
-	// Runtime-tools and marker post-processing are mutually exclusive per request.
-	runtimeToolsInjected := false
-	if supportsChatActionTools(params.Agent) {
-		surface := params.Surface
-		if surface == "" {
-			surface = chatcontrol.SurfaceWeb
-		}
-		var defs []llmcontracts.RuntimeToolDefinition
-		if params.IsTaskFollowup {
-			defs = filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, surface, true), agentDef)
-		} else {
-			defs = chatcontrol.ToolDefsForContext(chatMode, surface, chatMode == models.ChatModeOrchestrate)
-		}
-		if len(defs) > 0 {
-			rt := h.buildChatActionToolRuntimeFromDefs(params, nil, defs, chatMode, surface)
-			ctx = llmcontracts.WithRuntimeTools(ctx, rt)
-			params.ProcessMarkers = false
-			runtimeToolsInjected = true
-			log.Printf("[handler] processStreamingResponse exec=%s injected %d runtime action tools mode=%s surface=%s followup=%v",
-				params.ExecID, len(defs), chatMode, surface, params.IsTaskFollowup)
-		}
-	}
-	// Fallback: when interactive chat targets a provider/auth path without
-	// runtime tool support (e.g. Claude CLI, Codex CLI, Ollama), we MUST fall
-	// back to marker post-processing so [CREATE_TASK]/[EDIT_TASK]/
-	// [EXECUTE_TASKS] blocks emitted by the model are actually executed. If
-	// neither runtime tools nor marker processing run, the assistant transcript
-	// can display a "tool call" the backend never executed — producing a
-	// phantom task that never reaches the task store.
-	if !params.IsTaskFollowup && !runtimeToolsInjected && !params.ProcessMarkers {
-		params.ProcessMarkers = true
-		log.Printf("[handler] processStreamingResponse exec=%s no runtime tools (provider=%s auth=%s); enabling marker processing fallback",
-			params.ExecID, params.Agent.Provider, params.Agent.AuthMethod)
-	}
-
-	log.Printf("[handler] processStreamingResponse exec=%s task=%s agent=%s model=%s followup=%v markers=%v history=%d",
-		params.ExecID, params.TaskID, params.Agent.Name, params.Agent.Model, params.IsTaskFollowup, params.ProcessMarkers, len(params.ChatHistory))
-
-	stopDiffBroadcast, diffBroadcastDone := h.startFollowupDiffSnapshotBroadcast(ctx, params.TaskID, params.ExecID, params.WorkDir, params.IsTaskFollowup)
-
 	// Lifecycle integration for task-thread followups: lifecycle hooks must run on
 	// every model turn including followups. Without this block, followups would
 	// never see selected skills, skill runtime tools, or the available-skills
@@ -234,7 +191,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	if params.TaskID != "" {
 		if task, terr := h.taskRepo.GetByID(ctx, params.TaskID); terr == nil && task != nil {
 			if params.IsTaskFollowup && h.workerSvc != nil {
-				ctx = service.WithTaskThreadLifecycleTurn(ctx)
+				ctx = service.WithTaskThreadLifecycleTurnPrompt(ctx, params.Message)
 				turn := h.workerSvc.PrepareLifecycleTurn(ctx, *task)
 				ctx = turn.Ctx
 				lifecycleAfter = turn.AfterComplete
@@ -243,6 +200,50 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			}
 		}
 	}
+
+	// Inject request-scoped action tools when the provider supports runtime tool
+	// calling. Tool definitions are derived from the canonical chatcontrol registry
+	// filtered by mode and surface. In plan mode only read actions are available.
+	// Runtime-tools and marker post-processing are mutually exclusive per request.
+	// Build these after lifecycle preparation so task follow-up capabilities see
+	// selected memory handles/tools from the router.
+	runtimeToolsInjected := false
+	if supportsChatActionTools(params.Agent) {
+		surface := params.Surface
+		if surface == "" {
+			surface = chatcontrol.SurfaceWeb
+		}
+		var defs []llmcontracts.RuntimeToolDefinition
+		if params.IsTaskFollowup {
+			includeMemoryView := len(service.SelectedMemoryHandlesFromContext(ctx)) > 0 && !runtimeToolDefinitionsInclude(llmcontracts.RuntimeToolsFromContext(ctx), "memory_view")
+			defs = filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, surface, true), agentDef, includeMemoryView)
+		} else {
+			defs = chatcontrol.ToolDefsForContext(chatMode, surface, chatMode == models.ChatModeOrchestrate)
+		}
+		if len(defs) > 0 {
+			rt := h.buildChatActionToolRuntimeFromDefs(params, nil, defs, chatMode, surface)
+			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), rt))
+			params.ProcessMarkers = false
+			runtimeToolsInjected = true
+			log.Printf("[handler] processStreamingResponse exec=%s injected %d runtime action tools mode=%s surface=%s followup=%v",
+				params.ExecID, len(defs), chatMode, surface, params.IsTaskFollowup)
+		}
+	}
+	// Fallback: when a provider/auth path has no runtime tool support (e.g.
+	// Claude CLI, Codex CLI, Ollama), we MUST fall back to marker
+	// post-processing so emitted action blocks are actually executed. This
+	// applies to interactive chat and task-thread follow-ups; otherwise the UI
+	// can show an action block that never reaches the task store.
+	if !runtimeToolsInjected && !params.ProcessMarkers {
+		params.ProcessMarkers = true
+		log.Printf("[handler] processStreamingResponse exec=%s no runtime tools (provider=%s auth=%s followup=%v); enabling marker processing fallback",
+			params.ExecID, params.Agent.Provider, params.Agent.AuthMethod, params.IsTaskFollowup)
+	}
+
+	log.Printf("[handler] processStreamingResponse exec=%s task=%s agent=%s model=%s followup=%v markers=%v history=%d",
+		params.ExecID, params.TaskID, params.Agent.Name, params.Agent.Model, params.IsTaskFollowup, params.ProcessMarkers, len(params.ChatHistory))
+
+	stopDiffBroadcast, diffBroadcastDone := h.startFollowupDiffSnapshotBroadcast(ctx, params.TaskID, params.ExecID, params.WorkDir, params.IsTaskFollowup)
 
 	var result llmcontracts.AgentResult
 	var err error

@@ -971,6 +971,13 @@ func (s *LLMService) CallAgentDirectWithDefinition(ctx context.Context, message 
 	return s.callAgentDirectWithDefinition(ctx, message, attachments, agent, workDir, agentDef, false)
 }
 
+// CallAgentDirectWithDefinitionNoTools calls an agent directly while preserving
+// its prompt/model identity but suppressing scoped, plugin, MCP, and provider
+// default tools for hooks that are pure JSON routing/selection steps.
+func (s *LLMService) CallAgentDirectWithDefinitionNoTools(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent) (string, int, error) {
+	return s.callAgentDirectWithDefinition(ctx, message, attachments, agent, workDir, agentDef, true)
+}
+
 // CallAgentDirectNoTools calls the agent directly and explicitly suppresses
 // tool/plugin execution. Use this for strict JSON-generation helpers.
 func (s *LLMService) CallAgentDirectNoTools(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string) (string, int, error) {

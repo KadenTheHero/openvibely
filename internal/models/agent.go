@@ -180,7 +180,7 @@ type PluginRuntimeMCP struct {
 const (
 	// AgentSystemKindMemoryCurator is the built-in Memory Curator system agent.
 	// It owns the project's managed memory through indexed skills:
-	// recall_memory (before_run), update_memory (after_complete), and
+	// recall_memory (route_task), update_memory (after_complete), and
 	// consolidate_memory through a normal visible scheduled task.
 	AgentSystemKindMemoryCurator = "memory_curator"
 
@@ -206,6 +206,6 @@ var AllAgentTools = []string{
 	// hooks may also improve skills owned by the task's assigned agent through
 	// server-scoped agent_skill_manage.
 	"skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "agent_skill_manage",
-	"send_to_task", "set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal",
-	"mark_task_goal_achieved", "report_task_goal_blocked",
+	"memory_view",
+	"send_to_task", "set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal", "mark_task_goal_achieved", "report_task_goal_blocked",
 }

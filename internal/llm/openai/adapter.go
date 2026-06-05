@@ -72,7 +72,18 @@ func mapBuiltInToolName(name string) string {
 	}
 }
 
+func agentSkipDefaultTools(agentDef *models.Agent) bool {
+	return agentDef != nil && agentDef.ToolConfig.SkipDefaultTools
+}
+
+func runtimeSkipDefaultTools(rt *llmcontracts.RuntimeTools) bool {
+	return rt != nil && rt.SkipDefaultTools
+}
+
 func agentAllowsBuiltInTool(agentDef *models.Agent, toolName string) bool {
+	if agentSkipDefaultTools(agentDef) {
+		return false
+	}
 	if agentDef == nil || len(agentDef.Tools) == 0 {
 		return true
 	}
@@ -133,27 +144,31 @@ func runtimeOpenAITools(rt *llmcontracts.RuntimeTools) []openaiclient.ToolDefini
 	return out
 }
 
-func runtimeToolNameSet(rt *llmcontracts.RuntimeTools) map[string]struct{} {
+func runtimeToolAccessMap(rt *llmcontracts.RuntimeTools) map[string]llmcontracts.RuntimeToolAccess {
 	if rt == nil || len(rt.Definitions) == 0 {
 		return nil
 	}
-	names := make(map[string]struct{}, len(rt.Definitions))
+	out := make(map[string]llmcontracts.RuntimeToolAccess, len(rt.Definitions))
 	for _, def := range rt.Definitions {
 		n := strings.ToLower(strings.TrimSpace(def.Name))
 		if n == "" {
 			continue
 		}
-		names[n] = struct{}{}
+		access := def.Access
+		if access == "" {
+			access = llmcontracts.RuntimeToolAccessWrite
+		}
+		out[n] = access
 	}
-	return names
+	return out
 }
 
-func isRuntimeTool(runtimeNames map[string]struct{}, name string) bool {
-	if len(runtimeNames) == 0 {
-		return false
+func runtimeToolAccess(runtimeTools map[string]llmcontracts.RuntimeToolAccess, name string) (llmcontracts.RuntimeToolAccess, bool) {
+	if len(runtimeTools) == 0 {
+		return "", false
 	}
-	_, ok := runtimeNames[strings.ToLower(strings.TrimSpace(name))]
-	return ok
+	access, ok := runtimeTools[strings.ToLower(strings.TrimSpace(name))]
+	return access, ok
 }
 
 func composeRuntimeToolExecutor(base func(context.Context, string, json.RawMessage) (string, bool, error), rt *llmcontracts.RuntimeTools) func(context.Context, string, json.RawMessage) (string, bool, error) {
@@ -172,35 +187,34 @@ func composeRuntimeToolExecutor(base func(context.Context, string, json.RawMessa
 }
 
 func composeRuntimeToolFilter(base func(string) bool, rt *llmcontracts.RuntimeTools, isTaskFollowup bool, chatMode models.ChatMode) func(string) bool {
-	runtimeNames := runtimeToolNameSet(rt)
+	runtimeTools := runtimeToolAccessMap(rt)
 	return func(name string) bool {
-		if rt != nil && rt.Filter != nil {
-			allow, handled := rt.Filter(name)
-			if handled {
-				return allow
-			}
-		}
-		isActionTool := isRuntimeTool(runtimeNames, name)
-
+		access, isRuntimeTool := runtimeToolAccess(runtimeTools, name)
 		if !isTaskFollowup {
 			switch chatMode {
 			case models.ChatModePlan:
-				// Plan mode: read-only exploration tools only; no action tools.
-				if isActionTool {
+				// Plan mode: read-only exploration tools only; no write/action tools.
+				if isRuntimeTool && access != llmcontracts.RuntimeToolAccessRead {
 					return false
 				}
-				if !planModeAllowsReadOnlyTool(name) {
+				if !isRuntimeTool && !planModeAllowsReadOnlyTool(name) {
 					return false
 				}
 			default:
-				// Orchestrate mode: action tools only (no filesystem/mcp tools).
-				if !isActionTool {
+				// Orchestrate mode: action/runtime tools only (no filesystem/mcp tools).
+				if !isRuntimeTool {
 					return false
 				}
 			}
 		}
 
-		if isActionTool {
+		if isRuntimeTool {
+			if rt != nil && rt.Filter != nil {
+				allow, handled := rt.Filter(name)
+				if handled {
+					return allow
+				}
+			}
 			return true
 		}
 
@@ -408,6 +422,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	defer sw.Stop()
 	inThinking := false
 
+	skipDefaultTools := agentSkipDefaultTools(agentDef) || runtimeSkipDefaultTools(rt)
 	resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
 		Model:                  agent.Model,
 		MaxOutputTokens:        openAIAgenticOutputBudget,
@@ -421,6 +436,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		ExtraTools:             extraTools,
 		ToolExecutor:           toolExecutor,
 		ToolFilter:             toolFilter,
+		SkipDefaultTools:       skipDefaultTools,
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
 		OnThinking: func(text string) {
 			if !inThinking {
@@ -514,6 +530,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	chatInThinking := false
 
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
+	skipDefaultTools := agentSkipDefaultTools(agentDef) || runtimeSkipDefaultTools(rt)
 	resp, err := client.SendAgentic(ctx, message, &openaiclient.AgenticOptions{
 		Model:                  agent.Model,
 		MaxOutputTokens:        openAIAgenticOutputBudget,
@@ -528,6 +545,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		ExtraTools:             extraTools,
 		ToolExecutor:           toolExecutor,
 		ToolFilter:             toolFilter,
+		SkipDefaultTools:       skipDefaultTools,
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
 		OnThinking: func(text string) {
 			if !chatInThinking {
@@ -624,15 +642,17 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	sw := llmstream.NewWriter(execID, "", a.execRepo, ctx, 500*time.Millisecond)
 	defer sw.Stop()
 
+	skipDefaultTools := agentSkipDefaultTools(agentDef) || runtimeSkipDefaultTools(rt)
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
-		Model:           agent.Model,
-		MaxOutputTokens: openAIAgenticOutputBudget,
-		System:          applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
-		WorkDir:         effectiveWorkDir,
-		Attachments:     oaAttachments,
-		ExtraTools:      extraTools,
-		ToolExecutor:    toolExecutor,
-		ToolFilter:      toolFilter,
+		Model:            agent.Model,
+		MaxOutputTokens:  openAIAgenticOutputBudget,
+		System:           applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
+		WorkDir:          effectiveWorkDir,
+		Attachments:      oaAttachments,
+		ExtraTools:       extraTools,
+		ToolExecutor:     toolExecutor,
+		ToolFilter:       toolFilter,
+		SkipDefaultTools: skipDefaultTools,
 		OnText: func(text string) {
 			if isStreamingMarkerChunk(text) {
 				llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventRawOutput, Text: text}, false)
@@ -700,16 +720,18 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	defer sw.Stop()
 
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
+	skipDefaultTools := agentSkipDefaultTools(agentDef) || runtimeSkipDefaultTools(rt)
 	resp, err := client.SendCompletions(ctx, message, &openaiclient.CompletionsOptions{
-		Model:           agent.Model,
-		MaxOutputTokens: openAIAgenticOutputBudget,
-		System:          systemPromptStr,
-		DisableTools:    disableTools,
-		WorkDir:         effectiveWorkDir,
-		Attachments:     oaAttachments,
-		ExtraTools:      extraTools,
-		ToolExecutor:    toolExecutor,
-		ToolFilter:      toolFilter,
+		Model:            agent.Model,
+		MaxOutputTokens:  openAIAgenticOutputBudget,
+		System:           systemPromptStr,
+		DisableTools:     disableTools,
+		WorkDir:          effectiveWorkDir,
+		Attachments:      oaAttachments,
+		ExtraTools:       extraTools,
+		ToolExecutor:     toolExecutor,
+		ToolFilter:       toolFilter,
+		SkipDefaultTools: skipDefaultTools,
 		OnText: func(text string) {
 			if isStreamingMarkerChunk(text) {
 				llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventRawOutput, Text: text}, false)

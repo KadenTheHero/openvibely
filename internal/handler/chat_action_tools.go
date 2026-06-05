@@ -367,6 +367,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			updated := h.processChatToggleAlert(ctx, params.ExecID, params.ProjectID, marker)
 			return toolSummaryFromMarker(marker, updated), nil
 		},
+		"memory_view": func(_ context.Context, _ json.RawMessage) (string, error) {
+			return "memory_view is available only after the lifecycle memory router selects memory handles for this turn. Use memory_view only with handles listed in the selected memory index.", nil
+		},
 		"get_chat_mode": func(_ context.Context, _ json.RawMessage) (string, error) {
 			return fmt.Sprintf("Current chat mode: %s", mode), nil
 		},
@@ -380,12 +383,13 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			newMode := models.NormalizeChatMode(req.Mode)
 			return fmt.Sprintf("Chat mode set to %s. The mode change will take effect on the next message.", newMode), nil
 		},
-		"list_capabilities": func(_ context.Context, _ json.RawMessage) (string, error) {
+		"list_capabilities": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			summaries := chatcontrol.ListForContext(mode, surface)
+			selectedMemoryHandles := service.SelectedMemoryHandlesFromContext(ctx)
 			if params.IsTaskFollowup {
-				summaries = filterTaskThreadCapabilitySummaries(summaries, params.AgentDefinition)
+				summaries = filterTaskThreadCapabilitySummaries(summaries, params.AgentDefinition, len(selectedMemoryHandles) > 0)
 			}
-			return formatCapabilities(summaries), nil
+			return formatCapabilities(summaries, selectedMemoryHandles), nil
 		}}
 }
 
@@ -529,12 +533,18 @@ func (h *Handler) executeGetAlert(ctx context.Context, projectID string, input j
 		alert.Message, taskStr, alert.CreatedAt.Format("Jan 2, 2006 3:04 PM"))
 }
 
-func formatCapabilities(summaries []chatcontrol.ActionSummary) string {
+func formatCapabilities(summaries []chatcontrol.ActionSummary, selectedMemoryHandles []string) string {
 	if len(summaries) == 0 {
 		return "No capabilities available in the current mode."
 	}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Available capabilities (%d actions):\n", len(summaries)))
+	if len(selectedMemoryHandles) > 0 {
+		sb.WriteString("\nSelected memories for this turn:\n")
+		for _, handle := range selectedMemoryHandles {
+			sb.WriteString(fmt.Sprintf("  - %s\n", handle))
+		}
+	}
 	currentDomain := ""
 	for _, s := range summaries {
 		if s.Domain != currentDomain {
@@ -842,6 +852,10 @@ func hasToolGrant(tools []string, toolName string) bool {
 	return false
 }
 
+func runtimeToolDefinitionsInclude(rt *llmcontracts.RuntimeTools, toolName string) bool {
+	return rt != nil && rt.HasDefinition(toolName)
+}
+
 func sanitizeSendToTaskLineage(ctx context.Context, requestedOrigin, requestedOriginAgent string, params streamingResponseParams) (string, string) {
 	if isGoalLifecycleHookAgent(ctx) {
 		return models.TaskOriginSystemAgent, models.AgentSystemKindGoal
@@ -862,12 +876,19 @@ func sanitizeSendToTaskLineage(ctx context.Context, requestedOrigin, requestedOr
 	}
 }
 
-func filterTaskThreadRuntimeToolDefs(defs []llmcontracts.RuntimeToolDefinition, agentDef *models.Agent) []llmcontracts.RuntimeToolDefinition {
-	return filterRuntimeToolDefs(defs, taskThreadAllowedRuntimeToolNames(agentDef))
+func filterTaskThreadRuntimeToolDefs(defs []llmcontracts.RuntimeToolDefinition, agentDef *models.Agent, includeSelectedMemoryView bool) []llmcontracts.RuntimeToolDefinition {
+	allowed := taskThreadAllowedRuntimeToolNames(agentDef)
+	if includeSelectedMemoryView {
+		allowed["memory_view"] = true
+	}
+	return filterRuntimeToolDefs(defs, allowed)
 }
 
-func filterTaskThreadCapabilitySummaries(summaries []chatcontrol.ActionSummary, agentDef *models.Agent) []chatcontrol.ActionSummary {
+func filterTaskThreadCapabilitySummaries(summaries []chatcontrol.ActionSummary, agentDef *models.Agent, includeSelectedMemoryView bool) []chatcontrol.ActionSummary {
 	allowed := taskThreadAllowedRuntimeToolNames(agentDef)
+	if includeSelectedMemoryView {
+		allowed["memory_view"] = true
+	}
 	out := make([]chatcontrol.ActionSummary, 0, len(summaries))
 	for _, summary := range summaries {
 		if allowed[summary.Name] {
