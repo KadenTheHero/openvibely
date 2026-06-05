@@ -210,6 +210,32 @@ func TestSkillsList_ReturnsRawTopLevelSkillsMd(t *testing.T) {
 	}
 }
 
+func TestSkillsList_ExcludesDisabledSkillsFromOutput(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "enabled_skill", "---\ntitle: Enabled\n---\nbody")
+	writeDisabledSkill(t, root, "disabled_skill")
+	// Runtime catalog only contains enabled_skill.
+	cat, err := BuildCatalog("turn-disabled", root, "")
+	if err != nil {
+		t.Fatalf("BuildCatalog: %v", err)
+	}
+	rt := SkillRuntimeTools(cat, root, "", nil)
+
+	out, handled, isErr, execErr := rt.Executor(context.Background(), "skills_list", json.RawMessage(`{}`))
+	if !handled || execErr != nil || isErr {
+		t.Fatalf("expected ok, got handled=%v execErr=%v isErr=%v out=%q", handled, execErr, isErr, out)
+	}
+	if strings.Contains(out, "disabled_skill") {
+		t.Fatalf("skills_list must not include disabled_skill in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "## enabled_skill") {
+		t.Fatalf("skills_list must include enabled_skill header, got:\n%s", out)
+	}
+	if !strings.Contains(out, "standalone:enabled_skill") {
+		t.Fatalf("skills_list must include enabled_skill view handle, got:\n%s", out)
+	}
+}
+
 type fakeInspector struct {
 	list    []AgentSummary
 	listErr error

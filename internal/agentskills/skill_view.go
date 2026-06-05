@@ -179,13 +179,15 @@ func resolveSkillsList(globalRoot, projectRoot string, input json.RawMessage) (s
 	var out strings.Builder
 	hits := 0
 	if (scope == "global" || scope == "all") && globalRoot != "" {
-		if body, ok := readIfExists(SkillsIndexPath(globalRoot)); ok {
+		skillsDir := filepath.Join(globalRoot, SkillsDir)
+		if body, ok := filteredIndexBody(SkillsIndexPath(globalRoot), skillsDir, ""); ok {
 			fmt.Fprintf(&out, "=== global ===\n%s\n", strings.TrimRight(body, "\n"))
 			hits++
 		}
 	}
 	if (scope == "project" || scope == "all") && projectRoot != "" {
-		if body, ok := readIfExists(SkillsIndexPath(projectRoot)); ok {
+		skillsDir := filepath.Join(projectRoot, SkillsDir)
+		if body, ok := filteredIndexBody(SkillsIndexPath(projectRoot), skillsDir, ""); ok {
 			if hits > 0 {
 				out.WriteString("\n")
 			}

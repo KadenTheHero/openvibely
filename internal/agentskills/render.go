@@ -131,27 +131,26 @@ func readAgentSkillsSection(root, agentKey, scope string) string {
 	return readSkillsIndexSectionFiltered(AgentSkillsIndexPath(root, agentKey), skillsDir, agentKey, scope)
 }
 
-// readSkillsIndexSectionFiltered reads a SKILLS.md index file and returns only
-// the sections for skills that are not disabled on disk. agentKey, when set, is
-// the prefix used in agent-owned index headers (e.g. "myagent/skill_name").
-// This prevents disabled skill handles from appearing in the route_task
-// available_skills context injection.
-func readSkillsIndexSectionFiltered(indexPath, skillsDir, agentKey, scope string) string {
+// filteredIndexBody reads a SKILLS.md index file and returns the content with
+// disabled-skill sections removed. agentKey, when non-empty, constrains
+// matching to sections whose h2 header starts with "<agentKey>/". Returns
+// (filteredContent, true) when the file exists and has at least one enabled
+// section; ("", false) otherwise. This is the shared core used by both
+// readSkillsIndexSectionFiltered (available_skills context injection) and
+// resolveSkillsList (skills_list tool output) so that disabled handles are
+// absent from every surface the route_task model can inspect.
+func filteredIndexBody(indexPath, skillsDir, agentKey string) (string, bool) {
 	data, err := os.ReadFile(indexPath)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	content := string(data)
 
-	// Split content into sections delimited by ## headers.
-	// We rebuild only the sections whose skill is not disabled on disk.
 	type section struct {
-		header  string // the full "## handle\n..." text up to the next header
-		handle  string // the h2 slug (may include agent/ prefix)
-		skill   string // bare skill slug (agentKey prefix stripped)
+		body  string // full text from this ## header to the next
+		skill string // bare skill slug (agentKey prefix stripped)
 	}
 
-	// Find all h2 header positions.
 	headerLocs := h2HeaderRegexp.FindAllStringIndex(content, -1)
 	headerMatches := h2HeaderRegexp.FindAllStringSubmatch(content, -1)
 
@@ -169,35 +168,41 @@ func readSkillsIndexSectionFiltered(indexPath, skillsDir, agentKey, scope string
 		if strings.Contains(skill, "/") || !isValidSlug(skill) {
 			continue
 		}
-		// Capture from this header to the next (or end of content).
 		end := len(content)
 		if i+1 < len(headerLocs) {
 			end = headerLocs[i+1][0]
 		}
-		sections = append(sections, section{
-			header: content[loc[0]:end],
-			handle: handle,
-			skill:  skill,
-		})
+		sections = append(sections, section{body: content[loc[0]:end], skill: skill})
 	}
 
 	var sb strings.Builder
-	wrote := false
 	for _, sec := range sections {
 		absPath := filepath.Join(skillsDir, sec.skill, SkillFile)
 		if skillDisabledOnDisk(absPath) {
 			continue
 		}
-		sb.WriteString(sec.header)
-		wrote = true
+		sb.WriteString(sec.body)
 	}
-	if !wrote {
+	out := sb.String()
+	if out == "" {
+		return "", false
+	}
+	return out, true
+}
+
+// readSkillsIndexSectionFiltered reads a SKILLS.md index file and returns only
+// the sections for skills that are not disabled on disk, wrapped with a scope
+// header. agentKey, when set, constrains matching to the agent's skill handles.
+// This prevents disabled skill handles from appearing in the route_task
+// available_skills context injection.
+func readSkillsIndexSectionFiltered(indexPath, skillsDir, agentKey, scope string) string {
+	body, ok := filteredIndexBody(indexPath, skillsDir, agentKey)
+	if !ok {
 		return ""
 	}
-
 	var out strings.Builder
 	fmt.Fprintf(&out, "### Scope: %s\n\n", scope)
-	out.WriteString(strings.TrimSpace(sb.String()))
+	out.WriteString(strings.TrimSpace(body))
 	out.WriteString("\n")
 	return out.String()
 }
