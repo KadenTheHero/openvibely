@@ -43,11 +43,13 @@ func (h *Handler) ListModels(c echo.Context) error {
 // The UI shows "Anthropic" and "OpenAI" as single providers with auth type sub-selection,
 // while the DB stores provider and auth_method separately.
 func resolveProviderAndAuth(provider, anthropicAuthType, openaiAuthType, authMethod string) (models.LLMProvider, models.AuthMethod) {
-	// Accept both "subscription" (legacy) and "oauth" (current) form values
+	// Accept both "subscription" (legacy) and "oauth" (current) form values.
+	// Default to OAuth (not CLI) when auth_method is absent or unrecognized — the UI
+	// no longer exposes CLI as an option for these providers.
 	if provider == "anthropic" && (anthropicAuthType == "subscription" || anthropicAuthType == "oauth") {
 		am := models.AuthMethod(authMethod)
 		if am != models.AuthMethodCLI && am != models.AuthMethodOAuth {
-			am = models.AuthMethodCLI
+			am = models.AuthMethodOAuth
 		}
 		return models.ProviderAnthropic, am
 	}
@@ -57,11 +59,13 @@ func resolveProviderAndAuth(provider, anthropicAuthType, openaiAuthType, authMet
 	if provider == "openai" && openaiAuthType == "api_key" {
 		return models.ProviderOpenAI, models.AuthMethodAPIKey
 	}
-	// Accept both "subscription" (legacy) and "oauth" (current) form values
+	// Accept both "subscription" (legacy) and "oauth" (current) form values.
+	// Default to OAuth (not CLI) when auth_method is absent or unrecognized — the UI
+	// no longer exposes CLI as an option for these providers.
 	if provider == "openai" && (openaiAuthType == "subscription" || openaiAuthType == "oauth") {
 		am := models.AuthMethod(authMethod)
 		if am != models.AuthMethodCLI && am != models.AuthMethodOAuth {
-			am = models.AuthMethodCLI
+			am = models.AuthMethodOAuth
 		}
 		return models.ProviderOpenAI, am
 	}

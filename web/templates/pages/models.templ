@@ -955,13 +955,12 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						apiKeyField.classList.remove('hidden');
 						apiKeyInput.required = !isEditingModelForm();
 						authMethodField.classList.add('hidden');
-						authMethodSelect.disabled = true;				} else {
+					} else {
 					// OAuth via API is the only supported path; CLI option is not exposed in the UI
 					apiKeyField.classList.add('hidden');
 					apiKeyInput.required = false;
 					authMethodField.classList.add('hidden');
 					authMethodSelect.value = 'oauth';
-					authMethodSelect.disabled = true;
 					document.getElementById('subscription_info_oauth').classList.remove('hidden');
 				}
 			}
@@ -992,14 +991,13 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						apiKeyField.classList.remove('hidden');
 						apiKeyInput.required = !isEditingModelForm();
 						openaiConnectionMethodField.classList.add('hidden');
-						openaiConnectionMethodSelect.disabled = true;
-						document.getElementById('openai_api_key_info').classList.remove('hidden');				} else {
+						document.getElementById('openai_api_key_info').classList.remove('hidden');
+					} else {
 					// OAuth via API is the only supported path; CLI option is not exposed in the UI
 					apiKeyField.classList.add('hidden');
 					apiKeyInput.required = false;
 					openaiConnectionMethodField.classList.add('hidden');
 					openaiConnectionMethodSelect.value = 'oauth';
-					openaiConnectionMethodSelect.disabled = true;
 					document.getElementById('openai_subscription_info_oauth').classList.remove('hidden');
 				}
 			}

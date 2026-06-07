@@ -49,13 +49,13 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
-			name:           "anthropic subscription defaults to cli",
+			name:           "anthropic subscription defaults to oauth when auth_method absent",
 			provider:       "anthropic",
 			anthropicAuth:  "subscription",
 			openaiAuth:     "",
 			authMethod:     "",
 			wantProvider:   models.ProviderAnthropic,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
 			name:           "anthropic no auth type defaults to api key",
@@ -94,13 +94,13 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
-			name:           "openai subscription defaults to cli",
+			name:           "openai subscription defaults to oauth when auth_method absent",
 			provider:       "openai",
 			anthropicAuth:  "",
 			openaiAuth:     "subscription",
 			authMethod:     "",
 			wantProvider:   models.ProviderOpenAI,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
 			name:           "openai defaults to cli for backwards compat",
@@ -699,12 +699,13 @@ func TestUpdateModel_OpenAIOAuthPreservesStoredConfigWhenFormOmitsFields(t *test
 	}
 }
 
-// TestUpdateModel_DuplicateAuthMethodFormFields reproduces the browser bug where
+// TestUpdateModel_DuplicateAuthMethodFormFields reproduces the scenario where
 // two <select> elements with name="auth_method" exist in the form (one for Anthropic,
 // one for OpenAI). When both are enabled, the browser sends both values and Go's
-// FormValue returns the first one (the hidden OpenAI select defaulting to "cli"),
-// ignoring the user's intended value ("oauth") from the Anthropic select.
-// The fix disables the inactive select via JavaScript so only one value is sent.
+// FormValue returns the first one. The UI prevents this via toggleProviderFields(),
+// which disables the inactive provider's select so only the active provider's value
+// is submitted. The handler also defaults to OAuth (not CLI) when auth_method is
+// absent or unrecognized for OAuth auth types, providing an additional safety net.
 func TestUpdateModel_DuplicateAuthMethodFormFields(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -750,11 +751,11 @@ func TestUpdateModel_DuplicateAuthMethodFormFields(t *testing.T) {
 		t.Fatalf("get error: %v", err)
 	}
 
-	// With duplicate form fields, Go returns the first value ("cli").
-	// This documents the bug: the auth_method stays "cli" even though user selected "oauth".
-	// The frontend fix (disabling hidden selects) prevents this scenario.
+	// With duplicate form fields, Go's FormValue returns the first value ("cli").
+	// The UI prevents this via toggleProviderFields(), which disables the inactive
+	// provider's select. An explicit "cli" value is still respected by the handler.
 	if updated.AuthMethod != models.AuthMethodCLI {
-		t.Logf("NOTE: with duplicate auth_method form values, FormValue returns first value (cli)")
+		t.Errorf("auth_method = %q, want %q (FormValue returns first duplicate)", updated.AuthMethod, models.AuthMethodCLI)
 	}
 }
 
@@ -786,12 +787,12 @@ func TestResolveProviderAndAuth_OAuthFormValue(t *testing.T) {
 			wantAuthMethod: models.AuthMethodCLI,
 		},
 		{
-			name:           "anthropic oauth defaults to cli",
+			name:           "anthropic oauth defaults to oauth when auth_method absent",
 			provider:       "anthropic",
 			anthropicAuth:  "oauth",
 			authMethod:     "",
 			wantProvider:   models.ProviderAnthropic,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
 			name:           "openai oauth with api connection",
@@ -810,12 +811,12 @@ func TestResolveProviderAndAuth_OAuthFormValue(t *testing.T) {
 			wantAuthMethod: models.AuthMethodCLI,
 		},
 		{
-			name:           "openai oauth defaults to cli",
+			name:           "openai oauth defaults to oauth when auth_method absent",
 			provider:       "openai",
 			openaiAuth:     "oauth",
 			authMethod:     "",
 			wantProvider:   models.ProviderOpenAI,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodOAuth,
 		},
 	}
 
@@ -917,6 +918,92 @@ func TestCreateModel_OAuthAPI(t *testing.T) {
 	}
 	if found.AuthMethod != models.AuthMethodOAuth {
 		t.Errorf("auth_method = %q, want %q", found.AuthMethod, models.AuthMethodOAuth)
+	}
+}
+
+// TestCreateModel_AnthropicOAuthEmptyAuthMethod verifies that submitting an Anthropic
+// OAuth form without an auth_method field (e.g. if the JS disabled the select and the
+// browser omitted it) correctly defaults to OAuth — not CLI.
+func TestCreateModel_AnthropicOAuthEmptyAuthMethod(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+
+	// Do not set auth_method — simulates a disabled select being omitted by the browser.
+	form := url.Values{}
+	form.Set("name", "Anthropic OAuth Empty AuthMethod")
+	form.Set("provider", "anthropic")
+	form.Set("anthropic_auth_type", "oauth")
+	form.Set("model", "claude-opus-4-6")
+	form.Set("max_tokens", "4096")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	configs, err := llmConfigRepo.List(context.Background())
+	if err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	var found *models.LLMConfig
+	for i := range configs {
+		if configs[i].Name == "Anthropic OAuth Empty AuthMethod" {
+			found = &configs[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("created model not found")
+	}
+	if found.AuthMethod != models.AuthMethodOAuth {
+		t.Errorf("auth_method = %q, want %q (absent auth_method should default to oauth for oauth auth type)", found.AuthMethod, models.AuthMethodOAuth)
+	}
+}
+
+// TestCreateModel_OpenAIOAuthEmptyAuthMethod verifies that submitting an OpenAI
+// OAuth form without an auth_method field (e.g. if the JS disabled the select and the
+// browser omitted it) correctly defaults to OAuth — not CLI.
+func TestCreateModel_OpenAIOAuthEmptyAuthMethod(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+
+	// Do not set auth_method — simulates a disabled select being omitted by the browser.
+	form := url.Values{}
+	form.Set("name", "OpenAI OAuth Empty AuthMethod")
+	form.Set("provider", "openai")
+	form.Set("openai_auth_type", "oauth")
+	form.Set("model", "gpt-5.3-codex")
+	form.Set("max_tokens", "4096")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	configs, err := llmConfigRepo.List(context.Background())
+	if err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	var found *models.LLMConfig
+	for i := range configs {
+		if configs[i].Name == "OpenAI OAuth Empty AuthMethod" {
+			found = &configs[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("created model not found")
+	}
+	if found.AuthMethod != models.AuthMethodOAuth {
+		t.Errorf("auth_method = %q, want %q (absent auth_method should default to oauth for oauth auth type)", found.AuthMethod, models.AuthMethodOAuth)
 	}
 }
 
