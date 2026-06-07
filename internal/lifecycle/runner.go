@@ -44,6 +44,9 @@ type HookOutput struct {
 	OutputContract models.LifecycleOutputContract `json:"output_contract"`
 	Payload        json.RawMessage                `json:"payload"`
 	Error          string                         `json:"error,omitempty"`
+	// ExecutionID is the lifecycle_executions row ID for this output, used by
+	// callers that need to patch the stored output_json (e.g. always-use merge).
+	ExecutionID string `json:"execution_id,omitempty"`
 }
 
 // HookInvoker runs one agent skill and returns its raw output for validation.
@@ -399,6 +402,7 @@ func (r *Runner) finishHook(ctx context.Context, exec *models.LifecycleExecution
 		SkillKey:       hook.SkillKey,
 		OutputContract: hook.OutputContract,
 		Payload:        raw,
+		ExecutionID:    exec.ID,
 	}
 	if hookErr != nil {
 		out.Error = hookErr.Error()

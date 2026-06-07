@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -394,6 +395,43 @@ func (r *LifecycleRepo) ListExecutionEvents(ctx context.Context, lifecycleExecut
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// PatchExecutionOutputSkills rewrites the `skills` field inside a route_task
+// execution's output_json to reflect the post-merge (always-use + LLM) list,
+// preserving all other fields (confidence, reason, etc.) intact.  It is a
+// no-op when execID is empty or the row cannot be read.
+func (r *LifecycleRepo) PatchExecutionOutputSkills(ctx context.Context, execID string, handles []string) error {
+	if execID == "" {
+		return nil
+	}
+	var raw string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT output_json FROM lifecycle_executions WHERE id = ?`, execID,
+	).Scan(&raw)
+	if err != nil {
+		// Row gone or DB error — silently skip rather than surfacing to user.
+		return nil
+	}
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(raw), &probe); err != nil {
+		probe = map[string]any{}
+	}
+	// Convert []string → []any for JSON round-trip consistency.
+	skillsAny := make([]any, len(handles))
+	for i, h := range handles {
+		skillsAny[i] = h
+	}
+	probe["skills"] = skillsAny
+	patched, err := json.Marshal(probe)
+	if err != nil {
+		return fmt.Errorf("patching execution output_json: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx,
+		`UPDATE lifecycle_executions SET output_json = ? WHERE id = ?`,
+		string(patched), execID,
+	)
+	return err
 }
 
 func nullIfEmpty(s string) any {

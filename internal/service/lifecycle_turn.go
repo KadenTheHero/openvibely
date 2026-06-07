@@ -146,9 +146,13 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	selectedSkillHandles := []string{}
 	var selectedMemories lifecycle.SelectedMemories
 	haveSelectedMemories := false
+	// routeTaskExecID holds the lifecycle_executions row ID for the winning
+	// selected_skills output so we can patch it after the always-use merge.
+	routeTaskExecID := ""
 	if w.lifecycleRunner != nil {
 		if route := w.runLifecycleSlot(ctx, models.LifecycleRouteTask, task, runID, nil, llmcontracts.ChatContext{}); len(route.Outputs) > 0 {
 			var best lifecycle.SelectedSkills
+			var bestExecID string
 			haveBest := false
 			for _, out := range route.Outputs {
 				if len(out.Payload) == 0 || out.Error != "" {
@@ -167,6 +171,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 					}
 					if !haveBest || selected.Confidence > best.Confidence {
 						best = selected
+						bestExecID = out.ExecutionID
 						haveBest = true
 					}
 				case models.OutputContractSelectedMemories:
@@ -187,6 +192,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 			}
 			if haveBest {
 				selectedSkillHandles = filterCatalogHandles(catalog, best.Skills)
+				routeTaskExecID = bestExecID
 				log.Printf("[lifecycle-turn] route_task selected_skills task=%s handles=%d confidence=%.2f", task.ID, len(selectedSkillHandles), best.Confidence)
 			}
 			if haveSelectedMemories {
@@ -203,6 +209,14 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	if !catalog.IsAgentOwned() {
 		selectedSkillHandles, selectedSkillsProvenance = agentskills.MergeAlwaysUseIntoSelected(catalog, w.globalSkillRoot, projectRoot, selectedSkillHandles)
 		logAlwaysUseProvenance(task.ID, selectedSkillsProvenance)
+		// Patch the stored route_task output_json so the Lifecycle tab reflects
+		// the full merged skill list (always-use + skill_curator) rather than
+		// only the LLM-selected subset.
+		if routeTaskExecID != "" && w.lifecycleRepo != nil {
+			if err := w.lifecycleRepo.PatchExecutionOutputSkills(ctx, routeTaskExecID, selectedSkillHandles); err != nil {
+				log.Printf("[lifecycle-turn] patch route_task output_json task=%s exec=%s: %v", task.ID, routeTaskExecID, err)
+			}
+		}
 	} else {
 		selectedSkillsProvenance = make(agentskills.SkillSelectionProvenance, len(selectedSkillHandles))
 		for _, h := range selectedSkillHandles {

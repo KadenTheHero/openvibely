@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -444,5 +445,96 @@ func TestLifecycleRepo_IdempotencyAllowsRetryAfterFailure(t *testing.T) {
 	}
 	if err := repo.CreateExecution(ctx, third); err == nil {
 		t.Fatalf("expected unique-index violation for second completed row with same key")
+	}
+}
+
+func TestLifecycleRepo_PatchExecutionOutputSkills(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Patch Skills Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+		Prompt:    "test",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	hook := &models.AgentLifecycleHook{
+		AgentID:        agent.ID,
+		When:           models.LifecycleRouteTask,
+		SkillKey:       "skill_curator/route",
+		OutputContract: models.OutputContractSelectedSkills,
+		Enabled:        true,
+	}
+	if err := repo.CreateHook(ctx, hook); err != nil {
+		t.Fatalf("create hook: %v", err)
+	}
+	exec := &models.LifecycleExecution{
+		TaskID:          task.ID,
+		TaskRunID:       "run-patch-1",
+		AgentID:         agent.ID,
+		When:            models.LifecycleRouteTask,
+		LifecycleHookID: &hook.ID,
+		SkillKey:        hook.SkillKey,
+		OutputContract:  hook.OutputContract,
+		Status:          models.LifecycleExecRunning,
+		AttemptCount:    1,
+	}
+	if err := repo.CreateExecution(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	now := time.Now().UTC()
+	exec.Status = models.LifecycleExecCompleted
+	exec.OutputJSON = `{"skills":["skill_a"],"confidence":0.9,"reason":"test"}`
+	exec.CompletedAt = &now
+	if err := repo.UpdateExecution(ctx, exec); err != nil {
+		t.Fatalf("update execution: %v", err)
+	}
+
+	// Patch with merged list.
+	if err := repo.PatchExecutionOutputSkills(ctx, exec.ID, []string{"skill_a", "openvibely_project_guidance"}); err != nil {
+		t.Fatalf("patch output skills: %v", err)
+	}
+
+	list, err := repo.ListExecutionsForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list executions: %v", err)
+	}
+	if len(list) == 0 {
+		t.Fatal("expected at least one execution")
+	}
+	got := list[0]
+
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(got.OutputJSON), &probe); err != nil {
+		t.Fatalf("unmarshal patched output_json: %v", err)
+	}
+	rawSkills, _ := probe["skills"].([]any)
+	if len(rawSkills) != 2 {
+		t.Fatalf("expected 2 skills after patch, got %d: %v", len(rawSkills), rawSkills)
+	}
+	// Other fields must be preserved.
+	if conf, _ := probe["confidence"].(float64); conf != 0.9 {
+		t.Fatalf("expected confidence=0.9 preserved, got %v", conf)
+	}
+	if reason, _ := probe["reason"].(string); reason != "test" {
+		t.Fatalf("expected reason preserved, got %q", reason)
+	}
+
+	// No-op on empty execID must not error.
+	if err := repo.PatchExecutionOutputSkills(ctx, "", []string{"x"}); err != nil {
+		t.Fatalf("expected no-op for empty execID, got: %v", err)
+	}
+
+	// Unknown exec ID must not error (row not found → silent skip).
+	if err := repo.PatchExecutionOutputSkills(ctx, "nonexistent-id", []string{"x"}); err != nil {
+		t.Fatalf("expected no-op for unknown execID, got: %v", err)
 	}
 }

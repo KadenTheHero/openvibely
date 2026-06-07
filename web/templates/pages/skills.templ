@@ -208,6 +208,12 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 								<span class="label-text">Enabled</span>
 							</label>
 						</div>
+						<div class="form-control mt-1">
+							<label class="label cursor-pointer justify-start gap-3">
+								<input id="skill_always_use" type="checkbox" class="toggle toggle-secondary toggle-sm"/>
+								<span class="label-text">Always use</span>
+							</label>
+						</div>
 						<label class="form-control mt-3">
 							<span class="label-text mb-1">Skill body</span>						<textarea id="skill_body" class="textarea textarea-bordered font-mono text-sm min-h-72" required placeholder="Instructions for this skill..." oninput="markSkillTemplateEdited()">{ defaultSkillBodyTemplate() }</textarea>
 					</label>
@@ -328,6 +334,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				form.dataset.mode = 'create';
 				form.dataset.originalHandle = '';
 				form.dataset.templateEdited = '';
+				form.dataset.originalAlwaysUse = 'false';
 				document.getElementById('skill_modal_title').textContent = 'New Skill';
 				document.getElementById('skill_handle').value = 'openvibely_database_migration_workflow';
 				document.getElementById('skill_handle').disabled = false;
@@ -337,6 +344,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				document.getElementById('skill_description').value = 'Manage OpenVibely goose schema migrations, consolidation, and validation safely.';
 				document.getElementById('skill_body').value = defaultSkillTemplate('', '', '', '');
 				document.getElementById('skill_enabled').checked = true;
+				document.getElementById('skill_always_use').checked = false;
 				renderSkillPackageFiles('');
 				setSkillModalError('');
 				skill_modal.showModal();
@@ -356,6 +364,8 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				form.dataset.mode = 'edit';
 				form.dataset.originalHandle = card.dataset.skillHandle || '';
 				form.dataset.templateEdited = 'true';
+				var alwaysUse = card.dataset.skillAlwaysUse === 'true';
+				form.dataset.originalAlwaysUse = alwaysUse ? 'true' : 'false';
 				document.getElementById('skill_modal_title').textContent = 'Edit Skill';
 				document.getElementById('skill_handle').value = card.dataset.skillHandle || '';
 				document.getElementById('skill_handle').disabled = true;
@@ -365,6 +375,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				document.getElementById('skill_description').value = card.dataset.skillDescription || '';
 				document.getElementById('skill_body').value = card.dataset.skillContent || '';
 				document.getElementById('skill_enabled').checked = card.dataset.skillEnabled !== 'false';
+				document.getElementById('skill_always_use').checked = alwaysUse;
 				renderSkillPackageFiles(card.dataset.skillFiles || '');
 				setSkillModalError('');
 				skill_modal.showModal();
@@ -510,6 +521,22 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 						return resp.text().then(function(text) { throw new Error(text || 'Failed to save skill.'); });
 					}
 					return resp.text();
+				}).then(function(html) {
+					var alwaysUse = document.getElementById('skill_always_use').checked;
+					var originalAlwaysUse = form.dataset.originalAlwaysUse === 'true';
+					if (alwaysUse === originalAlwaysUse) return html;
+					var auHandle = form.dataset.originalHandle || handle;
+					var auScope = document.getElementById('skill_scope').value;
+					return fetch('/skills/' + encodeURIComponent(auHandle) + '/always_use' + currentSkillsProjectQuery(), {
+						method: 'POST',
+						headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
+						body: JSON.stringify({always_use: alwaysUse, scope: auScope})
+					}).then(function(resp2) {
+						if (!resp2.ok) {
+							return resp2.text().then(function(t) { throw new Error(t || 'Saved but failed to update always use setting.'); });
+						}
+						return resp2.text();
+					});
 				}).then(function(html) {
 					var container = document.getElementById('skills-container');
 					if (container) {
