@@ -204,6 +204,29 @@ func balancedJavaScriptBraces(value string) error {
 	return nil
 }
 
+// TestModelsContent_NoCLIOptionInAuthSelects verifies that the rendered model
+// setup dialog no longer exposes the "CLI (OAuth via terminal)" option for
+// Anthropic or OpenAI connection-method selects.
+func TestModelsContent_NoCLIOptionInAuthSelects(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+	out := buf.String()
+
+	if strings.Contains(out, `value="cli">CLI`) {
+		t.Error("expected CLI option to be removed from auth/connection method selects, but found it in rendered HTML")
+	}
+	if strings.Contains(out, "CLI (OAuth via terminal)") {
+		t.Error("expected CLI (OAuth via terminal) label to be absent from rendered auth selects")
+	}
+
+	// Auth method selects should each have only the oauth option remaining
+	if !strings.Contains(out, `value="oauth">API (OAuth via web)`) {
+		t.Error("expected OAuth option to remain in auth/connection method select")
+	}
+}
+
 func TestModelsContent_OAuthLinksLaunchInSystemBrowser(t *testing.T) {
 	agents := []models.LLMConfig{
 		{
