@@ -363,10 +363,9 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) {
 					<div id="new-project-github-fields" class="form-control mb-3 hidden">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
 						<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
-						<label class="label">
-							<span class="label-text-alt opacity-60">The repository is cloned into managed storage using your connected GitHub App installation.</span>
-						</label>
-					</div>
+							<label class="label">
+								<span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span>
+							</label>					</div>
 					<div id="new-project-create-dir-wrapper" class="form-control mb-2">
 						<label class="label cursor-pointer justify-start gap-3">
 							<input type="checkbox" id="new-project-create-dir" name="create_directory" value="true" class="checkbox checkbox-sm checkbox-primary"/>
@@ -383,10 +382,9 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) {
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
 						<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo" required/>
-						<label class="label">
-							<span class="label-text-alt opacity-60">The repository is cloned into managed storage using your connected GitHub App installation.</span>
-						</label>
-					</div>
+							<label class="label">
+								<span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span>
+							</label>					</div>
 				}
 				<div class="form-control mb-3">
 					<label class="label">

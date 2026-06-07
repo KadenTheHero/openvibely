@@ -335,10 +335,6 @@ func (s *GitHubService) CloneProjectRepo(ctx context.Context, projectID, repoURL
 	if err != nil {
 		return "", "", err
 	}
-	token, err := s.createOperationAccessToken(ctx)
-	if err != nil {
-		return "", "", err
-	}
 
 	dest := filepath.Join(root, projectID)
 	if _, err := os.Stat(dest); err == nil {
@@ -347,7 +343,7 @@ func (s *GitHubService) CloneProjectRepo(ctx context.Context, projectID, repoURL
 		return "", "", err
 	}
 
-	if err := s.cloneWithToken(ctx, repo.CloneURL, dest, token); err != nil {
+	if err := s.cloneProjectRepo(ctx, repo.CloneURL, localGitCloneURL(repoURL, repo.CloneURL), dest); err != nil {
 		return "", "", err
 	}
 	return dest, repo.HTMLURL, nil
@@ -362,17 +358,13 @@ func (s *GitHubService) RecloneProjectRepo(ctx context.Context, projectID, curre
 	if err != nil {
 		return "", "", err
 	}
-	token, err := s.createOperationAccessToken(ctx)
-	if err != nil {
-		return "", "", err
-	}
 
 	tmpRoot := filepath.Join(root, ".tmp")
 	if err := os.MkdirAll(tmpRoot, 0755); err != nil {
 		return "", "", err
 	}
 	tmpDest := filepath.Join(tmpRoot, fmt.Sprintf("%s-%d", projectID, s.nowFn().UnixNano()))
-	if err := s.cloneWithToken(ctx, repo.CloneURL, tmpDest, token); err != nil {
+	if err := s.cloneProjectRepo(ctx, repo.CloneURL, localGitCloneURL(repoURL, repo.CloneURL), tmpDest); err != nil {
 		_ = os.RemoveAll(tmpDest)
 		return "", "", err
 	}
@@ -697,12 +689,82 @@ func (s *GitHubService) createInstallationAccessToken(ctx context.Context) (stri
 	return tokenResp.Token, nil
 }
 
+func (s *GitHubService) cloneProjectRepo(ctx context.Context, tokenCloneURL, localCloneURL, destPath string) error {
+	token, tokenErr := s.createOperationAccessToken(ctx)
+	if tokenErr == nil {
+		return s.cloneWithToken(ctx, tokenCloneURL, destPath, token)
+	}
+
+	if err := s.cloneWithLocalGit(ctx, localCloneURL, destPath); err != nil {
+		if shouldIncludeGitHubAuthUnavailableContext(err) {
+			return fmt.Errorf("cloning repository with local git CLI fallback after GitHub auth was unavailable (%v): %w", tokenErr, err)
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *GitHubService) cloneWithToken(ctx context.Context, cloneURL, destPath, token string) error {
 	extraEnv := gitHubTokenEnv(token)
 	if _, err := s.runGit(ctx, "", extraEnv, "clone", cloneURL, destPath); err != nil {
 		return fmt.Errorf("cloning repository: %w", err)
 	}
 	return nil
+}
+
+func (s *GitHubService) cloneWithLocalGit(ctx context.Context, cloneURL, destPath string) error {
+	if _, err := s.runGit(ctx, "", localGitCloneEnv(), "clone", cloneURL, destPath); err != nil {
+		return fmt.Errorf("local git clone failed: %w", err)
+	}
+	return nil
+}
+
+func localGitCloneEnv() []string {
+	return []string{
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_ASKPASS=true",
+		"SSH_ASKPASS=true",
+	}
+}
+
+func localGitCloneURL(rawRepoURL, fallback string) string {
+	trimmed := strings.TrimSpace(rawRepoURL)
+	if trimmed == "" {
+		return fallback
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(trimmed, "git@") || strings.HasPrefix(lower, "ssh://") || strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return trimmed
+	}
+	return fallback
+}
+
+func shouldIncludeGitHubAuthUnavailableContext(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	credentialFragments := []string{
+		"authentication",
+		"authenticate",
+		"authorization",
+		"authorized",
+		"permission denied",
+		"access denied",
+		"could not read username",
+		"terminal prompts disabled",
+		"repository not found",
+		"not found",
+		"executable file not found",
+		"command not found",
+		"no such file or directory",
+	}
+	for _, fragment := range credentialFragments {
+		if strings.Contains(msg, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 // GitAuthEnvForRepo returns git CLI environment variables needed to authenticate

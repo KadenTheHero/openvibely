@@ -29,7 +29,7 @@ Why this matters:
 Recommended first steps:
 
 1. Add at least one model in `/models`.
-2. If you plan to use a GitHub repository URL, configure GitHub in `/channels` first.
+2. If you plan to create pull requests or need app-managed GitHub credentials, configure GitHub in `/channels`.
 
 If no model is configured, chat/task execution is blocked until a model exists.
 
@@ -67,8 +67,10 @@ Behavior:
 
 - OpenVibely clones the repository into managed storage (default root is `~/.openvibely/repos` unless `PROJECT_REPO_ROOT` or `OPENVIBELY_APP_DATA_DIR` is set).
 - The project stores both the normalized GitHub URL and managed clone path.
+- If GitHub PAT/App auth is configured in `/channels`, OpenVibely uses it for the clone.
+- If no GitHub token is configured, OpenVibely falls back to the local `git` CLI. This works for public repositories and private repositories when your local Git credential helper, SSH setup, or CLI environment already has access.
 
-If GitHub credentials are missing (for example PAT not configured), creation fails and you get a toast with a link to `/channels`.
+If both configured GitHub auth and the local git fallback are unavailable or fail, creation fails with the underlying clone error.
 
 ### Option B: Local Path
 
@@ -135,6 +137,6 @@ Important:
 
 ## Troubleshooting
 
-- `failed to clone GitHub repository ... PAT is not configured`: open `/channels` and configure GitHub auth.
+- `failed to clone GitHub repository ... local git clone failed`: confirm `git` is installed and available on `PATH`, then verify your Git credentials can clone the repository from a terminal. Configure GitHub auth in `/channels` if you want OpenVibely-managed credentials.
 - `Repository path must be an absolute path`: use a full absolute path or native folder picker.
 - Local path option missing: `OPENVIBELY_ENABLE_LOCAL_REPO_PATH` is disabled in this environment.

@@ -4,13 +4,15 @@ This guide covers GitHub setup from `/channels`.
 
 ## What GitHub Channel Is For
 
-GitHub channel settings give OpenVibely authenticated access to GitHub operations used by project/task workflows (for example repo access and pull request flows).
+GitHub channel settings give OpenVibely authenticated access to GitHub operations used by project/task workflows (for example private repo access, authenticated clone/push, and pull request flows).
 
 Why this matters:
 
-- Lets OpenVibely work with private repositories.
+- Lets OpenVibely use app-managed credentials for private repositories.
 - Enables authenticated Git operations and PR-related actions.
 - Keeps credentials centralized in one place.
+
+GitHub URL project creation can still clone through your local `git` CLI when no PAT or GitHub App token is configured. That fallback supports public repositories and private repositories your local Git environment can already access. Configure this channel when you want OpenVibely-managed credentials or PR workflows.
 
 ## Choose an Auth Mode
 

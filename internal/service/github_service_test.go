@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
@@ -211,4 +212,193 @@ func TestFormatGitHubAPIError(t *testing.T) {
 			t.Fatalf("expected raw body fallback, got %q", got)
 		}
 	})
+}
+
+func TestCloneProjectRepo_NoPATFallsBackToLocalGitCLI(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+
+	svc := NewGitHubService(settingsRepo, "", "", "", root)
+	var calls []struct {
+		env  []string
+		args []string
+	}
+	svc.runGit = func(_ context.Context, _ string, extraEnv []string, args ...string) ([]byte, error) {
+		calls = append(calls, struct {
+			env  []string
+			args []string
+		}{append([]string(nil), extraEnv...), append([]string(nil), args...)})
+		return nil, nil
+	}
+
+	clonedPath, normalizedURL, err := svc.CloneProjectRepo(ctx, "project-1", "https://github.com/openvibely/openvibely")
+	if err != nil {
+		t.Fatalf("CloneProjectRepo returned error: %v", err)
+	}
+	if clonedPath == "" || !strings.HasSuffix(clonedPath, "project-1") {
+		t.Fatalf("expected managed clone destination for project id, got %q", clonedPath)
+	}
+	if normalizedURL != "https://github.com/openvibely/openvibely" {
+		t.Fatalf("unexpected normalized URL: %q", normalizedURL)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected one local git clone call, got %d", len(calls))
+	}
+	if got := strings.Join(calls[0].args, " "); got != "clone https://github.com/openvibely/openvibely "+clonedPath {
+		t.Fatalf("unexpected git args: %q", got)
+	}
+	if envContainsPrefix(calls[0].env, "GIT_CONFIG_VALUE_0=") {
+		t.Fatalf("local fallback should not inject GitHub auth header, got env %v", calls[0].env)
+	}
+	assertLocalGitCloneEnv(t, calls[0].env)
+}
+
+func TestCloneProjectRepo_NoPATFallbackPreservesSSHCloneURL(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+
+	svc := NewGitHubService(settingsRepo, "", "", "", root)
+	var gotArgs []string
+	var gotEnv []string
+	svc.runGit = func(_ context.Context, _ string, extraEnv []string, args ...string) ([]byte, error) {
+		gotEnv = append([]string(nil), extraEnv...)
+		gotArgs = append([]string(nil), args...)
+		return nil, nil
+	}
+
+	_, normalizedURL, err := svc.CloneProjectRepo(ctx, "project-ssh", "git@github.com:openvibely/openvibely.git")
+	if err != nil {
+		t.Fatalf("CloneProjectRepo returned error: %v", err)
+	}
+	if normalizedURL != "https://github.com/openvibely/openvibely" {
+		t.Fatalf("unexpected normalized URL: %q", normalizedURL)
+	}
+	if len(gotArgs) < 2 || gotArgs[0] != "clone" || gotArgs[1] != "git@github.com:openvibely/openvibely.git" {
+		t.Fatalf("expected local fallback to preserve SSH clone URL, got args %v", gotArgs)
+	}
+	assertLocalGitCloneEnv(t, gotEnv)
+}
+
+func TestCloneProjectRepo_PATConfiguredUsesTokenClone(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_configured"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	svc := NewGitHubService(settingsRepo, "", "", "", root)
+	var gotEnv []string
+	svc.runGit = func(_ context.Context, _ string, extraEnv []string, args ...string) ([]byte, error) {
+		gotEnv = append([]string(nil), extraEnv...)
+		if len(args) == 0 || args[0] != "clone" {
+			t.Fatalf("expected git clone, got %v", args)
+		}
+		return nil, nil
+	}
+
+	if _, _, err := svc.CloneProjectRepo(ctx, "project-token", "https://github.com/openvibely/openvibely"); err != nil {
+		t.Fatalf("CloneProjectRepo returned error: %v", err)
+	}
+	if !envContainsPrefix(gotEnv, "GIT_CONFIG_VALUE_0=AUTHORIZATION: Basic ") {
+		t.Fatalf("expected token auth header env, got %v", gotEnv)
+	}
+}
+
+func TestCloneProjectRepo_LocalGitFallbackFailureIncludesGitFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+
+	svc := NewGitHubService(settingsRepo, "", "", "", root)
+	svc.runGit = func(_ context.Context, _ string, _ []string, _ ...string) ([]byte, error) {
+		return nil, fmt.Errorf("git clone failed: authentication required")
+	}
+
+	_, _, err := svc.CloneProjectRepo(ctx, "project-fail", "https://github.com/openvibely/openvibely")
+	if err == nil {
+		t.Fatal("expected clone error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "GitHub auth was unavailable") {
+		t.Fatalf("expected auth fallback context in error, got %q", msg)
+	}
+	if !strings.Contains(msg, "github personal access token is not configured") {
+		t.Fatalf("expected missing PAT context in error, got %q", msg)
+	}
+	if !strings.Contains(msg, "local git clone failed") || !strings.Contains(msg, "authentication required") {
+		t.Fatalf("expected underlying local git failure in error, got %q", msg)
+	}
+}
+
+func TestCloneProjectRepo_LocalGitNonCredentialFailureOmitsPATContext(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+
+	svc := NewGitHubService(settingsRepo, "", "", "", root)
+	svc.runGit = func(_ context.Context, _ string, _ []string, _ ...string) ([]byte, error) {
+		return nil, fmt.Errorf("git clone failed: unable to access remote: connection timed out")
+	}
+
+	_, _, err := svc.CloneProjectRepo(ctx, "project-network-fail", "https://github.com/openvibely/openvibely")
+	if err == nil {
+		t.Fatal("expected clone error")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "github personal access token is not configured") {
+		t.Fatalf("non-credential local git failure should not surface missing PAT context, got %q", msg)
+	}
+	if !strings.Contains(msg, "local git clone failed") || !strings.Contains(msg, "connection timed out") {
+		t.Fatalf("expected underlying local git failure in error, got %q", msg)
+	}
+}
+
+func assertLocalGitCloneEnv(t *testing.T, env []string) {
+	t.Helper()
+	for _, value := range []string{"GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=true", "SSH_ASKPASS=true"} {
+		if !envContainsValue(env, value) {
+			t.Fatalf("expected non-interactive local git fallback env %q, got %v", value, env)
+		}
+	}
+}
+
+func envContainsPrefix(env []string, prefix string) bool {
+	for _, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func envContainsValue(env []string, value string) bool {
+	for _, item := range env {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }
