@@ -149,7 +149,8 @@ build_macos_app() {
     local goarch="$1"
     local bin_name="openvibely-desktop-${goarch}"
     local app_name="OpenVibely.app"
-    local app_dir="${TMP_BIN}/${app_name}_${goarch}"
+    local staging_dir="${TMP_BIN}/staging_${goarch}"
+    local app_dir="${staging_dir}/${app_name}"
     local bundle="${app_dir}/Contents"
 
     log "Building macOS desktop app ($goarch)..."
@@ -178,7 +179,7 @@ PLIST
 
     local zip_name="OpenVibely_${VERSION}_darwin_${goarch}.app.zip"
     log "Packaging $zip_name..."
-    run bash -c "cd '${TMP_BIN}' && zip -r '${DIST_DIR}/${zip_name}' '${app_name}_${goarch}' -x '*.DS_Store'"
+    run bash -c "cd '${staging_dir}' && zip -r '${DIST_DIR}/${zip_name}' '${app_name}' -x '*.DS_Store'"
     log "Created: $zip_name"
 }
 
