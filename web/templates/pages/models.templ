@@ -344,12 +344,11 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							<option value="oauth">OAuth</option>
 						</select>
 					</div>
-					<!-- Connection method selector for OpenAI OAuth -->
+					<!-- Connection method selector for OpenAI OAuth (CLI option removed) -->
 					<div id="openai_connection_method_field" class="form-control mb-3 hidden">
 						<label class="label"><span class="label-text">Connection Method</span></label>
 						<select name="auth_method" id="model_openai_connection_method" class="select select-bordered" onchange="toggleOpenAIConnectionMethodFields()">
 							<option value="oauth">API (OAuth via web)</option>
-							<option value="cli">CLI (OAuth via terminal)</option>
 						</select>
 					</div>
 					<div class="form-control mb-3">
@@ -390,12 +389,11 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							</button>
 						</div>
 					</div>
-					<!-- Connection method selector for Anthropic OAuth -->
+					<!-- Connection method selector for Anthropic OAuth (CLI option removed) -->
 					<div id="auth_method_field" class="form-control mb-3 hidden">
 						<label class="label"><span class="label-text">Connection Method</span></label>
 						<select name="auth_method" id="model_auth_method" class="select select-bordered" onchange="toggleSubscriptionMethodFields()">
 							<option value="oauth">API (OAuth via web)</option>
-							<option value="cli">CLI (OAuth via terminal)</option>
 						</select>
 					</div>
 					<div id="subscription_info_cli" class="mb-3 hidden">
@@ -958,11 +956,13 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						apiKeyInput.required = !isEditingModelForm();
 						authMethodField.classList.add('hidden');
 						authMethodSelect.disabled = true;				} else {
+					// OAuth via API is the only supported path; CLI option is not exposed in the UI
 					apiKeyField.classList.add('hidden');
 					apiKeyInput.required = false;
-					authMethodField.classList.remove('hidden');
-					authMethodSelect.disabled = false;
-					toggleSubscriptionMethodFields();
+					authMethodField.classList.add('hidden');
+					authMethodSelect.value = 'oauth';
+					authMethodSelect.disabled = true;
+					document.getElementById('subscription_info_oauth').classList.remove('hidden');
 				}
 			}
 
@@ -994,12 +994,13 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						openaiConnectionMethodField.classList.add('hidden');
 						openaiConnectionMethodSelect.disabled = true;
 						document.getElementById('openai_api_key_info').classList.remove('hidden');				} else {
-					// subscription
+					// OAuth via API is the only supported path; CLI option is not exposed in the UI
 					apiKeyField.classList.add('hidden');
 					apiKeyInput.required = false;
-					openaiConnectionMethodField.classList.remove('hidden');
-					openaiConnectionMethodSelect.disabled = false;
-					toggleOpenAIConnectionMethodFields();
+					openaiConnectionMethodField.classList.add('hidden');
+					openaiConnectionMethodSelect.value = 'oauth';
+					openaiConnectionMethodSelect.disabled = true;
+					document.getElementById('openai_subscription_info_oauth').classList.remove('hidden');
 				}
 			}
 
