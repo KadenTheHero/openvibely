@@ -78,7 +78,7 @@ func (w *Writer) periodicFlush() {
 					if dbErr := w.repo.UpdateOutput(w.ctx, w.execID, w.buf.String()); dbErr != nil {
 						applog.Infof("[agent-svc] streamingWriter periodic flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
 					} else {
-						applog.Infof("[agent-svc] streamingWriter periodic flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, w.buf.Len())
+						applog.Debugf("[agent-svc] streamingWriter periodic flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, w.buf.Len())
 					}
 				}
 				w.dirty = false
@@ -105,7 +105,7 @@ func (w *Writer) Write(p []byte) (int, error) {
 			if dbErr := w.repo.UpdateOutput(w.ctx, w.execID, w.buf.String()); dbErr != nil {
 				applog.Infof("[agent-svc] streamingWriter flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
 			} else {
-				applog.Infof("[agent-svc] streamingWriter flushed to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, w.buf.Len())
+				applog.Debugf("[agent-svc] streamingWriter flushed to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, w.buf.Len())
 			}
 		}
 		w.dirty = false

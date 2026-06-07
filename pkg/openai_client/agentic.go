@@ -8,8 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math"
+
+	"github.com/openvibely/openvibely/internal/applog"
 	"net/http"
 	"strings"
 	"sync"
@@ -173,7 +174,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if !force && !compactByTranscript && !compactBySession {
 			return items, nil
 		}
-		log.Printf("[openai-client] compacting context force=%v transcript_tokens=%d session_tokens=%d threshold=%d items=%d",
+		applog.Infof("[openai-client] compacting context force=%v transcript_tokens=%d session_tokens=%d threshold=%d items=%d",
 			force, transcriptEstimate, sessionTokenEstimate, compactionThreshold, len(items))
 
 		compactedItems, summary, err := c.compactAgenticInputItems(ctx, items, tools, opts, isChatGPTOAuth)
@@ -303,7 +304,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 			modelOutput := truncateToolOutputForModelInput(exec.output, toolOutputTokenLimit)
 			if len(modelOutput) < len(exec.output) {
-				log.Printf("[openai-client] truncated tool output for model input tool=%s call_id=%s original_chars=%d truncated_chars=%d token_limit=%d",
+				applog.Infof("[openai-client] truncated tool output for model input tool=%s call_id=%s original_chars=%d truncated_chars=%d token_limit=%d",
 					exec.call.Name, exec.call.CallID, len(exec.output), len(modelOutput), toolOutputTokenLimit)
 			}
 			toolResultItem := agenticInputItem{
@@ -395,7 +396,7 @@ func executeOpenAIToolTasks(ctx context.Context, opts *AgenticOptions, tasks []o
 }
 
 func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, input json.RawMessage) (string, bool) {
-	log.Printf("[openai-client] executing tool %s", name)
+	applog.Infof("[openai-client] executing tool %s", name)
 	output := ""
 	isError := false
 	var err error
@@ -1052,11 +1053,10 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 	}
 	defer resp.Body.Close()
 
-	// TEMP: dump rate limit headers
 	for k, v := range resp.Header {
 		kl := strings.ToLower(k)
 		if strings.Contains(kl, "ratelimit") || strings.Contains(kl, "rate-limit") || strings.Contains(kl, "retry") || strings.Contains(kl, "x-openai") || strings.Contains(kl, "x-request") {
-			log.Printf("[openai-headers] %s: %v", k, v)
+			applog.Debugf("[openai-headers] %s: %v", k, v)
 		}
 	}
 

@@ -19,12 +19,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/applog"
 )
 
 // AnthropicAPIHost is the base URL for the Anthropic Messages API.
@@ -371,11 +372,10 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 	}
 	defer resp.Body.Close()
 
-	// TEMP: dump rate limit headers
 	for k, v := range resp.Header {
 		kl := strings.ToLower(k)
 		if strings.Contains(kl, "ratelimit") || strings.Contains(kl, "rate-limit") || strings.Contains(kl, "retry") || strings.Contains(kl, "x-anthropic") {
-			log.Printf("[anthropic-headers] %s: %v", k, v)
+			applog.Debugf("[anthropic-headers] %s: %v", k, v)
 		}
 	}
 

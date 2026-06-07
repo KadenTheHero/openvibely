@@ -3,10 +3,11 @@ package anthropicclient
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/applog"
 )
 
 const (
@@ -52,7 +53,7 @@ func doWithRetry(ctx context.Context, client *http.Client, buildReq func() (*htt
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
-			log.Printf("[anthropicclient] retry attempt %d/%d", attempt, maxRetries)
+			applog.Infof("[anthropicclient] retry attempt %d/%d", attempt, maxRetries)
 		}
 
 		req, err := buildReq()
@@ -80,14 +81,14 @@ func doWithRetry(ctx context.Context, client *http.Client, buildReq func() (*htt
 		// surface the 429 immediately instead of keeping executions "running"
 		// for minutes/hours with no user-visible failure.
 		if backoff > maxRetryBackoff {
-			log.Printf("[anthropicclient] received HTTP %d with retry delay %v (> %v), skipping retry",
+			applog.Infof("[anthropicclient] received HTTP %d with retry delay %v (> %v), skipping retry",
 				resp.StatusCode, backoff, maxRetryBackoff)
 			return resp, nil
 		}
 
 		// Retryable — close body, backoff, and retry
 		resp.Body.Close()
-		log.Printf("[anthropicclient] received HTTP %d, retrying in %v", resp.StatusCode, backoff)
+		applog.Infof("[anthropicclient] received HTTP %d, retrying in %v", resp.StatusCode, backoff)
 
 		select {
 		case <-ctx.Done():

@@ -7,8 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+
+	"github.com/openvibely/openvibely/internal/applog"
 	"os"
 	"os/exec"
 	"sort"
@@ -120,7 +121,7 @@ func NewMCPManager(ctx context.Context, configs []models.MCPServerConfig, workDi
 		srv, err := acquireServer(ctx, cfg, workDir, false)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", cfg.Name, err))
-			log.Printf("[mcp] skipping server %q: %v", cfg.Name, err)
+			applog.Infof("[mcp] skipping server %q: %v", cfg.Name, err)
 			continue
 		}
 		m.servers = append(m.servers, managedServerRef{
@@ -134,7 +135,7 @@ func NewMCPManager(ctx context.Context, configs []models.MCPServerConfig, workDi
 		return nil, fmt.Errorf("starting MCP servers failed: %s", strings.Join(errs, " | "))
 	}
 	if len(errs) > 0 {
-		log.Printf("[mcp] started %d/%d MCP servers (%d skipped)", len(m.servers), len(configs), len(errs))
+		applog.Infof("[mcp] started %d/%d MCP servers (%d skipped)", len(m.servers), len(configs), len(errs))
 	}
 	return m, nil
 }
@@ -147,7 +148,7 @@ func EnsurePersistentServers(ctx context.Context, configs []models.MCPServerConf
 		_, err := acquireServer(ctx, cfg, workDir, true)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", cfg.Name, err))
-			log.Printf("[mcp] persistent server %q failed: %v", cfg.Name, err)
+			applog.Infof("[mcp] persistent server %q failed: %v", cfg.Name, err)
 			continue
 		}
 		started++
@@ -182,7 +183,7 @@ func ReconcilePersistentServers(ctx context.Context, configs []models.MCPServerC
 		_, err := acquireServer(ctx, cfg, workDir, true)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", cfg.Name, err))
-			log.Printf("[mcp] reconcile persistent server %q failed: %v", cfg.Name, err)
+			applog.Infof("[mcp] reconcile persistent server %q failed: %v", cfg.Name, err)
 			continue
 		}
 		started++
@@ -570,7 +571,7 @@ func (s *MCPServer) fetchTools() error {
 			Desc:       t.Description,
 		})
 	}
-	log.Printf("[mcp] server %q: %d tools available", s.name, len(s.tools))
+	applog.Infof("[mcp] server %q: %d tools available", s.name, len(s.tools))
 	return nil
 }
 

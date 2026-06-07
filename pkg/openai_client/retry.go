@@ -6,8 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+
+	"github.com/openvibely/openvibely/internal/applog"
 	"strconv"
 	"time"
 )
@@ -55,7 +56,7 @@ func doWithRetry(ctx context.Context, client *http.Client, buildReq func() (*htt
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
-			log.Printf("[openai-client] retry attempt %d/%d", attempt, maxRetries)
+			applog.Infof("[openai-client] retry attempt %d/%d", attempt, maxRetries)
 		}
 
 		req, err := buildReq()
@@ -79,7 +80,7 @@ func doWithRetry(ctx context.Context, client *http.Client, buildReq func() (*htt
 					backoff = time.Duration(attempt+1) * time.Second
 				}
 
-				log.Printf("[openai-client] network error, retrying in %v: %v", backoff, err)
+				applog.Infof("[openai-client] network error, retrying in %v: %v", backoff, err)
 
 				select {
 				case <-ctx.Done():
@@ -113,12 +114,12 @@ func doWithRetry(ctx context.Context, client *http.Client, buildReq func() (*htt
 
 		// If server asks us to wait a very long time, surface the error immediately
 		if backoff > maxRetryBackoff {
-			log.Printf("[openai-client] received HTTP %d with retry delay %v (> %v), skipping retry",
+			applog.Infof("[openai-client] received HTTP %d with retry delay %v (> %v), skipping retry",
 				resp.StatusCode, backoff, maxRetryBackoff)
 			return makeErrorResponse(resp.StatusCode, body), nil
 		}
 
-		log.Printf("[openai-client] received HTTP %d (%v), retrying in %v", resp.StatusCode, apiErr, backoff)
+		applog.Infof("[openai-client] received HTTP %d (%v), retrying in %v", resp.StatusCode, apiErr, backoff)
 
 		select {
 		case <-ctx.Done():

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+
+	"github.com/openvibely/openvibely/internal/applog"
 	"strings"
 	"sync"
 
@@ -34,11 +36,11 @@ func main() {
 	// so every subprocess (task shells, Claude/Codex CLI shelling out to
 	// `bash -c "go ..."`, plugin MCP servers, etc.) inherits it.
 	config.EnsureDesktopPATH()
-	log.Printf("[desktop] initialized task PATH from user shell")
+	applog.Infof("[desktop] initialized task PATH from user shell")
 
 	cfg := config.LoadWithMode(config.ModeDesktop)
 
-	log.Println("[desktop] starting OpenVibely desktop app...")
+	applog.Infof("[desktop] starting OpenVibely desktop app...")
 
 	if err := runDesktop(cfg, startDesktopBackend, launchNativeWindow); err != nil {
 		log.Fatalf("[desktop] failed: %v", err)
@@ -58,13 +60,13 @@ func loadDesktopConfigFile() {
 	}
 	if err := config.LoadEnvFile(path); err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("[desktop] config file not found at %s; using defaults", path)
+			applog.Infof("[desktop] config file not found at %s; using defaults", path)
 			return
 		}
-		log.Printf("[desktop] error loading config file %s: %v", path, err)
+		applog.Infof("[desktop] error loading config file %s: %v", path, err)
 		return
 	}
-	log.Printf("[desktop] loaded config file %s", path)
+	applog.Infof("[desktop] loaded config file %s", path)
 }
 
 func runDesktop(cfg *config.Config, start desktopStarter, launch desktopLauncher) error {
@@ -80,7 +82,7 @@ func runDesktop(cfg *config.Config, start desktopStarter, launch desktopLauncher
 		return fmt.Errorf("failed to start backend: %w", err)
 	}
 
-	log.Printf("[desktop] backend listening at %s", backend.BaseURL)
+	applog.Infof("[desktop] backend listening at %s", backend.BaseURL)
 
 	var shutdownOnce sync.Once
 	shutdown := func() {
@@ -98,7 +100,7 @@ func runDesktop(cfg *config.Config, start desktopStarter, launch desktopLauncher
 	}
 
 	shutdown()
-	log.Println("[desktop] shutdown complete")
+	applog.Infof("[desktop] shutdown complete")
 	return nil
 }
 

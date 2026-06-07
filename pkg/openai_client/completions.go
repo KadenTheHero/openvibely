@@ -8,8 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math"
+
+	"github.com/openvibely/openvibely/internal/applog"
 	"net/http"
 	"strings"
 )
@@ -205,7 +206,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 				opts.OnToolUse(tc.Function.Name, inputJSON)
 			}
 
-			log.Printf("[openai-completions] executing tool %s", tc.Function.Name)
+			applog.Infof("[openai-completions] executing tool %s", tc.Function.Name)
 			output := ""
 			isError := false
 			var err error

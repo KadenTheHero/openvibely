@@ -7,12 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"net/http"
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/openvibely/openvibely/internal/applog"
 )
 
 // DefaultCompactionThreshold is the default input token count that triggers compaction.
@@ -297,12 +298,12 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			compactBlock.Content = resp.compaction.content
 
 			if resp.compaction.content != nil {
-				log.Printf("[anthropicclient] context compacted on turn %d, summary_len=%d", turn+1, len(*resp.compaction.content))
+				applog.Infof("[anthropicclient] context compacted on turn %d, summary_len=%d", turn+1, len(*resp.compaction.content))
 				if opts.OnCompaction != nil {
 					opts.OnCompaction(*resp.compaction.content)
 				}
 			} else {
-				log.Printf("[anthropicclient] compaction failed on turn %d (null content), round-tripping as no-op", turn+1)
+				applog.Infof("[anthropicclient] compaction failed on turn %d (null content), round-tripping as no-op", turn+1)
 			}
 
 			// Replace all prior messages with the compaction block.
@@ -350,7 +351,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			allText.WriteString(turnText)
 			// If max_tokens was hit, log a warning — the response may be truncated
 			if resp.stopReason == "max_tokens" {
-				log.Printf("[anthropicclient] turn %d hit max_tokens limit, response may be truncated", turn+1)
+				applog.Infof("[anthropicclient] turn %d hit max_tokens limit, response may be truncated", turn+1)
 			}
 			break
 		}
@@ -403,7 +404,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		// AND no server tool results, break to avoid an infinite loop.
 		if len(toolResults) == 0 && !hasServerToolResults {
 			allText.WriteString(turnText)
-			log.Printf("[anthropicclient] stop_reason=tool_use but no tool_use blocks found, breaking")
+			applog.Infof("[anthropicclient] stop_reason=tool_use but no tool_use blocks found, breaking")
 			break
 		}
 
@@ -712,7 +713,7 @@ func executeAnthropicToolUses(ctx context.Context, opts *AgenticOptions, blocks 
 }
 
 func runAnthropicToolUse(ctx context.Context, opts *AgenticOptions, name string, input json.RawMessage) (string, bool) {
-	log.Printf("[anthropicclient] executing tool %s", name)
+	applog.Infof("[anthropicclient] executing tool %s", name)
 	output := ""
 	isError := false
 	var err error
@@ -939,11 +940,10 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 	}
 	defer resp.Body.Close()
 
-	// TEMP: dump rate limit headers
 	for k, v := range resp.Header {
 		kl := strings.ToLower(k)
 		if strings.Contains(kl, "ratelimit") || strings.Contains(kl, "rate-limit") || strings.Contains(kl, "retry") || strings.Contains(kl, "x-anthropic") {
-			log.Printf("[anthropic-headers] %s: %v", k, v)
+			applog.Debugf("[anthropic-headers] %s: %v", k, v)
 		}
 	}
 

@@ -13,8 +13,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+
+	"github.com/openvibely/openvibely/internal/applog"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -78,19 +79,19 @@ func (rt *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 
 	body, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
-		log.Printf("[openai-client] non-2xx response status=%d method=%s url=%s body_read_error=%v", resp.StatusCode, req.Method, req.URL.String(), readErr)
+		applog.Infof("[openai-client] non-2xx response status=%d method=%s url=%s body_read_error=%v", resp.StatusCode, req.Method, req.URL.String(), readErr)
 		resp.Body = io.NopCloser(bytes.NewReader(nil))
 		return resp, nil
 	}
 
 	if strings.Contains(req.URL.Host, "auth.openai.com") {
-		log.Printf("[openai-client] non-2xx response status=%d method=%s url=%s body=<redacted>", resp.StatusCode, req.Method, req.URL.String())
+		applog.Infof("[openai-client] non-2xx response status=%d method=%s url=%s body=<redacted>", resp.StatusCode, req.Method, req.URL.String())
 	} else {
 		trimmed := strings.TrimSpace(string(body))
 		if trimmed == "" {
-			log.Printf("[openai-client] non-2xx response status=%d method=%s url=%s body=<empty>", resp.StatusCode, req.Method, req.URL.String())
+			applog.Infof("[openai-client] non-2xx response status=%d method=%s url=%s body=<empty>", resp.StatusCode, req.Method, req.URL.String())
 		} else {
-			log.Printf("[openai-client] non-2xx response status=%d method=%s url=%s body=%s", resp.StatusCode, req.Method, req.URL.String(), trimmed)
+			applog.Infof("[openai-client] non-2xx response status=%d method=%s url=%s body=%s", resp.StatusCode, req.Method, req.URL.String(), trimmed)
 		}
 	}
 
@@ -420,11 +421,10 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 	}
 	defer resp.Body.Close()
 
-	// TEMP: dump rate limit headers
 	for k, v := range resp.Header {
 		kl := strings.ToLower(k)
 		if strings.Contains(kl, "ratelimit") || strings.Contains(kl, "rate-limit") || strings.Contains(kl, "retry") || strings.Contains(kl, "x-openai") || strings.Contains(kl, "x-request") {
-			log.Printf("[openai-headers] %s: %v", k, v)
+			applog.Debugf("[openai-headers] %s: %v", k, v)
 		}
 	}
 
