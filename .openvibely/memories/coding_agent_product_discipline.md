@@ -35,6 +35,7 @@ Documentation preferences:
 - Useful README content and commented multi-line command examples are valuable to preserve unless there is a specific reason to trim them.
 - The user values preserving liked README/docs structure while folding in stronger positioning/selling points.
 - Keep root `docs/` in sync with README/docs-site positioning when overlapping product concepts change.
+- When syncing in-repo docs with the docs website repo, audit recent docs-site content changes and propagate overlapping product-concept updates into the in-repo guides; the user expects more than a narrow README/environment pass when the docs-site changed agents, chat, lifecycle, models, skills, workers, tasks, or analytics content.
 - Root README is expected to stay succinct and high-level, point to `https://docs.openvibely.ai` plus the docs source repo at `/Users/dubee/go/src/github.com/openvibely/openvibely-doc`, and keep detailed environment-variable reference in `docs/environment.md`.
 - For published docs links in README/project-facing docs, new-tab HTML anchors are preferred where supported; local relative links stay as normal Markdown.
 

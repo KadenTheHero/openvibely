@@ -5,7 +5,7 @@ skill:
     key: openvibely_project_guidance
     name: OpenVibely Project Guidance
     scope: project
-    description: Static coding-agent guidance for working on this OpenVibely repository.
+    description: Static coding-agent guidance for working in the OpenVibely repository.
 ---
 
 # OpenVibely Project Guidance
@@ -15,6 +15,7 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 ## Stop First
 
 - Never create documentation or summary files for your work. Do not create `*_FIX.md`, `*_SUMMARY.md`, `*_VERIFICATION.md`, `README_*.md`, `TECHNICAL_*.md`, `ACTION_PLAN_*.md`, `FINDINGS_*.md`, `INVESTIGATION_*.md`, `COMMIT_MESSAGE.txt`, QA checklist files, or similar summary markdown. The code and commit messages are the documentation.
+- Before editing code, verify the actual filesystem target. Run or otherwise confirm `pwd`, `git status --short --branch`, and `git worktree list` when the task mentions an isolated worktree, follow-up task branch, or explicit worktree path. If the current tool working directory is not the assigned worktree, use absolute paths into the assigned worktree for file tools and `git -C <worktree>`/`cd <worktree> && ...` for shell commands. Do not rely on relative paths until this is confirmed; accidental edits to the main checkout must be treated as a workflow bug and repaired before continuing.
 - Avoid validation loops, but do not leave compile or test failures unresolved after code edits. Make all intended code changes first, run the required validation chain once, fix any failures, and rerun only when needed to confirm the fix.
 - If code changed, use `-count=1` for tests. Skip it only when re-running without code changes and cached results are acceptable.
 - Avoid read-only tool loops. Repeated `read_file`, `list_files`, and `grep_search` calls without progress usually mean missing objective or weak handoff context.

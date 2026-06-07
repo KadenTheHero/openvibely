@@ -79,7 +79,7 @@ always_use:
 
 ## openvibely_project_guidance
 
-[OpenVibely Project Guidance](openvibely_project_guidance/SKILL.md) — Static coding-agent guidance for working on this OpenVibely repository.
+[OpenVibely Project Guidance](openvibely_project_guidance/SKILL.md) — Static coding-agent guidance for working in the OpenVibely repository.
 
 ## openvibely_followup_route_task_routing
 
@@ -104,3 +104,7 @@ always_use:
 ## openvibely_test_coverage_audit_workflow
 
 [OpenVibely Test Coverage Audit Workflow](openvibely_test_coverage_audit_workflow/SKILL.md) — Audit OpenVibely test count, coverage gaps, and CPU-heavy test execution with repeatable Go commands.
+
+## openvibely_worker_concurrency_workflow
+
+[OpenVibely Worker Concurrency Workflow](openvibely_worker_concurrency_workflow/SKILL.md) — Audit and fix OpenVibely worker queue slots, capacity counters, task claiming, and dispatch cleanup.

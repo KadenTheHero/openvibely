@@ -9,7 +9,7 @@ confidence: high
 title: Worktree and Lineage
 ---
 
-Task execution uses isolated git worktrees in `.worktrees/task_<id>` with task-scoped branches `task/<id_prefix>-<slug>`. LLM task prompts include explicit worktree path orientation when a workdir is present, while runtime workdir enforcement remains the source of truth. Coding changes for assigned tasks must be made in the assigned task worktree, not the main checkout.
+Task execution uses isolated git worktrees in `.worktrees/task_<id>` with task-scoped branches `task/<id_prefix>-<slug>`. LLM task prompts include explicit worktree path orientation when a workdir is present, while runtime workdir enforcement remains the source of truth. Coding changes for assigned tasks must be made in the assigned task worktree, not the main checkout, unless the user explicitly asks for main-checkout changes.
 
 **Worktree path discipline (mandatory when a worktree path is given):** Tool calls resolve relative paths against the agent's working directory (main repo root), NOT the worktree. To avoid silently editing the wrong tree: (1) run `cd <worktree-path> && pwd && git branch --show-current` as the very first action; (2) prefix every `bash` command with `cd <absolute-worktree-path> &&`; (3) use absolute paths in all `read_file`/`edit_file`/`write_file` calls. Before committing, verify with `git -C <worktree-path> status` that changes are in the worktree branch. Full details in the `openvibely_worktree_merge_lineage_workflow` skill.
 
