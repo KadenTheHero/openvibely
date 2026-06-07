@@ -130,12 +130,12 @@ const skillDeclarationExample = "---\n" +
 const skillDeclarationFieldDoc = "Full skills/<skill>/SKILL.md content including YAML frontmatter delimited by '---' lines, " +
 	"followed by the instructions for that one skill. " +
 	"REQUIRED frontmatter fields: kind (must be 'openvibely.agent_skill'), version (integer >= 1), skill.key (lowercase slug, [a-z0-9_]+). " +
-	"Do not set agent.key for standalone generated skills. Optional: skill.name, skill.scope (global|project), skill.description, routing. " + "Agent-level tools, permissions, lifecycle_hooks, routing defaults, model_defaults, and tool_config belong in the agent root SKILLS.md declaration, not in an individual SKILL.md unless intentionally patching legacy metadata. " +
+	"Do not set agent.key for standalone skills. Optional: skill.name, skill.scope (global|project), skill.description, routing. " + "Agent-level tools, permissions, lifecycle_hooks, routing defaults, model_defaults, and tool_config belong in the agent root SKILLS.md declaration, not in an individual SKILL.md unless intentionally patching legacy metadata. " +
 	"Example:\n" + skillDeclarationExample
 
 const indexUpdateReminder = " After a successful write, the mutation tool maintains the top-level skills/SKILLS.md skill-link index. " +
 	"Use the global skills root for scope=global mutations and the project skills root for scope=project."
-const skillManageDescription = "Create, patch, archive, write, or remove a support file for a generated skill. " +
+const skillManageDescription = "Create, patch, archive, write, or remove a support file for a standalone skill. " +
 	"Actions: create (new skill), patch (update existing), write_file/remove_file (manage references/templates/scripts/assets), archive (deprecate). " +
 	"For create/patch you MUST pass a complete standalone skills/<skill>/SKILL.md in the 'declaration' field (see field description for required frontmatter). " +
 	"Path traversal, unknown support directories, and protected artifacts are rejected." + indexUpdateReminder
@@ -149,9 +149,9 @@ func agentSkillManageDescription(agentKey string) string {
 		"Use skill_manage instead for reusable standalone/project/global skill learning. The backend scopes all writes to agents/" + agentKey + "/skills; do not pass agent paths."
 }
 
-const libraryAgentSkillManageDescription = "Create, patch, or manage support files for skills owned by non-protected agents. " +
+const libraryAgentSkillManageDescription = "Create, patch, or manage support files for skills owned by user-managed agents. " +
 	"Use this for skill library maintenance that consolidates or updates agent-specific skills. " +
-	"Pass the target agent key in 'agent' and the bare skill key in 'handle'; protected/system agents are rejected by the backend. " +
+	"Pass the target agent key in 'agent' and the bare skill key in 'handle'; protected agents are rejected by the backend. " +
 	"Use skill_manage instead for standalone project/global skills."
 
 func jsonString(s string) string {

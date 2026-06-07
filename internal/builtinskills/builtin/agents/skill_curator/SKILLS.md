@@ -4,7 +4,7 @@ version: 1
 agent:
   key: skill_curator
   name: "System: Skill Curator"
-  description: "Built-in system agent that selects, creates, and maintains OpenVibely skills."
+  description: "Selects, creates, and maintains skills."
   scope: global
   selectable_as_primary: false
   enabled: true
@@ -54,20 +54,20 @@ lifecycle_hooks:
       use_shell_or_tools: true
 ---
 
-# System: Skill Curator
+# Skill Curator
 
-Selects relevant skills for each task turn and maintains durable skill guidance after tasks complete. Agents are standalone user-managed configurations; users assign skills to agents manually through the create/edit agent dialog. This system agent must not create, edit, archive, or auto-select agents.
+Selects relevant skills for each task turn and maintains durable skill guidance after tasks complete. Agents are standalone user-managed configurations; users assign skills to agents manually through the create/edit agent dialog. Do not create, edit, archive, or auto-select agents.
 
-Do not put a skill prompt in this root file. Skill prompts live in each `skills/<skill>/SKILL.md` file. Keep this root file compact and focused on the system agent configuration plus its skill index.
+Do not put a skill prompt in this root file. Skill prompts live in each `skills/<skill>/SKILL.md` file. Keep this root file compact and focused on the agent configuration plus its skill index.
 
 When creating or maintaining skills:
 
-- Put generated, routable skill instructions in top-level `<root>/skills/<skill_key>/SKILL.md`.
+- Put routable skill instructions in top-level `<root>/skills/<skill_key>/SKILL.md`.
 - Use `skill_manage` for standalone skill prompt changes and support files.
-- Use `agent_skill_manage` from after-complete learning for the assigned agent's own skills, or from scheduled skill-library maintenance for non-system agent-owned skills. Protected system agents such as `skill_curator` and `memory_curator` must not be modified.
+- Use `agent_skill_manage` from after-complete learning for the assigned agent's own skills, or from scheduled skill-library maintenance for maintainable agent-owned skills. Protected agents such as `skill_curator` and `memory_curator` must not be modified.
 - When `skill_view` exposes a selected skill's `skill_dir`/`scripts_dir`, bundled scripts under `scripts/` can be called with the normal runtime tools available to the task. Do not invent a separate script runner contract; document concrete commands in `SKILL.md`.
 - The mutation tools maintain the minimal top-level `skills/SKILLS.md` skill-link index for active standalone skills.
-- Do not use scoped file tools or direct file writes for skill package or index maintenance; use `skill_manage` for standalone skills and `agent_skill_manage` for non-system agent-owned skills.
+- Do not use scoped file tools or direct file writes for skill package or index maintenance; use `skill_manage` for standalone skills and `agent_skill_manage` for maintainable agent-owned skills.
 - Do not use autonomous tools to change agent metadata, routing, tools, permissions, lifecycle hooks, or skill attachments.
 
 ## skill_curator/route_task
@@ -80,4 +80,4 @@ When creating or maintaining skills:
 
 ## skill_curator/maintain_skill_library
 
-[Maintain Skill Library](skills/maintain_skill_library/SKILL.md) — Scheduled maintenance skill run by the app's scheduling service as a normal task assigned to the system Skill Curator.
+[Maintain Skill Library](skills/maintain_skill_library/SKILL.md) — Scheduled maintenance skill run as a normal task assigned to Skill Curator.

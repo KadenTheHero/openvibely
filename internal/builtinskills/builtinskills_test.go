@@ -72,6 +72,36 @@ func TestSyncTo_SeedsDefaultIndexesAndSkillBodies(t *testing.T) {
 	}
 }
 
+func TestSyncTo_BundledSystemPromptsAvoidUnnecessaryInternalLabelInjection(t *testing.T) {
+	root := t.TempDir()
+	if err := SyncTo(root); err != nil {
+		t.Fatalf("SyncTo: %v", err)
+	}
+
+	paths := []string{
+		filepath.Join(root, "agents", "AGENTS.md"),
+		filepath.Join(root, "agents", "skill_curator", "SKILLS.md"),
+		filepath.Join(root, "agents", "skill_curator", "skills", "maintain_skill_library", "SKILL.md"),
+		filepath.Join(root, "agents", "skill_curator", "skills", "observe_task_for_learning", "SKILL.md"),
+		filepath.Join(root, "agents", "memory_curator", "SKILLS.md"),
+		filepath.Join(root, "agents", "memory_curator", "skills", "consolidate_memory", "SKILL.md"),
+		filepath.Join(root, "agents", "memory_curator", "skills", "update_memory", "SKILL.md"),
+		filepath.Join(root, "agents", "goal", "SKILLS.md"),
+	}
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("read %s: %v", p, err)
+		}
+		body := string(data)
+		for _, forbidden := range []string{"ships with OpenVibely", "OpenVibely managed project memory", "OpenVibely skills", "Built-in system agent", "built-in system agent", "generated skill", "generated skills"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("bundled prompt %s contains unnecessary internal/product wording %q:\n%s", p, forbidden, body)
+			}
+		}
+	}
+}
+
 func TestSyncTo_PreservesUserManagedIndexesButRefreshesSystemDeclaration(t *testing.T) {
 	root := t.TempDir()
 	if err := SyncTo(root); err != nil {
@@ -107,8 +137,8 @@ func TestSyncTo_PreservesUserManagedIndexesButRefreshesSystemDeclaration(t *test
 	if string(gotSkills) == customSkills {
 		t.Fatalf("protected system skill_curator/SKILLS.md was not refreshed by SyncTo")
 	}
-	if !strings.Contains(string(gotSkills), "System: Skill Curator") || !strings.Contains(string(gotSkills), "skill_manage") {
-		t.Fatalf("refreshed system SKILLS.md missing expected policy/tools:\n%s", gotSkills)
+	if !strings.Contains(string(gotSkills), "# Skill Curator") || !strings.Contains(string(gotSkills), "skill_manage") {
+		t.Fatalf("refreshed Skill Curator SKILLS.md missing expected policy/tools:\n%s", gotSkills)
 	}
 
 	userAgentDir := filepath.Join(root, "agents", "backend")

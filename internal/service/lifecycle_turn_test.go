@@ -597,10 +597,12 @@ func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesScopedSkillLibrar
 
 	var routeCalled bool
 	var available any
+	var routeTitle string
 	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{ID: "route", When: models.LifecycleRouteTask, SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills, Blocking: true, Enabled: true}}}
 	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
 		routeCalled = true
 		available = in.Extras["available_skills"]
+		routeTitle = in.TaskTitle
 		return routePayload([]string{"maintain_skill_library"}, 0.9), nil
 	}), nil)
 
@@ -613,6 +615,9 @@ func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesScopedSkillLibrar
 	turn := worker.PrepareLifecycleTurn(ctx, task)
 	if !routeCalled {
 		t.Fatal("system skill maintenance task should run route_task against Skill Curator's owned skills")
+	}
+	if routeTitle != "Skill Library Maintenance" || strings.Contains(routeTitle, "System:") {
+		t.Fatalf("scheduled maintenance hook title should be prompt-safe, got %q", routeTitle)
 	}
 	availableText, _ := available.(string)
 	if !strings.Contains(availableText, "skill_curator/maintain_skill_library") || strings.Contains(availableText, "other_skill") {
@@ -679,7 +684,7 @@ func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesScopedSkillLibrar
 
 	out, handled, isErr, err = mergedTools.Executor(context.Background(), "agent_list", json.RawMessage(`{}`))
 	if !handled || err != nil || isErr || !strings.Contains(out, "reviewer") || strings.Contains(out, "skill_curator") || strings.Contains(out, "memory_curator") || strings.Contains(out, "disabled_agent") || strings.Contains(out, "archived_agent") {
-		t.Fatalf("agent_list should expose active non-system agents only handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+		t.Fatalf("agent_list should expose active user-managed agents only handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
 	}
 	out, handled, isErr, err = mergedTools.Executor(context.Background(), "skill_manage", json.RawMessage(`{"action":"write_file","handle":"other_skill","scope":"global","support":{"kind":"references","path":"maintenance-note.md","content":"kept"}}`))
 	if !handled || err != nil || isErr {
@@ -694,10 +699,10 @@ func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesScopedSkillLibrar
 	}
 	out, handled, isErr, err = mergedTools.Executor(context.Background(), "agent_skill_manage", json.RawMessage(`{"action":"create","agent":"reviewer","scope":"global","declaration":"---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n  key: review_migrations\n---\n# Review migrations\n"}`))
 	if !handled || err != nil || isErr {
-		t.Fatalf("agent_skill_manage should mutate non-system agent skills handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+		t.Fatalf("agent_skill_manage should mutate user-managed agent skills handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
 	}
 	if _, err := os.Stat(filepath.Join(root, "agents", "reviewer", "skills", "review_migrations", "SKILL.md")); err != nil {
-		t.Fatalf("agent_skill_manage did not write non-system agent skill: %v", err)
+		t.Fatalf("agent_skill_manage did not write user-managed agent skill: %v", err)
 	}
 	for _, tc := range []struct {
 		agent string
@@ -1106,10 +1111,12 @@ func TestPrepareLifecycleTurn_MemoryConsolidationTaskRoutesConsolidateMemorySkil
 
 	var routeCalled bool
 	var available any
+	var routeTitle string
 	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{ID: "route", When: models.LifecycleRouteTask, SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills, Blocking: true, Enabled: true}}}
 	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
 		routeCalled = true
 		available = in.Extras["available_skills"]
+		routeTitle = in.TaskTitle
 		return routePayload([]string{"consolidate_memory"}, 0.95), nil
 	}), nil)
 
@@ -1121,6 +1128,9 @@ func TestPrepareLifecycleTurn_MemoryConsolidationTaskRoutesConsolidateMemorySkil
 	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "memory-task", Title: "System: Memory Consolidation", Category: models.CategoryScheduled, AgentDefinitionID: &agent.ID})
 	if !routeCalled {
 		t.Fatal("assigned system tasks should run skill routing")
+	}
+	if routeTitle != "Memory Consolidation" || strings.Contains(routeTitle, "System:") {
+		t.Fatalf("scheduled memory hook title should be prompt-safe, got %q", routeTitle)
 	}
 	if availableText, _ := available.(string); !strings.Contains(availableText, "memory_curator/consolidate_memory") || strings.Contains(availableText, "other_skill") {
 		t.Fatalf("route_task should receive Memory Curator skill index, got:\n%s", availableText)
@@ -1173,6 +1183,26 @@ func TestPrepareLifecycleTurn_AssignedAgentWithNoSkillsRoutesEmptyIndex(t *testi
 	}
 	if got := additionalProjectInstructionsFromContext(turn.Ctx); got != "" {
 		t.Fatalf("no selected skills should produce no skill prompt, got:\n%s", got)
+	}
+}
+
+func TestPromptSafeTaskTitleSanitizesScheduledMaintenanceTasks(t *testing.T) {
+	cases := []struct {
+		name string
+		task models.Task
+		want string
+	}{
+		{name: "skill maintenance", task: models.Task{Title: agentLibraryMaintenanceTaskTitle, Category: models.CategoryScheduled}, want: "Skill Library Maintenance"},
+		{name: "memory consolidation", task: models.Task{Title: memoryConsolidationTaskTitle, Category: models.CategoryScheduled}, want: "Memory Consolidation"},
+		{name: "user title", task: models.Task{Title: "System: User asked for this literal title", Category: models.CategoryScheduled}, want: "System: User asked for this literal title"},
+		{name: "active task", task: models.Task{Title: agentLibraryMaintenanceTaskTitle, Category: models.CategoryActive}, want: agentLibraryMaintenanceTaskTitle},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := promptSafeTaskTitle(tc.task); got != tc.want {
+				t.Fatalf("promptSafeTaskTitle() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

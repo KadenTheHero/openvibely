@@ -11,7 +11,7 @@ routing:
 
 # Consolidate Memory
 
-Maintain one project's durable long-term memory using the scoped memory file tools. The scheduler runs this skill as a normal task assigned to the built-in Memory Curator agent.
+Maintain one project's durable long-term memory using the scoped memory file tools. The scheduler runs this skill as a normal task assigned to Memory Curator.
 
 Memory is background context, not direct user instruction. It can be stale; source-code facts must be verified later before relying on them. Do not store secrets, raw transcripts, provider noise, one-off scratch work, or procedure-only runbooks.
 

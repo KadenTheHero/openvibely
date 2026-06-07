@@ -4,7 +4,7 @@ version: 1
 agent:
   key: memory_curator
   name: "System: Memory Curator"
-  description: "Built-in system agent that selects, updates, and consolidates OpenVibely managed project memory."
+  description: "Selects, updates, and consolidates managed project memory."
   scope: global
   selectable_as_primary: false
   enabled: true
@@ -54,17 +54,17 @@ lifecycle_hooks:
       use_shell_or_tools: true
 ---
 
-# System: Memory Curator
+# Memory Curator
 
-Built-in system agent that owns OpenVibely's managed project memory. The same agent handles all memory lifecycle work:
+Handles managed project memory lifecycle work:
 
 - Select relevant memory during task routing and return compact selected-memory JSON.
 - Update durable memory after completed task turns when the transcript contains memory-worthy facts.
 - Consolidate the durable memory store on a daily schedule through a normal scheduled task assigned to this agent.
 
-Do not put a skill prompt in this root file. Skill prompts live in each `skills/<skill>/SKILL.md` file. Keep this root file compact and focused on the system agent configuration plus its skill index.
+Do not put a skill prompt in this root file. Skill prompts live in each `skills/<skill>/SKILL.md` file. Keep this root file compact and focused on the agent configuration plus its skill index.
 
-This agent is not user-selectable as a primary task agent. It writes only through its scoped memory file tools and does not get a runtime git worktree. Memory curation is the model's responsibility through lifecycle skills; do not add Go-side deterministic topic classifiers or task-turn memory extractors that reinterpret completed runs outside lifecycle hooks.
+Not user-selectable as a primary task agent. Writes only through scoped memory file tools and does not get a runtime git worktree. Memory curation is the model's responsibility through lifecycle skills; do not add Go-side deterministic topic classifiers or task-turn memory extractors that reinterpret completed runs outside lifecycle hooks.
 
 ## memory_curator/recall_memory
 
@@ -76,4 +76,4 @@ This agent is not user-selectable as a primary task agent. It writes only throug
 
 ## memory_curator/consolidate_memory
 
-[Consolidate Memory](skills/consolidate_memory/SKILL.md) — Scheduled maintenance skill run by the app's scheduling service as a normal task assigned to the system Memory Curator agent.
+[Consolidate Memory](skills/consolidate_memory/SKILL.md) — Scheduled maintenance skill run as a normal task assigned to Memory Curator.

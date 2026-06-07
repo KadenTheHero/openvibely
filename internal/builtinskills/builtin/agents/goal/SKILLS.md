@@ -4,7 +4,7 @@ version: 1
 agent:
   key: goal
   name: "System: Goal Agent"
-  description: "Built-in system agent that evaluates persisted task goals after task turns and queues continuation work when goals remain unmet."
+  description: "Evaluates persisted task goals after task turns and queues continuation work when goals remain unmet."
   scope: global
   selectable_as_primary: false
   enabled: true
@@ -33,13 +33,13 @@ lifecycle_hooks:
       use_shell_or_tools: true
 ---
 
-# System: Goal Agent
+# Goal Agent
 
-Built-in system agent that owns persisted task-goal evaluation. It runs after task turns with active goals, checks the latest stored goal, decides whether the objective is achieved, blocked, or still unmet, and acts only through goal tools plus `send_to_task`.
+Evaluates persisted task goals after task turns with active goals. Check the latest stored goal, decide whether the objective is achieved, blocked, or still unmet, and act only through goal tools plus `send_to_task`.
 
-Do not put the evaluation prompt in this root file. Skill prompts live in each `skills/<skill>/SKILL.md` file. Keep this root file compact and focused on the system agent configuration plus its skill index.
+Do not put the evaluation prompt in this root file. Skill prompts live in each `skills/<skill>/SKILL.md` file. Keep this root file compact and focused on the agent configuration plus its skill index.
 
-This agent is not user-selectable as a primary task agent. It must not edit repository files, run shell commands, replay original prompts, or start task executions directly. Continuation must be persisted as normal queued task-thread input so existing worker, queue, lifecycle, sandbox, and reload behavior remain authoritative.
+Not user-selectable as a primary task agent. Do not edit repository files, run shell commands, replay original prompts, or start task executions directly. Continuation must be persisted as normal queued task-thread input so existing worker, queue, lifecycle, sandbox, and reload behavior remain authoritative.
 
 ## goal/evaluate_task_goal
 

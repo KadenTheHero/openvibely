@@ -473,7 +473,7 @@ func normalizeGeneratedAgent(input generatedAgentResponse, description string, d
 }
 
 func buildAgentGenerationPrompt(description string) string {
-	return fmt.Sprintf(`Generate an OpenVibely agent definition.
+	return fmt.Sprintf(`Generate an agent definition.
 
 User request:
 "%s"
@@ -998,7 +998,7 @@ func buildGenerateAgentRepairPrompt(rawOutput string) string {
 	}
 	rawOutput = util.TruncateWithSuffix(rawOutput, generateAgentRepairOutputMaxLength, "...[truncated]")
 
-	return fmt.Sprintf(`The previous response was not valid JSON for an OpenVibely agent definition.
+	return fmt.Sprintf(`The previous response was not valid JSON for an agent definition.
 
 Rewrite it into strict JSON.
 Return ONLY one JSON object with these keys:

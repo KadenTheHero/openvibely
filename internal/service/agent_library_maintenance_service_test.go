@@ -314,6 +314,16 @@ func TestAgentLibraryMaintenanceService_EnsureProjectCreatesVisibleScheduledTask
 	if task.Category != models.CategoryScheduled || task.AgentDefinitionID == nil || *task.AgentDefinitionID != agent.ID {
 		t.Fatalf("unexpected task category/agent: category=%q agent=%v want=%s", task.Category, task.AgentDefinitionID, agent.ID)
 	}
+	for _, forbidden := range []string{"OpenVibely skill library", "built-in system agent", "Built-in system agent", "non-system agent", "generated skill", "generated skills"} {
+		if strings.Contains(task.Prompt, forbidden) {
+			t.Fatalf("scheduled skill maintenance prompt should use neutral wording; found %q in: %q", forbidden, task.Prompt)
+		}
+	}
+	for _, want := range []string{"this project's skill library", "Do not create, edit, archive, route, or reassign agents", "Do not change project memory"} {
+		if !strings.Contains(task.Prompt, want) {
+			t.Fatalf("scheduled skill maintenance prompt missing %q: %q", want, task.Prompt)
+		}
+	}
 	schedules, err := scheduleRepo.ListByTask(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("ListByTask: %v", err)

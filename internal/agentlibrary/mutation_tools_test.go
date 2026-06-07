@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/agentskills"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
 type recRecorder struct {
@@ -102,6 +103,25 @@ func TestSkillMutationTools_ExcludesAgentManage(t *testing.T) {
 	}
 	if owns, handled := tools.Filter("agent_manage"); owns || handled {
 		t.Fatalf("skill-only runtime must not handle agent_manage")
+	}
+}
+
+func TestMutationToolDescriptionsAvoidInternalPromptLabels(t *testing.T) {
+	imp, _, _, _ := buildTools(t)
+	for name, tools := range map[string]*llmcontracts.RuntimeTools{
+		"skill_manage":       SkillMutationTools(imp, nil),
+		"agent_skill_manage": LibraryAgentSkillMutationTools(imp, nil),
+	} {
+		if tools == nil || len(tools.Definitions) == 0 {
+			t.Fatalf("%s tools missing definitions", name)
+		}
+		for _, def := range tools.Definitions {
+			for _, forbidden := range []string{"generated skill", "generated skills", "protected/system agents", "non-system agent"} {
+				if strings.Contains(def.Description, forbidden) {
+					t.Fatalf("%s description contains unnecessary internal wording %q: %s", def.Name, forbidden, def.Description)
+				}
+			}
+		}
 	}
 }
 

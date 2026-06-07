@@ -1342,7 +1342,7 @@ func TestLLMService_ExecuteTaskWithAgent_CustomAgentSkillLibraryToolsUseRoutedSe
 	}
 	out, handled, isErr, err = rt.Executor(context.Background(), "agent_list", json.RawMessage(`{}`))
 	if !handled || err != nil || isErr || !strings.Contains(out, "custom_librarian") || strings.Contains(out, "skill_curator") || strings.Contains(out, "memory_curator") {
-		t.Fatalf("agent_list should expose non-system agents only handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+		t.Fatalf("agent_list should expose user-managed agents only handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
 	}
 	out, handled, isErr, err = rt.Executor(context.Background(), "skill_manage", json.RawMessage(`{"action":"write_file","handle":"custom_librarian/curate","scope":"global","support":{"kind":"references","path":"forbidden.md","content":"blocked"}}`))
 	if !handled || err != nil || !isErr || !strings.Contains(out, "invalid standalone skill handle") {

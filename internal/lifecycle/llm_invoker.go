@@ -161,42 +161,50 @@ func (i *LLMHookInvoker) resolveLLMConfig(ctx context.Context, hook models.Agent
 	return models.LLMConfig{Model: "inherit"}, agentDef, nil
 }
 
+const (
+	lifecycleHookInputPromptTemplate = "Hook input:\n```json\n%s\n```"
+	outputContractPromptTemplate     = "Return one JSON object that matches the `%s` output contract. Do not wrap the JSON in prose.%s"
+)
+
 // renderHookPrompt builds the prompt the hook sends to the LLM. The skill
 // body anchors the procedure; the prompt override (if any) is appended; the
 // hook input snapshot lands in a fenced JSON block so the model can read the
-// relevant context without ambiguity. observe_task_for_learning receives only
-// the retained chat context JSON when it is available.
+// relevant context without ambiguity.
 func renderHookPrompt(hook models.AgentLifecycleHook, input HookInput) (string, error) {
-	var b strings.Builder
-	if input.SkillBody != "" {
-		b.WriteString(strings.TrimSpace(input.SkillBody))
-		b.WriteString("\n\n")
-	}
-	if hook.PromptOverride != "" {
-		b.WriteString(strings.TrimSpace(hook.PromptOverride))
-		b.WriteString("\n\n")
-	}
-	if hook.OutputContract != "" {
-		b.WriteString("Return one JSON object that matches the `")
-		b.WriteString(string(hook.OutputContract))
-		b.WriteString("` output contract. Do not wrap the JSON in prose.\n")
-		if spec := outputContractPromptSpec(hook.OutputContract); spec != "" {
-			b.WriteString(spec)
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
-	snap := any(sanitizedHookInputForPrompt(input))
-	label := "Hook input"
-	encoded, err := json.MarshalIndent(snap, "", "  ")
+	encoded, err := json.MarshalIndent(sanitizedHookInputForPrompt(input), "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("render hook prompt: %w", err)
 	}
-	b.WriteString(label)
-	b.WriteString(":\n```json\n")
-	b.Write(encoded)
-	b.WriteString("\n```\n")
-	return b.String(), nil
+
+	sections := compactPromptSections(
+		input.SkillBody,
+		hook.PromptOverride,
+		renderOutputContractPrompt(hook.OutputContract),
+		fmt.Sprintf(lifecycleHookInputPromptTemplate, encoded),
+	)
+	return strings.Join(sections, "\n\n") + "\n", nil
+}
+
+func compactPromptSections(parts ...string) []string {
+	sections := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			sections = append(sections, part)
+		}
+	}
+	return sections
+}
+
+func renderOutputContractPrompt(contract models.LifecycleOutputContract) string {
+	if contract == "" {
+		return ""
+	}
+	spec := outputContractPromptSpec(contract)
+	if spec != "" {
+		spec = "\n" + spec
+	}
+	return fmt.Sprintf(outputContractPromptTemplate, contract, spec)
 }
 
 func sanitizedHookInputForPrompt(input HookInput) HookInput {

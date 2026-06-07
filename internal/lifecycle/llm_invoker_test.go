@@ -363,6 +363,50 @@ func TestLLMHookInvoker_RendersConversationTranscript(t *testing.T) {
 	}
 }
 
+func TestMaintainAgentSkillLibraryPromptAvoidsUnnecessaryInternalLabels(t *testing.T) {
+	for _, forbidden := range []string{"OpenVibely skill library", "Built-in system agent", "built-in system agent", "non-system agent", "generated skill", "generated skills"} {
+		if strings.Contains(MaintainAgentSkillLibraryPrompt, forbidden) {
+			t.Fatalf("maintenance prompt contains unnecessary internal/product wording %q:\n%s", forbidden, MaintainAgentSkillLibraryPrompt)
+		}
+	}
+	for _, want := range []string{"user-managed agent-owned skill library", "Do not create, edit, archive, route, or reassign agents", "Never modify protected agent skills"} {
+		if !strings.Contains(MaintainAgentSkillLibraryPrompt, want) {
+			t.Fatalf("maintenance prompt missing %q:\n%s", want, MaintainAgentSkillLibraryPrompt)
+		}
+	}
+}
+
+func TestRenderHookPrompt_UsesReadableTemplateAndPreservesContractInstructions(t *testing.T) {
+	prompt, err := renderHookPrompt(models.AgentLifecycleHook{
+		PromptOverride: "Use compact phrasing.",
+		OutputContract: models.OutputContractSelectedMemories,
+	}, HookInput{
+		SkillBody:  "# Recall Memory\nSelect relevant memory handles.",
+		TaskID:     "task-template",
+		TaskPrompt: "Use the provider memory.",
+	})
+	if err != nil {
+		t.Fatalf("renderHookPrompt: %v", err)
+	}
+	for _, want := range []string{
+		"# Recall Memory",
+		"Use compact phrasing.",
+		"Return one JSON object that matches the `selected_memories` output contract.",
+		"Required JSON shape",
+		"Choose only memory file handles listed in available_memories for this turn.",
+		"Hook input:\n```json",
+		`"task_id": "task-template"`,
+		`"task_prompt": "Use the provider memory."`,
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("rendered prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "OpenVibely") {
+		t.Fatalf("generic lifecycle hook prompt should not inject product name:\n%s", prompt)
+	}
+}
+
 func TestLLMHookInvoker_LearningSummaryPromptIncludesExactJSONShape(t *testing.T) {
 	caller := &fakeCaller{reply: `{"summary":"reviewed","nothing_to_save":true}`}
 	inv := NewLLMHookInvoker(caller, nil, nil)

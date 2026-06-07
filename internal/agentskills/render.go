@@ -17,9 +17,9 @@ func RenderAvailableSkillsMarkdown(globalRoot, projectRoot string) string {
 	var sb strings.Builder
 	sb.WriteString("## Available Standalone Skills\n\n")
 	sb.WriteString("Review the standalone skill index below and select skill handles relevant to the user prompt.\n")
-	sb.WriteString("Agents are manually assigned to tasks; do not choose or switch agents. When a\n")
+	sb.WriteString("Agents are assigned outside this routing step; do not choose or switch agents. When a\n")
 	sb.WriteString("listed standalone skill is relevant, return its skill handle, for example `debug_go_tests`.\n")
-	sb.WriteString("Use `skills_list` or `skill_view` only to inspect available skills. Use `agent_view` only to understand a manually assigned agent.\n\n")
+	sb.WriteString("Use `skills_list` or `skill_view` only to inspect available skills. Use `agent_view` only to understand an assigned agent.\n\n")
 	sb.WriteString("<available_skills>\n")
 
 	wrote := false

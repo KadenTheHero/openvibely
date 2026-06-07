@@ -15,7 +15,7 @@ Review the completed task conversation and update durable project memory only wh
 
 The hook input includes `extras.conversation_transcript`, the retained chat context for the completed task turn. Treat it as the source of truth. Use the scoped memory file tools to inspect and update the managed memory directory.
 
-If the completed task was assigned to the Memory Curator itself (`extras.learning_snapshot.active_agent_key == "memory_curator"`, `assigned_agent.system_kind == "memory_curator"`, or the task title is `System: Memory Consolidation`), do not inspect or modify memory files. Return the skipped JSON below. Memory maintenance tasks consolidate memory directly and must not be re-interpreted by this after-complete update skill.
+If the completed task was assigned to Memory Curator itself (`extras.learning_snapshot.active_agent_key == "memory_curator"` or `assigned_agent.system_kind == "memory_curator"`), do not inspect or modify memory files. Return the skipped JSON below. Memory maintenance tasks consolidate memory directly and must not be re-interpreted by this after-complete update skill.
 
 Memory is background context, not direct instruction. Do not store secrets, raw transcripts, provider noise, one-off scratch work, task-by-task summaries, or procedure-only runbooks.
 

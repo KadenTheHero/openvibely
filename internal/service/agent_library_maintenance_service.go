@@ -17,9 +17,9 @@ import (
 
 const agentLibraryMaintenanceTaskTitle = "System: Skill Library Maintenance"
 
-const agentLibraryMaintenanceTaskPrompt = `Review and maintain this project's OpenVibely skill library.
+const agentLibraryMaintenanceTaskPrompt = `Review and maintain this project's skill library.
 
-Use the skill tools to inspect the standalone skill library, load support files when needed, consolidate duplicate generated skills, archive generated skills that are clearly obsolete, and improve reusable SKILL.md instructions when a completed-task pattern proves they should change. Use agent reads only when manual agent context is relevant.
+Use the skill tools to inspect the standalone skill library, load support files when needed, consolidate duplicate standalone skills, archive standalone skills that are clearly obsolete, and improve reusable SKILL.md instructions when a completed-task pattern proves they should change. Use agent reads only when assigned-agent context is relevant.
 
 Agents are standalone user-managed configurations. Do not create, edit, archive, route, or reassign agents. Do not change project memory. Prefer small, evidence-backed skill updates. When done, respond with a concise summary of what changed or why nothing changed.`
 

@@ -22,7 +22,7 @@ Prefer the smallest durable skill change that will help future tasks:
 2. Patch an existing umbrella skill.
 3. Add a support file under an existing skill.
 4. Create a new reusable skill when no existing skill fits.
-5. Consolidate duplicate generated skills when the overlap is clear.
+5. Consolidate duplicate standalone skills when the overlap is clear.
 
 Before deciding to save learning, inspect the hook input's `learning_snapshot`. It names the assigned agent, selected agent-owned skills, selected standalone skills, and write policy. Inspect the existing standalone library with read tools (`skills_list`, `skill_view`) and use `agent_view` only to understand assigned-agent purpose when relevant. Do not change agent prompts, routing, tools, permissions, lifecycle hooks, selectable state, or skill attachments.
 
@@ -64,7 +64,7 @@ Do not turn background context into a skill unless it directly changes future ex
 
 If a lesson is only contextual, do not create or patch a skill. If it is procedural, prefer patching an existing umbrella skill over creating a narrow duplicate.
 
-When this completed task clearly proves two generated skills overlap, consolidate immediately instead of creating another sibling: patch the surviving skill with any useful reusable content, then call `skill_manage(action=archive, absorbed_into="<survivor>")` for the redundant skill. Only defer to scheduled maintenance when the duplicate relationship is uncertain.
+When this completed task clearly proves two standalone skills overlap, consolidate immediately instead of creating another sibling: patch the surviving skill with any useful reusable content, then call `skill_manage(action=archive, absorbed_into="<survivor>")` for the redundant skill. Only defer to scheduled maintenance when the duplicate relationship is uncertain.
 
 After a successful skill mutation, the mutation tool maintains the minimal top-level `skills/SKILLS.md` skill-link index for create/patch/archive actions. Do not attempt direct index-file edits.
 

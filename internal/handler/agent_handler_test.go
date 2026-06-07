@@ -894,6 +894,20 @@ func TestBuildAgentGenerationPrompt_DisallowsToolExecutionDuringGeneration(t *te
 	}
 }
 
+func TestBuildAgentGenerationPromptsAvoidProductNameInjection(t *testing.T) {
+	for name, prompt := range map[string]string{
+		"generate": buildAgentGenerationPrompt("review React UI"),
+		"repair":   buildGenerateAgentRepairPrompt("not json"),
+	} {
+		if strings.Contains(prompt, "OpenVibely agent definition") || strings.Contains(prompt, "Generate an OpenVibely") {
+			t.Fatalf("%s prompt should use neutral agent-definition wording:\n%s", name, prompt)
+		}
+		if !strings.Contains(prompt, "agent definition") {
+			t.Fatalf("%s prompt should still describe the schema target:\n%s", name, prompt)
+		}
+	}
+}
+
 func TestHandler_GenerateAgent_MalformedJSONFallsBackWithClearError(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.SetAgentRepo(repository.NewAgentRepo(db))

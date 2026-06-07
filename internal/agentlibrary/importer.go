@@ -958,7 +958,7 @@ func appendAgentRootIndexEntry(body string, decl *SkillDeclaration) string {
 		return strings.TrimRight(updated, "\n") + "\n"
 	}
 	if strings.TrimSpace(trimmedBody) == "" {
-		trimmedBody = "# OpenVibely Agents"
+		trimmedBody = "# Agents"
 	}
 	if strings.TrimSpace(trimmedBody) != "" {
 		trimmedBody += "\n\n"

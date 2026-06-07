@@ -102,12 +102,12 @@ func skillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspect
 		if inspector != nil {
 			agentList := llmcontracts.RuntimeToolDefinition{
 				Name:        "agent_list",
-				Description: "List enabled non-system agents that may have maintainable agent-owned skills. Returns prompt-safe summaries; use agent_view with a returned key for details.",
+				Description: "List enabled user-managed agents that may have maintainable agent-owned skills. Returns prompt-safe summaries; use agent_view with a returned key for details.",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 			}
 			agentView := llmcontracts.RuntimeToolDefinition{
 				Name:        "agent_view",
-				Description: "Inspect one manually assigned agent: prompt, permissions, tool grants, lifecycle hooks, and attached/manual skills. Accepts an agent key/slug.",
+				Description: "Inspect one assigned agent: prompt, permissions, tool grants, lifecycle hooks, and attached/manual skills. Accepts an agent key/slug.",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{"key":{"type":"string","description":"Agent key/slug to inspect"}},"required":["key"],"additionalProperties":false}`),
 			}
 			definitions = append(definitions, agentList, agentView)

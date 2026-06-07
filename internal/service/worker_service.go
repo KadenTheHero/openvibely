@@ -404,7 +404,7 @@ func (w *WorkerService) runLifecycleSlotWithExtras(ctx context.Context, when mod
 		TaskID:     task.ID,
 		TaskRunID:  taskRunID,
 		ProjectID:  task.ProjectID,
-		TaskTitle:  task.Title,
+		TaskTitle:  promptSafeTaskTitle(task),
 		TaskPrompt: taskPrompt,
 		WorkDir:    projectRepoPath(ctx, w.projectRepo, task.ProjectID),
 		Extras:     baseExtras,
@@ -434,6 +434,18 @@ func (w *WorkerService) runLifecycleSlotWithExtras(ctx context.Context, when mod
 		return lifecycle.SlotResult{When: when}
 	}
 	return result
+}
+
+func promptSafeTaskTitle(task models.Task) string {
+	if task.Category == models.CategoryScheduled {
+		switch task.Title {
+		case agentLibraryMaintenanceTaskTitle:
+			return "Skill Library Maintenance"
+		case memoryConsolidationTaskTitle:
+			return "Memory Consolidation"
+		}
+	}
+	return task.Title
 }
 
 func (w *WorkerService) lifecycleHookInput(ctx context.Context, hook models.AgentLifecycleHook, input lifecycle.HookInput) lifecycle.HookInput {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/memory"
@@ -276,6 +277,16 @@ func TestMemoryServiceEnsureProjectCreatesMemoryCuratorAgentAndSchedule(t *testi
 	}
 	if task.CreatedVia != models.TaskOriginWeb {
 		t.Fatalf("scheduled task created_via = %q, want normal web origin", task.CreatedVia)
+	}
+	for _, forbidden := range []string{"OpenVibely", "built-in system agent", "Built-in system agent"} {
+		if strings.Contains(task.Prompt, forbidden) {
+			t.Fatalf("scheduled memory consolidation prompt contains unnecessary wording %q: %q", forbidden, task.Prompt)
+		}
+	}
+	for _, want := range []string{"this project's durable memory", "Keep MEMORIES.md as the compact index", "Do not store transient logs"} {
+		if !strings.Contains(task.Prompt, want) {
+			t.Fatalf("scheduled memory consolidation prompt missing %q: %q", want, task.Prompt)
+		}
 	}
 	schedules, err := repos.schedules.ListByTask(ctx, task.ID)
 	if err != nil {
