@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # release-notes.sh — Collect commits and render the RELEASE_NOTES.md shell for an
-# OpenVibely release. The "What's Changed" section is intentionally left as a
-# placeholder — the orchestrating agent is responsible for reading COMMITS.txt and
-# synthesizing a high-level human-readable changelog using AI judgment.
+# OpenVibely release. The "Highlights" and "What's Changed" sections are
+# intentionally left as placeholders — the orchestrating agent is responsible for
+# reading COMMITS.txt and synthesizing release-specific notes using AI judgment.
 #
 # Usage:
 #   ./release-notes.sh <version> <prev_tag> [dist_dir]
@@ -11,7 +11,7 @@
 #
 # Outputs (written to dist_dir):
 #   COMMITS.txt         — raw git log for AI synthesis input
-#   RELEASE_NOTES.md    — template with placeholder; agent must fill in changelog
+#   RELEASE_NOTES.md    — template with placeholders; agent must fill highlights + changelog
 #
 # Environment variables:
 #   REPO_URL=<url>      Override GitHub repo URL (default: detected from git remote).
@@ -119,13 +119,12 @@ else
 fi
 
 ###############################################################################
-# 5. Render RELEASE_NOTES.md with an AI_CHANGELOG placeholder
+# 5. Render RELEASE_NOTES.md with AI placeholders
 #
 # The orchestrating agent MUST:
 #   1. Read COMMITS.txt
-#   2. Synthesize a high-level, user-facing "What's Changed" section
-#   3. Replace the AI_CHANGELOG_PLACEHOLDER block in RELEASE_NOTES.md with
-#      the synthesized content before publishing
+#   2. Synthesize release-specific highlights and a high-level, user-facing changelog
+#   3. Replace both AI placeholder blocks in RELEASE_NOTES.md before publishing
 ###############################################################################
 
 NOTES_FILE="${DIST_DIR}/RELEASE_NOTES.md"
@@ -146,15 +145,17 @@ OpenVibely is an open-source, self-hosted platform for AI-powered task schedulin
 
 ## Highlights
 
-- **Chat-first task orchestration** — Create and manage agent tasks directly from a chat interface
-- **Agent task board** — Visual Kanban-style view of all running and completed tasks
-- **Per-task git worktree isolation** — Each task runs in its own git worktree for clean parallel execution
-- **Reusable agents, skills, personalities, chained tasks, and MCP plugins**
-- **Anthropic / OpenAI / Ollama provider support** — Bring your own model or use a local Ollama instance
-- **GitHub / Slack / Telegram integration paths**
-- **Scheduling** — One-time, recurring (seconds → monthly), and calendar-aware schedules
-- **Self-hosted web app with SQLite, REST API, and Swagger UI**
-- **macOS desktop app** — Menubar-launchable, no terminal required
+<!-- AI_HIGHLIGHTS_PLACEHOLDER
+     The agent orchestrating this release must replace this block with 2–4 concise
+     bullets for the biggest user-facing changes that are new in this release.
+     Do not reuse static product feature bullets from prior releases.
+
+     Instructions for the agent:
+       1. Read dist/${VERSION}/COMMITS.txt — it contains every commit since ${PREV_LABEL}.
+       2. Identify the most notable changes that are genuinely new in this release.
+       3. Write concise bullets that complement the detailed What's Changed section.
+       4. Delete this comment block when done.
+-->
 
 ## What's Changed
 
@@ -212,6 +213,6 @@ info "  Notes file:    $NOTES_FILE"
 info ""
 info "NEXT STEP (agent action required):"
 info "  1. Read $COMMITS_FILE"
-info "  2. Synthesize a high-level, user-facing 'What's Changed' section"
-info "  3. Replace the AI_CHANGELOG_PLACEHOLDER block in $NOTES_FILE"
+info "  2. Synthesize release-specific highlights and a high-level, user-facing 'What's Changed' section"
+info "  3. Replace the AI_HIGHLIGHTS_PLACEHOLDER and AI_CHANGELOG_PLACEHOLDER blocks in $NOTES_FILE"
 info "  4. Then run: release-publish.sh $VERSION $DIST_DIR"

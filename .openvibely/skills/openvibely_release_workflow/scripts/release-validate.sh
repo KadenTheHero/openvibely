@@ -159,9 +159,9 @@ check_branch "2.3.4" "release/v2.3.4"
 ###############################################################################
 # 5. Release notes template structure
 #
-# The script produces a RELEASE_NOTES.md with an AI_CHANGELOG_PLACEHOLDER block
-# and a COMMITS.txt with raw git log. Validate that the expected sections and
-# markers are present in a simulated output string.
+# The script produces a RELEASE_NOTES.md with AI_HIGHLIGHTS_PLACEHOLDER and
+# AI_CHANGELOG_PLACEHOLDER blocks plus a COMMITS.txt with raw git log. Validate
+# that the expected sections and markers are present in a simulated output string.
 ###############################################################################
 
 section "Release notes template structure"
@@ -174,7 +174,9 @@ OpenVibely is an open-source, self-hosted platform
 
 ## Highlights
 
-- Chat-first task orchestration
+<!-- AI_HIGHLIGHTS_PLACEHOLDER
+     The agent orchestrating this release must replace this block
+-->
 
 ## What's Changed
 
@@ -207,22 +209,29 @@ check_notes_section() {
     fi
 }
 
-check_notes_section "version heading"            "# OpenVibely 0.1.1"
-check_notes_section "Highlights section"         "## Highlights"
-check_notes_section "What's Changed section"     "## What's Changed"
-check_notes_section "AI_CHANGELOG_PLACEHOLDER"   "AI_CHANGELOG_PLACEHOLDER"
-check_notes_section "Full changelog link"        "Full changelog:"
-check_notes_section "Downloads section"          "## Downloads"
-check_notes_section "Docker section"             "## Docker"
-check_notes_section "Known Limitations section"  "## Known Limitations"
-check_notes_section "docker pull command"        "docker pull openvibely/openvibely:"
+check_notes_section "version heading"              "# OpenVibely 0.1.1"
+check_notes_section "Highlights section"           "## Highlights"
+check_notes_section "AI_HIGHLIGHTS_PLACEHOLDER"     "AI_HIGHLIGHTS_PLACEHOLDER"
+check_notes_section "What's Changed section"       "## What's Changed"
+check_notes_section "AI_CHANGELOG_PLACEHOLDER"      "AI_CHANGELOG_PLACEHOLDER"
+check_notes_section "Full changelog link"          "Full changelog:"
+check_notes_section "Downloads section"            "## Downloads"
+check_notes_section "Docker section"               "## Docker"
+check_notes_section "Known Limitations section"    "## Known Limitations"
+check_notes_section "docker pull command"          "docker pull openvibely/openvibely:"
 
-# Validate placeholder is NOT already replaced (would indicate the script wrongly
-# auto-populated the changelog rather than leaving it for agent synthesis)
-if echo "$FAKE_NOTES" | grep -q "AI_CHANGELOG_PLACEHOLDER"; then
-    pass "notes: placeholder present (agent synthesis step is required)"
+# Validate placeholders are NOT already replaced (would indicate the script
+# wrongly bypassed the agent synthesis step)
+if echo "$FAKE_NOTES" | grep -q "AI_HIGHLIGHTS_PLACEHOLDER"; then
+    pass "notes: highlights placeholder present (agent synthesis step is required)"
 else
-    fail "notes: AI_CHANGELOG_PLACEHOLDER missing — template incorrectly bypassed synthesis step"
+    fail "notes: AI_HIGHLIGHTS_PLACEHOLDER missing — template incorrectly bypassed highlights synthesis"
+fi
+
+if echo "$FAKE_NOTES" | grep -q "AI_CHANGELOG_PLACEHOLDER"; then
+    pass "notes: changelog placeholder present (agent synthesis step is required)"
+else
+    fail "notes: AI_CHANGELOG_PLACEHOLDER missing — template incorrectly bypassed changelog synthesis"
 fi
 
 ###############################################################################

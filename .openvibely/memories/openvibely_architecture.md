@@ -4,7 +4,7 @@ type: project
 created: 2026-05-09
 updated: 2026-06-07
 source: consolidation
-source_id: memory_consolidation_2026_06_05
+source_id: memory_consolidation_2026_06_07
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -47,6 +47,8 @@ Shared conventions:
 - User-facing documentation also lives under `docs/`, generally as concise `*-user-guide.md` Markdown pages that match the existing guide structure. README editing preferences and docs-site positioning live in `coding_agent_product_discipline.md`.
 
 Runtime logging:
-- OpenVibely uses `internal/applog` as the internal runtime logging facade: `Infof` emits operational logs, while `Debugf` is gated by `OPENVIBELY_LOG_LEVEL=debug` and defaults off at info level.
+- OpenVibely uses `internal/applog` as the runtime logging facade: `Infof` emits operational logs, while `Debugf` is gated by `OPENVIBELY_LOG_LEVEL=debug` and defaults off at info level.
 - `start.sh` defaults `OPENVIBELY_LOG_LEVEL` to `info` while preserving env or `.env` overrides.
-- Internal package logging goes through `applog` unless a component intentionally owns a `*log.Logger` dependency.
+- App logging across internal/pkg/cmd code should go through `applog` (`Infof` or `Debugf`) unless a component intentionally owns a `*log.Logger` dependency or uses fatal/setup-only standard-log behavior such as `log.SetOutput`/`log.Fatalf`.
+- Raw LLM/user content, high-frequency stream/SSE/diff/poll/routing traces, and OpenAI/Anthropic provider header or rate-limit dumps are debug-level diagnostics, not info logs. Very hot or low-value traces may remain as commented `applog.Debugf` examples to avoid call overhead.
+- Streaming persistence errors and final one-time stream lifecycle summaries can remain info-level, but periodic/eager streaming flush success counters during active generation are debug-level noise.

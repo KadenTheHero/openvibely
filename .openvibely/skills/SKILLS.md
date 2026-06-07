@@ -91,7 +91,7 @@ always_use:
 
 ## openvibely_release_workflow
 
-[OpenVibely Release Workflow](openvibely_release_workflow/SKILL.md) — Automate the OpenVibely release process — preflight, artifact builds, AI-synthesized release notes, and GitHub release publishing — for a given semver version.
+[OpenVibely Release Workflow](openvibely_release_workflow/SKILL.md) — Automate the OpenVibely release process — preflight, artifact builds, AI-synthesized release notes, docs updates, and GitHub release publishing — for a given semver version.
 
 ## openvibely_local_resource_diagnostics
 
@@ -100,3 +100,7 @@ always_use:
 ## openvibely_worktree_merge_lineage_workflow
 
 [OpenVibely Worktree Merge And Lineage Workflow](openvibely_worktree_merge_lineage_workflow/SKILL.md) — Implement and audit OpenVibely task worktrees, merge actions, Changes tab recovery, cleanup, and chained-task lineage.
+
+## openvibely_test_coverage_audit_workflow
+
+[OpenVibely Test Coverage Audit Workflow](openvibely_test_coverage_audit_workflow/SKILL.md) — Audit OpenVibely test count, coverage gaps, and CPU-heavy test execution with repeatable Go commands.

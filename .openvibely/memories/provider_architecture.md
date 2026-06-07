@@ -35,6 +35,7 @@ Provider facts:
 - Anthropic uses `ProviderAnthropic`; OAuth/API key path uses `pkg/anthropicclient`; CLI path uses subprocess. Helpers live in `models/llm_config.go`.
 - Ollama uses `/api/chat`, `ollama_base_url` migration 056, defaulting to `http://localhost:11434`.
 - Raw LLM streaming token/output content is not intended for terminal logs at info level. Shared streaming output flows through `internal/llm/stream.Writer`, including OpenAI, Anthropic API/OAuth, Anthropic CLI, Codex CLI, and Ollama paths; subprocess stdout remains piped into the streaming path rather than mirrored to `os.Stdout`.
+- Provider diagnostics that can produce noisy multi-line output, especially OpenAI/Anthropic rate-limit and provider response header dumps such as `x-openai`/`x-anthropic` headers, are debug-level diagnostics rather than info-level operational logs; retry/error recovery and significant tool/compaction events remain info-level operational logs.
 
 Provider-native tools:
 - Provider-native web search is executed by providers, not local web tooling.
