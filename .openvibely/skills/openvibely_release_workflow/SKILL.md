@@ -200,6 +200,9 @@ After `release-notes.sh` runs, the agent must:
    - Inspect related diffs or touched paths for ambiguous commits when practical instead of guessing from subjects alone.
    - Sanity-check product and model names against the actual changed code/docs before publishing; do not rely on ambiguous commit subjects for exact marketing names or version numbers.
    - **Omit minor model version additions** (e.g. "Model X added to model selector") unless the model is a primary release feature. Adding a model to a dropdown is a maintenance change, not a release highlight. Omit it entirely or fold it into a generic "model updates" entry only if there are several such additions.
+   - **Omit bug fixes and reliability patches** unless they fix a critical, user-visible breakage that affected a core workflow. Individual crash fixes, scroll bugs, state resets, worker slot leaks, UI polish items (light/dark mode rendering, panel detail tweaks), and narrow edge-case corrections are too low-level for release notes. If several related reliability fixes exist, fold them into a single understated sentence at most, or omit entirely.
+   - **Omit UI panel detail changes** (e.g. column widths, button placement, diff rendering toggles, color coding in a sub-panel) — these are incremental polish, not release features.
+   - The bar for inclusion is: would a developer choosing whether to upgrade specifically care about this? If the answer is only "maybe, if they hit that exact bug", leave it out.
 4. **Replace both placeholder blocks** in `RELEASE_NOTES.md`: `AI_HIGHLIGHTS_PLACEHOLDER` and `AI_CHANGELOG_PLACEHOLDER`.
 5. Confirm the notes look correct before running `release-publish.sh`: no placeholder text, no duplicated commit-derived bullets, no old highlights from a previous release, no leaked secrets, and no claims about Docker/artifacts/features that the scripts did not actually build or verify.
 
