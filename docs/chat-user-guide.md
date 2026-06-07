@@ -4,13 +4,42 @@ Use `/chat` to orchestrate work across tasks in a project.
 
 ## What This Page Is For
 
-`/chat` is the high-level control surface for project orchestration.
+Chat is your single control center for everything happening in a project. Describe what you want — a bug fix, a new feature, a refactor across multiple files — and Chat creates the tasks, runs them in parallel, and reports back. No terminal, no separate AI windows, no manual task wiring. One conversation drives the whole project.
 
-Use it when you want to:
+## Chat As Your Single Control Center
 
-- plan and prioritize work,
-- create/update/run tasks through conversation,
-- inspect progress without jumping between many pages.
+The fundamental idea behind Chat is that you should never need more than one window open. Instead of keeping a terminal running, a separate AI session for research, another for writing code, and a third for tests, you stay on the Chat page and describe what you want done. OpenVibely creates the tasks, runs them, and reports back — all from that one conversation.
+
+This matters most when a goal has multiple parts. Say you want to add a new feature with backend changes, frontend wiring, and tests. Rather than creating each task manually, switching between them, and tracking what finished, you describe the goal once in Chat and ask it to break the work apart. Chat creates the task cards, starts the independent ones in parallel, and remains the place you return to ask what is done, what is blocked, and what should happen next.
+
+Chat embeds clickable task links inline as it creates work, so you can jump to a task detail, review the diff, send a follow-up, and come back to Chat without losing your place in the conversation.
+
+**What Chat can orchestrate from a single conversation:**
+
+- Create one task or many tasks from a single natural-language request
+- Set a persistent goal on a task so the Goal Agent drives it to completion automatically
+- Execute tasks and report their status back into the conversation
+- Send follow-up instructions into individual task threads
+- Inspect task state, changes, agent output, and lifecycle events
+- Schedule work, manage alerts, and coordinate across the whole project
+- Accept steering or queue new prompts while a response is already in progress
+
+## How Chat Writes Task Prompts
+
+When Chat creates a task, it does not paste your words verbatim. It rewrites your request into a detailed, actionable instruction the executing agent can work from immediately.
+
+If you say "fix the login bug," Chat creates a prompt along the lines of "Debug and fix the login bug that prevents users from signing in. Investigate the authentication flow, identify the root cause, and implement a fix with tests." The agent receives something specific enough to act on — you never had to spell all that out.
+
+This matters because the coding agent that runs the task has no memory of your conversation. The task prompt is everything it knows. A thin prompt produces thin results. Chat's rewrite closes that gap automatically.
+
+**What gets embedded in the rewritten prompt:**
+
+- The intent and scope of your request, expanded into a clear instruction
+- Any file paths, code snippets, or configuration you pasted into Chat — included verbatim so the agent acts on the exact code you showed it
+- Screenshots or attachments referenced alongside the relevant instruction
+- Concrete acceptance criteria or constraints you mentioned in passing
+
+You can always open the task and read the full prompt Chat wrote. If it missed something, edit it before the task runs.
 
 ## Chat Input Controls
 
@@ -23,27 +52,38 @@ At the bottom input bar you can set:
 
 Then send with Enter (Shift+Enter for new line).
 
-Why these controls matter:
-
-- Model selector controls execution engine for that message.
-- Mode selector controls whether the session is planning-only or execution-capable.
-- Attachments add context (files, screenshots, notes) to improve results.
-
 ## Orchestrate vs Plan
 
 ### Orchestrate
 
 Execution-capable mode for normal chat-driven task operations.
 
-Use this when you want actions to happen (for example creating/running/updating tasks).
+Use this when you want actions to happen — creating, running, or updating tasks.
 
 ### Plan
 
-Read-only planning mode for exploration and planning.
+Read-only planning mode for exploration and planning before anything is created or changed.
 
-Use this when you want strategy/design discussion first without triggering task mutations.
+When a `Plan` turn finishes, Chat surfaces a prompt to continue in `Orchestrate` mode so you can move from analysis to action without manually switching modes.
 
-When a plan is complete, the UI can prompt you to `Switch to Orchestrate` to execute the next step.
+A good default workflow is to start in `Plan` for vague or risky work, then switch to `Orchestrate` when the next task is clear.
+
+## Parallel Task Example
+
+When a goal has multiple independent parts, ask Chat to split them explicitly:
+
+```
+Plan the changes needed for OAuth login, then create separate tasks for backend routes, UI wiring, tests, and docs. Run the independent tasks in parallel where possible and keep this chat updated as they finish.
+```
+
+In `Orchestrate` mode, Chat creates multiple task cards and can execute them immediately. Each task keeps its own status, thread, lifecycle events, diff review, and worktree actions — but the original Chat page stays the place to ask what is done, what is blocked, and what comes next.
+
+## What Stays Centralized
+
+- The selected project context stays fixed for the whole conversation.
+- Chat history keeps the original goal, plan, and follow-up decisions together in one place.
+- Task links produced by Chat open the relevant task detail without leaving the project workflow.
+- Running chat turns can accept steering or queue follow-up prompts instead of forcing a new session.
 
 ## Chat History
 
@@ -58,6 +98,10 @@ When a plan is complete, the UI can prompt you to `Switch to Orchestrate` to exe
 
 Use attachments whenever the answer depends on local file content or visual context.
 
+## Queueing And Steering
+
+If Chat is already responding, a new prompt can become queued input for the next turn. When the UI offers active-turn steering, a prompt can instead redirect the current response. This keeps the project conversation responsive without forcing users to open another thread just to add context or correct scope.
+
 ## Project Scope
 
 Chat is project-scoped. The selected sidebar project controls chat context.
@@ -67,3 +111,7 @@ If results look unrelated, verify the currently selected project first.
 ## No-Model Behavior
 
 If no model is configured, send attempts are blocked and a toast links directly to `/models`.
+
+## When To Use Tasks Instead
+
+Use Tasks instead when you already know the exact unit of work and want board status, scheduling, or thread review without a conversational layer around it.

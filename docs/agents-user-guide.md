@@ -1,69 +1,84 @@
 # Agents User Guide
 
-Use `/agents` to define reusable agent behavior (prompting, tools, and plugins).
+Use `/agents` (System → Agents in the sidebar) to define reusable AI worker profiles.
 
 ## What This Page Is For
 
-An Agent is a reusable execution profile you can attach to tasks.
-
-It defines things like:
-
-- the system prompt/persona,
-- allowed tools,
-- plugin/runtime capabilities,
-- optional model override.
+An Agent is a reusable execution profile you can attach to tasks. It defines the system prompt/persona, allowed tools, routing hints, permissions, skills, and optional model override.
 
 Why this matters:
 
 - Keeps behavior consistent across many tasks.
-- Lets you separate “how to work” (agent) from “what to do” (task prompt).
+- Lets you separate "how to work" (agent) from "what to do" (task prompt).
+- Lets agent-owned skills improve over time for that specific role.
 
 ## Create an Agent
 
-1. Open `/agents`.
+1. Open `Agents` from the System section of the sidebar.
 2. Click `+ Add Agent`.
-3. In `Agent Details`, fill:
-   - `Name`
-   - `Description`
-   - `System Prompt`
-   - Optional model override (`Model`)
-4. Choose allowed tools.
-5. Click `Save`.
+3. Fill the `Details` tab:
+   - `Name`, `Description`, `Key`, `Scope`
+   - `System Prompt` (or use `Generate` from a description)
+   - Optional model override
+4. Choose allowed tools (file, shell, web, notebook, scoped-file, management).
+5. Set routing hints and permissions.
+6. Click `Save`.
 
 ## Generate From Description
 
-In `Agent Details`, enter a description and click `Generate`.
+In `Agent Details`, enter a description and click `Generate`. This drafts configuration from your description including a starter system prompt.
 
-This drafts agent configuration from your description and currently selected plugin context.
+Use this as a faster starting point for complex prompting rather than writing a full system prompt by hand.
 
-Why use generate:
+## Agent Detail Tabs
 
-- Faster starting point for complex prompts.
-- Good when you know outcome/role but do not want to handwrite the full system prompt.
+The agent detail page has three tabs: **Details**, **Skills**, and **Lifecycle Hooks**.
 
-## Plugin Management (Inside Agent Modal)
+**Details** covers identity, instructions, tools, routing, and permissions — the core agent configuration.
 
-### Plugins Tab
+**Skills** shows skills owned by this agent. From this tab you can create a new skill, edit an existing one, change skill state (enable, disable, always-use, archive), or preview which skills the router would currently select for a hypothetical task. System agents show a protected banner instead of edit controls.
 
-- Search installed/available plugins.
-- Toggle plugin selection for the current agent.
-- Selected plugins become part of that agent's runtime.
+**Lifecycle Hooks** lists the hooks configured for this agent. Each row shows the hook type (`route_task`, `before_run`, `after_complete`), the assigned skill, run policy, and tool-scope permissions. The tool-scope section controls what that hook's skill is allowed to do — read or write skills, read or write repository files, use shell, and so on. An explainer callout on the tab summarizes what tool-scope means for that hook type.
 
-Use this to control which capabilities are available during execution.
+## Scopes
 
-### Marketplace Tab
+| Scope | When To Use It |
+|---|---|
+| Global | The agent should be reusable across projects. |
+| Project | The agent is specific to one repository or workspace. |
 
-- Add marketplace source (repo/URL/path).
-- Sync or remove marketplace entries.
-- Restore default marketplaces.
+## How Agents Fit Tasks
 
-Use this when the plugin you need is not already installed/visible.
+When creating a task, choose an agent or leave selection on auto-routing. An agent can also define model behavior, so task execution inherits a consistent combination of instructions, tools, and provider settings.
 
-## Install and Uninstall Plugins
+When a task is assigned to an agent, Skill Curator works within that agent's own skill library and can improve only that assigned agent's skills after completion.
 
-Use controls in the modal plugin catalog to install/uninstall plugin packages.
+## System Agents
 
-Install is global to the app, while enablement is per-agent.
+OpenVibely includes protected system agents for lifecycle and learning work users should not have to manage manually.
+
+| System Agent | What It Does |
+|---|---|
+| `System: Memory Curator` | Autonomously creates and updates durable project memory from completed work, recalls relevant memory before tasks, and runs scheduled consolidation. |
+| `System: Goal Agent` | Evaluates active task goals after each task turn via the `evaluate_task_goal` lifecycle hook, queuing continuation follow-ups until the goal is achieved or blocked. |
+| `Skill Curator` | Routes reusable skills into tasks and improves standalone or agent-owned skill libraries from completed work. |
+
+`System: Memory Curator` is a protected on-disk system agent. Its skills live under `.openvibely/agents/memory_curator/` in the project repository and can be reviewed there, but the agent is not user-editable or selectable as a primary task agent. It uses scoped memory tools rooted at `.openvibely/memories`, skips normal repository-editing tools, and does not get a runtime git worktree.
+
+`System: Goal Agent` is similarly protected — it is not user-selectable as a primary task agent and acts only through goal tools and `send_to_task`. It does not edit repository files or run shell commands.
+
+## Skills And Lifecycle Hooks
+
+Agents can own skills on disk, and those skills can evolve from completed work.
+
+| Capability | User Impact |
+|---|---|
+| Agent-owned skills | Keep role-specific instructions and reusable habits attached to one agent. |
+| Lifecycle hooks | Run supporting steps before or after task execution. |
+| Skill routing | Select relevant agent skills for assigned-agent tasks. |
+| Agent skill learning | Improve the assigned agent's skills without writing into unrelated agents. |
+
+Use agent-owned skills when the knowledge should stay with that agent. Use standalone skills when the knowledge should help many agents or no-agent tasks.
 
 ## Edit and Delete
 
@@ -72,12 +87,13 @@ From any agent card menu:
 - `Edit`
 - `Delete`
 
-Deleting an agent unlinks tasks that referenced it.
+Deleting an agent unlinks tasks that referenced it. System agents cannot be deleted or edited.
 
-## Using Agents in Tasks
+## Best Practices
 
-On task create/edit forms, choose an `Agent` from the dropdown.
-
-Agent-defined plugins and runtime behavior apply when that task runs.
-
-Tip: use one agent per recurring workflow type (for example, implementation, code review, release prep) instead of one giant universal agent.
+- Name agents by the work they perform, not by an implementation detail.
+- Keep instructions focused enough that you can predict the agent's behavior.
+- Use permissions and scoped file settings to make consequences explicit.
+- Prefer routing hints when multiple agents could plausibly handle similar work.
+- Use project-scoped agents for repository-specific conventions.
+- Let agent-owned skills capture role-specific learning that should improve future assigned tasks.

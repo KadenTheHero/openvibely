@@ -24,6 +24,17 @@ What each step does:
 
 Lifecycle hook implementation skills, such as Skill Curator's `route_task`, must come from the lifecycle agent that owns the hook. Task skills are separate and come from the current task's skill scope.
 
+## Lifecycle Tab (Task Detail)
+
+The task detail page includes a **Lifecycle** tab that shows all lifecycle hook invocations for that task, newest first. Each entry displays the hook type, status badge (`queued`, `running`, `completed`, `failed`, `skipped`), and pills for what the hook involved:
+
+| Pill Type | What It Represents |
+|---|---|
+| Skill pill | A skill that was routed or selected for this hook invocation. |
+| Memory pill | A memory file that was recalled during a `before_run` hook. |
+
+Use the Refresh button to pull updated hook state while a task is still running.
+
 ## Skill Curator
 
 Skill Curator is the built-in system agent that owns the lifecycle skills used for skill selection and learning.
@@ -35,6 +46,41 @@ Common Skill Curator lifecycle skills:
 - `maintain_skill_library`: runs scheduled skill-library maintenance.
 
 Skill Curator can read skill indexes and selected skill files during routing. After a task completes, it can update skills through scoped write tools.
+
+## Goal Agent
+
+`System: Goal Agent` is a protected built-in system agent that drives persistent task objectives. It is not user-selectable as a primary task agent.
+
+The Goal Agent owns one `after_complete` lifecycle hook: `evaluate_task_goal`. After every task turn, this hook reads the stored goal, inspects the latest task transcript and tool evidence, and takes one of three actions:
+
+| Decision | What Happens |
+|---|---|
+| Not yet achieved | Queues a concrete continuation follow-up so the task keeps making progress. |
+| Achieved | Marks the goal `achieved` with an evidence-based reason and stops queuing. |
+| Blocked | Records a blocker key and reason; after the same blocker repeats, transitions the goal to `blocked` and stops queuing. |
+
+Goal continuation is injected as a normal queued follow-up, so it respects worker capacity, lifecycle hooks, worktree state, and all other existing task behaviors. The Goal Agent acts only through goal tools (`get_task_goal`, `mark_task_goal_achieved`, `report_task_goal_blocked`) and `send_to_task` — it does not edit repository files or run shell commands.
+
+See the [Tasks User Guide § Task Goals](./tasks-user-guide.md#task-goals) section for how to set a goal from the task edit dialog or from Chat Orchestrate mode.
+
+## The Skills Page
+
+Open `Skills` from the sidebar. The Skills page lists all skills in scope for the selected project: standalone and agent-owned, global and project-scoped.
+
+Each skill card shows the skill name, key, scope, and current state badges. Use the per-card dropdown to create, edit, enable or disable, toggle always-use, or archive a skill. The search bar filters by name or key.
+
+To add a skill manually, click `+ Create Skill`. To import a pre-written skill package, use `Import Skill Package`.
+
+## Skill States
+
+| State | What It Means |
+|---|---|
+| Enabled | Default. The skill is available for routing and appears in the routing context. |
+| Disabled | Hidden from routing. The skill does not appear as a routing candidate and is excluded from the `skills_list` tool output. Use this to suppress a skill without deleting it. |
+| Always Use | Forces the skill into every task run for its scope, regardless of routing selection. Stored in the `SKILLS.md` index. Use sparingly — always-use skills add context to every task even when they may not be relevant. |
+| Archived | Soft-deleted. Archived skills are removed from normal views and routing but remain on disk. |
+
+The always-use toggle can be set from the skill card dropdown or from the create/edit modal. A skill can be both always-use and enabled; a disabled skill's always-use flag has no effect while it is disabled.
 
 ## Standalone Skills
 

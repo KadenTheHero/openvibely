@@ -12,6 +12,16 @@ Why this matters:
 - Model choice affects quality, speed, cost, and tool behavior.
 - Default model determines what runs when a task/chat turn does not choose one explicitly.
 
+## Recommended Setup
+
+**Start with Codex `gpt-5.5` at `high` reasoning effort.** This is the default model and the setup OpenVibely is tuned against. It handles the full range of tasks — code generation, multi-file edits, test writing, debugging — and the `high` effort level gives it enough reasoning depth to produce solid results without the latency cost of `xhigh`. For most teams this is the only model config they need.
+
+If a task is complex enough that `high` is producing shallow plans or missing edge cases, switch that model config to `xhigh`. Reserve `xhigh` for the tasks where deeper reasoning is worth the extra time.
+
+**Secondary: Claude Opus** for teams that prefer Anthropic. Opus at `medium` effort performs comparably for most coding tasks at a lower latency and cost than higher effort levels.
+
+**Avoid `low` effort for task execution.** `low` is fast but the model skips reasoning steps that matter for correctness. It is fine for lightweight utility tasks but not recommended as a default.
+
 ## Add a Model
 
 1. Open `/models`.
@@ -30,10 +40,11 @@ Why this matters:
 
 | Model | Effort Options | Notes |
 |---|---|---|
+| Claude Opus 4.8 (`claude-opus-4-8`) | low / medium / high / max | Latest Opus generation. |
 | Claude Opus 4.7 (`claude-opus-4-7`) | low / medium / high / max | 128k max output, 1M context. |
 | Claude Sonnet 4.6 (`claude-sonnet-4-6`) | low / medium / high / max | 64k max output, 1M context. |
 | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | low / medium / high / max | Legacy. |
-| Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | none | Legacy. |
+| Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | none | No reasoning effort support. Legacy. |
 | Claude Opus 4.6 (`claude-opus-4-6`) | low / medium / high / max | Legacy. |
 
 ### OpenAI (Codex)
@@ -62,9 +73,7 @@ Where a low-level provider API still requires an output limit, OpenVibely choose
 ### Anthropic
 
 - Supports API key or OAuth-based flows.
-- OAuth can use API/web flow or CLI flow, depending on connection method.
-- `Claude Effort` matches the Claude Code extension's effort selector (`low`, `medium`, `high`, `max`). Blank/legacy saved configs keep the provider default behavior.
-- For Anthropic API/OAuth calls, `Claude Effort` is translated into an extended-thinking budget. For Claude CLI calls, the value is passed through as `--effort`.
+- `Claude Effort` (`low`, `medium`, `high`, `max`) is translated into an extended-thinking budget for API/OAuth calls. Blank/legacy saved configs keep the provider default behavior.
 
 ### OpenAI
 

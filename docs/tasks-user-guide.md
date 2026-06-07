@@ -81,6 +81,7 @@ Open a task card title to access tabs:
 - `Details`: run now, edit fields, delete
 - `Thread`: task-specific conversation/execution follow-ups
 - `Changes`: git diff and review comments
+- `Lifecycle`: hook invocations, skill pills, and recalled memory pills for every hook run
 - `Schedules`: add/edit/remove task schedules
 - `Chaining`: configure child-task creation flow
 - `Attachments`: manage attached files
@@ -89,6 +90,13 @@ Why task detail matters:
 
 - It is where you inspect execution output and iterate safely.
 - `Thread` and `Changes` are the two most important tabs during active debugging/build work.
+- `Lifecycle` shows which skills and memories were involved in each hook invocation.
+
+## Thread Follow-Ups And Steering
+
+Send follow-up messages from the `Thread` tab to continue a task after its initial run. Follow-ups queue when task capacity is full and dispatch when a slot frees.
+
+When a follow-up is queued and the task thread shows a pending input row, a **Steer** button appears on that row. Steering from a task thread redirects the active turn rather than queuing behind it — use this when you want to correct or narrow a follow-up before the worker picks it up. If the turn has already started, the steer may be rejected and you should send a new follow-up instead.
 
 ## Task Goals
 

@@ -24,7 +24,7 @@ OpenVibely is organized around a selected project. The sidebar project selector 
 | Chat | Ask questions, plan changes, attach context, and orchestrate work conversationally. |
 | Tasks | Create AI coding tasks, run them, inspect output, review changed files, and follow up. |
 | Schedule | Put project work on a calendar so tasks run once or repeat. |
-| Insights | Use grades, pulse, reflection, and analytics to understand activity, history, and trends. |
+| Insights | Use grades, pulse, reflection, and analytics (including token usage, cost, and model breakdowns) to understand activity, history, and trends. |
 | System | Configure alerts, models, agents, workers, channels, and personality. |
 
 ## Local Guides

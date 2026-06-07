@@ -12,42 +12,47 @@ Why this matters:
 - If limits are too high, your machine or model providers can get overloaded.
 - This page helps you balance speed (throughput) vs stability.
 
-## Worker Capacity & Utilization Table
+## The Workers Page
 
-The main table combines global and per-project limits so you can see capacity and pressure in one place.
+When you open Workers you see three things:
 
-### What each column means
+**Live stats header** — Updates every few seconds. Shows:
+- **Worker Pool Size** — the current global limit (how many execution slots exist)
+- **Tasks Running** — how many slots are active right now, shown as `running / pool size`
+- **Queue** — how many tasks are waiting for a free slot
+
+**Worker Capacity & Utilization table** — Global and every project in one view. The table auto-refreshes every 3 seconds. Columns:
 
 - `Scope`: whether the row is `Global` (all projects) or a single project.
 - `Name`: the project name (or `All Projects` for global).
 - `Running`: tasks currently executing.
 - `Queue`: tasks waiting for an available worker slot.
-- `Limit`: max concurrent workers allowed for that scope.
+- `Limit`: max concurrent workers allowed for that scope — editable inline, click, type, click **Set**.
 - `Status`: quick health signal (`Idle`, `Active`, `At capacity`).
 
-How to use this:
-
-- High `Queue` + frequent `At capacity` means increase limits (if your machine/provider can handle it).
-- Low `Running` with little/no queue usually means you can keep limits as-is.
+**Per-Model Worker Pools table** — Only appears if at least one model has a dedicated worker pool configured. Limits for model pools are set on the `/models` page, not here.
 
 ## Change Global Limit
 
-1. In the `Global` row, edit the limit value.
-2. Click `Set`.
-
-This sets the top-level cap across every project.
+In the `Global` row, edit the limit value and click `Set`. This sets the hard ceiling across every project.
 
 Use this when the whole app feels slow due to queueing, or when your machine needs stricter load control.
 
 ## Change Per-Project Limit
 
-1. Find a project row.
-2. Edit the limit value.
-3. Click `Set`.
+Find a project row, edit the limit value, and click `Set`. Setting a project to `0` removes the project-specific cap — that project is then only bounded by the global limit.
 
-Project limits reserve/fence capacity per project within the global cap.
+The page preserves any limit field you're actively editing during live refreshes, so typing a new value won't get overwritten before you hit Set.
 
-Use this when one busy project is starving other projects, or when a specific project should run faster than others.
+## How The Two Layers Work Together
+
+Global and project limits stack as a dual-layer cap:
+
+- A task needs to fit within **both** the global limit and its project's limit (if one is set) before it can run.
+- If a project has no limit set (`0`), it competes freely within the global pool.
+- If a project limit is set lower than the global limit, that project can never consume more than its own cap regardless of how many global slots are free.
+
+**Example:** Global = 5, Project A = 2, Project B = no limit. Project A can run at most 2 tasks at once even if 4 global slots are free. Project B can use up to all 5 global slots if nothing else is running.
 
 ## Per-Model Worker Pools
 
@@ -62,10 +67,13 @@ Model pool limits are configured from `/models`.
 
 ## Reading Status Quickly
 
-- `At capacity`: running workers reached limit.
-- `Active`: work is running below limit.
-- `Idle`: no running work.
-- Queue > 0 indicates backlog pressure.
+| Badge | Meaning |
+|---|---|
+| `Idle` | No tasks running in this scope. |
+| `Active` | Tasks are running and slots remain available. |
+| `At capacity` | All allowed slots for this scope are taken; new work queues. |
+
+A non-zero Queue with `At capacity` status means tasks are waiting. They will be dispatched as soon as a slot frees.
 
 ## Quick Tuning Patterns
 
