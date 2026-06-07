@@ -473,6 +473,28 @@ func TestRenderHookPrompt_SanitizesInvalidPreviousOutputPayload(t *testing.T) {
 	}
 }
 
+func TestRenderHookPrompt_StripsPreviousOutputExecutionID(t *testing.T) {
+	prompt, err := renderHookPrompt(models.AgentLifecycleHook{OutputContract: models.OutputContractSelectedSkills}, HookInput{
+		TaskID: "task",
+		PreviousOutputs: []HookOutput{{
+			HookID:         "hook-1",
+			SkillKey:       "skill_curator/route",
+			OutputContract: models.OutputContractSelectedSkills,
+			Payload:        json.RawMessage(`{"skills":["skill_a"]}`),
+			ExecutionID:    "internal-db-uuid-should-not-appear",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("renderHookPrompt: %v", err)
+	}
+	if strings.Contains(prompt, "internal-db-uuid-should-not-appear") {
+		t.Fatalf("prompt must not contain ExecutionID from PreviousOutputs, got:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "execution_id") {
+		t.Fatalf("prompt must not contain the execution_id key, got:\n%s", prompt)
+	}
+}
+
 func TestLLMHookInvoker_AttachesHookAgentToolsToRuntimeContext(t *testing.T) {
 	caller := &fakeCaller{reply: `{"summary":"ok","changed_paths":[],"skipped":false}`}
 	agentDef := &models.Agent{ID: "custom-agent", Name: "Custom Hook", Tools: []string{"mark_task_goal_achieved", "send_to_task"}}

@@ -253,6 +253,8 @@ func sanitizeHookOutputsForPrompt(outputs []HookOutput) []HookOutput {
 		if len(output.Payload) > 0 && !json.Valid(output.Payload) {
 			output.Payload = json.RawMessage(strconv.Quote(string(output.Payload)))
 		}
+		// Strip internal DB metadata that must never be exposed to the model.
+		output.ExecutionID = ""
 		out = append(out, output)
 	}
 	return out
