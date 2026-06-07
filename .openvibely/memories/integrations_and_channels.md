@@ -3,8 +3,8 @@ name: integrations_and_channels
 type: project
 created: 2026-05-09
 updated: 2026-06-07
-source: consolidation
-source_id: memory_consolidation_2026_06_07
+source: task
+source_id: task_474f3c7f2c8dc82584f10774929f8e06
 confidence: high
 title: Integrations and Channels
 ---
@@ -23,6 +23,9 @@ GitHub facts:
 - Projects support both `repo_url` and `repo_path`. GitHub URL projects still use `repo_path` as the local managed clone path; `repo_url` is the remote source.
 - Local Path availability is controlled by `OPENVIBELY_ENABLE_LOCAL_REPO_PATH`.
 - GitHub URL mode clones into managed storage (`PROJECT_REPO_ROOT`, default `./repos`, Docker default `/data/repos`).
+- GitHub URL project creation preserves configured PAT/GitHub App operation-token cloning, but fresh installs without a GitHub token fall back to local `git clone` so public repos and locally credentialed SSH/HTTPS private repos can still import.
+- GitHub URL local fallback clones run non-interactively with `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=true`, and `SSH_ASKPASS=true`, matching other remote git operations so SSH/private-repo credential or host-key prompts fail clearly instead of blocking.
+- GitHub URL project creation shows in-flight clone progress in the New Project create button with spinner text `Cloning repository...` while the HTMX create/clone request is active.
 - Task Changes supports one-click PR creation, one PR per task, and reuse of existing task/remote-branch PRs.
 
 Webhook facts:

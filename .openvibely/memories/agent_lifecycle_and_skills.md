@@ -52,7 +52,8 @@ Lifecycle facts:
 - Routing/effective-mode logic has one primary agent/effective mode. Multi-agent permission merging is not part of the current design.
 - Ordinary tasks may intentionally have no assigned primary agent. Explicit assigned primary agents skip standalone skill routing and use that agent's curated/default or manual skill selection.
 - Maintenance/system agents are excluded from auto-routing via `selectable_as_primary=false`.
-- Lifecycle visibility renders structured selected-skill and selected-memory route decisions as compact prompt-safe badges/pills.
+- Lifecycle visibility renders structured selected-skill and selected-memory `route_task` decisions as compact prompt-safe badges/pills, without duplicate plain-text selected-handle summaries.
+- `after_complete` hook rows such as learning and memory-update summaries should still render their text summaries; selected-handle summary suppression is scoped to structured route-selection rows.
 - Lifecycle output contracts constrain final stored/validated results, not the agent's working notes or tool use.
 
 Goal Agent facts:

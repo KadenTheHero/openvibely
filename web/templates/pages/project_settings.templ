@@ -314,13 +314,14 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) {
 			<div class="modal-box">
 				@ModalCloseButton("new_project_modal", "Close new project dialog")
 				<h3 class="font-bold text-lg mb-4 pr-10">New Project</h3>
-			<form
-				id="new-project-form"
-				method="post"
-				action="/projects"
-				hx-post="/projects"
-				hx-swap="none"
-			>
+				<form
+					id="new-project-form"
+					method="post"
+					action="/projects"
+					hx-post="/projects"
+					hx-swap="none"
+					hx-indicator="#new-project-create-progress"
+				>
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Name</span></label>
 					<input type="text" id="new-project-name" name="name" class="input input-bordered" required placeholder="My Project"/>
@@ -426,10 +427,14 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) {
 					<svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
 					<span id="new-project-error-text"></span>
 				</div>
-				<div class="modal-action">
-					<button type="button" class="btn" onclick="new_project_modal.close()">Cancel</button>
-					<button type="submit" class="btn btn-primary">Create</button>
-				</div>
+					<div class="modal-action">
+						<button type="button" id="new-project-cancel-button" class="btn" onclick="new_project_modal.close()">Cancel</button>
+						<button type="submit" id="new-project-create-button" class="btn btn-primary">
+							<span id="new-project-create-progress" class="loading loading-spinner loading-sm htmx-indicator" aria-hidden="true"></span>
+							<span class="new-project-create-label">Create</span>
+							<span class="new-project-create-busy-label hidden">Cloning repository...</span>
+						</button>
+					</div>
 			</form>
 		</div>
 		<form method="dialog" class="modal-backdrop">
@@ -452,10 +457,22 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) {
 			var repoSourceSelect = document.getElementById('new-project-repo-source');
 			var localFields = document.getElementById('new-project-local-fields');
 			var githubFields = document.getElementById('new-project-github-fields');
-			var browseBtn = document.getElementById('new-project-browse-btn');
-			var localRepoPathEnabled = !!modal && modal.dataset.localRepoPathEnabled === 'true';
+				var browseBtn = document.getElementById('new-project-browse-btn');
+				var form = document.getElementById('new-project-form');
+				var createButton = document.getElementById('new-project-create-button');
+				var cancelButton = document.getElementById('new-project-cancel-button');
+				var createLabel = createButton ? createButton.querySelector('.new-project-create-label') : null;
+				var createBusyLabel = createButton ? createButton.querySelector('.new-project-create-busy-label') : null;
+				var localRepoPathEnabled = !!modal && modal.dataset.localRepoPathEnabled === 'true';
 
-			function updatePathPreview() {
+				function setCreateBusy(isBusy) {
+					if (createButton) createButton.disabled = !!isBusy;
+					if (cancelButton) cancelButton.disabled = !!isBusy;
+					if (createLabel) createLabel.classList.toggle('hidden', !!isBusy);
+					if (createBusyLabel) createBusyLabel.classList.toggle('hidden', !isBusy);
+				}
+
+				function updatePathPreview() {
 				if (!repoPathInput || !createDirCheckbox || !repoSourceSelect || !pathPreview || !pathPreviewText) return;
 				var path = repoPathInput.value.trim();
 				if (repoSourceSelect.value === 'local' && createDirCheckbox.checked && path) {
@@ -563,12 +580,26 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) {
 					chooseDirectoryNative();
 				});
 			}
-			if (repoSourceSelect && localRepoPathEnabled) {
-				repoSourceSelect.addEventListener('change', updateRepoSourceFields);
-				updateRepoSourceFields();
-			}
+				if (repoSourceSelect && localRepoPathEnabled) {
+					repoSourceSelect.addEventListener('change', updateRepoSourceFields);
+					updateRepoSourceFields();
+				}
+				if (form) {
+					form.addEventListener('htmx:beforeRequest', function() {
+						setCreateBusy(true);
+					});
+					form.addEventListener('htmx:afterRequest', function() {
+						setCreateBusy(false);
+					});
+					form.addEventListener('htmx:sendError', function() {
+						setCreateBusy(false);
+					});
+					form.addEventListener('htmx:abort', function() {
+						setCreateBusy(false);
+					});
+				}
 
-			if (modal) {
+				if (modal) {
 				modal.addEventListener('close', function() {
 					var form = document.getElementById('new-project-form');
 					if (form) form.reset();

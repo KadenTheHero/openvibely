@@ -3,8 +3,8 @@ name: provider_architecture
 type: project
 created: 2026-05-09
 updated: 2026-06-07
-source: consolidation
-source_id: memory_consolidation_2026_06_07
+source: task
+source_id: f741edb81ccf4445e54f75245ffb98bb
 confidence: high
 title: Provider Architecture
 ---
@@ -28,6 +28,10 @@ Current model-call shape as of 2026-06-07:
 - Direct utility services such as architect, backlog, collision, insights, trend, and upcoming use direct-style model calls and generally do not run task/chat lifecycle memory routing unless deliberately redesigned as user/task turns.
 
 Provider facts:
+- Provider/model selection is based on the selected `models.LLMConfig`, especially its `Provider`, `Model`, and `AuthMethod`; the model string alone does not choose the provider.
+- Normal task runs select the concrete model config in this order: `Task.AgentID`, then project `DefaultAgentConfigID`, then the global default `agent_configs.is_default = 1`.
+- Interactive chat selection differs: explicit `agent_id` uses that model config, `agent_id=default` uses the global default, and empty/`auto` triggers complexity/vision-based model selection rather than defaulting.
+- `Task.AgentDefinitionID` selects persona/system prompt/skills, not the provider/model; provider still comes from the selected `LLMConfig`.
 - OpenAI supports Responses API, Completions API, and Codex CLI fallback.
 - OpenAI Responses `SendAgentic` does Codex-style client-side history compaction for API key and OAuth flows.
 - OpenAI compaction uses a dedicated compact prompt and preserves both the opening task objective and newest context; it compacts prior history only, so it does not fire on first/simple turns with empty history.

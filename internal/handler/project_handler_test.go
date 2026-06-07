@@ -75,6 +75,30 @@ func TestListProjects(t *testing.T) {
 
 // ---- CreateProject ----
 
+func TestNewProjectDialog_CreateButtonShowsCloneProgress(t *testing.T) {
+	tc := NewTestContext(t)
+	rec := tc.HTMX().Get("/projects/new").Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, expected := range []string{
+		`id="new-project-form"`,
+		`hx-indicator="#new-project-create-progress"`,
+		`id="new-project-create-button"`,
+		`id="new-project-create-progress"`,
+		`loading loading-spinner loading-sm htmx-indicator`,
+		`Cloning repository...`,
+		`id="new-project-cancel-button"`,
+		`setCreateBusy(true)`,
+		`setCreateBusy(false)`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected new project dialog to contain %q", expected)
+		}
+	}
+}
+
 func TestCreateProject_Local_Success_Redirect(t *testing.T) {
 	tc := NewTestContext(t)
 	rec := tc.HTTP().Post("/projects").WithForm(url.Values{
@@ -142,7 +166,7 @@ func TestUpdateProject_Success_HTMX(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Original Name").Build()
 
-	rec := tc.HTMX().Put("/projects/"+project.ID).WithForm(url.Values{
+	rec := tc.HTMX().Put("/projects/" + project.ID).WithForm(url.Values{
 		"name":        {"Renamed Project"},
 		"repo_source": {"local"},
 		"repo_path":   {""},
@@ -159,7 +183,7 @@ func TestUpdateProject_Success_Redirect(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Old Name").Build()
 
-	rec := tc.HTTP().Put("/projects/"+project.ID).WithForm(url.Values{
+	rec := tc.HTTP().Put("/projects/" + project.ID).WithForm(url.Values{
 		"name":        {"New Name"},
 		"repo_source": {"local"},
 	}).Execute()
