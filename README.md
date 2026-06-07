@@ -216,12 +216,7 @@ Common targets:
 
 ## For AI Agents
 
-If you are working on this repository as an AI coding agent, read in this order:
-
-1. `AGENTS.md`
-2. `MEMORIES.md`
-3. `guardrails.md`
-4. `PRACTICES.md`
+Repository-specific guidance is app-managed under `.openvibely/` instead of root instruction markdown. Use the project skill index at `.openvibely/skills/SKILLS.md` and managed memory index at `.openvibely/memories/MEMORIES.md` through OpenVibely's normal skill and memory tooling.
 
 ## License
 

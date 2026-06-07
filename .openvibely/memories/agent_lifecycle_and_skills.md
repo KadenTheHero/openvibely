@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-06-06
-source: consolidation
-source_id: memory_consolidation_2026_06_06
+updated: 2026-06-07
+source: after_complete
+source_id: 972e198a18ba3458bae9b5453c96d8bf
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -18,7 +18,6 @@ Catalog model:
 - This subsystem has not shipped broadly, so do not preserve compatibility aliases, old paths, or intermediate names unless real persisted release data requires them.
 - Agents are global by default and reusable across projects. Project-scoped agents/skills live under `<project_root>/.openvibely/agents/...`; global agents live under the app/config agents root shared by local web/server and desktop modes unless explicitly overridden.
 - The on-disk catalog is authoritative after seed through per-agent declarations: `<agent_key>/SKILLS.md` lists that agent’s skills/metadata, and `<agent_key>/skills/<skill_key>/SKILL.md` is the skill body. Do not rely on a root `<agents_root>/AGENTS.md` index.
-- Standalone skills live under `<root>/skills/<skill_key>/SKILL.md`; agent-owned skills live under `<root>/agents/<agent_key>/skills/<skill_key>/SKILL.md`. Project definitions win over global definitions on duplicate keys.
 - Standalone skills are file-backed, not DB-backed. `<root>/skills/SKILLS.md` `## <handle>` headings are canonical handles and loaders expect matching `<root>/skills/<handle>/SKILL.md`; heading/link/frontmatter mismatches can make manually added skills invisible.
 - Product direction favors explicit import/index maintenance over automatic disk auto-discovery for manually dropped skill directories.
 - Skill enabled/disabled state is authoritative catalog/frontmatter metadata: `skill.enabled: false` disables a skill, absent/true means enabled. Runtime catalogs for task execution, lifecycle hooks, skill routing/selection, `skill_view`, and context injection must exclude disabled skills; management/admin listings should still show them as manageable.
@@ -29,7 +28,7 @@ Catalog model:
 - Missing indexes should degrade behavior but not crash or trigger deterministic regeneration. Bootstrap helpers should create directories only, except for built-in first-run seeding. Do not reintroduce deterministic index rebuilders, runtime index generators, or a `rebuild_indexes` runtime tool.
 
 Mutation and migration behavior:
-- `agent_manage`, `skill_manage`, and maintenance instructions should rely on mutation tools for catalog mutations where available. Scoped file edits are for focused narrative polish in managed declarations/indexes, not redundant manual minimal-link edits when tooling maintains links.
+- `agent_manage`, `skill_manage`, and maintenance instructions should rely on mutation tools for catalog mutations where available. Scoped file edits are for focused narrative polish in managed declarations/indexes or project skill/index content, not redundant manual minimal-link edits when tooling maintains links.
 - Skill handles and paths must remain constrained to indexed catalog entries; never allow model-supplied arbitrary paths.
 - Standalone skill mutations must keep top-level `<root>/skills/SKILLS.md` consistent with `<root>/skills/<skill_key>/SKILL.md`; deleting only the directory can leave stale advertised skills.
 - Agent root `SKILLS.md` is the authoritative overview/index and metadata surface for Agents page, lifecycle hooks, task loading, tool permissions, and declarations. It links to skill files and is updated idempotently, but it is not the canonical prompt container.

@@ -165,6 +165,47 @@ func TestBuildCatalog_ProjectOverridesGlobalForSameHandle(t *testing.T) {
 	}
 }
 
+func TestBuildCatalog_LoadsTrackedOpenVibelyProjectGuidance(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	repoRoot := filepath.Clean(filepath.Join(wd, "..", ".."))
+
+	projectRoot := filepath.Join(repoRoot, ".openvibely")
+	cat, err := BuildCatalog("t", "", projectRoot)
+	if err != nil {
+		t.Fatalf("build catalog: %v", err)
+	}
+	entry, ok := cat.Lookup("openvibely_project_guidance")
+	if !ok {
+		t.Fatalf("expected tracked openvibely_project_guidance skill in project catalog")
+	}
+	if entry.Source != SourceProject {
+		t.Fatalf("expected project-scoped guidance skill, got %s", entry.Source)
+	}
+	if !strings.HasPrefix(entry.AbsolutePath, filepath.Join(projectRoot, SkillsDir)) {
+		t.Fatalf("expected guidance skill under project .openvibely/skills, got %s", entry.AbsolutePath)
+	}
+	body, err := os.ReadFile(entry.AbsolutePath)
+	if err != nil {
+		t.Fatalf("read guidance skill: %v", err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"Never delete, truncate, or overwrite `openvibely.db`",
+		"After main Go app code changes, run the required validation chain",
+		"./start.sh              # Start server",
+		"| Entry point | `cmd/server/main.go` |",
+		"`models`: plain structs and domain rules",
+		"Chat bubbles and input containers should not use visible borders",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("guidance skill missing migrated guidance %q", want)
+		}
+	}
+}
+
 func TestBuildCatalog_IgnoresMissingRoots(t *testing.T) {
 	cat, err := BuildCatalog("t", "/nonexistent/global", "/nonexistent/project")
 	if err != nil {

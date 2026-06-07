@@ -73,6 +73,12 @@ Notes:
 - Home-relative values like `~/code/repo` are accepted and normalized.
 - If local-path mode is disabled in your environment, this option is hidden and only `GitHub URL` is available.
 
+## Project Guidance
+
+OpenVibely loads reusable project guidance from app-managed memory and skills, such as `.openvibely/memories/` and `.openvibely/skills/`. Use managed memory for durable project facts and skills for reusable task guidance.
+
+Projects may still provide root instruction files such as `AGENTS.md` or `CLAUDE.md` for compatibility with other tools and local workflows, but OpenVibely's own repository guidance is stored in managed project skills/memory rather than requiring those root files to exist.
+
 ## Default Model vs Global Default
 
 `Default Model` in the project form is a per-project override.

@@ -959,7 +959,7 @@ func TestSendAgentic_AutoCompactionBeforeFirstTurn_APIKey(t *testing.T) {
 
 func TestSendAgentic_AutoCompactionUsesDedicatedCompactionPrompt(t *testing.T) {
 	requests := 0
-	systemPrompt := "SYSTEM: read MEMORY.md, guardrails.md, patterns.md"
+	systemPrompt := "SYSTEM: use managed memory and selected project skills"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++

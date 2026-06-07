@@ -1,0 +1,147 @@
+---
+kind: openvibely.agent_skill
+version: 1
+skill:
+    key: openvibely_project_guidance
+    name: OpenVibely Project Guidance
+    scope: project
+    description: Static coding-agent guidance for working on this OpenVibely repository.
+---
+
+# OpenVibely Project Guidance
+
+Use this project-managed skill for coding-agent work in the OpenVibely repository or closely related sibling repos. Durable project context, feature decisions, user preferences, feedback, and task/chat lessons belong in managed memory under this repository's `.openvibely/memories/` directory, not root markdown instruction files.
+
+## Stop First
+
+- Never create documentation or summary files for your work. Do not create `*_FIX.md`, `*_SUMMARY.md`, `*_VERIFICATION.md`, `README_*.md`, `TECHNICAL_*.md`, `ACTION_PLAN_*.md`, `FINDINGS_*.md`, `INVESTIGATION_*.md`, `COMMIT_MESSAGE.txt`, QA checklist files, or similar summary markdown. The code and commit messages are the documentation.
+- Avoid validation loops, but do not leave compile or test failures unresolved after code edits. Make all intended code changes first, run the required validation chain once, fix any failures, and rerun only when needed to confirm the fix.
+- If code changed, use `-count=1` for tests. Skip it only when re-running without code changes and cached results are acceptable.
+- Avoid read-only tool loops. Repeated `read_file`, `list_files`, and `grep_search` calls without progress usually mean missing objective or weak handoff context.
+- Use parallel tool execution only for read-only tools. If a turn includes `write_file`, `edit_file`, `bash`, or any unknown or mutating tool, execute serially.
+- For `edit_file`, expand stable surrounding context when a replacement fails instead of retrying the same snippet. Use bulk replacement only when intentionally replacing every occurrence.
+- When a user asks to explain something better, says "no word salad", or challenges a prior diagnosis, explain the exact current bug, fix, or evidence in plain causal terms. Re-read the current diff/context if needed; do not paste unrelated instruction templates, cite stale commits as proof of a live fix, or claim a bug is fixed without current validation evidence.
+
+## Critical Rules
+
+- Never delete, truncate, or overwrite `openvibely.db`; it contains user data.
+- Never run `DROP TABLE` on production tables except in goose migrations.
+- Never run `DELETE FROM` without a `WHERE` clause on production tables.
+- Never change `busy_timeout`, `MaxOpenConns`, or `_loc=UTC` in `internal/database/database.go`.
+- Never write tests that hit real LLM APIs or spawn CLI subprocesses. Use `models.ProviderTest` with `SetLLMCaller(testutil.NewMockLLMCaller())`.
+- Strip `CLAUDECODE` from the environment when spawning Claude CLI subprocesses.
+- Never persist or log GitHub App installation access tokens, GitHub PATs, private-key material, OAuth tokens, API keys, or webhook secrets. Mint operation tokens per operation and keep token use in process.
+- Server-side git commands that may contact remotes must run non-interactively and use the same GitHub operation-token environment injection as clone/push paths.
+- Use `TaskRepo.ClaimTask()` for atomic task claiming. Never set task status to `running` directly.
+- Use parameterized SQL with `?` placeholders.
+- Use `context.Context` for database and service calls.
+- Respect foreign-key and CHECK constraints in test fixtures. Create referenced rows first and use valid enum values.
+
+## Development Workflow
+
+- Confirm where a change belongs before editing. Follow the layered architecture: `models -> repository -> service -> handler -> templates`.
+  - `models`: plain structs and domain rules.
+  - `repository`: raw SQL access with context-aware calls.
+  - `service`: orchestration and business logic.
+  - `handler`: HTTP parsing/rendering and response shaping.
+- Prefer coherent end-to-end slices through the proper layers over scattered one-off edits.
+- Keep changes minimal, explicit, and directly tied to the request.
+- Do not add features, broad refactors, compatibility shims, fallback migrations, or abstractions unless the task requires them.
+- Use logs intentionally. `logs/openvibely.log` is useful for behavior verification and diagnosis.
+- For handlers with setter-injected optional dependencies, validate required dependencies at handler entry and return controlled HTTP errors instead of nil-pointer panics.
+- When introducing behavior modes, propagate mode through typed request contracts and enforce behavior in provider/tool policy layers, not only in prompt text.
+- For task-execution actions, prefer exact entity targeting by `task_id` or `title`; reserve tag/priority filters for explicit group execution requests.
+- If a user asks to create an OpenVibely task but not run it, create it as `category=backlog`; active-category task creation auto-submits to the worker. Prefer the real task creation API/handler over emitting a marker when the user wants an actual persisted task.
+- If tasks run in isolated worktrees, include explicit worktree orientation in the model prompt while keeping runtime workdir enforcement as the source of truth.
+
+
+## Adding Features
+
+- New tables or columns require a new migration in `internal/database/migrations/` using the existing goose numbering pattern.
+- New models belong in `internal/models/`, repositories in `internal/repository/`, services in `internal/service/`, and handlers in `internal/handler/`.
+- Register new handlers and routes in `internal/handler/handler.go`.
+- Update templates under `web/templates/**/*.templ` when UI changes are needed, then run `templ generate`.
+
+## Testing And Validation
+
+- Always create or update tests when fixing bugs or adding features.
+- Every bug fix needs a regression test that reproduces the failure scenario.
+- Use `testutil.NewTestDB(t)` for DB-backed tests in the main Go app.
+- Never use `t.Parallel()` with shared database connections.
+- Production baseline should not assume a default model config. In tests, use `testutil.NewTestDB(t)` or create one explicitly.
+- Run `templ generate` after modifying `.templ` files.
+- After main Go app code changes, run the required validation chain at the end: `go build ./cmd/server && go test ./internal/... -count=1 -timeout 60s`. Include `templ generate &&` first if `.templ` files changed.
+
+
+## Running
+
+```bash
+./start.sh              # Start server (logs to logs/openvibely.log)
+make dev                # Development with live reload
+go test ./internal/... -count=1 -timeout 60s  # Tests
+```
+
+## Key Files
+
+| What | Where |
+|------|-------|
+| Entry point | `cmd/server/main.go` |
+| Database setup | `internal/database/database.go` |
+| Migrations | `internal/database/migrations/*.sql` |
+| Models | `internal/models/*.go` |
+| Repositories | `internal/repository/*_repo.go` |
+| Services | `internal/service/*_service.go` |
+| HTTP Handlers | `internal/handler/*_handler.go` |
+| Route registration | `internal/handler/handler.go` |
+| Templates | `web/templates/**/*.templ` |
+| Test helper | `internal/testutil/testdb.go` |
+
+## Data Access
+
+- Repositories use raw SQL, not an ORM.
+- Prefer `QueryRowContext` with `RETURNING` for inserts that need created row data.
+- Enforce cross-row invariants inside repository transactions so behavior remains correct when handlers or UI bypass optional workflows.
+- When adding columns, update every SELECT that scans the struct, not only `GetByID` or list methods.
+- Task SELECT mappings must include all current task columns, including follow-up, worktree, merge, lineage, origin, and agent-definition fields.
+- Valid CHECK values include agent provider `anthropic`, `openai`, `ollama`, `test`; auth method `cli`, `oauth`, `api_key`; task status `pending`, `queued`, `running`, `completed`, `failed`, `cancelled`, `blocked`; task merge status `''`, `pending`, `merged`, `failed`, `conflict`; schedule repeat type `once`, `seconds`, `minutes`, `hours`, `daily`, `weekly`, `monthly`.
+- `models.Agent` and the `agents` table do not include a `color` field. Do not add it back.
+- `projects` includes both `repo_path` and `repo_url`; keep model and repository CRUD mappings symmetric.
+- SQLite table recreation migrations must use `-- +goose NO TRANSACTION`, disable and reenable foreign keys, recreate all indexes, and preserve CHECK constraints.
+
+## Time And Scheduling
+
+- Parse `datetime-local` form inputs with `time.ParseInLocation("2006-01-02T15:04", value, time.Local)`, not `time.Parse()`.
+- Convert times to local with `.Local()` before formatting in templates.
+- For daily, weekly, and monthly schedule `ComputeNextRun`, convert to local time, use `AddDate`, then convert back to UTC so DST transitions are safe.
+- Do not use `time.Add(N*time.Hour)` for day arithmetic; use `time.AddDate(0, 0, N)`.
+- `ComputeNextRun` for one-time schedules returns `nil` after execution.
+
+## Frontend Practices
+
+- Use HTMX forms with explicit `method="post"` and return the appropriate fragment/container.
+- Keep client-side behavior deterministic. Avoid duplicate listener registration and brittle swap assumptions.
+- Scope page-specific selectors to unique roots such as `#chat-page-root`; avoid generic `[data-project-id]` selectors that appear on multiple pages.
+- For inline scripts inside HTMX-swapped fragments, use window-level one-time binding guards.
+- Prefer app-scoped `HX-Trigger` events bridged in the base layout for cross-page toast feedback.
+- For async actions, show explicit in-progress state, disable conflicting actions, and restore state in `finally`.
+- Pair template-level action gating with server-side enforcement.
+- Guard async refreshes against out-of-order responses.
+- Batch high-frequency streaming UI updates with `requestAnimationFrame` and flush on completion.
+- Preserve drafts during polling by keying them to entity identity and clearing only on successful intentional submits.
+- Escape raw HTML-like tags before markdown parsing while preserving code fences/spans.
+- Centralize shared link, badge, loader, chat bubble, and semantic component styling instead of one-off utility strings.
+- Chat bubbles and input containers should not use visible borders; use depth/drop shadow.
+
+## Git And Worktrees
+
+- Chained child tasks must not dispatch until their parent reaches a terminal state.
+- Empty chained-task child category inherits the parent category; do not default it to backlog.
+- Capture branch lineage atomically with child creation.
+- Before deleting a parent branch, check for non-terminal descendants.
+- Reset merge status to `pending` only when a merged task follow-up produces new changes.
+- Failed tasks can still have uncommitted worktree edits; do not hide local merge actions solely because metadata says merged.
+- Startup auto-merge should run only on clean worktrees. Dirty worktrees must skip it.
+- If startup auto-merge conflicts, detect files, abort the merge, set conflict status, and return actionable error text.
+- Worktrees live at `.worktrees/task_<id>`; do not reconstruct paths as `repo/worktrees/<branch>`.
+- Orphan cleanup must not delete `.worktrees/task_<id>` when the task still exists but DB worktree fields are temporarily empty.
+- Tests that create temporary Git repositories for worktree setup must create the branch expected by `worktree_merge_target`, usually `main`.

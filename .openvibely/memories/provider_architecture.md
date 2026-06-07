@@ -3,13 +3,17 @@ name: provider_architecture
 type: project
 created: 2026-05-09
 updated: 2026-06-06
-source: consolidation
-source_id: memory_consolidation_2026_06_06_scheduled
+source: after_complete
+source_id: a21a336579af2b853222744d738f51f0
 confidence: high
 title: Provider Architecture
 ---
 
 Provider logic is isolated in adapter packages under `internal/llm`: OpenAI, Anthropic, and Ollama. Provider routing goes through `internal/service/provider_adapter.go` and shared contracts/normalization/streaming packages.
+
+Architecture direction: consolidate model-call behavior around a normalized provider request assembly pipeline. Lifecycle preparation should run before provider request construction for turns that need it, selected memories/skills/task metadata/goals/follow-up metadata should be converted once into the normalized `AgentRequest`, and provider adapters should consume that contract instead of reinterpreting task/chat/follow-up state in ways that can drop context or tools. Routing should be based on required request features such as chat history, `ChatSystemContext`, streaming, runtime tools, and task execution, not ad hoc booleans such as `!Followup`. Regression tests should assert the provider-bound request/system prompt/tool payload across OpenAI and Anthropic task-thread follow-ups, chat orchestration, Plan inputs, queued follow-ups, and initial task runs; lifecycle DB rows alone are not sufficient proof that the final model saw selected memory or skills. As of 2026-06-06, backlog task `3ea84295058b37a1d7344f3f336777a9` tracks this refactor and was intentionally created as non-running/pending until the user asks to start it.
+
+Current model-call shape as of 2026-06-06: OpenVibely already has a partial normalized `AgentRequest`, but it is built late, after entry-specific code has already decided where context lives. Initial worker tasks run lifecycle and typically carry selected-memory handle context through `ProjectInstructions`; chat/API chat and task-thread follow-ups share `processStreamingResponse` and carry follow-up selected-memory context through `ChatSystemContext`; queued task-thread inputs promote back into that follow-up path. Lifecycle-selected memories/skills and runtime tools are first carried through `context.Context` and extra-instruction helpers before `LLMService.callLLMDetailed` or `CallAgentDirectStreamingDetailed` constructs an `AgentRequest`. Provider adapters then make a second routing decision, which is the fragile seam that allowed OpenAI task-thread follow-ups to drop `ChatSystemContext` before the 2026-06-06 fix. Direct utility services such as architect/backlog/collision/insights/trend/upcoming calls use `LLMService.CallAgentDirect`/direct-style requests and generally do not run task/chat lifecycle memory routing unless deliberately redesigned as user/task turns.
 
 Provider paths:
 - OpenAI supports Responses API, Completions API, and Codex CLI fallback. Responses `SendAgentic` does Codex-style client-side history compaction for API key and OAuth flows.

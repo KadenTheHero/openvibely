@@ -66,8 +66,8 @@ const AgentSystemPrompt = `You are an expert software engineer acting as a codin
 `
 
 // BuildAgentSystemPrompt constructs the full system prompt for agentic execution.
-// It combines the shared agent system prompt with optional project-specific
-// instructions (e.g. CLAUDE.md content) and additional context.
+// It combines the shared agent system prompt with optional managed project
+// instructions from selected skills/memory and additional context.
 func BuildAgentSystemPrompt(projectInstructions string, workDir ...string) string {
 	var sb strings.Builder
 	sb.WriteString(AgentSystemPrompt)

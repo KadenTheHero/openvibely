@@ -2386,9 +2386,61 @@ func TestLLMService_FailedTaskMovedToCompletedCategory(t *testing.T) {
 	}
 }
 
-// TestLLMService_ExecuteTaskWithAgent_PluginScopingWithAgentDef verifies that
-// when a task has an AgentDefinitionID, the agent definition (including its
-// plugin-resolved skills/MCP) is passed to the LLM call.
+// TestLLMService_ExecuteTaskWithAgent_IncludesManagedAndOptionalRootInstructions verifies
+// managed lifecycle guidance is preserved while optional user-provided root
+// AGENTS.md/CLAUDE.md files are also included when present.
+func TestLLMService_ExecuteTaskWithAgent_IncludesManagedAndOptionalRootInstructions(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	repoPath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoPath, "AGENTS.md"), []byte("user AGENTS guidance"), 0o644); err != nil {
+		t.Fatalf("write root AGENTS.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, "CLAUDE.md"), []byte("user CLAUDE guidance"), 0o644); err != nil {
+		t.Fatalf("write root CLAUDE.md: %v", err)
+	}
+	project := &models.Project{Name: "Managed Instructions Project", RepoPath: repoPath}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	capture := &captureProviderAdapter{}
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.providerAdapters[models.ProviderTest] = capture
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	task := &models.Task{ProjectID: project.ID, Title: "Managed instructions", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "do work", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	managedCtx := withAdditionalProjectInstructions(ctx, "managed skill and memory instructions")
+	if _, err := svc.ExecuteTaskWithAgent(managedCtx, *task, *agent); err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if !strings.Contains(capture.lastReq.ProjectInstructions, "managed skill and memory instructions") {
+		t.Fatalf("expected managed instructions in provider request, got %q", capture.lastReq.ProjectInstructions)
+	}
+	if !strings.Contains(capture.lastReq.ProjectInstructions, "# AGENTS.md") || !strings.Contains(capture.lastReq.ProjectInstructions, "user AGENTS guidance") {
+		t.Fatalf("expected optional AGENTS.md instructions in provider request, got %q", capture.lastReq.ProjectInstructions)
+	}
+	if !strings.Contains(capture.lastReq.ProjectInstructions, "# CLAUDE.md") || !strings.Contains(capture.lastReq.ProjectInstructions, "user CLAUDE guidance") {
+		t.Fatalf("expected optional CLAUDE.md instructions in provider request, got %q", capture.lastReq.ProjectInstructions)
+	}
+}
+
+func TestLoadRootProjectInstructions_MissingFilesIsEmpty(t *testing.T) {
+	if got := loadRootProjectInstructions(t.TempDir()); got != "" {
+		t.Fatalf("expected missing root instruction files to produce empty instructions, got %q", got)
+	}
+}
+
 func TestLLMService_ExecuteTaskWithAgent_PluginScopingWithAgentDef(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)

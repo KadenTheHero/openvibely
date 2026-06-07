@@ -150,7 +150,7 @@ func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontr
 					output, tokens, err := a.svc.callClaudeCLIChat(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.WorkDir, req.Followup, req.ChatMode, req.PluginDirs)
 					return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
 				}
-				output, textOnly, tokens, err := a.svc.callClaudeCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.PluginDirs, rawAgentDef)
+				output, textOnly, tokens, err := a.svc.callClaudeCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.PluginDirs, rawAgentDef)
 				return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), err)
 			}
 			if requestUsesChatStreaming(req) {
@@ -165,7 +165,7 @@ func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontr
 				return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
 			}
 			if req.Agent.IsAnthropicCLI() {
-				output, textOnly, tokens, err := a.svc.callClaudeCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.PluginDirs, rawAgentDef)
+				output, textOnly, tokens, err := a.svc.callClaudeCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.PluginDirs, rawAgentDef)
 				return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), err)
 			}
 			output, tokens, err := a.svc.callAnthropic(req.Ctx, req.Message, req.Attachments, req.Agent)

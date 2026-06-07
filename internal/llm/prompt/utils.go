@@ -104,8 +104,8 @@ func AttachmentAbsPath(att models.Attachment) string {
 }
 
 // BuildTaskPromptHeader returns the standard task execution directives that are
-// prepended to every task prompt. Project instructions (AGENTS.md) are now
-// injected via the system prompt, not here.
+// prepended to every task prompt. Managed project instructions from lifecycle
+// skills and memory are injected via the system prompt, not here.
 func BuildTaskPromptHeader() string {
 	return "IMPORTANT: Do not use plan mode. Take direct action immediately. Do not ask for approval or create plans — execute the task directly.\n\n"
 }
@@ -113,7 +113,7 @@ func BuildTaskPromptHeader() string {
 // BuildAttachmentInstructions builds the text block that tells CLI-based agents
 // about attached files with their absolute paths. Returns an empty string if
 // there are no attachments.
-// 
+//
 // NOTE: This function separates image files from text files. CLI agents cannot
 // view images natively (no vision support), so we provide a clear message that
 // images are listed but cannot be analyzed. Text files can be read normally.
@@ -121,10 +121,10 @@ func BuildAttachmentInstructions(attachments []models.Attachment) string {
 	if len(attachments) == 0 {
 		return ""
 	}
-	
+
 	var textFiles []models.Attachment
 	var imageFiles []models.Attachment
-	
+
 	for _, att := range attachments {
 		if output.IsImageMediaType(att.MediaType) {
 			imageFiles = append(imageFiles, att)
@@ -132,9 +132,9 @@ func BuildAttachmentInstructions(attachments []models.Attachment) string {
 			textFiles = append(textFiles, att)
 		}
 	}
-	
+
 	var sb strings.Builder
-	
+
 	// List text files that can be read
 	if len(textFiles) > 0 {
 		sb.WriteString("You have been provided with the following attached files:\n")
@@ -144,7 +144,7 @@ func BuildAttachmentInstructions(attachments []models.Attachment) string {
 		}
 		sb.WriteString("\nPlease examine these files as part of your task. Use the absolute paths above to access them.\n\n")
 	}
-	
+
 	// Warn about image files that cannot be viewed
 	if len(imageFiles) > 0 {
 		if len(textFiles) > 0 {
@@ -157,7 +157,7 @@ func BuildAttachmentInstructions(attachments []models.Attachment) string {
 		}
 		sb.WriteString("\nIf image analysis is required for this task, ask the user to reconfigure the task with a vision-capable model (e.g., Anthropic API or OpenAI API with an API key or OAuth).\n\n")
 	}
-	
+
 	return sb.String()
 }
 

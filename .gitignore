@@ -19,6 +19,12 @@ logs/
 !/.openvibely/memories/
 /.openvibely/memories/*
 !/.openvibely/memories/*.md
+!/.openvibely/skills/
+/.openvibely/skills/*
+!/.openvibely/skills/SKILLS.md
+!/.openvibely/skills/openvibely_project_guidance/
+/.openvibely/skills/openvibely_project_guidance/*
+!/.openvibely/skills/openvibely_project_guidance/SKILL.md
 
 # Local SQLite runtime files
 openvibely.db

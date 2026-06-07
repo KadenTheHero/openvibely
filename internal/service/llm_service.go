@@ -476,17 +476,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if agentSkillTools := s.agentDeclaredSkillRuntimeTools(ctx, task, agentDef, workDir); agentSkillTools != nil {
 		runtimeTools = llmcontracts.CompositeRuntimeTools(runtimeTools, agentSkillTools)
 	}
-	// Load project instructions (AGENTS.md) from the working directory.
-	projectInstructions := loadProjectInstructions(workDir)
-	if extra := additionalProjectInstructionsFromContext(ctx); extra != "" {
-		if projectInstructions == "" {
-			projectInstructions = extra
-		} else {
-			projectInstructions = extra + "\n\n" + projectInstructions
-		}
-	}
+	projectInstructions := combineProjectInstructions(additionalProjectInstructionsFromContext(ctx), loadRootProjectInstructions(repoDir))
 	if projectInstructions != "" {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent loaded project instructions (%d bytes) from %s", len(projectInstructions), workDir)
+		log.Printf("[agent-svc] ExecuteTaskWithAgent prepared project instructions (%d bytes)", len(projectInstructions))
 	}
 	// Start background diff snapshot broadcaster (if file change broadcaster is configured)
 	var stopDiffBroadcast chan struct{}
@@ -1139,17 +1131,39 @@ func (s *LLMService) CallAgentDirectStreaming(ctx context.Context, message strin
 	return res.Output, res.Usage.TotalTokens, err
 }
 
-// loadProjectInstructions reads AGENTS.md from the given directory.
-// Returns the file content or empty string if the file doesn't exist or can't be read.
-func loadProjectInstructions(workDir string) string {
-	if workDir == "" {
+func loadRootProjectInstructions(repoDir string) string {
+	repoDir = strings.TrimSpace(repoDir)
+	if repoDir == "" {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(workDir, "AGENTS.md"))
-	if err != nil {
-		return ""
+	var parts []string
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+		path := filepath.Join(repoDir, name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				log.Printf("[agent-svc] warning: failed to read %s: %v", path, err)
+			}
+			continue
+		}
+		text := strings.TrimSpace(string(data))
+		if text == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("# %s\n\n%s", name, text))
 	}
-	return string(data)
+	return strings.Join(parts, "\n\n")
+}
+
+func combineProjectInstructions(parts ...string) string {
+	var cleaned []string
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			cleaned = append(cleaned, part)
+		}
+	}
+	return strings.Join(cleaned, "\n\n")
 }
 
 func (s *LLMService) callLLM(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, agentDef ...*models.Agent) (string, string, int, error) {
@@ -1340,7 +1354,7 @@ func (s *LLMService) callAnthropicChat(ctx context.Context, message string, atta
 	return output, tokensUsed, nil
 }
 
-func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, pluginDirs []string, agentDef ...*models.Agent) (string, string, int, error) {
+func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, pluginDirs []string, agentDef ...*models.Agent) (string, string, int, error) {
 	log.Printf("[agent-svc] callClaudeCLI model=%s attachments=%d workDir=%s", agent.Model, len(attachments), workDir)
 
 	// SAFETY: Prevent accidental real CLI calls during tests
@@ -1356,12 +1370,14 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 	}
 	log.Printf("[agent-svc] callClaudeCLI using binary: %s", claudePath)
 
-	// Claude CLI reads CLAUDE.md natively (which points to AGENTS.md),
-	// so no need to inject project instructions here.
 	var fullPrompt strings.Builder
 	fullPrompt.WriteString(llmprompt.BuildTaskPromptHeader())
 	if worktreeContext := llmprompt.BuildWorktreeContextSentence(workDir); worktreeContext != "" {
 		fullPrompt.WriteString(worktreeContext)
+		fullPrompt.WriteString("\n\n")
+	}
+	if strings.TrimSpace(projectInstructions) != "" {
+		fullPrompt.WriteString(strings.TrimSpace(projectInstructions))
 		fullPrompt.WriteString("\n\n")
 	}
 	fullPrompt.WriteString(llmprompt.BuildAttachmentInstructions(attachments))
