@@ -76,10 +76,6 @@
 
 [OpenVibely Backlog Task Management](openvibely_backlog_task_management/SKILL.md) — Create or update OpenVibely backlog tasks without accidentally starting them.
 
-## openvibely_release_notes_workflow
-
-[OpenVibely Release Notes Workflow](openvibely_release_notes_workflow/SKILL.md) — Generate high-level OpenVibely release notes from rich commit context with AI synthesis and deterministic release mechanics.
-
 ## openvibely_release_workflow
 
-[OpenVibely Release Workflow](openvibely_release_workflow/SKILL.md) — Run the OpenVibely semver release process with deterministic scripts and agent-authored release notes.
+[OpenVibely Release Workflow](openvibely_release_workflow/SKILL.md) — Automate the OpenVibely release process — preflight, artifact builds, changelog, and GitHub release — for a given semver version.

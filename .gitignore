@@ -25,6 +25,12 @@ logs/
 !/.openvibely/skills/openvibely_project_guidance/
 /.openvibely/skills/openvibely_project_guidance/*
 !/.openvibely/skills/openvibely_project_guidance/SKILL.md
+!/.openvibely/skills/openvibely_release_workflow/
+/.openvibely/skills/openvibely_release_workflow/*
+!/.openvibely/skills/openvibely_release_workflow/SKILL.md
+!/.openvibely/skills/openvibely_release_workflow/scripts/
+/.openvibely/skills/openvibely_release_workflow/scripts/*
+!/.openvibely/skills/openvibely_release_workflow/scripts/*.sh
 
 # Local SQLite runtime files
 openvibely.db
