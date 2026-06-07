@@ -1,10 +1,12 @@
 # OpenVibely
 
-OpenVibely turns AI coding from one-off prompts into a self-hosted command center for real project work.
+The only recursive self-improvement command center for software teams.
 
-Give it your repositories, models, agents, schedules, review flow, and team channels, then manage work from one UI where tasks stay tied to project context, changes stay reviewable, and useful lessons carry into the next run.
+OpenVibely turns one Chat into the control plane for your entire AI development workflow. Describe a goal once, then let it fan out into parallel task sessions, live agent execution, reviewable diffs, scheduled follow-ups, and durable project learning.
 
-Start in chat when an idea is fuzzy, promote the plan into tracked tasks, watch execution live, review the diffs, and schedule follow-up work when the project needs ongoing attention. As work completes, OpenVibely gets smarter on its own: Memory Curator builds durable project memory, Skill Curation improves reusable task behavior, and future work starts with more of the context your team has already taught it.
+Agents do the work. You stays in command. Inspect any thread, review any diff, steer any task, and keep the whole plan moving from the original conversation.
+
+Goal loops drive unfinished work forward. Memory Curator preserves project context. Skill Curator turns completed tasks into sharper reusable workflows. Every run can make the next one better, while your team stays in control.
 
 Self-hosted, single binary, SQLite by default, and built for teams that want speed without giving up control, auditability, or ownership.
 
