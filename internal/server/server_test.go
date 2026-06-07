@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/config"
+	"github.com/openvibely/openvibely/internal/database"
 )
 
 func TestStart_BootstrapAndShutdown(t *testing.T) {
@@ -76,6 +78,96 @@ func TestStart_BootstrapAndShutdown(t *testing.T) {
 
 	// Graceful shutdown.
 	inst.Shutdown()
+}
+
+func TestStart_SeedsBuiltInSystemAgentsAndMaintenanceSchedulesOnFreshDB(t *testing.T) {
+	appDataDir := filepath.Join(t.TempDir(), "fresh-appdata")
+	cfg := &config.Config{
+		Mode:        config.ModeServer,
+		Port:        "0",
+		AppDataDir:  appDataDir,
+		Environment: "test",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	inst, err := Start(ctx, cfg)
+	if err != nil {
+		cancel()
+		t.Fatalf("Start() fresh failed: %v", err)
+	}
+	inst.Shutdown()
+	cancel()
+
+	assertFreshSystemSeedState(t, cfg.DatabasePath)
+
+	restartCtx, restartCancel := context.WithCancel(context.Background())
+	restarted, err := Start(restartCtx, cfg)
+	if err != nil {
+		restartCancel()
+		t.Fatalf("Start() restart failed: %v", err)
+	}
+	restarted.Shutdown()
+	restartCancel()
+
+	assertFreshSystemSeedState(t, cfg.DatabasePath)
+}
+
+func assertFreshSystemSeedState(t *testing.T, dbPath string) {
+	t.Helper()
+	db, err := database.New(dbPath)
+	if err != nil {
+		t.Fatalf("open seeded db: %v", err)
+	}
+	defer db.Close()
+
+	assertSingleProtectedSystemAgent(t, db, "memory_curator")
+	assertSingleProtectedSystemAgent(t, db, "skill_curator")
+	assertSingleProtectedSystemAgent(t, db, "goal")
+	assertSingleScheduledSystemTask(t, db, "System: Memory Consolidation", "memory_curator")
+	assertSingleScheduledSystemTask(t, db, "System: Skill Library Maintenance", "skill_curator")
+}
+
+func assertSingleProtectedSystemAgent(t *testing.T, db *sql.DB, systemKind string) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`
+		SELECT COUNT(*)
+		FROM agents
+		WHERE system_kind = ?
+		  AND key = ?
+		  AND generated_status = 'protected'
+		  AND created_by = 'system'
+		  AND enabled = 1
+		  AND selectable_as_primary = 0
+	`, systemKind, systemKind).Scan(&count); err != nil {
+		t.Fatalf("count protected system agent %s: %v", systemKind, err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one protected %s agent, got %d", systemKind, count)
+	}
+}
+
+func assertSingleScheduledSystemTask(t *testing.T, db *sql.DB, title, systemKind string) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`
+		SELECT COUNT(*)
+		FROM tasks t
+		JOIN agents a ON a.id = t.agent_definition_id
+		JOIN schedules s ON s.task_id = t.id
+		WHERE t.project_id = 'default'
+		  AND t.title = ?
+		  AND t.category = 'scheduled'
+		  AND a.system_kind = ?
+		  AND s.repeat_type = 'daily'
+		  AND s.repeat_interval = 1
+		  AND s.enabled = 1
+	`, title, systemKind).Scan(&count); err != nil {
+		t.Fatalf("count scheduled system task %s: %v", title, err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one scheduled system task %q for %s, got %d", title, systemKind, count)
+	}
 }
 
 func TestStart_NormalizesAppStorageDefaults(t *testing.T) {

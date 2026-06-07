@@ -76,7 +76,33 @@ func (s *MemoryService) SetLifecycleRepo(repo *repository.LifecycleRepo) {
 // Memory Consolidation scheduled task is wired to the Memory Curator agent.
 // Idempotent on every server boot and project creation.
 func (s *MemoryService) EnsureProject(ctx context.Context, projectID string) error {
+	if err := s.EnsureGlobalAgents(ctx); err != nil {
+		return err
+	}
 	if _, err := s.ensureProjectMemoryDir(ctx, projectID); err != nil {
+		return err
+	}
+	return s.ensureConsolidationTaskSchedule(ctx, projectID)
+}
+
+// EnsureGlobalAgents reconciles protected system Memory Curator identity and
+// lifecycle hooks independently from per-project memory-file setup. Startup calls
+// this even before any project-specific memory directories are available so the
+// built-in agent is always visible on fresh installs.
+func (s *MemoryService) EnsureGlobalAgents(ctx context.Context) error {
+	if s == nil || s.agentRepo == nil {
+		return nil
+	}
+	_, err := s.ensureMemoryAgent(ctx)
+	return err
+}
+
+// EnsureProjectSchedules reconciles the visible per-project Memory Consolidation
+// scheduled task without requiring the project to have a local repo_path. The
+// scheduled task itself is normal task/schedule state; runtime memory-file access
+// is validated when the task executes.
+func (s *MemoryService) EnsureProjectSchedules(ctx context.Context, projectID string) error {
+	if err := s.EnsureGlobalAgents(ctx); err != nil {
 		return err
 	}
 	return s.ensureConsolidationTaskSchedule(ctx, projectID)

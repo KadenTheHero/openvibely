@@ -54,10 +54,7 @@ func (s *AgentLibraryMaintenanceService) SyncRootDeclarations(ctx context.Contex
 	if s == nil || s.agentRepo == nil {
 		return nil
 	}
-	if _, err := s.ensureSkillCuratorAgent(ctx); err != nil {
-		return err
-	}
-	if _, err := s.ensureGoalAgent(ctx); err != nil {
+	if err := s.EnsureGlobalAgents(ctx); err != nil {
 		return err
 	}
 	applier := agentlibrary.NewRepoApplier(s.agentRepo, s.lifecycleRepo)
@@ -118,9 +115,27 @@ func syncRootDeclarationsFromRoot(ctx context.Context, root string, applier *age
 	return nil
 }
 
+// EnsureGlobalAgents reconciles protected system agents owned by the agent
+// library subsystem independently from per-project scheduled maintenance tasks.
+func (s *AgentLibraryMaintenanceService) EnsureGlobalAgents(ctx context.Context) error {
+	if s == nil || s.agentRepo == nil {
+		return nil
+	}
+	if _, err := s.ensureSkillCuratorAgent(ctx); err != nil {
+		return err
+	}
+	if _, err := s.ensureGoalAgent(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *AgentLibraryMaintenanceService) EnsureProject(ctx context.Context, projectID string) error {
 	if s == nil || s.taskRepo == nil || s.scheduleRepo == nil || s.agentRepo == nil {
 		return nil
+	}
+	if err := s.EnsureGlobalAgents(ctx); err != nil {
+		return err
 	}
 	agent, err := s.ensureSkillCuratorAgent(ctx)
 	if err != nil {

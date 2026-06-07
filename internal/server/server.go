@@ -520,9 +520,21 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		memoryStore := memory.NewFileStore(memoryResolver)
 		memorySvc = service.NewMemoryService(taskRepo, scheduleRepo, agentRepo, projectRepo, memoryStore, memoryResolver)
 		memorySvc.SetLifecycleRepo(lifecycleRepo)
-		// Seed per-project memory state for any existing projects.
+		if err := memorySvc.EnsureGlobalAgents(context.Background()); err != nil {
+			applog.Infof("[memory] ensure global system agents: %v", err)
+		}
+		// Seed per-project memory state for any existing projects. The visible
+		// scheduled task is reconciled even for the default project before it has a
+		// local repo_path; repo-local memory files remain strict and are prepared only
+		// when a project has a configured local repository.
 		if existing, lerr := projectRepo.List(context.Background()); lerr == nil {
 			for _, p := range existing {
+				if err := memorySvc.EnsureProjectSchedules(context.Background(), p.ID); err != nil {
+					applog.Infof("[memory] ensure project schedule %s: %v", p.ID, err)
+				}
+				if strings.TrimSpace(p.RepoPath) == "" {
+					continue
+				}
 				if err := memorySvc.EnsureProject(context.Background(), p.ID); err != nil {
 					applog.Infof("[memory] ensure project %s: %v", p.ID, err)
 				}
@@ -566,6 +578,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	agentLibraryMaintenanceSvc.SetLifecycleRepo(lifecycleRepo)
 	agentLibraryMaintenanceSvc.SetAgentsRootPath(globalSkillRoot)
 	workerSvc.SetAgentRootSyncService(agentLibraryMaintenanceSvc)
+	if err := agentLibraryMaintenanceSvc.EnsureGlobalAgents(context.Background()); err != nil {
+		applog.Infof("[agent-library] ensure global system agents: %v", err)
+	}
 	if err := agentLibraryMaintenanceSvc.SyncRootDeclarations(context.Background(), ""); err != nil {
 		applog.Infof("[agent-library] sync root declarations: %v", err)
 	}
