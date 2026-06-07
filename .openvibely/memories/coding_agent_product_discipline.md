@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-06-06
-source: consolidation
-source_id: memory_consolidation_2026_06_05
+updated: 2026-06-07
+source: after_complete
+source_id: 3f679b74b33ea6ed3957ea82f8f453f2
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -46,3 +46,7 @@ Maintenance expectations:
 - For scheduled Go maintenance tasks, inspect all Go version references (`go.mod`, `toolchain`, Dockerfiles, CI workflows, build scripts, docs, version-manager files), update consistently only when a newer stable toolchain is available, check compatible module upgrades, run `go mod tidy`, verify with `go test -count=1 ./...` plus standard build checks, and fix update-caused failures rather than masking them.
 - Avoid duplicating tool versions across scripts and Dockerfiles. Prefer deriving versions from authoritative module metadata such as `go.mod` when practical.
 - The last public release boundary the user identified was commit `d654a068ee0b4f146bb9e51dd536728eab49a150`. Schema migrations added only after that boundary and not yet pushed publicly can be consolidated before release; distinguish this from runtime/local database-file moves such as `openvibely.db` storage migration.
+- OpenVibely now has a project-scoped standalone release automation skill, `openvibely_release_workflow`, indexed in `.openvibely/skills/SKILLS.md` with deterministic scripts under `.openvibely/skills/openvibely_release_workflow/scripts/`. Future release work should prefer that skill/script path for semver normalization, preflight checks, release branch/tag naming, artifact naming matching v0.1.0, checksum generation, and GitHub release creation instead of improvising shell steps.
+- OpenVibely release notes should be AI-synthesized from structured unreleased commit context because commit subjects are often terse. Deterministic release scripts should collect raw commit context and render reusable/static release-note structure, but the agent should write the high-level user-facing "What's Changed" summary, group related impactful changes, preserve important technical notes, and omit low-impact internal noise instead of publishing regex buckets or raw commit-message lists.
+- The release workflow publishes GitHub releases through both `git` and the GitHub CLI: `git` creates/pushes the `release/v<version>` branch and annotated `v<version>` tag, while `gh` performs auth/release-existence checks, creates the GitHub release, uploads artifacts/checksums, and prints the release URL. Docker image publishing is documented as a manual/pending step unless explicit Docker credentials/tooling are present.
+- As of the final post-fix audit for task `3f679b74b33ea6ed3957ea82f8f453f2`, the release workflow's Windows desktop-cli blocker was fixed: `.openvibely/skills/openvibely_release_workflow/scripts/release-build.sh` no longer uses `local` at top level in the `WINDOWS_DESKTOP_OK=1` block. The audit found no material release-workflow bugs or regressions, and release validation reported 50/50 tests passing with all release scripts passing `bash -n`.

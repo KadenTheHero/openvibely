@@ -2,9 +2,9 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-06-06
-source: consolidation
-source_id: memory_consolidation_2026_06_05
+updated: 2026-06-07
+source: after_complete
+source_id: 6862e8a313c1e6422cda0739498a163f
 confidence: high
 title: Usage Analytics
 ---
@@ -27,6 +27,7 @@ Analytics surface:
 - `/api/analytics/usage` backs the Analytics page usage section.
 - As of the 2026-06-06 code inspection, the Analytics page's LLM usage fetch does not send `project_id` even though `/api/analytics/usage` supports it, so token/account usage appears global while execution analytics are project-scoped.
 - Direct/background model calls infer `project_id` from the call `workDir` when it exactly matches a known project repo path, so lifecycle/direct calls can appear in project-specific analytics without risky broad path matching.
+- Analytics chart date/hour buckets and the built-in usage `month` range use app/local timezone semantics matching the Schedules page. UTC-stored `llm_usage_events.occurred_at` values are grouped with SQLite `localtime`, execution analytics buckets derived from `executions.started_at` such as success/failure rates and hourly execution trends also use SQLite `localtime`, and filter bounds continue to compare as UTC instants.
 - Analytics load/manual refresh attempts live OAuth account usage refreshes and keeps showing local usage plus the latest successful snapshot if live refresh fails; account-limit refresh warnings are separate from local usage visibility.
 - The Analytics page should show provider account cards first in a responsive side-by-side grid, then `Token Usage` beside `Model Breakdown by Tokens`, followed by the `Token Usage Breakdown` table. The old `Daily Token Usage` graph should not appear on the page.
 - The `Token Usage Breakdown` table card should size to its table, keep `Provider`, `Model`, `Input`, `Output`, `Cache`, `Reasoning`, `Total`, and `Cost` headers, and show an aggregate Total row instead of separate high-level token summary cards.

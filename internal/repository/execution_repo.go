@@ -431,7 +431,7 @@ func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID st
 
 	query := `
 		SELECT
-			strftime(?, e.started_at) as period,
+			strftime(?, e.started_at, 'localtime') as period,
 			COUNT(*) as total_count,
 			SUM(CASE WHEN e.status = 'completed' THEN 1 ELSE 0 END) as success_count,
 			SUM(CASE WHEN e.status = 'failed' THEN 1 ELSE 0 END) as failure_count
@@ -556,7 +556,7 @@ type ExecutionTrend struct {
 func (r *ExecutionRepo) GetExecutionTrendsByHour(ctx context.Context, projectID string, dateFrom, dateTo string) ([]ExecutionTrend, error) {
 	query := `
 		SELECT
-			CAST(strftime('%H', e.started_at) as INTEGER) as hour,
+			CAST(strftime('%H', e.started_at, 'localtime') as INTEGER) as hour,
 			COUNT(*) as count
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id

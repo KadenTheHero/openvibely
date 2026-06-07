@@ -2,9 +2,9 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-06-06
+updated: 2026-06-07
 source: after_complete
-source_id: a21a336579af2b853222744d738f51f0
+source_id: 66fc677e3beaa88f5eaae6adf69ca094
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -77,7 +77,7 @@ Task goals:
 - Task-goal prompt context should be present across task-follow-up entry points, including web direct sends, queued task-thread sends, review submissions, and channel-origin task runs. Review and channel-origin runs should reactivate an achieved goal before prompt construction when appropriate. Supported channel parity details live in `integrations_and_channels.md`.
 - Generic runtime `send_to_task` callers must not be able to spoof protected Goal Agent lineage by passing `origin="system_agent"` or `origin_agent="goal"`; only the internal Goal Agent runtime override may persist `source='system_agent'` with `origin_agent='goal'`.
 - Goal Agent `send_to_task` should infer the current task in real task-thread runtimes. Durable queued/reloaded Goal Agent follow-ups retain lineage through `thread_inputs.origin_agent` alongside `source='system_agent'`.
-- `ResumeGoal` only resumes paused goals, preserves the same `goal_id`, and clears blocked audit state.
+- `ResumeGoal` resumes manually re-enabled paused or blocked goals, preserves the same `goal_id`, resets `blocker_count` to 0, and clears stale blocked audit state so a resumed goal gets a clean evaluation slate.
 - Kanban task cards render a `Goal` badge from a derived `Task.HasGoal` flag populated by the board/list task query for non-cleared goals; future task card/link surfaces need their queries expanded if they rely on the flag.
 - When a user/manual task-thread follow-up starts on a task whose goal is `achieved`, OpenVibely reactivates that same goal to `active` before prompt context and lifecycle evaluation. Goal Agent/system-agent continuations are excluded so internal follow-ups do not reopen completed goals.
 - Supported channel integrations, including Slack and Telegram, should keep task-goal controls at parity with the web/API chat control plane rather than restricting goal setting by surface.

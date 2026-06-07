@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-06-06
-source: consolidation
-source_id: memory_consolidation_2026_06_05
+updated: 2026-06-07
+source: after_complete
+source_id: 385678344882ee26e5e8ad30c348bf71
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -47,7 +47,7 @@ Chat and thread rendering:
 - Chat duplicate guards must keep execution IDs separate from pending-input IDs.
 - Chat's web-send dedupe/suppression flag must clear on the form request lifecycle as well as swap lifecycle, because active-response sends can return only out-of-band composer updates.
 - Thread tab content is lazy-loaded via `GET /tasks/:id/thread`; heavy execution transcripts should not be pre-rendered in hidden tabs.
-- Long Chat and Task Thread histories should remain complete in the database but be server-windowed in the UI: initial renders fetch only the latest bounded slice, older pages load via scroll-top pagination and prepend with scroll anchoring, and live appends prune the oldest visible execution once the window exceeds the limit. Do not send hundreds of rows to the browser and hide them with CSS.
+- Long Chat and Task Thread histories should remain complete in the database but be server-windowed in the UI: initial renders fetch only the latest bounded slice, older pages load via scroll-top pagination and prepend with scroll anchoring, and live appends prune the oldest visible execution once the window exceeds the limit. Do not send hundreds of rows to the browser and hide them with CSS. The accepted implementation uses `limit`/`before` routes, `limit+1` probes for `hasEarlier`, execution IDs backed by `(started_at,rowid)` cursor ordering rather than raw timestamps, whole-execution DOM wrappers for pruning, and a scroll-container custom HTMX event rather than viewport `revealed`. If pruning exposes older history when no sentinel exists, the client recreates/retargets the earlier loader from the container's base earlier URL so pruned rows stay reachable.
 - Active chat/task-thread streaming should use shared smart autoscroll behavior when present: record whether the viewport was pinned before content growth, then only scroll after rendering if it was pinned. Upward user movement is intent to read.
 - For large conversations, avoid clearing scroll intent from programmatic/clamp scroll events during streaming rerenders; derive intent from real user interactions such as wheel/touch/key/pointer.
 - Streaming code should resolve/rebind scroll trackers when HTMX/morph swaps replace or detach message containers so smart scrolling recovers without refresh.

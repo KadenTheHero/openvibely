@@ -32,10 +32,6 @@
 
 [OpenVibely Git Worktree Rebase Workflow](openvibely_git_worktree_rebase_workflow/SKILL.md) — Safely rebase OpenVibely task worktree branches onto main and recover startup auto-merge conflicts without losing task changes.
 
-## algorithmic-art
-
-[algorithmic-art](algorithmic-art/SKILL.md) — Creating algorithmic art using p5.js with seeded randomness and interactive parameter exploration. Use this when users request creating art using code, generative art, algorithmic art, flow fields, or particle systems. Create original algorithmic art rather than copying existing artists' work to avoid copyright violations.
-
 ## openvibely_chat_provider_test_workflow
 
 [OpenVibely Chat Provider Test Workflow](openvibely_chat_provider_test_workflow/SKILL.md) — Test OpenVibely chat, memory recall, and provider-normalized requests without confusing prompt text with model-facing context.
@@ -79,3 +75,11 @@
 ## openvibely_backlog_task_management
 
 [OpenVibely Backlog Task Management](openvibely_backlog_task_management/SKILL.md) — Create or update OpenVibely backlog tasks without accidentally starting them.
+
+## openvibely_release_notes_workflow
+
+[OpenVibely Release Notes Workflow](openvibely_release_notes_workflow/SKILL.md) — Generate high-level OpenVibely release notes from rich commit context with AI synthesis and deterministic release mechanics.
+
+## openvibely_release_workflow
+
+[OpenVibely Release Workflow](openvibely_release_workflow/SKILL.md) — Run the OpenVibely semver release process with deterministic scripts and agent-authored release notes.

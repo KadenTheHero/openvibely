@@ -91,13 +91,16 @@ func parseUsageFilter(c echo.Context) repository.UsageFilter {
 		filter.DateTo = to
 	}
 	if filter.DateFrom.IsZero() && filter.DateTo.IsZero() {
-		now := time.Now().UTC()
+		// Use local time so the range boundaries match the user's calendar day,
+		// consistent with how the Schedules page uses time.Local / time.Now().
+		now := time.Now()
 		switch c.QueryParam("range") {
 		case "7d":
 			filter.DateFrom = now.AddDate(0, 0, -7)
 			filter.DateTo = now
 		case "month":
-			filter.DateFrom = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+			// Start of the current local month at midnight local time.
+			filter.DateFrom = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
 			filter.DateTo = now
 		case "all":
 			// no date bounds

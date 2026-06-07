@@ -201,3 +201,192 @@ func TestUsageRepo_GetLatestAccountUsageSnapshotsBreaksTimestampTiesByInsertOrde
 		t.Fatalf("expected latest inserted snapshot to win timestamp tie, got %+v", snapshots[0])
 	}
 }
+
+// TestUsageRepo_LocaltimeDayBucketing verifies that GetDailyUsage, GetDailyUsageByModel,
+// and GetUsageRateBuckets group events by the server's local calendar day rather than
+// the UTC calendar day. This is the Analytics-page equivalent of the Schedules page using
+// time.Local / time.Now() for all calendar display, so the chart X-axis shows local dates.
+func TestUsageRepo_LocaltimeDayBucketing(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewUsageRepo(db)
+	ctx := context.Background()
+
+	// Use a specific UTC time; the expected period label must match the local date.
+	// Both SQLite's 'localtime' modifier and Go's time.Local use the OS timezone,
+	// so they agree on what "today" is regardless of the UTC offset.
+	eventTime := time.Now().UTC()
+	expectedPeriod := eventTime.In(time.Local).Format("2006-01-02")
+
+	if err := repo.RecordUsageEvent(ctx, &models.LLMUsageEvent{
+		Provider:     "anthropic",
+		Model:        "claude-sonnet",
+		Operation:    "task",
+		Status:       "completed",
+		InputTokens:  50,
+		OutputTokens: 25,
+		TotalTokens:  75,
+		OccurredAt:   eventTime,
+	}); err != nil {
+		t.Fatalf("RecordUsageEvent: %v", err)
+	}
+
+	// GetDailyUsage should label the period with the local date.
+	daily, err := repo.GetDailyUsage(ctx, UsageFilter{})
+	if err != nil {
+		t.Fatalf("GetDailyUsage: %v", err)
+	}
+	if len(daily) != 1 {
+		t.Fatalf("expected one daily point, got %d: %+v", len(daily), daily)
+	}
+	if daily[0].Period != expectedPeriod {
+		t.Errorf("GetDailyUsage period: got %q, want %q (local date for UTC time %v)",
+			daily[0].Period, expectedPeriod, eventTime)
+	}
+
+	// GetDailyUsageByModel should label the period with the local date.
+	byModel, err := repo.GetDailyUsageByModel(ctx, UsageFilter{})
+	if err != nil {
+		t.Fatalf("GetDailyUsageByModel: %v", err)
+	}
+	if len(byModel) != 1 {
+		t.Fatalf("expected one daily-by-model point, got %d: %+v", len(byModel), byModel)
+	}
+	if byModel[0].Period != expectedPeriod {
+		t.Errorf("GetDailyUsageByModel period: got %q, want %q (local date for UTC time %v)",
+			byModel[0].Period, expectedPeriod, eventTime)
+	}
+
+	// GetUsageRateBuckets with group_by=day should label the period with the local date.
+	rate, err := repo.GetUsageRateBuckets(ctx, UsageFilter{GroupBy: "day"})
+	if err != nil {
+		t.Fatalf("GetUsageRateBuckets: %v", err)
+	}
+	if len(rate) != 1 {
+		t.Fatalf("expected one rate bucket, got %d: %+v", len(rate), rate)
+	}
+	if rate[0].Period != expectedPeriod {
+		t.Errorf("GetUsageRateBuckets period: got %q, want %q (local date for UTC time %v)",
+			rate[0].Period, expectedPeriod, eventTime)
+	}
+
+	// GetUsageRateBucketsByModel with group_by=day should also label by local date.
+	rateByModel, err := repo.GetUsageRateBucketsByModel(ctx, UsageFilter{GroupBy: "day"})
+	if err != nil {
+		t.Fatalf("GetUsageRateBucketsByModel: %v", err)
+	}
+	if len(rateByModel) != 1 {
+		t.Fatalf("expected one rate-by-model bucket, got %d: %+v", len(rateByModel), rateByModel)
+	}
+	if rateByModel[0].Period != expectedPeriod {
+		t.Errorf("GetUsageRateBucketsByModel period: got %q, want %q (local date for UTC time %v)",
+			rateByModel[0].Period, expectedPeriod, eventTime)
+	}
+}
+
+// TestUsageRepo_LocaltimeBucketingCrossesMidnight verifies that an event stored at a UTC
+// time that falls on a different local calendar day than its UTC date is bucketed by the
+// correct LOCAL day. In timezones with nonzero offsets, UTC midnight may correspond to
+// yesterday or tomorrow in local time; the Analytics charts must reflect local dates.
+func TestUsageRepo_LocaltimeBucketingCrossesMidnight(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewUsageRepo(db)
+	ctx := context.Background()
+
+	// Build two event times: one on local day N, one on local day N+1.
+	// We derive both using time.Local so the test is timezone-agnostic.
+	localRef := time.Now().In(time.Local).Truncate(24 * time.Hour) // midnight of today, local
+	dayN := localRef.Add(6 * time.Hour)                            // 06:00 local today → UTC varies by TZ
+	dayN1 := localRef.Add(30 * time.Hour)                          // 06:00 local tomorrow
+
+	for i, eventTime := range []time.Time{dayN.UTC(), dayN1.UTC()} {
+		if err := repo.RecordUsageEvent(ctx, &models.LLMUsageEvent{
+			Provider:     "openai",
+			Model:        "gpt-5",
+			Operation:    "task",
+			Status:       "completed",
+			InputTokens:  10,
+			OutputTokens: 5,
+			TotalTokens:  15,
+			OccurredAt:   eventTime,
+		}); err != nil {
+			t.Fatalf("RecordUsageEvent[%d]: %v", i, err)
+		}
+	}
+
+	daily, err := repo.GetDailyUsage(ctx, UsageFilter{})
+	if err != nil {
+		t.Fatalf("GetDailyUsage: %v", err)
+	}
+	if len(daily) != 2 {
+		t.Fatalf("expected two daily points (one per local day), got %d: %+v", len(daily), daily)
+	}
+	expectedDayN := dayN.In(time.Local).Format("2006-01-02")
+	expectedDayN1 := dayN1.In(time.Local).Format("2006-01-02")
+	if daily[0].Period != expectedDayN || daily[1].Period != expectedDayN1 {
+		t.Errorf("expected periods [%q, %q], got [%q, %q]",
+			expectedDayN, expectedDayN1, daily[0].Period, daily[1].Period)
+	}
+}
+
+// TestUsageRepo_ModelUsageGlobalVisibility verifies that model usage events recorded with
+// an empty project_id appear in GetModelUsageBreakdown and GetUsageTotals when no project
+// filter is applied. This tests the global model-usage visibility path for the Analytics page
+// which does not send a project_id to /api/analytics/usage.
+func TestUsageRepo_ModelUsageGlobalVisibility(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewUsageRepo(db)
+	ctx := context.Background()
+
+	// Record Anthropic and OpenAI events without a project_id (simulating direct/lifecycle calls).
+	if err := repo.RecordUsageEvent(ctx, &models.LLMUsageEvent{
+		Provider:     "anthropic",
+		Model:        "claude-sonnet-4",
+		Operation:    "task",
+		Status:       "completed",
+		InputTokens:  80,
+		OutputTokens: 40,
+		TotalTokens:  120,
+		OccurredAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RecordUsageEvent anthropic: %v", err)
+	}
+	if err := repo.RecordUsageEvent(ctx, &models.LLMUsageEvent{
+		Provider:     "openai",
+		Model:        "gpt-5.3-codex",
+		Operation:    "streaming",
+		Status:       "completed",
+		InputTokens:  60,
+		OutputTokens: 30,
+		TotalTokens:  90,
+		OccurredAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RecordUsageEvent openai: %v", err)
+	}
+
+	// Global query (no project filter) must return both providers.
+	breakdown, err := repo.GetModelUsageBreakdown(ctx, UsageFilter{})
+	if err != nil {
+		t.Fatalf("GetModelUsageBreakdown: %v", err)
+	}
+	if len(breakdown) != 2 {
+		t.Fatalf("expected two breakdown rows (one per provider), got %d: %+v", len(breakdown), breakdown)
+	}
+	totalTokens := 0
+	for _, b := range breakdown {
+		totalTokens += b.TotalTokens
+	}
+	if totalTokens != 210 {
+		t.Errorf("expected 210 total tokens across providers, got %d", totalTokens)
+	}
+
+	totals, err := repo.GetUsageTotals(ctx, UsageFilter{})
+	if err != nil {
+		t.Fatalf("GetUsageTotals: %v", err)
+	}
+	if totals.CallCount != 2 {
+		t.Errorf("expected call_count=2 (global, no project filter), got %d", totals.CallCount)
+	}
+	if totals.TotalTokens != 210 {
+		t.Errorf("expected total_tokens=210, got %d", totals.TotalTokens)
+	}
+}

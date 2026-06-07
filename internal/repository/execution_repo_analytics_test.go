@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -600,5 +601,119 @@ func TestExecutionRepo_AnalyticsEmptyResults(t *testing.T) {
 		if string(jsonBytes) != "[]" {
 			t.Errorf("%s marshals to %q, expected '[]'", tc.name, string(jsonBytes))
 		}
+	}
+}
+
+// TestExecutionRepo_SuccessFailureRates_LocaltimePeriod verifies that
+// GetSuccessFailureRates buckets executions by the server's local calendar
+// day (via SQLite 'localtime'), not raw UTC. Regression test for the bug
+// where strftime(?, e.started_at) used UTC, causing dates to show 6/7
+// when the local date was 6/6.
+func TestExecutionRepo_SuccessFailureRates_LocaltimePeriod(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewExecutionRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	projectRepo := NewProjectRepo(db)
+	agentRepo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "TZ Test Project", RepoPath: "/tz-test"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	agent := &models.LLMConfig{Name: "TZ Agent", Provider: "anthropic", Model: "claude-3-5-sonnet-20241022"}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "TZ Task",
+		Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "x"}
+	if err := repo.Create(ctx, exec); err != nil {
+		t.Fatal(err)
+	}
+
+	// Override started_at to a known UTC instant; the expected period must be
+	// the LOCAL date for that instant, not the UTC date.
+	knownUTC := time.Now().UTC()
+	expectedPeriod := knownUTC.In(time.Local).Format("2006-01-02")
+	if _, err := db.ExecContext(ctx,
+		`UPDATE executions SET started_at = ? WHERE id = ?`,
+		knownUTC.Format("2006-01-02T15:04:05Z"), exec.ID,
+	); err != nil {
+		t.Fatalf("UPDATE started_at: %v", err)
+	}
+
+	rates, err := repo.GetSuccessFailureRates(ctx, project.ID, "day", "", "")
+	if err != nil {
+		t.Fatalf("GetSuccessFailureRates: %v", err)
+	}
+	if len(rates) == 0 {
+		t.Fatal("expected at least one rate entry")
+	}
+	if rates[0].Period != expectedPeriod {
+		t.Errorf("GetSuccessFailureRates period: got %q, want %q (local date for UTC %v)",
+			rates[0].Period, expectedPeriod, knownUTC)
+	}
+}
+
+// TestExecutionRepo_ExecutionTrendsByHour_LocaltimeHour verifies that
+// GetExecutionTrendsByHour buckets executions by the server's local hour
+// (via SQLite 'localtime'), not raw UTC hour.
+func TestExecutionRepo_ExecutionTrendsByHour_LocaltimeHour(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewExecutionRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	projectRepo := NewProjectRepo(db)
+	agentRepo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Hour TZ Project", RepoPath: "/hour-tz"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	agent := &models.LLMConfig{Name: "Hour Agent", Provider: "anthropic", Model: "claude-3-5-sonnet-20241022"}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Hour Task",
+		Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "x"}
+	if err := repo.Create(ctx, exec); err != nil {
+		t.Fatal(err)
+	}
+
+	// Override started_at to a known UTC instant; the expected hour must be
+	// the LOCAL hour for that instant.
+	knownUTC := time.Now().UTC()
+	expectedHour := knownUTC.In(time.Local).Hour()
+	if _, err := db.ExecContext(ctx,
+		`UPDATE executions SET started_at = ? WHERE id = ?`,
+		knownUTC.Format("2006-01-02T15:04:05Z"), exec.ID,
+	); err != nil {
+		t.Fatalf("UPDATE started_at: %v", err)
+	}
+
+	trends, err := repo.GetExecutionTrendsByHour(ctx, project.ID, "", "")
+	if err != nil {
+		t.Fatalf("GetExecutionTrendsByHour: %v", err)
+	}
+	if len(trends) == 0 {
+		t.Fatal("expected at least one trend entry")
+	}
+	if trends[0].Hour != expectedHour {
+		t.Errorf("GetExecutionTrendsByHour hour: got %d, want %d (local hour for UTC %v)",
+			trends[0].Hour, expectedHour, knownUTC)
 	}
 }

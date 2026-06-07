@@ -205,7 +205,7 @@ func (r *UsageRepo) GetUsageTotals(ctx context.Context, filter UsageFilter) (*mo
 func (r *UsageRepo) GetDailyUsage(ctx context.Context, filter UsageFilter) ([]models.DailyUsagePoint, error) {
 	where, args := usageWhere(filter)
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT date(occurred_at) AS period,
+		SELECT date(occurred_at, 'localtime') AS period,
 		       COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0),
 		       COALESCE(SUM(total_tokens), 0), SUM(cost_usd), COUNT(cost_usd), COUNT(*)
 		FROM llm_usage_events `+where+`
@@ -235,7 +235,7 @@ func (r *UsageRepo) GetDailyUsage(ctx context.Context, filter UsageFilter) ([]mo
 func (r *UsageRepo) GetDailyUsageByModel(ctx context.Context, filter UsageFilter) ([]models.DailyUsagePoint, error) {
 	where, args := usageWhere(filter)
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT date(occurred_at) AS period, provider, model,
+		SELECT date(occurred_at, 'localtime') AS period, provider, model,
 		       COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0),
 		       COALESCE(SUM(total_tokens), 0), SUM(cost_usd), COUNT(cost_usd), COUNT(*)
 		FROM llm_usage_events `+where+`
@@ -376,16 +376,20 @@ func usageWhere(filter UsageFilter) (string, []any) {
 	return "WHERE " + strings.Join(clauses, " AND "), args
 }
 
+// usagePeriodExpression returns a SQLite expression that groups occurred_at into
+// the requested bucket using the server's local timezone ('localtime' modifier).
+// This matches the Schedules page pattern of using time.Local / time.Now() so
+// that chart X-axis labels show local calendar days/weeks rather than UTC days.
 func usagePeriodExpression(groupBy string) string {
 	switch groupBy {
 	case "hour":
-		return "strftime('%Y-%m-%d %H:00:00', occurred_at)"
+		return "strftime('%Y-%m-%d %H:00:00', occurred_at, 'localtime')"
 	case "week":
-		return "strftime('%Y-W%W', occurred_at)"
+		return "strftime('%Y-W%W', occurred_at, 'localtime')"
 	case "month":
-		return "strftime('%Y-%m', occurred_at)"
+		return "strftime('%Y-%m', occurred_at, 'localtime')"
 	default:
-		return "date(occurred_at)"
+		return "date(occurred_at, 'localtime')"
 	}
 }
 
