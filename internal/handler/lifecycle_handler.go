@@ -301,9 +301,7 @@ func extractStructuredSummary(contract models.LifecycleOutputContract, raw strin
 			return summary
 		}
 	case models.OutputContractSelectedMemories:
-		if summary := selectedMemoriesSummary(probe); summary != "" {
-			return summary
-		}
+		return ""
 	}
 	return ""
 }
@@ -353,22 +351,6 @@ func selectedSkillsFromProbe(probe map[string]any) []string {
 }
 
 const maxLifecycleMemoryDetailLen = 240
-
-func selectedMemoriesSummary(probe map[string]any) string {
-	parts := selectedMemoryViewsFromProbe(probe)
-	if len(parts) == 0 {
-		return ""
-	}
-	labels := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if part.File != "" {
-			labels = append(labels, part.File)
-			continue
-		}
-		labels = append(labels, part.Topic)
-	}
-	return "Selected memories: " + strings.Join(labels, ", ")
-}
 
 func extractSelectedMemoryViews(e models.LifecycleExecution, raw string) []viewmodels.SelectedMemoryView {
 	if e.OutputContract == models.OutputContractSelectedMemories {

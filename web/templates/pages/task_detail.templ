@@ -905,7 +905,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 									container.innerHTML = rows.map(function(r) {
 										var selectedSkills = renderBadgeRow('Selected skills', r.selected_skills);
 										var selectedMemories = renderBadgeRow('Selected memories', memoryLabels(r.selected_memories));
-										var summary = r.summary && !selectedSkills ? '<p class="text-sm mt-1">' + escapeText(r.summary) + '</p>' : '';
+										var hasStructuredRoute = selectedSkills || selectedMemories;
+										var summary = r.summary && !hasStructuredRoute ? '<p class="text-sm mt-1">' + escapeText(r.summary) + '</p>' : '';
 										var error = r.error ? '<p class="text-xs text-error mt-1">' + escapeText(r.error) + '</p>' : '';
 										var when = r.completed_at ? new Date(r.completed_at).toLocaleString() : new Date(r.started_at).toLocaleString();
 										return '<div class="border border-base-300 rounded-lg p-3">' +

@@ -322,6 +322,9 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 	if summaries["route_task/route_task"] != "Selected skills: openvibely_agent_skill_architecture, debug_go_tests" {
 		t.Fatalf("expected selected skill summary, got %+v", summaries)
 	}
+	if summaries["route_task/recall_memory"] != "" {
+		t.Fatalf("expected selected memory route summary to stay badge-only, got %+v", summaries)
+	}
 	if len(route.SelectedSkills) != 2 || route.SelectedSkills[0] != "openvibely_agent_skill_architecture" || route.SelectedSkills[1] != "debug_go_tests" {
 		t.Fatalf("expected selected skills exposed as badge identifiers, got %+v", route.SelectedSkills)
 	}

@@ -1534,7 +1534,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, "\" class=\"space-y-2\"><p class=\"text-sm opacity-50\">Loading lifecycle activity...</p></div></div></div><script>\n\t\t\t\t(function() {\n\t\t\t\t\tfunction statusBadge(status) {\n\t\t\t\t\t\tvar map = { completed: 'badge-success', failed: 'badge-error', skipped: 'badge-ghost', queued: 'badge-info', running: 'badge-warning' };\n\t\t\t\t\t\tvar cls = map[status] || 'badge-ghost';\n\t\t\t\t\t\treturn '<span class=\"badge ' + cls + ' badge-sm\">' + status + '</span>';\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction escapeText(value) {\n\t\t\t\t\t\t\treturn String(value == null ? '' : value)\n\t\t\t\t\t\t\t\t.replace(/&/g, '&amp;')\n\t\t\t\t\t\t\t\t.replace(/</g, '&lt;')\n\t\t\t\t\t\t\t\t.replace(/>/g, '&gt;');\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction renderBadgeRow(label, values) {\n\t\t\t\t\t\t\tif (!Array.isArray(values) || values.length === 0) return '';\n\t\t\t\t\t\t\tvar seen = Object.create(null);\n\t\t\t\t\t\t\tvar badges = [];\n\t\t\t\t\t\t\tvalues.forEach(function(value) {\n\t\t\t\t\t\t\t\tif (!value || seen[value]) return;\n\t\t\t\t\t\t\t\tseen[value] = true;\n\t\t\t\t\t\t\t\tbadges.push('<span class=\"font-mono text-xs badge badge-outline\">' + escapeText(value) + '</span>');\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tif (badges.length === 0) return '';\n\t\t\t\t\t\t\treturn '<p class=\"text-sm mt-1 flex items-center gap-2 flex-wrap\">' +\n\t\t\t\t\t\t\t\t'<span>' + escapeText(label) + ':</span> ' + badges.join(' ') +\n\t\t\t\t\t\t\t'</p>';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction memoryLabels(memories) {\n\t\t\t\t\t\t\tif (!Array.isArray(memories)) return [];\n\t\t\t\t\t\t\treturn memories.map(function(m) { return m.file || m.topic || ''; });\n\t\t\t\t\t\t}\n\t\t\t\t\t\twindow.refreshLifecycleActivity = async function(taskID) {\n\t\t\t\t\t\t\tvar container = document.getElementById('lifecycle-activity-list');\n\t\t\t\t\t\t\tif (!container) return;\n\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\tvar response = await fetch('/api/tasks/' + encodeURIComponent(taskID) + '/lifecycle-executions', { headers: { 'Accept': 'application/json' } });\n\t\t\t\t\t\t\t\tif (!response.ok) throw new Error('failed to load lifecycle executions');\n\t\t\t\t\t\t\t\tvar rows = await response.json();\n\t\t\t\t\t\t\t\tif (!Array.isArray(rows) || rows.length === 0) {\n\t\t\t\t\t\t\t\t\tcontainer.innerHTML = '<p class=\"text-sm opacity-50\">No lifecycle activity recorded yet.</p>';\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tcontainer.innerHTML = rows.map(function(r) {\n\t\t\t\t\t\t\t\t\t\tvar selectedSkills = renderBadgeRow('Selected skills', r.selected_skills);\n\t\t\t\t\t\t\t\t\t\tvar selectedMemories = renderBadgeRow('Selected memories', memoryLabels(r.selected_memories));\n\t\t\t\t\t\t\t\t\t\tvar summary = r.summary && !selectedSkills ? '<p class=\"text-sm mt-1\">' + escapeText(r.summary) + '</p>' : '';\n\t\t\t\t\t\t\t\t\t\tvar error = r.error ? '<p class=\"text-xs text-error mt-1\">' + escapeText(r.error) + '</p>' : '';\n\t\t\t\t\t\t\t\t\t\tvar when = r.completed_at ? new Date(r.completed_at).toLocaleString() : new Date(r.started_at).toLocaleString();\n\t\t\t\t\t\t\t\t\t\treturn '<div class=\"border border-base-300 rounded-lg p-3\">' +\n\t\t\t\t\t\t\t\t\t\t\t'<div class=\"flex items-center justify-between flex-wrap gap-2\">' +\n\t\t\t\t\t\t\t\t\t\t\t\t'<div class=\"flex items-center gap-2 flex-wrap\">' +\n\t\t\t\t\t\t\t\t\t\t\t\t\t'<span class=\"font-mono text-xs opacity-70\">' + escapeText(r.when || '') + '</span>' +\n\t\t\t\t\t\t\t\t\t\t\t\t\t'<span class=\"text-sm font-medium\">' + escapeText(r.skill_key || '') + '</span>' +\n\t\t\t\t\t\t\t\t\t\t\t\t\tstatusBadge(r.status || '') +\n\t\t\t\t\t\t\t\t\t\t\t\t'</div>' +\n\t\t\t\t\t\t\t\t\t\t\t\t'<span class=\"text-xs opacity-60\">' + escapeText(when) + '</span>' +\n\t\t\t\t\t\t\t\t\t\t\t'</div>' +\n\t\t\t\t\t\t\t\t\t\t\tsummary + selectedSkills + selectedMemories + error +\n\t\t\t\t\t\t\t\t\t\t'</div>';\n\t\t\t\t\t\t\t\t\t}).join('');\n\t\t\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\t\tcontainer.innerHTML = '<p class=\"text-sm text-error\">' + escapeText(err.message || err) + '</p>';\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\t\t\t\t\tif (document.querySelector('[data-tab=\"lifecycle\"].tab-active')) {\n\t\t\t\t\t\tvar el = document.getElementById('lifecycle-activity-list');\n\t\t\t\t\t\tif (el) window.refreshLifecycleActivity(el.dataset.taskId);\n\t\t\t\t\t}\n\t\t\t\t\tdocument.addEventListener('click', function(ev) {\n\t\t\t\t\t\tvar tab = ev.target.closest && ev.target.closest('[data-tab=\"lifecycle\"]');\n\t\t\t\t\t\tif (!tab) return;\n\t\t\t\t\t\tvar el = document.getElementById('lifecycle-activity-list');\n\t\t\t\t\t\tif (el) window.refreshLifecycleActivity(el.dataset.taskId);\n\t\t\t\t\t});\n\t\t\t\t})();\n\t\t\t</script></div><!-- End Tab: Lifecycle --><!-- Tab: Changes -->")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, "\" class=\"space-y-2\"><p class=\"text-sm opacity-50\">Loading lifecycle activity...</p></div></div></div><script>\n\t\t\t\t(function() {\n\t\t\t\t\tfunction statusBadge(status) {\n\t\t\t\t\t\tvar map = { completed: 'badge-success', failed: 'badge-error', skipped: 'badge-ghost', queued: 'badge-info', running: 'badge-warning' };\n\t\t\t\t\t\tvar cls = map[status] || 'badge-ghost';\n\t\t\t\t\t\treturn '<span class=\"badge ' + cls + ' badge-sm\">' + status + '</span>';\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction escapeText(value) {\n\t\t\t\t\t\t\treturn String(value == null ? '' : value)\n\t\t\t\t\t\t\t\t.replace(/&/g, '&amp;')\n\t\t\t\t\t\t\t\t.replace(/</g, '&lt;')\n\t\t\t\t\t\t\t\t.replace(/>/g, '&gt;');\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction renderBadgeRow(label, values) {\n\t\t\t\t\t\t\tif (!Array.isArray(values) || values.length === 0) return '';\n\t\t\t\t\t\t\tvar seen = Object.create(null);\n\t\t\t\t\t\t\tvar badges = [];\n\t\t\t\t\t\t\tvalues.forEach(function(value) {\n\t\t\t\t\t\t\t\tif (!value || seen[value]) return;\n\t\t\t\t\t\t\t\tseen[value] = true;\n\t\t\t\t\t\t\t\tbadges.push('<span class=\"font-mono text-xs badge badge-outline\">' + escapeText(value) + '</span>');\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tif (badges.length === 0) return '';\n\t\t\t\t\t\t\treturn '<p class=\"text-sm mt-1 flex items-center gap-2 flex-wrap\">' +\n\t\t\t\t\t\t\t\t'<span>' + escapeText(label) + ':</span> ' + badges.join(' ') +\n\t\t\t\t\t\t\t'</p>';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction memoryLabels(memories) {\n\t\t\t\t\t\t\tif (!Array.isArray(memories)) return [];\n\t\t\t\t\t\t\treturn memories.map(function(m) { return m.file || m.topic || ''; });\n\t\t\t\t\t\t}\n\t\t\t\t\t\twindow.refreshLifecycleActivity = async function(taskID) {\n\t\t\t\t\t\t\tvar container = document.getElementById('lifecycle-activity-list');\n\t\t\t\t\t\t\tif (!container) return;\n\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\tvar response = await fetch('/api/tasks/' + encodeURIComponent(taskID) + '/lifecycle-executions', { headers: { 'Accept': 'application/json' } });\n\t\t\t\t\t\t\t\tif (!response.ok) throw new Error('failed to load lifecycle executions');\n\t\t\t\t\t\t\t\tvar rows = await response.json();\n\t\t\t\t\t\t\t\tif (!Array.isArray(rows) || rows.length === 0) {\n\t\t\t\t\t\t\t\t\tcontainer.innerHTML = '<p class=\"text-sm opacity-50\">No lifecycle activity recorded yet.</p>';\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tcontainer.innerHTML = rows.map(function(r) {\n\t\t\t\t\t\t\t\t\t\tvar selectedSkills = renderBadgeRow('Selected skills', r.selected_skills);\n\t\t\t\t\t\t\t\t\t\tvar selectedMemories = renderBadgeRow('Selected memories', memoryLabels(r.selected_memories));\n\t\t\t\t\t\t\t\t\t\tvar hasStructuredRoute = selectedSkills || selectedMemories;\n\t\t\t\t\t\t\t\t\t\tvar summary = r.summary && !hasStructuredRoute ? '<p class=\"text-sm mt-1\">' + escapeText(r.summary) + '</p>' : '';\n\t\t\t\t\t\t\t\t\t\tvar error = r.error ? '<p class=\"text-xs text-error mt-1\">' + escapeText(r.error) + '</p>' : '';\n\t\t\t\t\t\t\t\t\t\tvar when = r.completed_at ? new Date(r.completed_at).toLocaleString() : new Date(r.started_at).toLocaleString();\n\t\t\t\t\t\t\t\t\t\treturn '<div class=\"border border-base-300 rounded-lg p-3\">' +\n\t\t\t\t\t\t\t\t\t\t\t'<div class=\"flex items-center justify-between flex-wrap gap-2\">' +\n\t\t\t\t\t\t\t\t\t\t\t\t'<div class=\"flex items-center gap-2 flex-wrap\">' +\n\t\t\t\t\t\t\t\t\t\t\t\t\t'<span class=\"font-mono text-xs opacity-70\">' + escapeText(r.when || '') + '</span>' +\n\t\t\t\t\t\t\t\t\t\t\t\t\t'<span class=\"text-sm font-medium\">' + escapeText(r.skill_key || '') + '</span>' +\n\t\t\t\t\t\t\t\t\t\t\t\t\tstatusBadge(r.status || '') +\n\t\t\t\t\t\t\t\t\t\t\t\t'</div>' +\n\t\t\t\t\t\t\t\t\t\t\t\t'<span class=\"text-xs opacity-60\">' + escapeText(when) + '</span>' +\n\t\t\t\t\t\t\t\t\t\t\t'</div>' +\n\t\t\t\t\t\t\t\t\t\t\tsummary + selectedSkills + selectedMemories + error +\n\t\t\t\t\t\t\t\t\t\t'</div>';\n\t\t\t\t\t\t\t\t\t}).join('');\n\t\t\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\t\tcontainer.innerHTML = '<p class=\"text-sm text-error\">' + escapeText(err.message || err) + '</p>';\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\t\t\t\t\tif (document.querySelector('[data-tab=\"lifecycle\"].tab-active')) {\n\t\t\t\t\t\tvar el = document.getElementById('lifecycle-activity-list');\n\t\t\t\t\t\tif (el) window.refreshLifecycleActivity(el.dataset.taskId);\n\t\t\t\t\t}\n\t\t\t\t\tdocument.addEventListener('click', function(ev) {\n\t\t\t\t\t\tvar tab = ev.target.closest && ev.target.closest('[data-tab=\"lifecycle\"]');\n\t\t\t\t\t\tif (!tab) return;\n\t\t\t\t\t\tvar el = document.getElementById('lifecycle-activity-list');\n\t\t\t\t\t\tif (el) window.refreshLifecycleActivity(el.dataset.taskId);\n\t\t\t\t\t});\n\t\t\t\t})();\n\t\t\t</script></div><!-- End Tab: Lifecycle --><!-- Tab: Changes -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1563,7 +1563,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 		var templ_7745c5c3_Var84 string
 		templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 945, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 946, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var84)
 		if templ_7745c5c3_Err != nil {
@@ -1576,7 +1576,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 		var templ_7745c5c3_Var85 string
 		templ_7745c5c3_Var85, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 948, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 949, Col: 26}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var85)
 		if templ_7745c5c3_Err != nil {
@@ -1594,7 +1594,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 			var templ_7745c5c3_Var86 string
 			templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes", task.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 951, Col: 118}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 952, Col: 118}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var86)
 			if templ_7745c5c3_Err != nil {
@@ -1639,7 +1639,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 		var templ_7745c5c3_Var89 string
 		templ_7745c5c3_Var89, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/thread", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 974, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 975, Col: 53}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var89)
 		if templ_7745c5c3_Err != nil {
@@ -1652,7 +1652,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 		var templ_7745c5c3_Var90 string
 		templ_7745c5c3_Var90, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 977, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 978, Col: 26}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var90)
 		if templ_7745c5c3_Err != nil {
@@ -1711,7 +1711,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 		var templ_7745c5c3_Var92 string
 		templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/detail-status", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1482, Col: 58}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1483, Col: 58}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var92)
 		if templ_7745c5c3_Err != nil {
@@ -1724,7 +1724,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 		var templ_7745c5c3_Var93 string
 		templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(task.Status))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1486, Col: 40}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1487, Col: 40}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var93)
 		if templ_7745c5c3_Err != nil {
@@ -1737,7 +1737,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 		var templ_7745c5c3_Var94 string
 		templ_7745c5c3_Var94, templ_7745c5c3_Err = templ.JoinStringErrs(string(task.Category))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1490, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1491, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var94))
 		if templ_7745c5c3_Err != nil {
@@ -1777,7 +1777,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 			var templ_7745c5c3_Var97 string
 			templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.JoinStringErrs(components.StatusLabelForTask(task.Status, task.Category))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1497, Col: 143}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1498, Col: 143}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var97))
 			if templ_7745c5c3_Err != nil {
@@ -1800,7 +1800,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 			var templ_7745c5c3_Var98 string
 			templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.JoinStringErrs(components.TagLabel(task.Tag))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1503, Col: 108}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1504, Col: 108}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var98))
 			if templ_7745c5c3_Err != nil {
@@ -1828,7 +1828,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 			var templ_7745c5c3_Var99 string
 			templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.JoinStringErrs(components.PriorityLabel(task.Priority))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1511, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1512, Col: 93}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var99))
 			if templ_7745c5c3_Err != nil {
@@ -1846,7 +1846,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 		var templ_7745c5c3_Var100 string
 		templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.JoinStringErrs(taskModelLabel(task, agents))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1516, Col: 81}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1517, Col: 81}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var100))
 		if templ_7745c5c3_Err != nil {
@@ -1859,7 +1859,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 		var templ_7745c5c3_Var101 string
 		templ_7745c5c3_Var101, templ_7745c5c3_Err = templ.JoinStringErrs(taskAgentLabel(task, agentDefs))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1520, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1521, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var101))
 		if templ_7745c5c3_Err != nil {
@@ -1877,7 +1877,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 			var templ_7745c5c3_Var102 string
 			templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.JoinStringErrs(components.FormatElapsedTime(executions[len(executions)-1].StartedAt))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1525, Col: 114}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1526, Col: 114}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var102))
 			if templ_7745c5c3_Err != nil {
@@ -1897,7 +1897,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 				var templ_7745c5c3_Var103 string
 				templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.JoinStringErrs(dur)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1532, Col: 58}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1533, Col: 58}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var103))
 				if templ_7745c5c3_Err != nil {
@@ -1950,7 +1950,7 @@ func TaskPromptPanel(task *models.Task) templ.Component {
 			var templ_7745c5c3_Var105 string
 			templ_7745c5c3_Var105, templ_7745c5c3_Err = templ.JoinStringErrs(task.Prompt)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1544, Col: 177}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1545, Col: 177}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var105))
 			if templ_7745c5c3_Err != nil {
@@ -2002,7 +2002,7 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 		var templ_7745c5c3_Var107 string
 		templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.ResolveAttributeValue(taskID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1553, Col: 104}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1554, Col: 104}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var107)
 		if templ_7745c5c3_Err != nil {
@@ -2030,7 +2030,7 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 			var templ_7745c5c3_Var108 string
 			templ_7745c5c3_Var108, templ_7745c5c3_Err = templ.JoinStringErrs(string(goal.Status))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1563, Col: 60}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1564, Col: 60}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var108))
 			if templ_7745c5c3_Err != nil {
@@ -2053,7 +2053,7 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 			var templ_7745c5c3_Var109 string
 			templ_7745c5c3_Var109, templ_7745c5c3_Err = templ.JoinStringErrs(goal.Objective)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1567, Col: 180}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1568, Col: 180}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var109))
 			if templ_7745c5c3_Err != nil {
@@ -2071,7 +2071,7 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 				var templ_7745c5c3_Var110 string
 				templ_7745c5c3_Var110, templ_7745c5c3_Err = templ.JoinStringErrs(goal.Reason)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1569, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1570, Col: 56}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var110))
 				if templ_7745c5c3_Err != nil {
@@ -2094,7 +2094,7 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 				var templ_7745c5c3_Var111 string
 				templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.JoinStringErrs(goal.LastCheckedAt.Local().Format("Jan 2, 2006 3:04 PM"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1572, Col: 107}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1573, Col: 107}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var111))
 				if templ_7745c5c3_Err != nil {
