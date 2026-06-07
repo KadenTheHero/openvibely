@@ -123,7 +123,7 @@ func (s *TaskGoalService) ResumeGoal(ctx context.Context, taskID string, actor s
 	if goal == nil {
 		return ErrTaskGoalNotFound
 	}
-	if goal.Status != models.TaskGoalStatusPaused {
+	if goal.Status != models.TaskGoalStatusPaused && goal.Status != models.TaskGoalStatusBlocked {
 		return ErrTaskGoalNotPaused
 	}
 	goal, err = s.repo.UpdateStatus(ctx, taskID, goal.GoalID, models.TaskGoalStatusActive, reasonForActor(actor, "resumed"), true)

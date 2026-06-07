@@ -923,7 +923,7 @@ func (h *Handler) updateTaskGoalFromEditForm(c echo.Context, taskID string) erro
 		return nil
 	}
 	goalActive := c.FormValue("goal_active") == "on" || c.FormValue("goal_active") == "true"
-	if goalActive && latestGoal.Status == models.TaskGoalStatusPaused {
+	if goalActive && (latestGoal.Status == models.TaskGoalStatusPaused || latestGoal.Status == models.TaskGoalStatusBlocked) {
 		return h.taskGoalSvc.ResumeGoal(c.Request().Context(), taskID, "user")
 	}
 	if !goalActive && latestGoal.Status == models.TaskGoalStatusActive {

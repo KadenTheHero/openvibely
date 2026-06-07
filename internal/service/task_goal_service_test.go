@@ -119,3 +119,60 @@ func TestTaskGoalService_ValidationPauseResumeClear(t *testing.T) {
 		t.Fatalf("blocked report on cleared goal error = %v", err)
 	}
 }
+
+func TestTaskGoalService_ResumeBlockedGoalResetsBlockerCount(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createServiceGoalTestProject(t, ctx, db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: project.ID, Title: "Blocked Resume", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "prompt", Priority: 2}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+
+	goal, err := svc.SetGoal(ctx, task.ID, "Ship the feature", GoalOptions{Actor: "test"})
+	if err != nil {
+		t.Fatalf("set goal: %v", err)
+	}
+
+	// Report blockers until the goal transitions to blocked status (threshold = 3).
+	for i := 1; i <= 3; i++ {
+		updated, rerr := svc.RecordBlockedReport(ctx, task.ID, goal.GoalID, "ci-failure", "CI is red")
+		if rerr != nil {
+			t.Fatalf("RecordBlockedReport %d: %v", i, rerr)
+		}
+		if i < 3 && updated.Status != models.TaskGoalStatusActive {
+			t.Fatalf("expected active before threshold at report %d, got %s", i, updated.Status)
+		}
+	}
+
+	blocked, _ := svc.GetGoal(ctx, task.ID)
+	if blocked.Status != models.TaskGoalStatusBlocked || blocked.BlockerCount != 3 {
+		t.Fatalf("expected blocked with count=3 before resume, got status=%s count=%d", blocked.Status, blocked.BlockerCount)
+	}
+
+	// Resuming a blocked goal must succeed and clear blocker audit state.
+	if err := svc.ResumeGoal(ctx, task.ID, "user"); err != nil {
+		t.Fatalf("ResumeGoal on blocked goal: %v", err)
+	}
+
+	resumed, _ := svc.GetGoal(ctx, task.ID)
+	if resumed.Status != models.TaskGoalStatusActive {
+		t.Fatalf("expected active after resume, got %s", resumed.Status)
+	}
+	if resumed.BlockerCount != 0 {
+		t.Fatalf("expected blocker_count=0 after resume, got %d", resumed.BlockerCount)
+	}
+	if resumed.BlockerKey != "" {
+		t.Fatalf("expected blocker_key='' after resume, got %q", resumed.BlockerKey)
+	}
+	if resumed.GoalID != goal.GoalID {
+		t.Fatalf("expected same goal_id after resume, got %q (want %q)", resumed.GoalID, goal.GoalID)
+	}
+
+	// A second ResumeGoal on the now-active goal must return ErrTaskGoalNotPaused.
+	if err := svc.ResumeGoal(ctx, task.ID, "user"); !errors.Is(err, ErrTaskGoalNotPaused) {
+		t.Fatalf("expected ErrTaskGoalNotPaused resuming active goal, got %v", err)
+	}
+}
