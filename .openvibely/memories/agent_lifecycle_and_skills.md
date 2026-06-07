@@ -3,90 +3,68 @@ name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
 updated: 2026-06-07
-source: after_complete
-source_id: 817e88a4d4a1549843f1dbba276e0723
+source: consolidation
+source_id: memory_consolidation_2026_06_07
 confidence: high
 title: Agent Lifecycle and Skills
 ---
 
-OpenVibely lifecycle-agent and skill behavior is guided by the on-disk agent/skill catalog plus lifecycle hooks. Verify current source before relying on exact implementation details.
+OpenVibely lifecycle-agent and skill behavior is guided by the on-disk agent/skill catalog plus lifecycle hooks. Exact implementation details are source-authoritative.
 
-Catalog model:
-- Built-in system agents include Skill Curator (`skill_curator`), Memory Curator (`memory_curator`), and Goal Agent (`goal`). They are protected system agents and should be hidden/protected/list-filtered consistently where system agents are not user-selectable.
-- Goal Agent ships as embedded markdown under `internal/builtinskills/builtin/agents/goal/` with root `SKILLS.md` and `skills/evaluate_task_goal/SKILL.md`. Its seed/repair path must persist `system_kind=goal`, `created_by=system`, `generated_status=protected`, source refs, tool grants, and the `evaluate_task_goal` lifecycle hook through the system-agent path, not the generic generated-agent path. Repair must handle older databases with an existing `key=goal` row and blank `system_kind`.
-- Skill Curator uses clean `skill_curator` identifiers. Its scheduled maintenance skill is `maintain_skill_library`; bundled copy should say “skill” when it means skill, not “agent.”
-- This subsystem has not shipped broadly, so do not preserve compatibility aliases, old paths, or intermediate names unless real persisted release data requires them.
-- Agents are global by default and reusable across projects. Project-scoped agents/skills live under `<project_root>/.openvibely/agents/...`; global agents live under the app/config agents root shared by local web/server and desktop modes unless explicitly overridden.
-- The on-disk catalog is authoritative after seed through per-agent declarations: `<agent_key>/SKILLS.md` lists that agent’s skills/metadata, and `<agent_key>/skills/<skill_key>/SKILL.md` is the skill body. Do not rely on a root `<agents_root>/AGENTS.md` index.
-- Standalone skills are file-backed, not DB-backed. `<root>/skills/SKILLS.md` `## <handle>` headings are canonical handles and loaders expect matching `<root>/skills/<handle>/SKILL.md`; heading/link/frontmatter mismatches can make manually added skills invisible.
+Agent and catalog facts:
+- Built-in protected system agents include Skill Curator (`skill_curator`), Memory Curator (`memory_curator`), and Goal Agent (`goal`).
+- Goal Agent ships as embedded markdown under `internal/builtinskills/builtin/agents/goal/` with root `SKILLS.md` and `skills/evaluate_task_goal/SKILL.md`.
+- Skill Curator uses clean `skill_curator` identifiers; its scheduled maintenance skill is `maintain_skill_library`.
+- Agents are global by default and reusable across projects. Project-scoped agents/skills live under `<project_root>/.openvibely/agents/...`; global agents live under the app/config agents root.
+- The on-disk per-agent `SKILLS.md` declaration is the authoritative overview/index and metadata surface for agent skills, lifecycle hooks, task loading, tool permissions, and declarations.
+- Standalone skills are filesystem-backed packages. `<root>/skills/SKILLS.md` headings are canonical handles and match `<root>/skills/<handle>/SKILL.md`.
+- Project scope overrides global scope for matching standalone or agent-owned skill keys.
 - Product direction favors explicit import/index maintenance over automatic disk auto-discovery for manually dropped skill directories.
-- Project workflow skills should document how to invoke them in plain user prompts, including the minimal prompt form such as `Release version 0.1.1` and supported modifiers like dry-run or skip options, so future agents do not have to infer trigger phrasing from implementation details.
-- As of 2026-06-07, the project skill `.openvibely/skills/openvibely_release_workflow/` exists, is indexed, and passed post-fix audit for release automation. It is invoked by prompts like `Release version 0.1.1`; scripts handle semver/preflight, artifact builds, checksums, branch/tag operations, and GitHub release publishing, while the agent synthesizes high-level release notes from `COMMITS.txt` and replaces `AI_CHANGELOG_PLACEHOLDER` before publishing. GitHub release creation uses `git` for branch/tag pushes and `gh` for auth, release creation, and asset upload. Docker publishing remains an explicit manual/reported step unless credentials/tooling are deliberately available. The prior Windows desktop-cli blocker was fixed by removing top-level `local` from `release-build.sh`.
-- Skill enabled/disabled state is authoritative catalog/frontmatter metadata: `skill.enabled: false` disables a skill, absent/true means enabled. Runtime catalogs for task execution, lifecycle hooks, skill routing/selection, `skill_view`, and context injection must exclude disabled skills; management/admin listings should still show them as manageable.
-- Assigned-agent tasks should use that agent’s merged agent-owned skill catalog, not the top-level standalone catalog. Runtime `skill_view` and available-skill rendering must inspect the same assigned-agent scoped catalog.
-- Built-in/global agents and skills sync through the embedded/built-in path. Bundled `SKILL.md` bodies may be overwritten as app-owned source; bundled per-agent `SKILLS.md` declarations are the app-managed agent metadata/index surface.
-- The 2026-06-06 guidance migration removed OpenVibely's own root `AGENTS.md`, `CLAUDE.md`, `PRACTICES.md`, and `guardrails.md` files as required app artifacts and removed runtime support for reading repo-root `AGENTS.md` or `CLAUDE.md` into provider instructions. Static OpenVibely repository guidance belongs in the project-managed standalone skill at `.openvibely/skills/openvibely_project_guidance/SKILL.md`, indexed by `.openvibely/skills/SKILLS.md`; it is not a bundled built-in skill, must not be placed or indexed under the global app skill root, and should not be loaded by a bespoke hardcoded service path. Because the migrated static guidance must be durable in the branch, `.gitignore` selectively unignores only `.openvibely/skills/SKILLS.md` and `.openvibely/skills/openvibely_project_guidance/SKILL.md` while leaving other `.openvibely/skills` local app-managed state ignored. `SKILLS.md` should stay in canonical standalone-index format and preserve the existing project skill entries when adding `openvibely_project_guidance`; do not collapse the project skill index to a single guidance entry.
-- Keep `openvibely_project_guidance` focused on static repository operating guardrails. It should retain concise onboarding/navigation guidance migrated from the old root files, including `Running`, `Key Files`, `Adding Features`, `Architecture Practices`/`Layered Responsibilities`, and `Time And Scheduling`/timezone guardrail sections, because that content belongs in the project skill rather than managed memory. The layered-responsibility guidance should preserve the old model/repository/service/handler boundaries: models hold plain structs/domain rules, repositories own raw SQL/context-aware access, services orchestrate business logic, and handlers own HTTP parsing/rendering/response shaping. Do not add nonexistent support-file references or duplicate agent/skill/memory lifecycle workflow guidance there; dedicated project skills such as skill lifecycle and lifecycle-hook workflow skills own that business.
-- As of 2026-06-07, the OpenVibely repository project skill `.openvibely/skills/openvibely_project_guidance/SKILL.md` is intended to be selected for every applicable ordinary task through `.openvibely/skills/SKILLS.md` top-level `always_use`, not through hardcoded routing prompt text or a bespoke service path.
-- Missing indexes should degrade behavior but not crash or trigger deterministic regeneration. Bootstrap helpers should create directories only, except for built-in first-run seeding. Do not reintroduce deterministic index rebuilders, runtime index generators, or a `rebuild_indexes` runtime tool.
 
-Mutation and migration behavior:
-- `agent_manage`, `skill_manage`, and maintenance instructions should rely on mutation tools for catalog mutations where available. Scoped file edits are for focused narrative polish in managed declarations/indexes or project skill/index content, not redundant manual minimal-link edits when tooling maintains links.
-- Skill handles and paths must remain constrained to indexed catalog entries; never allow model-supplied arbitrary paths.
-- Standalone skill mutations must keep top-level `<root>/skills/SKILLS.md` consistent with `<root>/skills/<skill_key>/SKILL.md`; deleting only the directory can leave stale advertised skills.
-- Agent root `SKILLS.md` is the authoritative overview/index and metadata surface for Agents page, lifecycle hooks, task loading, tool permissions, and declarations. It links to skill files and is updated idempotently, but it is not the canonical prompt container.
-- Legacy DB-backed agent skills (`models.Agent.Skills`) are compatibility data distinct from routed on-disk agent-owned skills. Migrate/materialize DB-only agents safely into the global on-disk catalog with clean slugs, preserve data idempotently, and do not rewrite DB state from stale in-memory copies.
-- Standalone skill declarations should stay compact and limited to current catalog/manager fields. Keep active selection metadata such as `routing.triggers`, `routing.priority`, and `routing.description`; do not reintroduce removed legacy agent-routing scaffolding.
-- Standalone skills can be marked for deterministic inclusion through a compact top-level YAML/frontmatter `always_use` list in `<root>/skills/SKILLS.md`, e.g. project-scoped `.openvibely/skills/SKILLS.md`. Do not add default per-skill YAML blocks just to represent this setting. Mutations should be idempotent and remove the top-level metadata block when the list becomes empty. Top-level standalone-index metadata such as `always_use` is catalog control data and should not appear in model-visible `<available_skills>` rendering; render only prompt-safe skill sections.
-- Generated/native OpenVibely declarations must include required explicit `kind` frontmatter. Explicit import flows may accept standard Skills packages with top-level `name`/`description` and convert them into OpenVibely standalone declarations while preserving safe bundled resource files.
+Project guidance facts:
+- The 2026-06-06 guidance migration removed OpenVibely's own root `AGENTS.md`, `CLAUDE.md`, `PRACTICES.md`, and `guardrails.md` files as required app artifacts.
+- Static OpenVibely repository guidance belongs in `.openvibely/skills/openvibely_project_guidance/SKILL.md`, indexed by `.openvibely/skills/SKILLS.md`.
+- `openvibely_project_guidance` is intended to be selected for every applicable ordinary task through top-level `always_use`, not through hardcoded routing prompt text or a bespoke service path.
+- `.gitignore` selectively unignores committed project skills/memories while leaving local app-managed `.openvibely` state ignored.
 
-Skill Curator and post-task learning:
-- `observe_task_for_learning` is a Skill Curator `after_complete` hook, not execution as the task’s assigned primary agent. Mutation requires explicit lifecycle runtime tool grants for the hook owner.
-- The hook should review the compacted backend LLM conversation snapshot used for the task, not persisted threads, diffs, summaries, execution artifacts, or invented truncation policies.
-- Before saving learning, Skill Curator should inspect existing agents/skills as needed and avoid duplicate or already-covered learning. Cross-agent improvements belong in standalone skills; assigned-agent updates are reserved for behavior specific to that assigned agent’s role, purpose, private workflow, or selected agent-owned skill.
-- Hook context/tool descriptions should label assigned agent identity, purpose, selected agent-owned skills, selected standalone skills, provenance, and write policy explicitly; do not rely on path inference.
-- If uncertain about placement, prefer standalone skill updates or a proposed-change outcome rather than mutating. Avoid bulk-copying standalone or unrelated skills into an agent.
-- Assigned-agent skill mutation for post-task learning should use a constrained server-scoped agent-owned mutation path such as `agent_skill_manage`, not arbitrary `skill_manage` writes.
-- Agents/hooks that create, change, consolidate, or retire skills must have needed mutation/scoped-file access and preserve affected indexes. If write access is absent, report the required follow-up instead of claiming mutation happened.
-- Future skill-library maintenance/debugging should ensure authorized agent-owned skill inspection or appropriate scoped read access before expecting cross-agent duplicate/stale-skill cleanup.
+Skill metadata facts:
+- `skill.enabled: false` disables a skill; absent/true means enabled.
+- Runtime catalogs for task execution, lifecycle hooks, skill routing/selection, `skill_view`, and context injection exclude disabled skills.
+- Management/admin listings still show disabled skills as manageable.
+- Standalone top-level `always_use` metadata is catalog control data and does not appear in model-visible `<available_skills>` rendering.
+- Generated/native OpenVibely declarations include required explicit `kind` frontmatter.
+- Standard skill packages with top-level `name`/`description` can be converted into OpenVibely standalone declarations during explicit import.
 
-Lifecycle hooks and routing:
-- Lifecycle hooks live around `internal/lifecycle/` and task execution/server setup. Durable concepts include `route_task`, `before_run`, `after_complete`, `scheduled`, task-mode bookkeeping, blocking versus non-blocking execution, idempotency/audit rows, recursion prevention, and strict validation of hook types/tool access.
-- Goal Agent evaluation should run as a real generic `after_complete` lifecycle/system-agent evaluator using its skill/tools, not deterministic handler code or a bespoke `runGoalAgentCheckpoint` path. Filtering and runtime authorization should key on protected `system_kind=goal` identity, not only skill key strings.
-- `task_mode` is primary active task execution slot/bookkeeping and should not be exposed as an ordinary user-authored lifecycle hook unless deliberately redesigned.
-- `route_task` runs before `before_run` hooks and is an LLM routing decision over prompt-safe indexes. Skill Curator receives only the available skill index and may return a JSON `skills` array; Memory Curator recall receives only the available memory index and returns selected-memory handles. Preserve multiple selected entries from the winning route output and render compact selected-skill/selected-memory handle context deterministically. Detailed managed-memory routing/tool rules live in `managed_memory.md`.
-- Route hook extras are scoped by output contract. `selected_skills` route hooks should receive only `available_skills`, and `selected_memories` route hooks should receive only `available_memories`; strip any preexisting unrelated route index extras before contract-specific injection so unrelated route hooks do not see each other's indexes.
-- Multiple `route_task` hooks may occupy the same routing slot, such as Skill Curator `selected_skills` and Memory Curator `selected_memories`. The lifecycle runner executes blocking hooks first and sequentially, starts non-blocking hooks concurrently, waits for the route slot to complete, then merges selected-skill and selected-memory outputs before later lifecycle phases. Built-in Skill Curator and Memory Curator route hooks should default to `blocking=false`, and protected built-in repair/migration paths should normalize existing persisted route-hook rows to non-blocking so they can run concurrently while still being awaited before task start.
-- Lifecycle hook skill resolution is scoped to the hook owner. If the hook owner’s skill is missing, fail rather than falling back to the task turn’s selected/available catalog.
-- Routing/effective-mode logic has one primary agent/effective mode. Do not merge tool permissions across multiple agents or introduce multi-agent execution without explicit redesign.
-- Ordinary tasks may intentionally have no assigned primary agent. UI should label this as no assigned agent or skill-routed/default behavior, not “Auto Agent.”
-- Explicit assigned primary agents skip standalone skill routing and use that agent’s curated/default or manual skill selection, including tasks created from Chat orchestrate with an explicit `agent` Agent-definition name. Top-level standalone `always_use` skills must not pollute assigned-agent task runs unless that behavior is intentionally redesigned.
-- For ordinary standalone/no-agent task routing, lifecycle selection merges enabled handles from the global and project standalone `SKILLS.md` top-level `always_use` lists after Skill Curator's normal LLM `selected_skills` decision and before skill context injection. Disabled, missing, or unindexed skills remain excluded; duplicate handles are de-duplicated, and provenance should distinguish `skill_curator`, `always_use`, and overlap.
-- Maintenance/system agents are excluded from auto-routing via `selectable_as_primary=false`, not hardcoded name checks. The flag should not ban explicit/API assignment, scheduled tasks, or deliberate invocations.
-- Task detail UI should show the persisted selected primary task agent/effective mode. Lifecycle rows identify hook executors, not necessarily the routed primary task agent.
-- Lifecycle visibility should render prompt-safe structured decisions: route selected skills and recall selected memories as compact badges/pills, while freeform hooks remain prose. Expanded hook detail may include prompt snapshots, tool calls, raw final output, validated JSON, duration, model, and provider, scoped to the hook/task.
-- The task Lifecycle tab reads route selected-skill badges from persisted `lifecycle_executions.output_json`, not the in-memory lifecycle turn context. Always-use skill injection must therefore update the persisted `route_task` `selected_skills` output after merging, while preserving other structured fields, so injected skills such as `openvibely_project_guidance` are visible in lifecycle history.
-- A lifecycle hook `OutputContract` constrains the final structured result stored/validated by lifecycle code, not the agent’s working notes, tool use, or reasoning.
-- Lifecycle prompt/idempotency inputs must be JSON-safe even after prior invalid raw output. Final-output extraction should be contract-aware, skip syntactically valid tool-argument fragments, and prevent concatenated objects from poisoning later hooks. Internal lifecycle DB row identifiers such as `HookOutput.ExecutionID` are server infrastructure for UI/persistence patches and must be stripped from model-visible `previous_outputs` prompt serialization.
-- `activity_summary` lifecycle outputs require a real non-empty `summary` unless `skipped=true`; tool-call argument fragments must not be accepted as completed summaries.
-- Goal Agent `evaluate_task_goal` should preflight required runtime tools after agent-grant filtering and fail clearly if goal tools are missing.
-- Goal Agent after-complete evaluation should run for any task turn with an active/evaluable goal, keep after-complete detached from the user-visible task response, inject goal runtime tools through the worker's shared runtime provider, preserve protected `system_kind=goal` lineage/status authorization, and reload/publish current goal state after evaluation. Task-goal queueing/status semantics live in `chat_thread_system.md`.
+Skill Curator facts:
+- `observe_task_for_learning` is a Skill Curator `after_complete` hook, not execution as the task's assigned primary agent.
+- Cross-agent improvements belong in standalone skills.
+- Assigned-agent updates are reserved for behavior specific to that assigned agent's role, purpose, private workflow, or selected agent-owned skill.
+- Agent-owned skill mutation for post-task learning uses the server-scoped `agent_skill_manage` path.
 
-Scheduled maintenance and UI direction:
-- Prefer modeling scheduled maintenance as normal scheduled tasks assigned to agents and running through the usual lifecycle, unless a runbook requires invisible background hooks. System-agent scheduled tasks should respect explicit assigned agent and selected/manual skill configuration instead of ordinary `route_task` skill routing.
-- Let loaded agent/skill declarations drive scheduled-task runtime tool grants rather than worker-side hardcoded maintenance tools. Memory-consolidation specifics live in `managed_memory.md`.
-- Skill-library maintenance should use Skill Curator with `maintain_skill_library`; it may inspect agent namespaces and available skills, but should not manage standalone user-controlled agents unless explicitly authorized.
-- Lifecycle direct-call scoped-file setup must pass absolute directories for extra scopes such as `global_agents`, resolving configured/built-in roots before constructing `ScopedFiles` extras.
-- The left navigation includes a standalone Skills page using shared shell/sidebar conventions, searchable cards, kebab Edit/Delete, Agents-style scope badges, no displayed skill-key metadata line, and a frontmatter-seeded add modal. Disabled skill cards should not be dimmed/recolored; show a disabled pill/badge only. The standalone skill create/edit modal should expose both Enabled and Always use toggles so catalog settings are editable during normal skill creation/editing, not only through card actions.
-- Editing an existing standalone skill should show scope as disabled/read-only unless true move semantics exist. Importing standalone skills should run `SKILL.md` through the importer so `SKILLS.md` stays consistent, preserves safe package-relative files, and shows package files read-only.
-- Desktop/Wails skill-package import should use a Wails/native folder-picker path or equivalent desktop-safe flow because OS-native WebViews may not support browser-only directory upload reliably.
-- The agent create/edit dialog should align with on-disk agent-owned skills. Label the area “Skills”; avoid “Agent-Owned Skills,” legacy Routing-tab fields, and Model Defaults JSON editing in Advanced for now.
-- Lifecycle editing should focus on real hook slots, not `task_mode`; fold permission/default tool policy into Lifecycle Hooks rather than a separate Permissions tab.
-- Default `selectable_as_primary` to enabled for new-agent create flow and legacy conversions unless a source declaration explicitly says otherwise.
-- Verify persisted allowed-tool configuration and the Agents page/editor state, not only model output or DB rows; an agent can appear created while having no tools enabled if permissions are not derived and saved.
-- Goal runtime tool IDs such as `get_task_goal`, `send_to_task`, `mark_task_goal_achieved`, and `report_task_goal_blocked` should be present in the agent tool catalog/UI so grants are visible and survive saves. Grant-aware task-thread behavior and stale goal-status guards live in `chat_thread_system.md`.
+Lifecycle facts:
+- Lifecycle hooks live around `internal/lifecycle/` and task execution/server setup.
+- Durable hook concepts include `route_task`, `before_run`, `after_complete`, `scheduled`, task-mode bookkeeping, blocking versus non-blocking execution, idempotency/audit rows, recursion prevention, output contracts, and runtime-tool filtering.
+- `route_task` runs before `before_run`. Skill Curator returns selected skill handles; Memory Curator returns selected memory handles.
+- Skill Curator `selected_skills` and Memory Curator `selected_memories` can both occupy the route slot. Built-in route hooks default non-blocking, while the runner waits for route-slot completion before the main model turn starts.
+- Lifecycle hook skill resolution is scoped to the hook owner.
+- Routing/effective-mode logic has one primary agent/effective mode. Multi-agent permission merging is not part of the current design.
+- Ordinary tasks may intentionally have no assigned primary agent. Explicit assigned primary agents skip standalone skill routing and use that agent's curated/default or manual skill selection.
+- Maintenance/system agents are excluded from auto-routing via `selectable_as_primary=false`.
+- Lifecycle visibility renders structured selected-skill and selected-memory route decisions as compact prompt-safe badges/pills.
+- Lifecycle output contracts constrain final stored/validated results, not the agent's working notes or tool use.
 
-End-to-end expectations:
-- Lifecycle/skills work is incomplete unless wired end-to-end: build the skill catalog per task turn, resolve hook skill bodies, run routing/effective-mode resolution before LLM execution, register correct runtime tools, make created agents/skills visible in the filesystem catalog, execute scheduled bindings, and log enough to debug behavior.
-- Common audit gaps include UI without backend handlers, hook outputs not merged into prompts, route/effective decisions captured but unused, runtime tools registered with nil dependencies, and write-side mutations not visible until the intended refresh boundary.
-- Do not treat ad-hoc project-scoped agents/skills created during tests as built-in seeded product behavior; distinguish runtime/user-created artifacts from embedded built-ins and migrations.
+Goal Agent facts:
+- Goal Agent evaluation runs as a protected generic `after_complete` lifecycle evaluator, not a deterministic checkpoint.
+- Goal Agent authority comes from protected `system_kind=goal` identity and explicit runtime tool grants.
+- Goal Agent after-complete evaluation is detached from the user-visible task response and reloads/publishes current goal state after evaluation.
+- Goal runtime tool IDs such as `get_task_goal`, `send_to_task`, `mark_task_goal_achieved`, and `report_task_goal_blocked` are part of the agent tool catalog/UI so grants survive saves.
+
+Scheduled maintenance and UI facts:
+- Scheduled maintenance is modeled as normal scheduled tasks assigned to agents unless a future runbook explicitly requires invisible background hooks.
+- Scheduled maintenance task titles may remain app/storage identifiers; lifecycle hook input uses prompt-safe titles without low-value internal prefixes such as `System:`.
+- Memory consolidation specifics live in `managed_memory.md`.
+- The standalone Skills page uses shared shell/sidebar conventions, searchable cards, scope badges, disabled badges, and create/edit controls for Enabled and Always use.
+- The agent create/edit dialog aligns with on-disk agent-owned skills and labels the area “Skills.”
+- Lifecycle editing focuses on real hook slots, not `task_mode`.
+
+Operational implementation guidance for skill lifecycle, lifecycle hooks, Memory Curator routing, Goal Agent behavior, skill UI, import/indexing, lifecycle output validation, and regression coverage belongs in `.openvibely/skills/openvibely_skill_lifecycle_workflow/SKILL.md`, `.openvibely/skills/openvibely_lifecycle_hook_workflow/SKILL.md`, and `.openvibely/skills/openvibely_task_goals_workflow/SKILL.md`.

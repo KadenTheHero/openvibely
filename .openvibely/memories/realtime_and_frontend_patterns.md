@@ -3,86 +3,45 @@ name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
 updated: 2026-06-07
-source: after_complete
-source_id: 385678344882ee26e5e8ad30c348bf71
+source: consolidation
+source_id: memory_consolidation_2026_06_07
 confidence: high
 title: Realtime and Frontend Patterns
 ---
 
-OpenVibely uses server-rendered HTMX/templ UI with shared SSE-style live updates. Prefer one shared per-tab sidebar-managed SSE stream with in-browser event fan-out rather than opening separate long-lived EventSources for each surface. The broad UI contract is that SSE announces "something changed," then HTMX/server-rendered templ fragments provide authoritative state; reserve narrow per-execution SSE streams for high-frequency output where whole-fragment swaps would be disruptive.
+OpenVibely uses server-rendered HTMX/templ UI with shared SSE-style live updates. The broad UI contract is: SSE announces that something changed, and HTMX/server-rendered templ fragments provide authoritative state.
 
-Realtime and diff updates:
-- The shared `/events/live` stream multiplexes task, chat, and file-change events; sidebar-managed client code fans those into browser `CustomEvent`s such as `sse-task-event`, `sse-chat-live-event`, `sse-file-change-event`, and `sse-live-connected` rather than each page owning a separate broad EventSource.
-- The layout-level `window._tabVisibility` manager registers realtime connections, closes them while the tab is hidden, reconnects on visibility return, and pauses HTMX polling while hidden.
-- Task pages consume shared events and refresh HTMX fragments after filtering/debouncing; defer refresh while dragging, while a modal is open, or while the tab is hidden.
-- Per-execution `/events/chat/:exec_id` streams are the token-style output path: the server polls persisted execution output, emits appended deltas, then sends `done`/`error`. Streamed output should be persisted first so refresh/reconnect can resume from execution rows instead of volatile browser state. Browser-facing SSE relays must not log raw deltas, full outputs, prompts, or chat/model content; length/status metadata is acceptable for diagnostics.
-- Explicitly close per-execution EventSources on chat/thread/root swaps, navigation, completion, or errors so browser SSE connection limits are not exhausted.
-- Task/detail HTMX polling may remain as fallback for active states, but polling should pause or be cancelled while an active SSE stream is attached so morph swaps do not destroy live EventSources.
-- Real-time file changes stream to the Changes tab during task execution via SSE using `GetWorktreeDiffWithUncommitted` to show committed branch changes and uncommitted work without auto-committing.
-- Task-thread follow-up executions should run the same periodic diff snapshot broadcast path, persisting `executions.diff_output` and publishing `diff_snapshot` events.
-- Treat live diff snapshot UI indicators as runtime feedback, not durable task artifacts; they may disappear after app restart, while persisted execution diff/task changes are the source of durable review state.
-- Changes-tab scroll preservation: SSE diff updates should fetch offscreen DOM, compare fingerprints, and skip live DOM mutation when unchanged. When content changes, save/restore window scroll and active diff mode via `requestAnimationFrame`; preserve `window._diffFileState` file expand/collapse state.
-- Avoid `htmx.ajax()` live swaps for frequent diff refreshes when a fingerprint gate is needed; it can remount DOM before the no-op check.
+Realtime facts:
+- The shared `/events/live` stream multiplexes task, chat, and file-change events.
+- Sidebar-managed client code fans shared live events into browser `CustomEvent`s such as `sse-task-event`, `sse-chat-live-event`, `sse-file-change-event`, and `sse-live-connected`.
+- `window._tabVisibility` owns broad realtime connection visibility behavior and pauses polling while hidden.
+- Per-execution `/events/chat/:exec_id` streams are the token-style output path for high-frequency execution output.
+- Streamed output is persistence-first so reconnect/refresh can resume from execution rows.
+- Real-time file changes stream to the Changes tab during task execution via SSE using worktree diff snapshots that include committed branch changes and uncommitted work.
+- Live diff snapshot UI indicators are runtime feedback, not durable task artifacts.
 
-Task Changes rendering safety:
-- Task detail lazily loads Changes tab content unless `tab=changes` is active, so Thread/Details do not pre-render heavy hidden diff DOM. Direct `?tab=changes` server render must stay equivalent to lazy route behavior for stateful Changes features such as worktree merge controls.
-- Diff viewer uses GitHub-style load envelopes and renders oversized files as explicit `Load diff` or non-loadable placeholders rather than eagerly mounting all diff DOM.
-- Placeholder/non-rendered file entries should reuse the shared file-card header/body collapse contract without mounting heavy tables. Keep padding/background/content spacing on an inner placeholder wrapper so `max-height: 0` fully collapses non-rendered entries.
-- Diff parsing should synthesize a fallback hunk when diff content lines exist without an explicit `@@` header.
-- Task Changes file-header addition/deletion counts should visually align with the diff card add/delete palette. Keep desktop-WebView-safe plain color/RGBA variables for shared diff rendering.
-- Deleted files in task diffs render as normal file cards with a `Deleted` status badge; textual deletions show removed-line hunks, while deleted binary/empty files without hunks show centered summary text.
-- Live diff refreshes are gated by active-tab checks. Task-detail file-change listeners/SSE handlers are explicitly rebound with cleanup so HTMX swaps do not accumulate stale listeners or leave SSE running after navigation.
-- Task completion on the detail page should update in place through live update/HTMX/SSE mechanisms; avoid hard/full browser refreshes after completion so active tab, scroll position, and context remain stable.
-- The task detail Lifecycle tab should stay fresh for asynchronous/detached lifecycle rows, including generic `after_complete` Goal Agent evaluations that may complete after the tab first loads.
+Task Changes and diff facts:
+- Task detail lazily loads Changes tab content unless `tab=changes` is active.
+- Diff viewer uses GitHub-style load envelopes and oversized-file placeholders rather than eagerly mounting all diff DOM.
+- Deleted files render as normal file cards with deletion summaries where needed.
+- Direct `?tab=changes` renders remain equivalent to lazy route behavior for stateful Changes features such as worktree merge controls.
 
-Chat and thread rendering:
-- For streaming chat and tool cards, batch DOM rendering with `requestAnimationFrame` and force final flush on completion.
-- Chat steering live events such as `chat_turn_steered` should be forwarded by the shared sidebar SSE dispatcher and render or dedupe a pending steering row, not append a normal user message plus assistant streaming placeholder.
-- Queued live Chat events should render the durable pending-input row with `Steer` and cancel controls, not a generic assistant “queued” bubble, so live UI and refresh-rendered UI have the same controls.
-- Queued and steering-pending Chat/task-thread messages should render as compact composer/input-box rows rather than inside the transcript, including after refresh. Queued rows show `Steer` plus an icon-only trash cancel button; steering-pending rows use the same trash icon.
-- Pending composer rows should preserve readable text and clear spacing. Compactness should come from grouping/placement and shared CSS across server render, SSE, and HTMX out-of-band appends, not tiny fonts or cramped controls.
-- Task-thread SSE completion should finish dynamically in place: force the final streamed render, clear streaming indicators/state, and avoid post-stream reconciliation refreshes of either `#task-thread-view` or the whole task shell.
-- Promoted queued task-thread runs should be discovered through live events that append the promoted execution fragment, remove the stale pending row, and attach the new execution stream.
-- Pending steering rows should disappear through live events as soon as they are prepared/started for processing rather than waiting for provider success or a thread refresh. If provider failure recovery requeues the steer, publish a realtime re-add event.
-- Chat duplicate guards must keep execution IDs separate from pending-input IDs.
-- Chat's web-send dedupe/suppression flag must clear on the form request lifecycle as well as swap lifecycle, because active-response sends can return only out-of-band composer updates.
-- Thread tab content is lazy-loaded via `GET /tasks/:id/thread`; heavy execution transcripts should not be pre-rendered in hidden tabs.
-- Long Chat and Task Thread histories should remain complete in the database but be server-windowed in the UI: initial renders fetch only the latest bounded slice, older pages load via scroll-top pagination and prepend with scroll anchoring, and live appends prune the oldest visible execution once the window exceeds the limit. Do not send hundreds of rows to the browser and hide them with CSS. The accepted implementation uses `limit`/`before` routes, `limit+1` probes for `hasEarlier`, execution IDs backed by `(started_at,rowid)` cursor ordering rather than raw timestamps, whole-execution DOM wrappers for pruning, and a scroll-container custom HTMX event rather than viewport `revealed`. If pruning exposes older history when no sentinel exists, the client recreates/retargets the earlier loader from the container's base earlier URL so pruned rows stay reachable.
-- Chat initial render must bind the scroll-top earlier-loader immediately, but the loader should not auto-fetch on initialization just because the latest window is short or non-overflowing; older pages should load from real user scroll/top interaction so the initial UI stays bounded to the latest slice.
-- Active chat/task-thread streaming should use shared smart autoscroll behavior when present: record whether the viewport was pinned before content growth, then only scroll after rendering if it was pinned. Upward user movement is intent to read.
-- For large conversations, avoid clearing scroll intent from programmatic/clamp scroll events during streaming rerenders; derive intent from real user interactions such as wheel/touch/key/pointer.
-- Streaming code should resolve/rebind scroll trackers when HTMX/morph swaps replace or detach message containers so smart scrolling recovers without refresh.
-- Chat/thread attachment sends should mark send intent at the actual form submit gesture, then consume that intent after HTMX swaps/layout settling to bottom-align even when variable-size attachments change height.
-- Render image attachments with a stable marker and bind shared image load/error smart-scroll correction on initial render and relevant swaps.
-- Task-thread tab/task navigation should keep per-thread scroll state: returning from Details/Changes or another task should restore remembered position or bottom-align only when the prior thread state was pinned, on fresh initial entry, or for new send/active stream activity.
-- Task-thread streaming must keep its HTMX polling fallback resumable across lifecycle hook/status transitions: reactivated/resumed streams should reset stale inactive markers and preserve a valid `/tasks/:id/thread` poll URL/trigger.
-- Avoid expensive full-container reprocessing on polling refreshes; use content signatures and incremental cleaning.
-- Chat/thread markdown rendering escapes raw HTML-like tags outside fenced/inline code before `marked.parse` so malformed model outputs do not break DOM.
-- Avoid destructive `/chat` `outerHTML` history refreshes on tab refocus or SSE reconnect when chat history is already loaded, including after hard refresh where static chat bubble markup is present.
-- Plan-mode read-only repo exploration tool cards should remain visible in assistant bubble rendering during live streams and refreshes.
-- Chat mode selector hydration should use hidden input + localStorage restore and mark hydration state before evaluating mode-dependent UI; detailed plan-handoff rules live in `chat_thread_system.md`.
+Chat/thread rendering facts:
+- Chat and task-thread streaming batch DOM rendering and force a final flush on completion.
+- Queued and steering-pending Chat/task-thread messages render as compact composer/input-box rows rather than transcript bubbles.
+- Promoted queued task-thread runs are discovered through live events that remove stale pending rows, append promoted execution fragments, and attach execution streams.
+- Long Chat and Task Thread histories remain complete in the database but are server-windowed in the UI with scroll-top pagination.
+- Active chat/task-thread streaming uses smart autoscroll semantics: pinned viewers follow growth, while upward user movement is intent to read.
+- Chat/thread markdown rendering escapes raw HTML-like tags outside fenced/inline code before markdown parsing.
+- Plan-mode read-only repo exploration tool cards remain visible during live streams and refreshes.
 
-Task detail layout:
-- Task detail Details tab should keep Prompt, Goal, and Git Worktree in that order, using matching card containers with consistent dark-mode styling.
-- Prompt content should visually match the Goal input container, including container color and UI font/textarea-style treatment. The Details body should be the scroll container so long Goal/Worktree content cannot push Prompt out of reach.
-- Task Details non-edit mode is a read-only summary: preserve Category/Priority and show Tag, Model, and assigned Agent with clear low-clutter missing states.
-- Category and Tag should use neutral outline metadata pills on the Details page unless there is a deliberate semantic reason for different styling; Status can keep semantic color because it communicates task state.
-- Goal non-edit mode should show only goal information/status such as the status pill and last-checked details; avoid redundant boolean text like `Active: true` when the pill already communicates it.
-- Goal add/edit/clear/pause/resume controls belong in the task edit dialog. Git Worktree non-edit mode should keep operational actions gated by verified Git/worktree state, while edit-oriented config such as auto-merge belongs in the edit dialog.
+Task detail and shared UI facts:
+- Task detail Details tab keeps Prompt, Goal, and Git Worktree in that order with matching card containers.
+- Goal edit controls belong in the task edit dialog; verified-state Git worktree actions can remain on the details surface.
+- Chat/thread/task-result links share global link token `--ov-link-color: #7480ff`.
+- Left sidebar navigation preserves hover-only highlight behavior unless the product intentionally redesigns selected nav state.
+- `/models` uses `LLMConfig`/`agent_configs`; `/agents` is plugin-first and has no `color` field.
+- `Managed Memory` as a tool/profile is presented as a scoped memory-file capability, not broad repo read/write access.
+- Toast rendering accounts for native dialog top-layer behavior.
 
-Shared UI/page patterns:
-- For HTMX dropdown/menu actions, distinguish user reports of “spinner/toast but then failure” from “click did nothing.” If there is no spinner, toast, or menu close, first suspect that the HTMX request never fired or was not bound.
-- Check rendered attributes, lazy-loaded HTMX processing, and whether menu `<button>` elements are inside a parent `<form>` without `type="button"`.
-- Chat/thread markdown links and task-result links share global link token `--ov-link-color: #7480ff`, with hover/focus/active/visited states.
-- Left sidebar navigation should preserve the original hover-only highlight behavior; avoid persistent selected-item highlight classes/scripts unless the product intentionally redesigns nav active state.
-- Schedule timeline/current-time UI should use shared tokens instead of hardcoded green for light/dark consistency.
-- Schedule `Run At` controls should expose click-anywhere picker behavior using `showPicker()` with focus fallback while preserving keyboard entry.
-- Schedule repeat controls should stay parity-aligned across `/schedule` create modal and task-detail schedule forms. New Scheduled Task defaults Repeat to Daily and treats missing `repeat_type` in schedule-page create submissions as `daily` server-side.
-- `/personality` uses card-list UX; Base personality is pinned first, labelled Base, never active-ring highlighted, and Base kebab behavior differs depending on selection.
-- `/workers` uses a single Worker Capacity & Utilization table-style card with global row pinned first. Worker-limit inputs use dirty-state highlighting only while editing and suppress dirty restore after successful Set during immediate swaps.
-- `/models` uses `LLMConfig`/`agent_configs`; Default badge uses shared `ov-badge-default` style.
-- `/agents` is plugin-first with modal marketplace/install state, generate flow, plugin endpoints, and no `color` field/UI.
-- Agent tool-selection UI should avoid ambiguous aggregate labels. If a capability like `Read` includes multiple concrete tools, expose enough detail in labels/help text so users understand the granted operations.
-- If `Managed Memory` appears as a tool/profile, make clear it is a scoped memory-file capability rather than arbitrary normal repo read/write access.
-- Toast rendering must account for native dialog top-layer behavior by re-hosting toasts into the active modal dialog when needed.
-- Alert/banner inline values such as branch names should inherit the alert text color in dark mode; avoid themed surface backgrounds on inline `<code>` inside colored alerts because contrast can become unreadable.
+Operational implementation guidance for HTMX/templ, SSE, streaming DOM updates, diff rendering, task-detail layout, Skills UI, and frontend regressions belongs in `.openvibely/skills/openvibely_htmx_templ_ui_workflow/SKILL.md`.

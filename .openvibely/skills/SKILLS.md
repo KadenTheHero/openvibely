@@ -41,6 +41,10 @@ always_use:
 
 [OpenVibely Chat Provider Test Workflow](openvibely_chat_provider_test_workflow/SKILL.md) — Test OpenVibely chat, memory recall, and provider-normalized requests without confusing prompt text with model-facing context.
 
+## openvibely_provider_adapter_workflow
+
+[OpenVibely Provider Adapter Workflow](openvibely_provider_adapter_workflow/SKILL.md) — Implement and audit OpenVibely provider adapters, normalized AgentRequest routing, compaction, provider-native tools, and runtime tool payloads.
+
 ## openvibely_docs_editing_workflow
 
 [OpenVibely Docs Editing Workflow](openvibely_docs_editing_workflow/SKILL.md) — Edit OpenVibely README and product docs conservatively while preserving useful examples and validating links.
@@ -56,6 +60,10 @@ always_use:
 ## openvibely_task_goals_workflow
 
 [OpenVibely Task Goals Workflow](openvibely_task_goals_workflow/SKILL.md) — Implement and review OpenVibely task goal persistence, tools, UI, and continuation behavior.
+
+## openvibely_channel_integrations_workflow
+
+[OpenVibely Channel Integrations Workflow](openvibely_channel_integrations_workflow/SKILL.md) — Implement and debug OpenVibely GitHub, Slack, Telegram, and inbound webhook integrations with shared chat/task-thread behavior.
 
 ## openvibely_lifecycle_hook_workflow
 
@@ -83,8 +91,12 @@ always_use:
 
 ## openvibely_release_workflow
 
-[OpenVibely Release Workflow](openvibely_release_workflow/SKILL.md) — Automate the OpenVibely release process — preflight, artifact builds, changelog, and GitHub release — for a given semver version.
+[OpenVibely Release Workflow](openvibely_release_workflow/SKILL.md) — Automate the OpenVibely release process — preflight, artifact builds, AI-synthesized release notes, and GitHub release publishing — for a given semver version.
 
 ## openvibely_local_resource_diagnostics
 
 [OpenVibely Local Resource Diagnostics](openvibely_local_resource_diagnostics/SKILL.md) — Inspect local macOS CPU, memory, and fan-pressure causes without disrupting OpenVibely or system processes.
+
+## openvibely_worktree_merge_lineage_workflow
+
+[OpenVibely Worktree Merge And Lineage Workflow](openvibely_worktree_merge_lineage_workflow/SKILL.md) — Implement and audit OpenVibely task worktrees, merge actions, Changes tab recovery, cleanup, and chained-task lineage.

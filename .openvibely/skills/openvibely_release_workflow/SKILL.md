@@ -5,12 +5,12 @@ skill:
     key: openvibely_release_workflow
     name: OpenVibely Release Workflow
     scope: project
-    description: Automate the OpenVibely release process — preflight, artifact builds, changelog, and GitHub release — for a given semver version.
+    description: Automate the OpenVibely release process — preflight, artifact builds, AI-synthesized release notes, and GitHub release publishing — for a given semver version.
 ---
 
 # OpenVibely Release Workflow
 
-Use this skill when creating a new OpenVibely release for a given semver version. It orchestrates the end-to-end release pipeline using deterministic scripts checked into the repo under this skill's `scripts/` directory.
+Use this skill when creating a new OpenVibely release for a given semver version, or when creating, reviewing, or modifying OpenVibely release automation and GitHub release notes. It orchestrates the end-to-end release pipeline using deterministic scripts checked into the repo under this skill's `scripts/` directory.
 
 ---
 
@@ -173,8 +173,9 @@ After `release-notes.sh` runs, the agent must:
    - Leave out noise: internal refactors, memory updates, test changes, typo fixes, chore commits, anything with no user impact.
    - Combine multiple small commits about the same feature into one bullet.
    - If commit messages are terse or technical, infer intent from context (file paths, bodies, task references).
+   - Inspect related diffs or touched paths for ambiguous commits when practical instead of guessing from subjects alone.
 3. **Replace the `AI_CHANGELOG_PLACEHOLDER` block** in `RELEASE_NOTES.md` with the synthesized content.
-4. Confirm the notes look correct before running `release-publish.sh`.
+4. Confirm the notes look correct before running `release-publish.sh`: no placeholder text, duplicated commit-derived bullets, leaked secrets, or claims about Docker/artifacts/features that the scripts did not actually build or verify.
 
 ### Why this approach
 
@@ -288,6 +289,7 @@ Tests cover:
 - Release branch naming (`release/v<version>`)
 - Release notes template structure (`AI_CHANGELOG_PLACEHOLDER` present, all required sections)
 - `COMMITS.txt` output structure (hash, date, author, subject, body fields present)
+- If deterministic changelog grouping is replaced with AI synthesis, remove obsolete regex bucket tests and keep tests proving the placeholder and `COMMITS.txt` structure exist.
 
 ---
 

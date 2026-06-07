@@ -41,14 +41,23 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 ## Development Workflow
 
 - Confirm where a change belongs before editing. Follow the layered architecture: `models -> repository -> service -> handler -> templates`.
-  - `models`: plain structs and domain rules.
-  - `repository`: raw SQL access with context-aware calls.
-  - `service`: orchestration and business logic.
-  - `handler`: HTTP parsing/rendering and response shaping.
+- `models`: plain structs and domain rules.
+- `repository`: raw SQL access with context-aware calls.
+- `service`: orchestration and business logic.
+- `handler`: HTTP parsing/rendering and response shaping.
 - Prefer coherent end-to-end slices through the proper layers over scattered one-off edits.
 - Keep changes minimal, explicit, and directly tied to the request.
 - Do not add features, broad refactors, compatibility shims, fallback migrations, or abstractions unless the task requires them.
+- When implementing a runbook/spec with exclusions, treat every non-excluded section as in scope.
+- Identify the underlying product concept before coding; do not derive major behavior from incidental implementation shape such as tool lists, default flags, or temporary code structure.
+- Put product policy that affects workflow, isolation, data writes, recovery, or review in explicit configuration, state, or data model.
+- Keep generic capabilities generic. Model exceptional built-in-agent or workflow behavior through explicit configuration instead of hidden one-off cases.
+- Derive environment/path values from authoritative user or system sources instead of hardcoded guessed locations. Project root, isolated worktree root, process working directory, durable repo location, app data root, and tool scope root are distinct concepts.
+- Prefer product-correct defaults over mechanically convenient defaults.
+- When editing model-facing prompts, preserve only context that helps the model act correctly. Do not add product names or internal category labels such as `OpenVibely`, `built-in system agent`, `system agent configuration`, or `non-system agent` just to make text sound project-specific; prefer direct role and boundary wording like `Skill Curator`, `Memory Curator`, `protected agent`, or `user-managed agent` when that distinction matters.
+- Keep long model prompts as readable const templates with dynamic context interpolated, not chains of `WriteString` calls.
 - Use logs intentionally. `logs/openvibely.log` is useful for behavior verification and diagnosis.
+- When auditing runtime log noise, inspect `logs/openvibely.log` first and classify logs by operational value: keep errors, startup/shutdown, CRUD, task/execution creation, SSE lifecycle, completion metrics, and unusual state transitions at info; demote or comment out high-frequency HTMX poll/request counts, stream/delta/diff tick counters, and any content-carrying payloads or messages. Do not comment out every debug log: keep useful low-frequency diagnostics as active `applog.Debugf(...)` calls, and reserve fully commented-out debug instrumentation for hot loops, frequent polling, or payload dumps where even the method-call overhead or argument construction is wasteful. `start.sh` should default `OPENVIBELY_LOG_LEVEL` to `info` while allowing env or `.env` override.
 - For handlers with setter-injected optional dependencies, validate required dependencies at handler entry and return controlled HTTP errors instead of nil-pointer panics.
 - When introducing behavior modes, propagate mode through typed request contracts and enforce behavior in provider/tool policy layers, not only in prompt text.
 - For task-execution actions, prefer exact entity targeting by `task_id` or `title`; reserve tag/priority filters for explicit group execution requests.
@@ -67,6 +76,9 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 
 - Always create or update tests when fixing bugs or adding features.
 - Every bug fix needs a regression test that reproduces the failure scenario.
+- For cross-layer production changes, cover the touched wiring/call-site layer as well as lower-level service behavior.
+- For consistent UI/API/provider/mode bugs, reproduce the exact reported path and verify the final provider-bound request or tool payload when relevant.
+- For task-thread UI follow-up behavior, lifecycle DB rows, intermediate context objects, direct helper tests, and adjacent tool/API paths are not enough by themselves.
 - Use `testutil.NewTestDB(t)` for DB-backed tests in the main Go app.
 - Never use `t.Parallel()` with shared database connections.
 - Production baseline should not assume a default model config. In tests, use `testutil.NewTestDB(t)` or create one explicitly.
