@@ -1636,3 +1636,170 @@ func TestWorkerService_ProjectLimitIncreaseFIFOOrder(t *testing.T) {
 	ws.releaseProjectSlot(project.ID)
 	ws.releaseProjectSlot(project.ID)
 }
+
+func TestWorkerService_ReleasesSlotsAfterTaskFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	maxWorkers := 1
+	project := &models.Project{Name: "failure-slot-release", MaxWorkers: &maxWorkers}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("Create project: %v", err)
+	}
+	agent := &models.LLMConfig{
+		Name:       "Failure Agent",
+		Provider:   models.ProviderTest,
+		Model:      "test-model",
+		MaxTokens:  4096,
+		AuthMethod: models.AuthMethodCLI,
+		MaxWorkers: 1,
+		IsDefault:  true,
+	}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("Create agent: %v", err)
+	}
+
+	first := &models.Task{ProjectID: project.ID, Title: "failing task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "fail", AgentID: &agent.ID}
+	second := &models.Task{ProjectID: project.ID, Title: "next task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "next", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, first); err != nil {
+		t.Fatalf("Create first task: %v", err)
+	}
+	if err := taskRepo.Create(ctx, second); err != nil {
+		t.Fatalf("Create second task: %v", err)
+	}
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Err = fmt.Errorf("provider failed")
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, attachmentRepo)
+	llmSvc.SetLLMCaller(mock)
+
+	ws := NewWorkerService(llmSvc, 1, projectRepo)
+	ws.SetTaskRepo(taskRepo)
+	ws.SetLLMConfigRepo(llmConfigRepo)
+	ws.Start(ctx)
+	defer ws.Stop()
+
+	ws.Submit(*first)
+	ws.Submit(*second)
+
+	waitForWorkerCondition(t, func() bool {
+		firstTask, _ := taskRepo.GetByID(ctx, first.ID)
+		secondTask, _ := taskRepo.GetByID(ctx, second.ID)
+		return firstTask != nil && firstTask.Status == models.StatusFailed &&
+			secondTask != nil && secondTask.Status == models.StatusFailed &&
+			ws.TotalRunning() == 0 && ws.ProjectRunning(project.ID) == 0 && ws.ModelRunning(agent.ID) == 0 && ws.QueueSize() == 0
+	}, "failed task should release slots and dispatch next task")
+
+	if got := mock.CallCount(); got != 2 {
+		t.Fatalf("expected both tasks to call provider after slot release, got %d", got)
+	}
+}
+
+func TestWorkerService_ReleasesSlotsAfterTaskPanic(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	maxWorkers := 1
+	project := &models.Project{Name: "panic-slot-release", MaxWorkers: &maxWorkers}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("Create project: %v", err)
+	}
+	agent := &models.LLMConfig{
+		Name:       "Panic Agent",
+		Provider:   models.ProviderTest,
+		Model:      "test-model",
+		MaxTokens:  4096,
+		AuthMethod: models.AuthMethodCLI,
+		MaxWorkers: 1,
+		IsDefault:  true,
+	}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("Create agent: %v", err)
+	}
+
+	panicking := &models.Task{ProjectID: project.ID, Title: "panicking task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "panic", AgentID: &agent.ID}
+	next := &models.Task{ProjectID: project.ID, Title: "next after panic", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "next", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, panicking); err != nil {
+		t.Fatalf("Create panicking task: %v", err)
+	}
+	if err := taskRepo.Create(ctx, next); err != nil {
+		t.Fatalf("Create next task: %v", err)
+	}
+
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, attachmentRepo)
+	mock := testutil.NewMockLLMCaller()
+	panicOnce := true
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		if panicOnce {
+			panicOnce = false
+			panic("provider panic")
+		}
+	}
+	llmSvc.SetLLMCaller(mock)
+
+	ws := NewWorkerService(llmSvc, 1, projectRepo)
+	ws.SetTaskRepo(taskRepo)
+	ws.SetLLMConfigRepo(llmConfigRepo)
+	ws.SetExecutionRepo(execRepo)
+	ws.Start(ctx)
+	defer ws.Stop()
+
+	ws.Submit(*panicking)
+	ws.Submit(*next)
+
+	waitForWorkerCondition(t, func() bool {
+		panickedTask, _ := taskRepo.GetByID(ctx, panicking.ID)
+		nextTask, _ := taskRepo.GetByID(ctx, next.ID)
+		return panickedTask != nil && panickedTask.Status == models.StatusFailed &&
+			nextTask != nil && nextTask.Status == models.StatusCompleted &&
+			ws.TotalRunning() == 0 && ws.ProjectRunning(project.ID) == 0 && ws.ModelRunning(agent.ID) == 0 && ws.QueueSize() == 0
+	}, "panicked task should release slots and dispatch next task")
+
+	if got := mock.CallCount(); got != 2 {
+		t.Fatalf("expected panicking task and dispatched follow-up to call provider, got %d", got)
+	}
+
+	execs, err := execRepo.ListByTask(ctx, panicking.ID)
+	if err != nil {
+		t.Fatalf("ListByTask panicking task: %v", err)
+	}
+	if len(execs) != 1 {
+		t.Fatalf("expected one execution for panicking task, got %d", len(execs))
+	}
+	if execs[0].Status != models.ExecFailed {
+		t.Fatalf("expected panicking task execution status failed, got %s", execs[0].Status)
+	}
+	if execs[0].CompletedAt == nil {
+		t.Fatal("expected panicking task execution to have completed_at set")
+	}
+	if execs[0].ErrorMessage == "" {
+		t.Fatal("expected panicking task execution to record panic error message")
+	}
+}
+
+func waitForWorkerCondition(t *testing.T, condition func() bool, message string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if condition() {
+		return
+	}
+	t.Fatal(message)
+}

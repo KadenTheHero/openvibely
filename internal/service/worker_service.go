@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -290,6 +291,68 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 	taskCtx, taskCancel := context.WithCancel(w.ctx)
 	w.RegisterCancel(task.ID, taskCancel)
 
+	var executionErr error
+	claimed := w.taskRepo == nil
+	completionAttempted := w.taskRepo == nil
+	logOutcome := true
+
+	defer func() {
+		if r := recover(); r != nil {
+			executionErr = fmt.Errorf("panic: %v", r)
+			completionAttempted = true
+			applog.Infof("[worker] task panic task=%s %q: %v", task.ID, task.Title, r)
+			if claimed {
+				w.failRunningExecutionsAfterPanic(context.Background(), task.ID, executionErr)
+			}
+			if claimed && w.taskRepo != nil {
+				current, getErr := w.taskRepo.GetByID(context.Background(), task.ID)
+				if getErr != nil {
+					applog.Infof("[worker] task=%s status lookup after panic failed: %v", task.ID, getErr)
+				} else if current != nil && current.Status == models.StatusRunning {
+					if updateErr := w.taskRepo.UpdateStatus(context.Background(), task.ID, models.StatusFailed); updateErr != nil {
+						applog.Infof("[worker] task=%s failed status update after panic: %v", task.ID, updateErr)
+					}
+				}
+			}
+		}
+
+		w.DeregisterCancel(task.ID)
+		taskCancel()
+
+		// Remove from pending AFTER execution so scheduler doesn't re-submit during execution.
+		w.mu.Lock()
+		delete(w.pending, task.ID)
+		w.mu.Unlock()
+
+		// Release slots unconditionally for every path after dispatch acquired them.
+		w.releaseProjectSlot(task.ProjectID)
+		w.releaseModelSlot(agentConfigID)
+
+		if logOutcome {
+			if executionErr != nil {
+				applog.Infof("[worker] task failed task=%s %q: %v", task.ID, task.Title, executionErr)
+			} else {
+				applog.Infof("[worker] task completed task=%s %q", task.ID, task.Title)
+			}
+		}
+
+		if completionAttempted && w.onTaskComplete != nil {
+			// Run the post-completion callback in a goroutine so heavy side
+			// effects never block worker dispatch.
+			go func(t models.Task, runErr error) {
+				defer func() {
+					if r := recover(); r != nil {
+						applog.Infof("[worker] onTaskComplete panic for task=%s: %v", t.ID, r)
+					}
+				}()
+				w.onTaskComplete(t, runErr)
+			}(task, executionErr)
+		}
+
+		// Task finished, slot freed — dispatch next queued task.
+		w.dispatchNext()
+	}()
+
 	// Claim the task BEFORE running lifecycle hooks so the kanban board
 	// reflects the task as "running" while route_task/before_run hooks
 	// execute. Without this pre-claim the task would stay visually stuck in
@@ -299,31 +362,19 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 	// If claim fails (task already running/completed/cancelled), skip — the
 	// task either was already promoted or shouldn't run.
 	if w.taskRepo != nil {
-		claimed, claimErr := w.taskRepo.ClaimTask(taskCtx, task.ID)
+		claimedTask, claimErr := w.taskRepo.ClaimTask(taskCtx, task.ID)
 		if claimErr != nil {
 			applog.Infof("[worker] task=%s claim failed: %v", task.ID, claimErr)
-			w.DeregisterCancel(task.ID)
-			taskCancel()
-			w.mu.Lock()
-			delete(w.pending, task.ID)
-			w.mu.Unlock()
-			w.releaseProjectSlot(task.ProjectID)
-			w.releaseModelSlot(agentConfigID)
-			w.dispatchNext()
+			logOutcome = false
 			return
 		}
-		if !claimed {
+		if !claimedTask {
 			applog.Infof("[worker] task=%s not pending at dispatch (already running/terminal), skipping", task.ID)
-			w.DeregisterCancel(task.ID)
-			taskCancel()
-			w.mu.Lock()
-			delete(w.pending, task.ID)
-			w.mu.Unlock()
-			w.releaseProjectSlot(task.ProjectID)
-			w.releaseModelSlot(agentConfigID)
-			w.dispatchNext()
+			logOutcome = false
 			return
 		}
+		claimed = true
+		completionAttempted = true
 		// Reflect the new running status in the in-memory copy passed to
 		// lifecycle hooks so they observe the post-claim state.
 		task.Status = models.StatusRunning
@@ -335,43 +386,42 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 	turn := w.PrepareLifecycleTurn(taskCtx, task)
 	taskCtx = turn.Ctx
 
-	_, chatContext, err := w.llmSvc.executeTaskWithChatContext(taskCtx, task)
+	var chatContext llmcontracts.ChatContext
+	_, chatContext, executionErr = w.llmSvc.executeTaskWithChatContext(taskCtx, task)
 
-	turn.AfterComplete(err, chatContext)
+	turn.AfterComplete(executionErr, chatContext)
+}
 
-	w.DeregisterCancel(task.ID)
-	taskCancel()
-
-	// Remove from pending AFTER execution so scheduler doesn't re-submit during execution
-	w.mu.Lock()
-	delete(w.pending, task.ID)
-	w.mu.Unlock()
-
-	// Release slots
-	w.releaseProjectSlot(task.ProjectID)
-	w.releaseModelSlot(agentConfigID)
-
+func (w *WorkerService) failRunningExecutionsAfterPanic(ctx context.Context, taskID string, panicErr error) {
+	execRepo := w.execRepo
+	if execRepo == nil && w.llmSvc != nil {
+		execRepo = w.llmSvc.execRepo
+	}
+	if execRepo == nil {
+		return
+	}
+	execs, err := execRepo.ListByTask(ctx, taskID)
 	if err != nil {
-		applog.Infof("[worker] task failed task=%s %q: %v", task.ID, task.Title, err)
-	} else {
-		applog.Infof("[worker] task completed task=%s %q", task.ID, task.Title)
+		applog.Infof("[worker] task=%s execution lookup after panic failed: %v", taskID, err)
+		return
 	}
-
-	if w.onTaskComplete != nil {
-		// Run the post-completion callback in a goroutine so heavy side
-		// effects never block worker dispatch.
-		go func(t models.Task, runErr error) {
-			defer func() {
-				if r := recover(); r != nil {
-					applog.Infof("[worker] onTaskComplete panic for task=%s: %v", t.ID, r)
-				}
-			}()
-			w.onTaskComplete(t, runErr)
-		}(task, err)
+	errMsg := "panic during task execution"
+	if panicErr != nil {
+		errMsg = panicErr.Error()
 	}
-
-	// Task finished, slot freed — dispatch next queued task
-	w.dispatchNext()
+	now := time.Now()
+	for _, exec := range execs {
+		if exec.Status != models.ExecRunning {
+			continue
+		}
+		durationMs := now.Sub(exec.StartedAt).Milliseconds()
+		if durationMs < 0 {
+			durationMs = 0
+		}
+		if completeErr := execRepo.Complete(ctx, exec.ID, models.ExecFailed, "", errMsg, exec.TokensUsed, durationMs); completeErr != nil {
+			applog.Infof("[worker] task=%s execution=%s failed completion after panic failed: %v", taskID, exec.ID, completeErr)
+		}
+	}
 }
 
 // runLifecycleSlot dispatches the lifecycle runner for the supplied slot if
