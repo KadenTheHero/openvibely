@@ -90,6 +90,16 @@ Why task detail matters:
 - It is where you inspect execution output and iterate safely.
 - `Thread` and `Changes` are the two most important tabs during active debugging/build work.
 
+## Task Goals
+
+A Task Goal is a persistent objective that the built-in Goal Agent evaluates after each execution turn. When a goal is set, the agent automatically queues continuation follow-ups until the objective is achieved, blocked, or cleared — without manual follow-up messages.
+
+Set a goal in the task edit dialog (Goal section). The goal panel on the task detail page shows the objective, current status (`active`, `paused`, `achieved`, `blocked`, `cleared`, `failed`), the agent's last evaluation reason, and when it was last checked. Clear the objective text and save to remove the goal.
+
+In Chat Orchestrate mode, you can create a task and set a goal on it in the same turn using `set_task_goal`.
+
+For the full reference see <a href="https://docs.openvibely.ai/task-goals" target="_blank" rel="noopener noreferrer">Task Goals</a>.
+
 ## No-Model Behavior
 
 Execution paths are blocked when no models are configured. You will get an error toast with a link to `/models`.

@@ -36,7 +36,8 @@ OpenVibely is organized around a selected project. The sidebar project selector 
 | Agents | [Agents User Guide](./agents-user-guide.md) |
 | Lifecycle hooks and skills | [Lifecycle Hooks and Skills User Guide](./lifecycle-skills-user-guide.md) |
 | Workers | [Workers User Guide](./workers-user-guide.md) |
-| Tasks | [Tasks User Guide](./tasks-user-guide.md) |
+| Tasks | [Tasks User Guide](./tasks-user-guide.md) — includes Task Goals |
+| Task Goals | See [Tasks User Guide § Task Goals](./tasks-user-guide.md#task-goals) and <a href="https://docs.openvibely.ai/task-goals" target="_blank" rel="noopener noreferrer">Task Goals (full reference)</a> |
 | Chat | [Chat User Guide](./chat-user-guide.md) |
 | Schedule | [Schedule User Guide](./schedule-user-guide.md) |
 | Environment variables | [Environment Variables](./environment.md) |
