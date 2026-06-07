@@ -1232,10 +1232,13 @@ func TestHandler_ClearChat_CancelsPendingChatInputs(t *testing.T) {
 	rec := htmxDelete(e, "/chat/history?project_id="+project.ID)
 	assertCode(t, rec, http.StatusOK)
 
+	// Prepared/in-flight steering rows are excluded from ListPendingForChat
+	// (they were already delivered to the provider and removed from the composer UI
+	// via the SSE applied event). ClearChat cannot cancel them; they remain pending
+	// in the DB until the provider commits or recovers them.
 	pending, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
 	require.NoError(t, err)
-	require.Len(t, pending, 1)
-	assert.Equal(t, steering.ID, pending[0].ID)
+	require.Empty(t, pending, "prepared in-flight steering must not appear in the pending UI list")
 
 	queuedAfter, err := h.threadInputRepo.GetByID(ctx, queued.ID)
 	require.NoError(t, err)
