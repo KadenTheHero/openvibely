@@ -13,6 +13,7 @@ OpenVibely lifecycle-agent and skill behavior is guided by the on-disk agent/ski
 
 Agent and catalog facts:
 - Built-in protected system agents include Skill Curator (`skill_curator`), Memory Curator (`memory_curator`), and Goal Agent (`goal`).
+- Fresh-startup initialization must materialize these protected system agents in the database idempotently from bundled declarations; generic root declaration sync may skip protected declarations and is not sufficient by itself.
 - Goal Agent ships as embedded markdown under `internal/builtinskills/builtin/agents/goal/` with root `SKILLS.md` and `skills/evaluate_task_goal/SKILL.md`.
 - Skill Curator uses clean `skill_curator` identifiers; its scheduled maintenance skill is `maintain_skill_library`.
 - Agents are global by default and reusable across projects. Project-scoped agents/skills live under `<project_root>/.openvibely/agents/...`; global agents live under the app/config agents root.
@@ -36,6 +37,7 @@ Skill metadata facts:
 - Standard skill packages with top-level `name`/`description` can be converted into OpenVibely standalone declarations during explicit import.
 
 Skill Curator facts:
+- Skill Curator is a recursive self-improvement loop: `observe_task_for_learning` reviews completed task conversations for reusable learnings and can create or patch skills so future tasks benefit; `maintain_skill_library` consolidates and prunes the skill library on a schedule.
 - `observe_task_for_learning` is a Skill Curator `after_complete` hook, not execution as the task's assigned primary agent.
 - Cross-agent improvements belong in standalone skills.
 - Assigned-agent updates are reserved for behavior specific to that assigned agent's role, purpose, private workflow, or selected agent-owned skill.
@@ -61,6 +63,7 @@ Goal Agent facts:
 
 Scheduled maintenance and UI facts:
 - Scheduled maintenance is modeled as normal scheduled tasks assigned to agents unless a future runbook explicitly requires invisible background hooks.
+- Fresh installs must idempotently create visible scheduled tasks for `System: Memory Consolidation` and `System: Skill Library Maintenance` during startup, including when the default project exists but has no repo path.
 - Scheduled maintenance task titles may remain app/storage identifiers; lifecycle hook input uses prompt-safe titles without low-value internal prefixes such as `System:`.
 - Memory consolidation specifics live in `managed_memory.md`.
 - The standalone Skills page uses shared shell/sidebar conventions, searchable cards, scope badges, disabled badges, and create/edit controls for Enabled and Always use.

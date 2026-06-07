@@ -26,6 +26,7 @@ Model-facing prompt preferences:
 - For protected or scheduled agents, `System:` may remain in storage/UI names when it is a real identity, but model-facing prompt bodies and hook inputs should avoid `System:` headings or prefixes unless they affect behavior.
 - The user dislikes injecting the product/project name into prompts merely to make them sound project-specific.
 - The user prefers long model prompts as readable const templates with dynamic context interpolated, rather than chains of `WriteString` calls.
+- Reusable skills/runbooks should avoid naming specific current-release features as examples; those examples rot. Encode generic decision rules and feature-neutral examples instead.
 
 Logging preference:
 - The user prefers very high-frequency or low-value debug traces to be left as commented `applog.Debugf` examples instead of active gated calls when method-call overhead could accumulate.
@@ -46,6 +47,9 @@ Maintenance and release facts:
 - OpenVibely has project-scoped release automation skills indexed in `.openvibely/skills/SKILLS.md`.
 - Release notes are AI-synthesized from structured unreleased commit context because commit subjects are often terse.
 - Release-note `Highlights` must summarize what is new in the target release from the changelog/commit range, not repeat static product feature bullets from previous releases; `What's Changed` is the detailed changelog section.
+- Release-note synthesis should describe user-facing capability by what it does, not by incidental UI controls or generic labels. For the 0.2.0 skill work, describe the Skill Curator as a recursive self-improvement loop that creates/patches skills from task learnings, not as a generic “Skills overhaul.”
+- Do not call out minor model-selector additions, such as “Claude Opus 4.8 added to the model selector,” as standalone release-note features unless the user explicitly asks or the model integration is itself a major release theme.
+- High-level release notes should omit CI/test infrastructure, terminal log verbosity, and other internal/developer-tooling details unless the user explicitly asks for that audience or detail level.
 - Release workflow must include a documentation update pass for features that are new or meaningfully changed before publishing/tagging; keep in-repo `docs/*.md` and the docs site repo at `/Users/dubee/go/src/github.com/openvibely/openvibely-doc` aligned when overlapping product concepts change.
 - Release agents should install missing required local tools such as `gh` when feasible instead of treating them as immediate user blockers; only hand back if installation/authentication fails or requires unavailable credentials/permissions.
 - Docker image publishing remains documented as a manual/pending release step unless explicit Docker credentials/tooling are present.

@@ -108,3 +108,7 @@ always_use:
 ## openvibely_worker_concurrency_workflow
 
 [OpenVibely Worker Concurrency Workflow](openvibely_worker_concurrency_workflow/SKILL.md) — Audit and fix OpenVibely worker queue slots, capacity counters, task claiming, and dispatch cleanup.
+
+## openvibely_startup_seed_workflow
+
+[OpenVibely Startup Seeding Workflow](openvibely_startup_seed_workflow/SKILL.md) — Implement and audit fresh-database startup seeding for protected agents, default projects, and scheduled system tasks.

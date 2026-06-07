@@ -16,6 +16,7 @@ Durable storage facts:
 - `MemoryService` owns path resolution, file storage, context building, extraction, consolidation, and DB metadata.
 - Existing SQLite task/chat execution history is the transcript source; JSONL transcript storage and app-owned memory roots are not part of the current design.
 - Startup/runtime paths may create `.openvibely/memories/` and `MEMORIES.md` when missing. Topic files are created by explicit durable-memory writes.
+- Memory schedule seeding is separate from repo-local memory directory initialization: the default project can receive the visible Memory Consolidation scheduled task even when it has no `repo_path`, while actual memory file operations still require a valid local repo path.
 - Managed-memory tools are scoped to the memory directory and reject traversal, absolute paths, and symlink escapes.
 
 Content boundaries:

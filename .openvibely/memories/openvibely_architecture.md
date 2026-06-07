@@ -3,8 +3,8 @@ name: openvibely_architecture
 type: project
 created: 2026-05-09
 updated: 2026-06-07
-source: consolidation
-source_id: memory_consolidation_2026_06_07
+source: task
+source_id: task_e64663cde62ce2c6091f8b46a74a5d61
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -19,9 +19,11 @@ Dual mode architecture:
 - Hosted/Docker deployments use explicit env-driven storage such as mounted `/data` paths rather than local `$HOME/.openvibely` behavior.
 - Desktop mode (`cmd/desktop`) uses `config.LoadWithMode(ModeDesktop)`, uses ephemeral port `PORT=0`, enables local repo paths, and loads the Wails WebView from the server base URL.
 - `OPENVIBELY_APP_DATA_DIR` is the shared override for the local app-data root when users need both web/server and desktop to point at the same runtime state; explicit overrides bypass legacy-path migration into another app-data default.
-- Env vars override mode defaults. Users who set `DATABASE_PATH`, `PROJECT_REPO_ROOT`, or related storage env vars get those explicit paths.
+- `OPENVIBELY_APP_DATA_DIR` is read as a literal path by the app; shell `~` expansion is not performed by config loading, so quoted assignments such as `OPENVIBELY_APP_DATA_DIR="~/.openvibely-test"` can point at an unintended relative `./~/.openvibely-test` directory instead of `$HOME/.openvibely-test`.
+- Env vars override mode defaults. Users who set `DATABASE_PATH`, `PROJECT_REPO_ROOT`, or related storage env vars get those explicit paths; `DATABASE_PATH` overrides the database location even when `OPENVIBELY_APP_DATA_DIR` is set.
 - Desktop defaults to localhost OAuth callback flow (`APP_BASE_URL` unset). Server/VPS mode uses `APP_BASE_URL` for hosted callbacks.
 - Desktop/Wails GUI launches, especially on macOS, may not inherit the user's interactive shell `PATH`; task execution relies on centralized environment/PATH construction rather than hardcoded developer-tool paths.
+- The packaged desktop binary reads environment variables from a `config.env` file in the OS-conventional config directory (macOS: `~/Library/Application Support/OpenVibely/config.env`; Windows: `%LOCALAPPDATA%\OpenVibely\config.env`; Linux: `$XDG_DATA_HOME/openvibely/config.env`). `OPENVIBELY_DESKTOP_CONFIG_FILE` overrides this path when set.
 - Desktop external-link handling depends on the actual loaded Wails runtime API because the desktop WebView may be loaded from the local server URL rather than a `wails:` page.
 - Desktop file/folder selection UX favors Wails/native dialog APIs because browser-only upload features such as `webkitdirectory` are not consistently reliable across OS-native WebViews.
 - Server and desktop share `internal/server`; backend forking is not part of the intended architecture.
@@ -29,7 +31,8 @@ Dual mode architecture:
 Storage and runtime-state pitfalls:
 - Storage changes maintain compatibility across Docker/VPS, local server, and desktop deployments.
 - Docker/VPS persist under mounted `/data` paths where applicable.
-- Local storage migrations preserve existing user state by moving/copying the old local database, SQLite sidecars such as WAL/SHM files, repos, uploads, and related runtime directories into `$HOME/.openvibely` when no explicit storage override is set.
+- Local storage migrations preserve existing user state by moving/copying the old local database, SQLite sidecars such as WAL/SHM files, repos, uploads, and related runtime directories into `$HOME/.openvibely` when no explicit storage override is set. Set `OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION` to any non-empty value to skip this migration (useful after manual migration or when managing storage explicitly).
+- `OPENVIBELY_RUNTIME_DIR` is a deprecated `start.sh`-only alias for `OPENVIBELY_APP_DATA_DIR`; it is not read by the binary directly. Prefer `OPENVIBELY_APP_DATA_DIR` in all configurations.
 - Release binaries use stable app-owned storage rather than source-checkout/current-working-directory paths such as `./openvibely.db` or `./repos`.
 - Web/server and desktop local runs are expected to use the same database by default unless env vars explicitly separate them.
 - Local runtime-state diagnosis depends on the active process, port, and database path because multiple local/server/desktop instances may use different configured storage roots.

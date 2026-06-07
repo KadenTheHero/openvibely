@@ -23,11 +23,14 @@ Provider normalization facts:
 - Anthropic API/OAuth usage preserves input/output tokens plus cache creation/read token fields when returned.
 - Anthropic thinking/reasoning is not currently available as a separate `reasoning_output_tokens` value and is treated as part of output tokens.
 - OpenAI API/OAuth usage preserves input/output tokens plus cached/reasoning token fields from Responses API usage data.
+- OpenAI and Anthropic token totals are not directly comparable without normalization: OpenAI `input_tokens` includes cached tokens with cached tokens as a subcount, while Anthropic `input_tokens` excludes cache reads and reports cache creation/read separately.
+- For normalized analysis, OpenAI uncached input is approximately `input_tokens - cached_input_tokens`, while Anthropic raw context touched is approximately `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`.
 - Historical backfilled rows from `executions.tokens_used` are total-only and do not invent input/output/cache/cost breakdowns.
 
 Analytics surface facts:
 - `/analytics` includes local task/execution/productivity analytics plus LLM usage/account-limit views.
 - `/api/analytics/usage` backs the Analytics page usage section.
+- The Analytics page usage fetch includes the selected `project_id` so model usage charts/tables reflect the current project.
 - Direct/background model calls can infer `project_id` from exact project repo-path `workDir` matches.
 - Analytics date/hour buckets and the built-in `month` range use app/local timezone semantics matching Schedules.
 - Provider account cards appear before usage charts/tables.

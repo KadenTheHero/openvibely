@@ -190,7 +190,7 @@ Never reuse static product marketing bullets as release `Highlights`. The produc
 After `release-notes.sh` runs, the agent must:
 
 1. **Read `dist/<version>/COMMITS.txt`** — full commit log since the previous release.
-2. **Synthesize release-specific highlights** — 2–4 bullets, only for the most notable changes that are new in this release. Do not list evergreen features that existed in the prior release.
+2. **Synthesize release-specific highlights** — 2–4 bullets, only for the most notable changes that are new in this release. Do not list evergreen features that existed in the prior release. Describe each highlight by what it **does** for the user — the functional capability or workflow it enables — not by what UI elements or files were added. Avoid using feature-specific examples in this skill; they rot as the product evolves. Prefer generic guidance such as: describe the user outcome, not the implementation detail or surface-level label.
 3. **Synthesize a high-level, user-facing changelog** — not a dump of commit subjects. The agent should:
    - Identify what actually changed from a user's perspective.
    - Group related commits into coherent bullet points (3–8 total, plain English).
@@ -199,6 +199,7 @@ After `release-notes.sh` runs, the agent must:
    - If commit messages are terse or technical, infer intent from context (file paths, bodies, task references).
    - Inspect related diffs or touched paths for ambiguous commits when practical instead of guessing from subjects alone.
    - Sanity-check product and model names against the actual changed code/docs before publishing; do not rely on ambiguous commit subjects for exact marketing names or version numbers.
+   - **Omit minor model version additions** (e.g. "Model X added to model selector") unless the model is a primary release feature. Adding a model to a dropdown is a maintenance change, not a release highlight. Omit it entirely or fold it into a generic "model updates" entry only if there are several such additions.
 4. **Replace both placeholder blocks** in `RELEASE_NOTES.md`: `AI_HIGHLIGHTS_PLACEHOLDER` and `AI_CHANGELOG_PLACEHOLDER`.
 5. Confirm the notes look correct before running `release-publish.sh`: no placeholder text, no duplicated commit-derived bullets, no old highlights from a previous release, no leaked secrets, and no claims about Docker/artifacts/features that the scripts did not actually build or verify.
 
