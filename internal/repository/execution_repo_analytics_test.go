@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -715,5 +716,68 @@ func TestExecutionRepo_ExecutionTrendsByHour_LocaltimeHour(t *testing.T) {
 	if trends[0].Hour != expectedHour {
 		t.Errorf("GetExecutionTrendsByHour hour: got %d, want %d (local hour for UTC %v)",
 			trends[0].Hour, expectedHour, knownUTC)
+	}
+}
+
+// TestExecutionRepo_FailedTaskPatterns_LastFailedAtISO8601 verifies that
+// GetFailedTaskPatterns returns LastFailedAt as an ISO 8601 string
+// (e.g. "2006-01-02T15:04:05Z") so that JavaScript's new Date() can parse
+// it without returning "Invalid Date". Regression test for the bug where
+// MAX(e.started_at) returned SQLite's bare "YYYY-MM-DD HH:MM:SS" format.
+func TestExecutionRepo_FailedTaskPatterns_LastFailedAtISO8601(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewExecutionRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	projectRepo := NewProjectRepo(db)
+	agentRepo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "ISO Project", RepoPath: "/iso-test"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	agent := &models.LLMConfig{Name: "ISO Agent", Provider: "anthropic", Model: "claude-3-5-sonnet-20241022"}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "ISO Task",
+		Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	exec := &models.Execution{
+		TaskID: task.ID, AgentConfigID: agent.ID,
+		Status: models.ExecFailed, PromptSent: "x", ErrorMessage: "boom",
+	}
+	if err := repo.Create(ctx, exec); err != nil {
+		t.Fatal(err)
+	}
+
+	patterns, err := repo.GetFailedTaskPatterns(ctx, project.ID, 10)
+	if err != nil {
+		t.Fatalf("GetFailedTaskPatterns: %v", err)
+	}
+	if len(patterns) == 0 {
+		t.Fatal("expected at least one failed task pattern")
+	}
+
+	got := patterns[0].LastFailedAt
+	// Must contain 'T' (ISO 8601 separator) and end with 'Z' so that
+	// JavaScript's new Date(s) succeeds in all browsers.
+	if len(got) == 0 {
+		t.Fatal("LastFailedAt is empty")
+	}
+	if got[len(got)-1] != 'Z' {
+		t.Errorf("LastFailedAt %q does not end with 'Z'; JavaScript new Date() will return Invalid Date", got)
+	}
+	if !strings.Contains(got, "T") {
+		t.Errorf("LastFailedAt %q missing 'T' separator; JavaScript new Date() will return Invalid Date", got)
+	}
+	// Confirm it parses as a valid RFC3339 timestamp.
+	if _, err := time.Parse(time.RFC3339, got); err != nil {
+		t.Errorf("LastFailedAt %q does not parse as RFC3339: %v", got, err)
 	}
 }

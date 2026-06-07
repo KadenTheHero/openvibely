@@ -701,7 +701,7 @@ func (r *ExecutionRepo) GetFailedTaskPatterns(ctx context.Context, projectID str
 			t.title,
 			COUNT(*) as failure_count,
 			e.error_message as last_error,
-			MAX(e.started_at) as last_failed_at
+			strftime('%Y-%m-%dT%H:%M:%SZ', MAX(e.started_at)) as last_failed_at
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
 		WHERE t.project_id = ? AND e.status = 'failed'
