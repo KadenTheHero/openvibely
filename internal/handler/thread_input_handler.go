@@ -22,7 +22,11 @@ func (h *Handler) CancelThreadInput(c echo.Context) error {
 	cancelled, err := h.threadInputRepo.CancelPending(c.Request().Context(), inputID)
 	if err != nil {
 		if errors.Is(err, repository.ErrInputNotPending) {
-			return echo.NewHTTPError(http.StatusConflict, "thread input is no longer pending")
+			// The row is already applied, already cancelled, or is a prepared/in-flight steering
+			// row currently being consumed by a provider call.  In all cases it is no longer
+			// user-removable via this action.  Return the hidden-row fragment so HTMX removes
+			// any stale pending row from the composer UI instead of leaving it stuck.
+			return render(c, http.StatusOK, components.ChatInputCancelledRow(inputID))
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to cancel queued input")
 	}

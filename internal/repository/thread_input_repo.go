@@ -205,11 +205,16 @@ func (r *ThreadInputRepo) GetByID(ctx context.Context, id string) (*models.Threa
 }
 
 func (r *ThreadInputRepo) ListPendingForTask(ctx context.Context, taskID string) ([]models.ThreadInput, error) {
-	return r.list(ctx, `WHERE task_id = ? AND input_status = 'pending' ORDER BY queue_position ASC, created_at ASC, rowid ASC`, taskID)
+	// Exclude prepared/in-flight steering rows (expected_turn_id cleared by PreparePendingTextSteering).
+	// These rows have been sent to the provider but not yet committed; the SSE applied event already
+	// removed them from the composer UI at prepare time. Including them on refresh would show a stale
+	// "Steering pending" row that the user cannot delete (it's protected while in-flight).
+	return r.list(ctx, `WHERE task_id = ? AND input_status = 'pending' AND NOT (input_mode = 'steering' AND COALESCE(expected_turn_id, '') = '') ORDER BY queue_position ASC, created_at ASC, rowid ASC`, taskID)
 }
 
 func (r *ThreadInputRepo) ListPendingForChat(ctx context.Context, projectID string) ([]models.ThreadInput, error) {
-	return r.list(ctx, `WHERE scope = 'chat' AND project_id = ? AND input_status = 'pending' ORDER BY queue_position ASC, created_at ASC, rowid ASC`, projectID)
+	// Exclude prepared/in-flight steering rows for the same reason as ListPendingForTask.
+	return r.list(ctx, `WHERE scope = 'chat' AND project_id = ? AND input_status = 'pending' AND NOT (input_mode = 'steering' AND COALESCE(expected_turn_id, '') = '') ORDER BY queue_position ASC, created_at ASC, rowid ASC`, projectID)
 }
 
 func (r *ThreadInputRepo) ListPendingSteering(ctx context.Context, runExecutionID, turnID string) ([]models.ThreadInput, error) {

@@ -745,6 +745,226 @@ func TestExecutionRepo_RecoverStaleRunningTaskExecutionsRepairsPendingTaskCrashL
 	}
 }
 
+// TestThreadInputRepo_ListPendingForTask_ExcludesPreparedSteering verifies that
+// ListPendingForTask omits prepared/in-flight steering rows (expected_turn_id = NULL).
+// These rows were removed from the composer UI via the SSE applied event at prepare
+// time. Showing them on page refresh would leave a stale "Steering pending" row that
+// the user cannot delete (the DB guard protects in-flight rows from cancellation).
+//
+// The test is split into two phases:
+//  1. Before PreparePendingSteering — the steering row is still pending with
+//     expected_turn_id set, so it should appear in the list.
+//  2. After PreparePendingSteering — expected_turn_id is cleared (row is in-flight),
+//     so it must be hidden from the list.
+func TestThreadInputRepo_ListPendingForTask_ExcludesPreparedSteering(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+
+	// A normal queued follow-up — must always appear.
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "normal queued"}
+	if err := repo.CreateQueued(ctx, queued); err != nil {
+		t.Fatalf("CreateQueued: %v", err)
+	}
+
+	// A steering row — before PreparePendingSteering it has expected_turn_id set
+	// and should be visible in the pending list.
+	steer := &models.ThreadInput{
+		Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
+		AgentConfigID: agent.ID, InputMode: models.ThreadInputModeSteering,
+		InputStatus: models.ThreadInputPending, RunExecutionID: active.ID,
+		TurnID: active.ID, ExpectedTurnID: active.ID, Content: "rebase against main",
+	}
+	if err := repo.CreateSteeringForActiveExecution(ctx, steer, active.ID); err != nil {
+		t.Fatalf("CreateSteeringForActiveExecution: %v", err)
+	}
+
+	// Phase 1: unprepared steering should be in the list.
+	pending, err := repo.ListPendingForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListPendingForTask before prepare: %v", err)
+	}
+	foundBefore := map[string]bool{}
+	for _, p := range pending {
+		foundBefore[p.ID] = true
+	}
+	if !foundBefore[queued.ID] {
+		t.Errorf("phase 1: queued follow-up should appear in pending list, got %+v", pending)
+	}
+	if !foundBefore[steer.ID] {
+		t.Errorf("phase 1: unprepared steering row (expected_turn_id set) should appear in pending list, got %+v", pending)
+	}
+
+	// Prepare the steering row (simulates what PreparePendingTextSteering does inside
+	// the LLM steering callback — clears expected_turn_id).
+	preparedRows, err := repo.PreparePendingSteering(ctx, active.ID, active.ID)
+	if err != nil || len(preparedRows) == 0 {
+		t.Fatalf("PreparePendingSteering: err=%v rows=%d", err, len(preparedRows))
+	}
+
+	// Phase 2: prepared/in-flight steering must NOT appear in the list.
+	pending, err = repo.ListPendingForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListPendingForTask after prepare: %v", err)
+	}
+	foundAfter := map[string]bool{}
+	for _, p := range pending {
+		foundAfter[p.ID] = true
+	}
+	if !foundAfter[queued.ID] {
+		t.Errorf("phase 2: queued follow-up must still appear after steering is prepared, got %+v", pending)
+	}
+	if foundAfter[steer.ID] {
+		t.Errorf("phase 2: prepared/in-flight steering (expected_turn_id=NULL) must NOT appear in pending list — it was already sent to the provider, got %+v", pending)
+	}
+}
+
+// TestThreadInputRepo_ListPendingForChat_ExcludesPreparedSteering is the chat-scope
+// equivalent of the task test above.
+func TestThreadInputRepo_ListPendingForChat_ExcludesPreparedSteering(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+
+	chatTask := &models.Task{ProjectID: project.ID, Title: "Chat Task", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: "chat"}
+	if err := NewTaskRepo(db, nil).Create(ctx, chatTask); err != nil {
+		t.Fatalf("create chat task: %v", err)
+	}
+	active := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active chat"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+
+	// Normal queued chat input.
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "normal queued chat"}
+	if err := repo.CreateQueued(ctx, queued); err != nil {
+		t.Fatalf("CreateQueued: %v", err)
+	}
+
+	// Chat steering row (unprepared: expected_turn_id set, should be visible before prepare).
+	steer := &models.ThreadInput{
+		Scope: models.ThreadInputScopeChat, ProjectID: project.ID,
+		AgentConfigID: agent.ID, InputMode: models.ThreadInputModeSteering,
+		InputStatus: models.ThreadInputPending, RunExecutionID: active.ID,
+		TurnID: active.ID, ExpectedTurnID: active.ID, Content: "steer chat",
+	}
+	if err := repo.CreateSteeringForActiveExecution(ctx, steer, active.ID); err != nil {
+		t.Fatalf("CreateSteeringForActiveExecution: %v", err)
+	}
+
+	// Phase 1: before prepare — both queued and steering visible.
+	pending, err := repo.ListPendingForChat(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListPendingForChat before prepare: %v", err)
+	}
+	foundBefore := map[string]bool{}
+	for _, p := range pending {
+		foundBefore[p.ID] = true
+	}
+	if !foundBefore[queued.ID] {
+		t.Errorf("phase 1: queued chat input should appear in pending list, got %+v", pending)
+	}
+	if !foundBefore[steer.ID] {
+		t.Errorf("phase 1: unprepared chat steering should appear in pending list, got %+v", pending)
+	}
+
+	// Prepare (in-flight): clears expected_turn_id.
+	if _, err := repo.PreparePendingSteering(ctx, active.ID, active.ID); err != nil {
+		t.Fatalf("PreparePendingSteering: %v", err)
+	}
+
+	// Phase 2: after prepare — steering must be hidden.
+	pending, err = repo.ListPendingForChat(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListPendingForChat after prepare: %v", err)
+	}
+	foundAfter := map[string]bool{}
+	for _, p := range pending {
+		foundAfter[p.ID] = true
+	}
+	if !foundAfter[queued.ID] {
+		t.Errorf("phase 2: queued chat input must still appear, got %+v", pending)
+	}
+	if foundAfter[steer.ID] {
+		t.Errorf("phase 2: prepared/in-flight chat steering must NOT appear in pending list, got %+v", pending)
+	}
+}
+
+// TestThreadInputRepo_ListPendingForTask_PreparedSteeringReappearsAfterRequeue verifies
+// that a requeued (recovered) steering row is visible again after provider failure.
+func TestThreadInputRepo_ListPendingForTask_PreparedSteeringReappearsAfterRequeue(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+
+	steering := &models.ThreadInput{
+		Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
+		AgentConfigID: agent.ID, InputMode: models.ThreadInputModeSteering,
+		InputStatus: models.ThreadInputPending, RunExecutionID: active.ID,
+		TurnID: active.ID, ExpectedTurnID: active.ID, Content: "rebase against main",
+	}
+	if err := repo.CreateSteeringForActiveExecution(ctx, steering, active.ID); err != nil {
+		t.Fatalf("CreateSteeringForActiveExecution: %v", err)
+	}
+
+	// Prepare (in-flight) — should be hidden from UI.
+	if _, err := repo.PreparePendingSteering(ctx, active.ID, active.ID); err != nil {
+		t.Fatalf("PreparePendingSteering: %v", err)
+	}
+	pending, err := repo.ListPendingForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListPendingForTask after prepare: %v", err)
+	}
+	for _, p := range pending {
+		if p.ID == steering.ID {
+			t.Fatal("prepared in-flight steering must not appear in pending list")
+		}
+	}
+
+	// Simulate provider failure: requeue the steering.
+	requeued, err := repo.RequeuePendingSteeringForExecution(ctx, active.ID)
+	if err != nil || len(requeued) == 0 {
+		t.Fatalf("RequeuePendingSteeringForExecution: err=%v rows=%d", err, len(requeued))
+	}
+
+	// After requeue, the row is now input_mode='queued' and must reappear.
+	pending, err = repo.ListPendingForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListPendingForTask after requeue: %v", err)
+	}
+	found := false
+	for _, p := range pending {
+		if p.ID == steering.ID {
+			found = true
+			if p.InputMode != models.ThreadInputModeQueued {
+				t.Errorf("requeued steering should have input_mode=queued, got %s", p.InputMode)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("requeued steering row should reappear in pending list after provider failure, got %+v", pending)
+	}
+}
+
 func createThreadInputProject(t *testing.T, ctx context.Context, db *sql.DB) *models.Project {
 	t.Helper()
 	repo := NewProjectRepo(db)
