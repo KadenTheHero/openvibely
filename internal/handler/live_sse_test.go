@@ -13,6 +13,9 @@ import (
 )
 
 func TestLiveEventsSSE_ReceivesTaskChatAndFileEvents(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-sensitive SSE test in short mode")
+	}
 	taskBroadcaster := events.NewBroadcaster()
 	chatBroadcaster := events.NewChatBroadcaster()
 	fileBroadcaster := events.NewFileChangeBroadcaster()
@@ -52,8 +55,9 @@ func TestLiveEventsSSE_ReceivesTaskChatAndFileEvents(t *testing.T) {
 	// Empty separator line after ping.
 	scanner.Scan()
 
+	// Subscriptions are established before the ping is written, so events published
+	// after the client reads the ping are guaranteed to be delivered — no sleep needed.
 	go func() {
-		time.Sleep(100 * time.Millisecond)
 		taskBroadcaster.Publish(events.TaskEvent{
 			Type:      events.TaskStatusChanged,
 			TaskID:    "task-1",
@@ -132,6 +136,9 @@ func TestLiveEventsSSE_ReceivesTaskChatAndFileEvents(t *testing.T) {
 }
 
 func TestLiveEventsSSE_AppliesProjectAndTaskFilters(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-sensitive SSE test in short mode")
+	}
 	taskBroadcaster := events.NewBroadcaster()
 	chatBroadcaster := events.NewChatBroadcaster()
 	fileBroadcaster := events.NewFileChangeBroadcaster()
@@ -159,7 +166,6 @@ func TestLiveEventsSSE_AppliesProjectAndTaskFilters(t *testing.T) {
 	scanner.Scan() // empty line
 
 	go func() {
-		time.Sleep(100 * time.Millisecond)
 		// Filtered out by project.
 		taskBroadcaster.Publish(events.TaskEvent{
 			Type:      events.TaskStatusChanged,

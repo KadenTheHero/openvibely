@@ -1670,6 +1670,19 @@ func TestRetryBackoff_429WithoutRetryAfter(t *testing.T) {
 	}
 }
 
+// instantClock swaps clockAfter to return an already-fired channel so that
+// retry backoff sleeps take zero real time during tests.
+func instantClock(t *testing.T) {
+	t.Helper()
+	orig := clockAfter
+	clockAfter = func(d time.Duration) <-chan time.Time {
+		ch := make(chan time.Time, 1)
+		ch <- time.Time{}
+		return ch
+	}
+	t.Cleanup(func() { clockAfter = orig })
+}
+
 func TestDoWithRetry_SuccessOnFirstTry(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1691,6 +1704,7 @@ func TestDoWithRetry_SuccessOnFirstTry(t *testing.T) {
 }
 
 func TestDoWithRetry_RetriesThenSucceeds(t *testing.T) {
+	instantClock(t)
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
@@ -1722,6 +1736,7 @@ func TestDoWithRetry_RetriesThenSucceeds(t *testing.T) {
 }
 
 func TestDoWithRetry_ExhaustsRetries(t *testing.T) {
+	instantClock(t)
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
@@ -1799,6 +1814,7 @@ func TestDoWithRetry_ContextCancelled(t *testing.T) {
 }
 
 func TestDoWithRetry_RetryAfterHeader(t *testing.T) {
+	instantClock(t)
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++

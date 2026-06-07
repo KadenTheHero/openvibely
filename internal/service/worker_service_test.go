@@ -1216,6 +1216,9 @@ func TestWorkerService_NoStarvation(t *testing.T) {
 // tasks getting stuck in "Queued" status — thread follow-ups released slots
 // but never triggered dispatch of waiting tasks.
 func TestWorkerService_DispatchNextPromotesQueuedTasks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping goroutine-timing test in short mode")
+	}
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	projectRepo := repository.NewProjectRepo(db)
@@ -1301,6 +1304,9 @@ func TestWorkerService_DispatchNextPromotesQueuedTasks(t *testing.T) {
 // does NOT dispatch tasks when capacity is still full. This ensures we only
 // promote tasks when there's actual capacity.
 func TestWorkerService_DispatchNextWithoutSlotRelease(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping goroutine-timing test in short mode")
+	}
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	projectRepo := repository.NewProjectRepo(db)
@@ -1358,6 +1364,9 @@ func TestWorkerService_DispatchNextWithoutSlotRelease(t *testing.T) {
 // This is the regression test for the bug where increasing a project limit on
 // the Workers page did not start queued tasks until an unrelated event.
 func TestWorkerService_ProjectLimitIncreaseDispatchesQueued(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping goroutine-timing test in short mode")
+	}
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	projectRepo := repository.NewProjectRepo(db)
@@ -1457,6 +1466,9 @@ func TestWorkerService_ProjectLimitIncreaseDispatchesQueued(t *testing.T) {
 // even if a project limit is increased, tasks are not dispatched when the global
 // worker pool is at capacity.
 func TestWorkerService_ProjectLimitIncreaseNoDispatchWhenGlobalFull(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping goroutine-timing test in short mode")
+	}
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	projectRepo := repository.NewProjectRepo(db)
@@ -1526,6 +1538,9 @@ func TestWorkerService_ProjectLimitIncreaseNoDispatchWhenGlobalFull(t *testing.T
 // order (first submitted = first dispatched). The test verifies queue ordering
 // directly without executing tasks, since mock execution completes instantly.
 func TestWorkerService_ProjectLimitIncreaseFIFOOrder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping goroutine-timing test in short mode")
+	}
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	projectRepo := repository.NewProjectRepo(db)

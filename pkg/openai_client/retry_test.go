@@ -11,6 +11,19 @@ import (
 	"time"
 )
 
+// instantClock swaps clockAfter to return an already-fired channel so that
+// retry backoff sleeps take zero real time during tests.
+func instantClock(t *testing.T) {
+	t.Helper()
+	orig := clockAfter
+	clockAfter = func(d time.Duration) <-chan time.Time {
+		ch := make(chan time.Time, 1)
+		ch <- time.Time{}
+		return ch
+	}
+	t.Cleanup(func() { clockAfter = orig })
+}
+
 func TestIsRetryable(t *testing.T) {
 	tests := []struct {
 		code int
@@ -94,6 +107,7 @@ func TestDoWithRetry_Success(t *testing.T) {
 }
 
 func TestDoWithRetry_RetryOn429(t *testing.T) {
+	instantClock(t)
 	var attempts int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := atomic.AddInt32(&attempts, 1)
@@ -125,6 +139,7 @@ func TestDoWithRetry_RetryOn429(t *testing.T) {
 }
 
 func TestDoWithRetry_RetryOn500(t *testing.T) {
+	instantClock(t)
 	var attempts int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := atomic.AddInt32(&attempts, 1)
@@ -182,6 +197,7 @@ func TestDoWithRetry_NoRetryOn400(t *testing.T) {
 }
 
 func TestDoWithRetry_ExhaustedRetries(t *testing.T) {
+	instantClock(t)
 	var attempts int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&attempts, 1)
@@ -252,6 +268,7 @@ func TestDoWithRetry_ReturnsNon2xxNonRetryable(t *testing.T) {
 }
 
 func TestDoWithRetry_NetworkError(t *testing.T) {
+	instantClock(t)
 	var attempts int32
 
 	// Create a custom transport that simulates network errors
@@ -294,6 +311,7 @@ func TestDoWithRetry_NetworkError(t *testing.T) {
 }
 
 func TestDoWithRetry_NetworkTimeout(t *testing.T) {
+	instantClock(t)
 	var attempts int32
 
 	// Create a custom transport that simulates timeouts

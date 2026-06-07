@@ -287,7 +287,7 @@ func (h *Handler) AnalyzeTaskComplexity(c echo.Context) error {
 	taskID := c.Param("taskId")
 
 	task, err := h.taskRepo.GetByID(c.Request().Context(), taskID)
-	if err != nil {
+	if err != nil || task == nil {
 		return c.String(http.StatusNotFound, "Task not found")
 	}
 

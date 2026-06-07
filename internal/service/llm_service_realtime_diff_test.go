@@ -14,6 +14,9 @@ import (
 // TestRealtimeDiffUpdates verifies that execution DiffOutput is updated during task execution,
 // not just at completion, enabling realtime Changes tab updates.
 func TestRealtimeDiffUpdates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping ticker-timing test in short mode")
+	}
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 

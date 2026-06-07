@@ -18,6 +18,10 @@ const (
 	maxRetryBackoff = 30 * time.Second
 )
 
+// clockAfter is time.After by default; tests swap it to an instant channel
+// so retry tests run without real backoff delays.
+var clockAfter = time.After
+
 // retryableStatusCodes are HTTP status codes that trigger a retry.
 var retryableStatusCodes = map[int]bool{
 	429: true, // Too Many Requests
@@ -85,7 +89,7 @@ func doWithRetry(ctx context.Context, client *http.Client, buildReq func() (*htt
 				select {
 				case <-ctx.Done():
 					return nil, ctx.Err()
-				case <-time.After(backoff):
+				case <-clockAfter(backoff):
 					lastErr = netErr
 					continue
 				}
@@ -124,7 +128,7 @@ func doWithRetry(ctx context.Context, client *http.Client, buildReq func() (*htt
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(backoff):
+		case <-clockAfter(backoff):
 		}
 	}
 

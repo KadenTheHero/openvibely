@@ -962,21 +962,20 @@ func TestProcessStreamingResponse_ManualFollowupReactivatesAchievedGoalForCheckp
 		InputOrigin:    models.TaskOriginWeb,
 	})
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	require.Eventually(t, func() bool {
 		for _, seen := range invoker.Seen() {
 			if seen == "after_complete/evaluate_task_goal" {
-				latest, err := goalSvc.GetGoal(ctx, task.ID)
-				require.NoError(t, err)
-				require.NotNil(t, latest)
-				require.Equal(t, models.TaskGoalStatusActive, latest.Status)
-				require.Nil(t, latest.AchievedAt)
-				return
+				return true
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("expected Goal Agent after_complete hook after manual achieved-goal follow-up, seen=%#v", invoker.Seen())
+		return false
+	}, 2*time.Second, 10*time.Millisecond, "expected Goal Agent after_complete hook after manual achieved-goal follow-up, seen=%#v", invoker.Seen())
+
+	latest, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, latest)
+	require.Equal(t, models.TaskGoalStatusActive, latest.Status)
+	require.Nil(t, latest.AchievedAt)
 }
 
 func TestProcessStreamingResponse_GoalAgentQueuedFollowupDoesNotReactivateAchievedGoal(t *testing.T) {
@@ -1080,23 +1079,15 @@ func TestProcessStreamingResponse_GenericAfterCompleteRunsGoalAgentWithoutAutoEn
 		ChatMode:       models.ChatModeOrchestrate,
 	})
 
-	goalRuns := 0
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		goalRuns = 0
+	require.Eventually(t, func() bool {
+		n := 0
 		for _, seen := range invoker.Seen() {
 			if seen == "after_complete/evaluate_task_goal" {
-				goalRuns++
+				n++
 			}
 		}
-		if goalRuns == 1 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if goalRuns != 1 {
-		t.Fatalf("expected Goal Agent lifecycle hook once, got seen=%#v", invoker.Seen())
-	}
+		return n == 1
+	}, 2*time.Second, 10*time.Millisecond, "expected Goal Agent lifecycle hook once, got seen=%#v", invoker.Seen())
 	pending, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
 	require.NoError(t, err)
 	if len(pending) != 0 {

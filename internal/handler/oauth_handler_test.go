@@ -18,6 +18,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// waitForTCPPort polls until the given port is accepting connections or the
+// timeout elapses. Used instead of time.Sleep to wait for test servers to start.
+func waitForTCPPort(t *testing.T, port int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 50*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("server on port %d did not start within %s", port, timeout)
+}
+
 func stopOpenAIOAuthCallbackServerForTest(t *testing.T) {
 	t.Helper()
 	client := &http.Client{Timeout: 500 * time.Millisecond}
@@ -776,6 +792,9 @@ func TestHandler_OAuthCallback(t *testing.T) {
 }
 
 func TestHandler_startOAuthCallbackServer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping OAuth callback server test (starts real TCP listener) in short mode")
+	}
 	t.Run("handles successful callback", func(t *testing.T) {
 		h, _, llmConfigRepo := setupTestHandler(t)
 
@@ -840,8 +859,7 @@ func TestHandler_startOAuthCallbackServer(t *testing.T) {
 			done <- true
 		}()
 
-		// Give server time to start
-		time.Sleep(100 * time.Millisecond)
+		waitForTCPPort(t, port, 2*time.Second)
 
 		// Make a callback request without following redirects.
 		callbackURL := fmt.Sprintf("http://localhost:%d/callback?code=test-code&state=%s", port, testState)
@@ -891,8 +909,7 @@ func TestHandler_startOAuthCallbackServer(t *testing.T) {
 			done <- true
 		}()
 
-		// Give server time to start
-		time.Sleep(100 * time.Millisecond)
+		waitForTCPPort(t, port, 2*time.Second)
 
 		// Make a callback request with error
 		callbackURL := fmt.Sprintf("http://localhost:%d/callback?error=access_denied&error_description=User%%20denied%%20access", port)
@@ -947,6 +964,7 @@ func TestHandler_startOAuthCallbackServer(t *testing.T) {
 
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
+		cancelPort := listener.Addr().(*net.TCPAddr).Port
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan bool)
@@ -955,8 +973,7 @@ func TestHandler_startOAuthCallbackServer(t *testing.T) {
 			done <- true
 		}()
 
-		// Give server time to start
-		time.Sleep(100 * time.Millisecond)
+		waitForTCPPort(t, cancelPort, 2*time.Second)
 
 		// Cancel the context (simulates new flow for same config)
 		cancel()
@@ -971,6 +988,9 @@ func TestHandler_startOAuthCallbackServer(t *testing.T) {
 }
 
 func TestOAuthServerTracking(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping OAuth server tracking test (goroutine sleep sync) in short mode")
+	}
 	t.Run("shutdownPreviousOAuthServer cancels tracked server", func(t *testing.T) {
 		cancelled := false
 		ctx, cancel := context.WithCancel(context.Background())
@@ -988,9 +1008,8 @@ func TestOAuthServerTracking(t *testing.T) {
 
 		shutdownPreviousOAuthServer("test-config-track")
 
-		// Give goroutine time to observe cancellation
-		time.Sleep(50 * time.Millisecond)
-		require.True(t, cancelled, "Previous server should have been cancelled")
+		require.Eventually(t, func() bool { return cancelled }, 2*time.Second, 5*time.Millisecond,
+			"Previous server should have been cancelled")
 
 		oauthServersMu.Lock()
 		_, exists := oauthServers["test-config-track"]
@@ -1360,6 +1379,9 @@ func Test_startOAuthCallbackListener(t *testing.T) {
 	})
 
 	t.Run("cancels existing OpenAI listener and retries", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("skipping conflicting-listener test (uses sleep) in short mode")
+		}
 		// Start a conflicting server on the OpenAI port
 		conflictingListener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", openAIOAuthPort))
 		require.NoError(t, err)
@@ -1374,8 +1396,7 @@ func Test_startOAuthCallbackListener(t *testing.T) {
 			http.Serve(conflictingListener, mux)
 		}()
 
-		// Give the conflicting server time to start
-		time.Sleep(50 * time.Millisecond)
+		waitForTCPPort(t, openAIOAuthPort, 2*time.Second)
 
 		// Try to start OAuth listener - should cancel the conflicting one and succeed
 		listener, err := startOAuthCallbackListener(models.ProviderOpenAI)
