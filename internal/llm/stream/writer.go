@@ -93,7 +93,11 @@ func (w *Writer) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	n, err := w.buf.Write(p)
-	log.Printf("[agent-svc] streamingWriter received %d bytes exec=%s task=%s: %q", n, w.execID, w.taskID, string(p))
+	// Raw token content is debug-only; it is noisy at info level and may
+	// contain sensitive model output. Operational metadata (flush counts,
+	// errors) continues to use log.Printf unconditionally below.
+	// Uncomment to log raw streamed LLM content when debugging stream issues:
+	// applog.Debugf("[agent-svc] streamingWriter received %d bytes exec=%s task=%s: %q", n, w.execID, w.taskID, string(p))
 	w.dirty = true
 	// Eagerly flush if enough time has passed since last flush
 	if time.Since(w.lastFlush) >= w.interval {
