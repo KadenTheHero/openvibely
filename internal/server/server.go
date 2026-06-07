@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -20,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/config"
@@ -104,7 +104,7 @@ func migrateLegacyDatabaseFiles(databasePath string) error {
 		if err := moveOrCopyPath(from, to); err != nil {
 			return fmt.Errorf("moving legacy database file %s to %s: %w", from, to, err)
 		}
-		log.Printf("[storage] moved legacy database file %s to %s", from, to)
+		applog.Infof("[storage] moved legacy database file %s to %s", from, to)
 	}
 	return nil
 }
@@ -144,7 +144,7 @@ func migrateLegacyDirectory(name, targetPath string) error {
 	if err := moveOrCopyPath(legacyAbs, targetAbs); err != nil {
 		return fmt.Errorf("moving legacy %s %s to %s: %w", name, legacyAbs, targetAbs, err)
 	}
-	log.Printf("[storage] moved legacy %s %s to %s", name, legacyAbs, targetAbs)
+	applog.Infof("[storage] moved legacy %s %s to %s", name, legacyAbs, targetAbs)
 	return nil
 }
 
@@ -196,7 +196,7 @@ func backupExistingPath(path string) error {
 			if err := os.Rename(path, candidate); err != nil {
 				return fmt.Errorf("backing up existing target path %s to %s: %w", path, candidate, err)
 			}
-			log.Printf("[storage] backed up existing target path %s to %s", path, candidate)
+			applog.Infof("[storage] backed up existing target path %s to %s", path, candidate)
 			return nil
 		} else if err != nil {
 			return fmt.Errorf("checking backup path %s: %w", candidate, err)
@@ -286,7 +286,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	}
 	cfg.NormalizeForMode()
 	if err := config.ValidateAppBaseURL(os.Getenv("APP_BASE_URL")); err != nil {
-		log.Printf("warning: %v", err)
+		applog.Infof("warning: %v", err)
 	}
 
 	authCfg := auth.Config{
@@ -312,7 +312,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
-	log.Println("database initialized")
+	applog.Infof("database initialized")
 
 	// Event broadcasters for real-time UI updates
 	broadcaster := events.NewBroadcaster()
@@ -325,7 +325,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	taskGoalRepo := repository.NewTaskGoalRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	if modelsList, listErr := llmConfigRepo.List(context.Background()); listErr != nil {
-		log.Printf("warning: unable to check OAuth model configuration for APP_BASE_URL validation: %v", listErr)
+		applog.Infof("warning: unable to check OAuth model configuration for APP_BASE_URL validation: %v", listErr)
 	} else {
 		hasOAuth := false
 		hasOAuthAnthropic := false
@@ -345,15 +345,15 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 
 		if cfg.AppBaseURL == "" {
 			if hasOAuth {
-				log.Printf("warning: APP_BASE_URL is not set while OAuth models are configured; hosted OAuth callbacks will use localhost. Set APP_BASE_URL to your public host (example: https://dubee.org).")
+				applog.Infof("warning: APP_BASE_URL is not set while OAuth models are configured; hosted OAuth callbacks will use localhost. Set APP_BASE_URL to your public host (example: https://dubee.org).")
 			}
 		} else {
-			log.Printf("app base url configured for OAuth callbacks: %s", cfg.AppBaseURL)
+			applog.Infof("app base url configured for OAuth callbacks: %s", cfg.AppBaseURL)
 			if hasOAuthAnthropic && strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_CLIENT_ID")) == "" {
-				log.Printf("warning: ANTHROPIC_OAUTH_CLIENT_ID not set; hosted Anthropic OAuth will use built-in client and may be rejected by provider redirect policy.")
+				applog.Infof("warning: ANTHROPIC_OAUTH_CLIENT_ID not set; hosted Anthropic OAuth will use built-in client and may be rejected by provider redirect policy.")
 			}
 			if hasOAuthOpenAI && strings.TrimSpace(os.Getenv("OPENAI_OAUTH_CLIENT_ID")) == "" {
-				log.Printf("warning: OPENAI_OAUTH_CLIENT_ID not set; hosted OpenAI OAuth will use built-in client and may be rejected by provider redirect policy.")
+				applog.Infof("warning: OPENAI_OAUTH_CLIENT_ID not set; hosted OpenAI OAuth will use built-in client and may be rejected by provider redirect policy.")
 			}
 		}
 	}
@@ -513,7 +513,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	// memory, while this service owns storage setup and scheduled consolidation tasks.
 	memoryResolver, mrErr := memory.NewPathResolver("", "")
 	if mrErr != nil {
-		log.Printf("[memory] path resolver init failed (memory subsystem disabled): %v", mrErr)
+		applog.Infof("[memory] path resolver init failed (memory subsystem disabled): %v", mrErr)
 	}
 	var memorySvc *service.MemoryService
 	if memoryResolver != nil {
@@ -524,21 +524,21 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		if existing, lerr := projectRepo.List(context.Background()); lerr == nil {
 			for _, p := range existing {
 				if err := memorySvc.EnsureProject(context.Background(), p.ID); err != nil {
-					log.Printf("[memory] ensure project %s: %v", p.ID, err)
+					applog.Infof("[memory] ensure project %s: %v", p.ID, err)
 				}
 			}
 		}
-		log.Printf("[memory] repo-local memory enabled")
+		applog.Infof("[memory] repo-local memory enabled")
 	}
 	globalSkillRoot := cfg.AppDataDir
 	if err := builtinskills.SyncTo(globalSkillRoot); err != nil {
-		log.Printf("warning: failed to sync built-in lifecycle skills: %v", err)
+		applog.Infof("warning: failed to sync built-in lifecycle skills: %v", err)
 	}
 	if err := agentskills.EnsureAgentsRoot(globalSkillRoot); err != nil {
-		log.Printf("warning: failed to ensure agents root at %s: %v", globalSkillRoot, err)
+		applog.Infof("warning: failed to ensure agents root at %s: %v", globalSkillRoot, err)
 	}
 	if err := agentskills.EnsureSkillsRoot(globalSkillRoot); err != nil {
-		log.Printf("warning: failed to ensure skills root at %s: %v", globalSkillRoot, err)
+		applog.Infof("warning: failed to ensure skills root at %s: %v", globalSkillRoot, err)
 	}
 	llmHookInvoker := lifecycle.NewLLMHookInvoker(llmSvc, agentRepo, llmConfigRepo)
 	skillResolver := service.NewCatalogSkillResolver(agentRepo, workerSvc.CurrentLifecycleCatalog, globalSkillRoot, func(ctx context.Context, projectID string) string {
@@ -567,16 +567,16 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	agentLibraryMaintenanceSvc.SetAgentsRootPath(globalSkillRoot)
 	workerSvc.SetAgentRootSyncService(agentLibraryMaintenanceSvc)
 	if err := agentLibraryMaintenanceSvc.SyncRootDeclarations(context.Background(), ""); err != nil {
-		log.Printf("[agent-library] sync root declarations: %v", err)
+		applog.Infof("[agent-library] sync root declarations: %v", err)
 	}
 	if existing, lerr := projectRepo.List(context.Background()); lerr == nil {
 		for _, p := range existing {
 			if err := agentLibraryMaintenanceSvc.EnsureProject(context.Background(), p.ID); err != nil {
-				log.Printf("[agent-library] ensure project %s: %v", p.ID, err)
+				applog.Infof("[agent-library] ensure project %s: %v", p.ID, err)
 			}
 		}
 	}
-	log.Printf("[lifecycle] runner wired with catalog/tools root=%s", globalSkillRoot)
+	applog.Infof("[lifecycle] runner wired with catalog/tools root=%s", globalSkillRoot)
 	// Telegram Bot (optional - starts if token is configured via env or saved in DB)
 	telegramToken := cfg.TelegramToken
 	if telegramToken == "" {
@@ -601,7 +601,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 			workerSvc,
 		)
 		if tErr != nil {
-			log.Printf("warning: failed to initialize telegram bot: %v", tErr)
+			applog.Infof("warning: failed to initialize telegram bot: %v", tErr)
 		} else {
 			telegramSvc.SetTelegramAuthRepo(telegramAuthRepo)
 			telegramSvc.SetTelegramUserProjectRepo(telegramUserProjectRepo)
@@ -610,43 +610,43 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 			telegramSvc.SetAlertService(alertSvc)
 			telegramSvc.SetTaskGoalService(taskGoalSvc)
 			telegramSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
-			log.Println("telegram bot initialized")
+			applog.Infof("telegram bot initialized")
 		}
 	} else {
-		log.Println("telegram bot disabled (no token configured)")
+		applog.Infof("telegram bot disabled (no token configured)")
 	}
 
 	// Validate project repo paths exist on disk (catches ephemeral path loss after container restart)
 	if missing := projectSvc.ValidateRepoPaths(context.Background()); len(missing) > 0 {
-		log.Printf("WARNING: %d project(s) have missing repo paths — tasks using these projects will fail until repos are restored. Ensure PROJECT_REPO_ROOT is on a persistent volume (e.g. /data/repos).", len(missing))
+		applog.Infof("WARNING: %d project(s) have missing repo paths — tasks using these projects will fail until repos are restored. Ensure PROJECT_REPO_ROOT is on a persistent volume (e.g. /data/repos).", len(missing))
 	}
 
 	// Reset any tasks orphaned in 'running' state from a previous crash, then
 	// terminalize their pre-restart running executions. No task workers survive a
 	// process restart, so any non-chat execution still marked running is stale.
 	if count, resetErr := taskRepo.ResetOrphanedRunning(context.Background()); resetErr != nil {
-		log.Printf("warning: failed to reset orphaned running tasks: %v", resetErr)
+		applog.Infof("warning: failed to reset orphaned running tasks: %v", resetErr)
 	} else if count > 0 {
-		log.Printf("reset %d orphaned running tasks to pending", count)
+		applog.Infof("reset %d orphaned running tasks to pending", count)
 	}
 	if recovered, recoverErr := execRepo.RecoverStaleRunningTaskExecutions(context.Background()); recoverErr != nil {
-		log.Printf("warning: failed to recover stale running task executions: %v", recoverErr)
+		applog.Infof("warning: failed to recover stale running task executions: %v", recoverErr)
 	} else if recovered > 0 {
-		log.Printf("recovered %d stale running task execution(s)", recovered)
+		applog.Infof("recovered %d stale running task execution(s)", recovered)
 	}
 
 	// Clean up orphaned attachment files
 	if count, cleanErr := attachmentRepo.CleanupOrphanedFiles(context.Background(), filepath.Join(cfg.AppDataDir, "uploads")); cleanErr != nil {
-		log.Printf("warning: failed to cleanup orphaned attachments: %v", cleanErr)
+		applog.Infof("warning: failed to cleanup orphaned attachments: %v", cleanErr)
 	} else if count > 0 {
-		log.Printf("cleaned up %d orphaned attachment files", count)
+		applog.Infof("cleaned up %d orphaned attachment files", count)
 	}
 
 	// Clean up orphaned chat attachment files
 	if count, cleanErr := chatAttachmentRepo.CleanupOrphanedFiles(context.Background(), filepath.Join(cfg.AppDataDir, "uploads")); cleanErr != nil {
-		log.Printf("warning: failed to cleanup orphaned chat attachments: %v", cleanErr)
+		applog.Infof("warning: failed to cleanup orphaned chat attachments: %v", cleanErr)
 	} else if count > 0 {
-		log.Printf("cleaned up %d orphaned chat attachment files", count)
+		applog.Infof("cleaned up %d orphaned chat attachment files", count)
 	}
 
 	workDir, wdErr := os.Getwd()
@@ -655,11 +655,11 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	}
 	mcpBootCtx, mcpBootCancel := context.WithTimeout(context.Background(), 45*time.Second)
 	if mcpErr := agentplugins.EnsureInstalledPluginMCPRunning(mcpBootCtx, workDir); mcpErr != nil {
-		log.Printf("warning: persistent plugin MCP startup incomplete: %v", mcpErr)
+		applog.Infof("warning: persistent plugin MCP startup incomplete: %v", mcpErr)
 		alertCtx, alertCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		projects, projectErr := projectRepo.List(alertCtx)
 		if projectErr != nil {
-			log.Printf("warning: could not load project for MCP startup alert: %v", projectErr)
+			applog.Infof("warning: could not load project for MCP startup alert: %v", projectErr)
 		} else if len(projects) > 0 {
 			a := &models.Alert{
 				ProjectID: projects[0].ID,
@@ -669,7 +669,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 				Message:   mcpErr.Error(),
 			}
 			if alertErr := alertSvc.Create(alertCtx, a); alertErr != nil {
-				log.Printf("warning: failed to create MCP startup alert: %v", alertErr)
+				applog.Infof("warning: failed to create MCP startup alert: %v", alertErr)
 			}
 		}
 		alertCancel()
@@ -734,7 +734,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		telegramSvc.SetAgentRepo(agentRepo)
 	}
 	if err := slackSvc.Start(); err != nil {
-		log.Printf("warning: failed to start slack socket mode: %v", err)
+		applog.Infof("warning: failed to start slack socket mode: %v", err)
 	}
 	// Start Telegram bot if configured after the shared channel runner is wired.
 	if telegramSvc != nil {
@@ -767,7 +767,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	}
 
 	boundAddr := ln.Addr().String()
-	log.Printf("starting server on %s", boundAddr)
+	applog.Infof("starting server on %s", boundAddr)
 
 	// Derive a usable base URL.
 	host, port, _ := net.SplitHostPort(boundAddr)
@@ -787,7 +787,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		default:
 		}
 		close(shutdownOnce)
-		log.Println("shutting down...")
+		applog.Infof("shutting down...")
 		srvCancel()
 		workerSvc.Stop()
 		schedulerSvc.Stop()
@@ -806,7 +806,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	e.Listener = ln
 	go func() {
 		if sErr := e.Start(""); sErr != nil {
-			log.Printf("server stopped: %v", sErr)
+			applog.Infof("server stopped: %v", sErr)
 		}
 	}()
 

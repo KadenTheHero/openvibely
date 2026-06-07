@@ -1,10 +1,10 @@
 package handler
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -17,13 +17,13 @@ func (h *Handler) ListAlerts(c echo.Context) error {
 
 	alerts, err := h.alertSvc.ListByProject(ctx, currentProjectID, 100)
 	if err != nil {
-		log.Printf("[handler] ListAlerts error: %v", err)
+		applog.Infof("[handler] ListAlerts error: %v", err)
 		return err
 	}
 
 	unreadCount, _ := h.alertSvc.CountUnread(ctx, currentProjectID)
 
-	log.Printf("[handler] ListAlerts project=%s count=%d unread=%d htmx=%v", currentProjectID, len(alerts), unreadCount, isHTMX)
+	// applog.Debugf("[handler] ListAlerts project=%s count=%d unread=%d htmx=%v", currentProjectID, len(alerts), unreadCount, isHTMX)
 
 	if isHTMX {
 		return render(c, http.StatusOK, pages.AlertsContent(alerts, currentProjectID, unreadCount))
@@ -37,11 +37,11 @@ func (h *Handler) MarkAlertRead(c echo.Context) error {
 	ctx := c.Request().Context()
 
 	if err := h.alertSvc.MarkRead(ctx, id); err != nil {
-		log.Printf("[handler] MarkAlertRead error: %v", err)
+		applog.Infof("[handler] MarkAlertRead error: %v", err)
 		return err
 	}
 
-	log.Printf("[handler] MarkAlertRead id=%s", id)
+	applog.Infof("[handler] MarkAlertRead id=%s", id)
 
 	// Return updated alerts list
 	currentProjectID, _ := h.getCurrentProjectID(c)
@@ -61,11 +61,11 @@ func (h *Handler) MarkAllAlertsRead(c echo.Context) error {
 	currentProjectID, _ := h.getCurrentProjectID(c)
 
 	if err := h.alertSvc.MarkAllRead(ctx, currentProjectID); err != nil {
-		log.Printf("[handler] MarkAllAlertsRead error: %v", err)
+		applog.Infof("[handler] MarkAllAlertsRead error: %v", err)
 		return err
 	}
 
-	log.Printf("[handler] MarkAllAlertsRead project=%s", currentProjectID)
+	applog.Infof("[handler] MarkAllAlertsRead project=%s", currentProjectID)
 
 	alerts, _ := h.alertSvc.ListByProject(ctx, currentProjectID, 100)
 
@@ -80,11 +80,11 @@ func (h *Handler) DeleteAlert(c echo.Context) error {
 	ctx := c.Request().Context()
 
 	if err := h.alertSvc.Delete(ctx, id); err != nil {
-		log.Printf("[handler] DeleteAlert error: %v", err)
+		applog.Infof("[handler] DeleteAlert error: %v", err)
 		return err
 	}
 
-	log.Printf("[handler] DeleteAlert id=%s", id)
+	applog.Infof("[handler] DeleteAlert id=%s", id)
 
 	if isHTMX(c) {
 		// Re-render alerts list with updated count
@@ -108,7 +108,7 @@ func (h *Handler) GetUnreadAlertCount(c echo.Context) error {
 
 	count, err := h.alertSvc.CountUnread(ctx, projectID)
 	if err != nil {
-		log.Printf("[handler] GetUnreadAlertCount error: %v", err)
+		applog.Infof("[handler] GetUnreadAlertCount error: %v", err)
 		return err
 	}
 
@@ -121,11 +121,11 @@ func (h *Handler) DeleteAllAlerts(c echo.Context) error {
 	currentProjectID, _ := h.getCurrentProjectID(c)
 
 	if err := h.alertSvc.DeleteAll(ctx, currentProjectID); err != nil {
-		log.Printf("[handler] DeleteAllAlerts error: %v", err)
+		applog.Infof("[handler] DeleteAllAlerts error: %v", err)
 		return err
 	}
 
-	log.Printf("[handler] DeleteAllAlerts project=%s", currentProjectID)
+	applog.Infof("[handler] DeleteAllAlerts project=%s", currentProjectID)
 
 	// Trigger alert badge refresh in sidebar
 	c.Response().Header().Set("HX-Trigger", "alertUpdate")

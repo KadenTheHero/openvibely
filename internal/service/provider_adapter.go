@@ -3,10 +3,10 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/agentplugins"
+	"github.com/openvibely/openvibely/internal/applog"
 	llmanthropic "github.com/openvibely/openvibely/internal/llm/anthropic"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
@@ -81,7 +81,7 @@ func callWithRetry(req llmcontracts.AgentRequest, fn func() (llmcontracts.AgentR
 	return llmretry.DoWithBeforeRetry(ctx, policy, func() (llmcontracts.AgentResult, error) {
 		res, err := fn()
 		if err != nil && llmretry.IsRetryable(err) {
-			log.Printf("[agent-svc] provider adapter retryable error operation=%s provider=%s model=%s err=%v", req.Operation, req.Agent.Provider, req.Agent.Model, err)
+			applog.Infof("[agent-svc] provider adapter retryable error operation=%s provider=%s model=%s err=%v", req.Operation, req.Agent.Provider, req.Agent.Model, err)
 		}
 		return res, err
 	}, func(retryCtx context.Context) error {
@@ -103,7 +103,7 @@ func resolveAgentRuntime(ctx context.Context, ad *models.Agent) (raw *models.Age
 	}
 	runtime, err := resolvePluginRuntimeBundleFn(ctx, ad.Plugins)
 	if err != nil {
-		log.Printf("[agent-svc] resolveAgentRuntime failed for %s: %v", ad.Name, err)
+		applog.Infof("[agent-svc] resolveAgentRuntime failed for %s: %v", ad.Name, err)
 		return raw, merged, nil
 	}
 	merged = agentplugins.MergeAgentWithRuntime(ad, runtime)
@@ -212,7 +212,7 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 					if req.DisableTools {
 						return canonicalResult(output, output, usage, err)
 					}
-					log.Printf("[agent-svc] openai direct fallback to codex-cli operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
+					applog.Infof("[agent-svc] openai direct fallback to codex-cli operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
 					output, tokens, ferr := a.svc.callCodexCLISimple(req.Ctx, req.Message, req.Attachments, req.Agent, req.WorkDir, req.DisableTools)
 					return canonicalResult(output, output, llmusage.FromTotal(tokens), ferr)
 				}
@@ -229,10 +229,10 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 				if requestUsesChatStreaming(req) {
 					output, usage, err := a.adapter.CallChatStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, req.WorkDir, req.AgentDefinition)
 					if shouldFallbackOpenAI(req.Agent, err) {
-						log.Printf("[agent-svc] openai chat fallback to completions operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
+						applog.Infof("[agent-svc] openai chat fallback to completions operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
 						output, usage, err = a.adapter.CallCompletionsChatStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, req.WorkDir, req.AgentDefinition)
 						if err != nil {
-							log.Printf("[agent-svc] openai completions fallback to codex-cli operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
+							applog.Infof("[agent-svc] openai completions fallback to codex-cli operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
 							output, tokens, ferr := a.svc.callCodexCLIChat(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.WorkDir, req.Followup, req.ChatMode)
 							return canonicalResult(output, output, llmusage.FromTotal(tokens), ferr)
 						}
@@ -241,10 +241,10 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 				}
 				output, textOnly, usage, err := a.adapter.CallStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.AgentDefinition)
 				if shouldFallbackOpenAI(req.Agent, err) {
-					log.Printf("[agent-svc] openai streaming fallback to completions operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
+					applog.Infof("[agent-svc] openai streaming fallback to completions operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
 					output, textOnly, usage, err = a.adapter.CallCompletionsStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.AgentDefinition)
 					if err != nil {
-						log.Printf("[agent-svc] openai completions fallback to codex-cli operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
+						applog.Infof("[agent-svc] openai completions fallback to codex-cli operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
 						output, textOnly, tokens, ferr := a.svc.callCodexCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir)
 						return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), ferr)
 					}
@@ -262,10 +262,10 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 			if openAIDirectClientEnabled(req.Agent) {
 				output, textOnly, usage, err := a.adapter.CallStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.AgentDefinition)
 				if shouldFallbackOpenAI(req.Agent, err) {
-					log.Printf("[agent-svc] openai task fallback to completions operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
+					applog.Infof("[agent-svc] openai task fallback to completions operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
 					output, textOnly, usage, err = a.adapter.CallCompletionsStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.AgentDefinition)
 					if err != nil {
-						log.Printf("[agent-svc] openai completions fallback to codex-cli operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
+						applog.Infof("[agent-svc] openai completions fallback to codex-cli operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
 						output, textOnly, tokens, ferr := a.svc.callCodexCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir)
 						return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), ferr)
 					}

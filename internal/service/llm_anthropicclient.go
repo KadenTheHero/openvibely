@@ -3,8 +3,8 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
@@ -125,7 +125,7 @@ func convertAttachments(attachments []models.Attachment) ([]*anthropicclient.Fil
 	for _, att := range prepared {
 		mcAtt, err := anthropicclient.NewFileAttachment(att.FilePath)
 		if err != nil {
-			log.Printf("[agent-svc] convertAttachments error loading %s: %v", att.FilePath, err)
+			applog.Infof("[agent-svc] convertAttachments error loading %s: %v", att.FilePath, err)
 			return nil, fmt.Errorf("load attachment %s: %w", att.FileName, err)
 		}
 		result = append(result, mcAtt)

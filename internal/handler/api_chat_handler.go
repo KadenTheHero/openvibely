@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
-	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
@@ -128,7 +128,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		if c.Request().Header.Get("Content-Type") == "" || strings.HasPrefix(c.Request().Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
 			// That's OK, no attachments
 		} else {
-			log.Printf("[handler] APIChatMessage error parsing form: %v", err)
+			applog.Infof("[handler] APIChatMessage error parsing form: %v", err)
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to parse request form"})
 		}
 	}
@@ -144,19 +144,19 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "project_id is required"})
 	}
 
-	log.Printf("[handler] APIChatMessage message=%q project_id=%s", message, projectID)
+	applog.Debugf("[handler] APIChatMessage message=%q project_id=%s", message, projectID)
 
 	// Validate project exists
 	project, err := h.projectSvc.GetByID(c.Request().Context(), projectID)
 	if err != nil || project == nil {
-		log.Printf("[handler] APIChatMessage project not found: %s err=%v", projectID, err)
+		applog.Infof("[handler] APIChatMessage project not found: %s err=%v", projectID, err)
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
 	}
 
 	// Auto-select an agent
 	agents, err := h.llmConfigRepo.List(c.Request().Context())
 	if err != nil || len(agents) == 0 {
-		log.Printf("[handler] APIChatMessage no agents available: %v", err)
+		applog.Infof("[handler] APIChatMessage no agents available: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "no agents available"})
 	}
 	complexity := service.AnalyzeComplexity(message)
@@ -205,7 +205,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 
 	activeChatExec, err := h.execRepo.FindLatestActiveChatExecution(c.Request().Context(), projectID)
 	if err != nil {
-		log.Printf("[handler] APIChatMessage error checking active chat turn: %v", err)
+		applog.Infof("[handler] APIChatMessage error checking active chat turn: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to check chat queue"})
 	}
 
@@ -218,7 +218,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 			var sessionErr error
 			attachmentSessionID, sessionErr = saveAPIChatFilesToPendingSession(savedFiles)
 			if sessionErr != nil {
-				log.Printf("[handler] APIChatMessage error saving queued attachment session: %v", sessionErr)
+				applog.Infof("[handler] APIChatMessage error saving queued attachment session: %v", sessionErr)
 				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save queued attachments"})
 			}
 		}
@@ -234,7 +234,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 			ChatMode:            models.ChatModeOrchestrate,
 		}
 		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
-			log.Printf("[handler] APIChatMessage error creating queued input: %v", err)
+			applog.Infof("[handler] APIChatMessage error creating queued input: %v", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to queue chat message"})
 		}
 		if h.chatBroadcaster != nil {
@@ -268,7 +268,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		AgentID:   &agentID,
 	}
 	if err := h.taskRepo.Create(c.Request().Context(), task); err != nil {
-		log.Printf("[handler] APIChatMessage error creating task: %v", err)
+		applog.Infof("[handler] APIChatMessage error creating task: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create chat task"})
 	}
 
@@ -281,14 +281,14 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		PromptSent:    message,
 	}
 	if err := h.execRepo.Create(c.Request().Context(), exec); err != nil {
-		log.Printf("[handler] APIChatMessage error creating execution: %v", err)
+		applog.Infof("[handler] APIChatMessage error creating execution: %v", err)
 		if delErr := h.taskRepo.Delete(c.Request().Context(), task.ID); delErr != nil {
-			log.Printf("[handler] APIChatMessage error cleaning up chat task=%s after execution create failure: %v", task.ID, delErr)
+			applog.Infof("[handler] APIChatMessage error cleaning up chat task=%s after execution create failure: %v", task.ID, delErr)
 		}
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create execution"})
 	}
 
-	log.Printf("[handler] APIChatMessage created exec=%s task=%s status=%s", exec.ID, task.ID, exec.Status)
+	applog.Infof("[handler] APIChatMessage created exec=%s task=%s status=%s", exec.ID, task.ID, exec.Status)
 	// Broadcast new message event
 	if h.chatBroadcaster != nil {
 		h.chatBroadcaster.Publish(events.ChatEvent{
@@ -310,7 +310,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 	if len(savedFiles) > 0 {
 		execDir := filepath.Join(uploadsDir, "chat", exec.ID)
 		if err := os.MkdirAll(execDir, 0755); err != nil {
-			log.Printf("[handler] APIChatMessage error creating exec dir: %v", err)
+			applog.Infof("[handler] APIChatMessage error creating exec dir: %v", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create upload directory"})
 		}
 
@@ -324,7 +324,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 			// Open uploaded file
 			src, err := sf.header.Open()
 			if err != nil {
-				log.Printf("[handler] APIChatMessage error opening file %s: %v", filename, err)
+				applog.Infof("[handler] APIChatMessage error opening file %s: %v", filename, err)
 				continue
 			}
 
@@ -332,14 +332,14 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 			dst, err := os.Create(destPath)
 			if err != nil {
 				src.Close()
-				log.Printf("[handler] APIChatMessage error creating file %s: %v", filename, err)
+				applog.Infof("[handler] APIChatMessage error creating file %s: %v", filename, err)
 				continue
 			}
 			if _, err := io.Copy(dst, src); err != nil {
 				dst.Close()
 				src.Close()
 				os.Remove(destPath)
-				log.Printf("[handler] APIChatMessage error saving file %s: %v", filename, err)
+				applog.Infof("[handler] APIChatMessage error saving file %s: %v", filename, err)
 				continue
 			}
 			dst.Close()
@@ -357,7 +357,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 				FileSize:    sf.header.Size,
 			}
 			if err := h.chatAttachmentRepo.Create(c.Request().Context(), chatAtt); err != nil {
-				log.Printf("[handler] APIChatMessage error creating attachment record: %v", err)
+				applog.Infof("[handler] APIChatMessage error creating attachment record: %v", err)
 				continue
 			}
 
@@ -383,7 +383,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 				}
 			}
 
-			log.Printf("[handler] APIChatMessage saved attachment file=%s size=%d", filename, sf.header.Size)
+			applog.Infof("[handler] APIChatMessage saved attachment file=%s size=%d", filename, sf.header.Size)
 		}
 
 		if len(textContents) > 0 {
@@ -394,7 +394,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 	// Load chat history for conversation context
 	chatHistory, err := h.execRepo.ListChatHistory(c.Request().Context(), projectID, 50)
 	if err != nil {
-		log.Printf("[handler] APIChatMessage error loading chat history: %v", err)
+		applog.Infof("[handler] APIChatMessage error loading chat history: %v", err)
 		chatHistory = []models.Execution{}
 	}
 	priorHistory := filterChatHistory(chatHistory, exec.ID)
@@ -435,7 +435,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		Surface:          chatcontrol.SurfaceAPI,
 	})
 
-	log.Printf("[handler] APIChatMessage exec=%s accepted for async processing status=%s", exec.ID, execStatus)
+	applog.Infof("[handler] APIChatMessage exec=%s accepted for async processing status=%s", exec.ID, execStatus)
 	// Return 201 immediately with the message ID for polling
 	resp := ChatMessageAcceptedResponse{
 		MessageID: exec.ID,
@@ -468,21 +468,21 @@ func (h *Handler) APIChatMessageStatus(c echo.Context) error {
 
 	exec, err := h.execRepo.GetByID(c.Request().Context(), execID)
 	if err != nil {
-		log.Printf("[handler] APIChatMessageStatus exec=%s error: %v", execID, err)
+		applog.Infof("[handler] APIChatMessageStatus exec=%s error: %v", execID, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve message status"})
 	}
 	if exec == nil {
 		if h.threadInputRepo != nil {
 			input, inputErr := h.threadInputRepo.GetByID(c.Request().Context(), execID)
 			if inputErr != nil {
-				log.Printf("[handler] APIChatMessageStatus input=%s error: %v", execID, inputErr)
+				applog.Infof("[handler] APIChatMessageStatus input=%s error: %v", execID, inputErr)
 				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve message status"})
 			}
 			if input != nil {
 				if input.InputStatus == models.ThreadInputApplied && input.RunExecutionID != "" {
 					exec, err = h.execRepo.GetByID(c.Request().Context(), input.RunExecutionID)
 					if err != nil {
-						log.Printf("[handler] APIChatMessageStatus promoted exec=%s error: %v", input.RunExecutionID, err)
+						applog.Infof("[handler] APIChatMessageStatus promoted exec=%s error: %v", input.RunExecutionID, err)
 						return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve promoted message status"})
 					}
 					if exec != nil {

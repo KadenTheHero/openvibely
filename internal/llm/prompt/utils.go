@@ -2,11 +2,11 @@ package prompt
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -36,7 +36,7 @@ func CodexModelOrDefault(model string) string {
 	if _, ok := CodexSupportedReasoningEffortsByModel[model]; ok {
 		return model
 	}
-	log.Printf("[agent-svc] unsupported codex model %q requested, falling back to %q", model, CodexDefaultModel)
+	applog.Infof("[agent-svc] unsupported codex model %q requested, falling back to %q", model, CodexDefaultModel)
 	return CodexDefaultModel
 }
 

@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -140,7 +140,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		waitCtx, waitCancel := context.WithTimeout(ctx, timeout)
 		if err := h.workerSvc.AcquireProjectSlot(waitCtx, params.ProjectID); err != nil {
 			waitCancel()
-			log.Printf("[handler] processStreamingResponse exec=%s task=%s timed out waiting for project slot %s: %v",
+			applog.Infof("[handler] processStreamingResponse exec=%s task=%s timed out waiting for project slot %s: %v",
 				params.ExecID, params.TaskID, params.ProjectID, err)
 			h.completeWithFailure(context.Background(), params.ExecID, params.TaskID,
 				"project worker limit reached — timed out waiting for slot", 0, 0, params.ChannelReply)
@@ -154,7 +154,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		waitCtx2, waitCancel2 := context.WithTimeout(ctx, timeout)
 		if err := h.workerSvc.AcquireModelSlot(waitCtx2, agentConfigID); err != nil {
 			waitCancel2()
-			log.Printf("[handler] processStreamingResponse exec=%s task=%s failed to acquire model slot for %s: %v",
+			applog.Infof("[handler] processStreamingResponse exec=%s task=%s failed to acquire model slot for %s: %v",
 				params.ExecID, params.TaskID, agentConfigID, err)
 			h.completeWithFailure(context.Background(), params.ExecID, params.TaskID,
 				fmt.Sprintf("model %s at capacity, timed out waiting for slot", params.Agent.Name), 0, 0, params.ChannelReply)
@@ -163,13 +163,13 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 		waitCancel2()
 		defer h.workerSvc.ReleaseModelSlot(agentConfigID)
-		log.Printf("[handler] processStreamingResponse exec=%s acquired project + model slots for %s", params.ExecID, agentConfigID)
+		applog.Infof("[handler] processStreamingResponse exec=%s acquired project + model slots for %s", params.ExecID, agentConfigID)
 
 		// Transition task from "queued" to "running" now that worker slots are acquired
 		if task, err := h.taskRepo.GetByID(context.Background(), params.TaskID); err == nil && task != nil && task.Status == models.StatusQueued {
-			log.Printf("[handler] processStreamingResponse exec=%s task=%s transitioning from queued to running", params.ExecID, params.TaskID)
+			applog.Infof("[handler] processStreamingResponse exec=%s task=%s transitioning from queued to running", params.ExecID, params.TaskID)
 			if err := h.taskRepo.UpdateStatus(context.Background(), params.TaskID, models.StatusRunning); err != nil {
-				log.Printf("[handler] processStreamingResponse exec=%s task=%s failed to update status to running: %v", params.ExecID, params.TaskID, err)
+				applog.Infof("[handler] processStreamingResponse exec=%s task=%s failed to update status to running: %v", params.ExecID, params.TaskID, err)
 			}
 		}
 	}
@@ -225,7 +225,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), rt))
 			params.ProcessMarkers = false
 			runtimeToolsInjected = true
-			log.Printf("[handler] processStreamingResponse exec=%s injected %d runtime action tools mode=%s surface=%s followup=%v",
+			applog.Infof("[handler] processStreamingResponse exec=%s injected %d runtime action tools mode=%s surface=%s followup=%v",
 				params.ExecID, len(defs), chatMode, surface, params.IsTaskFollowup)
 		}
 	}
@@ -236,11 +236,11 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// can show an action block that never reaches the task store.
 	if !runtimeToolsInjected && !params.ProcessMarkers {
 		params.ProcessMarkers = true
-		log.Printf("[handler] processStreamingResponse exec=%s no runtime tools (provider=%s auth=%s followup=%v); enabling marker processing fallback",
+		applog.Infof("[handler] processStreamingResponse exec=%s no runtime tools (provider=%s auth=%s followup=%v); enabling marker processing fallback",
 			params.ExecID, params.Agent.Provider, params.Agent.AuthMethod, params.IsTaskFollowup)
 	}
 
-	log.Printf("[handler] processStreamingResponse exec=%s task=%s agent=%s model=%s followup=%v markers=%v history=%d",
+	applog.Infof("[handler] processStreamingResponse exec=%s task=%s agent=%s model=%s followup=%v markers=%v history=%d",
 		params.ExecID, params.TaskID, params.Agent.Name, params.Agent.Model, params.IsTaskFollowup, params.ProcessMarkers, len(params.ChatHistory))
 
 	stopDiffBroadcast, diffBroadcastDone := h.startFollowupDiffSnapshotBroadcast(ctx, params.TaskID, params.ExecID, params.WorkDir, params.IsTaskFollowup)
@@ -281,10 +281,10 @@ modelLoop:
 		if pendingSteering.count() == 0 {
 			preparedBefore, steeringErr := h.preparePendingSteeringInputs(ctx, &params, "")
 			if steeringErr != nil {
-				log.Printf("[handler] processStreamingResponse exec=%s error preparing steering before model call: %v", params.ExecID, steeringErr)
+				applog.Infof("[handler] processStreamingResponse exec=%s error preparing steering before model call: %v", params.ExecID, steeringErr)
 			}
 			if preparedBefore.count() > 0 {
-				log.Printf("[handler] processStreamingResponse exec=%s prepared %d steering inputs before model call", params.ExecID, preparedBefore.count())
+				applog.Infof("[handler] processStreamingResponse exec=%s prepared %d steering inputs before model call", params.ExecID, preparedBefore.count())
 				pendingSteering = preparedBefore
 			}
 		}
@@ -320,7 +320,7 @@ modelLoop:
 			h.requeueUncommittedSteering(ctx, params.ExecID, pendingSteering)
 			pendingSteering = preparedSteeringBatch{}
 			finalizeLifecycle(err, result.ChatContext)
-			log.Printf("[handler] processStreamingResponse exec=%s error committing steering after successful model call: %v", params.ExecID, err)
+			applog.Infof("[handler] processStreamingResponse exec=%s error committing steering after successful model call: %v", params.ExecID, err)
 			h.completeWithFailure(ctx, params.ExecID, params.TaskID, err.Error(), time.Since(start).Milliseconds(), params.TelegramInitialAckMessageID, params.ChannelReply)
 			h.finalizeStreamingTurn(params, result.Output)
 			return
@@ -328,12 +328,12 @@ modelLoop:
 		pendingSteering = preparedSteeringBatch{}
 		preparedAfter, steeringErr := h.preparePendingSteeringInputs(ctx, &params, result.Output)
 		if steeringErr != nil {
-			log.Printf("[handler] processStreamingResponse exec=%s error preparing steering after model call: %v", params.ExecID, steeringErr)
+			applog.Infof("[handler] processStreamingResponse exec=%s error preparing steering after model call: %v", params.ExecID, steeringErr)
 		}
 		if preparedAfter.count() == 0 {
 			latePrepared, lateErr := h.waitForFinalSteeringInputs(ctx, &params, result.Output)
 			if lateErr != nil {
-				log.Printf("[handler] processStreamingResponse exec=%s error preparing final steering before completion: %v", params.ExecID, lateErr)
+				applog.Infof("[handler] processStreamingResponse exec=%s error preparing final steering before completion: %v", params.ExecID, lateErr)
 			}
 			if latePrepared.count() == 0 {
 				break modelLoop
@@ -341,7 +341,7 @@ modelLoop:
 			preparedAfter = latePrepared
 		}
 		pendingSteering = preparedAfter
-		log.Printf("[handler] processStreamingResponse exec=%s prepared %d steering inputs for continuation", params.ExecID, pendingSteering.count())
+		applog.Infof("[handler] processStreamingResponse exec=%s prepared %d steering inputs for continuation", params.ExecID, pendingSteering.count())
 	}
 	durationMs := time.Since(start).Milliseconds()
 	output := result.Output
@@ -355,13 +355,13 @@ modelLoop:
 		}
 		h.recordStreamingUsage(ctx, params, result, status, err.Error(), durationMs)
 		finalizeLifecycle(err, result.ChatContext)
-		log.Printf("[handler] processStreamingResponse exec=%s task=%s LLM call failed after %dms: %v", params.ExecID, params.TaskID, durationMs, err)
+		applog.Infof("[handler] processStreamingResponse exec=%s task=%s LLM call failed after %dms: %v", params.ExecID, params.TaskID, durationMs, err)
 		// When max_tokens is hit, partial output is returned. Preserve it in the
 		// execution so the user can see what work was done before the limit.
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			h.completeWithCancellation(params.ExecID, params.TaskID, output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 		} else if output != "" {
-			log.Printf("[handler] processStreamingResponse exec=%s max_tokens failure, preserving partial output (%d bytes)", params.ExecID, len(output))
+			applog.Infof("[handler] processStreamingResponse exec=%s max_tokens failure, preserving partial output (%d bytes)", params.ExecID, len(output))
 			h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, err.Error(), output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 		} else {
 			h.completeWithFailure(ctx, params.ExecID, params.TaskID, err.Error(), durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
@@ -372,7 +372,7 @@ modelLoop:
 	// Check context before expensive marker processing
 	if ctx.Err() != nil {
 		finalizeLifecycle(ctx.Err(), result.ChatContext)
-		log.Printf("[handler] processStreamingResponse exec=%s task=%s context cancelled, skipping marker processing", params.ExecID, params.TaskID)
+		applog.Infof("[handler] processStreamingResponse exec=%s task=%s context cancelled, skipping marker processing", params.ExecID, params.TaskID)
 		h.completeWithCancellation(params.ExecID, params.TaskID, output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 		h.finalizeStreamingTurn(params, output)
 		return
@@ -382,7 +382,7 @@ modelLoop:
 	if params.ProcessMarkers {
 		agents, err := h.llmConfigRepo.List(ctx)
 		if err != nil {
-			log.Printf("[handler] processStreamingResponse error listing agents: %v", err)
+			applog.Infof("[handler] processStreamingResponse error listing agents: %v", err)
 			// Continue without marker processing rather than failing the entire response
 			agents = []models.LLMConfig{}
 		}
@@ -396,7 +396,7 @@ modelLoop:
 		}
 		if reason, found := llmoutput.ExtractMarker(statusCheckOutput, "[STATUS: FAILED |"); found {
 			finalizeLifecycle(errors.New(reason), result.ChatContext)
-			log.Printf("[handler] processStreamingResponse exec=%s task=%s agent reported STATUS FAILED reason=%q", params.ExecID, params.TaskID, reason)
+			applog.Infof("[handler] processStreamingResponse exec=%s task=%s agent reported STATUS FAILED reason=%q", params.ExecID, params.TaskID, reason)
 			h.recordStreamingUsage(ctx, params, result, string(models.ExecFailed), reason, durationMs)
 			h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, reason, output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 			h.finalizeStreamingTurn(params, output)
@@ -404,7 +404,7 @@ modelLoop:
 		}
 	}
 
-	log.Printf("[handler] processStreamingResponse exec=%s task=%s success tokens=%d duration=%dms output_len=%d",
+	applog.Infof("[handler] processStreamingResponse exec=%s task=%s success tokens=%d duration=%dms output_len=%d",
 		params.ExecID, params.TaskID, tokensUsed, durationMs, len(output))
 
 	completionOutcome := h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
@@ -420,17 +420,17 @@ modelLoop:
 		prepared, steeringErr := h.preparePendingSteeringInputs(ctx, &params, output)
 		if steeringErr != nil {
 			finalizeLifecycle(steeringErr, result.ChatContext)
-			log.Printf("[handler] processStreamingResponse exec=%s error preparing steering after deferred completion: %v", params.ExecID, steeringErr)
+			applog.Infof("[handler] processStreamingResponse exec=%s error preparing steering after deferred completion: %v", params.ExecID, steeringErr)
 			h.completeWithFailure(ctx, params.ExecID, params.TaskID, steeringErr.Error(), durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 			h.finalizeStreamingTurn(params, output)
 			return
 		}
 		if prepared.count() > 0 {
-			log.Printf("[handler] processStreamingResponse exec=%s prepared %d steering inputs after deferred completion; continuing active turn", params.ExecID, prepared.count())
+			applog.Infof("[handler] processStreamingResponse exec=%s prepared %d steering inputs after deferred completion; continuing active turn", params.ExecID, prepared.count())
 			pendingSteering = prepared
 			goto modelLoop
 		}
-		log.Printf("[handler] processStreamingResponse exec=%s completion deferred but no steering was claimable; retrying completion", params.ExecID)
+		applog.Infof("[handler] processStreamingResponse exec=%s completion deferred but no steering was claimable; retrying completion", params.ExecID)
 		completionOutcome = h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 		if completionOutcome == repository.CompleteSuccessAlreadyTerminal {
 			finalizeLifecycle(nil, result.ChatContext)
@@ -454,10 +454,10 @@ modelLoop:
 		if reason, found := llmoutput.ExtractMarker(statusCheckOutput, "[STATUS: NEEDS_FOLLOWUP |"); found {
 			task, taskErr := h.taskRepo.GetByID(ctx, params.TaskID)
 			if taskErr != nil {
-				log.Printf("[handler] processStreamingResponse exec=%s task=%s error loading task for followup alert: %v", params.ExecID, params.TaskID, taskErr)
+				applog.Infof("[handler] processStreamingResponse exec=%s task=%s error loading task for followup alert: %v", params.ExecID, params.TaskID, taskErr)
 			} else if task != nil && h.alertSvc != nil {
 				if alertErr := h.alertSvc.CreateTaskNeedsFollowupAlert(ctx, task.ProjectID, task.ID, params.ExecID, task.Title, reason); alertErr != nil {
-					log.Printf("[handler] processStreamingResponse exec=%s task=%s error creating followup alert: %v", params.ExecID, params.TaskID, alertErr)
+					applog.Infof("[handler] processStreamingResponse exec=%s task=%s error creating followup alert: %v", params.ExecID, params.TaskID, alertErr)
 				}
 			}
 		}
@@ -555,7 +555,7 @@ func (h *Handler) claimPendingSteeringInputsWithOptions(ctx context.Context, par
 		if input.AttachmentSessionID != "" {
 			attachmentContext, imageAttachments, attErr := h.previewPendingAttachments(input.AttachmentSessionID)
 			if attErr != nil {
-				log.Printf("[handler] claimPendingSteeringInputs exec=%s input=%s attachment preview error: %v", params.ExecID, input.ID, attErr)
+				applog.Infof("[handler] claimPendingSteeringInputs exec=%s input=%s attachment preview error: %v", params.ExecID, input.ID, attErr)
 				attachmentContext = fmt.Sprintf("⚠️ Attachment processing error: %v", attErr)
 			}
 			if attachmentContext != "" {
@@ -644,7 +644,7 @@ func (h *Handler) requeueUncommittedSteering(ctx context.Context, execID string,
 	}
 	requeued, err := h.threadInputRepo.RequeuePendingSteering(steeringCleanupContext(ctx), ids, execID)
 	if err != nil {
-		log.Printf("[handler] processStreamingResponse exec=%s error requeueing uncommitted steering after failed model call: %v", execID, err)
+		applog.Infof("[handler] processStreamingResponse exec=%s error requeueing uncommitted steering after failed model call: %v", execID, err)
 		return
 	}
 	h.publishThreadInputQueuedEvents(requeued)
@@ -656,7 +656,7 @@ func (h *Handler) requeuePendingSteeringForExecution(ctx context.Context, execID
 	}
 	requeued, err := h.threadInputRepo.RequeuePendingSteeringForExecution(steeringCleanupContext(ctx), execID)
 	if err != nil {
-		log.Printf("[handler] processStreamingResponse exec=%s error requeueing pending steering after failed model call: %v", execID, err)
+		applog.Infof("[handler] processStreamingResponse exec=%s error requeueing pending steering after failed model call: %v", execID, err)
 		return
 	}
 	h.publishThreadInputQueuedEvents(requeued)
@@ -784,7 +784,7 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 		}
 		active, activeErr := h.execRepo.HasActiveTaskExecution(ctx, completed.TaskID, excludeExecID)
 		if activeErr != nil {
-			log.Printf("[handler] startNextQueuedTurn error checking active task turn task=%s: %v", completed.TaskID, activeErr)
+			applog.Infof("[handler] startNextQueuedTurn error checking active task turn task=%s: %v", completed.TaskID, activeErr)
 			return
 		}
 		if active {
@@ -792,14 +792,14 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 		}
 		queued, err := h.threadInputRepo.FindOldestQueuedForTask(ctx, completed.TaskID)
 		if err != nil {
-			log.Printf("[handler] startNextQueuedTurn error finding queued task input task=%s: %v", completed.TaskID, err)
+			applog.Infof("[handler] startNextQueuedTurn error finding queued task input task=%s: %v", completed.TaskID, err)
 			return
 		}
 		if queued == nil {
 			return
 		}
 		if startErr := h.startQueuedTaskThreadInput(ctx, *queued); startErr != nil {
-			log.Printf("[handler] startNextQueuedTurn task=%s input=%s start error: %v", completed.TaskID, queued.ID, startErr)
+			applog.Infof("[handler] startNextQueuedTurn task=%s input=%s start error: %v", completed.TaskID, queued.ID, startErr)
 		}
 		return
 	}
@@ -808,7 +808,7 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 	}
 	activeChat, activeErr := h.execRepo.FindLatestActiveChatExecution(ctx, completed.ProjectID)
 	if activeErr != nil {
-		log.Printf("[handler] startNextQueuedTurn error checking active chat turn project=%s: %v", completed.ProjectID, activeErr)
+		applog.Infof("[handler] startNextQueuedTurn error checking active chat turn project=%s: %v", completed.ProjectID, activeErr)
 		return
 	}
 	if activeChat != nil && activeChat.ID != excludeExecID {
@@ -816,7 +816,7 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 	}
 	queued, err := h.threadInputRepo.FindOldestQueuedForChat(ctx, completed.ProjectID)
 	if err != nil {
-		log.Printf("[handler] startNextQueuedTurn error finding queued chat input project=%s: %v", completed.ProjectID, err)
+		applog.Infof("[handler] startNextQueuedTurn error finding queued chat input project=%s: %v", completed.ProjectID, err)
 		return
 	}
 	if queued == nil {
@@ -828,11 +828,11 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadInput) {
 	agent, unstartable, err := h.resolveQueuedInputAgent(ctx, input)
 	if err != nil {
-		log.Printf("[handler] startQueuedChatInput input=%s agent=%s load error: %v", input.ID, input.AgentConfigID, err)
+		applog.Infof("[handler] startQueuedChatInput input=%s agent=%s load error: %v", input.ID, input.AgentConfigID, err)
 		return
 	}
 	if agent == nil {
-		log.Printf("[handler] startQueuedChatInput input=%s agent=%s no usable model", input.ID, input.AgentConfigID)
+		applog.Infof("[handler] startQueuedChatInput input=%s agent=%s no usable model", input.ID, input.AgentConfigID)
 		if unstartable {
 			h.cancelUnstartableQueuedInput(ctx, input)
 			h.startNextQueuedTurnAfter(ctx, streamingResponseParams{ProjectID: input.ProjectID}, "")
@@ -870,7 +870,7 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 	}
 	if err := h.threadInputRepo.ClaimQueuedForChatExecution(ctx, input.ID, task, exec, slackContext); err != nil {
 		if err != repository.ErrInputNotPending {
-			log.Printf("[handler] startQueuedChatInput input=%s claim error: %v", input.ID, err)
+			applog.Infof("[handler] startQueuedChatInput input=%s claim error: %v", input.ID, err)
 		}
 		return
 	}
@@ -881,13 +881,13 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		var attErr error
 		attachmentContext, imageAttachments, _, attErr = h.processAttachmentsWithReturn(ctx, input.AttachmentSessionID, exec.ID)
 		if attErr != nil {
-			log.Printf("[handler] startQueuedChatInput exec=%s attachment processing error: %v", exec.ID, attErr)
+			applog.Infof("[handler] startQueuedChatInput exec=%s attachment processing error: %v", exec.ID, attErr)
 			attachmentContext = fmt.Sprintf("⚠️ Attachment processing error: %v", attErr)
 		}
 	}
 	history, err := h.execRepo.ListChatHistory(ctx, input.ProjectID, chatHistoryLimit)
 	if err != nil {
-		log.Printf("[handler] startQueuedChatInput exec=%s history error: %v", exec.ID, err)
+		applog.Infof("[handler] startQueuedChatInput exec=%s history error: %v", exec.ID, err)
 		history = []models.Execution{}
 	}
 	availableModels, _ := h.llmConfigRepo.List(ctx)
@@ -961,7 +961,7 @@ func (h *Handler) cancelUnstartableQueuedInput(ctx context.Context, input models
 		return
 	}
 	if _, err := h.threadInputRepo.CancelPending(ctx, input.ID); err != nil && !errors.Is(err, repository.ErrInputNotPending) {
-		log.Printf("[handler] cancelUnstartableQueuedInput input=%s error: %v", input.ID, err)
+		applog.Infof("[handler] cancelUnstartableQueuedInput input=%s error: %v", input.ID, err)
 	}
 }
 
@@ -982,7 +982,7 @@ func (h *Handler) StartPendingTaskThreadFollowup(ctx context.Context, taskID str
 	}
 	active, err := h.execRepo.HasActiveTaskExecution(ctx, taskID, "")
 	if err != nil {
-		log.Printf("[handler] startPendingTaskThreadFollowup task=%s active check error: %v", taskID, err)
+		applog.Infof("[handler] startPendingTaskThreadFollowup task=%s active check error: %v", taskID, err)
 		return false, err
 	}
 	if active {
@@ -990,7 +990,7 @@ func (h *Handler) StartPendingTaskThreadFollowup(ctx context.Context, taskID str
 	}
 	queued, err := h.threadInputRepo.FindOldestQueuedForTask(ctx, taskID)
 	if err != nil {
-		log.Printf("[handler] startPendingTaskThreadFollowup task=%s queued lookup error: %v", taskID, err)
+		applog.Infof("[handler] startPendingTaskThreadFollowup task=%s queued lookup error: %v", taskID, err)
 		return false, err
 	}
 	if queued == nil {
@@ -1008,16 +1008,16 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		if err == nil {
 			err = fmt.Errorf("task not found: %s", input.TaskID)
 		}
-		log.Printf("[handler] startQueuedTaskThreadInput input=%s task=%s load error: %v", input.ID, input.TaskID, err)
+		applog.Infof("[handler] startQueuedTaskThreadInput input=%s task=%s load error: %v", input.ID, input.TaskID, err)
 		return err
 	}
 	agent, unstartable, err := h.resolveQueuedInputAgent(ctx, input)
 	if err != nil {
-		log.Printf("[handler] startQueuedTaskThreadInput input=%s agent=%s load error: %v", input.ID, input.AgentConfigID, err)
+		applog.Infof("[handler] startQueuedTaskThreadInput input=%s agent=%s load error: %v", input.ID, input.AgentConfigID, err)
 		return err
 	}
 	if agent == nil {
-		log.Printf("[handler] startQueuedTaskThreadInput input=%s agent=%s no usable model", input.ID, input.AgentConfigID)
+		applog.Infof("[handler] startQueuedTaskThreadInput input=%s agent=%s no usable model", input.ID, input.AgentConfigID)
 		if unstartable {
 			h.cancelUnstartableQueuedInput(ctx, input)
 			h.startNextQueuedTurnAfter(ctx, streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, "")
@@ -1034,16 +1034,16 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 	}
 	if err := h.threadInputRepo.ClaimQueuedForTaskExecution(ctx, input.ID, exec); err != nil {
 		if err != repository.ErrInputNotPending {
-			log.Printf("[handler] startQueuedTaskThreadInput input=%s claim error: %v", input.ID, err)
+			applog.Infof("[handler] startQueuedTaskThreadInput input=%s claim error: %v", input.ID, err)
 		}
 		return err
 	}
 	if err := h.taskRepo.UpdateStatus(ctx, input.TaskID, models.StatusQueued); err != nil {
-		log.Printf("[handler] startQueuedTaskThreadInput task=%s error marking queued: %v", input.TaskID, err)
+		applog.Infof("[handler] startQueuedTaskThreadInput task=%s error marking queued: %v", input.TaskID, err)
 	}
 	if task.Category != models.CategoryActive {
 		if err := h.taskRepo.UpdateCategory(ctx, input.TaskID, models.CategoryActive); err != nil {
-			log.Printf("[handler] startQueuedTaskThreadInput task=%s error moving to active: %v", input.TaskID, err)
+			applog.Infof("[handler] startQueuedTaskThreadInput task=%s error moving to active: %v", input.TaskID, err)
 		}
 	}
 	var attachmentContext string
@@ -1052,7 +1052,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		var attErr error
 		attachmentContext, imageAttachments, _, attErr = h.processAttachmentsWithReturn(ctx, input.AttachmentSessionID, exec.ID)
 		if attErr != nil {
-			log.Printf("[handler] startQueuedTaskThreadInput exec=%s attachment processing error: %v", exec.ID, attErr)
+			applog.Infof("[handler] startQueuedTaskThreadInput exec=%s attachment processing error: %v", exec.ID, attErr)
 			attachmentContext = fmt.Sprintf("⚠️ Attachment processing error: %v", attErr)
 		}
 	}
@@ -1126,15 +1126,15 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 	telegramMessageID, channelReply := parseCompletionOptions(completionOptions...)
 	outcome, err := h.execRepo.CompleteSuccessIfNoPendingSteering(ctx, execID, output, tokensUsed, durationMs)
 	if err != nil {
-		log.Printf("[handler] completeWithSuccess exec=%s error completing execution: %v", execID, err)
+		applog.Infof("[handler] completeWithSuccess exec=%s error completing execution: %v", execID, err)
 		return repository.CompleteSuccessAlreadyTerminal
 	}
 	if outcome == repository.CompleteSuccessPendingSteering {
-		log.Printf("[handler] completeWithSuccess exec=%s deferred completion because pending steering exists", execID)
+		applog.Infof("[handler] completeWithSuccess exec=%s deferred completion because pending steering exists", execID)
 		return outcome
 	}
 	if outcome == repository.CompleteSuccessAlreadyTerminal {
-		log.Printf("[handler] completeWithSuccess exec=%s skipped because execution is already terminal", execID)
+		applog.Infof("[handler] completeWithSuccess exec=%s skipped because execution is already terminal", execID)
 		return outcome
 	}
 
@@ -1143,7 +1143,7 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 	// refresh. If the task status update happens after git diff capture
 	// (which can be slow), the refreshed page may still show 'running' status.
 	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted); err != nil {
-		log.Printf("[handler] completeWithSuccess task=%s error updating status: %v", taskID, err)
+		applog.Infof("[handler] completeWithSuccess task=%s error updating status: %v", taskID, err)
 	}
 
 	// Move active tasks to the completed category so they appear in the right column
@@ -1151,9 +1151,9 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 	h.sendChannelResponse(ctx, task, channelReply, output, "", telegramMessageID)
 	if err == nil && task != nil && task.Category == models.CategoryActive {
 		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryCompleted); err != nil {
-			log.Printf("[handler] completeWithSuccess task=%s error moving to completed category: %v", taskID, err)
+			applog.Infof("[handler] completeWithSuccess task=%s error moving to completed category: %v", taskID, err)
 		} else {
-			log.Printf("[handler] completeWithSuccess task=%s moved to completed category", taskID)
+			applog.Infof("[handler] completeWithSuccess task=%s moved to completed category", taskID)
 		}
 	}
 
@@ -1167,15 +1167,15 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 
 		if diffOutput != "" {
 			if err := h.execRepo.UpdateDiffOutput(ctx, execID, diffOutput); err != nil {
-				log.Printf("[handler] completeWithSuccess exec=%s error updating diff: %v", execID, err)
+				applog.Infof("[handler] completeWithSuccess exec=%s error updating diff: %v", execID, err)
 			}
 
 			// Reset stale terminal merge states when follow-up creates new changes.
 			if task != nil && task.WorktreePath != "" &&
 				(task.MergeStatus == models.MergeStatusMerged || task.MergeStatus == models.MergeStatusConflict) {
-				log.Printf("[handler] completeWithSuccess task=%s resetting merge_status from %s to pending (new changes detected)", taskID, task.MergeStatus)
+				applog.Infof("[handler] completeWithSuccess task=%s resetting merge_status from %s to pending (new changes detected)", taskID, task.MergeStatus)
 				if err := h.taskRepo.UpdateMergeStatus(ctx, taskID, models.MergeStatusPending); err != nil {
-					log.Printf("[handler] completeWithSuccess task=%s error resetting merge status: %v", taskID, err)
+					applog.Infof("[handler] completeWithSuccess task=%s error resetting merge status: %v", taskID, err)
 				}
 			}
 		}
@@ -1230,14 +1230,14 @@ func (h *Handler) completeWithCancellation(execID, taskID, output string, tokens
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := h.execRepo.Complete(ctx, execID, models.ExecCancelled, output, "cancelled", tokensUsed, durationMs); err != nil {
-		log.Printf("[handler] completeWithCancellation exec=%s error completing cancelled execution: %v", execID, err)
+		applog.Infof("[handler] completeWithCancellation exec=%s error completing cancelled execution: %v", execID, err)
 	}
 	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusCancelled); err != nil {
-		log.Printf("[handler] completeWithCancellation task=%s error updating status: %v", taskID, err)
+		applog.Infof("[handler] completeWithCancellation task=%s error updating status: %v", taskID, err)
 	}
 	task, err := h.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
-		log.Printf("[handler] completeWithCancellation task=%s error getting task: %v", taskID, err)
+		applog.Infof("[handler] completeWithCancellation task=%s error getting task: %v", taskID, err)
 		return
 	}
 	reply := service.ChannelReplyContext{}
@@ -1339,9 +1339,9 @@ func (h *Handler) startFollowupDiffSnapshotBroadcast(ctx context.Context, taskID
 				return
 			}
 			if err := h.execRepo.UpdateDiffOutput(ctx, execID, diffOutput); err != nil {
-				log.Printf("[handler] followup diff broadcast exec=%s error updating diff output: %v", execID, err)
+				applog.Infof("[handler] followup diff broadcast exec=%s error updating diff output: %v", execID, err)
 			} else {
-				log.Printf("[handler] followup diff broadcast exec=%s updated diff output (%d bytes)", execID, len(diffOutput))
+				// applog.Debugf("[handler] followup diff broadcast exec=%s updated diff output (%d bytes)", execID, len(diffOutput))
 			}
 			h.fileChangeBroadcaster.Publish(events.FileChangeEvent{
 				Type:       events.DiffSnapshot,
@@ -1409,32 +1409,32 @@ func (h *Handler) completeWithFailure(_ context.Context, execID, taskID, errorMe
 	defer cancel()
 
 	if err := h.execRepo.Complete(ctx, execID, models.ExecFailed, "", errorMessage, 0, durationMs); err != nil {
-		log.Printf("[handler] completeWithFailure exec=%s error completing execution: %v", execID, err)
+		applog.Infof("[handler] completeWithFailure exec=%s error completing execution: %v", execID, err)
 	}
 
 	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed); err != nil {
-		log.Printf("[handler] completeWithFailure task=%s error updating status: %v", taskID, err)
+		applog.Infof("[handler] completeWithFailure task=%s error updating status: %v", taskID, err)
 	}
 
 	// Move task to backlog so it can be re-executed
 	task, err := h.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
-		log.Printf("[handler] completeWithFailure task=%s error getting task: %v", taskID, err)
+		applog.Infof("[handler] completeWithFailure task=%s error getting task: %v", taskID, err)
 		return
 	}
 	h.sendChannelResponse(ctx, task, channelReply, "", errorMessage, telegramMessageID)
 	if task != nil && (task.Category == models.CategoryActive || task.Category == models.CategoryCompleted) {
 		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryBacklog); err != nil {
-			log.Printf("[handler] completeWithFailure task=%s error moving to backlog: %v", taskID, err)
+			applog.Infof("[handler] completeWithFailure task=%s error moving to backlog: %v", taskID, err)
 		} else {
-			log.Printf("[handler] completeWithFailure task=%s moved to backlog", taskID)
+			applog.Infof("[handler] completeWithFailure task=%s moved to backlog", taskID)
 		}
 	}
 
 	// Create failure alert
 	if task != nil && h.alertSvc != nil {
 		if err := h.alertSvc.CreateTaskFailedAlert(ctx, task.ProjectID, taskID, execID, task.Title, errorMessage); err != nil {
-			log.Printf("[handler] completeWithFailure task=%s error creating alert: %v", taskID, err)
+			applog.Infof("[handler] completeWithFailure task=%s error creating alert: %v", taskID, err)
 		}
 	}
 }
@@ -1447,32 +1447,32 @@ func (h *Handler) completeWithFailureAndOutput(_ context.Context, execID, taskID
 	defer cancel()
 
 	if err := h.execRepo.Complete(ctx, execID, models.ExecFailed, output, errorMessage, tokensUsed, durationMs); err != nil {
-		log.Printf("[handler] completeWithFailureAndOutput exec=%s error completing execution: %v", execID, err)
+		applog.Infof("[handler] completeWithFailureAndOutput exec=%s error completing execution: %v", execID, err)
 	}
 
 	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed); err != nil {
-		log.Printf("[handler] completeWithFailureAndOutput task=%s error updating status: %v", taskID, err)
+		applog.Infof("[handler] completeWithFailureAndOutput task=%s error updating status: %v", taskID, err)
 	}
 
 	// Move task to backlog so it can be re-executed
 	task, err := h.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
-		log.Printf("[handler] completeWithFailureAndOutput task=%s error getting task: %v", taskID, err)
+		applog.Infof("[handler] completeWithFailureAndOutput task=%s error getting task: %v", taskID, err)
 		return
 	}
 	h.sendChannelResponse(ctx, task, channelReply, output, errorMessage, telegramMessageID)
 	if task != nil && (task.Category == models.CategoryActive || task.Category == models.CategoryCompleted) {
 		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryBacklog); err != nil {
-			log.Printf("[handler] completeWithFailureAndOutput task=%s error moving to backlog: %v", taskID, err)
+			applog.Infof("[handler] completeWithFailureAndOutput task=%s error moving to backlog: %v", taskID, err)
 		} else {
-			log.Printf("[handler] completeWithFailureAndOutput task=%s moved to backlog", taskID)
+			applog.Infof("[handler] completeWithFailureAndOutput task=%s moved to backlog", taskID)
 		}
 	}
 
 	// Create failure alert
 	if task != nil && h.alertSvc != nil {
 		if err := h.alertSvc.CreateTaskFailedAlert(ctx, task.ProjectID, taskID, execID, task.Title, errorMessage); err != nil {
-			log.Printf("[handler] completeWithFailureAndOutput task=%s error creating alert: %v", taskID, err)
+			applog.Infof("[handler] completeWithFailureAndOutput task=%s error creating alert: %v", taskID, err)
 		}
 	}
 }
@@ -1554,11 +1554,11 @@ func (h *Handler) selectDefaultAgent(ctx context.Context, hasImages bool) (*mode
 		if len(agents) == 0 {
 			return nil, fmt.Errorf("no agents configured - please add at least one agent/model in settings")
 		}
-		log.Printf("[handler] selectDefaultAgent no default configured, falling back to first agent: %s", agents[0].Name)
+		applog.Infof("[handler] selectDefaultAgent no default configured, falling back to first agent: %s", agents[0].Name)
 		return &agents[0], nil
 	}
 	if hasImages && !agent.IsAnthropicAPIKey() && !agent.IsOAuth() {
-		log.Printf("[handler] selectDefaultAgent warning: agent %s may not support vision with image attachments", agent.Name)
+		applog.Infof("[handler] selectDefaultAgent warning: agent %s may not support vision with image attachments", agent.Name)
 	}
 	return agent, nil
 }
@@ -1573,7 +1573,7 @@ func (h *Handler) selectExplicitAgent(ctx context.Context, agentID string, hasIm
 		return nil, fmt.Errorf("agent %s not found", agentID)
 	}
 	if hasImages && !agent.IsAnthropicAPIKey() && !agent.IsOAuth() {
-		log.Printf("[handler] selectExplicitAgent warning: agent %s may not support vision with image attachments", agent.Name)
+		applog.Infof("[handler] selectExplicitAgent warning: agent %s may not support vision with image attachments", agent.Name)
 	}
 	return agent, nil
 }
@@ -1595,7 +1595,7 @@ func (h *Handler) autoSelectAgent(ctx context.Context, message string, hasImages
 
 	// Fallback to first agent
 	if hasImages {
-		log.Printf("[handler] autoSelectAgent has images but no vision-capable agents, falling back to first available")
+		applog.Infof("[handler] autoSelectAgent has images but no vision-capable agents, falling back to first available")
 	}
 	return &agents[0], nil
 }
@@ -1633,27 +1633,27 @@ func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task)
 
 	wtPath, wtBranch, skipStartupSync, wtErr := h.worktreeSvc.SetupFollowupWorktree(ctx, task, repoDir)
 	if wtErr != nil {
-		log.Printf("[handler] resolveWorktreeWorkDir worktree setup failed for task %s, using main repo: %v", task.ID, wtErr)
+		applog.Infof("[handler] resolveWorktreeWorkDir worktree setup failed for task %s, using main repo: %v", task.ID, wtErr)
 		return repoDir, "", nil
 	}
 	task.WorktreePath = wtPath
 	task.WorktreeBranch = wtBranch
 
 	if skipStartupSync {
-		log.Printf("[handler] resolveWorktreeWorkDir task=%s using fresh current-target follow-up worktree path=%s", task.ID, wtPath)
+		applog.Infof("[handler] resolveWorktreeWorkDir task=%s using fresh current-target follow-up worktree path=%s", task.ID, wtPath)
 		return wtPath, "", nil
 	}
 
 	if syncErr := h.worktreeSvc.SyncWorktreeFromMainAtStart(ctx, task, repoDir); syncErr != nil {
 		if models.IsTerminalStatus(task.Status) && strings.Contains(syncErr.Error(), "startup auto-merge conflict") {
-			log.Printf("[handler] resolveWorktreeWorkDir startup worktree sync conflict for terminal task follow-up %s, continuing in preserved worktree: %v", task.ID, syncErr)
+			applog.Infof("[handler] resolveWorktreeWorkDir startup worktree sync conflict for terminal task follow-up %s, continuing in preserved worktree: %v", task.ID, syncErr)
 			return wtPath, buildStartupSyncConflictContext(task, syncErr), nil
 		}
-		log.Printf("[handler] resolveWorktreeWorkDir startup worktree sync failed for task %s: %v", task.ID, syncErr)
+		applog.Infof("[handler] resolveWorktreeWorkDir startup worktree sync failed for task %s: %v", task.ID, syncErr)
 		return "", "", syncErr
 	}
 
-	log.Printf("[handler] resolveWorktreeWorkDir task=%s using worktree path=%s", task.ID, wtPath)
+	applog.Infof("[handler] resolveWorktreeWorkDir task=%s using worktree path=%s", task.ID, wtPath)
 	return wtPath, "", nil
 }
 
@@ -1667,7 +1667,7 @@ func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectI
 		return output, 0
 	}
 
-	log.Printf("[handler] processChatTaskCreations exec=%s found %d task creation requests", execID, len(taskRequests))
+	applog.Infof("[handler] processChatTaskCreations exec=%s found %d task creation requests", execID, len(taskRequests))
 
 	chatAtts, _ := h.chatAttachmentRepo.ListByExecution(ctx, execID)
 	deferredActiveTitles := h.deferActiveTasksWithAttachments(taskRequests, chatAtts)
@@ -1692,7 +1692,7 @@ func (h *Handler) deferActiveTasksWithAttachments(taskRequests []service.TaskCre
 		if taskRequests[i].Category == "active" {
 			deferredActiveTitles[taskRequests[i].Title] = true
 			taskRequests[i].Category = "backlog"
-			log.Printf("[handler] deferActiveTasksWithAttachments deferred auto-submit for task %q (has attachments)", taskRequests[i].Title)
+			applog.Infof("[handler] deferActiveTasksWithAttachments deferred auto-submit for task %q (has attachments)", taskRequests[i].Title)
 		}
 	}
 	return deferredActiveTitles
@@ -1709,10 +1709,10 @@ func (h *Handler) copyAttachmentsToTasks(ctx context.Context, execID string, cre
 	for _, task := range createdTasks {
 		copiedCount, err := h.copyChatAttachmentsToTask(ctx, execID, task.ID)
 		if err != nil {
-			log.Printf("[handler] copyAttachmentsToTasks error copying to task %s: %v", task.ID, err)
+			applog.Infof("[handler] copyAttachmentsToTasks error copying to task %s: %v", task.ID, err)
 		} else if copiedCount > 0 {
 			totalCopied += copiedCount
-			log.Printf("[handler] copyAttachmentsToTasks copied %d attachments to task %s", copiedCount, task.ID)
+			applog.Infof("[handler] copyAttachmentsToTasks copied %d attachments to task %s", copiedCount, task.ID)
 		}
 	}
 	return totalCopied
@@ -1726,9 +1726,9 @@ func (h *Handler) activateDeferredTasks(ctx context.Context, createdTasks []mode
 
 	for _, task := range createdTasks {
 		if deferredActiveTitles[task.Title] {
-			log.Printf("[handler] activateDeferredTasks activating task %s %q", task.ID, task.Title)
+			applog.Infof("[handler] activateDeferredTasks activating task %s %q", task.ID, task.Title)
 			if err := h.taskSvc.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
-				log.Printf("[handler] activateDeferredTasks error activating task %s: %v", task.ID, err)
+				applog.Infof("[handler] activateDeferredTasks error activating task %s: %v", task.ID, err)
 			}
 		}
 	}
@@ -1767,7 +1767,7 @@ func (h *Handler) processChatTaskEdits(ctx context.Context, execID, projectID, o
 		return output
 	}
 
-	log.Printf("[handler] processChatTaskEdits exec=%s found %d task edit requests", execID, len(editRequests))
+	applog.Infof("[handler] processChatTaskEdits exec=%s found %d task edit requests", execID, len(editRequests))
 
 	// Handle "chat" attachment keyword: copy chat attachments to target tasks
 	chatAttCopied, chatOnlyTaskIDs := h.processChatAttachmentsForEdits(ctx, execID, editRequests)
@@ -1829,12 +1829,12 @@ func (h *Handler) processChatAttachmentsForEdits(ctx context.Context, execID str
 
 		copiedCount, err := h.copyChatAttachmentsToTask(ctx, execID, taskID)
 		if err != nil {
-			log.Printf("[handler] processChatAttachmentsForEdits error copying chat attachments to task %s: %v", taskID, err)
+			applog.Infof("[handler] processChatAttachmentsForEdits error copying chat attachments to task %s: %v", taskID, err)
 		} else if copiedCount > 0 {
 			totalCopied += copiedCount
-			log.Printf("[handler] processChatAttachmentsForEdits copied %d chat attachments to task %s", copiedCount, taskID)
+			applog.Infof("[handler] processChatAttachmentsForEdits copied %d chat attachments to task %s", copiedCount, taskID)
 		} else {
-			log.Printf("[handler] processChatAttachmentsForEdits no chat attachments to copy for exec=%s", execID)
+			applog.Infof("[handler] processChatAttachmentsForEdits no chat attachments to copy for exec=%s", execID)
 		}
 	}
 	return totalCopied, chatOnlyTaskIDs
@@ -1856,7 +1856,7 @@ func (h *Handler) processChatTaskExecutions(ctx context.Context, execID, project
 		return output
 	}
 
-	log.Printf("[handler] processChatTaskExecutions exec=%s found %d task execution requests", execID, len(execRequests))
+	applog.Infof("[handler] processChatTaskExecutions exec=%s found %d task execution requests", execID, len(execRequests))
 	execSummary := executeChatTaskExecutions(ctx, execRequests, projectID, h.taskSvc)
 	if execSummary != "" {
 		output += execSummary
@@ -1873,19 +1873,19 @@ func (h *Handler) processViewThread(ctx context.Context, execID, projectID, outp
 		return output
 	}
 
-	log.Printf("[handler] processViewThread exec=%s found %d view requests", execID, len(viewRequests))
+	applog.Infof("[handler] processViewThread exec=%s found %d view requests", execID, len(viewRequests))
 
 	for _, req := range viewRequests {
 		task, err := h.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
 		if err != nil {
-			log.Printf("[handler] processViewThread error resolving task: %v", err)
+			applog.Infof("[handler] processViewThread error resolving task: %v", err)
 			output += fmt.Sprintf("\n\n---\nCould not find task: %v", err)
 			continue
 		}
 
 		executions, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
 		if err != nil {
-			log.Printf("[handler] processViewThread error listing executions for task %s: %v", task.ID, err)
+			applog.Infof("[handler] processViewThread error listing executions for task %s: %v", task.ID, err)
 			output += fmt.Sprintf("\n\n---\nError retrieving thread for task \"%s\": %v", task.Title, err)
 			continue
 		}
@@ -1906,19 +1906,19 @@ func (h *Handler) processChatSendToTask(ctx context.Context, execID, projectID, 
 		return output
 	}
 
-	log.Printf("[handler] processChatSendToTask exec=%s found %d send requests", execID, len(sendRequests))
+	applog.Infof("[handler] processChatSendToTask exec=%s found %d send requests", execID, len(sendRequests))
 
 	var results []string
 	for _, req := range sendRequests {
 		task, err := h.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
 		if err != nil {
-			log.Printf("[handler] processChatSendToTask error resolving task: %v", err)
+			applog.Infof("[handler] processChatSendToTask error resolving task: %v", err)
 			results = append(results, fmt.Sprintf("- Could not find task: %v", err))
 			continue
 		}
 		queued, err := h.enqueueTaskThreadInput(ctx, task.ID, req.Message, models.TaskOriginWeb, "")
 		if err != nil {
-			log.Printf("[handler] processChatSendToTask task=%s error queueing input: %v", task.ID, err)
+			applog.Infof("[handler] processChatSendToTask task=%s error queueing input: %v", task.ID, err)
 			results = append(results, fmt.Sprintf("- Error queueing message for task \"%s\": %v", task.Title, err))
 			continue
 		}
@@ -1940,13 +1940,13 @@ func (h *Handler) processChatScheduleTask(ctx context.Context, execID, projectID
 		return output
 	}
 
-	log.Printf("[handler] processChatScheduleTask exec=%s found %d schedule requests", execID, len(scheduleRequests))
+	applog.Infof("[handler] processChatScheduleTask exec=%s found %d schedule requests", execID, len(scheduleRequests))
 
 	var results []string
 	for _, req := range scheduleRequests {
 		task, err := h.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
 		if err != nil {
-			log.Printf("[handler] processChatScheduleTask error resolving task: %v", err)
+			applog.Infof("[handler] processChatScheduleTask error resolving task: %v", err)
 			results = append(results, fmt.Sprintf("- Could not find task: %v", err))
 			continue
 		}
@@ -1954,7 +1954,7 @@ func (h *Handler) processChatScheduleTask(ctx context.Context, execID, projectID
 		// Parse time (HH:MM format)
 		var hourVal, minuteVal int
 		if _, err := fmt.Sscanf(req.Time, "%d:%d", &hourVal, &minuteVal); err != nil || hourVal < 0 || hourVal > 23 || minuteVal < 0 || minuteVal > 59 {
-			log.Printf("[handler] processChatScheduleTask invalid time: %s", req.Time)
+			applog.Infof("[handler] processChatScheduleTask invalid time: %s", req.Time)
 			results = append(results, fmt.Sprintf("- Invalid time %q for task \"%s\" (expected HH:MM, 00:00-23:59)", req.Time, task.Title))
 			continue
 		}
@@ -1977,7 +1977,7 @@ func (h *Handler) processChatScheduleTask(ctx context.Context, execID, projectID
 		case "seconds":
 			repeatType = models.RepeatSeconds
 		default:
-			log.Printf("[handler] processChatScheduleTask unknown repeat type %q, defaulting to daily", req.Repeat)
+			applog.Infof("[handler] processChatScheduleTask unknown repeat type %q, defaulting to daily", req.Repeat)
 		}
 
 		// Determine repeat interval (default 1)
@@ -2032,7 +2032,7 @@ func (h *Handler) processChatScheduleTask(ctx context.Context, execID, projectID
 		}
 
 		if err := h.scheduleRepo.Create(ctx, schedule); err != nil {
-			log.Printf("[handler] processChatScheduleTask error creating schedule: %v", err)
+			applog.Infof("[handler] processChatScheduleTask error creating schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Error scheduling task \"%s\": %v", task.Title, err))
 			continue
 		}
@@ -2040,11 +2040,11 @@ func (h *Handler) processChatScheduleTask(ctx context.Context, execID, projectID
 		// Move task to scheduled category if not already
 		if task.Category != models.CategoryScheduled {
 			if err := h.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryScheduled); err != nil {
-				log.Printf("[handler] processChatScheduleTask error updating category: %v", err)
+				applog.Infof("[handler] processChatScheduleTask error updating category: %v", err)
 			}
 			if task.Status != models.StatusPending {
 				if err := h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
-					log.Printf("[handler] processChatScheduleTask error updating status: %v", err)
+					applog.Infof("[handler] processChatScheduleTask error updating status: %v", err)
 				}
 			}
 		}
@@ -2057,7 +2057,7 @@ func (h *Handler) processChatScheduleTask(ctx context.Context, execID, projectID
 			}
 		}
 		results = append(results, fmt.Sprintf("- Scheduled task \"%s\" [TASK_ID:%s] at %s (%s)", task.Title, task.ID, req.Time, repeatDesc))
-		log.Printf("[handler] processChatScheduleTask scheduled task=%s schedule=%s at %s repeat=%s", task.ID, schedule.ID, req.Time, repeatType)
+		applog.Infof("[handler] processChatScheduleTask scheduled task=%s schedule=%s at %s repeat=%s", task.ID, schedule.ID, req.Time, repeatType)
 	}
 
 	if len(results) > 0 {
@@ -2076,20 +2076,20 @@ func (h *Handler) processChatDeleteSchedule(ctx context.Context, execID, project
 		return output
 	}
 
-	log.Printf("[handler] processChatDeleteSchedule exec=%s found %d delete requests", execID, len(deleteRequests))
+	applog.Infof("[handler] processChatDeleteSchedule exec=%s found %d delete requests", execID, len(deleteRequests))
 
 	var results []string
 	for _, req := range deleteRequests {
 		// Resolve the schedule to delete
 		schedule, task, err := h.resolveScheduleReference(ctx, projectID, req.ScheduleID, req.TaskID, req.Title)
 		if err != nil {
-			log.Printf("[handler] processChatDeleteSchedule error resolving schedule: %v", err)
+			applog.Infof("[handler] processChatDeleteSchedule error resolving schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Could not find schedule: %v", err))
 			continue
 		}
 
 		if err := h.scheduleRepo.Delete(ctx, schedule.ID); err != nil {
-			log.Printf("[handler] processChatDeleteSchedule error deleting schedule: %v", err)
+			applog.Infof("[handler] processChatDeleteSchedule error deleting schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Error deleting schedule for task \"%s\": %v", task.Title, err))
 			continue
 		}
@@ -2097,17 +2097,17 @@ func (h *Handler) processChatDeleteSchedule(ctx context.Context, execID, project
 		// Check if the task has any remaining schedules
 		remaining, err := h.scheduleRepo.ListByTask(ctx, task.ID)
 		if err != nil {
-			log.Printf("[handler] processChatDeleteSchedule error checking remaining schedules: %v", err)
+			applog.Infof("[handler] processChatDeleteSchedule error checking remaining schedules: %v", err)
 		}
 		if len(remaining) == 0 && task.Category == models.CategoryScheduled {
 			// No more schedules — move task back to backlog
 			if err := h.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryBacklog); err != nil {
-				log.Printf("[handler] processChatDeleteSchedule error updating category: %v", err)
+				applog.Infof("[handler] processChatDeleteSchedule error updating category: %v", err)
 			}
 		}
 
 		results = append(results, fmt.Sprintf("- Deleted schedule for task \"%s\" [TASK_ID:%s]", task.Title, task.ID))
-		log.Printf("[handler] processChatDeleteSchedule deleted schedule=%s task=%s", schedule.ID, task.ID)
+		applog.Infof("[handler] processChatDeleteSchedule deleted schedule=%s task=%s", schedule.ID, task.ID)
 	}
 
 	if len(results) > 0 {
@@ -2125,13 +2125,13 @@ func (h *Handler) processChatModifySchedule(ctx context.Context, execID, project
 		return output
 	}
 
-	log.Printf("[handler] processChatModifySchedule exec=%s found %d modify requests", execID, len(modifyRequests))
+	applog.Infof("[handler] processChatModifySchedule exec=%s found %d modify requests", execID, len(modifyRequests))
 
 	var results []string
 	for _, req := range modifyRequests {
 		schedule, task, err := h.resolveScheduleReference(ctx, projectID, req.ScheduleID, req.TaskID, req.Title)
 		if err != nil {
-			log.Printf("[handler] processChatModifySchedule error resolving schedule: %v", err)
+			applog.Infof("[handler] processChatModifySchedule error resolving schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Could not find schedule: %v", err))
 			continue
 		}
@@ -2142,7 +2142,7 @@ func (h *Handler) processChatModifySchedule(ctx context.Context, execID, project
 		if req.Time != "" {
 			var hourVal, minuteVal int
 			if _, err := fmt.Sscanf(req.Time, "%d:%d", &hourVal, &minuteVal); err != nil || hourVal < 0 || hourVal > 23 || minuteVal < 0 || minuteVal > 59 {
-				log.Printf("[handler] processChatModifySchedule invalid time: %s", req.Time)
+				applog.Infof("[handler] processChatModifySchedule invalid time: %s", req.Time)
 				results = append(results, fmt.Sprintf("- Invalid time %q for schedule on task \"%s\" (expected HH:MM, 00:00-23:59)", req.Time, task.Title))
 				continue
 			}
@@ -2171,7 +2171,7 @@ func (h *Handler) processChatModifySchedule(ctx context.Context, execID, project
 			case "seconds":
 				schedule.RepeatType = models.RepeatSeconds
 			default:
-				log.Printf("[handler] processChatModifySchedule unknown repeat type %q", req.Repeat)
+				applog.Infof("[handler] processChatModifySchedule unknown repeat type %q", req.Repeat)
 				results = append(results, fmt.Sprintf("- Unknown repeat type %q for schedule on task \"%s\"", req.Repeat, task.Title))
 				continue
 			}
@@ -2242,13 +2242,13 @@ func (h *Handler) processChatModifySchedule(ctx context.Context, execID, project
 		schedule.NextRun = nextRun
 
 		if err := h.scheduleRepo.Update(ctx, schedule); err != nil {
-			log.Printf("[handler] processChatModifySchedule error updating schedule: %v", err)
+			applog.Infof("[handler] processChatModifySchedule error updating schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Error updating schedule for task \"%s\": %v", task.Title, err))
 			continue
 		}
 
 		results = append(results, fmt.Sprintf("- Updated schedule for task \"%s\" [TASK_ID:%s]: %s", task.Title, task.ID, strings.Join(changes, ", ")))
-		log.Printf("[handler] processChatModifySchedule updated schedule=%s task=%s changes=%s", schedule.ID, task.ID, strings.Join(changes, ", "))
+		applog.Infof("[handler] processChatModifySchedule updated schedule=%s task=%s changes=%s", schedule.ID, task.ID, strings.Join(changes, ", "))
 	}
 
 	if len(results) > 0 {
@@ -2425,7 +2425,7 @@ func (h *Handler) processChatListPersonalities(ctx context.Context, execID, proj
 		return output
 	}
 
-	log.Printf("[handler] processChatListPersonalities exec=%s", execID)
+	applog.Infof("[handler] processChatListPersonalities exec=%s", execID)
 
 	personalities := service.AllPersonalitiesWithCustom(ctx, h.customPersonalityRepo)
 	var sb strings.Builder
@@ -2443,7 +2443,7 @@ func (h *Handler) processChatListPersonalities(ctx context.Context, execID, proj
 	// Also show current personality
 	current, err := h.settingsRepo.Get(ctx, "personality")
 	if err != nil {
-		log.Printf("[handler] processChatListPersonalities error reading current personality: %v", err)
+		applog.Infof("[handler] processChatListPersonalities error reading current personality: %v", err)
 	}
 	if current == "" {
 		current = "default"
@@ -2461,7 +2461,7 @@ func (h *Handler) processChatSetPersonality(ctx context.Context, execID, project
 		return output
 	}
 
-	log.Printf("[handler] processChatSetPersonality exec=%s found %d requests", execID, len(requests))
+	applog.Infof("[handler] processChatSetPersonality exec=%s found %d requests", execID, len(requests))
 
 	var results []string
 	for _, req := range requests {
@@ -2481,13 +2481,13 @@ func (h *Handler) processChatSetPersonality(ctx context.Context, execID, project
 		}
 
 		if err := h.settingsRepo.Set(ctx, "personality", req.Personality); err != nil {
-			log.Printf("[handler] processChatSetPersonality error: %v", err)
+			applog.Infof("[handler] processChatSetPersonality error: %v", err)
 			results = append(results, fmt.Sprintf("- Error setting personality to %q: %v", req.Personality, err))
 			continue
 		}
 
 		results = append(results, fmt.Sprintf("- Personality changed to **%s** (`%s`)", matchedName, req.Personality))
-		log.Printf("[handler] processChatSetPersonality set personality to %q", req.Personality)
+		applog.Infof("[handler] processChatSetPersonality set personality to %q", req.Personality)
 	}
 
 	if len(results) > 0 {
@@ -2503,11 +2503,11 @@ func (h *Handler) processChatListModels(ctx context.Context, execID, projectID, 
 		return output
 	}
 
-	log.Printf("[handler] processChatListModels exec=%s", execID)
+	applog.Infof("[handler] processChatListModels exec=%s", execID)
 
 	configs, err := h.llmConfigRepo.List(ctx)
 	if err != nil {
-		log.Printf("[handler] processChatListModels error listing models: %v", err)
+		applog.Infof("[handler] processChatListModels error listing models: %v", err)
 		output += "\n\n---\nModel Settings:\n- Error retrieving model configurations: " + err.Error()
 		return output
 	}
@@ -2544,7 +2544,7 @@ func (h *Handler) processChatListAgents(ctx context.Context, execID, projectID, 
 	if !service.HasListAgents(output) {
 		return output
 	}
-	log.Printf("[handler] processChatListAgents exec=%s", execID)
+	applog.Infof("[handler] processChatListAgents exec=%s", execID)
 
 	if h.agentRepo == nil {
 		output += "\n\n---\nConfigured Agents:\nAgent definitions not available.\n"
@@ -2553,7 +2553,7 @@ func (h *Handler) processChatListAgents(ctx context.Context, execID, projectID, 
 
 	agents, err := h.agentRepo.List(ctx)
 	if err != nil {
-		log.Printf("[handler] processChatListAgents error: %v", err)
+		applog.Infof("[handler] processChatListAgents error: %v", err)
 		output += "\n\n---\nConfigured Agents:\n- Error: " + err.Error()
 		return output
 	}
@@ -2582,7 +2582,7 @@ func (h *Handler) processChatViewSettings(ctx context.Context, execID, projectID
 		return output
 	}
 
-	log.Printf("[handler] processChatViewSettings exec=%s", execID)
+	applog.Infof("[handler] processChatViewSettings exec=%s", execID)
 
 	var sb strings.Builder
 	sb.WriteString("\n\n---\nApp Settings:\n")
@@ -2590,7 +2590,7 @@ func (h *Handler) processChatViewSettings(ctx context.Context, execID, projectID
 	// Personality
 	personality, err := h.settingsRepo.Get(ctx, "personality")
 	if err != nil {
-		log.Printf("[handler] processChatViewSettings error reading personality: %v", err)
+		applog.Infof("[handler] processChatViewSettings error reading personality: %v", err)
 	}
 	if personality == "" {
 		personality = "default (no personality)"
@@ -2600,7 +2600,7 @@ func (h *Handler) processChatViewSettings(ctx context.Context, execID, projectID
 	// Model count
 	configs, err := h.llmConfigRepo.List(ctx)
 	if err != nil {
-		log.Printf("[handler] processChatViewSettings error listing models: %v", err)
+		applog.Infof("[handler] processChatViewSettings error listing models: %v", err)
 	} else {
 		sb.WriteString(fmt.Sprintf("- **Configured models:** %d\n", len(configs)))
 		for _, c := range configs {
@@ -2616,7 +2616,7 @@ func (h *Handler) processChatViewSettings(ctx context.Context, execID, projectID
 	if h.workerRepo != nil {
 		globalMax, err := h.workerRepo.GetMaxWorkers(ctx)
 		if err != nil {
-			log.Printf("[handler] processChatViewSettings error reading global workers: %v", err)
+			applog.Infof("[handler] processChatViewSettings error reading global workers: %v", err)
 			sb.WriteString("- **Global max workers:** error reading\n")
 		} else {
 			sb.WriteString(fmt.Sprintf("- **Global max workers:** %d\n", globalMax))
@@ -2628,7 +2628,7 @@ func (h *Handler) processChatViewSettings(ctx context.Context, execID, projectID
 	// Per-project worker limits
 	projects, err := h.projectRepo.List(ctx)
 	if err != nil {
-		log.Printf("[handler] processChatViewSettings error listing projects: %v", err)
+		applog.Infof("[handler] processChatViewSettings error listing projects: %v", err)
 	} else {
 		hasProjectLimits := false
 		for _, p := range projects {
@@ -2676,7 +2676,7 @@ func (h *Handler) processChatProjectInfo(ctx context.Context, execID, projectID,
 		return output
 	}
 
-	log.Printf("[handler] processChatProjectInfo exec=%s project=%s", execID, projectID)
+	applog.Infof("[handler] processChatProjectInfo exec=%s project=%s", execID, projectID)
 
 	var sb strings.Builder
 	sb.WriteString("\n\n---\nProject Info:\n")
@@ -2684,7 +2684,7 @@ func (h *Handler) processChatProjectInfo(ctx context.Context, execID, projectID,
 	// Get project details
 	project, err := h.projectRepo.GetByID(ctx, projectID)
 	if err != nil || project == nil {
-		log.Printf("[handler] processChatProjectInfo error getting project: %v", err)
+		applog.Infof("[handler] processChatProjectInfo error getting project: %v", err)
 		sb.WriteString("- Error retrieving project details\n")
 		output += sb.String()
 		return output
@@ -2701,7 +2701,7 @@ func (h *Handler) processChatProjectInfo(ctx context.Context, execID, projectID,
 	// Task counts by category
 	categoryCounts, err := h.taskRepo.CountByProjectAndCategory(ctx, projectID)
 	if err != nil {
-		log.Printf("[handler] processChatProjectInfo error counting tasks: %v", err)
+		applog.Infof("[handler] processChatProjectInfo error counting tasks: %v", err)
 	} else {
 		total := 0
 		for _, count := range categoryCounts {
@@ -2724,11 +2724,11 @@ func (h *Handler) processChatListProjects(ctx context.Context, execID, projectID
 		return output
 	}
 
-	log.Printf("[handler] processChatListProjects exec=%s project=%s", execID, projectID)
+	applog.Infof("[handler] processChatListProjects exec=%s project=%s", execID, projectID)
 
 	projects, err := h.projectRepo.List(ctx)
 	if err != nil {
-		log.Printf("[handler] processChatListProjects error listing projects: %v", err)
+		applog.Infof("[handler] processChatListProjects error listing projects: %v", err)
 		output += "\n\n---\nAvailable Projects:\n- Error retrieving projects: " + err.Error()
 		return output
 	}
@@ -2761,7 +2761,7 @@ func (h *Handler) processChatListAlerts(ctx context.Context, execID, projectID, 
 		return output
 	}
 
-	log.Printf("[handler] processChatListAlerts exec=%s project=%s", execID, projectID)
+	applog.Infof("[handler] processChatListAlerts exec=%s project=%s", execID, projectID)
 
 	if h.alertSvc == nil {
 		output += "\n\n---\nAlert Results:\n- Alert service not available"
@@ -2770,7 +2770,7 @@ func (h *Handler) processChatListAlerts(ctx context.Context, execID, projectID, 
 
 	alerts, err := h.alertSvc.ListByProject(ctx, projectID, 50)
 	if err != nil {
-		log.Printf("[handler] processChatListAlerts error listing alerts: %v", err)
+		applog.Infof("[handler] processChatListAlerts error listing alerts: %v", err)
 		output += "\n\n---\nAlert Results:\n- Error retrieving alerts: " + err.Error()
 		return output
 	}
@@ -2810,7 +2810,7 @@ func (h *Handler) processChatCreateAlert(ctx context.Context, execID, projectID,
 		return output
 	}
 
-	log.Printf("[handler] processChatCreateAlert exec=%s found %d requests", execID, len(requests))
+	applog.Infof("[handler] processChatCreateAlert exec=%s found %d requests", execID, len(requests))
 
 	if h.alertSvc == nil {
 		output += "\n\n---\nAlert Create Results:\n- Alert service not available"
@@ -2859,7 +2859,7 @@ func (h *Handler) processChatCreateAlert(ctx context.Context, execID, projectID,
 		}
 
 		if err := h.alertSvc.Create(ctx, a); err != nil {
-			log.Printf("[handler] processChatCreateAlert error: %v", err)
+			applog.Infof("[handler] processChatCreateAlert error: %v", err)
 			results = append(results, fmt.Sprintf("- Error creating alert %q: %v", req.Title, err))
 			continue
 		}
@@ -2881,7 +2881,7 @@ func (h *Handler) processChatDeleteAlert(ctx context.Context, execID, projectID,
 		return output
 	}
 
-	log.Printf("[handler] processChatDeleteAlert exec=%s found %d requests", execID, len(requests))
+	applog.Infof("[handler] processChatDeleteAlert exec=%s found %d requests", execID, len(requests))
 
 	if h.alertSvc == nil {
 		output += "\n\n---\nAlert Delete Results:\n- Alert service not available"
@@ -2891,7 +2891,7 @@ func (h *Handler) processChatDeleteAlert(ctx context.Context, execID, projectID,
 	var results []string
 	for _, req := range requests {
 		if err := h.alertSvc.Delete(ctx, req.AlertID); err != nil {
-			log.Printf("[handler] processChatDeleteAlert error: %v", err)
+			applog.Infof("[handler] processChatDeleteAlert error: %v", err)
 			results = append(results, fmt.Sprintf("- Error deleting alert %q: %v", req.AlertID, err))
 			continue
 		}
@@ -2912,7 +2912,7 @@ func (h *Handler) processChatToggleAlert(ctx context.Context, execID, projectID,
 		return output
 	}
 
-	log.Printf("[handler] processChatToggleAlert exec=%s found %d requests", execID, len(requests))
+	applog.Infof("[handler] processChatToggleAlert exec=%s found %d requests", execID, len(requests))
 
 	if h.alertSvc == nil {
 		output += "\n\n---\nAlert Toggle Results:\n- Alert service not available"
@@ -2922,7 +2922,7 @@ func (h *Handler) processChatToggleAlert(ctx context.Context, execID, projectID,
 	var results []string
 	for _, req := range requests {
 		if err := h.alertSvc.MarkRead(ctx, req.AlertID); err != nil {
-			log.Printf("[handler] processChatToggleAlert error: %v", err)
+			applog.Infof("[handler] processChatToggleAlert error: %v", err)
 			results = append(results, fmt.Sprintf("- Error marking alert %q as read: %v", req.AlertID, err))
 			continue
 		}
@@ -2956,7 +2956,7 @@ func (h *Handler) processChatResponse(ctx context.Context, execID, projectID, ou
 	if newOutput, attachmentCount := h.processChatTaskCreations(ctx, execID, projectID, output, agents); newOutput != output {
 		output = newOutput
 		if attachmentCount > 0 {
-			log.Printf("[handler] processChatResponse exec=%s copied %d attachments to created tasks", execID, attachmentCount)
+			applog.Infof("[handler] processChatResponse exec=%s copied %d attachments to created tasks", execID, attachmentCount)
 		}
 	}
 
@@ -3051,7 +3051,7 @@ func (h *Handler) processChatResponse(ctx context.Context, execID, projectID, ou
 	// but didn't actually output the corresponding marker block
 	if warnings := service.DetectMissingMarkers(originalOutput); len(warnings) > 0 {
 		for _, w := range warnings {
-			log.Printf("[handler] processChatResponse exec=%s WARNING: LLM promised %s action (matched %q) but no %s marker found in output",
+			applog.Infof("[handler] processChatResponse exec=%s WARNING: LLM promised %s action (matched %q) but no %s marker found in output",
 				execID, w.Action, w.MatchedHint, w.MarkerName)
 		}
 		// Append a user-visible warning so the user knows the action didn't execute
@@ -3065,7 +3065,7 @@ func (h *Handler) processChatResponse(ctx context.Context, execID, projectID, ou
 	// Update execution output if modified
 	if output != originalOutput {
 		if updateErr := h.execRepo.UpdateOutput(ctx, execID, output); updateErr != nil {
-			log.Printf("[handler] processChatResponse error updating output: %v", updateErr)
+			applog.Infof("[handler] processChatResponse error updating output: %v", updateErr)
 		}
 	}
 
@@ -3078,13 +3078,13 @@ func (h *Handler) processChatResponse(ctx context.Context, execID, projectID, ou
 func (h *Handler) buildChatContext(ctx context.Context, projectID string, availableModels []models.LLMConfig) string {
 	existingTasks, err := h.taskSvc.ListByProject(ctx, projectID, "")
 	if err != nil {
-		log.Printf("[handler] buildChatContext error listing tasks for project %s: %v", projectID, err)
+		applog.Infof("[handler] buildChatContext error listing tasks for project %s: %v", projectID, err)
 		existingTasks = []models.Task{}
 	}
 
 	schedules, err := h.scheduleRepo.ListByProject(ctx, projectID)
 	if err != nil {
-		log.Printf("[handler] buildChatContext error listing schedules for project %s: %v", projectID, err)
+		applog.Infof("[handler] buildChatContext error listing schedules for project %s: %v", projectID, err)
 		schedules = []models.Schedule{}
 	}
 
@@ -3098,7 +3098,7 @@ func (h *Handler) listChatAssignableAgentDefinitions(ctx context.Context) []mode
 	}
 	agents, err := h.agentRepo.List(ctx)
 	if err != nil {
-		log.Printf("[handler] buildChatContext error listing agent definitions: %v", err)
+		applog.Infof("[handler] buildChatContext error listing agent definitions: %v", err)
 		return nil
 	}
 	return service.UniqueChatAssignableAgentDefinitions(agents)
@@ -3290,11 +3290,11 @@ func (h *Handler) reactivateAchievedGoalForManualFollowup(ctx context.Context, t
 	}
 	goal, err := h.taskGoalSvc.ReactivateAchievedGoal(ctx, taskID, origin)
 	if err != nil {
-		log.Printf("[handler] task=%s error reactivating achieved goal for follow-up: %v", taskID, err)
+		applog.Infof("[handler] task=%s error reactivating achieved goal for follow-up: %v", taskID, err)
 		return
 	}
 	if goal != nil {
-		log.Printf("[handler] task=%s goal=%s reactivated achieved goal for %s follow-up", taskID, goal.GoalID, origin)
+		applog.Infof("[handler] task=%s goal=%s reactivated achieved goal for %s follow-up", taskID, goal.GoalID, origin)
 	}
 }
 

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -95,7 +95,7 @@ func NewTelegramService(
 	}
 
 	bot.Debug = false
-	log.Printf("[telegram] authorized on account %s", bot.Self.UserName)
+	applog.Infof("[telegram] authorized on account %s", bot.Self.UserName)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -192,7 +192,7 @@ func (s *TelegramService) SetTaskGoalService(svc *TaskGoalService) {
 // If projectID is empty, checks authorization across all projects.
 func (s *TelegramService) checkAuthorization(userID int64, username string, projectID string) bool {
 	if s.telegramAuthRepo == nil {
-		log.Printf("[telegram] auth check: no auth repo configured, allowing user %d (%s)", userID, username)
+		applog.Infof("[telegram] auth check: no auth repo configured, allowing user %d (%s)", userID, username)
 		return true // No auth repo configured, allow all
 	}
 
@@ -202,17 +202,17 @@ func (s *TelegramService) checkAuthorization(userID int64, username string, proj
 		// No project selected yet — check if user is authorized in ANY project
 		authorized, err := s.telegramAuthRepo.IsAuthorizedAnywhere(ctx, userID, username)
 		if err != nil {
-			log.Printf("[telegram] error checking global authorization for user %d: %v", userID, err)
+			applog.Infof("[telegram] error checking global authorization for user %d: %v", userID, err)
 			return true // Fail open on error
 		}
-		log.Printf("[telegram] auth check: user %d (%s) global authorized=%v", userID, username, authorized)
+		applog.Infof("[telegram] auth check: user %d (%s) global authorized=%v", userID, username, authorized)
 		return authorized
 	}
 
 	// Check if this specific user is authorized for the project
 	authorized, err := s.telegramAuthRepo.IsAuthorized(ctx, projectID, userID, username)
 	if err != nil {
-		log.Printf("[telegram] error checking authorization for user %d: %v", userID, err)
+		applog.Infof("[telegram] error checking authorization for user %d: %v", userID, err)
 		return true // Fail open on error
 	}
 
@@ -221,12 +221,12 @@ func (s *TelegramService) checkAuthorization(userID int64, username string, proj
 	if !authorized {
 		authorized, err = s.telegramAuthRepo.IsAuthorizedAnywhere(ctx, userID, username)
 		if err != nil {
-			log.Printf("[telegram] error checking global authorization for user %d: %v", userID, err)
+			applog.Infof("[telegram] error checking global authorization for user %d: %v", userID, err)
 			return true // Fail open on error
 		}
 	}
 
-	log.Printf("[telegram] auth check: user %d (%s) project=%s authorized=%v", userID, username, projectID, authorized)
+	applog.Infof("[telegram] auth check: user %d (%s) project=%s authorized=%v", userID, username, projectID, authorized)
 
 	// If authorized via username match, backfill the user ID for future lookups
 	if authorized && username != "" {
@@ -264,7 +264,7 @@ func (s *TelegramService) Start() {
 
 // Stop stops the Telegram bot
 func (s *TelegramService) Stop() {
-	log.Println("[telegram] stopping bot")
+	applog.Infof("[telegram] stopping bot")
 	s.running = false
 	if s.cancel != nil {
 		s.cancel()
@@ -281,12 +281,12 @@ func (s *TelegramService) run() {
 
 	updates := s.bot.GetUpdatesChan(u)
 
-	log.Println("[telegram] bot started, waiting for updates")
+	applog.Infof("[telegram] bot started, waiting for updates")
 
 	for {
 		select {
 		case <-s.ctx.Done():
-			log.Println("[telegram] bot stopped")
+			applog.Infof("[telegram] bot stopped")
 			return
 		case update := <-updates:
 			if update.Message == nil {
@@ -301,7 +301,7 @@ func (s *TelegramService) run() {
 			// Resolve the user's active project for authorization check
 			projectID := s.getActiveProject(userID)
 			if !s.checkAuthorization(userID, username, projectID) {
-				log.Printf("[telegram] unauthorized access attempt from user %d (username: %s) for project %s",
+				applog.Infof("[telegram] unauthorized access attempt from user %d (username: %s) for project %s",
 					userID, username, projectID)
 				s.sendMessage(chatID, "You are not authorized to use this bot. Contact the project owner to get access.")
 				continue
@@ -360,7 +360,7 @@ func (s *TelegramService) handleStart(userID int64) string {
 	s.userProjects[userID] = defaultProject.ID
 	if s.telegramUserProjectRepo != nil {
 		if err := s.telegramUserProjectRepo.SetUserProject(context.Background(), fmt.Sprintf("%d", userID), defaultProject.ID); err != nil {
-			log.Printf("[telegram] failed to persist default project for user %d: %v", userID, err)
+			applog.Infof("[telegram] failed to persist default project for user %d: %v", userID, err)
 		}
 	}
 
@@ -427,7 +427,7 @@ func (s *TelegramService) handleProject(userID int64, args string) string {
 	s.userProjects[userID] = targetProject.ID
 	if s.telegramUserProjectRepo != nil {
 		if err := s.telegramUserProjectRepo.SetUserProject(ctx, fmt.Sprintf("%d", userID), targetProject.ID); err != nil {
-			log.Printf("[telegram] failed to persist project selection for user %d: %v", userID, err)
+			applog.Infof("[telegram] failed to persist project selection for user %d: %v", userID, err)
 		}
 	}
 	return fmt.Sprintf("✅ Switched to project: *%s*", targetProject.Name)
@@ -443,7 +443,7 @@ func (s *TelegramService) queueChatInput(ctx context.Context, projectID, activeE
 		var err error
 		attachmentSessionID, err = s.saveChatAttachmentsToPendingSession(chatAttachments)
 		if err != nil {
-			log.Printf("[telegram] queue chat attachment staging failed: %v", err)
+			applog.Infof("[telegram] queue chat attachment staging failed: %v", err)
 			s.sendMessage(chatID, "Error queueing your attachment. Please try again.")
 			return true
 		}
@@ -462,7 +462,7 @@ func (s *TelegramService) queueChatInput(ctx context.Context, projectID, activeE
 		TelegramChatID:      chatID,
 	}
 	if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
-		log.Printf("[telegram] queue chat input failed: %v", err)
+		applog.Infof("[telegram] queue chat input failed: %v", err)
 		s.sendMessage(chatID, "Error queueing your message. Please try again.")
 		return true
 	}
@@ -504,7 +504,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 		text = fmt.Sprintf("User sent an attachment: %s", fileName)
 	}
 
-	log.Printf("[telegram] chat message from user=%d text=%q hasAttachment=%v", userID, text, fileID != "")
+	applog.Infof("[telegram] chat message from user=%d text=%q hasAttachment=%v", userID, text, fileID != "")
 
 	projectID := s.getActiveProject(userID)
 	if projectID == "" {
@@ -524,7 +524,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	if fileID != "" {
 		attCtx, imgAtts, chatAtts, err := s.downloadAndSaveTelegramAttachment(ctx, fileID, fileName, fileSize, mimeType)
 		if err != nil {
-			log.Printf("[telegram] attachment download error: %v", err)
+			applog.Infof("[telegram] attachment download error: %v", err)
 			s.sendMessage(chatID, fmt.Sprintf("⚠️ Failed to process attachment: %v", err))
 			// Continue without the attachment
 		} else {
@@ -538,7 +538,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	// Auto-select agent (vision-aware if images present)
 	agent, err := s.autoSelectAgent(ctx, text, hasImages)
 	if err != nil {
-		log.Printf("[telegram] agent selection error: %v", err)
+		applog.Infof("[telegram] agent selection error: %v", err)
 		s.sendMessage(chatID, fmt.Sprintf("Error selecting model: %v", err))
 		return
 	}
@@ -548,7 +548,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	// This ensures the chat orchestrator remains responsive even when all task workers are busy.
 
 	if activeChatExec, activeErr := s.execRepo.FindLatestActiveChatExecution(ctx, projectID); activeErr != nil {
-		log.Printf("[telegram] error checking active chat turn: %v", activeErr)
+		applog.Infof("[telegram] error checking active chat turn: %v", activeErr)
 		s.sendMessage(chatID, "Error checking active chat response. Please try again.")
 		return
 	} else if activeChatExec != nil {
@@ -571,7 +571,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 		TelegramChatID: chatID,
 	}
 	if err := s.taskRepo.Create(ctx, task); err != nil {
-		log.Printf("[telegram] error creating task: %v", err)
+		applog.Infof("[telegram] error creating task: %v", err)
 		s.sendMessage(chatID, "Error processing your message. Please try again.")
 		return
 	}
@@ -584,15 +584,15 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 		PromptSent:    text,
 	}
 	if err := s.execRepo.Create(ctx, exec); err != nil {
-		log.Printf("[telegram] error creating execution: %v", err)
+		applog.Infof("[telegram] error creating execution: %v", err)
 		if delErr := s.taskRepo.Delete(ctx, task.ID); delErr != nil {
-			log.Printf("[telegram] cleanup chat task failed task=%s after execution create failure: %v", task.ID, delErr)
+			applog.Infof("[telegram] cleanup chat task failed task=%s after execution create failure: %v", task.ID, delErr)
 		}
 		s.sendMessage(chatID, "Error processing your message. Please try again.")
 		return
 	}
 
-	log.Printf("[telegram] created exec=%s task=%s for user=%d", exec.ID, task.ID, userID)
+	applog.Infof("[telegram] created exec=%s task=%s for user=%d", exec.ID, task.ID, userID)
 
 	// Broadcast new message event so /chat page updates in real-time
 	if s.chatBroadcaster != nil {
@@ -633,14 +633,14 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 		var err error
 		sentMsg, err = s.bot.Send(thinkingMsg)
 		if err != nil {
-			log.Printf("[telegram] error sending thinking message: %v", err)
+			applog.Infof("[telegram] error sending thinking message: %v", err)
 		}
 	}
 
 	// Load chat history
 	chatHistory, err := s.execRepo.ListChatHistory(ctx, projectID, telegramChatHistoryLimit)
 	if err != nil {
-		log.Printf("[telegram] error loading chat history: %v", err)
+		applog.Infof("[telegram] error loading chat history: %v", err)
 		chatHistory = []models.Execution{}
 	}
 	priorHistory := filterTelegramChatHistory(chatHistory, exec.ID)
@@ -818,7 +818,7 @@ func (s *TelegramService) downloadAndSaveTelegramAttachment(
 		return "", nil, nil, fmt.Errorf("failed to save file: %w", err)
 	}
 
-	log.Printf("[telegram] downloaded attachment file=%s size=%d mime=%s path=%s", fileName, written, mimeType, destPath)
+	applog.Infof("[telegram] downloaded attachment file=%s size=%d mime=%s path=%s", fileName, written, mimeType, destPath)
 
 	// Make the path absolute
 	absPath, err := filepath.Abs(destPath)
@@ -846,18 +846,18 @@ func (s *TelegramService) downloadAndSaveTelegramAttachment(
 			MediaType: mimeType,
 			FileSize:  written,
 		})
-		log.Printf("[telegram] image attachment file=%s size=%d", fileName, written)
+		applog.Infof("[telegram] image attachment file=%s size=%d", fileName, written)
 	} else if written <= telegramMaxTextFileSize {
 		// Small text/document files: read content and include in context
 		content, readErr := os.ReadFile(absPath)
 		if readErr == nil {
 			attachmentContext = fmt.Sprintf("\n\n--- Attached Files ---\n\nFile: %s\n```\n%s\n```\n", fileName, string(content))
-			log.Printf("[telegram] text attachment file=%s size=%d", fileName, written)
+			applog.Infof("[telegram] text attachment file=%s size=%d", fileName, written)
 		}
 	} else {
 		// Large files: mention but don't include content
 		attachmentContext = fmt.Sprintf("\n\n--- Attached Files ---\n\nFile: %s (attached, %d bytes - too large to include inline)\n", fileName, written)
-		log.Printf("[telegram] large file attachment file=%s size=%d (content not included)", fileName, written)
+		applog.Infof("[telegram] large file attachment file=%s size=%d (content not included)", fileName, written)
 	}
 
 	return attachmentContext, imageAttachments, chatAttachments, nil
@@ -904,7 +904,7 @@ func (s *TelegramService) linkAttachmentsToExecution(ctx context.Context, execID
 
 	execDir := filepath.Join(telegramUploadsDir, "chat", execID)
 	if err := os.MkdirAll(execDir, 0755); err != nil {
-		log.Printf("[telegram] error creating exec dir %s: %v", execDir, err)
+		applog.Infof("[telegram] error creating exec dir %s: %v", execDir, err)
 		return
 	}
 
@@ -914,7 +914,7 @@ func (s *TelegramService) linkAttachmentsToExecution(ctx context.Context, execID
 		// Move file from temp directory to execution directory
 		destPath := filepath.Join(execDir, filepath.Base(att.FileName))
 		if err := moveOrCopyFile(att.FilePath, destPath); err != nil {
-			log.Printf("[telegram] error moving attachment file=%s: %v", att.FileName, err)
+			applog.Infof("[telegram] error moving attachment file=%s: %v", att.FileName, err)
 			continue
 		}
 
@@ -934,9 +934,9 @@ func (s *TelegramService) linkAttachmentsToExecution(ctx context.Context, execID
 
 		// Create database record
 		if err := s.chatAttachmentRepo.Create(ctx, att); err != nil {
-			log.Printf("[telegram] error creating chat attachment record: %v", err)
+			applog.Infof("[telegram] error creating chat attachment record: %v", err)
 		} else {
-			log.Printf("[telegram] linked attachment id=%s file=%s to exec=%s", att.ID, att.FileName, execID)
+			applog.Infof("[telegram] linked attachment id=%s file=%s to exec=%s", att.ID, att.FileName, execID)
 		}
 	}
 }
@@ -1058,7 +1058,7 @@ func (s *TelegramService) autoSelectAgent(ctx context.Context, message string, h
 func (s *TelegramService) buildChatContext(ctx context.Context, projectID string) string {
 	existingTasks, err := s.taskSvc.ListByProject(ctx, projectID, "")
 	if err != nil {
-		log.Printf("[telegram] error listing tasks for context: %v", err)
+		applog.Infof("[telegram] error listing tasks for context: %v", err)
 		existingTasks = []models.Task{}
 	}
 
@@ -1068,7 +1068,7 @@ func (s *TelegramService) buildChatContext(ctx context.Context, projectID string
 	if s.scheduleRepo != nil {
 		schedules, err = s.scheduleRepo.ListByProject(ctx, projectID)
 		if err != nil {
-			log.Printf("[telegram] error listing schedules for context: %v", err)
+			applog.Infof("[telegram] error listing schedules for context: %v", err)
 			schedules = []models.Schedule{}
 		}
 	}
@@ -1082,7 +1082,7 @@ func (s *TelegramService) listChatAssignableAgentDefinitions(ctx context.Context
 	}
 	agents, err := s.agentRepo.List(ctx)
 	if err != nil {
-		log.Printf("[telegram] error listing agent definitions for context: %v", err)
+		applog.Infof("[telegram] error listing agent definitions for context: %v", err)
 		return nil
 	}
 	return UniqueChatAssignableAgentDefinitions(agents)
@@ -1142,7 +1142,7 @@ func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64,
 			createdTasks, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{req}, projectID, s.taskSvc, agents)
 			for _, t := range createdTasks {
 				if err := s.taskRepo.UpdateTelegramOrigin(ctx, t.ID, chatID); err != nil {
-					log.Printf("[telegram] runtime create_task error setting telegram origin for task %s: %v", t.ID, err)
+					applog.Infof("[telegram] runtime create_task error setting telegram origin for task %s: %v", t.ID, err)
 				}
 			}
 			if collector != nil {
@@ -1380,7 +1380,7 @@ func (s *TelegramService) executeSendToTask(ctx context.Context, projectID strin
 	}
 	if task.Category != models.CategoryActive {
 		if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
-			log.Printf("[telegram] runtime send_to_task error updating category for task %s: %v", task.ID, err)
+			applog.Infof("[telegram] runtime send_to_task error updating category for task %s: %v", task.ID, err)
 		}
 	}
 	s.channelTaskRunner(context.Background(), ChannelTaskRunRequest{
@@ -1462,7 +1462,7 @@ func (s *TelegramService) switchTelegramProjectResult(ctx context.Context, userI
 	s.userProjects[userID] = target.ID
 	if s.telegramUserProjectRepo != nil {
 		if err := s.telegramUserProjectRepo.SetUserProject(ctx, fmt.Sprintf("%d", userID), target.ID); err != nil {
-			log.Printf("[telegram] runtime switch_project error persisting selection: %v", err)
+			applog.Infof("[telegram] runtime switch_project error persisting selection: %v", err)
 		}
 	}
 	return fmt.Sprintf("Switched to project: %s", target.Name)
@@ -1476,7 +1476,7 @@ func (s *TelegramService) executeGetPersonalityChannel(ctx context.Context) stri
 	}
 	current, err := s.settingsRepo.Get(ctx, "personality")
 	if err != nil {
-		log.Printf("[telegram] executeGetPersonalityChannel error: %v", err)
+		applog.Infof("[telegram] executeGetPersonalityChannel error: %v", err)
 		return "Error retrieving personality setting."
 	}
 	if current == "" {
@@ -1886,19 +1886,19 @@ func (s *TelegramService) processViewThread(ctx context.Context, execID, project
 		return output
 	}
 
-	log.Printf("[telegram] processViewThread exec=%s found %d view requests", execID, len(viewRequests))
+	applog.Infof("[telegram] processViewThread exec=%s found %d view requests", execID, len(viewRequests))
 
 	for _, req := range viewRequests {
 		task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
 		if err != nil {
-			log.Printf("[telegram] processViewThread error resolving task: %v", err)
+			applog.Infof("[telegram] processViewThread error resolving task: %v", err)
 			output += fmt.Sprintf("\n\n---\nCould not find task: %v", err)
 			continue
 		}
 
 		executions, err := s.execRepo.ListByTaskChronological(ctx, task.ID)
 		if err != nil {
-			log.Printf("[telegram] processViewThread error listing executions for task %s: %v", task.ID, err)
+			applog.Infof("[telegram] processViewThread error listing executions for task %s: %v", task.ID, err)
 			output += fmt.Sprintf("\n\n---\nError retrieving thread for task \"%s\": %v", task.Title, err)
 			continue
 		}
@@ -1916,13 +1916,13 @@ func (s *TelegramService) processScheduleTask(ctx context.Context, execID, proje
 		return output
 	}
 
-	log.Printf("[telegram] processScheduleTask exec=%s found %d schedule requests", execID, len(scheduleRequests))
+	applog.Infof("[telegram] processScheduleTask exec=%s found %d schedule requests", execID, len(scheduleRequests))
 
 	var results []string
 	for _, req := range scheduleRequests {
 		task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
 		if err != nil {
-			log.Printf("[telegram] processScheduleTask error resolving task: %v", err)
+			applog.Infof("[telegram] processScheduleTask error resolving task: %v", err)
 			results = append(results, fmt.Sprintf("- Could not find task: %v", err))
 			continue
 		}
@@ -1930,7 +1930,7 @@ func (s *TelegramService) processScheduleTask(ctx context.Context, execID, proje
 		// Parse time (HH:MM format)
 		var hourVal, minuteVal int
 		if _, err := fmt.Sscanf(req.Time, "%d:%d", &hourVal, &minuteVal); err != nil || hourVal < 0 || hourVal > 23 || minuteVal < 0 || minuteVal > 59 {
-			log.Printf("[telegram] processScheduleTask invalid time: %s", req.Time)
+			applog.Infof("[telegram] processScheduleTask invalid time: %s", req.Time)
 			results = append(results, fmt.Sprintf("- Invalid time %q for task \"%s\" (expected HH:MM, 00:00-23:59)", req.Time, task.Title))
 			continue
 		}
@@ -2004,13 +2004,13 @@ func (s *TelegramService) processScheduleTask(ctx context.Context, execID, proje
 		}
 
 		if s.scheduleRepo == nil {
-			log.Printf("[telegram] processScheduleTask scheduleRepo is nil, cannot create schedule")
+			applog.Infof("[telegram] processScheduleTask scheduleRepo is nil, cannot create schedule")
 			results = append(results, fmt.Sprintf("- Error scheduling task \"%s\": schedule repository not available", task.Title))
 			continue
 		}
 
 		if err := s.scheduleRepo.Create(ctx, schedule); err != nil {
-			log.Printf("[telegram] processScheduleTask error creating schedule: %v", err)
+			applog.Infof("[telegram] processScheduleTask error creating schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Error scheduling task \"%s\": %v", task.Title, err))
 			continue
 		}
@@ -2018,11 +2018,11 @@ func (s *TelegramService) processScheduleTask(ctx context.Context, execID, proje
 		// Move task to scheduled category
 		if task.Category != models.CategoryScheduled {
 			if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryScheduled); err != nil {
-				log.Printf("[telegram] processScheduleTask error updating category: %v", err)
+				applog.Infof("[telegram] processScheduleTask error updating category: %v", err)
 			}
 			if task.Status != models.StatusPending {
 				if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
-					log.Printf("[telegram] processScheduleTask error updating status: %v", err)
+					applog.Infof("[telegram] processScheduleTask error updating status: %v", err)
 				}
 			}
 		}
@@ -2051,36 +2051,36 @@ func (s *TelegramService) processDeleteSchedule(ctx context.Context, execID, pro
 		return output
 	}
 
-	log.Printf("[telegram] processDeleteSchedule exec=%s found %d delete requests", execID, len(deleteRequests))
+	applog.Infof("[telegram] processDeleteSchedule exec=%s found %d delete requests", execID, len(deleteRequests))
 
 	var results []string
 	for _, req := range deleteRequests {
 		schedule, task, err := s.resolveScheduleReference(ctx, projectID, req.ScheduleID, req.TaskID, req.Title)
 		if err != nil {
-			log.Printf("[telegram] processDeleteSchedule error resolving schedule: %v", err)
+			applog.Infof("[telegram] processDeleteSchedule error resolving schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Could not find schedule: %v", err))
 			continue
 		}
 
 		if s.scheduleRepo == nil {
-			log.Printf("[telegram] processDeleteSchedule scheduleRepo is nil")
+			applog.Infof("[telegram] processDeleteSchedule scheduleRepo is nil")
 			results = append(results, fmt.Sprintf("- Error deleting schedule for task \"%s\": schedule repository not available", task.Title))
 			continue
 		}
 
 		if err := s.scheduleRepo.Delete(ctx, schedule.ID); err != nil {
-			log.Printf("[telegram] processDeleteSchedule error deleting schedule: %v", err)
+			applog.Infof("[telegram] processDeleteSchedule error deleting schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Error deleting schedule for task \"%s\": %v", task.Title, err))
 			continue
 		}
 
 		remaining, err := s.scheduleRepo.ListByTask(ctx, task.ID)
 		if err != nil {
-			log.Printf("[telegram] processDeleteSchedule error checking remaining schedules: %v", err)
+			applog.Infof("[telegram] processDeleteSchedule error checking remaining schedules: %v", err)
 		}
 		if len(remaining) == 0 && task.Category == models.CategoryScheduled {
 			if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryBacklog); err != nil {
-				log.Printf("[telegram] processDeleteSchedule error updating category: %v", err)
+				applog.Infof("[telegram] processDeleteSchedule error updating category: %v", err)
 			}
 		}
 
@@ -2101,19 +2101,19 @@ func (s *TelegramService) processModifySchedule(ctx context.Context, execID, pro
 		return output
 	}
 
-	log.Printf("[telegram] processModifySchedule exec=%s found %d modify requests", execID, len(modifyRequests))
+	applog.Infof("[telegram] processModifySchedule exec=%s found %d modify requests", execID, len(modifyRequests))
 
 	var results []string
 	for _, req := range modifyRequests {
 		schedule, task, err := s.resolveScheduleReference(ctx, projectID, req.ScheduleID, req.TaskID, req.Title)
 		if err != nil {
-			log.Printf("[telegram] processModifySchedule error resolving schedule: %v", err)
+			applog.Infof("[telegram] processModifySchedule error resolving schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Could not find schedule: %v", err))
 			continue
 		}
 
 		if s.scheduleRepo == nil {
-			log.Printf("[telegram] processModifySchedule scheduleRepo is nil")
+			applog.Infof("[telegram] processModifySchedule scheduleRepo is nil")
 			results = append(results, fmt.Sprintf("- Error modifying schedule for task \"%s\": schedule repository not available", task.Title))
 			continue
 		}
@@ -2215,7 +2215,7 @@ func (s *TelegramService) processModifySchedule(ctx context.Context, execID, pro
 		schedule.NextRun = nextRun
 
 		if err := s.scheduleRepo.Update(ctx, schedule); err != nil {
-			log.Printf("[telegram] processModifySchedule error updating schedule: %v", err)
+			applog.Infof("[telegram] processModifySchedule error updating schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Error updating schedule for task \"%s\": %v", task.Title, err))
 			continue
 		}
@@ -2279,7 +2279,7 @@ func (s *TelegramService) processListPersonalities(ctx context.Context, execID, 
 		return output
 	}
 
-	log.Printf("[telegram] processListPersonalities exec=%s", execID)
+	applog.Infof("[telegram] processListPersonalities exec=%s", execID)
 
 	personalities := AllPersonalitiesWithCustom(ctx, s.customPersonalityRepo)
 	var sb strings.Builder
@@ -2298,7 +2298,7 @@ func (s *TelegramService) processListPersonalities(ctx context.Context, execID, 
 	if s.settingsRepo != nil {
 		current, err := s.settingsRepo.Get(ctx, "personality")
 		if err != nil {
-			log.Printf("[telegram] processListPersonalities error reading current personality: %v", err)
+			applog.Infof("[telegram] processListPersonalities error reading current personality: %v", err)
 		}
 		if current == "" {
 			current = "default"
@@ -2317,7 +2317,7 @@ func (s *TelegramService) processSetPersonality(ctx context.Context, execID, pro
 		return output
 	}
 
-	log.Printf("[telegram] processSetPersonality exec=%s found %d requests", execID, len(requests))
+	applog.Infof("[telegram] processSetPersonality exec=%s found %d requests", execID, len(requests))
 
 	var results []string
 	for _, req := range requests {
@@ -2342,13 +2342,13 @@ func (s *TelegramService) processSetPersonality(ctx context.Context, execID, pro
 		}
 
 		if err := s.settingsRepo.Set(ctx, "personality", req.Personality); err != nil {
-			log.Printf("[telegram] processSetPersonality error: %v", err)
+			applog.Infof("[telegram] processSetPersonality error: %v", err)
 			results = append(results, fmt.Sprintf("- Error setting personality to %q: %v", req.Personality, err))
 			continue
 		}
 
 		results = append(results, fmt.Sprintf("- Personality changed to **%s** (`%s`)", matchedName, req.Personality))
-		log.Printf("[telegram] processSetPersonality set personality to %q", req.Personality)
+		applog.Infof("[telegram] processSetPersonality set personality to %q", req.Personality)
 	}
 
 	if len(results) > 0 {
@@ -2364,11 +2364,11 @@ func (s *TelegramService) processListModels(ctx context.Context, execID, project
 		return output
 	}
 
-	log.Printf("[telegram] processListModels exec=%s", execID)
+	applog.Infof("[telegram] processListModels exec=%s", execID)
 
 	configs, err := s.llmConfigRepo.List(ctx)
 	if err != nil {
-		log.Printf("[telegram] processListModels error listing models: %v", err)
+		applog.Infof("[telegram] processListModels error listing models: %v", err)
 		output += "\n\n---\nModel Settings:\n- Error retrieving model configurations: " + err.Error()
 		return output
 	}
@@ -2405,14 +2405,14 @@ func (s *TelegramService) processListAgents(ctx context.Context, execID, project
 	if !HasListAgents(output) {
 		return output
 	}
-	log.Printf("[telegram] processListAgents exec=%s", execID)
+	applog.Infof("[telegram] processListAgents exec=%s", execID)
 	if s.agentRepo == nil {
 		output += "\n\n---\nConfigured Agents:\nAgent definitions not available.\n"
 		return output
 	}
 	agents, err := s.agentRepo.List(ctx)
 	if err != nil {
-		log.Printf("[telegram] processListAgents error: %v", err)
+		applog.Infof("[telegram] processListAgents error: %v", err)
 		output += "\n\n---\nConfigured Agents:\n- Error: " + err.Error()
 		return output
 	}
@@ -2440,7 +2440,7 @@ func (s *TelegramService) processViewSettings(ctx context.Context, execID, proje
 		return output
 	}
 
-	log.Printf("[telegram] processViewSettings exec=%s", execID)
+	applog.Infof("[telegram] processViewSettings exec=%s", execID)
 
 	var sb strings.Builder
 	sb.WriteString("\n\n---\nApp Settings:\n")
@@ -2449,7 +2449,7 @@ func (s *TelegramService) processViewSettings(ctx context.Context, execID, proje
 	if s.settingsRepo != nil {
 		personality, err := s.settingsRepo.Get(ctx, "personality")
 		if err != nil {
-			log.Printf("[telegram] processViewSettings error reading personality: %v", err)
+			applog.Infof("[telegram] processViewSettings error reading personality: %v", err)
 		}
 		if personality == "" {
 			personality = "default (no personality)"
@@ -2460,7 +2460,7 @@ func (s *TelegramService) processViewSettings(ctx context.Context, execID, proje
 	// Model count
 	configs, err := s.llmConfigRepo.List(ctx)
 	if err != nil {
-		log.Printf("[telegram] processViewSettings error listing models: %v", err)
+		applog.Infof("[telegram] processViewSettings error listing models: %v", err)
 	} else {
 		sb.WriteString(fmt.Sprintf("- **Configured models:** %d\n", len(configs)))
 		for _, c := range configs {
@@ -2475,7 +2475,7 @@ func (s *TelegramService) processViewSettings(ctx context.Context, execID, proje
 	// Per-project worker limits
 	projects, err := s.projectRepo.List(ctx)
 	if err != nil {
-		log.Printf("[telegram] processViewSettings error listing projects: %v", err)
+		applog.Infof("[telegram] processViewSettings error listing projects: %v", err)
 	} else {
 		hasProjectLimits := false
 		for _, p := range projects {
@@ -2523,7 +2523,7 @@ func (s *TelegramService) processProjectInfo(ctx context.Context, execID, projec
 		return output
 	}
 
-	log.Printf("[telegram] processProjectInfo exec=%s project=%s", execID, projectID)
+	applog.Infof("[telegram] processProjectInfo exec=%s project=%s", execID, projectID)
 
 	var sb strings.Builder
 	sb.WriteString("\n\n---\nProject Info:\n")
@@ -2531,7 +2531,7 @@ func (s *TelegramService) processProjectInfo(ctx context.Context, execID, projec
 	// Get project details
 	project, err := s.projectRepo.GetByID(ctx, projectID)
 	if err != nil || project == nil {
-		log.Printf("[telegram] processProjectInfo error getting project: %v", err)
+		applog.Infof("[telegram] processProjectInfo error getting project: %v", err)
 		sb.WriteString("- Error retrieving project details\n")
 		output += sb.String()
 		return output
@@ -2548,7 +2548,7 @@ func (s *TelegramService) processProjectInfo(ctx context.Context, execID, projec
 	// Task counts by category
 	categoryCounts, err := s.taskRepo.CountByProjectAndCategory(ctx, projectID)
 	if err != nil {
-		log.Printf("[telegram] processProjectInfo error counting tasks: %v", err)
+		applog.Infof("[telegram] processProjectInfo error counting tasks: %v", err)
 	} else {
 		total := 0
 		for _, count := range categoryCounts {
@@ -2571,7 +2571,7 @@ func (s *TelegramService) processListAlerts(ctx context.Context, execID, project
 		return output
 	}
 
-	log.Printf("[telegram] processListAlerts exec=%s project=%s", execID, projectID)
+	applog.Infof("[telegram] processListAlerts exec=%s project=%s", execID, projectID)
 
 	if s.alertSvc == nil {
 		output += "\n\n---\nAlert Results:\n- Alert service not available"
@@ -2580,7 +2580,7 @@ func (s *TelegramService) processListAlerts(ctx context.Context, execID, project
 
 	alerts, err := s.alertSvc.ListByProject(ctx, projectID, 50)
 	if err != nil {
-		log.Printf("[telegram] processListAlerts error listing alerts: %v", err)
+		applog.Infof("[telegram] processListAlerts error listing alerts: %v", err)
 		output += "\n\n---\nAlert Results:\n- Error retrieving alerts: " + err.Error()
 		return output
 	}
@@ -2620,7 +2620,7 @@ func (s *TelegramService) processCreateAlert(ctx context.Context, execID, projec
 		return output
 	}
 
-	log.Printf("[telegram] processCreateAlert exec=%s found %d requests", execID, len(requests))
+	applog.Infof("[telegram] processCreateAlert exec=%s found %d requests", execID, len(requests))
 
 	if s.alertSvc == nil {
 		output += "\n\n---\nAlert Create Results:\n- Alert service not available"
@@ -2667,7 +2667,7 @@ func (s *TelegramService) processCreateAlert(ctx context.Context, execID, projec
 		}
 
 		if err := s.alertSvc.Create(ctx, a); err != nil {
-			log.Printf("[telegram] processCreateAlert error: %v", err)
+			applog.Infof("[telegram] processCreateAlert error: %v", err)
 			results = append(results, fmt.Sprintf("- Error creating alert %q: %v", req.Title, err))
 			continue
 		}
@@ -2689,7 +2689,7 @@ func (s *TelegramService) processDeleteAlert(ctx context.Context, execID, projec
 		return output
 	}
 
-	log.Printf("[telegram] processDeleteAlert exec=%s found %d requests", execID, len(requests))
+	applog.Infof("[telegram] processDeleteAlert exec=%s found %d requests", execID, len(requests))
 
 	if s.alertSvc == nil {
 		output += "\n\n---\nAlert Delete Results:\n- Alert service not available"
@@ -2699,7 +2699,7 @@ func (s *TelegramService) processDeleteAlert(ctx context.Context, execID, projec
 	var results []string
 	for _, req := range requests {
 		if err := s.alertSvc.Delete(ctx, req.AlertID); err != nil {
-			log.Printf("[telegram] processDeleteAlert error: %v", err)
+			applog.Infof("[telegram] processDeleteAlert error: %v", err)
 			results = append(results, fmt.Sprintf("- Error deleting alert %q: %v", req.AlertID, err))
 			continue
 		}
@@ -2720,7 +2720,7 @@ func (s *TelegramService) processToggleAlert(ctx context.Context, execID, projec
 		return output
 	}
 
-	log.Printf("[telegram] processToggleAlert exec=%s found %d requests", execID, len(requests))
+	applog.Infof("[telegram] processToggleAlert exec=%s found %d requests", execID, len(requests))
 
 	if s.alertSvc == nil {
 		output += "\n\n---\nAlert Toggle Results:\n- Alert service not available"
@@ -2730,7 +2730,7 @@ func (s *TelegramService) processToggleAlert(ctx context.Context, execID, projec
 	var results []string
 	for _, req := range requests {
 		if err := s.alertSvc.MarkRead(ctx, req.AlertID); err != nil {
-			log.Printf("[telegram] processToggleAlert error: %v", err)
+			applog.Infof("[telegram] processToggleAlert error: %v", err)
 			results = append(results, fmt.Sprintf("- Error marking alert %q as read: %v", req.AlertID, err))
 			continue
 		}
@@ -2816,11 +2816,11 @@ func (s *TelegramService) processListProjects(ctx context.Context, execID, proje
 		return output
 	}
 
-	log.Printf("[telegram] processListProjects exec=%s", execID)
+	applog.Infof("[telegram] processListProjects exec=%s", execID)
 
 	projects, err := s.projectRepo.List(ctx)
 	if err != nil {
-		log.Printf("[telegram] processListProjects error listing projects: %v", err)
+		applog.Infof("[telegram] processListProjects error listing projects: %v", err)
 		output += "\n\n---\nAvailable Projects:\n- Error retrieving projects: " + err.Error()
 		return output
 	}
@@ -2855,11 +2855,11 @@ func (s *TelegramService) processSwitchProject(ctx context.Context, execID, proj
 		return output
 	}
 
-	log.Printf("[telegram] processSwitchProject exec=%s found %d requests", execID, len(requests))
+	applog.Infof("[telegram] processSwitchProject exec=%s found %d requests", execID, len(requests))
 
 	projects, err := s.projectRepo.List(ctx)
 	if err != nil {
-		log.Printf("[telegram] processSwitchProject error listing projects: %v", err)
+		applog.Infof("[telegram] processSwitchProject error listing projects: %v", err)
 		output += "\n\n---\nProject Switch Results:\n- Error loading projects: " + err.Error()
 		return output
 	}
@@ -2887,11 +2887,11 @@ func (s *TelegramService) processSwitchProject(ctx context.Context, execID, proj
 		s.userProjects[userID] = targetProject.ID
 		if s.telegramUserProjectRepo != nil {
 			if err := s.telegramUserProjectRepo.SetUserProject(ctx, fmt.Sprintf("%d", userID), targetProject.ID); err != nil {
-				log.Printf("[telegram] processSwitchProject error persisting: %v", err)
+				applog.Infof("[telegram] processSwitchProject error persisting: %v", err)
 			}
 		}
 		results = append(results, fmt.Sprintf("- Switched to project: **%s**", targetProject.Name))
-		log.Printf("[telegram] processSwitchProject user=%d switched to project=%s (%s)", userID, targetProject.ID, targetProject.Name)
+		applog.Infof("[telegram] processSwitchProject user=%d switched to project=%s (%s)", userID, targetProject.ID, targetProject.Name)
 	}
 
 	if len(results) > 0 {
@@ -3046,20 +3046,20 @@ func buildTelegramTaskChatContext(taskTitle string, hasHistory bool) string {
 func (s *TelegramService) completeExecution(ctx context.Context, execID, taskID, output, errorMessage string, tokensUsed int, durationMs int64) {
 	if errorMessage != "" {
 		if err := s.execRepo.Complete(ctx, execID, models.ExecFailed, "", errorMessage, 0, durationMs); err != nil {
-			log.Printf("[telegram] error completing execution (failed): %v", err)
+			applog.Infof("[telegram] error completing execution (failed): %v", err)
 		}
 		if err := s.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed); err != nil {
-			log.Printf("[telegram] error updating task status (failed): %v", err)
+			applog.Infof("[telegram] error updating task status (failed): %v", err)
 		}
 		s.promoteQueuedChatAfterCompletion(ctx, taskID)
 		return
 	}
 
 	if err := s.execRepo.Complete(ctx, execID, models.ExecCompleted, output, "", tokensUsed, durationMs); err != nil {
-		log.Printf("[telegram] error completing execution: %v", err)
+		applog.Infof("[telegram] error completing execution: %v", err)
 	}
 	if err := s.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted); err != nil {
-		log.Printf("[telegram] error updating task status: %v", err)
+		applog.Infof("[telegram] error updating task status: %v", err)
 	}
 	s.promoteQueuedChatAfterCompletion(ctx, taskID)
 }
@@ -3101,7 +3101,7 @@ func (s *TelegramService) getActiveProject(userID int64) string {
 	if s.telegramUserProjectRepo != nil {
 		savedProjectID, err := s.telegramUserProjectRepo.GetUserProject(context.Background(), fmt.Sprintf("%d", userID))
 		if err != nil {
-			log.Printf("[telegram] error loading persisted project for user %d: %v", userID, err)
+			applog.Infof("[telegram] error loading persisted project for user %d: %v", userID, err)
 		} else if savedProjectID != "" {
 			s.userProjects[userID] = savedProjectID
 			return savedProjectID
@@ -3141,10 +3141,10 @@ func (s *TelegramService) sendMessage(chatID int64, text string) {
 
 		if _, err := s.bot.Send(msgConfig); err != nil {
 			// Retry without Markdown if parsing fails
-			log.Printf("[telegram] error sending message with Markdown: %v, retrying without", err)
+			applog.Infof("[telegram] error sending message with Markdown: %v, retrying without", err)
 			msgConfig.ParseMode = ""
 			if _, err := s.bot.Send(msgConfig); err != nil {
-				log.Printf("[telegram] error sending message: %v", err)
+				applog.Infof("[telegram] error sending message: %v", err)
 			}
 		}
 	}
@@ -3169,7 +3169,7 @@ func (s *TelegramService) editMessage(chatID int64, messageID int, text string) 
 		if _, err := s.bot.Send(edit); err != nil {
 			// Ignore "message is not modified" errors (content unchanged)
 			if !strings.Contains(err.Error(), "message is not modified") {
-				log.Printf("[telegram] error editing message: %v", err)
+				applog.Infof("[telegram] error editing message: %v", err)
 			}
 		}
 	}
@@ -3295,7 +3295,7 @@ func (s *TelegramService) SendTaskCompletionToChat(ctx context.Context, chatID i
 		message = fmt.Sprintf("✅ *Task completed:* %s\n\n%s", taskTitle, util.Truncate(cleaned, 3500))
 	}
 	s.sendMessage(chatID, message)
-	log.Printf("[telegram] sent completion notification for task %q to chat %d", taskTitle, chatID)
+	applog.Infof("[telegram] sent completion notification for task %q to chat %d", taskTitle, chatID)
 }
 
 // SendTaskCompletionNotification sends a task result back to the Telegram user
@@ -3304,39 +3304,39 @@ func (s *TelegramService) SendTaskCompletionNotification(ctx context.Context, ta
 	needsHydration := task.CreatedVia != models.TaskOriginTelegram || task.TelegramChatID == 0
 	if needsHydration {
 		if task.ID == "" || s.taskRepo == nil {
-			log.Printf("[telegram] completion notification task %s missing Telegram origin and cannot reload (has_id=%t task_repo_set=%t)", task.ID, task.ID != "", s.taskRepo != nil)
+			applog.Infof("[telegram] completion notification task %s missing Telegram origin and cannot reload (has_id=%t task_repo_set=%t)", task.ID, task.ID != "", s.taskRepo != nil)
 		} else {
-			log.Printf("[telegram] completion notification task %s missing Telegram origin in memory (created_via=%q chat_id=%d), reloading from DB", task.ID, task.CreatedVia, task.TelegramChatID)
+			applog.Infof("[telegram] completion notification task %s missing Telegram origin in memory (created_via=%q chat_id=%d), reloading from DB", task.ID, task.CreatedVia, task.TelegramChatID)
 			loadedTask, err := s.taskRepo.GetByID(ctx, task.ID)
 			if err != nil {
-				log.Printf("[telegram] failed reloading task %s for completion notification: %v", task.ID, err)
+				applog.Infof("[telegram] failed reloading task %s for completion notification: %v", task.ID, err)
 			} else if loadedTask == nil {
-				log.Printf("[telegram] task %s not found during completion notification reload", task.ID)
+				applog.Infof("[telegram] task %s not found during completion notification reload", task.ID)
 			} else {
 				task = *loadedTask
-				log.Printf("[telegram] reloaded task %s for completion notification (created_via=%q chat_id=%d category=%s)", task.ID, task.CreatedVia, task.TelegramChatID, task.Category)
+				applog.Infof("[telegram] reloaded task %s for completion notification (created_via=%q chat_id=%d category=%s)", task.ID, task.CreatedVia, task.TelegramChatID, task.Category)
 			}
 		}
 	}
 
 	if task.CreatedVia != models.TaskOriginTelegram {
-		log.Printf("[telegram] skipping completion notification for task %s: created_via=%q", task.ID, task.CreatedVia)
+		applog.Infof("[telegram] skipping completion notification for task %s: created_via=%q", task.ID, task.CreatedVia)
 		return
 	}
 	if task.TelegramChatID == 0 {
-		log.Printf("[telegram] skipping completion notification for task %s: missing telegram chat id", task.ID)
+		applog.Infof("[telegram] skipping completion notification for task %s: missing telegram chat id", task.ID)
 		return
 	}
 
 	// Check the setting
 	if !s.IsSendResponsesEnabled(ctx) {
-		log.Printf("[telegram] send-responses disabled, skipping notification for task %s", task.ID)
+		applog.Infof("[telegram] send-responses disabled, skipping notification for task %s", task.ID)
 		return
 	}
 
 	// Don't notify for chat tasks (they already get a direct response)
 	if task.Category == models.CategoryChat {
-		log.Printf("[telegram] skipping completion notification for task %s: category=chat", task.ID)
+		applog.Infof("[telegram] skipping completion notification for task %s: category=chat", task.ID)
 		return
 	}
 
@@ -3352,7 +3352,7 @@ func (s *TelegramService) SendTaskCompletionNotification(ctx context.Context, ta
 	}
 
 	s.sendMessage(task.TelegramChatID, message)
-	log.Printf("[telegram] sent completion notification for task %s to chat %d", task.ID, task.TelegramChatID)
+	applog.Infof("[telegram] sent completion notification for task %s to chat %d", task.ID, task.TelegramChatID)
 }
 
 func firstInt(values []int) int {

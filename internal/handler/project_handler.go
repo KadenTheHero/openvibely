@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -36,14 +36,14 @@ func (h *Handler) Home(c echo.Context) error {
 }
 
 func (h *Handler) Dashboard(c echo.Context) error {
-	log.Printf("[handler] Dashboard requested, project_id=%s", c.QueryParam("project_id"))
+	applog.Infof("[handler] Dashboard requested, project_id=%s", c.QueryParam("project_id"))
 
 	projects, err := h.projectSvc.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] Dashboard error listing projects: %v", err)
+		applog.Infof("[handler] Dashboard error listing projects: %v", err)
 		return err
 	}
-	log.Printf("[handler] Dashboard found %d projects", len(projects))
+	applog.Infof("[handler] Dashboard found %d projects", len(projects))
 
 	// Default to the first project
 	projectID := c.QueryParam("project_id")
@@ -60,20 +60,20 @@ func (h *Handler) Dashboard(c echo.Context) error {
 	}
 
 	counts, _ := h.taskSvc.CountByProjectAndCategory(c.Request().Context(), projectID)
-	log.Printf("[handler] Dashboard rendering project=%s counts=%v", projectID, counts)
+	applog.Infof("[handler] Dashboard rendering project=%s counts=%v", projectID, counts)
 
 	return render(c, http.StatusOK, pages.Dashboard(projects, currentProject, counts))
 }
 
 func (h *Handler) DashboardMockup(c echo.Context) error {
-	log.Printf("[handler] DashboardMockup requested, project_id=%s", c.QueryParam("project_id"))
+	applog.Infof("[handler] DashboardMockup requested, project_id=%s", c.QueryParam("project_id"))
 	return h.renderDashboardMockup(c, "", "", false, "")
 }
 
 func (h *Handler) DashboardMockupAction(c echo.Context) error {
 	projectID, err := h.getCurrentProjectID(c)
 	if err != nil {
-		log.Printf("[handler] DashboardMockupAction project resolve error: %v", err)
+		applog.Infof("[handler] DashboardMockupAction project resolve error: %v", err)
 		return err
 	}
 	if projectID == "" {
@@ -100,7 +100,7 @@ func (h *Handler) renderDashboardMockup(c echo.Context, actionMessage, actionTon
 	ctx := c.Request().Context()
 	projects, err := h.projectSvc.List(ctx)
 	if err != nil {
-		log.Printf("[handler] renderDashboardMockup error listing projects: %v", err)
+		applog.Infof("[handler] renderDashboardMockup error listing projects: %v", err)
 		return err
 	}
 
@@ -129,13 +129,13 @@ func (h *Handler) renderDashboardMockup(c echo.Context, actionMessage, actionTon
 }
 
 func (h *Handler) ListProjects(c echo.Context) error {
-	log.Printf("[handler] ListProjects requested")
+	applog.Infof("[handler] ListProjects requested")
 	projects, err := h.projectSvc.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] ListProjects error: %v", err)
+		applog.Infof("[handler] ListProjects error: %v", err)
 		return err
 	}
-	log.Printf("[handler] ListProjects returning %d projects", len(projects))
+	applog.Infof("[handler] ListProjects returning %d projects", len(projects))
 	return c.JSON(http.StatusOK, projects)
 }
 
@@ -290,7 +290,7 @@ func (h *Handler) PickProjectFolder(c echo.Context) error {
 				"error":    "Native folder picker is unavailable on this system. Paste an absolute path manually.",
 			})
 		}
-		log.Printf("[handler] PickProjectFolder error: %v", err)
+		applog.Infof("[handler] PickProjectFolder error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	if canceled || strings.TrimSpace(path) == "" {
@@ -342,10 +342,10 @@ func (h *Handler) CreateProject(c echo.Context) error {
 			p.MaxWorkers = &v
 		}
 	}
-	log.Printf("[handler] CreateProject name=%q description=%q repo_source=%q repo_path=%q repo_url=%q default_agent=%v max_workers=%v local_repo_path_enabled=%v", p.Name, p.Description, repoSource, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, localRepoPathEnabled)
+	applog.Infof("[handler] CreateProject name=%q description=%q repo_source=%q repo_path=%q repo_url=%q default_agent=%v max_workers=%v local_repo_path_enabled=%v", p.Name, p.Description, repoSource, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, localRepoPathEnabled)
 
 	if err := h.projectSvc.Create(c.Request().Context(), p); err != nil {
-		log.Printf("[handler] CreateProject error: %v", err)
+		applog.Infof("[handler] CreateProject error: %v", err)
 		if isHTMX(c) {
 			return h.projectErrorResponse(c, http.StatusBadRequest, err.Error())
 		}
@@ -380,23 +380,23 @@ func (h *Handler) CreateProject(c echo.Context) error {
 			dirPath := filepath.Clean(p.RepoPath)
 			if !filepath.IsAbs(dirPath) {
 				errMsg := fmt.Sprintf("Repository path must be an absolute path: %s", dirPath)
-				log.Printf("[handler] CreateProject error: %s", errMsg)
+				applog.Infof("[handler] CreateProject error: %s", errMsg)
 				_ = h.projectSvc.Delete(c.Request().Context(), p.ID)
 				return h.projectErrorResponse(c, http.StatusBadRequest, errMsg)
 			}
 			if strings.Contains(dirPath, "..") {
 				errMsg := "Repository path must not contain '..'"
-				log.Printf("[handler] CreateProject error: %s", errMsg)
+				applog.Infof("[handler] CreateProject error: %s", errMsg)
 				_ = h.projectSvc.Delete(c.Request().Context(), p.ID)
 				return h.projectErrorResponse(c, http.StatusBadRequest, errMsg)
 			}
 			if err := os.MkdirAll(dirPath, 0755); err != nil {
 				errMsg := fmt.Sprintf("Failed to create directory %s: %v", dirPath, err)
-				log.Printf("[handler] CreateProject error: %s", errMsg)
+				applog.Infof("[handler] CreateProject error: %s", errMsg)
 				_ = h.projectSvc.Delete(c.Request().Context(), p.ID)
 				return h.projectErrorResponse(c, http.StatusBadRequest, errMsg)
 			}
-			log.Printf("[handler] CreateProject created directory: %s", dirPath)
+			applog.Infof("[handler] CreateProject created directory: %s", dirPath)
 			p.RepoPath = dirPath
 			if err := h.projectSvc.Update(c.Request().Context(), p); err != nil {
 				_ = h.projectSvc.Delete(c.Request().Context(), p.ID)
@@ -406,15 +406,15 @@ func (h *Handler) CreateProject(c echo.Context) error {
 	}
 	if h.memorySvc != nil {
 		if err := h.memorySvc.EnsureProject(c.Request().Context(), p.ID); err != nil {
-			log.Printf("[handler] CreateProject warning: memory setup failed project=%s: %v", p.ID, err)
+			applog.Infof("[handler] CreateProject warning: memory setup failed project=%s: %v", p.ID, err)
 		}
 	}
 	if h.agentLibraryMaintenanceSvc != nil {
 		if err := h.agentLibraryMaintenanceSvc.EnsureProject(c.Request().Context(), p.ID); err != nil {
-			log.Printf("[handler] CreateProject warning: agent library maintenance setup failed project=%s: %v", p.ID, err)
+			applog.Infof("[handler] CreateProject warning: agent library maintenance setup failed project=%s: %v", p.ID, err)
 		}
 	}
-	log.Printf("[handler] CreateProject success id=%s, redirecting to tasks", p.ID)
+	applog.Infof("[handler] CreateProject success id=%s, redirecting to tasks", p.ID)
 	redirectURL := "/tasks?project_id=" + p.ID
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Redirect", redirectURL)
@@ -425,15 +425,15 @@ func (h *Handler) CreateProject(c echo.Context) error {
 
 func (h *Handler) UpdateProject(c echo.Context) error {
 	projectID := c.Param("id")
-	log.Printf("[handler] UpdateProject id=%s", projectID)
+	applog.Infof("[handler] UpdateProject id=%s", projectID)
 
 	p, err := h.projectSvc.GetByID(c.Request().Context(), projectID)
 	if err != nil {
-		log.Printf("[handler] UpdateProject fetch error: %v", err)
+		applog.Infof("[handler] UpdateProject fetch error: %v", err)
 		return err
 	}
 	if p == nil {
-		log.Printf("[handler] UpdateProject not found id=%s", projectID)
+		applog.Infof("[handler] UpdateProject not found id=%s", projectID)
 		return echo.NewHTTPError(http.StatusNotFound, "project not found")
 	}
 
@@ -488,16 +488,16 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 	} else {
 		p.MaxWorkers = nil
 	}
-	log.Printf("[handler] UpdateProject id=%s name=%q repo_source=%q repo_path=%q repo_url=%q default_agent=%v max_workers=%v local_repo_path_enabled=%v legacy_local_project=%v", projectID, p.Name, repoSource, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, localRepoPathEnabled, legacyLocalProject)
+	applog.Infof("[handler] UpdateProject id=%s name=%q repo_source=%q repo_path=%q repo_url=%q default_agent=%v max_workers=%v local_repo_path_enabled=%v legacy_local_project=%v", projectID, p.Name, repoSource, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, localRepoPathEnabled, legacyLocalProject)
 
 	if err := h.projectSvc.Update(c.Request().Context(), p); err != nil {
-		log.Printf("[handler] UpdateProject error: %v", err)
+		applog.Infof("[handler] UpdateProject error: %v", err)
 		if isHTMX(c) {
 			return h.projectErrorResponse(c, http.StatusBadRequest, err.Error())
 		}
 		return err
 	}
-	log.Printf("[handler] UpdateProject success id=%s", projectID)
+	applog.Infof("[handler] UpdateProject success id=%s", projectID)
 
 	// Return to current page
 	if isHTMX(c) {
@@ -532,22 +532,22 @@ func isGitHubPATNotConfiguredError(err error) bool {
 }
 
 func (h *Handler) NewProjectDialog(c echo.Context) error {
-	log.Printf("[handler] NewProjectDialog requested")
+	applog.Infof("[handler] NewProjectDialog requested")
 	agents, _ := h.llmConfigRepo.List(c.Request().Context())
 	return render(c, http.StatusOK, pages.NewProjectDialog(agents, h.isLocalRepoPathEnabled()))
 }
 
 func (h *Handler) EditProjectDialog(c echo.Context) error {
 	projectID := c.Param("id")
-	log.Printf("[handler] EditProjectDialog id=%s", projectID)
+	applog.Infof("[handler] EditProjectDialog id=%s", projectID)
 
 	p, err := h.projectSvc.GetByID(c.Request().Context(), projectID)
 	if err != nil {
-		log.Printf("[handler] EditProjectDialog fetch error: %v", err)
+		applog.Infof("[handler] EditProjectDialog fetch error: %v", err)
 		return err
 	}
 	if p == nil {
-		log.Printf("[handler] EditProjectDialog not found id=%s", projectID)
+		applog.Infof("[handler] EditProjectDialog not found id=%s", projectID)
 		return echo.NewHTTPError(http.StatusNotFound, "project not found")
 	}
 
@@ -558,31 +558,31 @@ func (h *Handler) EditProjectDialog(c echo.Context) error {
 
 func (h *Handler) DeleteProject(c echo.Context) error {
 	projectID := c.Param("id")
-	log.Printf("[handler] DeleteProject id=%s", projectID)
+	applog.Infof("[handler] DeleteProject id=%s", projectID)
 
 	ctx := c.Request().Context()
 
 	p, err := h.projectSvc.GetByID(ctx, projectID)
 	if err != nil {
-		log.Printf("[handler] DeleteProject fetch error: %v", err)
+		applog.Infof("[handler] DeleteProject fetch error: %v", err)
 		return err
 	}
 	if p == nil {
-		log.Printf("[handler] DeleteProject not found id=%s", projectID)
+		applog.Infof("[handler] DeleteProject not found id=%s", projectID)
 		return echo.NewHTTPError(http.StatusNotFound, "project not found")
 	}
 
 	if p.IsDefault {
-		log.Printf("[handler] DeleteProject refused: cannot delete default project id=%s", projectID)
+		applog.Infof("[handler] DeleteProject refused: cannot delete default project id=%s", projectID)
 		return echo.NewHTTPError(http.StatusBadRequest, "cannot delete the default project")
 	}
 
 	if err := h.projectSvc.Delete(ctx, projectID); err != nil {
-		log.Printf("[handler] DeleteProject error: %v", err)
+		applog.Infof("[handler] DeleteProject error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete project")
 	}
 
-	log.Printf("[handler] DeleteProject success id=%s", projectID)
+	applog.Infof("[handler] DeleteProject success id=%s", projectID)
 
 	// Find the default project to redirect to
 	projects, _ := h.projectSvc.List(ctx)
@@ -601,11 +601,11 @@ func (h *Handler) DeleteProject(c echo.Context) error {
 func (h *Handler) ViewSchedule(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 	isHTMX := isHTMX(c)
-	log.Printf("[handler] ViewSchedule requested for project_id=%s htmx=%v", projectID, isHTMX)
+	applog.Infof("[handler] ViewSchedule requested for project_id=%s htmx=%v", projectID, isHTMX)
 
 	projects, err := h.projectSvc.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] ViewSchedule error listing projects: %v", err)
+		applog.Infof("[handler] ViewSchedule error listing projects: %v", err)
 		return err
 	}
 
@@ -623,7 +623,7 @@ func (h *Handler) ViewSchedule(c echo.Context) error {
 	}
 
 	if currentProject == nil {
-		log.Printf("[handler] ViewSchedule project not found: %s", projectID)
+		applog.Infof("[handler] ViewSchedule project not found: %s", projectID)
 		return echo.NewHTTPError(http.StatusNotFound, "project not found")
 	}
 
@@ -635,16 +635,16 @@ func (h *Handler) ViewSchedule(c echo.Context) error {
 		}
 	}
 
-	log.Printf("[handler] ViewSchedule loading week with offset %d", weekOffset)
+	applog.Infof("[handler] ViewSchedule loading week with offset %d", weekOffset)
 
 	// Get tasks with schedules for this project
 	tasks, err := h.taskSvc.GetTasksWithSchedulesByProject(c.Request().Context(), projectID)
 	if err != nil {
-		log.Printf("[handler] ViewSchedule error fetching tasks with schedules: %v", err)
+		applog.Infof("[handler] ViewSchedule error fetching tasks with schedules: %v", err)
 		return err
 	}
 
-	log.Printf("[handler] ViewSchedule found %d tasks with schedules", len(tasks))
+	applog.Infof("[handler] ViewSchedule found %d tasks with schedules", len(tasks))
 
 	// Get agents for the new scheduled task form
 	agents, _ := h.llmConfigRepo.List(c.Request().Context())

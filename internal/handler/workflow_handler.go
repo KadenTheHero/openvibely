@@ -2,10 +2,10 @@ package handler
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -18,20 +18,20 @@ func (h *Handler) ListWorkflows(c echo.Context) error {
 
 	workflows, err := h.workflowSvc.ListWorkflows(c.Request().Context(), projectID)
 	if err != nil {
-		log.Printf("[handler] ListWorkflows error: %v", err)
+		applog.Infof("[handler] ListWorkflows error: %v", err)
 		return c.String(http.StatusInternalServerError, "Failed to list workflows")
 	}
 
 	templates, err := h.workflowSvc.ListTemplates(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] ListWorkflows templates error: %v", err)
+		applog.Infof("[handler] ListWorkflows templates error: %v", err)
 		templates = nil
 	}
 
 	// Get all agents for display
 	agents, err := h.llmConfigRepo.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] ListWorkflows agents error: %v", err)
+		applog.Infof("[handler] ListWorkflows agents error: %v", err)
 		agents = nil
 	}
 
@@ -69,7 +69,7 @@ func (h *Handler) CreateWorkflow(c echo.Context) error {
 		// Create from template
 		workflow, err = h.workflowSvc.CreateWorkflowFromTemplate(c.Request().Context(), projectID, templateID, name)
 		if err != nil {
-			log.Printf("[handler] CreateWorkflow from template error: %v", err)
+			applog.Infof("[handler] CreateWorkflow from template error: %v", err)
 			return c.String(http.StatusInternalServerError, fmt.Sprintf("Failed to create workflow: %v", err))
 		}
 	} else {
@@ -87,7 +87,7 @@ func (h *Handler) CreateWorkflow(c echo.Context) error {
 			Config:      "{}",
 		}
 		if err := h.workflowSvc.CreateWorkflow(c.Request().Context(), workflow); err != nil {
-			log.Printf("[handler] CreateWorkflow error: %v", err)
+			applog.Infof("[handler] CreateWorkflow error: %v", err)
 			return c.String(http.StatusInternalServerError, fmt.Sprintf("Failed to create workflow: %v", err))
 		}
 	}
@@ -106,19 +106,19 @@ func (h *Handler) GetWorkflow(c echo.Context) error {
 
 	steps, err := h.workflowSvc.ListSteps(c.Request().Context(), id)
 	if err != nil {
-		log.Printf("[handler] GetWorkflow steps error: %v", err)
+		applog.Infof("[handler] GetWorkflow steps error: %v", err)
 		steps = nil
 	}
 
 	executions, err := h.workflowSvc.ListWorkflowExecutions(c.Request().Context(), id)
 	if err != nil {
-		log.Printf("[handler] GetWorkflow executions error: %v", err)
+		applog.Infof("[handler] GetWorkflow executions error: %v", err)
 		executions = nil
 	}
 
 	agents, err := h.llmConfigRepo.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] GetWorkflow agents error: %v", err)
+		applog.Infof("[handler] GetWorkflow agents error: %v", err)
 		agents = nil
 	}
 
@@ -150,7 +150,7 @@ func (h *Handler) UpdateWorkflow(c echo.Context) error {
 	}
 
 	if err := h.workflowSvc.UpdateWorkflow(c.Request().Context(), workflow); err != nil {
-		log.Printf("[handler] UpdateWorkflow error: %v", err)
+		applog.Infof("[handler] UpdateWorkflow error: %v", err)
 		return c.String(http.StatusInternalServerError, "Failed to update workflow")
 	}
 
@@ -161,7 +161,7 @@ func (h *Handler) UpdateWorkflow(c echo.Context) error {
 func (h *Handler) DeleteWorkflow(c echo.Context) error {
 	id := c.Param("id")
 	if err := h.workflowSvc.DeleteWorkflow(c.Request().Context(), id); err != nil {
-		log.Printf("[handler] DeleteWorkflow error: %v", err)
+		applog.Infof("[handler] DeleteWorkflow error: %v", err)
 		return c.String(http.StatusInternalServerError, "Failed to delete workflow")
 	}
 	return c.NoContent(http.StatusOK)
@@ -200,7 +200,7 @@ func (h *Handler) AddWorkflowStep(c echo.Context) error {
 	}
 
 	if err := h.workflowSvc.CreateStep(c.Request().Context(), step); err != nil {
-		log.Printf("[handler] AddWorkflowStep error: %v", err)
+		applog.Infof("[handler] AddWorkflowStep error: %v", err)
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Failed to add step: %v", err))
 	}
 
@@ -211,7 +211,7 @@ func (h *Handler) AddWorkflowStep(c echo.Context) error {
 func (h *Handler) DeleteWorkflowStep(c echo.Context) error {
 	stepID := c.Param("stepId")
 	if err := h.workflowSvc.DeleteStep(c.Request().Context(), stepID); err != nil {
-		log.Printf("[handler] DeleteWorkflowStep error: %v", err)
+		applog.Infof("[handler] DeleteWorkflowStep error: %v", err)
 		return c.String(http.StatusInternalServerError, "Failed to delete step")
 	}
 	return c.NoContent(http.StatusOK)
@@ -228,7 +228,7 @@ func (h *Handler) ExecuteWorkflow(c echo.Context) error {
 
 	exec, err := h.workflowSvc.ExecuteWorkflow(c.Request().Context(), workflowID, taskID)
 	if err != nil {
-		log.Printf("[handler] ExecuteWorkflow error: %v", err)
+		applog.Infof("[handler] ExecuteWorkflow error: %v", err)
 		return c.String(http.StatusInternalServerError, fmt.Sprintf("Failed to execute workflow: %v", err))
 	}
 
@@ -239,7 +239,7 @@ func (h *Handler) ExecuteWorkflow(c echo.Context) error {
 func (h *Handler) CancelWorkflowExecution(c echo.Context) error {
 	execID := c.Param("execId")
 	if err := h.workflowSvc.CancelWorkflowExecution(c.Request().Context(), execID); err != nil {
-		log.Printf("[handler] CancelWorkflowExecution error: %v", err)
+		applog.Infof("[handler] CancelWorkflowExecution error: %v", err)
 		return c.String(http.StatusInternalServerError, "Failed to cancel workflow execution")
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "cancelled"})
@@ -256,7 +256,7 @@ func (h *Handler) GetWorkflowExecution(c echo.Context) error {
 
 	stepExecs, err := h.workflowSvc.ListStepExecutions(c.Request().Context(), execID)
 	if err != nil {
-		log.Printf("[handler] GetWorkflowExecution steps error: %v", err)
+		applog.Infof("[handler] GetWorkflowExecution steps error: %v", err)
 		stepExecs = nil
 	}
 
@@ -276,7 +276,7 @@ func (h *Handler) GetWorkflowExecution(c echo.Context) error {
 func (h *Handler) ListWorkflowTemplates(c echo.Context) error {
 	templates, err := h.workflowSvc.ListTemplates(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] ListWorkflowTemplates error: %v", err)
+		applog.Infof("[handler] ListWorkflowTemplates error: %v", err)
 		return c.String(http.StatusInternalServerError, "Failed to list templates")
 	}
 	return c.JSON(http.StatusOK, templates)
@@ -293,7 +293,7 @@ func (h *Handler) AnalyzeTaskComplexity(c echo.Context) error {
 
 	recommendation, err := h.workflowSvc.AnalyzeTaskComplexity(c.Request().Context(), task)
 	if err != nil {
-		log.Printf("[handler] AnalyzeTaskComplexity error: %v", err)
+		applog.Infof("[handler] AnalyzeTaskComplexity error: %v", err)
 		return c.String(http.StatusInternalServerError, "Failed to analyze task")
 	}
 
@@ -314,7 +314,7 @@ func (h *Handler) GetAgentMetrics(c echo.Context) error {
 
 	metrics, err := h.workflowSvc.GetAgentMetrics(c.Request().Context(), agentID)
 	if err != nil {
-		log.Printf("[handler] GetAgentMetrics error: %v", err)
+		applog.Infof("[handler] GetAgentMetrics error: %v", err)
 		return c.String(http.StatusInternalServerError, "Failed to get metrics")
 	}
 
@@ -332,7 +332,7 @@ func (h *Handler) GetAgentMetrics(c echo.Context) error {
 func (h *Handler) GetAllAgentMetrics(c echo.Context) error {
 	metrics, err := h.workflowSvc.GetAllMetrics(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] GetAllAgentMetrics error: %v", err)
+		applog.Infof("[handler] GetAllAgentMetrics error: %v", err)
 		return c.String(http.StatusInternalServerError, "Failed to get metrics")
 	}
 
@@ -421,7 +421,7 @@ func (h *Handler) GetVoteRecords(c echo.Context) error {
 
 	votes, err := h.workflowSvc.ListVoteRecords(c.Request().Context(), stepExecID)
 	if err != nil {
-		log.Printf("[handler] GetVoteRecords error: %v", err)
+		applog.Infof("[handler] GetVoteRecords error: %v", err)
 		return c.String(http.StatusInternalServerError, "Failed to get votes")
 	}
 

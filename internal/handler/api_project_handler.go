@@ -1,10 +1,10 @@
 package handler
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 )
 
 // ProjectResponse represents a project in the API response
@@ -34,11 +34,11 @@ type ProjectsListResponse struct {
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/projects [get]
 func (h *Handler) APIGetProjects(c echo.Context) error {
-	log.Printf("[handler] APIGetProjects requested")
+	// applog.Debugf("[handler] APIGetProjects requested")
 
 	projects, err := h.projectSvc.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] APIGetProjects error: %v", err)
+		applog.Infof("[handler] APIGetProjects error: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "failed to fetch projects",
 		})
@@ -55,7 +55,7 @@ func (h *Handler) APIGetProjects(c echo.Context) error {
 		})
 	}
 
-	log.Printf("[handler] APIGetProjects returning %d projects", len(projectResponses))
+	// applog.Debugf("[handler] APIGetProjects returning %d projects", len(projectResponses))
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"projects": projectResponses,

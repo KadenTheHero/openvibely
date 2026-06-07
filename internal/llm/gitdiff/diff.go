@@ -2,11 +2,12 @@ package gitdiff
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/openvibely/openvibely/internal/applog"
 )
 
 // Capture runs `git diff HEAD` in the given directory to capture
@@ -33,7 +34,7 @@ func Capture(workDir string) string {
 		cmd2.Dir = workDir
 		out, err = cmd2.Output()
 		if err != nil {
-			log.Printf("[agent-svc] captureGitDiff error: %v", err)
+			applog.Infof("[agent-svc] captureGitDiff error: %v", err)
 			return ""
 		}
 	}

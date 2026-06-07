@@ -2,12 +2,12 @@ package handler
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
@@ -21,7 +21,7 @@ func (h *Handler) ListReviewComments(c echo.Context) error {
 
 	comments, err := h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
 	if err != nil {
-		log.Printf("[handler] ListReviewComments error: %v", err)
+		applog.Infof("[handler] ListReviewComments error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load review comments")
 	}
 
@@ -63,7 +63,7 @@ func (h *Handler) AddReviewComment(c echo.Context) error {
 	}
 
 	if err := h.reviewCommentRepo.Create(c.Request().Context(), comment); err != nil {
-		log.Printf("[handler] AddReviewComment error: %v", err)
+		applog.Infof("[handler] AddReviewComment error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to add review comment")
 	}
 
@@ -85,7 +85,7 @@ func (h *Handler) UpdateReviewComment(c echo.Context) error {
 	}
 
 	if err := h.reviewCommentRepo.UpdateText(c.Request().Context(), id, commentText); err != nil {
-		log.Printf("[handler] UpdateReviewComment error: %v", err)
+		applog.Infof("[handler] UpdateReviewComment error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update review comment")
 	}
 
@@ -100,7 +100,7 @@ func (h *Handler) DeleteReviewComment(c echo.Context) error {
 	}
 
 	if err := h.reviewCommentRepo.Delete(c.Request().Context(), id); err != nil {
-		log.Printf("[handler] DeleteReviewComment error: %v", err)
+		applog.Infof("[handler] DeleteReviewComment error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete review comment")
 	}
 
@@ -151,16 +151,16 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 	// Set status to "queued" (same pattern as TaskThreadSend — processStreamingResponse
 	// will acquire worker slots and transition to "running").
 	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
-		log.Printf("[handler] SubmitReview setting task=%s status=queued (was %s)", taskID, task.Status)
+		applog.Infof("[handler] SubmitReview setting task=%s status=queued (was %s)", taskID, task.Status)
 		if err := h.taskRepo.UpdateStatus(c.Request().Context(), taskID, models.StatusQueued); err != nil {
-			log.Printf("[handler] SubmitReview error setting status: %v", err)
+			applog.Infof("[handler] SubmitReview error setting status: %v", err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to update task status")
 		}
 	}
 	// Always move to active category so the task appears in the Active column
 	if task.Category != models.CategoryActive {
 		if err := h.taskRepo.UpdateCategory(c.Request().Context(), taskID, models.CategoryActive); err != nil {
-			log.Printf("[handler] SubmitReview error updating category: %v", err)
+			applog.Infof("[handler] SubmitReview error updating category: %v", err)
 		}
 	}
 
@@ -173,11 +173,11 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 		IsFollowup:    true,
 	}
 	if err := h.execRepo.Create(c.Request().Context(), exec); err != nil {
-		log.Printf("[handler] SubmitReview error creating execution: %v", err)
+		applog.Infof("[handler] SubmitReview error creating execution: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
 	}
 
-	log.Printf("[handler] SubmitReview created review exec=%s for task=%s with %d comments", exec.ID, taskID, len(comments))
+	applog.Infof("[handler] SubmitReview created review exec=%s for task=%s with %d comments", exec.ID, taskID, len(comments))
 
 	// Build system context and spawn LLM processing
 	h.reactivateAchievedGoalForManualFollowup(c.Request().Context(), taskID, models.TaskOriginWeb, "")
@@ -209,7 +209,7 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 
 	// Clear the review comments after submission
 	if err := h.reviewCommentRepo.DeleteByTask(c.Request().Context(), taskID); err != nil {
-		log.Printf("[handler] SubmitReview error clearing comments: %v", err)
+		applog.Infof("[handler] SubmitReview error clearing comments: %v", err)
 	}
 
 	// Redirect to chat tab to see the review being processed

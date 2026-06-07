@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/agentplugins"
+	"github.com/openvibely/openvibely/internal/applog"
 	llmretry "github.com/openvibely/openvibely/internal/llm/retry"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/util"
@@ -632,7 +632,7 @@ func (h *Handler) installPluginForModalAgent(c echo.Context, pluginID, scope, ag
 	}
 	if !alreadyInstalled {
 		if err := installPluginFn(c.Request().Context(), pluginID, scope); err != nil {
-			log.Printf("[handler] InstallPlugin error: %v", err)
+			applog.Infof("[handler] InstallPlugin error: %v", err)
 			projectID, _ := h.getCurrentProjectID(c)
 			h.createPluginRuntimeAlert(projectID, fmt.Sprintf("Plugin install failed: %s", pluginID), shortGenerationError(err))
 			return "", err, nil
@@ -649,7 +649,7 @@ func (h *Handler) installPluginForModalAgent(c echo.Context, pluginID, scope, ag
 	warning = ""
 	if err := ensurePluginMCPRunningFn(startCtx, []string{pluginID}, workDir); err != nil {
 		warning = shortGenerationError(err)
-		log.Printf("[handler] InstallPlugin MCP startup warning plugin=%q: %v", pluginID, err)
+		applog.Infof("[handler] InstallPlugin MCP startup warning plugin=%q: %v", pluginID, err)
 		projectID, _ := h.getCurrentProjectID(c)
 		h.createPluginRuntimeAlert(projectID, fmt.Sprintf("Plugin MCP startup failed: %s", pluginID), warning)
 	}
@@ -658,7 +658,7 @@ func (h *Handler) installPluginForModalAgent(c echo.Context, pluginID, scope, ag
 		return warning, nil, nil
 	}
 	if err := h.enablePluginForAgent(c.Request().Context(), agentID, pluginID); err != nil {
-		log.Printf("[handler] InstallPlugin enable warning plugin=%q agent=%q: %v", pluginID, agentID, err)
+		applog.Infof("[handler] InstallPlugin enable warning plugin=%q agent=%q: %v", pluginID, agentID, err)
 		projectID, _ := h.getCurrentProjectID(c)
 		h.createPluginRuntimeAlert(projectID, fmt.Sprintf("Plugin enable failed: %s", pluginID), shortGenerationError(err))
 		return warning, nil, fmt.Errorf("could not enable plugin for agent: %w", err)
@@ -1038,7 +1038,7 @@ func (h *Handler) repairGenerateAgentJSON(ctx context.Context, rawOutput string,
 		if len(outputSample) > 500 {
 			outputSample = outputSample[:500] + "..."
 		}
-		log.Printf("[handler] GenerateAgent repair returned malformed JSON model=%s err=%v output=%q", cfg.Name, err, outputSample)
+		applog.Infof("[handler] GenerateAgent repair returned malformed JSON model=%s err=%v output=%q", cfg.Name, err, outputSample)
 		return generatedAgentResponse{}, fmt.Errorf("repair parse failed: %w", err)
 	}
 	return generated, nil
@@ -1056,7 +1056,7 @@ func (h *Handler) generateAgentWithLLM(ctx context.Context, prompt string, cfg m
 			generated, parseErr := parseGeneratedAgentOutput(output)
 			if parseErr == nil {
 				if attempt > 1 {
-					log.Printf("[handler] GenerateAgent default model generation succeeded after retry attempt=%d/%d model=%s", attempt, generateAgentTransientRetryCount, cfg.Name)
+					applog.Infof("[handler] GenerateAgent default model generation succeeded after retry attempt=%d/%d model=%s", attempt, generateAgentTransientRetryCount, cfg.Name)
 				}
 				return generated, nil
 			}
@@ -1066,14 +1066,14 @@ func (h *Handler) generateAgentWithLLM(ctx context.Context, prompt string, cfg m
 			if len(outputSample) > 500 {
 				outputSample = outputSample[:500] + "..."
 			}
-			log.Printf("[handler] GenerateAgent malformed JSON output attempt=%d/%d model=%s err=%v output=%q", attempt, generateAgentTransientRetryCount, cfg.Name, parseErr, outputSample)
+			applog.Infof("[handler] GenerateAgent malformed JSON output attempt=%d/%d model=%s err=%v output=%q", attempt, generateAgentTransientRetryCount, cfg.Name, parseErr, outputSample)
 			repaired, repairErr := h.repairGenerateAgentJSON(generateCtx, output, cfg, workDir)
 			if repairErr == nil {
-				log.Printf("[handler] GenerateAgent JSON repair succeeded attempt=%d/%d model=%s", attempt, generateAgentTransientRetryCount, cfg.Name)
+				applog.Infof("[handler] GenerateAgent JSON repair succeeded attempt=%d/%d model=%s", attempt, generateAgentTransientRetryCount, cfg.Name)
 				return repaired, nil
 			}
 
-			log.Printf("[handler] GenerateAgent JSON repair failed attempt=%d/%d model=%s err=%v", attempt, generateAgentTransientRetryCount, cfg.Name, repairErr)
+			applog.Infof("[handler] GenerateAgent JSON repair failed attempt=%d/%d model=%s err=%v", attempt, generateAgentTransientRetryCount, cfg.Name, repairErr)
 			lastErr = &generateAgentMalformedResponseError{modelName: cfg.Name, cause: parseErr}
 			if generateCtx.Err() != nil {
 				return generatedAgentResponse{}, generateCtx.Err()
@@ -1091,13 +1091,13 @@ func (h *Handler) generateAgentWithLLM(ctx context.Context, prompt string, cfg m
 		}
 
 		if isGenerateAgentMalformedModelOutputError(err) {
-			log.Printf("[handler] GenerateAgent provider returned malformed JSON error attempt=%d/%d model=%s err=%v", attempt, generateAgentTransientRetryCount, cfg.Name, err)
+			applog.Infof("[handler] GenerateAgent provider returned malformed JSON error attempt=%d/%d model=%s err=%v", attempt, generateAgentTransientRetryCount, cfg.Name, err)
 			repaired, repairErr := h.repairGenerateAgentJSON(generateCtx, err.Error(), cfg, workDir)
 			if repairErr == nil {
-				log.Printf("[handler] GenerateAgent provider-error JSON repair succeeded attempt=%d/%d model=%s", attempt, generateAgentTransientRetryCount, cfg.Name)
+				applog.Infof("[handler] GenerateAgent provider-error JSON repair succeeded attempt=%d/%d model=%s", attempt, generateAgentTransientRetryCount, cfg.Name)
 				return repaired, nil
 			}
-			log.Printf("[handler] GenerateAgent provider-error JSON repair failed attempt=%d/%d model=%s err=%v", attempt, generateAgentTransientRetryCount, cfg.Name, repairErr)
+			applog.Infof("[handler] GenerateAgent provider-error JSON repair failed attempt=%d/%d model=%s err=%v", attempt, generateAgentTransientRetryCount, cfg.Name, repairErr)
 			lastErr = &generateAgentMalformedResponseError{modelName: cfg.Name, cause: err}
 			if generateCtx.Err() != nil {
 				return generatedAgentResponse{}, generateCtx.Err()
@@ -1125,7 +1125,7 @@ func (h *Handler) generateAgentWithLLM(ctx context.Context, prompt string, cfg m
 			return generatedAgentResponse{}, err
 		}
 
-		log.Printf("[handler] GenerateAgent transient generation failure attempt=%d/%d model=%s prompt_len=%d err=%v", attempt, generateAgentTransientRetryCount, cfg.Name, len(activePrompt), err)
+		applog.Infof("[handler] GenerateAgent transient generation failure attempt=%d/%d model=%s prompt_len=%d err=%v", attempt, generateAgentTransientRetryCount, cfg.Name, len(activePrompt), err)
 		select {
 		case <-generateCtx.Done():
 			return generatedAgentResponse{}, generateCtx.Err()
@@ -1209,11 +1209,11 @@ func (h *Handler) GenerateAgent(c echo.Context) error {
 	if err != nil {
 		generated.GenerationError = buildGenerateAgentUserError(defaultModel.Name, err)
 		if isGenerateAgentRequestCanceled(err) {
-			log.Printf("[handler] GenerateAgent default model generation canceled model=%s provider=%s prompt_len=%d duration=%s err=%v", defaultModel.Name, defaultModel.Provider, len(prompt), duration, err)
+			applog.Infof("[handler] GenerateAgent default model generation canceled model=%s provider=%s prompt_len=%d duration=%s err=%v", defaultModel.Name, defaultModel.Provider, len(prompt), duration, err)
 		} else if errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "context deadline exceeded") {
-			log.Printf("[handler] GenerateAgent default model generation timed out model=%s provider=%s prompt_len=%d timeout=%s duration=%s err=%v", defaultModel.Name, defaultModel.Provider, len(prompt), generateAgentTimeout, duration, err)
+			applog.Infof("[handler] GenerateAgent default model generation timed out model=%s provider=%s prompt_len=%d timeout=%s duration=%s err=%v", defaultModel.Name, defaultModel.Provider, len(prompt), generateAgentTimeout, duration, err)
 		} else {
-			log.Printf("[handler] GenerateAgent default model generation failed model=%s provider=%s prompt_len=%d duration=%s err=%v", defaultModel.Name, defaultModel.Provider, len(prompt), duration, err)
+			applog.Infof("[handler] GenerateAgent default model generation failed model=%s provider=%s prompt_len=%d duration=%s err=%v", defaultModel.Name, defaultModel.Provider, len(prompt), duration, err)
 		}
 		return c.JSON(http.StatusOK, normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels))
 	}
@@ -1257,7 +1257,7 @@ func (h *Handler) createPluginRuntimeAlert(projectID, title, message string) {
 		Message:   util.TruncateWithSuffix(message, 1000, "..."),
 	}
 	if err := h.alertSvc.Create(bgCtx, alert); err != nil {
-		log.Printf("[handler] createPluginRuntimeAlert error: %v", err)
+		applog.Infof("[handler] createPluginRuntimeAlert error: %v", err)
 	}
 }
 
@@ -1272,7 +1272,7 @@ func (h *Handler) GetPluginState(c echo.Context) error {
 	state, err := discoverPluginStateFn(ctx)
 	runtime := pluginMCPRuntimeStateFn()
 	if err != nil {
-		log.Printf("[handler] GetPluginState error: %v", err)
+		applog.Infof("[handler] GetPluginState error: %v", err)
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"marketplaces": []models.PluginMarketplace{},
 			"installed":    []models.InstalledPlugin{},
@@ -1310,7 +1310,7 @@ func (h *Handler) AddPluginMarketplace(c echo.Context) error {
 		return writePluginJSONError(c, err)
 	}
 	if err := addMarketplaceFn(c.Request().Context(), payload.Source, payload.Scope); err != nil {
-		log.Printf("[handler] AddPluginMarketplace error: %v", err)
+		applog.Infof("[handler] AddPluginMarketplace error: %v", err)
 		return writePluginJSONError(c, err)
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"ok": true})
@@ -1322,7 +1322,7 @@ func (h *Handler) UpdatePluginMarketplace(c echo.Context) error {
 		return writePluginJSONError(c, fmt.Errorf("name is required"))
 	}
 	if err := updateMarketplaceFn(c.Request().Context(), name); err != nil {
-		log.Printf("[handler] UpdatePluginMarketplace error: %v", err)
+		applog.Infof("[handler] UpdatePluginMarketplace error: %v", err)
 		return writePluginJSONError(c, err)
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"ok": true})
@@ -1334,7 +1334,7 @@ func (h *Handler) DeletePluginMarketplace(c echo.Context) error {
 		return writePluginJSONError(c, fmt.Errorf("name is required"))
 	}
 	if err := removeMarketplaceFn(c.Request().Context(), name); err != nil {
-		log.Printf("[handler] DeletePluginMarketplace error: %v", err)
+		applog.Infof("[handler] DeletePluginMarketplace error: %v", err)
 		return writePluginJSONError(c, err)
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"ok": true})
@@ -1376,7 +1376,7 @@ func (h *Handler) UninstallPlugin(c echo.Context) error {
 		return writePluginJSONError(c, err)
 	}
 	if err := uninstallPluginFn(c.Request().Context(), payload.PluginID); err != nil {
-		log.Printf("[handler] UninstallPlugin error: %v", err)
+		applog.Infof("[handler] UninstallPlugin error: %v", err)
 		projectID, _ := h.getCurrentProjectID(c)
 		h.createPluginRuntimeAlert(projectID, fmt.Sprintf("Plugin uninstall failed: %s", payload.PluginID), shortGenerationError(err))
 		return writePluginJSONError(c, err)
@@ -1391,7 +1391,7 @@ func (h *Handler) UninstallPlugin(c echo.Context) error {
 
 	if err := reconcilePluginMCPRunningFn(reconcileCtx, workDir); err != nil {
 		warning := shortGenerationError(err)
-		log.Printf("[handler] UninstallPlugin MCP reconcile warning plugin=%q: %v", payload.PluginID, err)
+		applog.Infof("[handler] UninstallPlugin MCP reconcile warning plugin=%q: %v", payload.PluginID, err)
 		projectID, _ := h.getCurrentProjectID(c)
 		h.createPluginRuntimeAlert(projectID, fmt.Sprintf("Plugin MCP reconcile warning: %s", payload.PluginID), warning)
 	}
@@ -1401,7 +1401,7 @@ func (h *Handler) UninstallPlugin(c echo.Context) error {
 
 func (h *Handler) ResetPluginMarketplaces(c echo.Context) error {
 	if err := resetMarketplacesFn(c.Request().Context()); err != nil {
-		log.Printf("[handler] ResetPluginMarketplaces error: %v", err)
+		applog.Infof("[handler] ResetPluginMarketplaces error: %v", err)
 		return writePluginJSONError(c, err)
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"ok": true})
@@ -1430,7 +1430,7 @@ func buildAgentModelOptions(configs []models.LLMConfig) []models.AgentModelOptio
 
 func (h *Handler) ListAgents(c echo.Context) error {
 	isHtmx := isHTMX(c)
-	log.Printf("[handler] ListAgents requested htmx=%v", isHtmx)
+	// applog.Debugf("[handler] ListAgents requested htmx=%v", isHtmx)
 
 	if h.agentLibraryMaintenanceSvc != nil {
 		projectRoot := ""
@@ -1440,25 +1440,25 @@ func (h *Handler) ListAgents(c echo.Context) error {
 			}
 		}
 		if err := h.agentLibraryMaintenanceSvc.SyncRootDeclarations(c.Request().Context(), projectRoot); err != nil {
-			log.Printf("[handler] ListAgents sync root declarations warning: %v", err)
+			applog.Infof("[handler] ListAgents sync root declarations warning: %v", err)
 		}
 	}
 	agents, err := h.agentRepo.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] ListAgents error: %v", err)
+		applog.Infof("[handler] ListAgents error: %v", err)
 		return err
 	}
 	if err := h.materializeDBAgentsToDisk(c, agents); err != nil {
-		log.Printf("[handler] ListAgents materialize DB agents warning: %v", err)
+		applog.Infof("[handler] ListAgents materialize DB agents warning: %v", err)
 	} else if agents, err = h.agentRepo.List(c.Request().Context()); err != nil {
-		log.Printf("[handler] ListAgents reload after materialize error: %v", err)
+		applog.Infof("[handler] ListAgents reload after materialize error: %v", err)
 		return err
 	}
-	log.Printf("[handler] ListAgents found %d agents", len(agents))
+	// applog.Debugf("[handler] ListAgents found %d agents", len(agents))
 
 	modelConfigs, err := h.llmConfigRepo.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] ListAgents listing model configs failed: %v", err)
+		applog.Infof("[handler] ListAgents listing model configs failed: %v", err)
 		return err
 	}
 	modelOptions := buildAgentModelOptions(modelConfigs)
@@ -1483,7 +1483,7 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 	allowedModels := map[string]struct{}{}
 	modelConfigs, err := h.llmConfigRepo.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] CreateAgent listing model configs failed: %v", err)
+		applog.Infof("[handler] CreateAgent listing model configs failed: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	for _, cfg := range modelConfigs {
@@ -1498,7 +1498,7 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 	// Parse tools from JSON hidden field
 	if toolsJSON := c.FormValue("tools_json"); toolsJSON != "" {
 		if err := json.Unmarshal([]byte(toolsJSON), &agent.Tools); err != nil {
-			log.Printf("[handler] CreateAgent error parsing tools: %v", err)
+			applog.Infof("[handler] CreateAgent error parsing tools: %v", err)
 		}
 	}
 	if agent.Tools == nil {
@@ -1507,7 +1507,7 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 	agent.Tools = normalizeAgentTools(agent.Tools)
 	if toolConfigJSON := c.FormValue("tool_config_json"); toolConfigJSON != "" {
 		if err := json.Unmarshal([]byte(toolConfigJSON), &agent.ToolConfig); err != nil {
-			log.Printf("[handler] CreateAgent error parsing tool_config: %v", err)
+			applog.Infof("[handler] CreateAgent error parsing tool_config: %v", err)
 			return echo.NewHTTPError(http.StatusBadRequest, "Invalid tool configuration")
 		}
 	}
@@ -1518,7 +1518,7 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 	// Parse selected plugins from JSON hidden field
 	if pluginsJSON := c.FormValue("plugins_json"); pluginsJSON != "" {
 		if err := json.Unmarshal([]byte(pluginsJSON), &agent.Plugins); err != nil {
-			log.Printf("[handler] CreateAgent error parsing plugins: %v", err)
+			applog.Infof("[handler] CreateAgent error parsing plugins: %v", err)
 		}
 	}
 	validatedPlugins, err := h.normalizeAndValidateSelectedPlugins(c.Request().Context(), agent.Plugins)
@@ -1530,7 +1530,7 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 	// Parse skills from JSON hidden field
 	if skillsJSON := c.FormValue("skills_json"); skillsJSON != "" {
 		if err := json.Unmarshal([]byte(skillsJSON), &agent.Skills); err != nil {
-			log.Printf("[handler] CreateAgent error parsing skills: %v", err)
+			applog.Infof("[handler] CreateAgent error parsing skills: %v", err)
 		}
 	}
 	if agent.Skills == nil {
@@ -1540,7 +1540,7 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 	// Parse MCP servers from JSON hidden field
 	if mcpJSON := c.FormValue("mcp_servers_json"); mcpJSON != "" {
 		if err := json.Unmarshal([]byte(mcpJSON), &agent.MCPServers); err != nil {
-			log.Printf("[handler] CreateAgent error parsing mcp_servers: %v", err)
+			applog.Infof("[handler] CreateAgent error parsing mcp_servers: %v", err)
 		}
 	}
 	if agent.MCPServers == nil {
@@ -1551,11 +1551,11 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	log.Printf("[handler] CreateAgent name=%q model=%s tools=%d skills=%d mcp=%d",
+	applog.Infof("[handler] CreateAgent name=%q model=%s tools=%d skills=%d mcp=%d",
 		agent.Name, agent.Model, len(agent.Tools), len(agent.Skills), len(agent.MCPServers))
 
 	if err := h.agentRepo.Create(c.Request().Context(), &agent); err != nil {
-		log.Printf("[handler] CreateAgent error: %v", err)
+		applog.Infof("[handler] CreateAgent error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	if err := h.saveAgentLifecycleHooksFromForm(c, agent.ID); err != nil {
@@ -1589,7 +1589,7 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 	allowedModels := map[string]struct{}{}
 	modelConfigs, err := h.llmConfigRepo.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] UpdateAgent listing model configs failed: %v", err)
+		applog.Infof("[handler] UpdateAgent listing model configs failed: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	for _, cfg := range modelConfigs {
@@ -1603,13 +1603,13 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 
 	if toolsJSON := c.FormValue("tools_json"); toolsJSON != "" {
 		if err := json.Unmarshal([]byte(toolsJSON), &existing.Tools); err != nil {
-			log.Printf("[handler] UpdateAgent error parsing tools: %v", err)
+			applog.Infof("[handler] UpdateAgent error parsing tools: %v", err)
 		}
 	}
 	existing.Tools = normalizeAgentTools(existing.Tools)
 	if toolConfigJSON := c.FormValue("tool_config_json"); toolConfigJSON != "" {
 		if err := json.Unmarshal([]byte(toolConfigJSON), &existing.ToolConfig); err != nil {
-			log.Printf("[handler] UpdateAgent error parsing tool_config: %v", err)
+			applog.Infof("[handler] UpdateAgent error parsing tool_config: %v", err)
 			return echo.NewHTTPError(http.StatusBadRequest, "Invalid tool configuration")
 		}
 	}
@@ -1618,7 +1618,7 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 	}
 	if pluginsJSON := c.FormValue("plugins_json"); pluginsJSON != "" {
 		if err := json.Unmarshal([]byte(pluginsJSON), &existing.Plugins); err != nil {
-			log.Printf("[handler] UpdateAgent error parsing plugins: %v", err)
+			applog.Infof("[handler] UpdateAgent error parsing plugins: %v", err)
 		}
 	}
 	validatedPlugins, err := h.normalizeAndValidateSelectedPlugins(c.Request().Context(), existing.Plugins)
@@ -1628,12 +1628,12 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 	existing.Plugins = validatedPlugins
 	if skillsJSON := c.FormValue("skills_json"); skillsJSON != "" {
 		if err := json.Unmarshal([]byte(skillsJSON), &existing.Skills); err != nil {
-			log.Printf("[handler] UpdateAgent error parsing skills: %v", err)
+			applog.Infof("[handler] UpdateAgent error parsing skills: %v", err)
 		}
 	}
 	if mcpJSON := c.FormValue("mcp_servers_json"); mcpJSON != "" {
 		if err := json.Unmarshal([]byte(mcpJSON), &existing.MCPServers); err != nil {
-			log.Printf("[handler] UpdateAgent error parsing mcp_servers: %v", err)
+			applog.Infof("[handler] UpdateAgent error parsing mcp_servers: %v", err)
 		}
 	}
 
@@ -1641,10 +1641,10 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	log.Printf("[handler] UpdateAgent id=%s name=%q", id, existing.Name)
+	applog.Infof("[handler] UpdateAgent id=%s name=%q", id, existing.Name)
 
 	if err := h.agentRepo.Update(c.Request().Context(), existing); err != nil {
-		log.Printf("[handler] UpdateAgent error: %v", err)
+		applog.Infof("[handler] UpdateAgent error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	if existing.GeneratedStatus != models.AgentStatusProtected {
@@ -1664,10 +1664,10 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 
 func (h *Handler) DeleteAgent(c echo.Context) error {
 	id := c.Param("id")
-	log.Printf("[handler] DeleteAgent id=%s", id)
+	applog.Infof("[handler] DeleteAgent id=%s", id)
 
 	if err := h.agentRepo.Delete(c.Request().Context(), id); err != nil {
-		log.Printf("[handler] DeleteAgent error: %v", err)
+		applog.Infof("[handler] DeleteAgent error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 

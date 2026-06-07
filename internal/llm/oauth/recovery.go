@@ -3,10 +3,10 @@ package oauth
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"golang.org/x/sync/singleflight"
@@ -102,7 +102,7 @@ func (m *Manager) refreshSelectedLocked(ctx context.Context, cfg models.LLMConfi
 	// Another worker may have already refreshed and persisted tokens while this
 	// request was running or waiting for the singleflight lock.
 	if strings.TrimSpace(tokenUsed) != "" && loaded.OAuthAccessToken != "" && loaded.OAuthAccessToken != tokenUsed {
-		log.Printf("[oauth-recovery] selected config already refreshed id=%s provider=%s model=%s", loaded.ID, loaded.Provider, loaded.Model)
+		applog.Infof("[oauth-recovery] selected config already refreshed id=%s provider=%s model=%s", loaded.ID, loaded.Provider, loaded.Model)
 		return *loaded, nil
 	}
 	if strings.TrimSpace(tokenUsed) == "" && minTTL > 0 && loaded.OAuthAccessToken != "" && loaded.OAuthExpiresAt >= time.Now().Add(minTTL).UnixMilli() {
@@ -141,6 +141,6 @@ func (m *Manager) refreshSelectedLocked(ctx context.Context, cfg models.LLMConfi
 	if tokens.AccountID != "" {
 		loaded.OAuthAccountID = tokens.AccountID
 	}
-	log.Printf("[oauth-recovery] refreshed selected config id=%s provider=%s model=%s expires=%s", loaded.ID, loaded.Provider, loaded.Model, time.UnixMilli(loaded.OAuthExpiresAt).Format(time.RFC3339))
+	applog.Infof("[oauth-recovery] refreshed selected config id=%s provider=%s model=%s expires=%s", loaded.ID, loaded.Provider, loaded.Model, time.UnixMilli(loaded.OAuthExpiresAt).Format(time.RFC3339))
 	return *loaded, nil
 }

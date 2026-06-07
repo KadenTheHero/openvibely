@@ -2,12 +2,12 @@ package handler
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -28,7 +28,7 @@ func (h *Handler) UpdateTaskAutoMerge(c echo.Context) error {
 	}
 
 	if err := h.taskRepo.UpdateAutoMerge(c.Request().Context(), taskID, autoMerge, targetBranch); err != nil {
-		log.Printf("[handler] UpdateTaskAutoMerge error: %v", err)
+		applog.Infof("[handler] UpdateTaskAutoMerge error: %v", err)
 		return err
 	}
 
@@ -98,7 +98,7 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 
 	result, mergeErr := h.worktreeSvc.MergeBranch(c.Request().Context(), task, project.RepoPath, mergeType)
 	if mergeErr != nil {
-		log.Printf("[handler] MergeTaskBranch error: %v", mergeErr)
+		applog.Infof("[handler] MergeTaskBranch error: %v", mergeErr)
 		errMessage := "Local merge failed"
 		if result != nil && result.ErrorMessage != "" {
 			errMessage = fmt.Sprintf("Local merge failed: %s", result.ErrorMessage)
@@ -267,7 +267,7 @@ func (h *Handler) ResolveTaskConflicts(c echo.Context) error {
 
 	result, resolveErr := h.worktreeSvc.ResolveConflictsWithAI(c.Request().Context(), task, project.RepoPath)
 	if resolveErr != nil {
-		log.Printf("[handler] ResolveTaskConflicts error: %v", resolveErr)
+		applog.Infof("[handler] ResolveTaskConflicts error: %v", resolveErr)
 		errMessage := "Failed to resolve merge conflicts"
 		if result != nil && result.ErrorMessage != "" {
 			errMessage = result.ErrorMessage
@@ -339,7 +339,7 @@ func (h *Handler) CleanupTaskWorktree(c echo.Context) error {
 
 	deleteBranch := c.FormValue("delete_branch") == "on" || c.FormValue("delete_branch") == "true"
 	if cleanErr := h.worktreeSvc.CleanupWorktree(c.Request().Context(), task, project.RepoPath, deleteBranch); cleanErr != nil {
-		log.Printf("[handler] CleanupTaskWorktree error: %v", cleanErr)
+		applog.Infof("[handler] CleanupTaskWorktree error: %v", cleanErr)
 		return echo.NewHTTPError(http.StatusInternalServerError, cleanErr.Error())
 	}
 

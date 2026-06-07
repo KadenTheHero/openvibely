@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"path/filepath"
 	"strings"
+
+	"github.com/openvibely/openvibely/internal/applog"
 )
 
 // parseJSONStream reads JSON events from the Claude CLI stream-json output
@@ -84,7 +85,7 @@ func ParseJSONStream(reader io.Reader, writer *Writer, skipThinking bool) error 
 					switch dt {
 					case "text_delta":
 						if text, ok := delta["text"].(string); ok && text != "" {
-							log.Printf("[agent-svc] parseJSONStream: text_delta received, len=%d", len(text))
+							applog.Infof("[agent-svc] parseJSONStream: text_delta received, len=%d", len(text))
 							hasSeenTextDeltas = true
 							hasSeenActualText = true
 							WriteEvent(writer, Event{Type: EventTextDelta, Text: text}, skipThinking)
@@ -95,7 +96,7 @@ func ParseJSONStream(reader io.Reader, writer *Writer, skipThinking bool) error 
 						}
 					case "thinking_delta":
 						if thinking, ok := delta["thinking"].(string); ok && thinking != "" {
-							log.Printf("[agent-svc] parseJSONStream: thinking_delta received, len=%d, skipThinking=%v", len(thinking), skipThinking)
+							applog.Infof("[agent-svc] parseJSONStream: thinking_delta received, len=%d, skipThinking=%v", len(thinking), skipThinking)
 							hasSeenTextDeltas = true
 							WriteEvent(writer, Event{Type: EventThinkingText, Text: thinking}, skipThinking)
 						}
@@ -116,14 +117,14 @@ func ParseJSONStream(reader io.Reader, writer *Writer, skipThinking bool) error 
 					switch bt {
 					case "tool_use":
 						if name, ok := cb["name"].(string); ok && name != "" {
-							log.Printf("[agent-svc] parseJSONStream: tool_use started: %s", name)
+							applog.Infof("[agent-svc] parseJSONStream: tool_use started: %s", name)
 							currentToolName = name
 							toolInputJSON.Reset()
 							// Don't emit the marker yet — wait for content_block_stop
 							// so we can include tool input details (file path, command, etc.)
 						}
 					case "thinking":
-						log.Printf("[agent-svc] parseJSONStream: thinking block started, skipThinking=%v", skipThinking)
+						applog.Infof("[agent-svc] parseJSONStream: thinking block started, skipThinking=%v", skipThinking)
 						WriteEvent(writer, Event{Type: EventThinkingOpen}, skipThinking)
 					}
 				}
@@ -168,31 +169,31 @@ func ParseJSONStream(reader io.Reader, writer *Writer, skipThinking bool) error 
 				// response text appears only in this result event.
 				if result, ok := event["result"].(string); ok && result != "" {
 					if !hasSeenActualText {
-						log.Printf("[agent-svc] parseJSONStream: appending result (no text_delta seen), len=%d", len(result))
+						applog.Infof("[agent-svc] parseJSONStream: appending result (no text_delta seen), len=%d", len(result))
 						if writer.String() != "" {
 							WriteEvent(writer, Event{Type: EventRawOutput, Text: "\n"}, skipThinking)
 						}
 						WriteEvent(writer, Event{Type: EventRawOutput, Text: result}, skipThinking)
 						WriteEvent(writer, Event{Type: EventTextOnly, Text: result}, skipThinking)
 					} else {
-						log.Printf("[agent-svc] parseJSONStream: ignoring result (already have text output)")
+						applog.Infof("[agent-svc] parseJSONStream: ignoring result (already have text output)")
 					}
 				}
 				// Capture is_error and subtype for failure detection
 				if isErr, ok := event["is_error"].(bool); ok && isErr {
 					subtype, _ := event["subtype"].(string)
 					WriteEvent(writer, Event{Type: EventError, IsError: true, Subtype: subtype}, skipThinking)
-					log.Printf("[agent-svc] parseJSONStream: result is_error=true subtype=%s", subtype)
+					applog.Infof("[agent-svc] parseJSONStream: result is_error=true subtype=%s", subtype)
 				}
 
 			case "message":
 				// Complete assistant message (legacy/Anthropic format).
 				// Skip if text deltas were seen (content already streamed).
 				if !hasSeenTextDeltas {
-					log.Printf("[agent-svc] parseJSONStream: extracting message text (no deltas seen)")
+					applog.Infof("[agent-svc] parseJSONStream: extracting message text (no deltas seen)")
 					extractMessageText(event, writer, skipThinking)
 				} else {
-					log.Printf("[agent-svc] parseJSONStream: skipping message (already got deltas)")
+					applog.Infof("[agent-svc] parseJSONStream: skipping message (already got deltas)")
 				}
 
 			case "content_block_stop":
@@ -224,7 +225,7 @@ func ParseJSONStream(reader io.Reader, writer *Writer, skipThinking bool) error 
 				if errData, ok := event["error"].(map[string]interface{}); ok {
 					errType, _ := errData["type"].(string)
 					errMsg, _ := errData["message"].(string)
-					log.Printf("[agent-svc] parseJSONStream: API error: type=%s message=%s", errType, errMsg)
+					applog.Infof("[agent-svc] parseJSONStream: API error: type=%s message=%s", errType, errMsg)
 				}
 			}
 		} else if role, ok := event["role"].(string); ok {
@@ -234,18 +235,18 @@ func ParseJSONStream(reader io.Reader, writer *Writer, skipThinking bool) error 
 				// Complete assistant message without standard streaming "type" field.
 				// Only extract text when no text deltas are available.
 				if !hasSeenTextDeltas {
-					log.Printf("[agent-svc] parseJSONStream: extracting role=assistant message (no deltas)")
+					applog.Infof("[agent-svc] parseJSONStream: extracting role=assistant message (no deltas)")
 					extractMessageText(event, writer, skipThinking)
 				} else {
-					log.Printf("[agent-svc] parseJSONStream: skipping role=assistant (already got deltas)")
+					applog.Infof("[agent-svc] parseJSONStream: skipping role=assistant (already got deltas)")
 				}
 			case "system":
 				if sessionID, ok := event["session_id"].(string); ok && sessionID != "" {
 					WriteEvent(writer, Event{Type: EventSessionID, SessionID: sessionID}, skipThinking)
-					log.Printf("[agent-svc] parseJSONStream: session_id=%s", sessionID)
+					applog.Infof("[agent-svc] parseJSONStream: session_id=%s", sessionID)
 				}
 				if cost, ok := event["cost_usd"].(float64); ok {
-					log.Printf("[agent-svc] parseJSONStream: session cost=$%.4f", cost)
+					applog.Infof("[agent-svc] parseJSONStream: session cost=$%.4f", cost)
 				}
 			}
 		}
@@ -337,14 +338,14 @@ func ParseCodexJSONStream(reader io.Reader, writer *Writer, skipThinking bool) e
 		case "thread.started":
 			if threadID := codexString(event["thread_id"]); threadID != "" {
 				WriteEvent(writer, Event{Type: EventSessionID, SessionID: threadID}, skipThinking)
-				log.Printf("[agent-svc] parseCodexJSONStream: thread_id=%s", threadID)
+				applog.Infof("[agent-svc] parseCodexJSONStream: thread_id=%s", threadID)
 			}
 
 		case "error":
 			// Codex emits transient reconnect errors during network retries.
 			// Keep these out of user-visible output to avoid noisy duplication.
 			if msg := codexString(event["message"]); msg != "" {
-				log.Printf("[agent-svc] parseCodexJSONStream notice: %s", msg)
+				applog.Infof("[agent-svc] parseCodexJSONStream notice: %s", msg)
 			}
 		}
 	}

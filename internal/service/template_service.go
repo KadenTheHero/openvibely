@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -60,7 +60,7 @@ func (s *TemplateService) GetDashboard(ctx context.Context, projectID string) (*
 	// Get favorites
 	favorites, err := s.templateRepo.ListFavorites(ctx, projectID)
 	if err != nil {
-		log.Printf("[template-svc] error listing favorites: %v", err)
+		applog.Infof("[template-svc] error listing favorites: %v", err)
 		favorites = []models.TaskTemplate{}
 	}
 	data.Favorites = favorites
@@ -68,7 +68,7 @@ func (s *TemplateService) GetDashboard(ctx context.Context, projectID string) (*
 	// Get recently used (last 5)
 	recentlyUsed, err := s.templateRepo.ListRecentlyUsed(ctx, projectID, 5)
 	if err != nil {
-		log.Printf("[template-svc] error listing recently used: %v", err)
+		applog.Infof("[template-svc] error listing recently used: %v", err)
 		recentlyUsed = []models.TaskTemplate{}
 	}
 	data.RecentlyUsed = recentlyUsed
@@ -115,7 +115,7 @@ func (s *TemplateService) CreateFromTemplate(ctx context.Context, templateID, pr
 
 	// Increment template usage
 	if err := s.templateRepo.IncrementUsage(ctx, templateID); err != nil {
-		log.Printf("[template-svc] error incrementing usage: %v", err)
+		applog.Infof("[template-svc] error incrementing usage: %v", err)
 	}
 
 	return task, nil

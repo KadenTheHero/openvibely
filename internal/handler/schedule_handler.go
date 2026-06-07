@@ -2,12 +2,12 @@ package handler
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -20,14 +20,14 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 	isHTMX := isHTMX(c)
 
 	runAtStr := c.FormValue("run_at")
-	log.Printf("[handler] CreateSchedule task=%s run_at=%q repeat_type=%s interval=%s htmx=%v",
+	applog.Infof("[handler] CreateSchedule task=%s run_at=%q repeat_type=%s interval=%s htmx=%v",
 		taskID, runAtStr, c.FormValue("repeat_type"), c.FormValue("repeat_interval"), isHTMX)
 
 	// Parse the time in local timezone since the browser sends datetime-local values,
 	// then convert to UTC for consistent storage
 	runAt, err := time.ParseInLocation("2006-01-02T15:04", runAtStr, time.Local)
 	if err != nil {
-		log.Printf("[handler] CreateSchedule invalid date: %v", err)
+		applog.Infof("[handler] CreateSchedule invalid date: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
 	}
 	runAt = runAt.UTC()
@@ -57,16 +57,16 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 	// at 1:34 AM would skip today and not run until tomorrow).
 
 	if err := h.scheduleRepo.Create(c.Request().Context(), s); err != nil {
-		log.Printf("[handler] CreateSchedule error: %v", err)
+		applog.Infof("[handler] CreateSchedule error: %v", err)
 		return err
 	}
-	log.Printf("[handler] CreateSchedule success id=%s next_run=%v", s.ID, s.NextRun)
+	applog.Infof("[handler] CreateSchedule success id=%s next_run=%v", s.ID, s.NextRun)
 
 	// For HTMX requests, return the updated task detail content
 	if isHTMX {
 		task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
 		if err != nil {
-			log.Printf("[handler] CreateSchedule error fetching task: %v", err)
+			applog.Infof("[handler] CreateSchedule error fetching task: %v", err)
 			return err
 		}
 		if task == nil {
@@ -97,17 +97,17 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	isHTMX := isHTMX(c)
 
 	runAtStr := c.FormValue("run_at")
-	log.Printf("[handler] UpdateSchedule id=%s run_at=%q repeat_type=%s interval=%s htmx=%v",
+	applog.Infof("[handler] UpdateSchedule id=%s run_at=%q repeat_type=%s interval=%s htmx=%v",
 		id, runAtStr, c.FormValue("repeat_type"), c.FormValue("repeat_interval"), isHTMX)
 
 	// Get the existing schedule
 	schedule, err := h.scheduleRepo.GetByID(c.Request().Context(), id)
 	if err != nil {
-		log.Printf("[handler] UpdateSchedule error getting schedule: %v", err)
+		applog.Infof("[handler] UpdateSchedule error getting schedule: %v", err)
 		return err
 	}
 	if schedule == nil {
-		log.Printf("[handler] UpdateSchedule schedule not found id=%s", id)
+		applog.Infof("[handler] UpdateSchedule schedule not found id=%s", id)
 		return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
 	}
 
@@ -115,7 +115,7 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	// then convert to UTC for consistent storage
 	runAt, err := time.ParseInLocation("2006-01-02T15:04", runAtStr, time.Local)
 	if err != nil {
-		log.Printf("[handler] UpdateSchedule invalid date: %v", err)
+		applog.Infof("[handler] UpdateSchedule invalid date: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
 	}
 	runAt = runAt.UTC()
@@ -143,10 +143,10 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	schedule.NextRun = &runAt
 
 	if err := h.scheduleRepo.Update(c.Request().Context(), schedule); err != nil {
-		log.Printf("[handler] UpdateSchedule error: %v", err)
+		applog.Infof("[handler] UpdateSchedule error: %v", err)
 		return err
 	}
-	log.Printf("[handler] UpdateSchedule success id=%s next_run=%v", schedule.ID, schedule.NextRun)
+	applog.Infof("[handler] UpdateSchedule success id=%s next_run=%v", schedule.ID, schedule.NextRun)
 
 	// Reset task status to pending so the scheduler can pick it up.
 	// This allows completed/failed tasks to run again after schedule changes.
@@ -154,9 +154,9 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 		task, err := h.taskSvc.GetByID(c.Request().Context(), schedule.TaskID)
 		if err == nil && task != nil && task.Status != models.StatusPending && task.Status != models.StatusRunning {
 			if err := h.taskSvc.UpdateStatus(c.Request().Context(), task.ID, models.StatusPending); err != nil {
-				log.Printf("[handler] UpdateSchedule error resetting task status to pending: %v", err)
+				applog.Infof("[handler] UpdateSchedule error resetting task status to pending: %v", err)
 			} else {
-				log.Printf("[handler] UpdateSchedule reset task=%s status to pending (was %s)", task.ID, task.Status)
+				applog.Infof("[handler] UpdateSchedule reset task=%s status to pending (was %s)", task.ID, task.Status)
 			}
 		}
 	}
@@ -165,7 +165,7 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	if isHTMX {
 		task, err := h.taskSvc.GetByID(c.Request().Context(), schedule.TaskID)
 		if err != nil {
-			log.Printf("[handler] UpdateSchedule error fetching task: %v", err)
+			applog.Infof("[handler] UpdateSchedule error fetching task: %v", err)
 			return err
 		}
 		if task == nil {
@@ -193,13 +193,13 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 
 func (h *Handler) DeleteSchedule(c echo.Context) error {
 	id := c.Param("id")
-	log.Printf("[handler] DeleteSchedule id=%s", id)
+	applog.Infof("[handler] DeleteSchedule id=%s", id)
 
 	if err := h.scheduleRepo.Delete(c.Request().Context(), id); err != nil {
-		log.Printf("[handler] DeleteSchedule error: %v", err)
+		applog.Infof("[handler] DeleteSchedule error: %v", err)
 		return err
 	}
-	log.Printf("[handler] DeleteSchedule success id=%s", id)
+	applog.Infof("[handler] DeleteSchedule success id=%s", id)
 
 	if isHTMX(c) {
 		return c.NoContent(http.StatusOK)
@@ -211,7 +211,7 @@ func (h *Handler) DeleteSchedule(c echo.Context) error {
 func (h *Handler) buildModelWorkerStatsList(ctx context.Context) []pages.ModelWorkerStats {
 	agents, err := h.llmConfigRepo.List(ctx)
 	if err != nil {
-		log.Printf("[handler] buildModelWorkerStatsList error: %v", err)
+		applog.Infof("[handler] buildModelWorkerStatsList error: %v", err)
 		return nil
 	}
 	stats := make([]pages.ModelWorkerStats, 0, len(agents))
@@ -231,7 +231,7 @@ func (h *Handler) buildModelWorkerStatsList(ctx context.Context) []pages.ModelWo
 
 func (h *Handler) WorkerSettings(c echo.Context) error {
 	isHTMX := isHTMX(c)
-	log.Printf("[handler] WorkerSettings requested htmx=%v", isHTMX)
+	applog.Infof("[handler] WorkerSettings requested htmx=%v", isHTMX)
 	maxWorkers, _ := h.workerRepo.GetMaxWorkers(c.Request().Context())
 	queueSize := h.workerSvc.QueueSize()
 	runningWorkers := h.workerSvc.NumWorkers()
@@ -242,7 +242,7 @@ func (h *Handler) WorkerSettings(c echo.Context) error {
 	// Get pending task counts by project
 	pendingCounts, err := h.taskRepo.CountPendingByProject(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] WorkerSettings error counting pending tasks: %v", err)
+		applog.Infof("[handler] WorkerSettings error counting pending tasks: %v", err)
 		pendingCounts = make(map[string]int) // fallback to empty map
 	}
 
@@ -261,7 +261,7 @@ func (h *Handler) WorkerSettings(c echo.Context) error {
 	// Build per-model utilization
 	modelStats := h.buildModelWorkerStatsList(c.Request().Context())
 
-	log.Printf("[handler] WorkerSettings max_workers=%d running_workers=%d total_running=%d queue_size=%d",
+	applog.Infof("[handler] WorkerSettings max_workers=%d running_workers=%d total_running=%d queue_size=%d",
 		maxWorkers, runningWorkers, totalRunning, queueSize)
 
 	// For HTMX requests, return just the worker settings content
@@ -282,10 +282,10 @@ func (h *Handler) UpdateWorkerSettings(c echo.Context) error {
 	if maxWorkers > 10 {
 		maxWorkers = 10
 	}
-	log.Printf("[handler] UpdateWorkerSettings max_workers=%d", maxWorkers)
+	applog.Infof("[handler] UpdateWorkerSettings max_workers=%d", maxWorkers)
 
 	if err := h.workerRepo.SetMaxWorkers(c.Request().Context(), maxWorkers); err != nil {
-		log.Printf("[handler] UpdateWorkerSettings error: %v", err)
+		applog.Infof("[handler] UpdateWorkerSettings error: %v", err)
 		return err
 	}
 
@@ -293,7 +293,7 @@ func (h *Handler) UpdateWorkerSettings(c echo.Context) error {
 	h.workerSvc.Resize(maxWorkers)
 	runningWorkers := h.workerSvc.NumWorkers()
 	totalRunning := h.workerSvc.TotalRunning()
-	log.Printf("[handler] UpdateWorkerSettings success, resized to %d workers (actual running: %d)", maxWorkers, runningWorkers)
+	applog.Infof("[handler] UpdateWorkerSettings success, resized to %d workers (actual running: %d)", maxWorkers, runningWorkers)
 
 	// For HTMX requests, return the updated content instead of redirecting
 	isHTMX := isHTMX(c)
@@ -303,7 +303,7 @@ func (h *Handler) UpdateWorkerSettings(c echo.Context) error {
 		projects, _ := h.projectSvc.List(c.Request().Context())
 		pendingCounts, err := h.taskRepo.CountPendingByProject(c.Request().Context())
 		if err != nil {
-			log.Printf("[handler] UpdateWorkerSettings error counting pending tasks: %v", err)
+			applog.Infof("[handler] UpdateWorkerSettings error counting pending tasks: %v", err)
 			pendingCounts = make(map[string]int)
 		}
 		projectStats := make([]pages.ProjectWorkerStats, len(projects))
@@ -340,7 +340,7 @@ func (h *Handler) ProjectWorkerStats(c echo.Context) error {
 	// Get pending task counts by project
 	pendingCounts, err := h.taskRepo.CountPendingByProject(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] ProjectWorkerStats error counting pending tasks: %v", err)
+		applog.Infof("[handler] ProjectWorkerStats error counting pending tasks: %v", err)
 		pendingCounts = make(map[string]int)
 	}
 
@@ -374,29 +374,29 @@ func (h *Handler) RescheduleTask(c echo.Context) error {
 	scheduleID := c.Param("scheduleId")
 	newDateStr := c.FormValue("new_date")
 	hourStr := c.FormValue("hour")
-	log.Printf("[handler] RescheduleTask schedule=%s new_date=%s hour=%s", scheduleID, newDateStr, hourStr)
+	applog.Infof("[handler] RescheduleTask schedule=%s new_date=%s hour=%s", scheduleID, newDateStr, hourStr)
 
 	// Parse the new date and hour
 	newDate, err := time.Parse("2006-01-02", newDateStr)
 	if err != nil {
-		log.Printf("[handler] RescheduleTask invalid date: %v", err)
+		applog.Infof("[handler] RescheduleTask invalid date: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid date format")
 	}
 
 	hour, err := strconv.Atoi(hourStr)
 	if err != nil || hour < 0 || hour > 23 {
-		log.Printf("[handler] RescheduleTask invalid hour: %v", err)
+		applog.Infof("[handler] RescheduleTask invalid hour: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid hour")
 	}
 
 	// Get the existing schedule
 	schedule, err := h.scheduleRepo.GetByID(c.Request().Context(), scheduleID)
 	if err != nil {
-		log.Printf("[handler] RescheduleTask error getting schedule: %v", err)
+		applog.Infof("[handler] RescheduleTask error getting schedule: %v", err)
 		return err
 	}
 	if schedule == nil {
-		log.Printf("[handler] RescheduleTask schedule not found id=%s", scheduleID)
+		applog.Infof("[handler] RescheduleTask schedule not found id=%s", scheduleID)
 		return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
 	}
 
@@ -429,16 +429,16 @@ func (h *Handler) RescheduleTask(c echo.Context) error {
 		nextRun := schedule.ComputeNextRun(now)
 		if nextRun != nil && nextRun.After(now) {
 			schedule.NextRun = nextRun
-			log.Printf("[handler] RescheduleTask adjusted past time to next occurrence: %v → %v", newScheduleTime, *nextRun)
+			applog.Infof("[handler] RescheduleTask adjusted past time to next occurrence: %v → %v", newScheduleTime, *nextRun)
 		}
 	}
 
 	if err := h.scheduleRepo.Update(c.Request().Context(), schedule); err != nil {
-		log.Printf("[handler] RescheduleTask error updating schedule: %v", err)
+		applog.Infof("[handler] RescheduleTask error updating schedule: %v", err)
 		return err
 	}
 
-	log.Printf("[handler] RescheduleTask success schedule=%s new_time=%v next_run=%v", scheduleID, newScheduleTime, schedule.NextRun)
+	applog.Infof("[handler] RescheduleTask success schedule=%s new_time=%v next_run=%v", scheduleID, newScheduleTime, schedule.NextRun)
 
 	// NOTE: Do NOT reset task status to pending here. Drag-and-drop reschedule
 	// should only update the schedule time. The scheduler will handle status
@@ -453,22 +453,22 @@ func (h *Handler) RescheduleTask(c echo.Context) error {
 
 func (h *Handler) GetExecution(c echo.Context) error {
 	id := c.Param("id")
-	log.Printf("[handler] GetExecution id=%s", id)
+	applog.Infof("[handler] GetExecution id=%s", id)
 
 	exec, err := h.execRepo.GetByID(c.Request().Context(), id)
 	if err != nil {
-		log.Printf("[handler] GetExecution error: %v", err)
+		applog.Infof("[handler] GetExecution error: %v", err)
 		return err
 	}
 	if exec == nil {
-		log.Printf("[handler] GetExecution not found id=%s", id)
+		applog.Infof("[handler] GetExecution not found id=%s", id)
 		return echo.NewHTTPError(http.StatusNotFound, "execution not found")
 	}
 
 	task, _ := h.taskSvc.GetByID(c.Request().Context(), exec.TaskID)
 	projects, _ := h.projectSvc.List(c.Request().Context())
 
-	log.Printf("[handler] GetExecution id=%s status=%s tokens=%d duration=%dms",
+	applog.Infof("[handler] GetExecution id=%s status=%s tokens=%d duration=%dms",
 		id, exec.Status, exec.TokensUsed, exec.DurationMs)
 	return render(c, http.StatusOK, pages.ExecutionDetail(projects, exec, task))
 }
@@ -485,16 +485,16 @@ func (h *Handler) UpdateProjectWorkerLimit(c echo.Context) error {
 		maxWorkers = 10 // Cap at 10
 	}
 
-	log.Printf("[handler] UpdateProjectWorkerLimit project=%s max_workers=%d", projectID, maxWorkers)
+	applog.Infof("[handler] UpdateProjectWorkerLimit project=%s max_workers=%d", projectID, maxWorkers)
 
 	// Get the project
 	project, err := h.projectSvc.GetByID(c.Request().Context(), projectID)
 	if err != nil {
-		log.Printf("[handler] UpdateProjectWorkerLimit error getting project: %v", err)
+		applog.Infof("[handler] UpdateProjectWorkerLimit error getting project: %v", err)
 		return err
 	}
 	if project == nil {
-		log.Printf("[handler] UpdateProjectWorkerLimit project not found id=%s", projectID)
+		applog.Infof("[handler] UpdateProjectWorkerLimit project not found id=%s", projectID)
 		return echo.NewHTTPError(http.StatusNotFound, "project not found")
 	}
 
@@ -506,11 +506,11 @@ func (h *Handler) UpdateProjectWorkerLimit(c echo.Context) error {
 	}
 
 	if err := h.projectSvc.Update(c.Request().Context(), project); err != nil {
-		log.Printf("[handler] UpdateProjectWorkerLimit error updating project: %v", err)
+		applog.Infof("[handler] UpdateProjectWorkerLimit error updating project: %v", err)
 		return err
 	}
 
-	log.Printf("[handler] UpdateProjectWorkerLimit success project=%s max_workers=%v", projectID, project.MaxWorkers)
+	applog.Infof("[handler] UpdateProjectWorkerLimit success project=%s max_workers=%v", projectID, project.MaxWorkers)
 
 	// Trigger dispatch check — if the limit was increased and there are queued
 	// tasks for this project, they should start immediately.
@@ -525,7 +525,7 @@ func (h *Handler) UpdateProjectWorkerLimit(c echo.Context) error {
 	projects, _ := h.projectSvc.List(c.Request().Context())
 	pendingCounts, err := h.taskRepo.CountPendingByProject(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] UpdateProjectWorkerLimit error counting pending tasks: %v", err)
+		applog.Infof("[handler] UpdateProjectWorkerLimit error counting pending tasks: %v", err)
 		pendingCounts = make(map[string]int)
 	}
 
@@ -613,14 +613,14 @@ func (h *Handler) GetGlobalCapacity(c echo.Context) error {
 func (h *Handler) GetProjectCapacities(c echo.Context) error {
 	projects, err := h.projectSvc.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] GetProjectCapacities error: %v", err)
+		applog.Infof("[handler] GetProjectCapacities error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list projects")
 	}
 
 	// Get pending task counts by project
 	pendingCounts, err := h.taskRepo.CountPendingByProject(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] GetProjectCapacities error counting pending tasks: %v", err)
+		applog.Infof("[handler] GetProjectCapacities error counting pending tasks: %v", err)
 		pendingCounts = make(map[string]int)
 	}
 
@@ -667,7 +667,7 @@ func (h *Handler) GetProjectCapacity(c echo.Context) error {
 
 	project, err := h.projectSvc.GetByID(c.Request().Context(), projectID)
 	if err != nil {
-		log.Printf("[handler] GetProjectCapacity error: %v", err)
+		applog.Infof("[handler] GetProjectCapacity error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get project")
 	}
 	if project == nil {
@@ -679,7 +679,7 @@ func (h *Handler) GetProjectCapacity(c echo.Context) error {
 
 	pendingCounts, err := h.taskRepo.CountPendingByProject(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] GetProjectCapacity error counting pending tasks: %v", err)
+		applog.Infof("[handler] GetProjectCapacity error counting pending tasks: %v", err)
 		pendingCounts = make(map[string]int)
 	}
 
@@ -716,7 +716,7 @@ func (h *Handler) GetProjectCapacity(c echo.Context) error {
 func (h *Handler) GetModelCapacities(c echo.Context) error {
 	agents, err := h.llmConfigRepo.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] GetModelCapacities error: %v", err)
+		applog.Infof("[handler] GetModelCapacities error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list models")
 	}
 
@@ -760,7 +760,7 @@ func (h *Handler) GetModelCapacity(c echo.Context) error {
 
 	agent, err := h.llmConfigRepo.GetByID(c.Request().Context(), modelID)
 	if err != nil {
-		log.Printf("[handler] GetModelCapacity error: %v", err)
+		applog.Infof("[handler] GetModelCapacity error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get model")
 	}
 	if agent == nil {

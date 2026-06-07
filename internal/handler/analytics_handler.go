@@ -1,12 +1,12 @@
 package handler
 
 import (
-	"log"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -15,14 +15,14 @@ import (
 // Analytics displays the analytics dashboard
 func (h *Handler) Analytics(c echo.Context) error {
 	isHTMX := isHTMX(c)
-	log.Printf("[handler] Analytics requested, project_id=%s, htmx=%v", c.QueryParam("project_id"), isHTMX)
+	applog.Debugf("[handler] Analytics requested, project_id=%s, htmx=%v", c.QueryParam("project_id"), isHTMX)
 
 	projectID := c.QueryParam("project_id")
 
 	// For HTMX requests, we still need to get projects for the current project lookup
 	projects, err := h.projectSvc.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] Analytics error listing projects: %v", err)
+		applog.Infof("[handler] Analytics error listing projects: %v", err)
 		return err
 	}
 
@@ -68,7 +68,7 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 	filter := parseUsageFilter(c)
 	view, err := h.usageAnalyticsSvc.BuildAnalyticsUsage(c.Request().Context(), filter)
 	if err != nil {
-		log.Printf("[handler] GetAnalyticsUsage error: %v", err)
+		applog.Infof("[handler] GetAnalyticsUsage error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, view)
@@ -148,7 +148,7 @@ func (h *Handler) GetSuccessFailureRates(c echo.Context) error {
 
 	rates, err := h.execRepo.GetSuccessFailureRates(c.Request().Context(), projectID, groupBy, dateFrom, dateTo)
 	if err != nil {
-		log.Printf("[handler] GetSuccessFailureRates error: %v", err)
+		applog.Infof("[handler] GetSuccessFailureRates error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -177,7 +177,7 @@ func (h *Handler) GetAvgExecutionTimeByTask(c echo.Context) error {
 
 	times, err := h.execRepo.GetAvgExecutionTimeByTask(c.Request().Context(), projectID, limit)
 	if err != nil {
-		log.Printf("[handler] GetAvgExecutionTimeByTask error: %v", err)
+		applog.Infof("[handler] GetAvgExecutionTimeByTask error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -198,7 +198,7 @@ func (h *Handler) GetAvgExecutionTimeByAgent(c echo.Context) error {
 
 	times, err := h.execRepo.GetAvgExecutionTimeByAgent(c.Request().Context(), projectID)
 	if err != nil {
-		log.Printf("[handler] GetAvgExecutionTimeByAgent error: %v", err)
+		applog.Infof("[handler] GetAvgExecutionTimeByAgent error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -223,7 +223,7 @@ func (h *Handler) GetExecutionTrendsByHour(c echo.Context) error {
 
 	trends, err := h.execRepo.GetExecutionTrendsByHour(c.Request().Context(), projectID, dateFrom, dateTo)
 	if err != nil {
-		log.Printf("[handler] GetExecutionTrendsByHour error: %v", err)
+		applog.Infof("[handler] GetExecutionTrendsByHour error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -244,7 +244,7 @@ func (h *Handler) GetAgentUsageByProject(c echo.Context) error {
 
 	usage, err := h.execRepo.GetAgentUsageByProject(c.Request().Context(), projectID)
 	if err != nil {
-		log.Printf("[handler] GetAgentUsageByProject error: %v", err)
+		applog.Infof("[handler] GetAgentUsageByProject error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -273,7 +273,7 @@ func (h *Handler) GetMostFrequentTasks(c echo.Context) error {
 
 	frequencies, err := h.execRepo.GetMostFrequentTasks(c.Request().Context(), projectID, limit)
 	if err != nil {
-		log.Printf("[handler] GetMostFrequentTasks error: %v", err)
+		applog.Infof("[handler] GetMostFrequentTasks error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -302,7 +302,7 @@ func (h *Handler) GetFailedTaskPatterns(c echo.Context) error {
 
 	patterns, err := h.execRepo.GetFailedTaskPatterns(c.Request().Context(), projectID, limit)
 	if err != nil {
-		log.Printf("[handler] GetFailedTaskPatterns error: %v", err)
+		applog.Infof("[handler] GetFailedTaskPatterns error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 

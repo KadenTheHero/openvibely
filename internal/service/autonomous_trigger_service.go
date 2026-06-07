@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -14,7 +14,7 @@ import (
 type BuildSummary struct {
 	RootTaskID string `json:"root_task_id"`
 	Summary    string `json:"summary"`
-	Phase      string `json:"phase"`   // Which phase produced the summary (e.g. "summary", "review")
+	Phase      string `json:"phase"` // Which phase produced the summary (e.g. "summary", "review")
 	Completed  bool   `json:"completed"`
 }
 
@@ -26,7 +26,7 @@ type AutonomousTriggerService struct {
 	taskRepo       *repository.TaskRepo
 	execRepo       *repository.ExecutionRepo
 	autonomousRepo *repository.AutonomousRepo // for config only
-	trendSvc       *TrendIntelligenceService   // for trend intelligence (optional)
+	trendSvc       *TrendIntelligenceService  // for trend intelligence (optional)
 }
 
 // SetTrendIntelligenceService sets the trend intelligence service for enriching discovery.
@@ -53,7 +53,7 @@ func NewAutonomousTriggerService(
 // TriggerBuild creates the first task in an autonomous build chain.
 // Subsequent tasks are created automatically via task chaining as each phase completes.
 func (s *AutonomousTriggerService) TriggerBuild(ctx context.Context, projectID string) (*models.Task, error) {
-	log.Printf("[autonomous-trigger] triggering build for project=%s", projectID)
+	applog.Infof("[autonomous-trigger] triggering build for project=%s", projectID)
 
 	project, err := s.projectRepo.GetByID(ctx, projectID)
 	if err != nil {
@@ -164,7 +164,7 @@ func (s *AutonomousTriggerService) TriggerBuild(ctx context.Context, projectID s
 		return nil, fmt.Errorf("create discovery task: %w", err)
 	}
 
-	log.Printf("[autonomous-trigger] created discovery task id=%s for project=%s", discoveryTask.ID, projectID)
+	applog.Infof("[autonomous-trigger] created discovery task id=%s for project=%s", discoveryTask.ID, projectID)
 	return discoveryTask, nil
 }
 

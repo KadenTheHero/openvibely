@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmnormalize "github.com/openvibely/openvibely/internal/llm/normalize"
@@ -22,7 +22,7 @@ import (
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
-	"github.com/openvibely/openvibely/pkg/anthropic_client"
+	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 )
 
 // buildAttachmentInstructionsForCLI is a helper that builds CLI-specific attachment
@@ -146,10 +146,10 @@ func (s *LLMService) promoteQueuedTaskThreadAfterCompletion(taskID string) {
 		return
 	}
 	if s.queuedTaskThreadPromoter == nil {
-		log.Printf("[agent-svc] queued task-thread promoter not configured task=%s", taskID)
+		applog.Infof("[agent-svc] queued task-thread promoter not configured task=%s", taskID)
 		return
 	}
-	log.Printf("[agent-svc] promoting queued task-thread input after completion task=%s", taskID)
+	applog.Infof("[agent-svc] promoting queued task-thread input after completion task=%s", taskID)
 	s.queuedTaskThreadPromoter(taskID)
 }
 
@@ -203,7 +203,7 @@ func (s *LLMService) ExecuteTask(ctx context.Context, task models.Task) (*models
 }
 
 func (s *LLMService) executeTaskWithChatContext(ctx context.Context, task models.Task) (*models.Execution, llmcontracts.ChatContext, error) {
-	log.Printf("[agent-svc] ExecuteTask task=%s title=%q agent_id=%v", task.ID, task.Title, task.AgentID)
+	applog.Infof("[agent-svc] ExecuteTask task=%s title=%q agent_id=%v", task.ID, task.Title, task.AgentID)
 
 	var agent *models.LLMConfig
 	var err error
@@ -212,34 +212,34 @@ func (s *LLMService) executeTaskWithChatContext(ctx context.Context, task models
 	if task.AgentID != nil && *task.AgentID != "" {
 		agent, err = s.llmConfigRepo.GetByID(ctx, *task.AgentID)
 		if err != nil {
-			log.Printf("[agent-svc] ExecuteTask error getting agent %s: %v", *task.AgentID, err)
+			applog.Infof("[agent-svc] ExecuteTask error getting agent %s: %v", *task.AgentID, err)
 			return nil, llmcontracts.ChatContext{}, fmt.Errorf("getting agent: %w", err)
 		}
 		if agent == nil {
-			log.Printf("[agent-svc] ExecuteTask agent %s not found, falling back to default", *task.AgentID)
+			applog.Infof("[agent-svc] ExecuteTask agent %s not found, falling back to default", *task.AgentID)
 			// Fall back to project default, then global default
 			agent, err = s.getDefaultAgentForTask(ctx, task.ProjectID)
 			if err != nil {
-				log.Printf("[agent-svc] ExecuteTask error getting default agent: %v", err)
+				applog.Infof("[agent-svc] ExecuteTask error getting default agent: %v", err)
 				return nil, llmcontracts.ChatContext{}, fmt.Errorf("getting default agent: %w", err)
 			}
 		} else {
-			log.Printf("[agent-svc] ExecuteTask using assigned agent=%s provider=%s model=%s", agent.Name, agent.Provider, agent.Model)
+			applog.Infof("[agent-svc] ExecuteTask using assigned agent=%s provider=%s model=%s", agent.Name, agent.Provider, agent.Model)
 		}
 	} else {
 		// Try project-level default agent first, then fall back to global default
 		agent, err = s.getDefaultAgentForTask(ctx, task.ProjectID)
 		if err != nil {
-			log.Printf("[agent-svc] ExecuteTask error getting default agent: %v", err)
+			applog.Infof("[agent-svc] ExecuteTask error getting default agent: %v", err)
 			return nil, llmcontracts.ChatContext{}, fmt.Errorf("getting default agent: %w", err)
 		}
 		if agent != nil {
-			log.Printf("[agent-svc] ExecuteTask using default agent=%s provider=%s model=%s", agent.Name, agent.Provider, agent.Model)
+			applog.Infof("[agent-svc] ExecuteTask using default agent=%s provider=%s model=%s", agent.Name, agent.Provider, agent.Model)
 		}
 	}
 
 	if agent == nil {
-		log.Printf("[agent-svc] ExecuteTask no agent available")
+		applog.Infof("[agent-svc] ExecuteTask no agent available")
 		return nil, llmcontracts.ChatContext{}, fmt.Errorf("no agent configured")
 	}
 
@@ -253,13 +253,13 @@ func (s *LLMService) getDefaultAgentForTask(ctx context.Context, projectID strin
 	if projectID != "" && s.projectRepo != nil {
 		project, err := s.projectRepo.GetByID(ctx, projectID)
 		if err != nil {
-			log.Printf("[agent-svc] getDefaultAgentForTask error getting project %s: %v", projectID, err)
+			applog.Infof("[agent-svc] getDefaultAgentForTask error getting project %s: %v", projectID, err)
 		} else if project != nil && project.DefaultAgentConfigID != nil && *project.DefaultAgentConfigID != "" {
 			agent, err := s.llmConfigRepo.GetByID(ctx, *project.DefaultAgentConfigID)
 			if err != nil {
-				log.Printf("[agent-svc] getDefaultAgentForTask error getting project default agent %s: %v", *project.DefaultAgentConfigID, err)
+				applog.Infof("[agent-svc] getDefaultAgentForTask error getting project default agent %s: %v", *project.DefaultAgentConfigID, err)
 			} else if agent != nil {
-				log.Printf("[agent-svc] getDefaultAgentForTask using project default agent=%s for project=%s", agent.Name, projectID)
+				applog.Infof("[agent-svc] getDefaultAgentForTask using project default agent=%s for project=%s", agent.Name, projectID)
 				return agent, nil
 			}
 		}
@@ -275,14 +275,14 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 }
 
 func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task, agent models.LLMConfig) (*models.Execution, llmcontracts.ChatContext, error) {
-	log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s agent=%s model=%s", task.ID, agent.Name, agent.Model)
+	applog.Infof("[agent-svc] ExecuteTaskWithAgent task=%s agent=%s model=%s", task.ID, agent.Name, agent.Model)
 	finalizeCtx := context.Background()
 
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && s.agentRepo != nil {
 		if ad, adErr := s.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
 			agentDef = ad
-			log.Printf("[agent-svc] ExecuteTaskWithAgent using agent definition=%s (%s)", ad.Name, ad.ID)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent using agent definition=%s (%s)", ad.Name, ad.ID)
 		}
 	}
 	// Atomically claim the task (only succeeds if status is pending). The
@@ -294,26 +294,26 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// pre-claim context flag) keep the original skip-on-running semantics.
 	claimed, err := s.taskRepo.ClaimTask(ctx, task.ID)
 	if err != nil {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent error claiming task: %v", err)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error claiming task: %v", err)
 		return nil, llmcontracts.ChatContext{}, fmt.Errorf("claiming task: %w", err)
 	}
 	if !claimed {
 		if !isTaskPreClaimed(ctx) {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s not pending (already running/completed), skipping", task.ID)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent task=%s not pending (already running/completed), skipping", task.ID)
 			return nil, llmcontracts.ChatContext{}, nil
 		}
 		current, getErr := s.taskRepo.GetByID(ctx, task.ID)
 		if getErr != nil {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent error checking task status after pre-claimed miss: %v", getErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error checking task status after pre-claimed miss: %v", getErr)
 			return nil, llmcontracts.ChatContext{}, fmt.Errorf("checking task status: %w", getErr)
 		}
 		if current == nil || current.Status != models.StatusRunning {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s pre-claimed flag set but status=%v, skipping", task.ID, statusOrNil(current))
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent task=%s pre-claimed flag set but status=%v, skipping", task.ID, statusOrNil(current))
 			return nil, llmcontracts.ChatContext{}, nil
 		}
-		log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s already claimed by worker, proceeding", task.ID)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent task=%s already claimed by worker, proceeding", task.ID)
 	} else {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s status -> running", task.ID)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent task=%s status -> running", task.ID)
 	}
 
 	var runtimeTools *llmcontracts.RuntimeTools
@@ -327,27 +327,27 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		PromptSent:    task.Prompt,
 	}
 	if err := s.execRepo.Create(ctx, exec); err != nil {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent error creating execution: %v", err)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating execution: %v", err)
 		return nil, llmcontracts.ChatContext{}, fmt.Errorf("creating execution: %w", err)
 	}
-	log.Printf("[agent-svc] ExecuteTaskWithAgent execution=%s created, calling LLM...", exec.ID)
+	applog.Infof("[agent-svc] ExecuteTaskWithAgent execution=%s created, calling LLM...", exec.ID)
 
 	// Load attachments for the task
 	attachments, err := s.attachmentRepo.ListByTask(ctx, task.ID)
 	if err != nil {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent error loading attachments: %v", err)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error loading attachments: %v", err)
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", err.Error(), 0, 0); completeErr != nil {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution after attachment load failure: %v", completeErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after attachment load failure: %v", completeErr)
 		}
 		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after attachment load failure: %v", statusErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after attachment load failure: %v", statusErr)
 		}
 		exec.Status = models.ExecFailed
 		exec.ErrorMessage = err.Error()
 		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, llmcontracts.ChatContext{}, fmt.Errorf("loading attachments: %w", err)
 	}
-	log.Printf("[agent-svc] ExecuteTaskWithAgent loaded %d attachments for task=%s", len(attachments), task.ID)
+	applog.Infof("[agent-svc] ExecuteTaskWithAgent loaded %d attachments for task=%s", len(attachments), task.ID)
 
 	// Vision-aware agent override: if the task has image attachments and the
 	// current agent doesn't support vision (e.g., Anthropic CLI which can't
@@ -355,7 +355,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// API key and OAuth agents support vision natively via multimodal content blocks.
 	visionDecision := s.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, task.Prompt, attachments, agent, "ExecuteTaskWithAgent", task.ID)
 	agent = visionDecision.Agent
-	log.Printf("[agent-svc] ExecuteTaskWithAgent vision routing changed=%v reason=%s detail=%q selected_agent=%s selected_provider=%s",
+	applog.Infof("[agent-svc] ExecuteTaskWithAgent vision routing changed=%v reason=%s detail=%q selected_agent=%s selected_provider=%s",
 		visionDecision.Changed, visionDecision.Reason, visionDecision.Detail, agent.Name, agent.Provider)
 
 	// Look up the project's repo path to use as the working directory
@@ -366,7 +366,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if task.ProjectID != "" && s.projectRepo != nil {
 		project, projErr := s.projectRepo.GetByID(ctx, task.ProjectID)
 		if projErr != nil {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent error getting project for workDir: %v", projErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error getting project for workDir: %v", projErr)
 		} else if project != nil && project.RepoPath != "" {
 			if _, statErr := os.Stat(project.RepoPath); os.IsNotExist(statErr) {
 				errMsg := fmt.Sprintf("project repo path %q does not exist on disk", project.RepoPath)
@@ -375,19 +375,19 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 				} else {
 					errMsg += ". Ensure the local repo path is mounted into the container."
 				}
-				log.Printf("[agent-svc] ExecuteTaskWithAgent ERROR: %s", errMsg)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent ERROR: %s", errMsg)
 				if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); completeErr != nil {
-					log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution after missing repo: %v", completeErr)
+					applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after missing repo: %v", completeErr)
 				}
 				if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
-					log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after missing repo: %v", statusErr)
+					applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after missing repo: %v", statusErr)
 				}
 				s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 				return exec, llmcontracts.ChatContext{}, fmt.Errorf("repo path missing: %s", errMsg)
 			}
 			repoDir = project.RepoPath
 			workDir = project.RepoPath
-			log.Printf("[agent-svc] ExecuteTaskWithAgent using project workDir=%s", workDir)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent using project workDir=%s", workDir)
 		}
 	}
 
@@ -400,31 +400,31 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if useRuntimeWorktree && s.worktreeSvc != nil && repoDir != "" && task.Category != models.CategoryChat && IsGitRepo(repoDir) {
 		wtPath, wtBranch, wtErr := s.worktreeSvc.SetupWorktree(ctx, &task, repoDir)
 		if wtErr != nil {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent worktree setup failed (using main repo): %v", wtErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent worktree setup failed (using main repo): %v", wtErr)
 		} else if wtPath != "" {
 			workDir = wtPath
 			task.WorktreePath = wtPath
 			task.WorktreeBranch = wtBranch
-			log.Printf("[agent-svc] ExecuteTaskWithAgent using worktree workDir=%s branch=%s", workDir, wtBranch)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent using worktree workDir=%s branch=%s", workDir, wtBranch)
 
 			if syncErr := s.worktreeSvc.SyncWorktreeFromMainAtStart(ctx, &task, repoDir); syncErr != nil {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent startup worktree auto-merge failed task=%s: %v", task.ID, syncErr)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent startup worktree auto-merge failed task=%s: %v", task.ID, syncErr)
 				if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", syncErr.Error(), 0, 0); completeErr != nil {
-					log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution after startup auto-merge failure: %v", completeErr)
+					applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after startup auto-merge failure: %v", completeErr)
 				}
 				if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
-					log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after startup auto-merge failure: %v", statusErr)
+					applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after startup auto-merge failure: %v", statusErr)
 				}
 				if task.Category == models.CategoryActive {
 					if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
-						log.Printf("[agent-svc] ExecuteTaskWithAgent error moving startup-auto-merge-failed task to completed category: %v", categoryErr)
+						applog.Infof("[agent-svc] ExecuteTaskWithAgent error moving startup-auto-merge-failed task to completed category: %v", categoryErr)
 					} else {
-						log.Printf("[agent-svc] ExecuteTaskWithAgent moved startup-auto-merge-failed task=%s to completed category", task.ID)
+						applog.Infof("[agent-svc] ExecuteTaskWithAgent moved startup-auto-merge-failed task=%s to completed category", task.ID)
 					}
 				}
 				if s.alertSvc != nil {
 					if alertErr := s.alertSvc.CreateTaskFailedAlert(finalizeCtx, task.ProjectID, task.ID, exec.ID, task.Title, syncErr.Error()); alertErr != nil {
-						log.Printf("[agent-svc] ExecuteTaskWithAgent error creating startup auto-merge failure alert: %v", alertErr)
+						applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating startup auto-merge failure alert: %v", alertErr)
 					}
 				}
 				exec.Status = models.ExecFailed
@@ -453,12 +453,12 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		preparedWorkDir, rt, prepErr := buildScopedFilesRuntimeTools(ctx, task.ProjectID, scopedFilesRoot, agentDef.ToolConfig)
 		if prepErr != nil {
 			errMsg := fmt.Sprintf("preparing scoped file tools: %v", prepErr)
-			log.Printf("[agent-svc] ExecuteTaskWithAgent scoped files prep failed task=%s: %v", task.ID, prepErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent scoped files prep failed task=%s: %v", task.ID, prepErr)
 			if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); completeErr != nil {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution after scoped files prep failure: %v", completeErr)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after scoped files prep failure: %v", completeErr)
 			}
 			if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after scoped files prep failure: %v", statusErr)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after scoped files prep failure: %v", statusErr)
 			}
 			exec.Status = models.ExecFailed
 			exec.ErrorMessage = errMsg
@@ -470,7 +470,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if agentDef.ToolConfig.SkipDefaultTools && scopedFilesWorkDir != "" {
 			workDir = scopedFilesWorkDir
 			repoDir = ""
-			log.Printf("[agent-svc] ExecuteTaskWithAgent using scoped files workDir=%s", workDir)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent using scoped files workDir=%s", workDir)
 		}
 	}
 	if agentSkillTools := s.agentDeclaredSkillRuntimeTools(ctx, task, agentDef, workDir); agentSkillTools != nil {
@@ -478,7 +478,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	}
 	projectInstructions := combineProjectInstructions(additionalProjectInstructionsFromContext(ctx), loadRootProjectInstructions(repoDir))
 	if projectInstructions != "" {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent prepared project instructions (%d bytes)", len(projectInstructions))
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent prepared project instructions (%d bytes)", len(projectInstructions))
 	}
 	// Start background diff snapshot broadcaster (if file change broadcaster is configured)
 	var stopDiffBroadcast chan struct{}
@@ -538,17 +538,17 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		bgCtx := context.Background()
 		if ctx.Err() == context.Canceled {
 			s.requeuePendingTaskSteeringForExecution(bgCtx, exec.ID)
-			log.Printf("[agent-svc] ExecuteTaskWithAgent CANCELLED task=%s duration=%dms",
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent CANCELLED task=%s duration=%dms",
 				task.ID, durationMs)
 			// Pass output (may contain partial streamed content) so Complete preserves it
 			if completeErr := s.execRepo.Complete(bgCtx, exec.ID, models.ExecCancelled, output, "task cancelled by user", tokensUsed, durationMs); completeErr != nil {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent error completing cancelled execution: %v", completeErr)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing cancelled execution: %v", completeErr)
 			}
 			RecordUsageFromResult(bgCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecCancelled), ErrorMessage: "task cancelled by user", LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 			// Task status is already set to cancelled by CancelTask, but set it again
 			// in case the cancellation came from a different path (e.g., server shutdown).
 			if statusErr := s.taskRepo.UpdateStatus(bgCtx, task.ID, models.StatusCancelled); statusErr != nil {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status to cancelled: %v", statusErr)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to cancelled: %v", statusErr)
 			}
 			exec.Status = models.ExecCancelled
 			exec.ErrorMessage = "task cancelled by user"
@@ -557,7 +557,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		}
 
 		s.requeuePendingTaskSteeringForExecution(bgCtx, exec.ID)
-		log.Printf("[agent-svc] ExecuteTaskWithAgent LLM call FAILED task=%s duration=%dms error=%v",
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent LLM call FAILED task=%s duration=%dms error=%v",
 			task.ID, durationMs, err)
 		// For max_tokens failures, preserve the partial output so the user can see
 		// what work was done before the token limit was hit. For other failures,
@@ -565,27 +565,27 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		failedOutput := ""
 		if output != "" {
 			failedOutput = output
-			log.Printf("[agent-svc] ExecuteTaskWithAgent max_tokens failure, preserving partial output (%d bytes) task=%s", len(output), task.ID)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent max_tokens failure, preserving partial output (%d bytes) task=%s", len(output), task.ID)
 		}
 		if completeErr := s.execRepo.Complete(bgCtx, exec.ID, models.ExecFailed, failedOutput, err.Error(), tokensUsed, durationMs); completeErr != nil {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
 		}
 		RecordUsageFromResult(bgCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: err.Error(), LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 		if statusErr := s.taskRepo.UpdateStatus(bgCtx, task.ID, models.StatusFailed); statusErr != nil {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status to failed: %v", statusErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to failed: %v", statusErr)
 		}
 		// Move failed tasks to completed category (same as successful tasks)
 		if task.Category == models.CategoryActive {
 			if categoryErr := s.taskRepo.UpdateCategory(bgCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent error moving failed task to completed category: %v", categoryErr)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error moving failed task to completed category: %v", categoryErr)
 			} else {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent moved failed task=%s to completed category", task.ID)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent moved failed task=%s to completed category", task.ID)
 			}
 		}
 		// Create an alert for the failed task
 		if s.alertSvc != nil {
 			if alertErr := s.alertSvc.CreateTaskFailedAlert(bgCtx, task.ProjectID, task.ID, exec.ID, task.Title, err.Error()); alertErr != nil {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent error creating alert: %v", alertErr)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating alert: %v", alertErr)
 			}
 		}
 		exec.Status = models.ExecFailed
@@ -603,13 +603,13 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 
 	if err := s.commitPreparedTaskSteering(ctx, exec.ID, preparedSteering); err != nil {
 		s.requeuePendingTaskSteeringForExecution(finalizeCtx, exec.ID)
-		log.Printf("[agent-svc] ExecuteTaskWithAgent error committing steering task=%s exec=%s: %v", task.ID, exec.ID, err)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing steering task=%s exec=%s: %v", task.ID, exec.ID, err)
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, output, err.Error(), tokensUsed, durationMs); completeErr != nil {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution after steering commit failure: %v", completeErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after steering commit failure: %v", completeErr)
 		}
 		RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: err.Error(), LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after steering commit failure: %v", statusErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after steering commit failure: %v", statusErr)
 		}
 		exec.Status = models.ExecFailed
 		exec.ErrorMessage = err.Error()
@@ -617,7 +617,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		return exec, result.ChatContext, fmt.Errorf("committing steering: %w", err)
 	}
 
-	log.Printf("[agent-svc] ExecuteTaskWithAgent LLM call SUCCESS task=%s tokens=%d duration=%dms output_len=%d",
+	applog.Infof("[agent-svc] ExecuteTaskWithAgent LLM call SUCCESS task=%s tokens=%d duration=%dms output_len=%d",
 		task.ID, tokensUsed, durationMs, len(output))
 
 	// Check for agent-reported failure/followup markers in the output.
@@ -630,26 +630,26 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		statusCheckOutput = output
 	}
 	if reason, found := llmoutput.ExtractMarker(statusCheckOutput, "[STATUS: FAILED |"); found {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent agent reported STATUS FAILED task=%s reason=%q", task.ID, reason)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent agent reported STATUS FAILED task=%s reason=%q", task.ID, reason)
 		// Clear the execution output on failure — only keep the prompt and error message.
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", reason, tokensUsed, durationMs); completeErr != nil {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
 		}
 		RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: reason, LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status to failed: %v", statusErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to failed: %v", statusErr)
 		}
 		// Move failed tasks to completed category (same as successful tasks)
 		if task.Category == models.CategoryActive {
 			if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent error moving failed task to completed category: %v", categoryErr)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error moving failed task to completed category: %v", categoryErr)
 			} else {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent moved failed task=%s to completed category", task.ID)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent moved failed task=%s to completed category", task.ID)
 			}
 		}
 		if s.alertSvc != nil {
 			if alertErr := s.alertSvc.CreateTaskFailedAlert(finalizeCtx, task.ProjectID, task.ID, exec.ID, task.Title, reason); alertErr != nil {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent error creating alert: %v", alertErr)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating alert: %v", alertErr)
 			}
 		}
 		exec.Status = models.ExecFailed
@@ -677,11 +677,11 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// allow marker-driven fan-out during their execution.
 	if s.taskSvc != nil {
 		if task.CreatedVia == models.TaskOriginWebhook {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent skipping marker task creation for webhook-origin task=%s", task.ID)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent skipping marker task creation for webhook-origin task=%s", task.ID)
 		} else {
 			taskRequests := ParseTaskCreations(output)
 			if len(taskRequests) > 0 {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s found %d task creation requests", task.ID, len(taskRequests))
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent task=%s found %d task creation requests", task.ID, len(taskRequests))
 				summary := ExecuteTaskCreations(finalizeCtx, taskRequests, task.ProjectID, s.taskSvc)
 				if summary != "" {
 					output += summary
@@ -692,11 +692,11 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 
 	// Record success
 	if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecCompleted, output, "", tokensUsed, durationMs); completeErr != nil {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
 	}
 	RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecCompleted), LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 	if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusCompleted); statusErr != nil {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status to completed: %v", statusErr)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to completed: %v", statusErr)
 	}
 
 	// Capture git diff of changes made during execution
@@ -709,10 +709,10 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			}
 		} else if diffOutput := s.CaptureGitDiff(workDir); diffOutput != "" {
 			if diffErr := s.execRepo.UpdateDiffOutput(finalizeCtx, exec.ID, diffOutput); diffErr != nil {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent error saving diff output: %v", diffErr)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error saving diff output: %v", diffErr)
 			} else {
 				exec.DiffOutput = diffOutput
-				log.Printf("[agent-svc] ExecuteTaskWithAgent captured diff output for exec=%s (%d bytes)", exec.ID, len(diffOutput))
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent captured diff output for exec=%s (%d bytes)", exec.ID, len(diffOutput))
 			}
 		}
 	}
@@ -724,10 +724,10 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 
 	// Check for follow-up marker (task still completed, but alert created)
 	if reason, found := llmoutput.ExtractMarker(statusCheckOutput, "[STATUS: NEEDS_FOLLOWUP |"); found {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent agent reported STATUS NEEDS_FOLLOWUP task=%s reason=%q", task.ID, reason)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent agent reported STATUS NEEDS_FOLLOWUP task=%s reason=%q", task.ID, reason)
 		if s.alertSvc != nil {
 			if alertErr := s.alertSvc.CreateTaskNeedsFollowupAlert(finalizeCtx, task.ProjectID, task.ID, exec.ID, task.Title, reason); alertErr != nil {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent error creating followup alert: %v", alertErr)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating followup alert: %v", alertErr)
 			}
 		}
 	}
@@ -735,21 +735,21 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// Automatically move completed tasks from active category to completed category
 	if task.Category == models.CategoryActive {
 		if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent error moving task to completed category: %v", categoryErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error moving task to completed category: %v", categoryErr)
 		} else {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent moved task=%s to completed category", task.ID)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent moved task=%s to completed category", task.ID)
 		}
 	}
 	// Automatically move completed scheduled tasks with RepeatOnce to completed category
 	if task.Category == models.CategoryScheduled {
 		schedules, err := s.scheduleRepo.ListByTask(finalizeCtx, task.ID)
 		if err != nil {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent error getting schedules for task %s: %v", task.ID, err)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error getting schedules for task %s: %v", task.ID, err)
 		} else if len(schedules) > 0 && schedules[0].RepeatType == models.RepeatOnce {
 			if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent error moving RepeatOnce task to completed category: %v", categoryErr)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error moving RepeatOnce task to completed category: %v", categoryErr)
 			} else {
-				log.Printf("[agent-svc] ExecuteTaskWithAgent moved RepeatOnce task=%s to completed category", task.ID)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent moved RepeatOnce task=%s to completed category", task.ID)
 			}
 		}
 	}
@@ -761,7 +761,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// Trigger task chaining if configured
 	if s.taskSvc != nil {
 		if chainErr := s.triggerTaskChain(finalizeCtx, task, textOnlyOutput); chainErr != nil {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent error triggering task chain: %v", chainErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error triggering task chain: %v", chainErr)
 		}
 	}
 
@@ -833,7 +833,7 @@ func (s *LLMService) requeuePendingTaskSteeringForExecution(ctx context.Context,
 	}
 	requeued, err := s.threadInputRepo.RequeuePendingSteeringForExecution(ctx, execID)
 	if err != nil {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent exec=%s error requeueing pending steering: %v", execID, err)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent exec=%s error requeueing pending steering: %v", execID, err)
 		return
 	}
 	s.publishTaskThreadInputQueuedEvents(requeued)
@@ -870,7 +870,7 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 		targetBranch = GetDefaultBranch(repoDir)
 	}
 	if err := CommitWorktreeChanges(task.WorktreePath, fmt.Sprintf("Task completed: %s", task.Title)); err != nil {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, task.WorktreeBranch, err)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, task.WorktreeBranch, err)
 	}
 
 	// Persist the authoritative branch diff when the auto-commit succeeds or the
@@ -882,10 +882,10 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 		return ""
 	}
 	if diffErr := s.execRepo.UpdateDiffOutput(ctx, execID, diffOutput); diffErr != nil {
-		log.Printf("[agent-svc] ExecuteTaskWithAgent error saving worktree diff output: %v", diffErr)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error saving worktree diff output: %v", diffErr)
 		return diffOutput
 	}
-	log.Printf("[agent-svc] ExecuteTaskWithAgent captured worktree diff output for exec=%s (%d bytes)", execID, len(diffOutput))
+	applog.Infof("[agent-svc] ExecuteTaskWithAgent captured worktree diff output for exec=%s (%d bytes)", execID, len(diffOutput))
 	return diffOutput
 }
 
@@ -933,9 +933,9 @@ func (s *LLMService) broadcastDiffSnapshots(ctx context.Context, taskID, execID,
 				// This allows the Changes tab to show in-progress diffs when it polls
 				// via GET /tasks/:taskId/changes, not just completed execution diffs.
 				if err := s.execRepo.UpdateDiffOutput(ctx, execID, diffOutput); err != nil {
-					log.Printf("[diff-broadcast] error updating execution diff output: %v", err)
+					applog.Infof("[diff-broadcast] error updating execution diff output: %v", err)
 				} else {
-					log.Printf("[diff-broadcast] updated execution diff for realtime UI (task=%s exec=%s, %d bytes)", taskID, execID, len(diffOutput))
+					// applog.Debugf("[diff-broadcast] updated execution diff for realtime UI (task=%s exec=%s, %d bytes)", taskID, execID, len(diffOutput))
 				}
 				// Broadcast via SSE to connected clients
 				s.fileChangeBroadcaster.Publish(events.FileChangeEvent{
@@ -981,7 +981,7 @@ func (s *LLMService) callAgentDirect(ctx context.Context, message string, attach
 }
 
 func (s *LLMService) callAgentDirectWithDefinition(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent, disableTools bool) (string, int, error) {
-	log.Printf("[agent-svc] CallAgentDirect agent=%s model=%s message_len=%d workDir=%s disable_tools=%v agent_def=%t", agent.Name, agent.Model, len(message), workDir, disableTools, agentDef != nil)
+	applog.Infof("[agent-svc] CallAgentDirect agent=%s model=%s message_len=%d workDir=%s disable_tools=%v agent_def=%t", agent.Name, agent.Model, len(message), workDir, disableTools, agentDef != nil)
 
 	adapter, err := s.ensureRoutingStrategy().resolveAdapter(agent.Provider)
 	if err != nil {
@@ -1041,7 +1041,7 @@ func (s *LLMService) projectIDForWorkDir(ctx context.Context, workDir string) st
 	want := filepath.Clean(workDir)
 	projects, err := s.projectRepo.List(ctx)
 	if err != nil {
-		log.Printf("[usage] error resolving project for workDir=%s: %v", workDir, err)
+		applog.Infof("[usage] error resolving project for workDir=%s: %v", workDir, err)
 		return ""
 	}
 	for _, project := range projects {
@@ -1080,7 +1080,7 @@ func (s *LLMService) directScopedFilesRuntime(ctx context.Context, agentDef *mod
 // isTaskFollowup when true uses the coding agent system prompt instead of task management prompt.
 func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, workDir string, agentDef *models.Agent, isTaskFollowup ...bool) (llmcontracts.AgentResult, error) {
 	followup := len(isTaskFollowup) > 0 && isTaskFollowup[0]
-	log.Printf("[agent-svc] CallAgentDirectStreaming agent=%s model=%s message_len=%d exec=%s history=%d workDir=%s isTaskFollowup=%v", agent.Name, agent.Model, len(message), execID, len(chatHistory), workDir, followup)
+	applog.Infof("[agent-svc] CallAgentDirectStreaming agent=%s model=%s message_len=%d exec=%s history=%d workDir=%s isTaskFollowup=%v", agent.Name, agent.Model, len(message), execID, len(chatHistory), workDir, followup)
 	chatMode := llmcontracts.ChatModeFromContext(ctx)
 	if followup {
 		chatMode = models.ChatModeOrchestrate
@@ -1088,7 +1088,7 @@ func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, messa
 
 	visionDecision := s.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, message, attachments, agent, "CallAgentDirectStreaming", "")
 	agent = visionDecision.Agent
-	log.Printf("[agent-svc] CallAgentDirectStreaming vision routing changed=%v reason=%s detail=%q selected_agent=%s selected_provider=%s",
+	applog.Infof("[agent-svc] CallAgentDirectStreaming vision routing changed=%v reason=%s detail=%q selected_agent=%s selected_provider=%s",
 		visionDecision.Changed, visionDecision.Reason, visionDecision.Detail, agent.Name, agent.Provider)
 	adapter, err := s.ensureRoutingStrategy().resolveAdapter(agent.Provider)
 	if err != nil {
@@ -1142,7 +1142,7 @@ func loadRootProjectInstructions(repoDir string) string {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			if !os.IsNotExist(err) {
-				log.Printf("[agent-svc] warning: failed to read %s: %v", path, err)
+				applog.Infof("[agent-svc] warning: failed to read %s: %v", path, err)
 			}
 			continue
 		}
@@ -1172,7 +1172,7 @@ func (s *LLMService) callLLM(ctx context.Context, prompt string, attachments []m
 }
 
 func (s *LLMService) callLLMDetailed(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, agentDef ...*models.Agent) (llmcontracts.AgentResult, error) {
-	log.Printf("[agent-svc] callLLM provider=%s model=%s prompt_len=%d attachments=%d workDir=%s projectInstructions=%d", agent.Provider, agent.Model, len(prompt), len(attachments), workDir, len(projectInstructions))
+	applog.Infof("[agent-svc] callLLM provider=%s model=%s prompt_len=%d attachments=%d workDir=%s projectInstructions=%d", agent.Provider, agent.Model, len(prompt), len(attachments), workDir, len(projectInstructions))
 	adapter, err := s.ensureRoutingStrategy().resolveAdapter(agent.Provider)
 	if err != nil {
 		return llmcontracts.AgentResult{}, err
@@ -1234,7 +1234,7 @@ func chatContextFromNormalizedRequest(req llmcontracts.AgentRequest, assistantOu
 }
 
 func (s *LLMService) callAnthropic(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig) (string, int, error) {
-	log.Printf("[agent-svc] callAnthropic model=%s temp=%.1f attachments=%d",
+	applog.Infof("[agent-svc] callAnthropic model=%s temp=%.1f attachments=%d",
 		agent.Model, agent.Temperature, len(attachments))
 
 	client := anthropicclient.NewWithAPIKey(agent.APIKey)
@@ -1262,12 +1262,12 @@ func (s *LLMService) callAnthropic(ctx context.Context, prompt string, attachmen
 		Attachments: mcAttachments,
 	})
 	if err != nil {
-		log.Printf("[agent-svc] callAnthropic API error: %v", err)
+		applog.Infof("[agent-svc] callAnthropic API error: %v", err)
 		return "", 0, fmt.Errorf("anthropic API call: %w", err)
 	}
 
 	tokensUsed := resp.InputTokens + resp.OutputTokens
-	log.Printf("[agent-svc] callAnthropic success input_tokens=%d output_tokens=%d stop_reason=%s",
+	applog.Infof("[agent-svc] callAnthropic success input_tokens=%d output_tokens=%d stop_reason=%s",
 		resp.InputTokens, resp.OutputTokens, resp.StopReason)
 
 	return resp.Text, tokensUsed, nil
@@ -1278,7 +1278,7 @@ func (s *LLMService) callAnthropic(ctx context.Context, prompt string, attachmen
 // Image attachments are sent as proper multimodal content blocks instead of text.
 // Uses anthropicclient for retries, connection pooling, and streaming.
 func (s *LLMService) callAnthropicChat(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode) (string, int, error) {
-	log.Printf("[agent-svc] callAnthropicChat model=%s history=%d message_len=%d context_len=%d attachments=%d exec=%s isTaskFollowup=%v chat_mode=%s", agent.Model, len(chatHistory), len(message), len(chatSystemContext), len(attachments), execID, isTaskFollowup, chatMode)
+	applog.Infof("[agent-svc] callAnthropicChat model=%s history=%d message_len=%d context_len=%d attachments=%d exec=%s isTaskFollowup=%v chat_mode=%s", agent.Model, len(chatHistory), len(message), len(chatSystemContext), len(attachments), execID, isTaskFollowup, chatMode)
 
 	client := anthropicclient.NewWithAPIKey(agent.APIKey)
 
@@ -1332,14 +1332,14 @@ func (s *LLMService) callAnthropicChat(ctx context.Context, message string, atta
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 		OnCompaction: func(summary string) {
-			log.Printf("[agent-svc] callAnthropicChat context compacted, summary_len=%d", len(summary))
+			applog.Infof("[agent-svc] callAnthropicChat context compacted, summary_len=%d", len(summary))
 		},
 	}
 
 	resp, err := client.SendAgentic(ctx, message, opts)
 	if err != nil {
 		sw.Flush()
-		log.Printf("[agent-svc] callAnthropicChat error: %v", err)
+		applog.Infof("[agent-svc] callAnthropicChat error: %v", err)
 		return "", 0, fmt.Errorf("anthropic API streaming call: %w", err)
 	}
 
@@ -1347,7 +1347,7 @@ func (s *LLMService) callAnthropicChat(ctx context.Context, message string, atta
 
 	output := sw.String()
 	tokensUsed := resp.InputTokens + resp.OutputTokens
-	log.Printf("[agent-svc] callAnthropicChat success input_tokens=%d output_tokens=%d output_len=%d tools=%d stop=%s", resp.InputTokens, resp.OutputTokens, len(output), len(resp.ToolCalls), resp.StopReason)
+	applog.Infof("[agent-svc] callAnthropicChat success input_tokens=%d output_tokens=%d output_len=%d tools=%d stop=%s", resp.InputTokens, resp.OutputTokens, len(output), len(resp.ToolCalls), resp.StopReason)
 	if resp.StopReason == "max_tokens" {
 		return output, tokensUsed, errMaxTokens
 	}
@@ -1355,7 +1355,7 @@ func (s *LLMService) callAnthropicChat(ctx context.Context, message string, atta
 }
 
 func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, pluginDirs []string, agentDef ...*models.Agent) (string, string, int, error) {
-	log.Printf("[agent-svc] callClaudeCLI model=%s attachments=%d workDir=%s", agent.Model, len(attachments), workDir)
+	applog.Infof("[agent-svc] callClaudeCLI model=%s attachments=%d workDir=%s", agent.Model, len(attachments), workDir)
 
 	// SAFETY: Prevent accidental real CLI calls during tests
 	if isTestMode() {
@@ -1365,10 +1365,10 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 	// Find the claude binary
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
-		log.Printf("[agent-svc] callClaudeCLI 'claude' not found in PATH: %v", err)
+		applog.Infof("[agent-svc] callClaudeCLI 'claude' not found in PATH: %v", err)
 		return "", "", 0, fmt.Errorf("claude CLI not found in PATH - install it from https://docs.anthropic.com/en/docs/claude-code")
 	}
-	log.Printf("[agent-svc] callClaudeCLI using binary: %s", claudePath)
+	applog.Infof("[agent-svc] callClaudeCLI using binary: %s", claudePath)
 
 	var fullPrompt strings.Builder
 	fullPrompt.WriteString(llmprompt.BuildTaskPromptHeader())
@@ -1421,7 +1421,7 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 		args = append(args, "--plugin-dir", dir)
 	}
 
-	log.Printf("[agent-svc] callClaudeCLI executing: claude %s (prompt via stdin)", strings.Join(args, " "))
+	applog.Infof("[agent-svc] callClaudeCLI executing: claude %s (prompt via stdin)", strings.Join(args, " "))
 
 	cmd := exec.CommandContext(ctx, claudePath, args...)
 
@@ -1429,7 +1429,7 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 	// operates in the correct project directory (not the OpenVibely server dir).
 	if workDir != "" {
 		cmd.Dir = workDir
-		log.Printf("[agent-svc] callClaudeCLI using workDir=%s", workDir)
+		applog.Infof("[agent-svc] callClaudeCLI using workDir=%s", workDir)
 	}
 
 	// Write agent definition files (agent.md, skills, .mcp.json) if present
@@ -1440,10 +1440,10 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 	if ad != nil && workDir != "" {
 		cleanup, writeErr := WriteAgentFiles(workDir, ad)
 		if writeErr != nil {
-			log.Printf("[agent-svc] callClaudeCLI error writing agent files: %v", writeErr)
+			applog.Infof("[agent-svc] callClaudeCLI error writing agent files: %v", writeErr)
 		} else {
 			defer cleanup()
-			log.Printf("[agent-svc] callClaudeCLI wrote agent definition files for %q", ad.Name)
+			applog.Infof("[agent-svc] callClaudeCLI wrote agent definition files for %q", ad.Name)
 		}
 	}
 
@@ -1455,7 +1455,7 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 	// Get stdout pipe for reading JSON stream
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Printf("[agent-svc] callClaudeCLI error creating stdout pipe: %v", err)
+		applog.Infof("[agent-svc] callClaudeCLI error creating stdout pipe: %v", err)
 		return "", "", 0, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
@@ -1470,7 +1470,7 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 
 	// Start the command
 	if err := cmd.Start(); err != nil {
-		log.Printf("[agent-svc] callClaudeCLI error starting command: %v", err)
+		applog.Infof("[agent-svc] callClaudeCLI error starting command: %v", err)
 		return "", "", 0, fmt.Errorf("starting claude CLI: %w", err)
 	}
 
@@ -1485,7 +1485,7 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 
 	// Wait for parsing to complete
 	if pErr := <-parseErr; pErr != nil {
-		log.Printf("[agent-svc] callClaudeCLI JSON parsing error: %v", pErr)
+		applog.Infof("[agent-svc] callClaudeCLI JSON parsing error: %v", pErr)
 	}
 
 	// Flush any remaining output to the DB
@@ -1493,7 +1493,7 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 
 	if err != nil {
 		errOutput := stderr.String()
-		log.Printf("[agent-svc] callClaudeCLI error: %v stderr: %s", err, errOutput)
+		applog.Infof("[agent-svc] callClaudeCLI error: %v stderr: %s", err, errOutput)
 		if errOutput != "" {
 			return "", "", 0, fmt.Errorf("claude CLI error: %s", errOutput)
 		}
@@ -1505,13 +1505,13 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 	if sw.IsError() {
 		output := sw.String()
 		subtype := sw.ResultSubtype()
-		log.Printf("[agent-svc] callClaudeCLI result is_error=true subtype=%s output_len=%d", subtype, len(output))
+		applog.Infof("[agent-svc] callClaudeCLI result is_error=true subtype=%s output_len=%d", subtype, len(output))
 		return output, "", 0, fmt.Errorf("claude CLI reported error (subtype=%s)", subtype)
 	}
 
 	output := sw.String()
 	textOnly := sw.TextString()
-	log.Printf("[agent-svc] callClaudeCLI success output_len=%d text_only_len=%d", len(output), len(textOnly))
+	applog.Infof("[agent-svc] callClaudeCLI success output_len=%d text_only_len=%d", len(output), len(textOnly))
 
 	// CLI doesn't report token counts, so we return 0
 	return output, textOnly, 0, nil
@@ -1521,7 +1521,7 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 // It builds a lightweight prompt with conversation history and no task-execution
 // directives (no AGENTS.md, no STATUS markers).
 func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, workDir string, isTaskFollowup bool, chatMode models.ChatMode, pluginDirs []string) (string, int, error) {
-	log.Printf("[agent-svc] callClaudeCLIChat model=%s history=%d message_len=%d context_len=%d attachments=%d workDir=%s isTaskFollowup=%v chat_mode=%s", agent.Model, len(chatHistory), len(message), len(chatSystemContext), len(attachments), workDir, isTaskFollowup, chatMode)
+	applog.Infof("[agent-svc] callClaudeCLIChat model=%s history=%d message_len=%d context_len=%d attachments=%d workDir=%s isTaskFollowup=%v chat_mode=%s", agent.Model, len(chatHistory), len(message), len(chatSystemContext), len(attachments), workDir, isTaskFollowup, chatMode)
 
 	// SAFETY: Prevent accidental real CLI calls during tests
 	if isTestMode() {
@@ -1530,7 +1530,7 @@ func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, atta
 
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
-		log.Printf("[agent-svc] callClaudeCLIChat 'claude' not found in PATH: %v", err)
+		applog.Infof("[agent-svc] callClaudeCLIChat 'claude' not found in PATH: %v", err)
 		return "", 0, fmt.Errorf("claude CLI not found in PATH - install it from https://docs.anthropic.com/en/docs/claude-code")
 	}
 
@@ -1621,10 +1621,10 @@ func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, atta
 	// Resume the CLI session if we have one from a prior chat turn
 	if lastSessionID != "" {
 		args = append(args, "--resume", lastSessionID)
-		log.Printf("[agent-svc] callClaudeCLIChat resuming session=%s", lastSessionID)
+		applog.Infof("[agent-svc] callClaudeCLIChat resuming session=%s", lastSessionID)
 	}
 
-	log.Printf("[agent-svc] callClaudeCLIChat executing: claude %s (prompt via stdin, len=%d)", strings.Join(args, " "), fullPrompt.Len())
+	applog.Infof("[agent-svc] callClaudeCLIChat executing: claude %s (prompt via stdin, len=%d)", strings.Join(args, " "), fullPrompt.Len())
 
 	cmd := exec.CommandContext(ctx, claudePath, args...)
 
@@ -1632,7 +1632,7 @@ func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, atta
 	// operates in the correct project directory (not the OpenVibely server dir).
 	if workDir != "" {
 		cmd.Dir = workDir
-		log.Printf("[agent-svc] callClaudeCLIChat using workDir=%s", workDir)
+		applog.Infof("[agent-svc] callClaudeCLIChat using workDir=%s", workDir)
 	}
 
 	cmd.Env = llmprompt.FilteredEnvWithoutClaudeCode()
@@ -1641,7 +1641,7 @@ func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, atta
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Printf("[agent-svc] callClaudeCLIChat error creating stdout pipe: %v", err)
+		applog.Infof("[agent-svc] callClaudeCLIChat error creating stdout pipe: %v", err)
 		return "", 0, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
@@ -1652,7 +1652,7 @@ func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, atta
 	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("[agent-svc] callClaudeCLIChat error starting command: %v", err)
+		applog.Infof("[agent-svc] callClaudeCLIChat error starting command: %v", err)
 		return "", 0, fmt.Errorf("starting claude CLI: %w", err)
 	}
 
@@ -1664,14 +1664,14 @@ func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, atta
 	err = cmd.Wait()
 
 	if pErr := <-parseErr; pErr != nil {
-		log.Printf("[agent-svc] callClaudeCLIChat JSON parsing error: %v", pErr)
+		applog.Infof("[agent-svc] callClaudeCLIChat JSON parsing error: %v", pErr)
 	}
 
 	sw.Flush()
 
 	if err != nil {
 		errOutput := stderr.String()
-		log.Printf("[agent-svc] callClaudeCLIChat error: %v stderr: %s", err, errOutput)
+		applog.Infof("[agent-svc] callClaudeCLIChat error: %v stderr: %s", err, errOutput)
 		if errOutput != "" {
 			return "", 0, fmt.Errorf("claude CLI error: %s", errOutput)
 		}
@@ -1681,7 +1681,7 @@ func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, atta
 	if sw.IsError() {
 		output := sw.String()
 		subtype := sw.ResultSubtype()
-		log.Printf("[agent-svc] callClaudeCLIChat result is_error=true subtype=%s output_len=%d", subtype, len(output))
+		applog.Infof("[agent-svc] callClaudeCLIChat result is_error=true subtype=%s output_len=%d", subtype, len(output))
 		return output, 0, fmt.Errorf("claude CLI reported error (subtype=%s)", subtype)
 	}
 
@@ -1691,13 +1691,13 @@ func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, atta
 	sid := sw.SessionID()
 	if sid != "" && s.execRepo != nil {
 		if err := s.execRepo.UpdateCliSessionID(ctx, execID, sid); err != nil {
-			log.Printf("[agent-svc] callClaudeCLIChat error persisting session_id: %v", err)
+			applog.Infof("[agent-svc] callClaudeCLIChat error persisting session_id: %v", err)
 		} else {
-			log.Printf("[agent-svc] callClaudeCLIChat persisted session_id=%s for exec=%s", sid, execID)
+			applog.Infof("[agent-svc] callClaudeCLIChat persisted session_id=%s for exec=%s", sid, execID)
 		}
 	}
 
-	log.Printf("[agent-svc] callClaudeCLIChat success output_len=%d session_id=%s", len(output), sid)
+	applog.Infof("[agent-svc] callClaudeCLIChat success output_len=%d session_id=%s", len(output), sid)
 	return output, 0, nil
 }
 
@@ -1720,7 +1720,7 @@ func prependDirectNoToolsInstruction(prompt string) string {
 }
 
 func (s *LLMService) callClaudeCLISimple(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, disableTools bool) (string, int, error) {
-	log.Printf("[agent-svc] callClaudeCLISimple model=%s attachments=%d workDir=%s", agent.Model, len(attachments), workDir)
+	applog.Infof("[agent-svc] callClaudeCLISimple model=%s attachments=%d workDir=%s", agent.Model, len(attachments), workDir)
 
 	// SAFETY: Prevent accidental real CLI calls during tests
 	if isTestMode() {
@@ -1730,10 +1730,10 @@ func (s *LLMService) callClaudeCLISimple(ctx context.Context, prompt string, att
 	// Find the claude binary
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
-		log.Printf("[agent-svc] callClaudeCLISimple 'claude' not found in PATH: %v", err)
+		applog.Infof("[agent-svc] callClaudeCLISimple 'claude' not found in PATH: %v", err)
 		return "", 0, fmt.Errorf("claude CLI not found in PATH - install it from https://docs.anthropic.com/en/docs/claude-code")
 	}
-	log.Printf("[agent-svc] callClaudeCLISimple using binary: %s", claudePath)
+	applog.Infof("[agent-svc] callClaudeCLISimple using binary: %s", claudePath)
 
 	// Build command with streaming JSON output
 	args := []string{
@@ -1750,14 +1750,14 @@ func (s *LLMService) callClaudeCLISimple(ctx context.Context, prompt string, att
 		args = append(args, "--effort", effort)
 	}
 
-	log.Printf("[agent-svc] callClaudeCLISimple executing: claude %s (prompt via stdin)", strings.Join(args, " "))
+	applog.Infof("[agent-svc] callClaudeCLISimple executing: claude %s (prompt via stdin)", strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, claudePath, args...)
 
 	// Set working directory to the project's repo path so the agent
 	// operates in the correct project directory (not the OpenVibely server dir).
 	if workDir != "" {
 		cmd.Dir = workDir
-		log.Printf("[agent-svc] callClaudeCLISimple using workDir=%s", workDir)
+		applog.Infof("[agent-svc] callClaudeCLISimple using workDir=%s", workDir)
 	}
 
 	cmd.Env = llmprompt.FilteredEnvWithoutClaudeCode()
@@ -1773,7 +1773,7 @@ func (s *LLMService) callClaudeCLISimple(ctx context.Context, prompt string, att
 	// Get stdout pipe for reading JSON stream
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Printf("[agent-svc] callClaudeCLISimple error creating stdout pipe: %v", err)
+		applog.Infof("[agent-svc] callClaudeCLISimple error creating stdout pipe: %v", err)
 		return "", 0, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
@@ -1785,7 +1785,7 @@ func (s *LLMService) callClaudeCLISimple(ctx context.Context, prompt string, att
 
 	// Start the command
 	if err := cmd.Start(); err != nil {
-		log.Printf("[agent-svc] callClaudeCLISimple error starting command: %v", err)
+		applog.Infof("[agent-svc] callClaudeCLISimple error starting command: %v", err)
 		return "", 0, fmt.Errorf("starting claude CLI: %w", err)
 	}
 
@@ -1840,7 +1840,7 @@ func (s *LLMService) callClaudeCLISimple(ctx context.Context, prompt string, att
 
 	if err != nil {
 		errOutput := stderr.String()
-		log.Printf("[agent-svc] callClaudeCLISimple error: %v stderr: %s", err, errOutput)
+		applog.Infof("[agent-svc] callClaudeCLISimple error: %v stderr: %s", err, errOutput)
 		if errOutput != "" {
 			return "", 0, fmt.Errorf("claude CLI error: %s", errOutput)
 		}
@@ -1848,13 +1848,13 @@ func (s *LLMService) callClaudeCLISimple(ctx context.Context, prompt string, att
 	}
 
 	output := outputBuf.String()
-	log.Printf("[agent-svc] callClaudeCLISimple success output_len=%d", len(output))
+	applog.Infof("[agent-svc] callClaudeCLISimple success output_len=%d", len(output))
 
 	return output, 0, nil
 }
 
 func (s *LLMService) callCodexCLI(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
-	log.Printf("[agent-svc] callCodexCLI model=%s attachments=%d workDir=%s", agent.Model, len(attachments), workDir)
+	applog.Infof("[agent-svc] callCodexCLI model=%s attachments=%d workDir=%s", agent.Model, len(attachments), workDir)
 
 	// SAFETY: Prevent accidental real CLI calls during tests
 	if isTestMode() {
@@ -1863,10 +1863,10 @@ func (s *LLMService) callCodexCLI(ctx context.Context, prompt string, attachment
 
 	codexPath, err := exec.LookPath("codex")
 	if err != nil {
-		log.Printf("[agent-svc] callCodexCLI 'codex' not found in PATH: %v", err)
+		applog.Infof("[agent-svc] callCodexCLI 'codex' not found in PATH: %v", err)
 		return "", "", 0, fmt.Errorf("codex CLI not found in PATH - install it from https://github.com/openai/codex")
 	}
-	log.Printf("[agent-svc] callCodexCLI using binary: %s", codexPath)
+	applog.Infof("[agent-svc] callCodexCLI using binary: %s", codexPath)
 
 	var fullPrompt strings.Builder
 	fullPrompt.WriteString(llmprompt.BuildTaskPromptHeader())
@@ -1895,18 +1895,18 @@ func (s *LLMService) callCodexCLI(ctx context.Context, prompt string, attachment
 		"This status line is MANDATORY. Always include it as the very last line of your response.")
 
 	args := llmprompt.CodexExecArgs(agent.Model, agent.ReasoningEffort, imagePaths)
-	log.Printf("[agent-svc] callCodexCLI executing: codex %s (prompt via stdin)", strings.Join(args, " "))
+	applog.Infof("[agent-svc] callCodexCLI executing: codex %s (prompt via stdin)", strings.Join(args, " "))
 
 	cmd := exec.CommandContext(ctx, codexPath, args...)
 	if workDir != "" {
 		cmd.Dir = workDir
-		log.Printf("[agent-svc] callCodexCLI using workDir=%s", workDir)
+		applog.Infof("[agent-svc] callCodexCLI using workDir=%s", workDir)
 	}
 	cmd.Stdin = strings.NewReader(fullPrompt.String())
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Printf("[agent-svc] callCodexCLI error creating stdout pipe: %v", err)
+		applog.Infof("[agent-svc] callCodexCLI error creating stdout pipe: %v", err)
 		return "", "", 0, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
@@ -1917,7 +1917,7 @@ func (s *LLMService) callCodexCLI(ctx context.Context, prompt string, attachment
 	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("[agent-svc] callCodexCLI error starting command: %v", err)
+		applog.Infof("[agent-svc] callCodexCLI error starting command: %v", err)
 		return "", "", 0, fmt.Errorf("starting codex CLI: %w", err)
 	}
 
@@ -1928,14 +1928,14 @@ func (s *LLMService) callCodexCLI(ctx context.Context, prompt string, attachment
 
 	err = cmd.Wait()
 	if pErr := <-parseErr; pErr != nil {
-		log.Printf("[agent-svc] callCodexCLI JSON parsing error: %v", pErr)
+		applog.Infof("[agent-svc] callCodexCLI JSON parsing error: %v", pErr)
 	}
 
 	sw.Flush()
 
 	if err != nil {
 		errOutput := strings.TrimSpace(stderr.String())
-		log.Printf("[agent-svc] callCodexCLI error: %v stderr: %s", err, errOutput)
+		applog.Infof("[agent-svc] callCodexCLI error: %v stderr: %s", err, errOutput)
 		if errOutput != "" {
 			return "", "", 0, fmt.Errorf("codex CLI error: %s", errOutput)
 		}
@@ -1945,18 +1945,18 @@ func (s *LLMService) callCodexCLI(ctx context.Context, prompt string, attachment
 	if sw.IsError() {
 		output := sw.String()
 		subtype := sw.ResultSubtype()
-		log.Printf("[agent-svc] callCodexCLI result is_error=true subtype=%s output_len=%d", subtype, len(output))
+		applog.Infof("[agent-svc] callCodexCLI result is_error=true subtype=%s output_len=%d", subtype, len(output))
 		return output, "", 0, fmt.Errorf("codex CLI reported error (subtype=%s)", subtype)
 	}
 
 	output := sw.String()
 	textOnly := sw.TextString()
-	log.Printf("[agent-svc] callCodexCLI success output_len=%d text_only_len=%d", len(output), len(textOnly))
+	applog.Infof("[agent-svc] callCodexCLI success output_len=%d text_only_len=%d", len(output), len(textOnly))
 	return output, textOnly, 0, nil
 }
 
 func (s *LLMService) callCodexCLIChat(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, workDir string, isTaskFollowup bool, chatMode models.ChatMode) (string, int, error) {
-	log.Printf("[agent-svc] callCodexCLIChat model=%s history=%d message_len=%d context_len=%d attachments=%d workDir=%s isTaskFollowup=%v chat_mode=%s", agent.Model, len(chatHistory), len(message), len(chatSystemContext), len(attachments), workDir, isTaskFollowup, chatMode)
+	applog.Infof("[agent-svc] callCodexCLIChat model=%s history=%d message_len=%d context_len=%d attachments=%d workDir=%s isTaskFollowup=%v chat_mode=%s", agent.Model, len(chatHistory), len(message), len(chatSystemContext), len(attachments), workDir, isTaskFollowup, chatMode)
 
 	// SAFETY: Prevent accidental real CLI calls during tests
 	if isTestMode() {
@@ -1965,7 +1965,7 @@ func (s *LLMService) callCodexCLIChat(ctx context.Context, message string, attac
 
 	codexPath, err := exec.LookPath("codex")
 	if err != nil {
-		log.Printf("[agent-svc] callCodexCLIChat 'codex' not found in PATH: %v", err)
+		applog.Infof("[agent-svc] callCodexCLIChat 'codex' not found in PATH: %v", err)
 		return "", 0, fmt.Errorf("codex CLI not found in PATH - install it from https://github.com/openai/codex")
 	}
 
@@ -2008,22 +2008,22 @@ func (s *LLMService) callCodexCLIChat(ctx context.Context, message string, attac
 	if lastThreadID != "" {
 		// Resume existing thread — codex manages its own history
 		args = llmprompt.CodexResumeArgs(agent.Model, agent.ReasoningEffort, lastThreadID, imagePaths, chatMode)
-		log.Printf("[agent-svc] callCodexCLIChat resuming thread=%s", lastThreadID)
+		applog.Infof("[agent-svc] callCodexCLIChat resuming thread=%s", lastThreadID)
 	} else {
 		args = llmprompt.CodexChatArgs(agent.Model, agent.ReasoningEffort, imagePaths, chatMode)
 	}
-	log.Printf("[agent-svc] callCodexCLIChat executing: codex %s (prompt via stdin, len=%d)", strings.Join(args, " "), fullPrompt.Len())
+	applog.Infof("[agent-svc] callCodexCLIChat executing: codex %s (prompt via stdin, len=%d)", strings.Join(args, " "), fullPrompt.Len())
 
 	cmd := exec.CommandContext(ctx, codexPath, args...)
 	if workDir != "" {
 		cmd.Dir = workDir
-		log.Printf("[agent-svc] callCodexCLIChat using workDir=%s", workDir)
+		applog.Infof("[agent-svc] callCodexCLIChat using workDir=%s", workDir)
 	}
 	cmd.Stdin = strings.NewReader(fullPrompt.String())
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Printf("[agent-svc] callCodexCLIChat error creating stdout pipe: %v", err)
+		applog.Infof("[agent-svc] callCodexCLIChat error creating stdout pipe: %v", err)
 		return "", 0, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
@@ -2034,7 +2034,7 @@ func (s *LLMService) callCodexCLIChat(ctx context.Context, message string, attac
 	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("[agent-svc] callCodexCLIChat error starting command: %v", err)
+		applog.Infof("[agent-svc] callCodexCLIChat error starting command: %v", err)
 		return "", 0, fmt.Errorf("starting codex CLI: %w", err)
 	}
 
@@ -2045,14 +2045,14 @@ func (s *LLMService) callCodexCLIChat(ctx context.Context, message string, attac
 
 	err = cmd.Wait()
 	if pErr := <-parseErr; pErr != nil {
-		log.Printf("[agent-svc] callCodexCLIChat JSON parsing error: %v", pErr)
+		applog.Infof("[agent-svc] callCodexCLIChat JSON parsing error: %v", pErr)
 	}
 
 	sw.Flush()
 
 	if err != nil {
 		errOutput := strings.TrimSpace(stderr.String())
-		log.Printf("[agent-svc] callCodexCLIChat error: %v stderr: %s", err, errOutput)
+		applog.Infof("[agent-svc] callCodexCLIChat error: %v stderr: %s", err, errOutput)
 		if errOutput != "" {
 			return "", 0, fmt.Errorf("codex CLI error: %s", errOutput)
 		}
@@ -2062,7 +2062,7 @@ func (s *LLMService) callCodexCLIChat(ctx context.Context, message string, attac
 	if sw.IsError() {
 		output := sw.String()
 		subtype := sw.ResultSubtype()
-		log.Printf("[agent-svc] callCodexCLIChat result is_error=true subtype=%s output_len=%d", subtype, len(output))
+		applog.Infof("[agent-svc] callCodexCLIChat result is_error=true subtype=%s output_len=%d", subtype, len(output))
 		return output, 0, fmt.Errorf("codex CLI reported error (subtype=%s)", subtype)
 	}
 
@@ -2072,18 +2072,18 @@ func (s *LLMService) callCodexCLIChat(ctx context.Context, message string, attac
 	tid := sw.SessionID()
 	if tid != "" && s.execRepo != nil {
 		if err := s.execRepo.UpdateCliSessionID(ctx, execID, tid); err != nil {
-			log.Printf("[agent-svc] callCodexCLIChat error persisting thread_id: %v", err)
+			applog.Infof("[agent-svc] callCodexCLIChat error persisting thread_id: %v", err)
 		} else {
-			log.Printf("[agent-svc] callCodexCLIChat persisted thread_id=%s for exec=%s", tid, execID)
+			applog.Infof("[agent-svc] callCodexCLIChat persisted thread_id=%s for exec=%s", tid, execID)
 		}
 	}
 
-	log.Printf("[agent-svc] callCodexCLIChat success output_len=%d thread_id=%s", len(output), tid)
+	applog.Infof("[agent-svc] callCodexCLIChat success output_len=%d thread_id=%s", len(output), tid)
 	return output, 0, nil
 }
 
 func (s *LLMService) callCodexCLISimple(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, disableTools bool) (string, int, error) {
-	log.Printf("[agent-svc] callCodexCLISimple model=%s attachments=%d workDir=%s", agent.Model, len(attachments), workDir)
+	applog.Infof("[agent-svc] callCodexCLISimple model=%s attachments=%d workDir=%s", agent.Model, len(attachments), workDir)
 
 	// SAFETY: Prevent accidental real CLI calls during tests
 	if isTestMode() {
@@ -2092,7 +2092,7 @@ func (s *LLMService) callCodexCLISimple(ctx context.Context, prompt string, atta
 
 	codexPath, err := exec.LookPath("codex")
 	if err != nil {
-		log.Printf("[agent-svc] callCodexCLISimple 'codex' not found in PATH: %v", err)
+		applog.Infof("[agent-svc] callCodexCLISimple 'codex' not found in PATH: %v", err)
 		return "", 0, fmt.Errorf("codex CLI not found in PATH - install it from https://github.com/openai/codex")
 	}
 
@@ -2113,18 +2113,18 @@ func (s *LLMService) callCodexCLISimple(ctx context.Context, prompt string, atta
 	}
 
 	args := llmprompt.CodexExecArgs(agent.Model, agent.ReasoningEffort, imagePaths)
-	log.Printf("[agent-svc] callCodexCLISimple executing: codex %s (prompt via stdin)", strings.Join(args, " "))
+	applog.Infof("[agent-svc] callCodexCLISimple executing: codex %s (prompt via stdin)", strings.Join(args, " "))
 
 	cmd := exec.CommandContext(ctx, codexPath, args...)
 	if workDir != "" {
 		cmd.Dir = workDir
-		log.Printf("[agent-svc] callCodexCLISimple using workDir=%s", workDir)
+		applog.Infof("[agent-svc] callCodexCLISimple using workDir=%s", workDir)
 	}
 	cmd.Stdin = strings.NewReader(fullPrompt)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Printf("[agent-svc] callCodexCLISimple error creating stdout pipe: %v", err)
+		applog.Infof("[agent-svc] callCodexCLISimple error creating stdout pipe: %v", err)
 		return "", 0, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
@@ -2135,7 +2135,7 @@ func (s *LLMService) callCodexCLISimple(ctx context.Context, prompt string, atta
 	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("[agent-svc] callCodexCLISimple error starting command: %v", err)
+		applog.Infof("[agent-svc] callCodexCLISimple error starting command: %v", err)
 		return "", 0, fmt.Errorf("starting codex CLI: %w", err)
 	}
 
@@ -2146,12 +2146,12 @@ func (s *LLMService) callCodexCLISimple(ctx context.Context, prompt string, atta
 
 	err = cmd.Wait()
 	if pErr := <-parseErr; pErr != nil {
-		log.Printf("[agent-svc] callCodexCLISimple JSON parsing error: %v", pErr)
+		applog.Infof("[agent-svc] callCodexCLISimple JSON parsing error: %v", pErr)
 	}
 
 	if err != nil {
 		errOutput := strings.TrimSpace(stderr.String())
-		log.Printf("[agent-svc] callCodexCLISimple error: %v stderr: %s", err, errOutput)
+		applog.Infof("[agent-svc] callCodexCLISimple error: %v stderr: %s", err, errOutput)
 		if errOutput != "" {
 			return "", 0, fmt.Errorf("codex CLI error: %s", errOutput)
 		}
@@ -2161,12 +2161,12 @@ func (s *LLMService) callCodexCLISimple(ctx context.Context, prompt string, atta
 	if sw.IsError() {
 		output := sw.String()
 		subtype := sw.ResultSubtype()
-		log.Printf("[agent-svc] callCodexCLISimple result is_error=true subtype=%s output_len=%d", subtype, len(output))
+		applog.Infof("[agent-svc] callCodexCLISimple result is_error=true subtype=%s output_len=%d", subtype, len(output))
 		return output, 0, fmt.Errorf("codex CLI reported error (subtype=%s)", subtype)
 	}
 
 	output := sw.String()
-	log.Printf("[agent-svc] callCodexCLISimple success output_len=%d", len(output))
+	applog.Infof("[agent-svc] callCodexCLISimple success output_len=%d", len(output))
 	return output, 0, nil
 }
 

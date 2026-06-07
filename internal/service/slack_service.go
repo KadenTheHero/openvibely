@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -15,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -213,7 +213,7 @@ func (s *SlackService) Start() error {
 	go s.runSocketLoop(ctx, socketClient)
 	go socketClient.RunContext(ctx)
 
-	log.Println("[slack] socket mode started")
+	applog.Infof("[slack] socket mode started")
 	return nil
 }
 
@@ -229,7 +229,7 @@ func (s *SlackService) Stop() {
 	s.running = false
 	s.socketClient = nil
 	s.botClient = nil
-	log.Println("[slack] socket mode stopped")
+	applog.Infof("[slack] socket mode stopped")
 }
 
 func (s *SlackService) ReloadFromSettings(ctx context.Context) error {
@@ -412,7 +412,7 @@ func (s *SlackService) SendTaskCompletionToThread(ctx context.Context, channelID
 		message = fmt.Sprintf("✅ *Task completed:* %s\n\n%s", taskTitle, util.Truncate(cleaned, 3500))
 	}
 	if err := s.sendSlackMessage(channelID, threadTS, message); err != nil {
-		log.Printf("[slack] send completion notification failed for channel=%s thread=%s user=%s: %v", channelID, threadTS, userID, err)
+		applog.Infof("[slack] send completion notification failed for channel=%s thread=%s user=%s: %v", channelID, threadTS, userID, err)
 	}
 }
 
@@ -452,7 +452,7 @@ func (s *SlackService) SendTaskCompletionNotification(ctx context.Context, task 
 	}
 
 	if err := s.sendSlackMessage(ctxRecord.SlackChannelID, ctxRecord.SlackThreadTS, message); err != nil {
-		log.Printf("[slack] send completion notification failed for task=%s: %v", task.ID, err)
+		applog.Infof("[slack] send completion notification failed for task=%s: %v", task.ID, err)
 	}
 }
 
@@ -603,7 +603,7 @@ func (s *SlackService) queueChatInput(ctx context.Context, projectID, activeExec
 		SlackUserID:    msg.UserID,
 	}
 	if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
-		log.Printf("[slack] queue chat input failed: %v", err)
+		applog.Infof("[slack] queue chat input failed: %v", err)
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error queueing your message. Please try again.")
 		return true
 	}
@@ -626,7 +626,7 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		return
 	}
 	if s.taskRepo == nil || s.execRepo == nil || s.llmConfigRepo == nil || s.llmSvc == nil || s.taskSvc == nil || s.projectRepo == nil {
-		log.Printf("[slack] incoming message ignored: service dependencies are not fully configured")
+		applog.Infof("[slack] incoming message ignored: service dependencies are not fully configured")
 		return
 	}
 
@@ -640,7 +640,7 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		return
 	}
 	if !s.checkAuthorization(ctx, projectID, msg.UserID) {
-		log.Printf("[slack] unauthorized access blocked for user=%s team=%s project=%s", msg.UserID, msg.TeamID, projectID)
+		applog.Infof("[slack] unauthorized access blocked for user=%s team=%s project=%s", msg.UserID, msg.TeamID, projectID)
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "You are not authorized to use Slack access for this project. Contact the project owner to get access.")
 		return
 	}
@@ -652,7 +652,7 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 	}
 
 	if activeChatExec, activeErr := s.execRepo.FindLatestActiveChatExecution(ctx, projectID); activeErr != nil {
-		log.Printf("[slack] error checking active chat turn: %v", activeErr)
+		applog.Infof("[slack] error checking active chat turn: %v", activeErr)
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error checking active chat response. Please try again.")
 		return
 	} else if activeChatExec != nil {
@@ -673,7 +673,7 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		CreatedVia: models.TaskOriginSlack,
 	}
 	if err := s.taskRepo.Create(ctx, task); err != nil {
-		log.Printf("[slack] create chat task failed: %v", err)
+		applog.Infof("[slack] create chat task failed: %v", err)
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
 		return
 	}
@@ -686,9 +686,9 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 			SlackThreadTS:  msg.ThreadTS,
 			SlackUserID:    msg.UserID,
 		}); err != nil {
-			log.Printf("[slack] create chat context failed task=%s: %v", task.ID, err)
+			applog.Infof("[slack] create chat context failed task=%s: %v", task.ID, err)
 			if delErr := s.taskRepo.Delete(ctx, task.ID); delErr != nil {
-				log.Printf("[slack] cleanup chat task failed task=%s: %v", task.ID, delErr)
+				applog.Infof("[slack] cleanup chat task failed task=%s: %v", task.ID, delErr)
 			}
 			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
 			return
@@ -701,9 +701,9 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		PromptSent:    msg.Text,
 	}
 	if err := s.execRepo.Create(ctx, exec); err != nil {
-		log.Printf("[slack] create execution failed: %v", err)
+		applog.Infof("[slack] create execution failed: %v", err)
 		if delErr := s.taskRepo.Delete(ctx, task.ID); delErr != nil {
-			log.Printf("[slack] cleanup chat task failed task=%s after execution create failure: %v", task.ID, delErr)
+			applog.Infof("[slack] cleanup chat task failed task=%s after execution create failure: %v", task.ID, delErr)
 		}
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
 		return
@@ -760,20 +760,20 @@ func (s *SlackService) completeExecution(ctx context.Context, execID, taskID, ou
 	}
 	if errorMessage != "" {
 		if err := s.execRepo.Complete(ctx, execID, models.ExecFailed, "", errorMessage, 0, durationMs); err != nil {
-			log.Printf("[slack] complete failed execution error: %v", err)
+			applog.Infof("[slack] complete failed execution error: %v", err)
 		}
 		if err := s.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed); err != nil {
-			log.Printf("[slack] update failed task status error: %v", err)
+			applog.Infof("[slack] update failed task status error: %v", err)
 		}
 		s.promoteQueuedChatAfterCompletion(ctx, taskID)
 		return
 	}
 
 	if err := s.execRepo.Complete(ctx, execID, models.ExecCompleted, output, "", tokensUsed, durationMs); err != nil {
-		log.Printf("[slack] complete execution error: %v", err)
+		applog.Infof("[slack] complete execution error: %v", err)
 	}
 	if err := s.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted); err != nil {
-		log.Printf("[slack] update task status error: %v", err)
+		applog.Infof("[slack] update task status error: %v", err)
 	}
 	s.promoteQueuedChatAfterCompletion(ctx, taskID)
 }
@@ -842,7 +842,7 @@ func (s *SlackService) listChatAssignableAgentDefinitions(ctx context.Context) [
 	}
 	agents, err := s.agentRepo.List(ctx)
 	if err != nil {
-		log.Printf("[slack] error listing agent definitions for context: %v", err)
+		applog.Infof("[slack] error listing agent definitions for context: %v", err)
 		return nil
 	}
 	return UniqueChatAssignableAgentDefinitions(agents)
@@ -910,7 +910,7 @@ func (s *SlackService) slackActionHandlers(projectID string, markerCtx slackMark
 			for _, t := range createdTasks {
 				if s.taskRepo != nil {
 					if err := s.taskRepo.UpdateSlackOrigin(ctx, t.ID); err != nil {
-						log.Printf("[slack] runtime create_task update slack origin failed for task=%s: %v", t.ID, err)
+						applog.Infof("[slack] runtime create_task update slack origin failed for task=%s: %v", t.ID, err)
 					}
 				}
 				if s.slackTaskContextRepo != nil {
@@ -1123,7 +1123,7 @@ func (s *SlackService) slackGetPersonality(ctx context.Context) string {
 	}
 	current, err := s.settingsRepo.Get(ctx, "personality")
 	if err != nil {
-		log.Printf("[slack] slackGetPersonality error: %v", err)
+		applog.Infof("[slack] slackGetPersonality error: %v", err)
 		return "Error retrieving personality setting."
 	}
 	if current == "" {
@@ -1318,7 +1318,7 @@ func (s *SlackService) slackSendToTask(ctx context.Context, projectID string, in
 	}
 	if task.Category != models.CategoryActive {
 		if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
-			log.Printf("[slack] runtime send_to_task error updating category for task %s: %v", task.ID, err)
+			applog.Infof("[slack] runtime send_to_task error updating category for task %s: %v", task.ID, err)
 		}
 	}
 	s.channelTaskRunner(context.Background(), ChannelTaskRunRequest{
@@ -2028,7 +2028,7 @@ func (s *SlackService) setActiveProject(ctx context.Context, teamID, userID, pro
 	s.mu.Unlock()
 	if s.slackUserProjectRepo != nil {
 		if err := s.slackUserProjectRepo.SetUserProject(ctx, teamID, userID, projectID); err != nil {
-			log.Printf("[slack] persist active project failed: %v", err)
+			applog.Infof("[slack] persist active project failed: %v", err)
 		}
 	}
 }
@@ -2084,7 +2084,7 @@ func (s *SlackService) checkAuthorization(ctx context.Context, projectID, slackU
 	if strings.TrimSpace(projectID) == "" {
 		authorized, err := s.slackAuthRepo.IsAuthorizedAnywhere(ctx, slackUserID)
 		if err != nil {
-			log.Printf("[slack] auth check error for user=%s anywhere: %v", slackUserID, err)
+			applog.Infof("[slack] auth check error for user=%s anywhere: %v", slackUserID, err)
 			return true
 		}
 		return authorized
@@ -2092,7 +2092,7 @@ func (s *SlackService) checkAuthorization(ctx context.Context, projectID, slackU
 
 	authorized, err := s.slackAuthRepo.IsAuthorized(ctx, projectID, slackUserID)
 	if err != nil {
-		log.Printf("[slack] auth check error for user=%s project=%s: %v", slackUserID, projectID, err)
+		applog.Infof("[slack] auth check error for user=%s project=%s: %v", slackUserID, projectID, err)
 		return true
 	}
 	if authorized {
@@ -2101,7 +2101,7 @@ func (s *SlackService) checkAuthorization(ctx context.Context, projectID, slackU
 
 	authorizedAnywhere, err := s.slackAuthRepo.IsAuthorizedAnywhere(ctx, slackUserID)
 	if err != nil {
-		log.Printf("[slack] auth check error for user=%s fallback-anywhere: %v", slackUserID, err)
+		applog.Infof("[slack] auth check error for user=%s fallback-anywhere: %v", slackUserID, err)
 		return true
 	}
 	return authorizedAnywhere
@@ -2228,7 +2228,7 @@ func (s *SlackService) SendChatResponse(ctx context.Context, task models.Task, o
 		message = cleaned
 	}
 	if err := s.sendSlackMessage(ctxRecord.SlackChannelID, ctxRecord.SlackThreadTS, message); err != nil {
-		log.Printf("[slack] send chat response failed for task=%s: %v", task.ID, err)
+		applog.Infof("[slack] send chat response failed for task=%s: %v", task.ID, err)
 	}
 }
 

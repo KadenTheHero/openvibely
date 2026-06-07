@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
@@ -25,11 +25,11 @@ const chatSSETimeout = chatProcessingTimeout + 30*time.Second
 
 func (h *Handler) Chat(c echo.Context) error {
 	isHTMX := isHTMX(c)
-	log.Printf("[handler] Chat requested htmx=%v", isHTMX)
+	applog.Debugf("[handler] Chat requested htmx=%v", isHTMX)
 
 	agents, err := h.llmConfigRepo.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] Chat error listing agents: %v", err)
+		applog.Infof("[handler] Chat error listing agents: %v", err)
 		return err
 	}
 
@@ -38,7 +38,7 @@ func (h *Handler) Chat(c echo.Context) error {
 	// Load recent chat history for this project (last 50 messages)
 	chatHistory, err := h.execRepo.ListChatHistory(c.Request().Context(), currentProjectID, 50)
 	if err != nil {
-		log.Printf("[handler] Chat error loading chat history: %v", err)
+		applog.Infof("[handler] Chat error loading chat history: %v", err)
 		// Continue even if history load fails - just show empty chat
 		chatHistory = []models.Execution{}
 	}
@@ -50,7 +50,7 @@ func (h *Handler) Chat(c echo.Context) error {
 	}
 	chatAttachmentsByExec, err := h.chatAttachmentRepo.ListByExecutionIDs(c.Request().Context(), execIDs)
 	if err != nil {
-		log.Printf("[handler] Chat error loading attachments: %v", err)
+		applog.Infof("[handler] Chat error loading attachments: %v", err)
 		chatAttachmentsByExec = make(map[string][]models.ChatAttachment)
 	}
 
@@ -59,7 +59,7 @@ func (h *Handler) Chat(c echo.Context) error {
 		if inputs, inputErr := h.threadInputRepo.ListPendingForChat(c.Request().Context(), currentProjectID); inputErr == nil {
 			pendingInputs = inputs
 		} else {
-			log.Printf("[handler] Chat error loading pending inputs: %v", inputErr)
+			applog.Infof("[handler] Chat error loading pending inputs: %v", inputErr)
 		}
 	}
 
@@ -83,15 +83,15 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 	}
 
-	log.Printf("[handler] ChatSend message=%q agent_id=%s chat_mode=%s", message, agentID, chatMode)
+	applog.Infof("[handler] ChatSend message=%q agent_id=%s chat_mode=%s", message, agentID, chatMode)
 
 	hasModels, err := h.hasConfiguredModels(c)
 	if err != nil {
-		log.Printf("[handler] ChatSend model availability check error: %v", err)
+		applog.Infof("[handler] ChatSend model availability check error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check model availability")
 	}
 	if !hasModels {
-		log.Printf("[handler] ChatSend blocked: no models configured")
+		applog.Infof("[handler] ChatSend blocked: no models configured")
 		return noModelsConfiguredResponse(c)
 	}
 
@@ -102,14 +102,14 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	// Select agent (auto or explicit)
 	agent, err := h.selectAgent(c.Request().Context(), agentID, message, hasImages)
 	if err != nil {
-		log.Printf("[handler] ChatSend agent selection error: %v", err)
+		applog.Infof("[handler] ChatSend agent selection error: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
 	// Get project from query param or use default
 	projectID, err := h.getCurrentProjectID(c)
 	if err != nil || projectID == "" {
-		log.Printf("[handler] ChatSend error getting project: %v", err)
+		applog.Infof("[handler] ChatSend error getting project: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "no project available")
 	}
 
@@ -119,7 +119,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 
 	activeChatExec, err := h.execRepo.FindLatestActiveChatExecution(c.Request().Context(), projectID)
 	if err != nil {
-		log.Printf("[handler] ChatSend error checking active chat turn: %v", err)
+		applog.Infof("[handler] ChatSend error checking active chat turn: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check chat queue")
 	}
 
@@ -139,7 +139,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 			ChatMode:            chatMode,
 		}
 		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
-			log.Printf("[handler] ChatSend error creating queued input: %v", err)
+			applog.Infof("[handler] ChatSend error creating queued input: %v", err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue chat message")
 		}
 		if h.chatBroadcaster != nil {
@@ -168,7 +168,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		AgentID:   &selectedAgentID,
 	}
 	if err := h.taskRepo.Create(c.Request().Context(), task); err != nil {
-		log.Printf("[handler] ChatSend error creating task: %v", err)
+		applog.Infof("[handler] ChatSend error creating task: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create chat task")
 	}
 
@@ -181,14 +181,14 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		PromptSent:    message,
 	}
 	if err := h.execRepo.Create(c.Request().Context(), exec); err != nil {
-		log.Printf("[handler] ChatSend error creating execution: %v", err)
+		applog.Infof("[handler] ChatSend error creating execution: %v", err)
 		if delErr := h.taskRepo.Delete(c.Request().Context(), task.ID); delErr != nil {
-			log.Printf("[handler] ChatSend error cleaning up chat task=%s after execution create failure: %v", task.ID, delErr)
+			applog.Infof("[handler] ChatSend error cleaning up chat task=%s after execution create failure: %v", task.ID, delErr)
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
 	}
 
-	log.Printf("[handler] ChatSend created exec=%s for chat message status=%s", exec.ID, exec.Status)
+	applog.Infof("[handler] ChatSend created exec=%s for chat message status=%s", exec.ID, exec.Status)
 	// Broadcast new message event so other tabs/clients update in real-time
 	if h.chatBroadcaster != nil {
 		h.chatBroadcaster.Publish(events.ChatEvent{
@@ -207,11 +207,11 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	var imageAttachments []models.Attachment
 	var chatAttachments []models.ChatAttachment
 	if sessionID != "" {
-		log.Printf("[handler] ChatSend processing attachments for session=%s", sessionID)
+		applog.Infof("[handler] ChatSend processing attachments for session=%s", sessionID)
 		var attErr error
 		attachmentContext, imageAttachments, chatAttachments, attErr = h.processAttachmentsWithReturn(c.Request().Context(), sessionID, exec.ID)
 		if attErr != nil {
-			log.Printf("[handler] ChatSend error processing attachments: %v", attErr)
+			applog.Infof("[handler] ChatSend error processing attachments: %v", attErr)
 			message = message + fmt.Sprintf("\n\n⚠️ Attachment processing error: %v", attErr)
 		}
 	}
@@ -219,7 +219,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	// Load recent chat history and filter for conversation context
 	chatHistory, err := h.execRepo.ListChatHistory(c.Request().Context(), projectID, chatHistoryLimit)
 	if err != nil {
-		log.Printf("[handler] ChatSend error loading chat history: %v", err)
+		applog.Infof("[handler] ChatSend error loading chat history: %v", err)
 		chatHistory = []models.Execution{}
 	}
 	priorHistory := filterChatHistory(chatHistory, exec.ID)
@@ -267,12 +267,12 @@ func (h *Handler) ChatSteer(c echo.Context) error {
 	}
 	projectID, err := h.getCurrentProjectID(c)
 	if err != nil || projectID == "" {
-		log.Printf("[handler] ChatSteer error getting project: %v", err)
+		applog.Infof("[handler] ChatSteer error getting project: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "no project available")
 	}
 	active, err := h.execRepo.FindLatestActiveChatExecution(c.Request().Context(), projectID)
 	if err != nil {
-		log.Printf("[handler] ChatSteer active execution check failed project=%s: %v", projectID, err)
+		applog.Infof("[handler] ChatSteer active execution check failed project=%s: %v", projectID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
 	}
 	if active == nil {
@@ -298,7 +298,7 @@ func (h *Handler) ChatSteer(c echo.Context) error {
 		ChatMode:            chatMode,
 	}
 	if err := h.threadInputRepo.CreateSteeringForActiveExecution(c.Request().Context(), input, active.ID); err != nil {
-		log.Printf("[handler] ChatSteer error creating steering input: %v", err)
+		applog.Infof("[handler] ChatSteer error creating steering input: %v", err)
 		if errors.Is(err, repository.ErrExpectedTurnEmpty) {
 			return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
 		}
@@ -358,7 +358,7 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 
 	// Check if pending directory exists
 	if _, err := os.Stat(pendingDir); os.IsNotExist(err) {
-		log.Printf("[handler] processAttachmentsWithReturn pending directory not found: %s", pendingDir)
+		applog.Infof("[handler] processAttachmentsWithReturn pending directory not found: %s", pendingDir)
 		return "", nil, nil, nil // Not an error, just no attachments
 	}
 
@@ -392,14 +392,14 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 
 		// Move file
 		if err := os.Rename(srcPath, destPath); err != nil {
-			log.Printf("[handler] processAttachments error moving file %s: %v", file.Name(), err)
+			applog.Infof("[handler] processAttachments error moving file %s: %v", file.Name(), err)
 			continue
 		}
 
 		// Get file info
 		info, err := os.Stat(destPath)
 		if err != nil {
-			log.Printf("[handler] processAttachments error getting file info %s: %v", file.Name(), err)
+			applog.Infof("[handler] processAttachments error getting file info %s: %v", file.Name(), err)
 			continue
 		}
 
@@ -416,7 +416,7 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 		}
 
 		if err := h.chatAttachmentRepo.Create(ctx, attachment); err != nil {
-			log.Printf("[handler] processAttachmentsWithReturn error creating attachment record: %v", err)
+			applog.Infof("[handler] processAttachmentsWithReturn error creating attachment record: %v", err)
 			continue
 		}
 
@@ -432,20 +432,20 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 				MediaType: mediaType,
 				FileSize:  info.Size(),
 			})
-			log.Printf("[handler] processAttachmentsWithReturn image attachment id=%s file=%s size=%d", attachment.ID, file.Name(), info.Size())
+			applog.Infof("[handler] processAttachmentsWithReturn image attachment id=%s file=%s size=%d", attachment.ID, file.Name(), info.Size())
 		} else if info.Size() <= maxTextAttachmentSize {
 			// Text files within size limit: read content and include in prompt context
 			content, readErr := os.ReadFile(destPath)
 			if readErr != nil {
-				log.Printf("[handler] processAttachmentsWithReturn error reading file %s: %v", file.Name(), readErr)
+				applog.Infof("[handler] processAttachmentsWithReturn error reading file %s: %v", file.Name(), readErr)
 				continue
 			}
 			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", file.Name(), string(content)))
-			log.Printf("[handler] processAttachmentsWithReturn text attachment id=%s file=%s size=%d", attachment.ID, file.Name(), info.Size())
+			applog.Infof("[handler] processAttachmentsWithReturn text attachment id=%s file=%s size=%d", attachment.ID, file.Name(), info.Size())
 		} else {
 			// Large text files: mention but don't include content to avoid prompt overflow
 			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", file.Name(), info.Size()))
-			log.Printf("[handler] processAttachmentsWithReturn large file id=%s file=%s size=%d (skipped content)", attachment.ID, file.Name(), info.Size())
+			applog.Infof("[handler] processAttachmentsWithReturn large file id=%s file=%s size=%d (skipped content)", attachment.ID, file.Name(), info.Size())
 		}
 	}
 
@@ -507,7 +507,7 @@ func (h *Handler) previewPendingAttachments(sessionID string) (string, []models.
 
 func (h *Handler) ClearChat(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
-	log.Printf("[handler] ClearChat project=%s", projectID)
+	applog.Infof("[handler] ClearChat project=%s", projectID)
 
 	// Cancel any running chat goroutines before deleting.
 	// Without this, running goroutines continue processing with old conversation
@@ -515,28 +515,28 @@ func (h *Handler) ClearChat(c echo.Context) error {
 	if h.workerSvc != nil {
 		runningIDs, _ := h.taskRepo.ListRunningChatTaskIDs(c.Request().Context(), projectID)
 		for _, id := range runningIDs {
-			log.Printf("[handler] ClearChat cancelling running chat task=%s", id)
+			applog.Infof("[handler] ClearChat cancelling running chat task=%s", id)
 			h.workerSvc.CancelRunningTask(id)
 		}
 	}
 	if h.threadInputRepo != nil {
 		if err := h.threadInputRepo.CancelPendingForChat(c.Request().Context(), projectID); err != nil {
-			log.Printf("[handler] ClearChat error cancelling pending chat inputs: %v", err)
+			applog.Infof("[handler] ClearChat error cancelling pending chat inputs: %v", err)
 			return err
 		}
 	}
 
 	count, err := h.taskSvc.DeleteAllChat(c.Request().Context(), projectID)
 	if err != nil {
-		log.Printf("[handler] ClearChat error: %v", err)
+		applog.Infof("[handler] ClearChat error: %v", err)
 		return err
 	}
-	log.Printf("[handler] ClearChat deleted %d chat tasks", count)
+	applog.Infof("[handler] ClearChat deleted %d chat tasks", count)
 
 	// Return updated chat content
 	agents, err := h.llmConfigRepo.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] ClearChat error listing agents: %v", err)
+		applog.Infof("[handler] ClearChat error listing agents: %v", err)
 		return err
 	}
 
@@ -594,13 +594,13 @@ func (h *Handler) copyChatAttachmentsToTask(ctx context.Context, executionID, ta
 		// Read source file
 		data, err := os.ReadFile(srcPath)
 		if err != nil {
-			log.Printf("[handler] copyChatAttachmentsToTask error reading file %s: %v", srcPath, err)
+			applog.Infof("[handler] copyChatAttachmentsToTask error reading file %s: %v", srcPath, err)
 			continue
 		}
 
 		// Write to destination
 		if err := os.WriteFile(destPath, data, 0644); err != nil {
-			log.Printf("[handler] copyChatAttachmentsToTask error writing file %s: %v", destPath, err)
+			applog.Infof("[handler] copyChatAttachmentsToTask error writing file %s: %v", destPath, err)
 			continue
 		}
 
@@ -614,13 +614,13 @@ func (h *Handler) copyChatAttachmentsToTask(ctx context.Context, executionID, ta
 		}
 
 		if err := h.attachmentRepo.Create(ctx, taskAttachment); err != nil {
-			log.Printf("[handler] copyChatAttachmentsToTask error creating attachment record: %v", err)
+			applog.Infof("[handler] copyChatAttachmentsToTask error creating attachment record: %v", err)
 			// Clean up the copied file
 			os.Remove(destPath)
 			continue
 		}
 
-		log.Printf("[handler] copyChatAttachmentsToTask copied attachment file=%s from exec=%s to task=%s", chatAtt.FileName, executionID, taskID)
+		applog.Infof("[handler] copyChatAttachmentsToTask copied attachment file=%s from exec=%s to task=%s", chatAtt.FileName, executionID, taskID)
 		copiedCount++
 		copiedFileNames = append(copiedFileNames, chatAtt.FileName)
 	}
@@ -637,7 +637,7 @@ func (h *Handler) copyChatAttachmentsToTask(ctx context.Context, executionID, ta
 			}
 			task.Prompt += fmt.Sprintf("\n\n[Attached files from chat:\n%s]", strings.Join(fileRefs, "\n"))
 			if updateErr := h.taskRepo.Update(ctx, task); updateErr != nil {
-				log.Printf("[handler] copyChatAttachmentsToTask error updating task prompt: %v", updateErr)
+				applog.Infof("[handler] copyChatAttachmentsToTask error updating task prompt: %v", updateErr)
 			}
 		}
 	}
@@ -663,7 +663,7 @@ func (h *Handler) ChatStreamSSE(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "exec_id is required")
 	}
 
-	log.Printf("[handler] ChatStreamSSE exec=%s connected", execID)
+	applog.Infof("[handler] ChatStreamSSE exec=%s connected", execID)
 
 	// Set headers for SSE
 	c.Response().Header().Set("Content-Type", "text/event-stream")
@@ -681,11 +681,11 @@ func (h *Handler) ChatStreamSSE(c echo.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("[handler] ChatStreamSSE exec=%s client disconnected", execID)
+			applog.Infof("[handler] ChatStreamSSE exec=%s client disconnected", execID)
 			return nil
 
 		case <-timeout:
-			log.Printf("[handler] ChatStreamSSE exec=%s timeout", execID)
+			applog.Infof("[handler] ChatStreamSSE exec=%s timeout", execID)
 			fmt.Fprintf(c.Response(), "event: error\ndata: timeout\n\n")
 			c.Response().Flush()
 			return nil
@@ -694,14 +694,14 @@ func (h *Handler) ChatStreamSSE(c echo.Context) error {
 			// Get current execution state
 			exec, err := h.execRepo.GetByID(ctx, execID)
 			if err != nil {
-				log.Printf("[handler] ChatStreamSSE exec=%s error: %v", execID, err)
+				applog.Infof("[handler] ChatStreamSSE exec=%s error: %v", execID, err)
 				fmt.Fprintf(c.Response(), "event: error\ndata: %s\n\n", err.Error())
 				c.Response().Flush()
 				return nil
 			}
 
 			if exec == nil {
-				log.Printf("[handler] ChatStreamSSE exec=%s not found", execID)
+				applog.Infof("[handler] ChatStreamSSE exec=%s not found", execID)
 				fmt.Fprintf(c.Response(), "event: error\ndata: execution not found\n\n")
 				c.Response().Flush()
 				return nil
@@ -713,7 +713,7 @@ func (h *Handler) ChatStreamSSE(c echo.Context) error {
 			if output != lastOutput && len(output) > len(lastOutput) {
 				// Send only the delta (new content)
 				delta := output[len(lastOutput):]
-				log.Printf("[handler] ChatStreamSSE exec=%s delta_len=%d delta=%q", execID, len(delta), delta)
+				// applog.Debugf("[handler] ChatStreamSSE exec=%s delta_len=%d delta=%q", execID, len(delta), delta)
 				// SSE requires multi-line data to have each line prefixed with "data:".
 				// Without this, content after the first newline is silently dropped
 				// by the browser's EventSource parser.
@@ -727,12 +727,12 @@ func (h *Handler) ChatStreamSSE(c echo.Context) error {
 
 			// Check if execution is complete
 			if exec.Status == models.ExecCompleted {
-				log.Printf("[handler] ChatStreamSSE exec=%s completed total_output_len=%d total_output=%q", execID, len(exec.Output), exec.Output)
+				// applog.Debugf("[handler] ChatStreamSSE exec=%s completed total_output_len=%d total_output=%q", execID, len(exec.Output), exec.Output)
 				fmt.Fprintf(c.Response(), "event: done\ndata: completed\n\n")
 				c.Response().Flush()
 				return nil
 			} else if exec.Status == models.ExecFailed {
-				log.Printf("[handler] ChatStreamSSE exec=%s failed: %s", execID, exec.ErrorMessage)
+				applog.Infof("[handler] ChatStreamSSE exec=%s failed: %s", execID, exec.ErrorMessage)
 				fmt.Fprintf(c.Response(), "event: error\ndata: %s\n\n", exec.ErrorMessage)
 				c.Response().Flush()
 				return nil

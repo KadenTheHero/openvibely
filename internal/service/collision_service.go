@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/util"
@@ -44,7 +44,7 @@ func (s *CollisionService) SetLLMService(llmSvc *LLMService) {
 
 // AnalyzeTaskImpact performs AI-powered semantic analysis of what a task will touch
 func (s *CollisionService) AnalyzeTaskImpact(ctx context.Context, taskID string) (*models.ImpactAnalysis, error) {
-	log.Printf("[collision-svc] AnalyzeTaskImpact task=%s", taskID)
+	applog.Infof("[collision-svc] AnalyzeTaskImpact task=%s", taskID)
 
 	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil || task == nil {
@@ -74,7 +74,7 @@ func (s *CollisionService) AnalyzeTaskImpact(ctx context.Context, taskID string)
 	// Parse the AI response
 	response, err := parseImpactAnalysisResponse(output)
 	if err != nil {
-		log.Printf("[collision-svc] AnalyzeTaskImpact failed to parse AI response, using raw: %v", err)
+		applog.Infof("[collision-svc] AnalyzeTaskImpact failed to parse AI response, using raw: %v", err)
 		response = &models.ImpactAnalysisResponse{
 			Summary:    output,
 			Confidence: 0.3,
@@ -106,7 +106,7 @@ func (s *CollisionService) AnalyzeTaskImpact(ctx context.Context, taskID string)
 		return nil, fmt.Errorf("saving impact analysis: %w", err)
 	}
 
-	log.Printf("[collision-svc] AnalyzeTaskImpact completed task=%s files=%d apis=%d schemas=%d components=%d confidence=%.2f",
+	applog.Infof("[collision-svc] AnalyzeTaskImpact completed task=%s files=%d apis=%d schemas=%d components=%d confidence=%.2f",
 		taskID, len(response.Files), len(response.APIs), len(response.Schemas), len(response.Components), response.Confidence)
 
 	return ia, nil
@@ -114,7 +114,7 @@ func (s *CollisionService) AnalyzeTaskImpact(ctx context.Context, taskID string)
 
 // DetectConflicts compares impact analyses across pending/running tasks to find conflicts
 func (s *CollisionService) DetectConflicts(ctx context.Context, projectID string) ([]models.ConflictPrediction, error) {
-	log.Printf("[collision-svc] DetectConflicts project=%s", projectID)
+	applog.Infof("[collision-svc] DetectConflicts project=%s", projectID)
 
 	analyses, err := s.collisionRepo.ListImpactAnalysesByProject(ctx, projectID)
 	if err != nil {
@@ -122,7 +122,7 @@ func (s *CollisionService) DetectConflicts(ctx context.Context, projectID string
 	}
 
 	if len(analyses) < 2 {
-		log.Printf("[collision-svc] DetectConflicts only %d analyses, skipping", len(analyses))
+		applog.Infof("[collision-svc] DetectConflicts only %d analyses, skipping", len(analyses))
 		return nil, nil
 	}
 
@@ -143,7 +143,7 @@ func (s *CollisionService) DetectConflicts(ctx context.Context, projectID string
 				// Check if this conflict already exists
 				exists, err := s.collisionRepo.ExistingConflict(ctx, a.TaskID, b.TaskID, result.ConflictType)
 				if err != nil {
-					log.Printf("[collision-svc] DetectConflicts error checking existing conflict: %v", err)
+					applog.Infof("[collision-svc] DetectConflicts error checking existing conflict: %v", err)
 					continue
 				}
 				if exists {
@@ -161,17 +161,17 @@ func (s *CollisionService) DetectConflicts(ctx context.Context, projectID string
 					Status:             models.ConflictDetected,
 				}
 				if err := cp.SetOverlappingResources(result.OverlappingResources); err != nil {
-					log.Printf("[collision-svc] DetectConflicts error setting resources: %v", err)
+					applog.Infof("[collision-svc] DetectConflicts error setting resources: %v", err)
 					continue
 				}
 
 				if err := s.collisionRepo.CreateConflictPrediction(ctx, &cp); err != nil {
-					log.Printf("[collision-svc] DetectConflicts error creating prediction: %v", err)
+					applog.Infof("[collision-svc] DetectConflicts error creating prediction: %v", err)
 					continue
 				}
 
 				newConflicts = append(newConflicts, cp)
-				log.Printf("[collision-svc] DetectConflicts found %s conflict between task=%s and task=%s severity=%s",
+				applog.Infof("[collision-svc] DetectConflicts found %s conflict between task=%s and task=%s severity=%s",
 					result.ConflictType, a.TaskID, b.TaskID, result.Severity)
 			}
 		}
@@ -182,7 +182,7 @@ func (s *CollisionService) DetectConflicts(ctx context.Context, projectID string
 
 // RecommendExecutionOrder suggests optimal task execution order to minimize conflicts
 func (s *CollisionService) RecommendExecutionOrder(ctx context.Context, projectID string) (*models.ExecutionOrderRecommendation, error) {
-	log.Printf("[collision-svc] RecommendExecutionOrder project=%s", projectID)
+	applog.Infof("[collision-svc] RecommendExecutionOrder project=%s", projectID)
 
 	// Get pending tasks in active category
 	tasks, err := s.taskRepo.ListByProject(ctx, projectID, string(models.CategoryActive))
@@ -229,7 +229,7 @@ func (s *CollisionService) RecommendExecutionOrder(ctx context.Context, projectI
 		return nil, fmt.Errorf("saving recommendation: %w", err)
 	}
 
-	log.Printf("[collision-svc] RecommendExecutionOrder created rec=%s tasks=%d batches=%d conflicts=%d",
+	applog.Infof("[collision-svc] RecommendExecutionOrder created rec=%s tasks=%d batches=%d conflicts=%d",
 		rec.ID, len(ordering), len(batchGroups), len(conflicts))
 
 	return rec, nil

@@ -72,6 +72,32 @@ func TestDebugf_EmittedAtDebugLevel(t *testing.T) {
 	}
 }
 
+func TestInfof_AlwaysEmittedAtInfoLevel(t *testing.T) {
+	orig := debugEnabled
+	defer func() { debugEnabled = orig }()
+
+	setDebug(false)
+	out := captureLog(func() {
+		Infof("[handler] ChatSend created exec=%s status=%s", "exec-abc", "pending")
+	})
+	if !strings.Contains(out, "exec-abc") {
+		t.Errorf("expected Infof to emit at info level, got %q", out)
+	}
+}
+
+func TestInfof_AlwaysEmittedAtDebugLevel(t *testing.T) {
+	orig := debugEnabled
+	defer func() { debugEnabled = orig }()
+
+	setDebug(true)
+	out := captureLog(func() {
+		Infof("[handler] ChatSend created exec=%s status=%s", "exec-xyz", "pending")
+	})
+	if !strings.Contains(out, "exec-xyz") {
+		t.Errorf("expected Infof to emit at debug level, got %q", out)
+	}
+}
+
 func TestDebugf_FormatArgs(t *testing.T) {
 	orig := debugEnabled
 	defer func() { debugEnabled = orig }()

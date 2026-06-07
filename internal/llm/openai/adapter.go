@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
@@ -260,7 +260,7 @@ func buildOpenAIRuntime(ctx context.Context, workDir string, agentDef *models.Ag
 
 	manager, err := mcpclient.NewMCPManager(ctx, agentDef.MCPServers, workDir)
 	if err != nil {
-		log.Printf("[openai-adapter] MCP manager init failed: %v", err)
+		applog.Infof("[openai-adapter] MCP manager init failed: %v", err)
 		execFn := func(ctx context.Context, name string, input json.RawMessage) (string, bool, error) {
 			out, err := openaiclient.ExecuteTool(ctx, workDir, name, input)
 			return out, err != nil, err
@@ -315,7 +315,7 @@ func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.Execution
 
 // CallDirect makes a non-streaming OpenAI API call.
 func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, disableTools bool) (string, llmcontracts.Usage, error) {
-	log.Printf("[openai-adapter] CallDirect model=%s output_budget=%d attachments=%d auth_method=%s disable_tools=%v", agent.Model, openAIDirectOutputBudget, len(attachments), agent.AuthMethod, disableTools)
+	applog.Infof("[openai-adapter] CallDirect model=%s output_budget=%d attachments=%d auth_method=%s disable_tools=%v", agent.Model, openAIDirectOutputBudget, len(attachments), agent.AuthMethod, disableTools)
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
@@ -356,7 +356,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 			SkipDefaultTools:       rt.SkipDefaultTools,
 		})
 		if err != nil {
-			log.Printf("[openai-adapter] CallDirect agentic error: %v", err)
+			applog.Infof("[openai-adapter] CallDirect agentic error: %v", err)
 			return "", llmusage.FromTotal(0), wrapAuthScopeError(agent, err)
 		}
 		usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
@@ -372,7 +372,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 		Attachments:         oaAttachments,
 	})
 	if err != nil {
-		log.Printf("[openai-adapter] CallDirect error: %v", err)
+		applog.Infof("[openai-adapter] CallDirect error: %v", err)
 		return "", llmusage.FromTotal(0), wrapAuthScopeError(agent, err)
 	}
 
@@ -382,7 +382,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 
 // CallStreaming makes a streaming OpenAI API call with tool use.
 func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, agentDef *models.Agent) (string, string, llmcontracts.Usage, error) {
-	log.Printf("[openai-adapter] CallStreaming model=%s output_budget=%d attachments=%d exec=%s auth_method=%s workDir=%s", agent.Model, openAIAgenticOutputBudget, len(attachments), execID, agent.AuthMethod, workDir)
+	applog.Infof("[openai-adapter] CallStreaming model=%s output_budget=%d attachments=%d exec=%s auth_method=%s workDir=%s", agent.Model, openAIAgenticOutputBudget, len(attachments), execID, agent.AuthMethod, workDir)
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
@@ -468,12 +468,12 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 		OnCompaction: func(summary string) {
-			log.Printf("[openai-adapter] CallStreaming context compacted, summary_len=%d", len(summary))
+			applog.Infof("[openai-adapter] CallStreaming context compacted, summary_len=%d", len(summary))
 		},
 	})
 	if err != nil {
 		sw.Flush()
-		log.Printf("[openai-adapter] CallStreaming error: %v", err)
+		applog.Infof("[openai-adapter] CallStreaming error: %v", err)
 		return "", "", llmusage.FromTotal(0), wrapAuthScopeError(agent, err)
 	}
 	if inThinking {
@@ -486,7 +486,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	output := sw.String()
 	textOnly := sw.TextString()
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
-	log.Printf("[openai-adapter] CallStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
+	applog.Infof("[openai-adapter] CallStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if isMaxTokensStopReason(resp.StopReason) {
 		return output, textOnly, usage, errMaxTokens
 	}
@@ -495,7 +495,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 
 // CallChatStreaming makes a streaming OpenAI chat call with history.
 func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, agentDef *models.Agent) (string, llmcontracts.Usage, error) {
-	log.Printf("[openai-adapter] CallChatStreaming model=%s history=%d message_len=%d context_len=%d attachments=%d exec=%s isTaskFollowup=%v auth_method=%s workDir=%s",
+	applog.Infof("[openai-adapter] CallChatStreaming model=%s history=%d message_len=%d context_len=%d attachments=%d exec=%s isTaskFollowup=%v auth_method=%s workDir=%s",
 		agent.Model, len(chatHistory), len(message), len(chatSystemContext), len(attachments), execID, isTaskFollowup, agent.AuthMethod, workDir)
 
 	client, err := a.getClient(ctx, agent)
@@ -577,12 +577,12 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 		OnCompaction: func(summary string) {
-			log.Printf("[openai-adapter] CallChatStreaming context compacted, summary_len=%d", len(summary))
+			applog.Infof("[openai-adapter] CallChatStreaming context compacted, summary_len=%d", len(summary))
 		},
 	})
 	if err != nil {
 		sw.Flush()
-		log.Printf("[openai-adapter] CallChatStreaming error: %v", err)
+		applog.Infof("[openai-adapter] CallChatStreaming error: %v", err)
 		return "", llmusage.FromTotal(0), wrapAuthScopeError(agent, err)
 	}
 	if chatInThinking {
@@ -594,7 +594,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 
 	output := sw.String()
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
-	log.Printf("[openai-adapter] CallChatStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
+	applog.Infof("[openai-adapter] CallChatStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if isMaxTokensStopReason(resp.StopReason) {
 		return output, usage, errMaxTokens
 	}
@@ -603,7 +603,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 
 // CallCompletionsStreaming uses /v1/chat/completions as a fallback.
 func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, agentDef *models.Agent) (string, string, llmcontracts.Usage, error) {
-	log.Printf("[openai-adapter] CallCompletionsStreaming (fallback) model=%s exec=%s", agent.Model, execID)
+	applog.Infof("[openai-adapter] CallCompletionsStreaming (fallback) model=%s exec=%s", agent.Model, execID)
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
@@ -678,7 +678,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	output := sw.String()
 	textOnly := sw.TextString()
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
-	log.Printf("[openai-adapter] CallCompletionsStreaming success output_len=%d tokens=%d tools=%d stop=%s", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason)
+	applog.Infof("[openai-adapter] CallCompletionsStreaming success output_len=%d tokens=%d tools=%d stop=%s", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason)
 	if isMaxTokensStopReason(resp.StopReason) {
 		return output, textOnly, usage, errMaxTokens
 	}
@@ -687,7 +687,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 
 // CallCompletionsChatStreaming uses /v1/chat/completions for chat with history.
 func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, agentDef *models.Agent) (string, llmcontracts.Usage, error) {
-	log.Printf("[openai-adapter] CallCompletionsChatStreaming (fallback) model=%s history=%d exec=%s", agent.Model, len(chatHistory), execID)
+	applog.Infof("[openai-adapter] CallCompletionsChatStreaming (fallback) model=%s history=%d exec=%s", agent.Model, len(chatHistory), execID)
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
@@ -756,7 +756,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 
 	output := sw.String()
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
-	log.Printf("[openai-adapter] CallCompletionsChatStreaming success output_len=%d tokens=%d tools=%d stop=%s", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason)
+	applog.Infof("[openai-adapter] CallCompletionsChatStreaming success output_len=%d tokens=%d tools=%d stop=%s", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason)
 	if isMaxTokensStopReason(resp.StopReason) {
 		return output, usage, errMaxTokens
 	}
@@ -808,7 +808,7 @@ func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig) (*opena
 
 		agent, err := a.ensureFreshOAuth(ctx, agent)
 		if err != nil {
-			log.Printf("[openai-adapter] getClient token refresh failed for agent=%s: %v", agent.Name, err)
+			applog.Infof("[openai-adapter] getClient token refresh failed for agent=%s: %v", agent.Name, err)
 			return nil, err
 		}
 
@@ -850,7 +850,7 @@ func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAt
 		if err != nil {
 			// Skip unsupported file types silently (e.g. PDFs)
 			if _, ok := err.(*openaiclient.UnsupportedFileTypeError); ok {
-				log.Printf("[openai-adapter] convertAttachments skipping unsupported file %s: %v", att.FileName, err)
+				applog.Infof("[openai-adapter] convertAttachments skipping unsupported file %s: %v", att.FileName, err)
 				continue
 			}
 			return nil, fmt.Errorf("load attachment %s: %w", att.FileName, err)

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"regexp"
 	"sort"
 	"strconv"
@@ -11,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/util"
@@ -170,7 +170,7 @@ func (s *WorkflowService) CreateWorkflowFromTemplate(ctx context.Context, projec
 		// Resolve agent based on role if adaptive routing enabled
 		agentID, err := s.resolveAgentForRole(ctx, projectID, models.AgentRole(ts.AgentRole))
 		if err != nil {
-			log.Printf("[workflow-svc] could not resolve agent for role %q: %v", ts.AgentRole, err)
+			applog.Infof("[workflow-svc] could not resolve agent for role %q: %v", ts.AgentRole, err)
 		} else if agentID != "" {
 			step.AgentID = &agentID
 		}
@@ -301,7 +301,7 @@ func (s *WorkflowService) CancelWorkflowExecution(ctx context.Context, id string
 
 // runWorkflowEngine is the main orchestration loop
 func (s *WorkflowService) runWorkflowEngine(ctx context.Context, execID string, workflow *models.Workflow, task *models.Task) {
-	log.Printf("[workflow-engine] starting workflow %q (exec=%s) for task %q", workflow.Name, execID, task.Title)
+	applog.Infof("[workflow-engine] starting workflow %q (exec=%s) for task %q", workflow.Name, execID, task.Title)
 
 	steps, err := s.workflowRepo.ListSteps(ctx, workflow.ID)
 	if err != nil {
@@ -341,7 +341,7 @@ func (s *WorkflowService) runWorkflowEngine(ctx context.Context, execID string, 
 		// Update current step
 		we, err := s.workflowRepo.GetWorkflowExecution(ctx, execID)
 		if err != nil {
-			log.Printf("[workflow-engine] error getting execution: %v", err)
+			applog.Infof("[workflow-engine] error getting execution: %v", err)
 			continue
 		}
 		if we.Status == models.WorkflowCancelled || we.Status == models.WorkflowFailed {
@@ -371,7 +371,7 @@ func (s *WorkflowService) runWorkflowEngine(ctx context.Context, execID string, 
 
 // executeStep runs a single workflow step
 func (s *WorkflowService) executeStep(ctx context.Context, execID string, step *models.WorkflowStep, wfConfig *models.WorkflowConfig, task *models.Task) error {
-	log.Printf("[workflow-engine] executing step %q (type=%s)", step.Name, step.StepType)
+	applog.Infof("[workflow-engine] executing step %q (type=%s)", step.Name, step.StepType)
 
 	// Update current step
 	we, err := s.workflowRepo.GetWorkflowExecution(ctx, execID)
@@ -408,7 +408,7 @@ func (s *WorkflowService) executeStep(ctx context.Context, execID string, step *
 
 // executeParallelSteps runs multiple steps concurrently
 func (s *WorkflowService) executeParallelSteps(ctx context.Context, execID string, steps []*models.WorkflowStep, wfConfig *models.WorkflowConfig, task *models.Task) error {
-	log.Printf("[workflow-engine] executing %d parallel steps", len(steps))
+	applog.Infof("[workflow-engine] executing %d parallel steps", len(steps))
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(steps))
@@ -476,7 +476,7 @@ func (s *WorkflowService) executeAgentStep(ctx context.Context, execID string, s
 		se.Status = models.StepFailed
 		se.ErrorMessage = err.Error()
 		if updateErr := s.workflowRepo.UpdateStepExecution(ctx, se); updateErr != nil {
-			log.Printf("[workflow-engine] error updating failed step execution: %v", updateErr)
+			applog.Infof("[workflow-engine] error updating failed step execution: %v", updateErr)
 		}
 		return fmt.Errorf("agent execution: %w", err)
 	}
@@ -484,7 +484,7 @@ func (s *WorkflowService) executeAgentStep(ctx context.Context, execID string, s
 	se.Status = models.StepCompleted
 	se.Output = output
 	if updateErr := s.workflowRepo.UpdateStepExecution(ctx, se); updateErr != nil {
-		log.Printf("[workflow-engine] error updating completed step execution: %v", updateErr)
+		applog.Infof("[workflow-engine] error updating completed step execution: %v", updateErr)
 	}
 
 	// Update handoff context with step output
@@ -497,7 +497,7 @@ func (s *WorkflowService) executeAgentStep(ctx context.Context, execID string, s
 	if agent.ID != "" {
 		taskType := s.inferTaskType(step, task)
 		if metricErr := s.workflowRepo.UpsertMetric(ctx, agent.ID, taskType, true, durationMs, se.CostCents, 0.8); metricErr != nil {
-			log.Printf("[workflow-engine] error recording metric: %v", metricErr)
+			applog.Infof("[workflow-engine] error recording metric: %v", metricErr)
 		}
 	}
 
@@ -517,7 +517,7 @@ func (s *WorkflowService) executeGateStep(ctx context.Context, execID string, st
 	}
 
 	for iteration := 0; iteration < maxIterations; iteration++ {
-		log.Printf("[workflow-engine] gate step %q iteration %d/%d", step.Name, iteration+1, maxIterations)
+		applog.Infof("[workflow-engine] gate step %q iteration %d/%d", step.Name, iteration+1, maxIterations)
 
 		// Run the review agent
 		agent, err := s.resolveStepAgent(ctx, step, wfConfig)
@@ -568,11 +568,11 @@ func (s *WorkflowService) executeGateStep(ctx context.Context, execID string, st
 		s.updateHandoffContext(ctx, execID, step.ID, output)
 
 		if score >= threshold {
-			log.Printf("[workflow-engine] gate step %q passed: score=%.2f threshold=%.2f", step.Name, score, threshold)
+			applog.Infof("[workflow-engine] gate step %q passed: score=%.2f threshold=%.2f", step.Name, score, threshold)
 			return nil
 		}
 
-		log.Printf("[workflow-engine] gate step %q failed: score=%.2f threshold=%.2f, iteration %d/%d",
+		applog.Infof("[workflow-engine] gate step %q failed: score=%.2f threshold=%.2f, iteration %d/%d",
 			step.Name, score, threshold, iteration+1, maxIterations)
 
 		if iteration == maxIterations-1 {
@@ -581,7 +581,7 @@ func (s *WorkflowService) executeGateStep(ctx context.Context, execID string, st
 			case "rollback":
 				return fmt.Errorf("gate failed after %d iterations (score=%.2f, threshold=%.2f), rolling back", maxIterations, score, threshold)
 			case "skip":
-				log.Printf("[workflow-engine] gate step %q: skipping due to fail_action=skip", step.Name)
+				applog.Infof("[workflow-engine] gate step %q: skipping due to fail_action=skip", step.Name)
 				return nil
 			case "pause":
 				we, _ := s.workflowRepo.GetWorkflowExecution(ctx, execID)
@@ -600,7 +600,7 @@ func (s *WorkflowService) executeGateStep(ctx context.Context, execID string, st
 
 // executeVoteStep runs a voting step with multiple agents
 func (s *WorkflowService) executeVoteStep(ctx context.Context, execID string, step *models.WorkflowStep, stepConfig *models.StepConfig, task *models.Task) error {
-	log.Printf("[workflow-engine] executing vote step %q with strategy=%s", step.Name, stepConfig.VoteStrategy)
+	applog.Infof("[workflow-engine] executing vote step %q with strategy=%s", step.Name, stepConfig.VoteStrategy)
 
 	// Get voter agents
 	voterIDs := stepConfig.VoterAgentIDs
@@ -685,7 +685,7 @@ func (s *WorkflowService) executeVoteStep(ctx context.Context, execID string, st
 
 	for result := range results {
 		if result.err != nil {
-			log.Printf("[workflow-engine] vote from agent %s failed: %v", result.agentID, result.err)
+			applog.Infof("[workflow-engine] vote from agent %s failed: %v", result.agentID, result.err)
 			continue
 		}
 
@@ -697,7 +697,7 @@ func (s *WorkflowService) executeVoteStep(ctx context.Context, execID string, st
 			Confidence:      result.confidence,
 		}
 		if err := s.workflowRepo.CreateVoteRecord(ctx, vr); err != nil {
-			log.Printf("[workflow-engine] error recording vote: %v", err)
+			applog.Infof("[workflow-engine] error recording vote: %v", err)
 		}
 
 		votes[result.choice]++
@@ -741,7 +741,7 @@ func (s *WorkflowService) executeVoteStep(ctx context.Context, execID string, st
 
 // executeMergeStep merges outputs from parallel steps
 func (s *WorkflowService) executeMergeStep(ctx context.Context, execID string, step *models.WorkflowStep, stepConfig *models.StepConfig, task *models.Task) error {
-	log.Printf("[workflow-engine] executing merge step %q with strategy=%s", step.Name, stepConfig.MergeStrategy)
+	applog.Infof("[workflow-engine] executing merge step %q with strategy=%s", step.Name, stepConfig.MergeStrategy)
 
 	// Get outputs from dependency steps
 	deps, err := step.ParseDependsOn()
@@ -753,7 +753,7 @@ func (s *WorkflowService) executeMergeStep(ctx context.Context, execID string, s
 	for _, depID := range deps {
 		latestExec, err := s.workflowRepo.GetLatestStepExecution(ctx, execID, depID)
 		if err != nil {
-			log.Printf("[workflow-engine] merge: could not get output for step %s: %v", depID, err)
+			applog.Infof("[workflow-engine] merge: could not get output for step %s: %v", depID, err)
 			continue
 		}
 		outputs = append(outputs, fmt.Sprintf("--- Output from step %s ---\n%s", depID, latestExec.Output))
@@ -772,7 +772,7 @@ func (s *WorkflowService) executeMergeStep(ctx context.Context, execID string, s
 					strings.Join(outputs, "\n\n"), task.Prompt)
 				mergedOutput, err = s.callAgentForWorkflow(ctx, selectPrompt, agent, task)
 				if err != nil {
-					log.Printf("[workflow-engine] merge coordinator failed, falling back to concatenate: %v", err)
+					applog.Infof("[workflow-engine] merge coordinator failed, falling back to concatenate: %v", err)
 					mergedOutput = strings.Join(outputs, "\n\n")
 				}
 			}
@@ -814,7 +814,7 @@ func (s *WorkflowService) executeMergeStep(ctx context.Context, execID string, s
 
 // executeHandoffStep generates a context summary for the next agent
 func (s *WorkflowService) executeHandoffStep(ctx context.Context, execID string, step *models.WorkflowStep, task *models.Task) error {
-	log.Printf("[workflow-engine] executing handoff step %q", step.Name)
+	applog.Infof("[workflow-engine] executing handoff step %q", step.Name)
 
 	// Get current handoff context
 	we, err := s.workflowRepo.GetWorkflowExecution(ctx, execID)
@@ -871,7 +871,7 @@ Original task: %s`, strings.Join(contextParts, "\n\n---\n\n"), task.Prompt)
 	now := time.Now().UTC()
 	se.CompletedAt = &now
 	if err := s.workflowRepo.CreateStepExecution(ctx, se); err != nil {
-		log.Printf("[workflow-engine] error creating handoff step execution: %v", err)
+		applog.Infof("[workflow-engine] error creating handoff step execution: %v", err)
 	}
 
 	ctxJSON, _ := hctx.ToJSON()
@@ -889,7 +889,7 @@ func (s *WorkflowService) resolveStepAgent(ctx context.Context, step *models.Wor
 		if err == nil {
 			return agent, nil
 		}
-		log.Printf("[workflow-engine] step agent %s not found, falling back to adaptive: %v", *step.AgentID, err)
+		applog.Infof("[workflow-engine] step agent %s not found, falling back to adaptive: %v", *step.AgentID, err)
 	}
 
 	// Adaptive routing based on performance
@@ -899,7 +899,7 @@ func (s *WorkflowService) resolveStepAgent(ctx context.Context, step *models.Wor
 		if err == nil {
 			agent, err := s.llmConfigRepo.GetByID(ctx, metric.AgentConfigID)
 			if err == nil {
-				log.Printf("[workflow-engine] adaptive routing: selected agent %q for task type %q (quality=%.2f)",
+				applog.Infof("[workflow-engine] adaptive routing: selected agent %q for task type %q (quality=%.2f)",
 					agent.Name, taskType, metric.AvgQualityScore)
 				return agent, nil
 			}
@@ -965,13 +965,13 @@ func (s *WorkflowService) callAgentForWorkflow(ctx context.Context, prompt strin
 func (s *WorkflowService) updateHandoffContext(ctx context.Context, execID, stepID, output string) {
 	we, err := s.workflowRepo.GetWorkflowExecution(ctx, execID)
 	if err != nil {
-		log.Printf("[workflow-engine] error getting execution for context update: %v", err)
+		applog.Infof("[workflow-engine] error getting execution for context update: %v", err)
 		return
 	}
 
 	hctx, err := models.ParseHandoffContext(we.Context)
 	if err != nil {
-		log.Printf("[workflow-engine] error parsing handoff context: %v", err)
+		applog.Infof("[workflow-engine] error parsing handoff context: %v", err)
 		return
 	}
 
@@ -979,13 +979,13 @@ func (s *WorkflowService) updateHandoffContext(ctx context.Context, execID, step
 
 	ctxJSON, err := hctx.ToJSON()
 	if err != nil {
-		log.Printf("[workflow-engine] error marshaling handoff context: %v", err)
+		applog.Infof("[workflow-engine] error marshaling handoff context: %v", err)
 		return
 	}
 
 	we.Context = ctxJSON
 	if err := s.workflowRepo.UpdateWorkflowExecution(ctx, we); err != nil {
-		log.Printf("[workflow-engine] error updating handoff context: %v", err)
+		applog.Infof("[workflow-engine] error updating handoff context: %v", err)
 	}
 }
 
@@ -1001,10 +1001,10 @@ func (s *WorkflowService) updateWorkflowCost(ctx context.Context, execID string,
 
 // failWorkflowExecution marks a workflow execution as failed and creates an alert
 func (s *WorkflowService) failWorkflowExecution(ctx context.Context, execID, errorMsg string, workflow *models.Workflow, task *models.Task) {
-	log.Printf("[workflow-engine] workflow execution %s failed: %s", execID, errorMsg)
+	applog.Infof("[workflow-engine] workflow execution %s failed: %s", execID, errorMsg)
 
 	if err := s.workflowRepo.CompleteWorkflowExecution(ctx, execID, models.WorkflowFailed, errorMsg); err != nil {
-		log.Printf("[workflow-engine] error completing failed execution: %v", err)
+		applog.Infof("[workflow-engine] error completing failed execution: %v", err)
 	}
 
 	if s.alertSvc != nil {
@@ -1015,16 +1015,16 @@ func (s *WorkflowService) failWorkflowExecution(ctx context.Context, execID, err
 
 // completeWorkflowExecution marks a workflow execution as completed
 func (s *WorkflowService) completeWorkflowExecution(ctx context.Context, execID string, workflow *models.Workflow, task *models.Task) {
-	log.Printf("[workflow-engine] workflow execution %s completed successfully", execID)
+	applog.Infof("[workflow-engine] workflow execution %s completed successfully", execID)
 
 	if err := s.workflowRepo.CompleteWorkflowExecution(ctx, execID, models.WorkflowCompleted, ""); err != nil {
-		log.Printf("[workflow-engine] error completing execution: %v", err)
+		applog.Infof("[workflow-engine] error completing execution: %v", err)
 	}
 }
 
 // rollbackWorkflow marks failed steps as rolled back
 func (s *WorkflowService) rollbackWorkflow(ctx context.Context, execID string, failedSteps []*models.WorkflowStep) {
-	log.Printf("[workflow-engine] rolling back %d steps", len(failedSteps))
+	applog.Infof("[workflow-engine] rolling back %d steps", len(failedSteps))
 
 	for _, step := range failedSteps {
 		latestExec, err := s.workflowRepo.GetLatestStepExecution(ctx, execID, step.ID)
@@ -1212,7 +1212,7 @@ func (s *WorkflowService) AnalyzeTaskComplexity(ctx context.Context, task *model
 
 // WorkflowRecommendation is the result of task complexity analysis
 type WorkflowRecommendation struct {
-	Strategy         models.WorkflowStrategy        `json:"strategy"`
+	Strategy         models.WorkflowStrategy         `json:"strategy"`
 	Reason           string                          `json:"reason"`
 	TemplateCategory models.WorkflowTemplateCategory `json:"template_category"`
 	TemplateName     string                          `json:"template_name"`

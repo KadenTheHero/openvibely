@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -75,7 +75,7 @@ func CleanOutputForChain(output string) string {
 func (s *Service) TriggerTaskChain(ctx context.Context, parentTask models.Task, parentOutput string) error {
 	config, err := parentTask.ParseChainConfig()
 	if err != nil {
-		log.Printf("[agent-svc] triggerTaskChain error parsing chain config task=%s: %v", parentTask.ID, err)
+		applog.Infof("[agent-svc] triggerTaskChain error parsing chain config task=%s: %v", parentTask.ID, err)
 		return fmt.Errorf("parsing chain config: %w", err)
 	}
 
@@ -83,11 +83,11 @@ func (s *Service) TriggerTaskChain(ctx context.Context, parentTask models.Task, 
 		return nil
 	}
 
-	log.Printf("[agent-svc] triggerTaskChain task=%s trigger=%s child_agent=%s child_model=%s",
+	applog.Infof("[agent-svc] triggerTaskChain task=%s trigger=%s child_agent=%s child_model=%s",
 		parentTask.ID, config.Trigger, config.ChildAgentID, config.ChildModel)
 
 	if config.Trigger != "on_completion" && config.Trigger != "on_planning_complete" {
-		log.Printf("[agent-svc] triggerTaskChain unknown trigger=%s, skipping", config.Trigger)
+		applog.Infof("[agent-svc] triggerTaskChain unknown trigger=%s, skipping", config.Trigger)
 		return nil
 	}
 
@@ -106,7 +106,7 @@ func (s *Service) TriggerTaskChain(ctx context.Context, parentTask models.Task, 
 		if data, err := json.Marshal(config.ChildChainConfig); err == nil {
 			childChainConfig = string(data)
 		} else {
-			log.Printf("[agent-svc] triggerTaskChain error marshaling child chain config: %v", err)
+			applog.Infof("[agent-svc] triggerTaskChain error marshaling child chain config: %v", err)
 		}
 	}
 
@@ -116,11 +116,11 @@ func (s *Service) TriggerTaskChain(ctx context.Context, parentTask models.Task, 
 	if s.lineageResolver != nil {
 		branch, sha, lineageErr := s.lineageResolver.ResolveParentLineage(ctx, parentTask)
 		if lineageErr != nil {
-			log.Printf("[agent-svc] triggerTaskChain lineage resolution failed task=%s: %v (child will use default branch)", parentTask.ID, lineageErr)
+			applog.Infof("[agent-svc] triggerTaskChain lineage resolution failed task=%s: %v (child will use default branch)", parentTask.ID, lineageErr)
 		} else {
 			baseBranch = branch
 			baseCommitSHA = sha
-			log.Printf("[agent-svc] triggerTaskChain resolved parent lineage task=%s branch=%s sha=%s", parentTask.ID, baseBranch, baseCommitSHA)
+			applog.Infof("[agent-svc] triggerTaskChain resolved parent lineage task=%s branch=%s sha=%s", parentTask.ID, baseBranch, baseCommitSHA)
 		}
 	}
 
@@ -159,23 +159,23 @@ func (s *Service) TriggerTaskChain(ctx context.Context, parentTask models.Task, 
 		childTask.AgentID = &config.ChildAgentID
 	}
 
-	log.Printf("[agent-svc] triggerTaskChain creating child task title=%q category=%s category_source=%s parent=%s lineage_depth=%d base_branch=%s base_sha=%s",
+	applog.Infof("[agent-svc] triggerTaskChain creating child task title=%q category=%s category_source=%s parent=%s lineage_depth=%d base_branch=%s base_sha=%s",
 		childTask.Title, childTask.Category, categorySource, parentTask.ID, childTask.LineageDepth, childTask.BaseBranch, childTask.BaseCommitSHA)
 
 	if err := s.taskCreator.Create(ctx, childTask); err != nil {
-		log.Printf("[agent-svc] triggerTaskChain error creating child task: %v", err)
+		applog.Infof("[agent-svc] triggerTaskChain error creating child task: %v", err)
 		return fmt.Errorf("creating child task: %w", err)
 	}
 
-	log.Printf("[agent-svc] triggerTaskChain created child task id=%s parent=%s", childTask.ID, parentTask.ID)
+	applog.Infof("[agent-svc] triggerTaskChain created child task id=%s parent=%s", childTask.ID, parentTask.ID)
 
 	// Pre-create blocked grandchild for visibility if child has its own chain config
 	if config.ChildChainConfig != nil && config.ChildChainConfig.Enabled {
 		blockedGrandchild := BuildBlockedChild(*childTask, config.ChildChainConfig)
 		if gcErr := s.taskCreator.Create(ctx, blockedGrandchild); gcErr != nil {
-			log.Printf("[agent-svc] triggerTaskChain error pre-creating blocked grandchild: %v", gcErr)
+			applog.Infof("[agent-svc] triggerTaskChain error pre-creating blocked grandchild: %v", gcErr)
 		} else {
-			log.Printf("[agent-svc] triggerTaskChain pre-created blocked grandchild id=%s for child=%s", blockedGrandchild.ID, childTask.ID)
+			applog.Infof("[agent-svc] triggerTaskChain pre-created blocked grandchild id=%s for child=%s", blockedGrandchild.ID, childTask.ID)
 		}
 	}
 

@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/util"
@@ -110,7 +110,7 @@ func (s *InsightsService) GetDashboard(ctx context.Context, projectID string) (*
 		var err error
 		latestHC, err = s.insightsRepo.GetLatestHealthCheck(ctx, projectID)
 		if err != nil {
-			log.Printf("[insights-svc] get latest health check error: %v", err)
+			applog.Infof("[insights-svc] get latest health check error: %v", err)
 		}
 		return nil
 	})
@@ -119,7 +119,7 @@ func (s *InsightsService) GetDashboard(ctx context.Context, projectID string) (*
 		var err error
 		healthHistory, err = s.insightsRepo.ListHealthChecks(ctx, projectID, 10)
 		if err != nil {
-			log.Printf("[insights-svc] list health checks error: %v", err)
+			applog.Infof("[insights-svc] list health checks error: %v", err)
 		}
 		return nil
 	})
@@ -128,7 +128,7 @@ func (s *InsightsService) GetDashboard(ctx context.Context, projectID string) (*
 		var err error
 		latestIG, err = s.insightsRepo.GetLatestIdeaGrade(ctx, projectID)
 		if err != nil {
-			log.Printf("[insights-svc] get latest idea grade error: %v", err)
+			applog.Infof("[insights-svc] get latest idea grade error: %v", err)
 		}
 		return nil
 	})
@@ -137,7 +137,7 @@ func (s *InsightsService) GetDashboard(ctx context.Context, projectID string) (*
 		var err error
 		ideaGradeHistory, err = s.insightsRepo.ListIdeaGrades(ctx, projectID, 10)
 		if err != nil {
-			log.Printf("[insights-svc] list idea grades error: %v", err)
+			applog.Infof("[insights-svc] list idea grades error: %v", err)
 		}
 		return nil
 	})
@@ -226,7 +226,7 @@ func (s *InsightsService) computeStats(ctx context.Context, projectID string) (m
 
 // RunAnalysis performs a full analysis of the project and generates insights
 func (s *InsightsService) RunAnalysis(ctx context.Context, projectID string) (*models.InsightReport, error) {
-	log.Printf("[insights-svc] starting analysis for project %s", projectID)
+	applog.Infof("[insights-svc] starting analysis for project %s", projectID)
 
 	project, err := s.projectRepo.GetByID(ctx, projectID)
 	if err != nil || project == nil {
@@ -239,7 +239,7 @@ func (s *InsightsService) RunAnalysis(ctx context.Context, projectID string) (*m
 	// 1. Bug pattern detection
 	bugInsights, err := s.detectBugPatterns(ctx, project)
 	if err != nil {
-		log.Printf("[insights-svc] bug pattern detection error: %v", err)
+		applog.Infof("[insights-svc] bug pattern detection error: %v", err)
 		analysisLog = append(analysisLog, fmt.Sprintf("Bug patterns: error - %v", err))
 	} else {
 		for _, i := range bugInsights {
@@ -251,7 +251,7 @@ func (s *InsightsService) RunAnalysis(ctx context.Context, projectID string) (*m
 	// 2. Incomplete feature detection
 	incompleteInsights, err := s.detectIncompleteFeatures(ctx, project)
 	if err != nil {
-		log.Printf("[insights-svc] incomplete feature detection error: %v", err)
+		applog.Infof("[insights-svc] incomplete feature detection error: %v", err)
 		analysisLog = append(analysisLog, fmt.Sprintf("Incomplete features: error - %v", err))
 	} else {
 		for _, i := range incompleteInsights {
@@ -263,7 +263,7 @@ func (s *InsightsService) RunAnalysis(ctx context.Context, projectID string) (*m
 	// 3. Tech debt detection
 	debtInsights, err := s.detectTechDebt(ctx, project)
 	if err != nil {
-		log.Printf("[insights-svc] tech debt detection error: %v", err)
+		applog.Infof("[insights-svc] tech debt detection error: %v", err)
 		analysisLog = append(analysisLog, fmt.Sprintf("Tech debt: error - %v", err))
 	} else {
 		for _, i := range debtInsights {
@@ -275,7 +275,7 @@ func (s *InsightsService) RunAnalysis(ctx context.Context, projectID string) (*m
 	// 4. Optimization opportunities
 	optInsights, err := s.detectOptimizations(ctx, project)
 	if err != nil {
-		log.Printf("[insights-svc] optimization detection error: %v", err)
+		applog.Infof("[insights-svc] optimization detection error: %v", err)
 		analysisLog = append(analysisLog, fmt.Sprintf("Optimizations: error - %v", err))
 	} else {
 		for _, i := range optInsights {
@@ -288,7 +288,7 @@ func (s *InsightsService) RunAnalysis(ctx context.Context, projectID string) (*m
 	if s.llmSvc != nil {
 		suggInsights, err := s.generateProactiveSuggestions(ctx, project, len(bugInsights), len(incompleteInsights), len(debtInsights), len(optInsights))
 		if err != nil {
-			log.Printf("[insights-svc] proactive suggestions error: %v", err)
+			applog.Infof("[insights-svc] proactive suggestions error: %v", err)
 			analysisLog = append(analysisLog, fmt.Sprintf("Proactive suggestions: error - %v", err))
 		} else {
 			for _, i := range suggInsights {
@@ -332,7 +332,7 @@ func (s *InsightsService) RunAnalysis(ctx context.Context, projectID string) (*m
 		return nil, fmt.Errorf("create report: %w", err)
 	}
 
-	log.Printf("[insights-svc] analysis complete for project %s: %d insights", projectID, len(insightIDs))
+	applog.Infof("[insights-svc] analysis complete for project %s: %d insights", projectID, len(insightIDs))
 	return report, nil
 }
 
@@ -548,8 +548,8 @@ func (s *InsightsService) detectOptimizations(ctx context.Context, project *mode
 		}
 		if !exists {
 			evidence := map[string]interface{}{
-				"total_failures":   totalFailures,
-				"pattern_count":    len(failedPatterns),
+				"total_failures": totalFailures,
+				"pattern_count":  len(failedPatterns),
 			}
 			evidenceJSON, _ := json.Marshal(evidence)
 
@@ -617,7 +617,7 @@ Respond with ONLY the JSON array, no markdown fences or extra text.`, project.Na
 	// Parse AI response
 	suggestions, err := parseProactiveSuggestions(output)
 	if err != nil {
-		log.Printf("[insights-svc] failed to parse AI suggestions: %v", err)
+		applog.Infof("[insights-svc] failed to parse AI suggestions: %v", err)
 		return nil, nil
 	}
 
@@ -706,7 +706,7 @@ Respond with ONLY the JSON array, no markdown fences.`, project.Name, strings.Jo
 
 	entries, err := parseKnowledgeEntries(output)
 	if err != nil {
-		log.Printf("[insights-svc] failed to parse knowledge entries: %v", err)
+		applog.Infof("[insights-svc] failed to parse knowledge entries: %v", err)
 		return nil, nil
 	}
 
@@ -798,36 +798,36 @@ func (s *InsightsService) RunHealthCheck(ctx context.Context, projectID string) 
 
 	priorityDist, err := s.insightsRepo.GetTaskPriorityDistribution(ctx, projectID)
 	if err != nil {
-		log.Printf("[insights-svc] priority distribution error: %v", err)
+		applog.Infof("[insights-svc] priority distribution error: %v", err)
 		priorityDist = make(map[int]int)
 	}
 
 	completionRate, err := s.insightsRepo.GetRecentCompletionRate(ctx, projectID, 30)
 	if err != nil {
-		log.Printf("[insights-svc] completion rate error: %v", err)
+		applog.Infof("[insights-svc] completion rate error: %v", err)
 	}
 
 	activityTrend, err := s.insightsRepo.GetTaskActivityTrend(ctx, projectID, 14)
 	if err != nil {
-		log.Printf("[insights-svc] activity trend error: %v", err)
+		applog.Infof("[insights-svc] activity trend error: %v", err)
 	}
 
 	tagDist, err := s.insightsRepo.GetTagDistribution(ctx, projectID)
 	if err != nil {
-		log.Printf("[insights-svc] tag distribution error: %v", err)
+		applog.Infof("[insights-svc] tag distribution error: %v", err)
 		tagDist = make(map[string]int)
 	}
 
 	// Get failure patterns
 	failPatterns, err := s.insightsRepo.GetFailedTaskPatterns(ctx, projectID, 1)
 	if err != nil {
-		log.Printf("[insights-svc] fail patterns error: %v", err)
+		applog.Infof("[insights-svc] fail patterns error: %v", err)
 	}
 
 	// Get recent tasks for prompt quality analysis
 	recentTasks, err := s.taskRepo.ListByProject(ctx, projectID, "")
 	if err != nil {
-		log.Printf("[insights-svc] recent tasks error: %v", err)
+		applog.Infof("[insights-svc] recent tasks error: %v", err)
 	}
 
 	// Build task summary for LLM
@@ -948,7 +948,7 @@ Respond with ONLY the JSON object, no markdown fences or extra text.`,
 		return nil, fmt.Errorf("save health check: %w", err)
 	}
 
-	log.Printf("[insights-svc] health check complete for project %s: grade=%s", projectID, hc.Grade)
+	applog.Infof("[insights-svc] health check complete for project %s: grade=%s", projectID, hc.Grade)
 	return hc, nil
 }
 
@@ -1099,7 +1099,7 @@ Respond with ONLY the JSON object, no markdown fences or extra text.`,
 		return nil, fmt.Errorf("save idea grade: %w", err)
 	}
 
-	log.Printf("[insights-svc] idea grade complete for project %s: grade=%s", projectID, ig.Grade)
+	applog.Infof("[insights-svc] idea grade complete for project %s: grade=%s", projectID, ig.Grade)
 	return ig, nil
 }
 
@@ -1116,12 +1116,12 @@ func (s *InsightsService) ListIdeaGrades(ctx context.Context, projectID string, 
 // --- Parsing helpers ---
 
 type aiSuggestion struct {
-	Title       string          `json:"title"`
-	Description string          `json:"description"`
-	Suggestion  string          `json:"suggestion"`
-	Impact      string          `json:"impact"`
+	Title       string                 `json:"title"`
+	Description string                 `json:"description"`
+	Suggestion  string                 `json:"suggestion"`
+	Impact      string                 `json:"impact"`
 	Severity    models.InsightSeverity `json:"severity"`
-	Confidence  float64         `json:"confidence"`
+	Confidence  float64                `json:"confidence"`
 }
 
 func parseProactiveSuggestions(output string) ([]aiSuggestion, error) {
@@ -1207,4 +1207,3 @@ func parseIdeaGradeResponse(output string) (*models.IdeaGrade, error) {
 		StrategyScore:  ig.StrategyScore,
 	}, nil
 }
-

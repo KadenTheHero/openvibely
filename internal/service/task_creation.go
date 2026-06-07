@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"mime"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -53,11 +53,11 @@ func ParseTaskCreations(output string) []TaskCreationRequest {
 		jsonStr := strings.TrimSpace(match[1])
 		var req TaskCreationRequest
 		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			log.Printf("[task-creation] error parsing task JSON %q: %v", jsonStr, err)
+			applog.Infof("[task-creation] error parsing task JSON %q: %v", jsonStr, err)
 			continue
 		}
 		if req.Title == "" {
-			log.Printf("[task-creation] skipping task with empty title")
+			applog.Infof("[task-creation] skipping task with empty title")
 			continue
 		}
 		// Apply priority default only (category defaulting happens in ExecuteTaskCreationsWithReturn)
@@ -118,7 +118,7 @@ func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreation
 		} else if len(availableAgents) == 1 {
 			// If only one agent available, use it by default
 			selectedAgentID = availableAgents[0].ID
-			log.Printf("[task-creation] only one agent available, using %s", selectedAgentID)
+			applog.Infof("[task-creation] only one agent available, using %s", selectedAgentID)
 		}
 
 		// Determine initial category based on auto-start setting
@@ -130,7 +130,7 @@ func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreation
 			if selectedAgentID != "" {
 				if agentConfig, ok := agentConfigMap[selectedAgentID]; ok && agentConfig.AutoStartTasks {
 					category = models.CategoryActive
-					log.Printf("[task-creation] auto-start enabled for agent %s, setting category to active", selectedAgentID)
+					applog.Infof("[task-creation] auto-start enabled for agent %s, setting category to active", selectedAgentID)
 				} else {
 					category = models.CategoryBacklog
 				}
@@ -156,7 +156,7 @@ func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreation
 		// Apply chain configuration if provided
 		if req.Chain != nil {
 			if err := task.SetChainConfig(req.Chain); err != nil {
-				log.Printf("[task-creation] error setting chain config for %q: %v", req.Title, err)
+				applog.Infof("[task-creation] error setting chain config for %q: %v", req.Title, err)
 			}
 		}
 
@@ -174,46 +174,46 @@ func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreation
 		if req.Agent != "" {
 			if taskSvc != nil && taskSvc.agentRepo != nil {
 				if ad, err := taskSvc.agentRepo.GetUniqueSelectableByName(ctx, req.Agent); err != nil {
-					log.Printf("[task-creation] could not resolve agent %q for task %q: %v", req.Agent, req.Title, err)
+					applog.Infof("[task-creation] could not resolve agent %q for task %q: %v", req.Agent, req.Title, err)
 				} else if ad != nil {
 					task.AgentDefinitionID = &ad.ID
-					log.Printf("[task-creation] resolved agent %q → %s for task %q", req.Agent, ad.ID, req.Title)
+					applog.Infof("[task-creation] resolved agent %q → %s for task %q", req.Agent, ad.ID, req.Title)
 				} else {
-					log.Printf("[task-creation] agent %q did not exactly match one unique enabled/selectable Agent definition for task %q", req.Agent, req.Title)
+					applog.Infof("[task-creation] agent %q did not exactly match one unique enabled/selectable Agent definition for task %q", req.Agent, req.Title)
 					if req.AgentDefinitionID == req.Agent {
 						task.AgentDefinitionID = nil
 					}
 				}
 			} else if req.AgentDefinitionID == req.Agent {
 				task.AgentDefinitionID = nil
-				log.Printf("[task-creation] cannot resolve agent %q for task %q without an Agent repository", req.Agent, req.Title)
+				applog.Infof("[task-creation] cannot resolve agent %q for task %q without an Agent repository", req.Agent, req.Title)
 			}
 		} else if req.AgentDefinitionID != "" && taskSvc != nil && taskSvc.agentRepo != nil {
 			if existing, err := taskSvc.agentRepo.GetByID(ctx, req.AgentDefinitionID); err != nil {
-				log.Printf("[task-creation] could not validate agent_definition_id %q for task %q: %v", req.AgentDefinitionID, req.Title, err)
+				applog.Infof("[task-creation] could not validate agent_definition_id %q for task %q: %v", req.AgentDefinitionID, req.Title, err)
 			} else if existing == nil {
 				if ad, err := taskSvc.agentRepo.GetUniqueSelectableByName(ctx, req.AgentDefinitionID); err != nil {
-					log.Printf("[task-creation] could not resolve agent_definition_id name %q for task %q: %v", req.AgentDefinitionID, req.Title, err)
+					applog.Infof("[task-creation] could not resolve agent_definition_id name %q for task %q: %v", req.AgentDefinitionID, req.Title, err)
 				} else if ad != nil {
 					task.AgentDefinitionID = &ad.ID
-					log.Printf("[task-creation] resolved agent_definition_id name %q → %s for task %q", req.AgentDefinitionID, ad.ID, req.Title)
+					applog.Infof("[task-creation] resolved agent_definition_id name %q → %s for task %q", req.AgentDefinitionID, ad.ID, req.Title)
 				}
 			}
 		}
 
 		if err := taskSvc.CreateWithGoal(ctx, task, req.Goal); err != nil {
-			log.Printf("[task-creation] error creating task %q: %v", req.Title, err)
+			applog.Infof("[task-creation] error creating task %q: %v", req.Title, err)
 			failed = append(failed, fmt.Sprintf("- \"%s\": %v", req.Title, err))
 		} else {
-			log.Printf("[task-creation] created task %q id=%s category=%s agent=%v chain=%v selection=%s", req.Title, task.ID, category, task.AgentID, req.Chain != nil && req.Chain.Enabled, selectionInfo)
+			applog.Infof("[task-creation] created task %q id=%s category=%s agent=%v chain=%v selection=%s", req.Title, task.ID, category, task.AgentID, req.Chain != nil && req.Chain.Enabled, selectionInfo)
 
 			// Pre-create blocked child for visibility when chain is configured
 			if req.Chain != nil && req.Chain.Enabled {
 				blockedChild := llmworkflow.BuildBlockedChild(*task, req.Chain)
 				if childErr := taskSvc.Create(ctx, blockedChild); childErr != nil {
-					log.Printf("[task-creation] error pre-creating blocked child for %q: %v", req.Title, childErr)
+					applog.Infof("[task-creation] error pre-creating blocked child for %q: %v", req.Title, childErr)
 				} else {
-					log.Printf("[task-creation] pre-created blocked child id=%s for parent=%s", blockedChild.ID, task.ID)
+					applog.Infof("[task-creation] pre-created blocked child id=%s for parent=%s", blockedChild.ID, task.ID)
 				}
 			}
 
@@ -286,11 +286,11 @@ func ParseTaskEdits(output string) []TaskEditRequest {
 		jsonStr := strings.TrimSpace(match[1])
 		var req TaskEditRequest
 		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			log.Printf("[task-edit] error parsing edit JSON %q: %v", jsonStr, err)
+			applog.Infof("[task-edit] error parsing edit JSON %q: %v", jsonStr, err)
 			continue
 		}
 		if req.ID == "" {
-			log.Printf("[task-edit] skipping edit with empty task ID")
+			applog.Infof("[task-edit] skipping edit with empty task ID")
 			continue
 		}
 		edits = append(edits, req)
@@ -312,14 +312,14 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 	for _, req := range requests {
 		task, err := taskSvc.GetByID(ctx, req.ID)
 		if err != nil || task == nil {
-			log.Printf("[task-edit] task not found id=%s: %v", req.ID, err)
+			applog.Infof("[task-edit] task not found id=%s: %v", req.ID, err)
 			failed = append(failed, fmt.Sprintf("- task %s: not found", req.ID))
 			continue
 		}
 
 		// Verify task belongs to the same project
 		if task.ProjectID != projectID {
-			log.Printf("[task-edit] task %s belongs to different project", req.ID)
+			applog.Infof("[task-edit] task %s belongs to different project", req.ID)
 			failed = append(failed, fmt.Sprintf("- \"%s\": belongs to different project", task.Title))
 			continue
 		}
@@ -365,7 +365,7 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 		// Handle chain configuration
 		if req.Chain != nil {
 			if err := task.SetChainConfig(req.Chain); err != nil {
-				log.Printf("[task-edit] error setting chain config for task %s: %v", req.ID, err)
+				applog.Infof("[task-edit] error setting chain config for task %s: %v", req.ID, err)
 			} else {
 				changes = append(changes, "chain_config")
 
@@ -376,16 +376,16 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 						if existing == nil {
 							blockedChild := llmworkflow.BuildBlockedChild(*task, req.Chain)
 							if childErr := taskSvc.Create(ctx, blockedChild); childErr != nil {
-								log.Printf("[task-edit] error pre-creating blocked child for task %s: %v", req.ID, childErr)
+								applog.Infof("[task-edit] error pre-creating blocked child for task %s: %v", req.ID, childErr)
 							} else {
-								log.Printf("[task-edit] pre-created blocked child id=%s for parent=%s", blockedChild.ID, task.ID)
+								applog.Infof("[task-edit] pre-created blocked child id=%s for parent=%s", blockedChild.ID, task.ID)
 							}
 						}
 					} else {
 						if delErr := taskSvc.repo.DeleteBlockedChildrenByParent(ctx, task.ID); delErr != nil {
-							log.Printf("[task-edit] error deleting blocked children for task %s: %v", req.ID, delErr)
+							applog.Infof("[task-edit] error deleting blocked children for task %s: %v", req.ID, delErr)
 						} else {
-							log.Printf("[task-edit] removed blocked children for parent=%s (chain disabled)", task.ID)
+							applog.Infof("[task-edit] removed blocked children for parent=%s (chain disabled)", task.ID)
 						}
 					}
 				}
@@ -408,7 +408,7 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 					task.Category = newCategory
 					changes = append(changes, "category")
 				} else {
-					log.Printf("[task-edit] invalid category %q for task %s", req.Category, req.ID)
+					applog.Infof("[task-edit] invalid category %q for task %s", req.Category, req.ID)
 				}
 			}
 		}
@@ -429,16 +429,16 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 		}
 
 		if len(changes) == 0 {
-			log.Printf("[task-edit] no changes for task %s", req.ID)
+			applog.Infof("[task-edit] no changes for task %s", req.ID)
 			failed = append(failed, fmt.Sprintf("- \"%s\": no changes to apply", task.Title))
 			continue
 		}
 
 		if err := taskSvc.Update(ctx, task); err != nil {
-			log.Printf("[task-edit] error updating task %s: %v", req.ID, err)
+			applog.Infof("[task-edit] error updating task %s: %v", req.ID, err)
 			failed = append(failed, fmt.Sprintf("- \"%s\": %v", task.Title, err))
 		} else {
-			log.Printf("[task-edit] updated task %s fields=%v", req.ID, changes)
+			applog.Infof("[task-edit] updated task %s fields=%v", req.ID, changes)
 			edited = append(edited, fmt.Sprintf("- \"%s\" (%s, updated: %s) [TASK_EDITED:%s]", task.Title, task.Category, strings.Join(changes, ", "), task.ID))
 		}
 	}
@@ -466,7 +466,7 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 func copyAttachmentFiles(ctx context.Context, filePaths []string, taskID string, attachmentRepo *repository.AttachmentRepo, uploadsDir string) (int, []string) {
 	taskDir := filepath.Join(uploadsDir, "tasks", taskID)
 	if err := os.MkdirAll(taskDir, 0755); err != nil {
-		log.Printf("[task-edit] error creating task directory %s: %v", taskDir, err)
+		applog.Infof("[task-edit] error creating task directory %s: %v", taskDir, err)
 		return 0, nil
 	}
 
@@ -482,15 +482,15 @@ func copyAttachmentFiles(ctx context.Context, filePaths []string, taskID string,
 		// Check if the file exists
 		info, err := os.Stat(srcPath)
 		if err != nil {
-			log.Printf("[task-edit] attachment file not found %s: %v", srcPath, err)
+			applog.Infof("[task-edit] attachment file not found %s: %v", srcPath, err)
 			continue
 		}
 		if info.IsDir() {
-			log.Printf("[task-edit] attachment path is a directory %s, skipping", srcPath)
+			applog.Infof("[task-edit] attachment path is a directory %s, skipping", srcPath)
 			continue
 		}
 		if info.Size() > 10<<20 { // 10 MB limit
-			log.Printf("[task-edit] attachment file too large %s (%d bytes), skipping", srcPath, info.Size())
+			applog.Infof("[task-edit] attachment file too large %s (%d bytes), skipping", srcPath, info.Size())
 			continue
 		}
 
@@ -500,19 +500,19 @@ func copyAttachmentFiles(ctx context.Context, filePaths []string, taskID string,
 
 		src, err := os.Open(srcPath)
 		if err != nil {
-			log.Printf("[task-edit] error opening attachment %s: %v", srcPath, err)
+			applog.Infof("[task-edit] error opening attachment %s: %v", srcPath, err)
 			continue
 		}
 
 		dest, err := os.Create(destPath)
 		if err != nil {
-			log.Printf("[task-edit] error creating destination %s: %v", destPath, err)
+			applog.Infof("[task-edit] error creating destination %s: %v", destPath, err)
 			src.Close()
 			continue
 		}
 
 		if _, err := io.Copy(dest, src); err != nil {
-			log.Printf("[task-edit] error copying attachment %s: %v", srcPath, err)
+			applog.Infof("[task-edit] error copying attachment %s: %v", srcPath, err)
 			src.Close()
 			dest.Close()
 			os.Remove(destPath)
@@ -536,12 +536,12 @@ func copyAttachmentFiles(ctx context.Context, filePaths []string, taskID string,
 			FileSize:  info.Size(),
 		}
 		if err := attachmentRepo.Create(ctx, att); err != nil {
-			log.Printf("[task-edit] error creating attachment record for %s: %v", fileName, err)
+			applog.Infof("[task-edit] error creating attachment record for %s: %v", fileName, err)
 			os.Remove(destPath)
 			continue
 		}
 
-		log.Printf("[task-edit] attached file %s to task %s", fileName, taskID)
+		applog.Infof("[task-edit] attached file %s to task %s", fileName, taskID)
 		copiedCount++
 		copiedNames = append(copiedNames, fileName)
 	}
@@ -828,11 +828,11 @@ func ParseTaskExecutions(output string) []TaskExecutionRequest {
 		jsonStr := strings.TrimSpace(match[1])
 		var req TaskExecutionRequest
 		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			log.Printf("[task-execution] error parsing execution JSON %q: %v", jsonStr, err)
+			applog.Infof("[task-execution] error parsing execution JSON %q: %v", jsonStr, err)
 			continue
 		}
 		if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" && len(req.Tags) == 0 && req.MinPriority == 0 {
-			log.Printf("[task-execution] skipping execution request with no task_id/title/tags/priority filter")
+			applog.Infof("[task-execution] skipping execution request with no task_id/title/tags/priority filter")
 			continue
 		}
 		requests = append(requests, req)
@@ -869,7 +869,7 @@ func ExecuteTaskExecutions(ctx context.Context, requests []TaskExecutionRequest,
 
 		// If tags were specified but none were valid, report an error
 		if len(req.Tags) > 0 && len(tags) == 0 {
-			log.Printf("[task-execution] no valid tags found in request")
+			applog.Infof("[task-execution] no valid tags found in request")
 			failed = append(failed, "- No valid tags specified")
 			continue
 		}
@@ -911,19 +911,19 @@ func ExecuteTaskExecutions(ctx context.Context, requests []TaskExecutionRequest,
 			matchedTasks, submitted, err = taskSvc.ExecuteTasksByTags(ctx, tags, projectID, req.MinPriority, req.IncludeCompleted)
 		}
 		if err != nil {
-			log.Printf("[task-execution] error executing tasks: %v", err)
+			applog.Infof("[task-execution] error executing tasks: %v", err)
 			failed = append(failed, fmt.Sprintf("- %s: %v", filterDesc, err))
 			continue
 		}
 
 		if len(matchedTasks) == 0 {
-			log.Printf("[task-execution] no tasks found matching %s", filterDesc)
+			applog.Infof("[task-execution] no tasks found matching %s", filterDesc)
 			failed = append(failed, fmt.Sprintf("- No tasks found matching %s", filterDesc))
 			continue
 		}
 
 		if submitted == 0 {
-			log.Printf("[task-execution] %d tasks matched %s but none could be submitted", len(matchedTasks), filterDesc)
+			applog.Infof("[task-execution] %d tasks matched %s but none could be submitted", len(matchedTasks), filterDesc)
 			failed = append(failed, fmt.Sprintf("- %d task(s) matched %s but none could be submitted (check logs for errors)", len(matchedTasks), filterDesc))
 			continue
 		}
@@ -1024,11 +1024,11 @@ func ParseViewThread(output string) []ViewThreadRequest {
 		jsonStr := strings.TrimSpace(match[1])
 		var req ViewThreadRequest
 		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			log.Printf("[thread-view] error parsing view request JSON %q: %v", jsonStr, err)
+			applog.Infof("[thread-view] error parsing view request JSON %q: %v", jsonStr, err)
 			continue
 		}
 		if req.TaskID == "" && req.Title == "" {
-			log.Printf("[thread-view] skipping view request with no task_id or title")
+			applog.Infof("[thread-view] skipping view request with no task_id or title")
 			continue
 		}
 		requests = append(requests, req)
@@ -1061,15 +1061,15 @@ func ParseSendToTask(output string) []SendToTaskRequest {
 		jsonStr := strings.TrimSpace(match[1])
 		var req SendToTaskRequest
 		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			log.Printf("[thread-send] error parsing send request JSON %q: %v", jsonStr, err)
+			applog.Infof("[thread-send] error parsing send request JSON %q: %v", jsonStr, err)
 			continue
 		}
 		if req.TaskID == "" && req.Title == "" {
-			log.Printf("[thread-send] skipping send request with no task_id or title")
+			applog.Infof("[thread-send] skipping send request with no task_id or title")
 			continue
 		}
 		if req.Message == "" {
-			log.Printf("[thread-send] skipping send request with no message")
+			applog.Infof("[thread-send] skipping send request with no message")
 			continue
 		}
 		requests = append(requests, req)
@@ -1105,15 +1105,15 @@ func ParseScheduleTask(output string) []ScheduleTaskRequest {
 		jsonStr := strings.TrimSpace(match[1])
 		var req ScheduleTaskRequest
 		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			log.Printf("[schedule-task] error parsing schedule request JSON %q: %v", jsonStr, err)
+			applog.Infof("[schedule-task] error parsing schedule request JSON %q: %v", jsonStr, err)
 			continue
 		}
 		if req.TaskID == "" && req.Title == "" {
-			log.Printf("[schedule-task] skipping schedule request with no task_id or title")
+			applog.Infof("[schedule-task] skipping schedule request with no task_id or title")
 			continue
 		}
 		if req.Time == "" {
-			log.Printf("[schedule-task] skipping schedule request with no time")
+			applog.Infof("[schedule-task] skipping schedule request with no time")
 			continue
 		}
 		requests = append(requests, req)
@@ -1146,11 +1146,11 @@ func ParseDeleteSchedule(output string) []DeleteScheduleRequest {
 		jsonStr := strings.TrimSpace(match[1])
 		var req DeleteScheduleRequest
 		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			log.Printf("[delete-schedule] error parsing JSON %q: %v", jsonStr, err)
+			applog.Infof("[delete-schedule] error parsing JSON %q: %v", jsonStr, err)
 			continue
 		}
 		if req.ScheduleID == "" && req.TaskID == "" && req.Title == "" {
-			log.Printf("[delete-schedule] skipping request with no schedule_id, task_id, or title")
+			applog.Infof("[delete-schedule] skipping request with no schedule_id, task_id, or title")
 			continue
 		}
 		requests = append(requests, req)
@@ -1188,11 +1188,11 @@ func ParseModifySchedule(output string) []ModifyScheduleRequest {
 		jsonStr := strings.TrimSpace(match[1])
 		var req ModifyScheduleRequest
 		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			log.Printf("[modify-schedule] error parsing JSON %q: %v", jsonStr, err)
+			applog.Infof("[modify-schedule] error parsing JSON %q: %v", jsonStr, err)
 			continue
 		}
 		if req.ScheduleID == "" && req.TaskID == "" && req.Title == "" {
-			log.Printf("[modify-schedule] skipping request with no schedule_id, task_id, or title")
+			applog.Infof("[modify-schedule] skipping request with no schedule_id, task_id, or title")
 			continue
 		}
 		requests = append(requests, req)
@@ -1246,11 +1246,11 @@ func ParseCreateAlert(output string) []CreateAlertRequest {
 		jsonStr := strings.TrimSpace(match[1])
 		var req CreateAlertRequest
 		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			log.Printf("[create-alert] error parsing JSON %q: %v", jsonStr, err)
+			applog.Infof("[create-alert] error parsing JSON %q: %v", jsonStr, err)
 			continue
 		}
 		if req.Title == "" {
-			log.Printf("[create-alert] skipping request with no title")
+			applog.Infof("[create-alert] skipping request with no title")
 			continue
 		}
 		requests = append(requests, req)
@@ -1273,11 +1273,11 @@ func ParseDeleteAlert(output string) []DeleteAlertRequest {
 		jsonStr := strings.TrimSpace(match[1])
 		var req DeleteAlertRequest
 		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			log.Printf("[delete-alert] error parsing JSON %q: %v", jsonStr, err)
+			applog.Infof("[delete-alert] error parsing JSON %q: %v", jsonStr, err)
 			continue
 		}
 		if req.AlertID == "" {
-			log.Printf("[delete-alert] skipping request with no alert_id")
+			applog.Infof("[delete-alert] skipping request with no alert_id")
 			continue
 		}
 		requests = append(requests, req)
@@ -1300,11 +1300,11 @@ func ParseToggleAlert(output string) []ToggleAlertRequest {
 		jsonStr := strings.TrimSpace(match[1])
 		var req ToggleAlertRequest
 		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			log.Printf("[toggle-alert] error parsing JSON %q: %v", jsonStr, err)
+			applog.Infof("[toggle-alert] error parsing JSON %q: %v", jsonStr, err)
 			continue
 		}
 		if req.AlertID == "" {
-			log.Printf("[toggle-alert] skipping request with no alert_id")
+			applog.Infof("[toggle-alert] skipping request with no alert_id")
 			continue
 		}
 		requests = append(requests, req)
@@ -1371,11 +1371,11 @@ func ParseSwitchProject(output string) []SwitchProjectRequest {
 		jsonStr := strings.TrimSpace(match[1])
 		var req SwitchProjectRequest
 		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			log.Printf("[switch-project] error parsing JSON %q: %v", jsonStr, err)
+			applog.Infof("[switch-project] error parsing JSON %q: %v", jsonStr, err)
 			continue
 		}
 		if req.Project == "" {
-			log.Printf("[switch-project] skipping request with empty project name")
+			applog.Infof("[switch-project] skipping request with empty project name")
 			continue
 		}
 		requests = append(requests, req)
@@ -1398,7 +1398,7 @@ func ParseSetPersonality(output string) []SetPersonalityRequest {
 		jsonStr := strings.TrimSpace(match[1])
 		var req SetPersonalityRequest
 		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			log.Printf("[set-personality] error parsing JSON %q: %v", jsonStr, err)
+			applog.Infof("[set-personality] error parsing JSON %q: %v", jsonStr, err)
 			continue
 		}
 		requests = append(requests, req)

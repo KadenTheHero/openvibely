@@ -10,7 +10,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,6 +20,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
@@ -149,10 +149,10 @@ func ensureGitSSLConfig(env []string) []string {
 
 	// Try to find system CA bundle
 	caBundlePaths := []string{
-		"/etc/ssl/certs/ca-certificates.crt", // Debian/Ubuntu/Alpine
-		"/etc/pki/tls/certs/ca-bundle.crt",   // RHEL/CentOS
-		"/etc/ssl/ca-bundle.pem",             // OpenSUSE
-		"/etc/ssl/cert.pem",                  // OpenBSD (if it exists)
+		"/etc/ssl/certs/ca-certificates.crt",     // Debian/Ubuntu/Alpine
+		"/etc/pki/tls/certs/ca-bundle.crt",       // RHEL/CentOS
+		"/etc/ssl/ca-bundle.pem",                 // OpenSUSE
+		"/etc/ssl/cert.pem",                      // OpenBSD (if it exists)
 		"/usr/local/share/certs/ca-root-nss.crt", // FreeBSD
 	}
 
@@ -177,11 +177,11 @@ func ensureGitSSLConfig(env []string) []string {
 	if os.Getenv("GIT_SSL_NO_VERIFY") != "" {
 		return append(env, "GIT_SSL_NO_VERIFY="+os.Getenv("GIT_SSL_NO_VERIFY"))
 	}
-	
+
 	// Last resort: disable SSL verification to prevent clone failures
 	// This is not ideal for security but prevents the service from being unusable
 	// Log a warning so admins know to configure proper certificates
-	log.Println("WARNING: No valid SSL CA bundle found for Git HTTPS operations. Disabling SSL verification. Set GIT_SSL_CAINFO or GIT_SSL_NO_VERIFY environment variable to configure explicitly.")
+	applog.Infof("WARNING: No valid SSL CA bundle found for Git HTTPS operations. Disabling SSL verification. Set GIT_SSL_CAINFO or GIT_SSL_NO_VERIFY environment variable to configure explicitly.")
 	return append(env, "GIT_SSL_NO_VERIFY=true")
 }
 

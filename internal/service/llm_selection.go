@@ -1,9 +1,9 @@
 package service
 
 import (
-	"log"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -184,7 +184,7 @@ func SelectLLMWithVision(complexity ComplexityResult, configs []models.LLMConfig
 		}
 		if len(filteredConfigs) == 0 {
 			// No vision-capable providers available
-			log.Printf("[llm-selection] vision required but no vision-capable Anthropic providers available")
+			applog.Infof("[llm-selection] vision required but no vision-capable Anthropic providers available")
 			return nil
 		}
 		configs = filteredConfigs
@@ -279,7 +279,7 @@ func SelectLLMWithVision(complexity ComplexityResult, configs []models.LLMConfig
 		reason = "no tier match found, using first available model"
 	}
 
-	log.Printf("[llm-selection] complexity=%s score=%d selected=%s (%s) reason=%q",
+	applog.Infof("[llm-selection] complexity=%s score=%d selected=%s (%s) reason=%q",
 		complexity.Level, complexity.Score, selected.Name, selected.Model, reason)
 
 	return &LLMSelectionResult{

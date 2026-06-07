@@ -7,13 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
@@ -93,7 +93,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 // callDirect calls the Ollama API for task execution (non-chat).
 func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig) (string, int, error) {
 	baseURL := agent.GetOllamaBaseURL()
-	log.Printf("[ollama] callDirect model=%s base_url=%s prompt_len=%d attachments=%d", agent.Model, baseURL, len(prompt), len(attachments))
+	applog.Infof("[ollama] callDirect model=%s base_url=%s prompt_len=%d attachments=%d", agent.Model, baseURL, len(prompt), len(attachments))
 
 	opts := &options{}
 	if agent.Temperature > 0 {
@@ -150,7 +150,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 
 	output := chatResp.Message.Content
 	tokens := chatResp.EvalCount
-	log.Printf("[ollama] callDirect success model=%s eval_tokens=%d prompt_tokens=%d output_len=%d",
+	applog.Infof("[ollama] callDirect success model=%s eval_tokens=%d prompt_tokens=%d output_len=%d",
 		agent.Model, tokens, chatResp.PromptEvalCount, len(output))
 	return output, tokens, nil
 }
@@ -158,7 +158,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 // callChat calls the Ollama API with chat history for interactive chat.
 func (a *Adapter) callChat(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode) (string, int, error) {
 	baseURL := agent.GetOllamaBaseURL()
-	log.Printf("[ollama] callChat model=%s base_url=%s history=%d message_len=%d attachments=%d exec=%s isTaskFollowup=%v",
+	applog.Infof("[ollama] callChat model=%s base_url=%s history=%d message_len=%d attachments=%d exec=%s isTaskFollowup=%v",
 		agent.Model, baseURL, len(chatHistory), len(message), len(attachments), execID, isTaskFollowup)
 
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
@@ -243,7 +243,7 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 
 	sw.Flush()
 	output := sw.String()
-	log.Printf("[ollama] callChat success model=%s eval_tokens=%d prompt_tokens=%d output_len=%d",
+	applog.Infof("[ollama] callChat success model=%s eval_tokens=%d prompt_tokens=%d output_len=%d",
 		agent.Model, totalTokens, promptTokens, len(output))
 	return output, totalTokens, nil
 }
@@ -251,7 +251,7 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 // callStreaming calls Ollama with streaming for task execution.
 func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, projectInstructions string) (string, string, int, error) {
 	baseURL := agent.GetOllamaBaseURL()
-	log.Printf("[ollama] callStreaming model=%s base_url=%s prompt_len=%d attachments=%d exec=%s", agent.Model, baseURL, len(prompt), len(attachments), execID)
+	applog.Infof("[ollama] callStreaming model=%s base_url=%s prompt_len=%d attachments=%d exec=%s", agent.Model, baseURL, len(prompt), len(attachments), execID)
 
 	opts := &options{}
 	if agent.Temperature > 0 {
@@ -349,7 +349,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	if thinkingBuf.Len() == 0 {
 		textOutput = output
 	}
-	log.Printf("[ollama] callStreaming success model=%s eval_tokens=%d prompt_tokens=%d output_len=%d",
+	applog.Infof("[ollama] callStreaming success model=%s eval_tokens=%d prompt_tokens=%d output_len=%d",
 		agent.Model, totalTokens, promptTokens, len(output))
 	return output, textOutput, totalTokens, nil
 }
@@ -398,11 +398,11 @@ func encodeImageAttachments(attachments []models.Attachment) []string {
 		}
 		data, err := os.ReadFile(filePath)
 		if err != nil {
-			log.Printf("[ollama] error reading image %s: %v", filePath, err)
+			applog.Infof("[ollama] error reading image %s: %v", filePath, err)
 			continue
 		}
 		images = append(images, base64.StdEncoding.EncodeToString(data))
-		log.Printf("[ollama] added image attachment %s (%s, %d bytes)", att.FileName, att.MediaType, len(data))
+		applog.Infof("[ollama] added image attachment %s (%s, %d bytes)", att.FileName, att.MediaType, len(data))
 	}
 	return images
 }

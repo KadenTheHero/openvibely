@@ -3,11 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"os/exec"
 	"regexp"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -58,7 +58,7 @@ func (r workflowLineageResolver) ResolveParentLineage(ctx context.Context, paren
 	if parentTask.WorktreePath != "" && parentTask.WorktreeBranch != "" {
 		sha, err := resolveGitHEAD(parentTask.WorktreePath)
 		if err != nil {
-			log.Printf("[lineage] failed to resolve HEAD in worktree %s: %v", parentTask.WorktreePath, err)
+			applog.Infof("[lineage] failed to resolve HEAD in worktree %s: %v", parentTask.WorktreePath, err)
 		} else {
 			return parentTask.WorktreeBranch, sha, nil
 		}
@@ -149,7 +149,7 @@ func (s *LLMService) triggerTaskChain(ctx context.Context, parentTask models.Tas
 	// (e.g., via chat EDIT_TASK) are respected at completion time.
 	if s.taskRepo != nil {
 		if latest, getErr := s.taskRepo.GetByID(ctx, parentTask.ID); getErr != nil {
-			log.Printf("[agent-svc] triggerTaskChain error loading latest parent task=%s: %v", parentTask.ID, getErr)
+			applog.Infof("[agent-svc] triggerTaskChain error loading latest parent task=%s: %v", parentTask.ID, getErr)
 		} else if latest != nil {
 			parentTask = *latest
 		}
@@ -164,10 +164,10 @@ func (s *LLMService) triggerTaskChain(ctx context.Context, parentTask models.Tas
 	if s.taskRepo != nil {
 		blockedChild, findErr := s.taskRepo.FindBlockedChildByParent(ctx, parentTask.ID)
 		if findErr != nil {
-			log.Printf("[agent-svc] triggerTaskChain error finding blocked child for parent=%s: %v", parentTask.ID, findErr)
+			applog.Infof("[agent-svc] triggerTaskChain error finding blocked child for parent=%s: %v", parentTask.ID, findErr)
 		}
 		if blockedChild != nil {
-			log.Printf("[agent-svc] triggerTaskChain activating blocked child id=%s parent=%s", blockedChild.ID, parentTask.ID)
+			applog.Infof("[agent-svc] triggerTaskChain activating blocked child id=%s parent=%s", blockedChild.ID, parentTask.ID)
 
 			// Build the real prompt from parent output
 			childPrompt := llmworkflow.CleanOutputForChain(parentOutput)
@@ -182,11 +182,11 @@ func (s *LLMService) triggerTaskChain(ctx context.Context, parentTask models.Tas
 			if svc != nil {
 				branch, sha, lineageErr := workflowLineageResolver{s: s}.ResolveParentLineage(ctx, parentTask)
 				if lineageErr != nil {
-					log.Printf("[agent-svc] triggerTaskChain lineage resolution failed parent=%s: %v", parentTask.ID, lineageErr)
+					applog.Infof("[agent-svc] triggerTaskChain lineage resolution failed parent=%s: %v", parentTask.ID, lineageErr)
 				} else {
 					blockedChild.BaseBranch = branch
 					blockedChild.BaseCommitSHA = sha
-					log.Printf("[agent-svc] triggerTaskChain resolved lineage for child=%s branch=%s sha=%s", blockedChild.ID, branch, sha)
+					applog.Infof("[agent-svc] triggerTaskChain resolved lineage for child=%s branch=%s sha=%s", blockedChild.ID, branch, sha)
 				}
 			}
 
@@ -198,13 +198,13 @@ func (s *LLMService) triggerTaskChain(ctx context.Context, parentTask models.Tas
 			}
 
 			if err := s.taskRepo.Update(ctx, blockedChild); err != nil {
-				log.Printf("[agent-svc] triggerTaskChain error updating blocked child id=%s: %v", blockedChild.ID, err)
+				applog.Infof("[agent-svc] triggerTaskChain error updating blocked child id=%s: %v", blockedChild.ID, err)
 				return fmt.Errorf("activating blocked child: %w", err)
 			}
 
 			// Submit to worker pool
 			if s.taskSvc != nil && blockedChild.Category == models.CategoryActive {
-				log.Printf("[agent-svc] triggerTaskChain submitting activated child id=%s to worker pool", blockedChild.ID)
+				applog.Infof("[agent-svc] triggerTaskChain submitting activated child id=%s to worker pool", blockedChild.ID)
 				s.taskSvc.workerSvc.Submit(*blockedChild)
 			}
 			return nil
@@ -212,6 +212,6 @@ func (s *LLMService) triggerTaskChain(ctx context.Context, parentTask models.Tas
 	}
 
 	// Fallback: no blocked child found, create a new one via the workflow service
-	log.Printf("[agent-svc] triggerTaskChain no blocked child found for parent=%s, creating new child", parentTask.ID)
+	applog.Infof("[agent-svc] triggerTaskChain no blocked child found for parent=%s, creating new child", parentTask.ID)
 	return s.workflowChainService().TriggerTaskChain(ctx, parentTask, parentOutput)
 }

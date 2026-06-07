@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -129,9 +129,9 @@ func (ws *WorktreeService) SetupFollowupWorktree(ctx context.Context, task *mode
 	}
 
 	if ws.shouldReuseStoredFollowupWorktree(task, repoDir) {
-		log.Printf("[worktree] reusing stored follow-up worktree task=%s path=%s branch=%s", task.ID, task.WorktreePath, task.WorktreeBranch)
+		applog.Infof("[worktree] reusing stored follow-up worktree task=%s path=%s branch=%s", task.ID, task.WorktreePath, task.WorktreeBranch)
 		if updateErr := ws.taskRepo.UpdateWorktreeInfo(ctx, task.ID, task.WorktreePath, task.WorktreeBranch); updateErr != nil {
-			log.Printf("[worktree] error updating stored follow-up worktree info: %v", updateErr)
+			applog.Infof("[worktree] error updating stored follow-up worktree info: %v", updateErr)
 		}
 		return task.WorktreePath, task.WorktreeBranch, false, nil
 	}
@@ -157,7 +157,7 @@ func (ws *WorktreeService) setupWorktree(ctx context.Context, task *models.Task,
 
 	// If this is a chained task and we couldn't resolve lineage, log a clear error
 	if !continueFromCurrentTarget && task.ParentTaskID != nil && task.BaseCommitSHA != "" && baseRef != task.BaseCommitSHA {
-		log.Printf("[worktree] WARNING: chained task %s could not use parent lineage SHA %s, using fallback base %s", task.ID, task.BaseCommitSHA, baseRef)
+		applog.Infof("[worktree] WARNING: chained task %s could not use parent lineage SHA %s, using fallback base %s", task.ID, task.BaseCommitSHA, baseRef)
 	}
 
 	// Create branch name from task
@@ -180,16 +180,16 @@ func (ws *WorktreeService) setupWorktree(ctx context.Context, task *models.Task,
 	if !continueFromCurrentTarget {
 		if storedPath, storedBranch, ok := ws.existingStoredWorktree(task); ok {
 			ws.clearStaleConflictStatusIfClean(ctx, task)
-			log.Printf("[worktree] stored worktree already exists at %s, reusing", storedPath)
+			applog.Infof("[worktree] stored worktree already exists at %s, reusing", storedPath)
 			if updateErr := ws.taskRepo.UpdateWorktreeInfo(ctx, task.ID, storedPath, storedBranch); updateErr != nil {
-				log.Printf("[worktree] error updating worktree info: %v", updateErr)
+				applog.Infof("[worktree] error updating worktree info: %v", updateErr)
 			}
 			return storedPath, storedBranch, nil
 		}
 		if _, err := os.Stat(worktreePath); err == nil {
-			log.Printf("[worktree] worktree already exists at %s, reusing", worktreePath)
+			applog.Infof("[worktree] worktree already exists at %s, reusing", worktreePath)
 			if updateErr := ws.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, branchName); updateErr != nil {
-				log.Printf("[worktree] error updating worktree info: %v", updateErr)
+				applog.Infof("[worktree] error updating worktree info: %v", updateErr)
 			}
 			return worktreePath, branchName, nil
 		}
@@ -218,11 +218,11 @@ func (ws *WorktreeService) setupWorktree(ctx context.Context, task *models.Task,
 		}
 	}
 
-	log.Printf("[worktree] created worktree at %s on branch %s (base: %s) for task %s (lineage_depth=%d)", worktreePath, branchName, baseRef, task.ID, task.LineageDepth)
+	applog.Infof("[worktree] created worktree at %s on branch %s (base: %s) for task %s (lineage_depth=%d)", worktreePath, branchName, baseRef, task.ID, task.LineageDepth)
 
 	// Update task record with worktree info
 	if updateErr := ws.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, branchName); updateErr != nil {
-		log.Printf("[worktree] error updating worktree info: %v", updateErr)
+		applog.Infof("[worktree] error updating worktree info: %v", updateErr)
 	}
 	if task.MergeTargetBranch == "" {
 		mergeTarget := baseRef
@@ -232,7 +232,7 @@ func (ws *WorktreeService) setupWorktree(ctx context.Context, task *models.Task,
 		}
 		task.MergeTargetBranch = mergeTarget
 		if updateErr := ws.taskRepo.UpdateAutoMerge(ctx, task.ID, task.AutoMerge, mergeTarget); updateErr != nil {
-			log.Printf("[worktree] error setting merge target branch: %v", updateErr)
+			applog.Infof("[worktree] error setting merge target branch: %v", updateErr)
 		}
 	}
 
@@ -260,9 +260,9 @@ func (ws *WorktreeService) resolveWorktreeBaseRef(ctx context.Context, task *mod
 		checkSHA.Dir = repoDir
 		if checkSHA.Run() == nil {
 			baseRef = task.BaseCommitSHA
-			log.Printf("[worktree] using lineage commit SHA %s as base for task %s (depth=%d)", baseRef, task.ID, task.LineageDepth)
+			applog.Infof("[worktree] using lineage commit SHA %s as base for task %s (depth=%d)", baseRef, task.ID, task.LineageDepth)
 		} else {
-			log.Printf("[worktree] lineage commit SHA %s not found in repo for task %s, falling back", task.BaseCommitSHA, task.ID)
+			applog.Infof("[worktree] lineage commit SHA %s not found in repo for task %s, falling back", task.BaseCommitSHA, task.ID)
 		}
 	}
 	if baseRef == "" && task.BaseBranch != "" {
@@ -271,9 +271,9 @@ func (ws *WorktreeService) resolveWorktreeBaseRef(ctx context.Context, task *mod
 		checkBr.Dir = repoDir
 		if checkBr.Run() == nil {
 			baseRef = task.BaseBranch
-			log.Printf("[worktree] using lineage branch %s as base for task %s (depth=%d)", baseRef, task.ID, task.LineageDepth)
+			applog.Infof("[worktree] using lineage branch %s as base for task %s (depth=%d)", baseRef, task.ID, task.LineageDepth)
 		} else {
-			log.Printf("[worktree] lineage branch %s not found in repo for task %s, falling back", task.BaseBranch, task.ID)
+			applog.Infof("[worktree] lineage branch %s not found in repo for task %s, falling back", task.BaseBranch, task.ID)
 		}
 	}
 
@@ -389,11 +389,11 @@ func (ws *WorktreeService) clearStaleConflictStatusIfClean(ctx context.Context, 
 		return
 	}
 	if err := ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
-		log.Printf("[worktree] error clearing stale conflict status for task %s: %v", task.ID, err)
+		applog.Infof("[worktree] error clearing stale conflict status for task %s: %v", task.ID, err)
 		return
 	}
 	task.MergeStatus = models.MergeStatusPending
-	log.Printf("[worktree] cleared stale conflict status for task %s after clean aborted merge state", task.ID)
+	applog.Infof("[worktree] cleared stale conflict status for task %s after clean aborted merge state", task.ID)
 }
 
 // SyncWorktreeFromMainAtStart updates a task branch with the latest main/default branch
@@ -427,18 +427,18 @@ func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task
 	if currentBranch == "" {
 		currentBranch = task.WorktreeBranch
 	}
-	log.Printf("[worktree] startup auto-merge check task=%s worktree=%s branch=%s", task.ID, task.WorktreePath, currentBranch)
+	applog.Infof("[worktree] startup auto-merge check task=%s worktree=%s branch=%s", task.ID, task.WorktreePath, currentBranch)
 
 	statusOut, statusErr := runGit(task.WorktreePath, "status", "--porcelain")
 	if statusErr != nil {
-		log.Printf("[worktree] startup auto-merge failed task=%s unable to read git status: %v", task.ID, statusErr)
+		applog.Infof("[worktree] startup auto-merge failed task=%s unable to read git status: %v", task.ID, statusErr)
 		if ws.taskRepo != nil {
 			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
 		}
 		return fmt.Errorf("could not check worktree status in %s: %w", task.WorktreePath, statusErr)
 	}
 	if strings.TrimSpace(string(statusOut)) != "" {
-		log.Printf("[worktree] startup auto-merge skipped task=%s branch=%s reason=dirty_worktree", task.ID, currentBranch)
+		applog.Infof("[worktree] startup auto-merge skipped task=%s branch=%s reason=dirty_worktree", task.ID, currentBranch)
 		return nil
 	}
 	ws.clearStaleConflictStatusIfClean(ctx, task)
@@ -462,13 +462,13 @@ func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task
 	if _, originErr := runGit(repoDir, "remote", "get-url", "origin"); originErr == nil {
 		fetchOut, fetchErr := runGit(task.WorktreePath, "fetch", "origin", syncBranch)
 		if fetchErr != nil {
-			log.Printf("[worktree] startup auto-merge task=%s fetch origin/%s skipped (non-fatal): %s", task.ID, syncBranch, strings.TrimSpace(string(fetchOut)))
+			applog.Infof("[worktree] startup auto-merge task=%s fetch origin/%s skipped (non-fatal): %s", task.ID, syncBranch, strings.TrimSpace(string(fetchOut)))
 			mergeSource = syncBranch
 		} else {
 			mergeSource = "origin/" + syncBranch
 		}
 	} else {
-		log.Printf("[worktree] startup auto-merge task=%s no origin remote, using local %s", task.ID, syncBranch)
+		applog.Infof("[worktree] startup auto-merge task=%s no origin remote, using local %s", task.ID, syncBranch)
 	}
 
 	mergeOut, mergeErr := runGit(task.WorktreePath, "merge", "--no-edit", mergeSource)
@@ -484,7 +484,7 @@ func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task
 			if abortErr != nil {
 				action = fmt.Sprintf("%s; additionally, git merge --abort failed: %v", action, abortErr)
 			}
-			log.Printf("[worktree] startup auto-merge failed task=%s reason=conflict details=%s", task.ID, action)
+			applog.Infof("[worktree] startup auto-merge failed task=%s reason=conflict details=%s", task.ID, action)
 			return fmt.Errorf("%s", action)
 		}
 
@@ -494,14 +494,14 @@ func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task
 		if mergeMsg == "" {
 			mergeMsg = mergeErr.Error()
 		}
-		log.Printf("[worktree] startup auto-merge failed task=%s branch=%s source=%s error=%s", task.ID, currentBranch, mergeSource, mergeMsg)
+		applog.Infof("[worktree] startup auto-merge failed task=%s branch=%s source=%s error=%s", task.ID, currentBranch, mergeSource, mergeMsg)
 		return fmt.Errorf("startup auto-merge failed while merging %s into %s: %s", mergeSource, currentBranch, mergeMsg)
 	}
 
 	if mergeMsg == "" {
 		mergeMsg = "already up to date"
 	}
-	log.Printf("[worktree] startup auto-merge ran task=%s branch=%s source=%s result=%s", task.ID, currentBranch, mergeSource, mergeMsg)
+	applog.Infof("[worktree] startup auto-merge ran task=%s branch=%s source=%s result=%s", task.ID, currentBranch, mergeSource, mergeMsg)
 	return nil
 }
 
@@ -983,7 +983,7 @@ func (ws *WorktreeService) CleanupWorktree(ctx context.Context, task *models.Tas
 	removeCmd := exec.Command("git", "worktree", "remove", task.WorktreePath, "--force")
 	removeCmd.Dir = repoDir
 	if out, err := removeCmd.CombinedOutput(); err != nil {
-		log.Printf("[worktree] error removing worktree: %s", string(out))
+		applog.Infof("[worktree] error removing worktree: %s", string(out))
 		// Try manual removal as fallback
 		os.RemoveAll(task.WorktreePath)
 		// Prune worktree list
@@ -999,28 +999,28 @@ func (ws *WorktreeService) CleanupWorktree(ctx context.Context, task *models.Tas
 		if ws.taskRepo != nil {
 			active, descErr := ws.taskRepo.HasNonTerminalDescendants(ctx, task.ID)
 			if descErr != nil {
-				log.Printf("[worktree] error checking descendants for task %s: %v", task.ID, descErr)
+				applog.Infof("[worktree] error checking descendants for task %s: %v", task.ID, descErr)
 			} else {
 				hasActiveDesc = active
 			}
 		}
 		if hasActiveDesc {
-			log.Printf("[worktree] skipping branch deletion for task %s branch %s: has active descendants", task.ID, task.WorktreeBranch)
+			applog.Infof("[worktree] skipping branch deletion for task %s branch %s: has active descendants", task.ID, task.WorktreeBranch)
 		} else {
 			deleteCmd := exec.Command("git", "branch", "-D", task.WorktreeBranch)
 			deleteCmd.Dir = repoDir
 			if out, err := deleteCmd.CombinedOutput(); err != nil {
-				log.Printf("[worktree] error deleting branch %s: %s", task.WorktreeBranch, string(out))
+				applog.Infof("[worktree] error deleting branch %s: %s", task.WorktreeBranch, string(out))
 			}
 		}
 	}
 
 	// Clear worktree info from task
 	if err := ws.taskRepo.ClearWorktreeInfo(ctx, task.ID); err != nil {
-		log.Printf("[worktree] error clearing worktree info: %v", err)
+		applog.Infof("[worktree] error clearing worktree info: %v", err)
 	}
 
-	log.Printf("[worktree] cleaned up worktree for task %s", task.ID)
+	applog.Infof("[worktree] cleaned up worktree for task %s", task.ID)
 	return nil
 }
 
@@ -1037,7 +1037,7 @@ func GetWorktreeDiff(repoDir string, branchName string, targetBranch string) str
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
-		log.Printf("[worktree] error getting worktree diff: %v", err)
+		applog.Infof("[worktree] error getting worktree diff: %v", err)
 		return ""
 	}
 	return string(out)
@@ -1353,7 +1353,7 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 	// for a branch that does not actually contain the provider's file edits.
 	msg := fmt.Sprintf("Task completed: %s", task.Title)
 	if err := CommitWorktreeChanges(task.WorktreePath, msg); err != nil {
-		log.Printf("[worktree] error committing changes for task %s: %v", task.ID, err)
+		applog.Infof("[worktree] error committing changes for task %s: %v", task.ID, err)
 		if ws.taskRepo != nil {
 			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
 		}
@@ -1362,17 +1362,17 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 
 	// Auto-merge if enabled
 	if task.AutoMerge {
-		log.Printf("[worktree] auto-merging task %s branch %s -> %s", task.ID, task.WorktreeBranch, task.MergeTargetBranch)
+		applog.Infof("[worktree] auto-merging task %s branch %s -> %s", task.ID, task.WorktreeBranch, task.MergeTargetBranch)
 		result, err := ws.MergeBranch(ctx, task, repoDir, "merge")
 		if err != nil {
-			log.Printf("[worktree] auto-merge failed for task %s: %v", task.ID, err)
+			applog.Infof("[worktree] auto-merge failed for task %s: %v", task.ID, err)
 			return
 		}
 		if !result.Success && len(result.ConflictFiles) > 0 {
-			log.Printf("[worktree] auto-merge has conflicts for task %s, attempting AI resolution", task.ID)
+			applog.Infof("[worktree] auto-merge has conflicts for task %s, attempting AI resolution", task.ID)
 			aiResult, aiErr := ws.ResolveConflictsWithAI(ctx, task, repoDir)
 			if aiErr != nil || (aiResult != nil && !aiResult.Success) {
-				log.Printf("[worktree] AI conflict resolution failed for task %s, aborting merge", task.ID)
+				applog.Infof("[worktree] AI conflict resolution failed for task %s, aborting merge", task.ID)
 				AbortMerge(repoDir)
 				_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
 				return
@@ -1383,7 +1383,7 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 		policy := ws.GetCleanupPolicy(ctx)
 		if policy == "after_merge" {
 			if cleanErr := ws.CleanupWorktree(ctx, task, repoDir, true); cleanErr != nil {
-				log.Printf("[worktree] cleanup after merge failed: %v", cleanErr)
+				applog.Infof("[worktree] cleanup after merge failed: %v", cleanErr)
 			}
 		}
 	} else {
@@ -1413,7 +1413,7 @@ func (ws *WorktreeService) CleanupMergedWorktrees(ctx context.Context) error {
 		return nil
 	}
 
-	log.Printf("[worktree] cleanup scan: checking %d tasks with worktrees", len(tasks))
+	applog.Infof("[worktree] cleanup scan: checking %d tasks with worktrees", len(tasks))
 
 	cleanedCount := 0
 	for _, task := range tasks {
@@ -1425,13 +1425,13 @@ func (ws *WorktreeService) CleanupMergedWorktrees(ctx context.Context) error {
 		// Get the project to determine the repo directory
 		project, err := ws.projectRepo.GetByID(ctx, task.ProjectID)
 		if err != nil || project == nil {
-			log.Printf("[worktree] cleanup: skipping task %s (project not found)", task.ID)
+			applog.Infof("[worktree] cleanup: skipping task %s (project not found)", task.ID)
 			continue
 		}
 
 		repoDir := project.RepoPath
 		if repoDir == "" || !IsGitRepo(repoDir) {
-			log.Printf("[worktree] cleanup: skipping task %s (not a git repo)", task.ID)
+			applog.Infof("[worktree] cleanup: skipping task %s (not a git repo)", task.ID)
 			continue
 		}
 
@@ -1445,7 +1445,7 @@ func (ws *WorktreeService) CleanupMergedWorktrees(ctx context.Context) error {
 
 		// Check if branch has been merged
 		if IsBranchMerged(repoDir, task.WorktreeBranch, targetBranch) {
-			log.Printf("[worktree] cleanup: task %s branch %s is merged to %s, cleaning up",
+			applog.Infof("[worktree] cleanup: task %s branch %s is merged to %s, cleaning up",
 				task.ID, task.WorktreeBranch, targetBranch)
 
 			// Update merge status to merged if not already
@@ -1455,7 +1455,7 @@ func (ws *WorktreeService) CleanupMergedWorktrees(ctx context.Context) error {
 
 			// Cleanup the worktree and delete the branch
 			if err := ws.CleanupWorktree(ctx, &task, repoDir, true); err != nil {
-				log.Printf("[worktree] cleanup: failed to cleanup task %s: %v", task.ID, err)
+				applog.Infof("[worktree] cleanup: failed to cleanup task %s: %v", task.ID, err)
 			} else {
 				cleanedCount++
 			}
@@ -1463,15 +1463,15 @@ func (ws *WorktreeService) CleanupMergedWorktrees(ctx context.Context) error {
 	}
 
 	if cleanedCount > 0 {
-		log.Printf("[worktree] cleanup scan: cleaned up %d merged worktrees", cleanedCount)
+		applog.Infof("[worktree] cleanup scan: cleaned up %d merged worktrees", cleanedCount)
 	}
 
 	// Also cleanup orphaned worktrees (worktrees with no corresponding task)
 	orphanedCount, err := ws.CleanupOrphanedWorktrees(ctx)
 	if err != nil {
-		log.Printf("[worktree] cleanup: failed to cleanup orphaned worktrees: %v", err)
+		applog.Infof("[worktree] cleanup: failed to cleanup orphaned worktrees: %v", err)
 	} else if orphanedCount > 0 {
-		log.Printf("[worktree] cleanup scan: cleaned up %d orphaned worktrees", orphanedCount)
+		applog.Infof("[worktree] cleanup scan: cleaned up %d orphaned worktrees", orphanedCount)
 	}
 
 	return nil
@@ -1503,7 +1503,7 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 		// List all git worktrees for this repo
 		worktrees, err := ListGitWorktrees(project.RepoPath)
 		if err != nil {
-			log.Printf("[worktree] cleanup: failed to list worktrees for project %s: %v", project.ID, err)
+			applog.Infof("[worktree] cleanup: failed to list worktrees for project %s: %v", project.ID, err)
 			continue
 		}
 
@@ -1512,7 +1512,7 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 		// 2) knownTaskIDs (task exists but may not have worktree_path persisted yet)
 		allTasks, err := ws.taskRepo.ListByProject(ctx, project.ID, "")
 		if err != nil {
-			log.Printf("[worktree] cleanup: failed to list tasks for project %s: %v", project.ID, err)
+			applog.Infof("[worktree] cleanup: failed to list tasks for project %s: %v", project.ID, err)
 			continue
 		}
 
@@ -1541,11 +1541,11 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 			// Worktree directories follow .worktrees/task_<taskID>. If the task still
 			// exists but worktree_path wasn't persisted yet, treat it as in-use.
 			if taskID, ok := taskIDFromWorktreePath(worktree.Path); ok && knownTaskIDs[taskID] {
-				log.Printf("[worktree] cleanup: skipping worktree at %s because task %s still exists", worktree.Path, taskID)
+				applog.Infof("[worktree] cleanup: skipping worktree at %s because task %s still exists", worktree.Path, taskID)
 				continue
 			}
 
-			log.Printf("[worktree] cleanup: found orphaned worktree at %s (branch: %s)", worktree.Path, worktree.Branch)
+			applog.Infof("[worktree] cleanup: found orphaned worktree at %s (branch: %s)", worktree.Path, worktree.Branch)
 
 			// Try to remove the worktree using git first
 			cmd := exec.Command("git", "worktree", "remove", "--force", worktree.Path)
@@ -1556,16 +1556,16 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 				// A locked worktree may still be actively initializing. Don't perform
 				// manual filesystem deletion in this case; retry on a future cleanup cycle.
 				if strings.Contains(outputText, "cannot remove a locked working tree") {
-					log.Printf("[worktree] cleanup: skipping locked orphaned worktree at %s (output: %s)", worktree.Path, outputText)
+					applog.Infof("[worktree] cleanup: skipping locked orphaned worktree at %s (output: %s)", worktree.Path, outputText)
 					continue
 				}
 
 				// If git worktree remove fails, try manual cleanup
-				log.Printf("[worktree] cleanup: git worktree remove failed, attempting manual cleanup: %v (output: %s)", err, outputText)
+				applog.Infof("[worktree] cleanup: git worktree remove failed, attempting manual cleanup: %v (output: %s)", err, outputText)
 
 				// Remove the worktree directory manually
 				if err := os.RemoveAll(worktree.Path); err != nil {
-					log.Printf("[worktree] cleanup: failed to remove orphaned worktree directory %s: %v", worktree.Path, err)
+					applog.Infof("[worktree] cleanup: failed to remove orphaned worktree directory %s: %v", worktree.Path, err)
 					continue
 				}
 

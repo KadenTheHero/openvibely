@@ -1,12 +1,12 @@
 package handler
 
 import (
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -14,13 +14,13 @@ import (
 
 func (h *Handler) ListModels(c echo.Context) error {
 	isHTMX := isHTMX(c)
-	log.Printf("[handler] ListModels requested htmx=%v", isHTMX)
+	// applog.Debugf("[handler] ListModels requested htmx=%v", isHTMX)
 	agents, err := h.llmConfigRepo.List(c.Request().Context())
 	if err != nil {
-		log.Printf("[handler] ListModels error: %v", err)
+		applog.Infof("[handler] ListModels error: %v", err)
 		return err
 	}
-	log.Printf("[handler] ListModels found %d agents", len(agents))
+	// applog.Debugf("[handler] ListModels found %d agents", len(agents))
 
 	// Build per-model worker utilization
 	modelWorkerStats := make(map[string]int)
@@ -131,14 +131,14 @@ func (h *Handler) CreateModel(c echo.Context) error {
 	if a.Provider == models.ProviderOpenAI {
 		a.Model = normalizeOpenAIModel(a.Model)
 	}
-	log.Printf("[handler] CreateModel name=%q provider=%s model=%s auth_method=%s temp=%.1f default=%v",
+	applog.Infof("[handler] CreateModel name=%q provider=%s model=%s auth_method=%s temp=%.1f default=%v",
 		a.Name, a.Provider, a.Model, a.AuthMethod, a.Temperature, a.IsDefault)
 
 	if err := h.llmConfigRepo.Create(c.Request().Context(), a); err != nil {
-		log.Printf("[handler] CreateModel error: %v", err)
+		applog.Infof("[handler] CreateModel error: %v", err)
 		return err
 	}
-	log.Printf("[handler] CreateModel success id=%s", a.ID)
+	applog.Infof("[handler] CreateModel success id=%s", a.ID)
 
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
@@ -153,15 +153,15 @@ func (h *Handler) CreateModel(c echo.Context) error {
 
 func (h *Handler) UpdateModel(c echo.Context) error {
 	id := c.Param("id")
-	log.Printf("[handler] UpdateModel id=%s", id)
+	applog.Infof("[handler] UpdateModel id=%s", id)
 
 	agent, err := h.llmConfigRepo.GetByID(c.Request().Context(), id)
 	if err != nil {
-		log.Printf("[handler] UpdateModel fetch error: %v", err)
+		applog.Infof("[handler] UpdateModel fetch error: %v", err)
 		return err
 	}
 	if agent == nil {
-		log.Printf("[handler] UpdateModel not found id=%s", id)
+		applog.Infof("[handler] UpdateModel not found id=%s", id)
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 
@@ -244,12 +244,12 @@ func (h *Handler) UpdateModel(c echo.Context) error {
 		agent.WorkerTimeout = wt
 	}
 
-	log.Printf("[handler] UpdateModel id=%s name=%q model=%s auth_method=%s max_workers=%d", id, agent.Name, agent.Model, agent.AuthMethod, agent.MaxWorkers)
+	applog.Infof("[handler] UpdateModel id=%s name=%q model=%s auth_method=%s max_workers=%d", id, agent.Name, agent.Model, agent.AuthMethod, agent.MaxWorkers)
 	if err := h.llmConfigRepo.Update(c.Request().Context(), agent); err != nil {
-		log.Printf("[handler] UpdateModel error: %v", err)
+		applog.Infof("[handler] UpdateModel error: %v", err)
 		return err
 	}
-	log.Printf("[handler] UpdateModel success id=%s", id)
+	applog.Infof("[handler] UpdateModel success id=%s", id)
 
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
@@ -264,24 +264,24 @@ func (h *Handler) UpdateModel(c echo.Context) error {
 
 func (h *Handler) SetDefaultModel(c echo.Context) error {
 	id := c.Param("id")
-	log.Printf("[handler] SetDefaultModel id=%s", id)
+	applog.Infof("[handler] SetDefaultModel id=%s", id)
 
 	agent, err := h.llmConfigRepo.GetByID(c.Request().Context(), id)
 	if err != nil {
-		log.Printf("[handler] SetDefaultModel fetch error: %v", err)
+		applog.Infof("[handler] SetDefaultModel fetch error: %v", err)
 		return err
 	}
 	if agent == nil {
-		log.Printf("[handler] SetDefaultModel not found id=%s", id)
+		applog.Infof("[handler] SetDefaultModel not found id=%s", id)
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 
 	agent.IsDefault = true
 	if err := h.llmConfigRepo.Update(c.Request().Context(), agent); err != nil {
-		log.Printf("[handler] SetDefaultModel update error: %v", err)
+		applog.Infof("[handler] SetDefaultModel update error: %v", err)
 		return err
 	}
-	log.Printf("[handler] SetDefaultModel success id=%s", id)
+	applog.Infof("[handler] SetDefaultModel success id=%s", id)
 
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
@@ -296,17 +296,17 @@ func (h *Handler) SetDefaultModel(c echo.Context) error {
 
 func (h *Handler) DeleteModel(c echo.Context) error {
 	id := c.Param("id")
-	log.Printf("[handler] DeleteModel id=%s", id)
+	applog.Infof("[handler] DeleteModel id=%s", id)
 	ctx := c.Request().Context()
 
 	// Fetch agent to check if it exists and if it's the default
 	agent, err := h.llmConfigRepo.GetByID(ctx, id)
 	if err != nil {
-		log.Printf("[handler] DeleteModel fetch error: %v", err)
+		applog.Infof("[handler] DeleteModel fetch error: %v", err)
 		return err
 	}
 	if agent == nil {
-		log.Printf("[handler] DeleteModel not found id=%s", id)
+		applog.Infof("[handler] DeleteModel not found id=%s", id)
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 
@@ -321,31 +321,31 @@ func (h *Handler) DeleteModel(c echo.Context) error {
 			// Verify the new default exists and is not the model being deleted.
 			newDefault, err := h.llmConfigRepo.GetByID(ctx, newDefaultID)
 			if err != nil {
-				log.Printf("[handler] DeleteModel new default fetch error: %v", err)
+				applog.Infof("[handler] DeleteModel new default fetch error: %v", err)
 				return err
 			}
 			if newDefault == nil || newDefaultID == id {
-				log.Printf("[handler] DeleteModel rejected: invalid new default id=%s", newDefaultID)
+				applog.Infof("[handler] DeleteModel rejected: invalid new default id=%s", newDefaultID)
 				return echo.NewHTTPError(http.StatusBadRequest, "Invalid new default model selection.")
 			}
 			if err := h.llmConfigRepo.TransferDefaultAndDelete(ctx, id, newDefaultID); err != nil {
-				log.Printf("[handler] DeleteModel transfer+delete error: %v", err)
+				applog.Infof("[handler] DeleteModel transfer+delete error: %v", err)
 				return err
 			}
-			log.Printf("[handler] DeleteModel success: transferred default to %s, deleted %s", newDefaultID, id)
+			applog.Infof("[handler] DeleteModel success: transferred default to %s, deleted %s", newDefaultID, id)
 		} else {
 			if err := h.llmConfigRepo.Delete(ctx, id); err != nil {
-				log.Printf("[handler] DeleteModel default delete error: %v", err)
+				applog.Infof("[handler] DeleteModel default delete error: %v", err)
 				return err
 			}
-			log.Printf("[handler] DeleteModel success: deleted default model id=%s (auto-reassigned when needed)", id)
+			applog.Infof("[handler] DeleteModel success: deleted default model id=%s (auto-reassigned when needed)", id)
 		}
 	} else {
 		if err := h.llmConfigRepo.Delete(ctx, id); err != nil {
-			log.Printf("[handler] DeleteModel error: %v", err)
+			applog.Infof("[handler] DeleteModel error: %v", err)
 			return err
 		}
-		log.Printf("[handler] DeleteModel success id=%s", id)
+		applog.Infof("[handler] DeleteModel success id=%s", id)
 	}
 
 	// Return updated agents list for HTMX
@@ -418,7 +418,7 @@ func (h *Handler) ListOllamaAvailableModels(c echo.Context) error {
 
 	models, err := service.ListOllamaModels(c.Request().Context(), baseURL)
 	if err != nil {
-		log.Printf("[handler] ListOllamaAvailableModels error: %v", err)
+		applog.Infof("[handler] ListOllamaAvailableModels error: %v", err)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	}
 

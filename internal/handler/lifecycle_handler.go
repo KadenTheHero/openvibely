@@ -3,11 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/viewmodels"
@@ -26,7 +26,7 @@ func (h *Handler) GetAgentLifecycleHooks(c echo.Context) error {
 	}
 	hooks, err := h.lifecycleRepo.HooksByAgent(c.Request().Context(), agentID)
 	if err != nil {
-		log.Printf("[handler] GetAgentLifecycleHooks agent=%s error: %v", agentID, err)
+		applog.Infof("[handler] GetAgentLifecycleHooks agent=%s error: %v", agentID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, hooks)
@@ -197,7 +197,7 @@ func (h *Handler) GetTaskLifecycleExecutions(c echo.Context) error {
 	}
 	execs, err := h.lifecycleRepo.ListExecutionsForTask(c.Request().Context(), taskID)
 	if err != nil {
-		log.Printf("[handler] GetTaskLifecycleExecutions task=%s error: %v", taskID, err)
+		applog.Infof("[handler] GetTaskLifecycleExecutions task=%s error: %v", taskID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	views := make([]viewmodels.LifecycleExecutionView, 0, len(execs))
@@ -227,7 +227,7 @@ func (h *Handler) GetLifecycleExecutionEvents(c echo.Context) error {
 	}
 	events, err := h.lifecycleRepo.ListExecutionEvents(c.Request().Context(), execID)
 	if err != nil {
-		log.Printf("[handler] GetLifecycleExecutionEvents exec=%s error: %v", execID, err)
+		applog.Infof("[handler] GetLifecycleExecutionEvents exec=%s error: %v", execID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	views := make([]viewmodels.LifecycleExecutionEventView, 0, len(events))

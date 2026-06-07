@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -26,7 +26,7 @@ func (s *AlertService) Create(ctx context.Context, a *models.Alert) error {
 	if err := s.alertRepo.Create(ctx, a); err != nil {
 		return fmt.Errorf("creating alert: %w", err)
 	}
-	log.Printf("[alert-svc] created alert id=%s type=%s severity=%s title=%q", a.ID, a.Type, a.Severity, a.Title)
+	applog.Infof("[alert-svc] created alert id=%s type=%s severity=%s title=%q", a.ID, a.Type, a.Severity, a.Title)
 
 	// Publish event for real-time UI updates
 	if s.broadcaster != nil {
@@ -35,7 +35,7 @@ func (s *AlertService) Create(ctx context.Context, a *models.Alert) error {
 			ProjectID: a.ProjectID,
 			AlertID:   a.ID,
 		})
-		log.Printf("[alert-svc] published alert_created event for alert=%s project=%s", a.ID, a.ProjectID)
+		applog.Infof("[alert-svc] published alert_created event for alert=%s project=%s", a.ID, a.ProjectID)
 	}
 
 	return nil
@@ -95,7 +95,7 @@ func (s *AlertService) DeleteAll(ctx context.Context, projectID string) error {
 	if err := s.alertRepo.DeleteAll(ctx, projectID); err != nil {
 		return fmt.Errorf("deleting all alerts: %w", err)
 	}
-	log.Printf("[alert-svc] deleted all alerts for project=%s", projectID)
+	applog.Infof("[alert-svc] deleted all alerts for project=%s", projectID)
 
 	// Publish event for real-time UI updates
 	if s.broadcaster != nil {
@@ -103,7 +103,7 @@ func (s *AlertService) DeleteAll(ctx context.Context, projectID string) error {
 			Type:      events.AlertCreated, // Reuse AlertCreated to trigger badge refresh
 			ProjectID: projectID,
 		})
-		log.Printf("[alert-svc] published alert event for project=%s after delete all", projectID)
+		applog.Infof("[alert-svc] published alert event for project=%s after delete all", projectID)
 	}
 
 	return nil

@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
@@ -356,7 +356,7 @@ func buildAnthropicRuntime(ctx context.Context, workDir string, agentDef *models
 
 	manager, err := mcpclient.NewMCPManager(ctx, agentDef.MCPServers, workDir)
 	if err != nil {
-		log.Printf("[anthropic] MCP manager init failed: %v", err)
+		applog.Infof("[anthropic] MCP manager init failed: %v", err)
 		execFn := func(ctx context.Context, name string, input json.RawMessage) (string, bool, error) {
 			out, err := anthropicclient.ExecuteTool(ctx, workDir, name, input)
 			return out, err != nil, err
@@ -472,7 +472,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 // callDirect calls the Anthropic API using OAuth tokens.
 func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, disableTools bool, skipDefaultTools bool) (string, llmcontracts.Usage, error) {
 	maxTokens := claudeCodeMaxOutputTokens(agent.Model)
-	log.Printf("[anthropic] callDirect model=%s max_tokens=%d workDir=%s attachments=%d disable_tools=%v", agent.Model, maxTokens, workDir, len(attachments), disableTools)
+	applog.Infof("[anthropic] callDirect model=%s max_tokens=%d workDir=%s attachments=%d disable_tools=%v", agent.Model, maxTokens, workDir, len(attachments), disableTools)
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
@@ -503,12 +503,12 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 
 	resp, err := client.SendAgentic(ctx, fullPrompt, opts)
 	if err != nil {
-		log.Printf("[anthropic] callDirect error: %v", err)
+		applog.Infof("[anthropic] callDirect error: %v", err)
 		return "", llmusage.FromTotal(0), fmt.Errorf("anthropicclient agentic call: %w", err)
 	}
 
 	usage := llmusage.FromAnthropic(resp.InputTokens, resp.OutputTokens, resp.CacheCreationInputTokens, resp.CacheReadInputTokens)
-	log.Printf("[anthropic] callDirect success model=%s input=%d output=%d tools=%d stop=%s compacted=%v", resp.Model, resp.InputTokens, resp.OutputTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
+	applog.Infof("[anthropic] callDirect success model=%s input=%d output=%d tools=%d stop=%s compacted=%v", resp.Model, resp.InputTokens, resp.OutputTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if resp.StopReason == "max_tokens" {
 		return resp.Text, usage, errMaxTokens
 	}
@@ -518,7 +518,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 // callChatStreaming calls the Anthropic API with streaming for chat/followup.
 func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, agentSkipDefaults bool) (string, llmcontracts.Usage, error) {
 	maxTokens := claudeCodeMaxOutputTokens(agent.Model)
-	log.Printf("[anthropic] callChatStreaming model=%s max_tokens=%d history=%d exec=%s isTaskFollowup=%v workDir=%s attachments=%d", agent.Model, maxTokens, len(chatHistory), execID, isTaskFollowup, workDir, len(attachments))
+	applog.Infof("[anthropic] callChatStreaming model=%s max_tokens=%d history=%d exec=%s isTaskFollowup=%v workDir=%s attachments=%d", agent.Model, maxTokens, len(chatHistory), execID, isTaskFollowup, workDir, len(attachments))
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
@@ -586,14 +586,14 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 		OnCompaction: func(summary string) {
-			log.Printf("[anthropic] callChatStreaming context compacted, summary_len=%d", len(summary))
+			applog.Infof("[anthropic] callChatStreaming context compacted, summary_len=%d", len(summary))
 		},
 	}
 
 	resp, err := client.SendAgentic(ctx, message, opts)
 	if err != nil {
 		sw.Flush()
-		log.Printf("[anthropic] callChatStreaming error: %v", err)
+		applog.Infof("[anthropic] callChatStreaming error: %v", err)
 		return "", llmusage.FromTotal(0), fmt.Errorf("anthropicclient agentic chat streaming call: %w", err)
 	}
 
@@ -601,7 +601,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 
 	output := sw.String()
 	usage := llmusage.FromAnthropic(resp.InputTokens, resp.OutputTokens, resp.CacheCreationInputTokens, resp.CacheReadInputTokens)
-	log.Printf("[anthropic] callChatStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
+	applog.Infof("[anthropic] callChatStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if resp.StopReason == "max_tokens" {
 		return output, usage, errMaxTokens
 	}
@@ -611,7 +611,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 // callStreaming calls the Anthropic API with streaming.
 func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, agentSkipDefaults bool) (string, string, llmcontracts.Usage, error) {
 	maxTokens := claudeCodeMaxOutputTokens(agent.Model)
-	log.Printf("[anthropic] callStreaming model=%s max_tokens=%d exec=%s workDir=%s attachments=%d", agent.Model, maxTokens, execID, workDir, len(attachments))
+	applog.Infof("[anthropic] callStreaming model=%s max_tokens=%d exec=%s workDir=%s attachments=%d", agent.Model, maxTokens, execID, workDir, len(attachments))
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
@@ -674,14 +674,14 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 		OnCompaction: func(summary string) {
-			log.Printf("[anthropic] callStreaming context compacted, summary_len=%d", len(summary))
+			applog.Infof("[anthropic] callStreaming context compacted, summary_len=%d", len(summary))
 		},
 	}
 
 	resp, err := client.SendAgentic(ctx, fullPrompt, opts)
 	if err != nil {
 		sw.Flush()
-		log.Printf("[anthropic] callStreaming error: %v", err)
+		applog.Infof("[anthropic] callStreaming error: %v", err)
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("anthropicclient agentic streaming call: %w", err)
 	}
 
@@ -690,7 +690,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	output := sw.String()
 	textOnly := sw.TextString()
 	usage := llmusage.FromAnthropic(resp.InputTokens, resp.OutputTokens, resp.CacheCreationInputTokens, resp.CacheReadInputTokens)
-	log.Printf("[anthropic] callStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
+	applog.Infof("[anthropic] callStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if resp.StopReason == "max_tokens" {
 		return output, textOnly, usage, errMaxTokens
 	}
@@ -742,7 +742,7 @@ func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig) (*anthr
 
 	agent, err := a.ensureFreshOAuth(ctx, agent)
 	if err != nil {
-		log.Printf("[anthropic] getClient token refresh failed for agent=%s: %v", agent.Name, err)
+		applog.Infof("[anthropic] getClient token refresh failed for agent=%s: %v", agent.Name, err)
 		return nil, err
 	}
 
@@ -793,7 +793,7 @@ func convertAttachments(attachments []models.Attachment) ([]*anthropicclient.Fil
 	for _, att := range prepared {
 		mcAtt, err := anthropicclient.NewFileAttachment(att.FilePath)
 		if err != nil {
-			log.Printf("[anthropic] convertAttachments error loading %s: %v", att.FilePath, err)
+			applog.Infof("[anthropic] convertAttachments error loading %s: %v", att.FilePath, err)
 			return nil, fmt.Errorf("load attachment %s: %w", att.FileName, err)
 		}
 		result = append(result, mcAtt)

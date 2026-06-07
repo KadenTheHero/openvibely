@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/util"
@@ -184,7 +184,7 @@ func (s *BacklogService) RunAnalysis(ctx context.Context, projectID string) (*mo
 			}
 		}
 		if err := s.backlogRepo.CreateSuggestion(ctx, &suggestions[i]); err != nil {
-			log.Printf("[backlog-svc] failed to create suggestion: %v", err)
+			applog.Infof("[backlog-svc] failed to create suggestion: %v", err)
 			continue
 		}
 		suggestionIDs = append(suggestionIDs, suggestions[i].ID)
@@ -192,7 +192,7 @@ func (s *BacklogService) RunAnalysis(ctx context.Context, projectID string) (*mo
 
 	// Take health snapshot
 	if err := s.snapshotHealth(ctx, projectID); err != nil {
-		log.Printf("[backlog-svc] failed to snapshot health: %v", err)
+		applog.Infof("[backlog-svc] failed to snapshot health: %v", err)
 	}
 
 	// Create report
@@ -205,8 +205,8 @@ func (s *BacklogService) RunAnalysis(ctx context.Context, projectID string) (*mo
 
 	statsJSON, _ := json.Marshal(map[string]interface{}{
 		"backlog_tasks_analyzed": len(backlogTasks),
-		"suggestions_created":   len(suggestionIDs),
-		"recent_completed":      len(recentCompleted),
+		"suggestions_created":    len(suggestionIDs),
+		"recent_completed":       len(recentCompleted),
 	})
 	report.Stats = string(statsJSON)
 
@@ -281,7 +281,7 @@ func (s *BacklogService) parseAnalysisResponse(response, projectID string, backl
 	// Parse JSON from AI response
 	jsonStr := util.ExtractJSONObject(response)
 	if jsonStr == "" {
-		log.Printf("[backlog-svc] no JSON found in AI response")
+		applog.Infof("[backlog-svc] no JSON found in AI response")
 		return nil, "Analysis completed but no structured suggestions were generated."
 	}
 
@@ -300,7 +300,7 @@ func (s *BacklogService) parseAnalysisResponse(response, projectID string, backl
 	}
 
 	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
-		log.Printf("[backlog-svc] failed to parse AI response JSON: %v", err)
+		applog.Infof("[backlog-svc] failed to parse AI response JSON: %v", err)
 		return nil, "Analysis completed but response could not be parsed."
 	}
 
@@ -482,7 +482,7 @@ func (s *BacklogService) ApplySuggestion(ctx context.Context, id string) error {
 					ChainConfig:  "{}",
 				}
 				if err := s.taskRepo.Create(ctx, newTask); err != nil {
-					log.Printf("[backlog-svc] failed to create subtask: %v", err)
+					applog.Infof("[backlog-svc] failed to create subtask: %v", err)
 				}
 			}
 		}
@@ -548,4 +548,3 @@ func (s *BacklogService) SnapshotHealth(ctx context.Context, projectID string) e
 func (s *BacklogService) ListHealthHistory(ctx context.Context, projectID string) ([]models.BacklogHealthSnapshot, error) {
 	return s.backlogRepo.ListHealthSnapshots(ctx, projectID, 30)
 }
-

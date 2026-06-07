@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -14,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	"github.com/openvibely/openvibely/internal/models"
@@ -192,11 +192,11 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 		if err != nil {
 			reason := accountRefreshFailureReason(err)
 			message := accountRefreshFailureMessage(reason)
-			log.Printf("[usage] account usage refresh failed provider=%s agent=%s reason=%s: %v", cfg.Provider, cfg.ID, reason, sanitizeAccountUsageError(err))
+			applog.Infof("[usage] account usage refresh failed provider=%s agent=%s reason=%s: %v", cfg.Provider, cfg.ID, reason, sanitizeAccountUsageError(err))
 			errorsByKey[accountUsageKeyForConfig(cfg)] = message
 			failure := accountRefreshFailureSnapshot(cfg, latest, reason)
 			if storeErr := s.usageRepo.CreateAccountUsageSnapshot(ctx, &failure); storeErr != nil {
-				log.Printf("[usage] storing account usage refresh failure failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, storeErr)
+				applog.Infof("[usage] storing account usage refresh failure failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, storeErr)
 				continue
 			}
 			snapshots = append(snapshots, failure)
@@ -215,7 +215,7 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 			snapshot.AccountID = accountIDForConfig(cfg)
 		}
 		if err := s.usageRepo.CreateAccountUsageSnapshot(ctx, snapshot); err != nil {
-			log.Printf("[usage] storing account usage snapshot failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, err)
+			applog.Infof("[usage] storing account usage snapshot failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, err)
 			continue
 		}
 		s.syncOAuthAccountGroup(ctx, cfg, configs, key)
@@ -237,7 +237,7 @@ func (s *UsageAnalyticsService) syncOAuthAccountGroup(ctx context.Context, refre
 			continue
 		}
 		if err := s.llmConfigRepo.UpdateOAuthTokens(ctx, cfg.ID, latest.OAuthAccessToken, latest.OAuthRefreshToken, latest.OAuthExpiresAt, latest.OAuthAccountID); err != nil {
-			log.Printf("[usage] syncing OAuth account tokens failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, err)
+			applog.Infof("[usage] syncing OAuth account tokens failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, err)
 		}
 	}
 }
@@ -1003,7 +1003,7 @@ func (s *UsageAnalyticsService) resolveAccountUsageOAuthAccountID(ctx context.Co
 	case models.ProviderAnthropic:
 		fresh, profile, err := s.resolveAnthropicOAuthProfile(ctx, cfg)
 		if err != nil {
-			log.Printf("[usage] resolving Anthropic OAuth account profile failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, sanitizeAccountUsageError(err))
+			applog.Infof("[usage] resolving Anthropic OAuth account profile failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, sanitizeAccountUsageError(err))
 			return cfg
 		}
 		cfg = fresh
@@ -1017,7 +1017,7 @@ func (s *UsageAnalyticsService) resolveAccountUsageOAuthAccountID(ctx context.Co
 	cfg.OAuthAccountID = accountID
 	if s.llmConfigRepo != nil && strings.TrimSpace(cfg.ID) != "" {
 		if err := s.llmConfigRepo.UpdateOAuthTokens(ctx, cfg.ID, cfg.OAuthAccessToken, cfg.OAuthRefreshToken, cfg.OAuthExpiresAt, accountID); err != nil {
-			log.Printf("[usage] persisting OAuth account id failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, err)
+			applog.Infof("[usage] persisting OAuth account id failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, err)
 		}
 	}
 	return cfg
@@ -1111,12 +1111,12 @@ func (s *UsageAnalyticsService) fetchAnthropicOAuthUsage(ctx context.Context, cf
 			cfg.OAuthAccountID = profile.AccountID
 			if s.llmConfigRepo != nil && strings.TrimSpace(cfg.ID) != "" {
 				if err := s.llmConfigRepo.UpdateOAuthTokens(ctx, cfg.ID, cfg.OAuthAccessToken, cfg.OAuthRefreshToken, cfg.OAuthExpiresAt, cfg.OAuthAccountID); err != nil {
-					log.Printf("[usage] persisting Anthropic OAuth profile account id failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, err)
+					applog.Infof("[usage] persisting Anthropic OAuth profile account id failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, err)
 				}
 			}
 		}
 	} else {
-		log.Printf("[usage] resolving Anthropic OAuth account profile failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, sanitizeAccountUsageError(profileErr))
+		applog.Infof("[usage] resolving Anthropic OAuth account profile failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, sanitizeAccountUsageError(profileErr))
 	}
 	endpoint := strings.TrimRight(anthropicclient.AnthropicAPIHost, "/") + "/api/oauth/usage"
 	raw, err := s.doAccountUsageRequestWithOAuthRecovery(ctx, cfg, endpoint, buildAnthropicAccountUsageRequest, s.anthropicAccountUsageRefreshFunc())
@@ -1848,7 +1848,7 @@ func RecordUsageFromResult(ctx context.Context, usageRepo *repository.UsageRepo,
 		event.Status = "completed"
 	}
 	if err := usageRepo.RecordUsageEvent(ctx, event); err != nil {
-		log.Printf("[usage] error recording usage event provider=%s model=%s exec=%s: %v", agent.Provider, agent.Model, capture.ExecutionID, err)
+		applog.Infof("[usage] error recording usage event provider=%s model=%s exec=%s: %v", agent.Provider, agent.Model, capture.ExecutionID, err)
 	}
 }
 

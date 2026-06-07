@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -401,7 +401,7 @@ func (h *Handler) executeGetPersonality(ctx context.Context) string {
 	}
 	current, err := h.settingsRepo.Get(ctx, "personality")
 	if err != nil {
-		log.Printf("[handler] executeGetPersonality error: %v", err)
+		applog.Infof("[handler] executeGetPersonality error: %v", err)
 		return "Error retrieving personality setting."
 	}
 	if current == "" {
@@ -421,7 +421,7 @@ func (h *Handler) executeGetModel(ctx context.Context, input json.RawMessage) st
 
 	configs, err := h.llmConfigRepo.List(ctx)
 	if err != nil {
-		log.Printf("[handler] executeGetModel error: %v", err)
+		applog.Infof("[handler] executeGetModel error: %v", err)
 		return "Error retrieving model configurations."
 	}
 
@@ -513,7 +513,7 @@ func (h *Handler) executeGetAlert(ctx context.Context, projectID string, input j
 
 	alert, err := h.alertSvc.GetByID(ctx, req.AlertID)
 	if err != nil {
-		log.Printf("[handler] executeGetAlert error: %v", err)
+		applog.Infof("[handler] executeGetAlert error: %v", err)
 		return fmt.Sprintf("Error retrieving alert %q: %v", req.AlertID, err)
 	}
 	if alert == nil {

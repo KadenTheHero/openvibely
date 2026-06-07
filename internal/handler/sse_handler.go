@@ -3,10 +3,10 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
 )
 
@@ -37,11 +37,11 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 	if h.broadcaster != nil {
 		sub, err := h.broadcaster.Subscribe()
 		if err == events.ErrMaxSubscribers {
-			log.Printf("[sse-live] task subscriber limit reached, rejecting connection")
+			applog.Infof("[sse-live] task subscriber limit reached, rejecting connection")
 			return c.String(http.StatusServiceUnavailable, "Too many SSE connections")
 		}
 		if err != nil {
-			log.Printf("[sse-live] task subscribe error: %v", err)
+			applog.Infof("[sse-live] task subscribe error: %v", err)
 			return c.String(http.StatusInternalServerError, "SSE subscribe failed")
 		}
 		taskSub = sub
@@ -54,11 +54,11 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 	if h.chatBroadcaster != nil {
 		sub, err := h.chatBroadcaster.Subscribe()
 		if err == events.ErrMaxSubscribers {
-			log.Printf("[sse-live] chat subscriber limit reached, rejecting connection")
+			applog.Infof("[sse-live] chat subscriber limit reached, rejecting connection")
 			return c.String(http.StatusServiceUnavailable, "Too many SSE connections")
 		}
 		if err != nil {
-			log.Printf("[sse-live] chat subscribe error: %v", err)
+			applog.Infof("[sse-live] chat subscribe error: %v", err)
 			return c.String(http.StatusInternalServerError, "SSE subscribe failed")
 		}
 		chatSub = sub
@@ -71,11 +71,11 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 	if h.fileChangeBroadcaster != nil {
 		sub, err := h.fileChangeBroadcaster.Subscribe()
 		if err == events.ErrMaxSubscribers {
-			log.Printf("[sse-live] file subscriber limit reached, rejecting connection")
+			applog.Infof("[sse-live] file subscriber limit reached, rejecting connection")
 			return c.String(http.StatusServiceUnavailable, "Too many SSE connections")
 		}
 		if err != nil {
-			log.Printf("[sse-live] file subscribe error: %v", err)
+			applog.Infof("[sse-live] file subscribe error: %v", err)
 			return c.String(http.StatusInternalServerError, "SSE subscribe failed")
 		}
 		fileSub = sub
@@ -92,7 +92,7 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 	c.Response().Header().Set("Connection", "keep-alive")
 	c.Response().Header().Set("X-Accel-Buffering", "no")
 
-	log.Printf(
+	applog.Infof(
 		"[sse-live] client connected project=%s task=%s subscribers(tasks=%d chat=%d files=%d)",
 		projectID,
 		taskID,
@@ -110,14 +110,14 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("[sse-live] client disconnected project=%s task=%s", projectID, taskID)
+			applog.Infof("[sse-live] client disconnected project=%s task=%s", projectID, taskID)
 			return nil
 		case event := <-taskSub:
 			if projectID != "" && event.ProjectID != projectID {
 				continue
 			}
 			if err := writeSSEEvent(c.Response(), string(event.Type), event); err != nil {
-				log.Printf("[sse-live] error sending task event: %v", err)
+				applog.Infof("[sse-live] error sending task event: %v", err)
 				return err
 			}
 			c.Response().Flush()
@@ -126,7 +126,7 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 				continue
 			}
 			if err := writeSSEEvent(c.Response(), string(event.Type), event); err != nil {
-				log.Printf("[sse-live] error sending chat event: %v", err)
+				applog.Infof("[sse-live] error sending chat event: %v", err)
 				return err
 			}
 			c.Response().Flush()
@@ -135,7 +135,7 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 				continue
 			}
 			if err := writeSSEEvent(c.Response(), string(event.Type), event); err != nil {
-				log.Printf("[sse-live] error sending file event: %v", err)
+				applog.Infof("[sse-live] error sending file event: %v", err)
 				return err
 			}
 			c.Response().Flush()

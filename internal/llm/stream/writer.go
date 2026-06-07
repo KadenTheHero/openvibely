@@ -3,10 +3,10 @@ package stream
 import (
 	"bytes"
 	"context"
-	"log"
 	"sync"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
@@ -49,7 +49,7 @@ func NewWriter(execID, taskID string, repo *repository.ExecutionRepo, ctx contex
 		seedCtx := context.WithoutCancel(ctx)
 		exec, err := repo.GetByID(seedCtx, execID)
 		if err != nil {
-			log.Printf("[agent-svc] streamingWriter seed load error exec=%s task=%s: %v", execID, taskID, err)
+			applog.Infof("[agent-svc] streamingWriter seed load error exec=%s task=%s: %v", execID, taskID, err)
 		} else if exec != nil && exec.Output != "" {
 			sw.buf.WriteString(exec.Output)
 		}
@@ -76,9 +76,9 @@ func (w *Writer) periodicFlush() {
 			if w.dirty {
 				if w.repo != nil && w.execID != "" {
 					if dbErr := w.repo.UpdateOutput(w.ctx, w.execID, w.buf.String()); dbErr != nil {
-						log.Printf("[agent-svc] streamingWriter periodic flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
+						applog.Infof("[agent-svc] streamingWriter periodic flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
 					} else {
-						log.Printf("[agent-svc] streamingWriter periodic flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, w.buf.Len())
+						applog.Infof("[agent-svc] streamingWriter periodic flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, w.buf.Len())
 					}
 				}
 				w.dirty = false
@@ -95,7 +95,7 @@ func (w *Writer) Write(p []byte) (int, error) {
 	n, err := w.buf.Write(p)
 	// Raw token content is debug-only; it is noisy at info level and may
 	// contain sensitive model output. Operational metadata (flush counts,
-	// errors) continues to use log.Printf unconditionally below.
+	// errors) uses applog.Infof and is always emitted.
 	// Uncomment to log raw streamed LLM content when debugging stream issues:
 	// applog.Debugf("[agent-svc] streamingWriter received %d bytes exec=%s task=%s: %q", n, w.execID, w.taskID, string(p))
 	w.dirty = true
@@ -103,9 +103,9 @@ func (w *Writer) Write(p []byte) (int, error) {
 	if time.Since(w.lastFlush) >= w.interval {
 		if w.repo != nil && w.execID != "" {
 			if dbErr := w.repo.UpdateOutput(w.ctx, w.execID, w.buf.String()); dbErr != nil {
-				log.Printf("[agent-svc] streamingWriter flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
+				applog.Infof("[agent-svc] streamingWriter flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
 			} else {
-				log.Printf("[agent-svc] streamingWriter flushed to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, w.buf.Len())
+				applog.Infof("[agent-svc] streamingWriter flushed to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, w.buf.Len())
 			}
 		}
 		w.dirty = false
@@ -127,15 +127,15 @@ func (w *Writer) Flush() {
 	defer w.mu.Unlock()
 	if w.repo != nil && w.execID != "" {
 		if w.buf.Len() == 0 {
-			log.Printf("[agent-svc] streamingWriter final flush skipped empty buffer exec=%s task=%s", w.execID, w.taskID)
+			applog.Infof("[agent-svc] streamingWriter final flush skipped empty buffer exec=%s task=%s", w.execID, w.taskID)
 			w.dirty = false
 			return
 		}
 		flushCtx := context.WithoutCancel(w.ctx)
 		if dbErr := w.repo.UpdateOutput(flushCtx, w.execID, w.buf.String()); dbErr != nil {
-			log.Printf("[agent-svc] streamingWriter final flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
+			applog.Infof("[agent-svc] streamingWriter final flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
 		} else {
-			log.Printf("[agent-svc] streamingWriter final flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, w.buf.Len())
+			applog.Infof("[agent-svc] streamingWriter final flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, w.buf.Len())
 		}
 	}
 	w.dirty = false

@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/util"
@@ -46,7 +46,7 @@ func (s *ArchitectService) GetDashboard(ctx context.Context, projectID string) (
 
 	active, err := s.architectRepo.ListSessionsByProject(ctx, projectID, models.ArchitectStatusActive)
 	if err != nil {
-		log.Printf("[architect-svc] error listing active sessions: %v", err)
+		applog.Infof("[architect-svc] error listing active sessions: %v", err)
 	}
 	if active == nil {
 		active = []models.ArchitectSession{}
@@ -55,7 +55,7 @@ func (s *ArchitectService) GetDashboard(ctx context.Context, projectID string) (
 
 	completed, err := s.architectRepo.ListSessionsByProject(ctx, projectID, models.ArchitectStatusCompleted)
 	if err != nil {
-		log.Printf("[architect-svc] error listing completed sessions: %v", err)
+		applog.Infof("[architect-svc] error listing completed sessions: %v", err)
 	}
 	if completed == nil {
 		completed = []models.ArchitectSession{}
@@ -64,7 +64,7 @@ func (s *ArchitectService) GetDashboard(ctx context.Context, projectID string) (
 
 	templates, err := s.architectRepo.ListTemplates(ctx)
 	if err != nil {
-		log.Printf("[architect-svc] error listing templates: %v", err)
+		applog.Infof("[architect-svc] error listing templates: %v", err)
 	}
 	if templates == nil {
 		templates = []models.ArchitectTemplate{}
@@ -96,12 +96,12 @@ func (s *ArchitectService) CreateSession(ctx context.Context, projectID, title, 
 	if templateID != nil {
 		tmpl, err := s.architectRepo.GetTemplate(ctx, *templateID)
 		if err != nil {
-			log.Printf("[architect-svc] error getting template: %v", err)
+			applog.Infof("[architect-svc] error getting template: %v", err)
 		} else if tmpl != nil {
 			session.VisionData = tmpl.VisionData
 			session.ArchData = tmpl.ArchData
 			if err := s.architectRepo.IncrementTemplateUsage(ctx, tmpl.ID); err != nil {
-				log.Printf("[architect-svc] error incrementing template usage: %v", err)
+				applog.Infof("[architect-svc] error incrementing template usage: %v", err)
 			}
 		}
 	}
@@ -118,7 +118,7 @@ func (s *ArchitectService) CreateSession(ctx context.Context, projectID, title, 
 		Phase:     models.PhaseVisionRefinement,
 	}
 	if err := s.architectRepo.CreateMessage(ctx, msg); err != nil {
-		log.Printf("[architect-svc] error creating initial message: %v", err)
+		applog.Infof("[architect-svc] error creating initial message: %v", err)
 	}
 
 	return session, nil
@@ -232,7 +232,7 @@ func (s *ArchitectService) AdvancePhase(ctx context.Context, sessionID string) (
 
 	// Process current phase data before advancing
 	if err := s.processPhaseCompletion(ctx, session); err != nil {
-		log.Printf("[architect-svc] error processing phase completion: %v", err)
+		applog.Infof("[architect-svc] error processing phase completion: %v", err)
 	}
 
 	session.Phase = nextPhase
@@ -251,7 +251,7 @@ func (s *ArchitectService) AdvancePhase(ctx context.Context, sessionID string) (
 		Phase:     nextPhase,
 	}
 	if err := s.architectRepo.CreateMessage(ctx, msg); err != nil {
-		log.Printf("[architect-svc] error creating phase intro message: %v", err)
+		applog.Infof("[architect-svc] error creating phase intro message: %v", err)
 	}
 
 	return session, nil
@@ -293,7 +293,7 @@ func (s *ArchitectService) GenerateArchitecture(ctx context.Context, sessionID s
 	archJSON, _ := json.Marshal(rec)
 	session.ArchData = string(archJSON)
 	if err := s.architectRepo.UpdateSession(ctx, session); err != nil {
-		log.Printf("[architect-svc] error saving arch data: %v", err)
+		applog.Infof("[architect-svc] error saving arch data: %v", err)
 	}
 
 	return &rec, nil
@@ -332,7 +332,7 @@ func (s *ArchitectService) GenerateRiskAnalysis(ctx context.Context, sessionID s
 	riskJSON, _ := json.Marshal(analysis)
 	session.RiskData = string(riskJSON)
 	if err := s.architectRepo.UpdateSession(ctx, session); err != nil {
-		log.Printf("[architect-svc] error saving risk data: %v", err)
+		applog.Infof("[architect-svc] error saving risk data: %v", err)
 	}
 
 	return &analysis, nil
@@ -379,7 +379,7 @@ func (s *ArchitectService) GenerateTaskPlan(ctx context.Context, sessionID strin
 
 	// Clear existing tasks for this session
 	if err := s.architectRepo.DeleteTasksBySession(ctx, sessionID); err != nil {
-		log.Printf("[architect-svc] error clearing old tasks: %v", err)
+		applog.Infof("[architect-svc] error clearing old tasks: %v", err)
 	}
 
 	var tasks []models.ArchitectTask
@@ -410,7 +410,7 @@ func (s *ArchitectService) GenerateTaskPlan(ctx context.Context, sessionID strin
 			EstHours:   td.EstHours,
 		}
 		if err := s.architectRepo.CreateTask(ctx, task); err != nil {
-			log.Printf("[architect-svc] error creating task %q: %v", td.Title, err)
+			applog.Infof("[architect-svc] error creating task %q: %v", td.Title, err)
 			continue
 		}
 		tasks = append(tasks, *task)
@@ -421,7 +421,7 @@ func (s *ArchitectService) GenerateTaskPlan(ctx context.Context, sessionID strin
 	phaseJSON, _ := json.Marshal(breakdown)
 	session.PhaseData = string(phaseJSON)
 	if err := s.architectRepo.UpdateSession(ctx, session); err != nil {
-		log.Printf("[architect-svc] error saving phase data: %v", err)
+		applog.Infof("[architect-svc] error saving phase data: %v", err)
 	}
 
 	// Save estimate data
@@ -429,7 +429,7 @@ func (s *ArchitectService) GenerateTaskPlan(ctx context.Context, sessionID strin
 	estJSON, _ := json.Marshal(estimate)
 	session.EstData = string(estJSON)
 	if err := s.architectRepo.UpdateSession(ctx, session); err != nil {
-		log.Printf("[architect-svc] error saving estimate data: %v", err)
+		applog.Infof("[architect-svc] error saving estimate data: %v", err)
 	}
 
 	return tasks, nil
@@ -457,11 +457,11 @@ func (s *ArchitectService) ActivatePhase(ctx context.Context, sessionID string, 
 			Status:    models.StatusPending,
 		}
 		if err := s.taskRepo.Create(ctx, realTask); err != nil {
-			log.Printf("[architect-svc] error creating real task for %q: %v", at.Title, err)
+			applog.Infof("[architect-svc] error creating real task for %q: %v", at.Title, err)
 			continue
 		}
 		if err := s.architectRepo.ActivateTask(ctx, at.ID, realTask.ID); err != nil {
-			log.Printf("[architect-svc] error activating task %q: %v", at.Title, err)
+			applog.Infof("[architect-svc] error activating task %q: %v", at.Title, err)
 			continue
 		}
 		activated++
@@ -529,7 +529,7 @@ func (s *ArchitectService) generateAIResponse(ctx context.Context, session *mode
 	prompt := buildArchitectConversationPrompt(session, messages, userMessage)
 	output, _, err := s.llmSvc.CallAgentDirect(ctx, prompt, nil, *agent, project.RepoPath)
 	if err != nil {
-		log.Printf("[architect-svc] AI response failed, using fallback: %v", err)
+		applog.Infof("[architect-svc] AI response failed, using fallback: %v", err)
 		return generateArchitectFallbackResponse(session.Phase, userMessage), nil
 	}
 	return output, nil

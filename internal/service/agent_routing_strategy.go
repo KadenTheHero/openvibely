@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	llmcapability "github.com/openvibely/openvibely/internal/llm/capability"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
@@ -70,10 +70,10 @@ func (r *agentRoutingStrategy) resolveVisionRoutingDecision(ctx context.Context,
 	}
 
 	if taskID != "" {
-		log.Printf("[agent-svc] %s task=%s has image attachments but agent=%s is %s (no vision), looking for vision-capable agent",
+		applog.Infof("[agent-svc] %s task=%s has image attachments but agent=%s is %s (no vision), looking for vision-capable agent",
 			operation, taskID, agent.Name, agent.Provider)
 	} else {
-		log.Printf("[agent-svc] %s has image attachments but agent=%s is %s (no vision), looking for vision-capable agent",
+		applog.Infof("[agent-svc] %s has image attachments but agent=%s is %s (no vision), looking for vision-capable agent",
 			operation, agent.Name, agent.Provider)
 	}
 
@@ -102,10 +102,10 @@ func (r *agentRoutingStrategy) resolveVisionRoutingDecision(ctx context.Context,
 		decision.Reason = "vision_agent_selected"
 		decision.Detail = visionResult.Reason
 		if taskID != "" {
-			log.Printf("[agent-svc] %s switched to vision-capable agent=%s provider=%s for task=%s",
+			applog.Infof("[agent-svc] %s switched to vision-capable agent=%s provider=%s for task=%s",
 				operation, decision.Agent.Name, decision.Agent.Provider, taskID)
 		} else {
-			log.Printf("[agent-svc] %s switched to vision-capable agent=%s provider=%s",
+			applog.Infof("[agent-svc] %s switched to vision-capable agent=%s provider=%s",
 				operation, decision.Agent.Name, decision.Agent.Provider)
 		}
 		return decision
@@ -123,9 +123,9 @@ func (r *agentRoutingStrategy) resolveVisionRoutingDecision(ctx context.Context,
 		decision.Reason = "vision_env_fallback"
 		decision.Detail = "selected ad-hoc Anthropic API agent via ANTHROPIC_API_KEY"
 		if taskID != "" {
-			log.Printf("[agent-svc] %s created ad-hoc Anthropic agent using ANTHROPIC_API_KEY env var for task=%s image analysis", operation, taskID)
+			applog.Infof("[agent-svc] %s created ad-hoc Anthropic agent using ANTHROPIC_API_KEY env var for task=%s image analysis", operation, taskID)
 		} else {
-			log.Printf("[agent-svc] %s created ad-hoc Anthropic agent using ANTHROPIC_API_KEY env var for image analysis", operation)
+			applog.Infof("[agent-svc] %s created ad-hoc Anthropic agent using ANTHROPIC_API_KEY env var for image analysis", operation)
 		}
 		return decision
 	}
@@ -133,9 +133,9 @@ func (r *agentRoutingStrategy) resolveVisionRoutingDecision(ctx context.Context,
 	decision.Reason = "no_vision_fallback_available"
 	decision.Detail = "no vision-capable agent and ANTHROPIC_API_KEY is empty"
 	if taskID != "" {
-		log.Printf("[agent-svc] %s no vision-capable agents and no ANTHROPIC_API_KEY env var, proceeding with %s (images will be file paths only)", operation, agent.Name)
+		applog.Infof("[agent-svc] %s no vision-capable agents and no ANTHROPIC_API_KEY env var, proceeding with %s (images will be file paths only)", operation, agent.Name)
 	} else {
-		log.Printf("[agent-svc] %s no vision-capable agents and no ANTHROPIC_API_KEY env var, proceeding with %s (images will not be analyzed)", operation, agent.Name)
+		applog.Infof("[agent-svc] %s no vision-capable agents and no ANTHROPIC_API_KEY env var, proceeding with %s (images will not be analyzed)", operation, agent.Name)
 	}
 	return decision
 }

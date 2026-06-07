@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -45,7 +45,7 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 func (s *ProjectService) ValidateRepoPaths(ctx context.Context) []string {
 	projects, err := s.repo.List(ctx)
 	if err != nil {
-		log.Printf("warning: could not list projects for repo path validation: %v", err)
+		applog.Infof("warning: could not list projects for repo path validation: %v", err)
 		return nil
 	}
 	var missing []string
@@ -61,7 +61,7 @@ func (s *ProjectService) ValidateRepoPaths(ctx context.Context) []string {
 				msg += " (local repo — ensure the path is mounted into the container)"
 			}
 			missing = append(missing, msg)
-			log.Printf("WARNING: %s", msg)
+			applog.Infof("WARNING: %s", msg)
 		}
 	}
 	return missing

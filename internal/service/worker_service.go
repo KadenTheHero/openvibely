@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/memory"
@@ -158,7 +158,7 @@ func (w *WorkerService) Start(ctx context.Context) {
 	defer w.mu.Unlock()
 
 	w.ctx, w.cancel = context.WithCancel(ctx)
-	log.Printf("[worker] started with %d max parallel tasks", w.numWorkers)
+	applog.Infof("[worker] started with %d max parallel tasks", w.numWorkers)
 }
 
 func (w *WorkerService) Stop() {
@@ -169,7 +169,7 @@ func (w *WorkerService) Stop() {
 	w.mu.Unlock()
 
 	w.wg.Wait()
-	log.Println("[worker] all tasks stopped")
+	applog.Infof("[worker] all tasks stopped")
 }
 
 // Resize changes the max number of parallel tasks.
@@ -180,7 +180,7 @@ func (w *WorkerService) Resize(n int) {
 	w.numWorkers = n
 	w.mu.Unlock()
 
-	log.Printf("[worker] Resize %d -> %d max parallel tasks", old, n)
+	applog.Infof("[worker] Resize %d -> %d max parallel tasks", old, n)
 	if n > old {
 		w.dispatchNext()
 	}
@@ -192,14 +192,14 @@ func (w *WorkerService) Resize(n int) {
 func (w *WorkerService) Submit(task models.Task) {
 	// Chat tasks bypass the worker pool
 	if task.Category == models.CategoryChat {
-		log.Printf("[worker] Submit skipping chat task id=%s (chat tasks bypass worker pool)", task.ID)
+		applog.Infof("[worker] Submit skipping chat task id=%s (chat tasks bypass worker pool)", task.ID)
 		return
 	}
 
 	w.mu.Lock()
 	if w.pending[task.ID] {
 		w.mu.Unlock()
-		log.Printf("[worker] Submit skipping duplicate task id=%s title=%q", task.ID, task.Title)
+		applog.Infof("[worker] Submit skipping duplicate task id=%s title=%q", task.ID, task.Title)
 		return
 	}
 	w.pending[task.ID] = true
@@ -243,7 +243,7 @@ func (w *WorkerService) dispatchNext() {
 				(dbTask.Category != models.CategoryActive && dbTask.Category != models.CategoryScheduled) {
 				w.queue = append(w.queue[:i], w.queue[i+1:]...)
 				delete(w.pending, task.ID)
-				log.Printf("[worker] pruned stale task=%s %q from queue", task.ID, task.Title)
+				applog.Infof("[worker] pruned stale task=%s %q from queue", task.ID, task.Title)
 				continue
 			}
 
@@ -251,7 +251,7 @@ func (w *WorkerService) dispatchNext() {
 			if dbTask.ParentTaskID != nil && *dbTask.ParentTaskID != "" {
 				parentTask, parentErr := w.taskRepo.GetByID(context.Background(), *dbTask.ParentTaskID)
 				if parentErr == nil && parentTask != nil && !models.IsTerminalStatus(parentTask.Status) {
-					log.Printf("[worker] dependency gate: task=%s %q waiting on parent=%s (status=%s)",
+					applog.Infof("[worker] dependency gate: task=%s %q waiting on parent=%s (status=%s)",
 						task.ID, task.Title, *dbTask.ParentTaskID, parentTask.Status)
 					i++ // skip, re-check on next dispatch loop
 					continue
@@ -285,7 +285,7 @@ func (w *WorkerService) dispatchNext() {
 func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 	defer w.wg.Done()
 
-	log.Printf("[worker] executing task=%s %q (project: %s, model: %s)", task.ID, task.Title, task.ProjectID, agentConfigID)
+	applog.Infof("[worker] executing task=%s %q (project: %s, model: %s)", task.ID, task.Title, task.ProjectID, agentConfigID)
 
 	taskCtx, taskCancel := context.WithCancel(w.ctx)
 	w.RegisterCancel(task.ID, taskCancel)
@@ -301,7 +301,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 	if w.taskRepo != nil {
 		claimed, claimErr := w.taskRepo.ClaimTask(taskCtx, task.ID)
 		if claimErr != nil {
-			log.Printf("[worker] task=%s claim failed: %v", task.ID, claimErr)
+			applog.Infof("[worker] task=%s claim failed: %v", task.ID, claimErr)
 			w.DeregisterCancel(task.ID)
 			taskCancel()
 			w.mu.Lock()
@@ -313,7 +313,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 			return
 		}
 		if !claimed {
-			log.Printf("[worker] task=%s not pending at dispatch (already running/terminal), skipping", task.ID)
+			applog.Infof("[worker] task=%s not pending at dispatch (already running/terminal), skipping", task.ID)
 			w.DeregisterCancel(task.ID)
 			taskCancel()
 			w.mu.Lock()
@@ -352,9 +352,9 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 	w.releaseModelSlot(agentConfigID)
 
 	if err != nil {
-		log.Printf("[worker] task failed task=%s %q: %v", task.ID, task.Title, err)
+		applog.Infof("[worker] task failed task=%s %q: %v", task.ID, task.Title, err)
 	} else {
-		log.Printf("[worker] task completed task=%s %q", task.ID, task.Title)
+		applog.Infof("[worker] task completed task=%s %q", task.ID, task.Title)
 	}
 
 	if w.onTaskComplete != nil {
@@ -363,7 +363,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 		go func(t models.Task, runErr error) {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("[worker] onTaskComplete panic for task=%s: %v", t.ID, r)
+					applog.Infof("[worker] onTaskComplete panic for task=%s: %v", t.ID, r)
 				}
 			}()
 			w.onTaskComplete(t, runErr)
@@ -430,7 +430,7 @@ func (w *WorkerService) runLifecycleSlotWithExtras(ctx context.Context, when mod
 	}
 	result, err := w.lifecycleRunner.RunSlotFiltered(ctx, when, in, include)
 	if err != nil {
-		log.Printf("[worker] lifecycle %s failed for task=%s: %v", when, task.ID, err)
+		applog.Infof("[worker] lifecycle %s failed for task=%s: %v", when, task.ID, err)
 		return lifecycle.SlotResult{When: when}
 	}
 	return result
@@ -493,7 +493,7 @@ func (w *WorkerService) availableMemoryIndex(ctx context.Context, task models.Ta
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			log.Printf("[worker] read memory index failed task=%s path=%s: %v", task.ID, path, err)
+			applog.Infof("[worker] read memory index failed task=%s path=%s: %v", task.ID, path, err)
 		}
 		return ""
 	}
@@ -553,11 +553,11 @@ func (w *WorkerService) CancelRunningTask(taskID string) bool {
 	w.cancelMu.Unlock()
 
 	if ok {
-		log.Printf("[worker] CancelRunningTask killing task=%s", taskID)
+		applog.Infof("[worker] CancelRunningTask killing task=%s", taskID)
 		cancel()
 		return true
 	}
-	log.Printf("[worker] CancelRunningTask task=%s not found in running tasks", taskID)
+	applog.Infof("[worker] CancelRunningTask task=%s not found in running tasks", taskID)
 	return false
 }
 

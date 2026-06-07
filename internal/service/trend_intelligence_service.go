@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/util"
@@ -175,13 +175,13 @@ func (s *TrendIntelligenceService) CollectFromX(ctx context.Context, projectID s
 	for _, source := range sources {
 		count, err := s.collectFromXForSource(ctx, projectID, creds, &source)
 		if err != nil {
-			log.Printf("[trend-intelligence] error collecting from X for source %s: %v", source.Value, err)
+			applog.Infof("[trend-intelligence] error collecting from X for source %s: %v", source.Value, err)
 			continue
 		}
 		collected += count
 	}
 
-	log.Printf("[trend-intelligence] collected %d entries from X for project=%s", collected, projectID)
+	applog.Infof("[trend-intelligence] collected %d entries from X for project=%s", collected, projectID)
 	return collected, nil
 }
 
@@ -215,7 +215,7 @@ func (s *TrendIntelligenceService) collectFromXForSource(ctx context.Context, pr
 		}
 
 		if err := s.trendRepo.CreateEntry(ctx, entry); err != nil {
-			log.Printf("[trend-intelligence] error saving entry: %v", err)
+			applog.Infof("[trend-intelligence] error saving entry: %v", err)
 			continue
 		}
 		collected++
@@ -225,11 +225,11 @@ func (s *TrendIntelligenceService) collectFromXForSource(ctx context.Context, pr
 
 // xTweet represents a tweet from X API v2.
 type xTweet struct {
-	ID            string       `json:"id"`
-	Text          string       `json:"text"`
-	AuthorID      string       `json:"author_id"`
-	CreatedAt     string       `json:"created_at"`
-	PublicMetrics xMetrics     `json:"public_metrics"`
+	ID            string   `json:"id"`
+	Text          string   `json:"text"`
+	AuthorID      string   `json:"author_id"`
+	CreatedAt     string   `json:"created_at"`
+	PublicMetrics xMetrics `json:"public_metrics"`
 }
 
 type xMetrics struct {
@@ -369,13 +369,13 @@ func (s *TrendIntelligenceService) AnalyzeTrends(ctx context.Context, projectID 
 		}
 
 		if err := s.trendRepo.CreatePattern(ctx, &patterns[i]); err != nil {
-			log.Printf("[trend-intelligence] error saving pattern: %v", err)
+			applog.Infof("[trend-intelligence] error saving pattern: %v", err)
 			continue
 		}
 		saved = append(saved, patterns[i])
 	}
 
-	log.Printf("[trend-intelligence] analyzed trends for project=%s, identified %d patterns", projectID, len(saved))
+	applog.Infof("[trend-intelligence] analyzed trends for project=%s, identified %d patterns", projectID, len(saved))
 	return saved, nil
 }
 
@@ -430,13 +430,13 @@ func (s *TrendIntelligenceService) AnalyzeCompetitors(ctx context.Context, proje
 	for i := range updates {
 		updates[i].ProjectID = projectID
 		if err := s.trendRepo.CreateCompetitorUpdate(ctx, &updates[i]); err != nil {
-			log.Printf("[trend-intelligence] error saving competitor update: %v", err)
+			applog.Infof("[trend-intelligence] error saving competitor update: %v", err)
 			continue
 		}
 		saved = append(saved, updates[i])
 	}
 
-	log.Printf("[trend-intelligence] analyzed competitors for project=%s, found %d updates", projectID, len(saved))
+	applog.Infof("[trend-intelligence] analyzed competitors for project=%s, found %d updates", projectID, len(saved))
 	return saved, nil
 }
 
@@ -767,4 +767,3 @@ func (s *TrendIntelligenceService) parseCompetitorUpdatesResponse(response strin
 
 	return updates, nil
 }
-

@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -55,13 +55,13 @@ func (s *UpcomingService) GenerateUpcoming(ctx context.Context, projectID string
 
 	running, err := s.upcomingRepo.ListRunningTasks(ctx, projectID)
 	if err != nil {
-		log.Printf("[upcoming-svc] error listing running tasks: %v", err)
+		applog.Infof("[upcoming-svc] error listing running tasks: %v", err)
 		return nil, err
 	}
 
 	pending, err := s.upcomingRepo.ListPendingActiveTasks(ctx, projectID)
 	if err != nil {
-		log.Printf("[upcoming-svc] error listing pending tasks: %v", err)
+		applog.Infof("[upcoming-svc] error listing pending tasks: %v", err)
 		return nil, err
 	}
 
@@ -69,7 +69,7 @@ func (s *UpcomingService) GenerateUpcoming(ctx context.Context, projectID string
 	until := now.Add(7 * 24 * time.Hour)
 	scheduled, err := s.upcomingRepo.ListUpcomingScheduledTasks(ctx, projectID, until)
 	if err != nil {
-		log.Printf("[upcoming-svc] error listing scheduled tasks: %v", err)
+		applog.Infof("[upcoming-svc] error listing scheduled tasks: %v", err)
 		return nil, err
 	}
 
@@ -78,7 +78,7 @@ func (s *UpcomingService) GenerateUpcoming(ctx context.Context, projectID string
 	if s.backlogRepo != nil {
 		health, err := s.backlogRepo.GetLatestHealth(ctx, projectID)
 		if err != nil {
-			log.Printf("[upcoming-svc] error getting backlog health (non-fatal): %v", err)
+			applog.Infof("[upcoming-svc] error getting backlog health (non-fatal): %v", err)
 		} else {
 			backlogHealth = health
 		}
@@ -87,7 +87,7 @@ func (s *UpcomingService) GenerateUpcoming(ctx context.Context, projectID string
 	// Fetch task summary metrics
 	taskSummary, err := s.upcomingRepo.GetTaskSummary(ctx, projectID, now)
 	if err != nil {
-		log.Printf("[upcoming-svc] error getting task summary (non-fatal): %v", err)
+		applog.Infof("[upcoming-svc] error getting task summary (non-fatal): %v", err)
 	}
 
 	upcoming := &models.Upcoming{
@@ -100,7 +100,7 @@ func (s *UpcomingService) GenerateUpcoming(ctx context.Context, projectID string
 		TaskSummary:    taskSummary,
 	}
 
-	log.Printf("[upcoming-svc] generated upcoming project=%s running=%d pending=%d scheduled=%d",
+	applog.Infof("[upcoming-svc] generated upcoming project=%s running=%d pending=%d scheduled=%d",
 		projectID, len(running), len(pending), len(scheduled))
 
 	return upcoming, nil
@@ -113,13 +113,13 @@ func (s *UpcomingService) GenerateHistory(ctx context.Context, projectID string,
 
 	summary, err := s.upcomingRepo.GetHistorySummary(ctx, projectID, since)
 	if err != nil {
-		log.Printf("[upcoming-svc] error getting history summary: %v", err)
+		applog.Infof("[upcoming-svc] error getting history summary: %v", err)
 		return nil, err
 	}
 
 	executions, err := s.upcomingRepo.ListRecentExecutions(ctx, projectID, since)
 	if err != nil {
-		log.Printf("[upcoming-svc] error listing recent executions: %v", err)
+		applog.Infof("[upcoming-svc] error listing recent executions: %v", err)
 		return nil, err
 	}
 
@@ -128,11 +128,11 @@ func (s *UpcomingService) GenerateHistory(ctx context.Context, projectID string,
 	if s.projectRepo != nil {
 		project, err := s.projectRepo.GetByID(ctx, projectID)
 		if err != nil {
-			log.Printf("[upcoming-svc] error getting project for git changes (non-fatal): %v", err)
+			applog.Infof("[upcoming-svc] error getting project for git changes (non-fatal): %v", err)
 		} else if project.RepoPath != "" {
 			changes, err := s.getProjectChanges(project.RepoPath, since)
 			if err != nil {
-				log.Printf("[upcoming-svc] error getting git changes (non-fatal): %v", err)
+				applog.Infof("[upcoming-svc] error getting git changes (non-fatal): %v", err)
 			} else {
 				projectChanges = changes
 			}
@@ -149,7 +149,7 @@ func (s *UpcomingService) GenerateHistory(ctx context.Context, projectID string,
 		ProjectChanges: projectChanges,
 	}
 
-	log.Printf("[upcoming-svc] generated history project=%s range=%s executions=%d success=%d failed=%d",
+	applog.Infof("[upcoming-svc] generated history project=%s range=%s executions=%d success=%d failed=%d",
 		projectID, timeRange, summary.TotalExecutions, summary.SuccessCount, summary.FailureCount)
 
 	return history, nil
@@ -355,7 +355,7 @@ func (s *UpcomingService) getProjectChanges(repoPath string, since time.Time) (*
 	cmd.Dir = absPath
 	fileOut, err := cmd.Output()
 	if err != nil {
-		log.Printf("[upcoming-svc] error getting changed files (non-fatal): %v", err)
+		applog.Infof("[upcoming-svc] error getting changed files (non-fatal): %v", err)
 	}
 
 	fileTypes := parseFileTypes(string(fileOut))

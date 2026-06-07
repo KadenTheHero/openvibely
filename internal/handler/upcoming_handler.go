@@ -1,10 +1,10 @@
 package handler
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -17,11 +17,11 @@ func (h *Handler) ViewUpcoming(c echo.Context) error {
 
 	upcoming, err := h.upcomingSvc.GenerateUpcoming(ctx, currentProjectID)
 	if err != nil {
-		log.Printf("[handler] ViewUpcoming error: %v", err)
+		applog.Infof("[handler] ViewUpcoming error: %v", err)
 		return err
 	}
 
-	log.Printf("[handler] ViewUpcoming project=%s running=%d pending=%d scheduled=%d htmx=%v",
+	applog.Infof("[handler] ViewUpcoming project=%s running=%d pending=%d scheduled=%d htmx=%v",
 		currentProjectID, len(upcoming.RunningTasks), len(upcoming.PendingTasks), len(upcoming.ScheduledTasks), isHTMX)
 
 	if isHTMX {
@@ -44,11 +44,11 @@ func (h *Handler) ViewHistory(c echo.Context) error {
 
 	history, err := h.upcomingSvc.GenerateHistory(ctx, currentProjectID, timeRange)
 	if err != nil {
-		log.Printf("[handler] ViewHistory error: %v", err)
+		applog.Infof("[handler] ViewHistory error: %v", err)
 		return err
 	}
 
-	log.Printf("[handler] ViewHistory project=%s range=%s executions=%d htmx=%v",
+	applog.Infof("[handler] ViewHistory project=%s range=%s executions=%d htmx=%v",
 		currentProjectID, timeRange, history.Summary.TotalExecutions, isHTMX)
 
 	if isHTMX {

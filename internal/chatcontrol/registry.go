@@ -36,7 +36,6 @@ package chatcontrol
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 
@@ -685,11 +684,13 @@ func (e *ActionError) Error() string {
 }
 
 // LogGating logs the decision when an action is gated or allowed.
+// Commented out: fires on every action routing check (very high frequency).
+// Uncomment and switch to applog.Debugf for chatcontrol routing traces.
 func LogGating(action string, mode models.ChatMode, surface Surface, allowed bool) {
 	if allowed {
-		log.Printf("[chatcontrol] action=%s mode=%s surface=%s allowed=true", action, mode, surface)
+		// applog.Debugf("[chatcontrol] action=%s mode=%s surface=%s allowed=true", action, mode, surface)
 	} else {
-		log.Printf("[chatcontrol] action=%s mode=%s surface=%s allowed=false", action, mode, surface)
+		// applog.Debugf("[chatcontrol] action=%s mode=%s surface=%s allowed=false", action, mode, surface)
 	}
 }
 

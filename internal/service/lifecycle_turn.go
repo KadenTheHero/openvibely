@@ -4,11 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/memory"
@@ -58,7 +58,7 @@ func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task
 	runID := newLifecycleTaskRunID(task.ID)
 	if projectRoot := projectSkillRoot(ctx, w.projectRepo, task.ProjectID); projectRoot != "" && w.agentRootSyncService != nil {
 		if err := w.agentRootSyncService.SyncRootDeclarations(ctx, projectRoot); err != nil {
-			log.Printf("[lifecycle-turn] sync agent root declarations failed task=%s: %v", task.ID, err)
+			applog.Infof("[lifecycle-turn] sync agent root declarations failed task=%s: %v", task.ID, err)
 		}
 	}
 	catalog := w.buildSkillCatalog(ctx, task)
@@ -80,7 +80,7 @@ func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task
 		legacyContext := lifecycle.MergeContextBlocks(before.Outputs)
 		preparedContext = joinLifecyclePromptBlocks(preparedContext, legacyContext)
 		if preparedContext != "" {
-			log.Printf("[lifecycle-turn] chat memory prepared_context task=%s bytes=%d", task.ID, len(preparedContext))
+			applog.Infof("[lifecycle-turn] chat memory prepared_context task=%s bytes=%d", task.ID, len(preparedContext))
 		}
 	}
 	promptContext := buildLifecyclePromptContext("", preparedContext)
@@ -116,7 +116,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	assignedAgent := w.taskAgentDefinition(ctx, task)
 	if w.agentRootSyncService != nil {
 		if err := w.agentRootSyncService.SyncRootDeclarations(ctx, projectRoot); err != nil {
-			log.Printf("[lifecycle-turn] sync agent root declarations failed task=%s: %v", task.ID, err)
+			applog.Infof("[lifecycle-turn] sync agent root declarations failed task=%s: %v", task.ID, err)
 		}
 	}
 	catalog := w.buildSkillCatalog(ctx, task)
@@ -133,7 +133,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		ctx = llmcontracts.WithRuntimeTools(ctx, hookReadTools)
 	}
 	hookMutationTools := w.buildLifecycleRuntimeTools(task, catalog)
-	log.Printf("[lifecycle-turn] prepared task=%s catalog_skills=%d runtime_tools=%t", task.ID, len(catalog.Entries()), hookReadTools != nil)
+	applog.Infof("[lifecycle-turn] prepared task=%s catalog_skills=%d runtime_tools=%t", task.ID, len(catalog.Entries()), hookReadTools != nil)
 	effectiveTask := task
 	if incomingTurn.TaskThreadTurn && incomingTurn.TurnPrompt != "" {
 		effectiveTask.Prompt = incomingTurn.TurnPrompt
@@ -162,11 +162,11 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 				case models.OutputContractSelectedSkills:
 					selected, err := lifecycle.ValidateSelectedSkills(out.Payload)
 					if err != nil {
-						log.Printf("[lifecycle-turn] route_task invalid selected_skills task=%s: %v", task.ID, err)
+						applog.Infof("[lifecycle-turn] route_task invalid selected_skills task=%s: %v", task.ID, err)
 						continue
 					}
 					if selected.NeedsClarification {
-						log.Printf("[lifecycle-turn] route_task clarification requested task=%s question=%q", task.ID, selected.ClarifyingQuestion)
+						applog.Infof("[lifecycle-turn] route_task clarification requested task=%s question=%q", task.ID, selected.ClarifyingQuestion)
 						continue
 					}
 					if !haveBest || selected.Confidence > best.Confidence {
@@ -177,11 +177,11 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 				case models.OutputContractSelectedMemories:
 					selected, err := lifecycle.ValidateSelectedMemories(out.Payload)
 					if err != nil {
-						log.Printf("[lifecycle-turn] route_task invalid selected_memories task=%s: %v", task.ID, err)
+						applog.Infof("[lifecycle-turn] route_task invalid selected_memories task=%s: %v", task.ID, err)
 						continue
 					}
 					if selected.NeedsClarification {
-						log.Printf("[lifecycle-turn] route_task memory clarification requested task=%s question=%q", task.ID, selected.ClarifyingQuestion)
+						applog.Infof("[lifecycle-turn] route_task memory clarification requested task=%s question=%q", task.ID, selected.ClarifyingQuestion)
 						continue
 					}
 					if !haveSelectedMemories || selected.Confidence > selectedMemories.Confidence {
@@ -193,10 +193,10 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 			if haveBest {
 				selectedSkillHandles = filterCatalogHandles(catalog, best.Skills)
 				routeTaskExecID = bestExecID
-				log.Printf("[lifecycle-turn] route_task selected_skills task=%s handles=%d confidence=%.2f", task.ID, len(selectedSkillHandles), best.Confidence)
+				applog.Infof("[lifecycle-turn] route_task selected_skills task=%s handles=%d confidence=%.2f", task.ID, len(selectedSkillHandles), best.Confidence)
 			}
 			if haveSelectedMemories {
-				log.Printf("[lifecycle-turn] route_task selected_memories task=%s memories=%d confidence=%.2f", task.ID, len(selectedMemories.Memories), selectedMemories.Confidence)
+				applog.Infof("[lifecycle-turn] route_task selected_memories task=%s memories=%d confidence=%.2f", task.ID, len(selectedMemories.Memories), selectedMemories.Confidence)
 			}
 		}
 	}
@@ -214,7 +214,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		// only the LLM-selected subset.
 		if routeTaskExecID != "" && w.lifecycleRepo != nil {
 			if err := w.lifecycleRepo.PatchExecutionOutputSkills(ctx, routeTaskExecID, selectedSkillHandles); err != nil {
-				log.Printf("[lifecycle-turn] patch route_task output_json task=%s exec=%s: %v", task.ID, routeTaskExecID, err)
+				applog.Infof("[lifecycle-turn] patch route_task output_json task=%s exec=%s: %v", task.ID, routeTaskExecID, err)
 			}
 		}
 	} else {
@@ -235,7 +235,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		before := w.runLifecycleSlot(ctx, models.LifecycleBeforeRun, task, runID, nil, llmcontracts.ChatContext{})
 		preparedContext = lifecycle.MergeContextBlocks(before.Outputs)
 		if preparedContext != "" {
-			log.Printf("[lifecycle-turn] before_run prepared_context task=%s bytes=%d outputs=%d", task.ID, len(preparedContext), len(before.Outputs))
+			applog.Infof("[lifecycle-turn] before_run prepared_context task=%s bytes=%d outputs=%d", task.ID, len(preparedContext), len(before.Outputs))
 		}
 	}
 
@@ -280,7 +280,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		go func(t models.Task, taskRunID string, runErr error, taskChatContext llmcontracts.ChatContext, rt *llmcontracts.RuntimeTools, turn lifecycleTurnContext) {
 			defer func() {
 				if rec := recover(); rec != nil {
-					log.Printf("[lifecycle-turn] after_complete panic for task=%s: %v", t.ID, rec)
+					applog.Infof("[lifecycle-turn] after_complete panic for task=%s: %v", t.ID, rec)
 				}
 			}()
 			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -300,7 +300,7 @@ func (w *WorkerService) publishGoalEvaluationAfterComplete(ctx context.Context, 
 		return
 	}
 	if _, err := w.taskGoalSvc.PublishEvaluatedGoal(ctx, task.ID); err != nil {
-		log.Printf("[lifecycle-turn] reload evaluated task goal failed task=%s: %v", task.ID, err)
+		applog.Infof("[lifecycle-turn] reload evaluated task goal failed task=%s: %v", task.ID, err)
 	}
 }
 
@@ -340,7 +340,7 @@ func (w *WorkerService) evaluableTaskGoal(ctx context.Context, taskID string) *m
 	}
 	goal, err := w.taskGoalSvc.GetEvaluableGoal(ctx, taskID)
 	if err != nil {
-		log.Printf("[lifecycle-turn] load evaluable task goal failed task=%s: %v", taskID, err)
+		applog.Infof("[lifecycle-turn] load evaluable task goal failed task=%s: %v", taskID, err)
 		return nil
 	}
 	return goal
@@ -441,7 +441,7 @@ func (w *WorkerService) filterSelectedMemoryEntries(ctx context.Context, task mo
 	if len(allowed) == 0 {
 		for _, entry := range entries {
 			if entry.File != "" {
-				log.Printf("[lifecycle-turn] route_task selected memory without MEMORIES.md index task=%s handle=%s", task.ID, entry.File)
+				applog.Infof("[lifecycle-turn] route_task selected memory without MEMORIES.md index task=%s handle=%s", task.ID, entry.File)
 			}
 		}
 		return nil
@@ -450,7 +450,7 @@ func (w *WorkerService) filterSelectedMemoryEntries(ctx context.Context, task mo
 	for _, entry := range entries {
 		handle := memory.NormalizeMemoryHandle(entry.File)
 		if _, ok := allowed[handle]; !ok {
-			log.Printf("[lifecycle-turn] route_task selected memory not in MEMORIES.md task=%s handle=%s", task.ID, strings.TrimSpace(entry.File))
+			applog.Infof("[lifecycle-turn] route_task selected memory not in MEMORIES.md task=%s handle=%s", task.ID, strings.TrimSpace(entry.File))
 			continue
 		}
 		out = append(out, memory.SelectedMemory{File: handle})
@@ -552,7 +552,7 @@ func filterCatalogHandles(catalog *agentskills.Catalog, handles []string) []stri
 			continue
 		}
 		if _, ok := catalog.Lookup(handle); !ok {
-			log.Printf("[lifecycle-turn] route_task selected unknown skill handle=%s", handle)
+			applog.Infof("[lifecycle-turn] route_task selected unknown skill handle=%s", handle)
 			continue
 		}
 		seen[handle] = struct{}{}
@@ -583,9 +583,9 @@ func logAlwaysUseProvenance(taskID string, prov agentskills.SkillSelectionProven
 		}
 	}
 	if len(alwaysUse) > 0 {
-		log.Printf("[lifecycle-turn] always_use injected task=%s handles=%v", taskID, alwaysUse)
+		applog.Infof("[lifecycle-turn] always_use injected task=%s handles=%v", taskID, alwaysUse)
 	}
 	if len(both) > 0 {
-		log.Printf("[lifecycle-turn] always_use+skill_curator overlap task=%s handles=%v", taskID, both)
+		applog.Infof("[lifecycle-turn] always_use+skill_curator overlap task=%s handles=%v", taskID, both)
 	}
 }

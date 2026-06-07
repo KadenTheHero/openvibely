@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -21,6 +20,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/pkg/browser"
 )
@@ -97,11 +97,11 @@ var (
 // GET /models/:id/oauth/initiate
 func (h *Handler) OAuthInitiate(c echo.Context) error {
 	id := c.Param("id")
-	log.Printf("[handler] OAuthInitiate id=%s", id)
+	applog.Infof("[handler] OAuthInitiate id=%s", id)
 
 	agent, err := h.llmConfigRepo.GetByID(c.Request().Context(), id)
 	if err != nil {
-		log.Printf("[handler] OAuthInitiate fetch error: %v", err)
+		applog.Infof("[handler] OAuthInitiate fetch error: %v", err)
 		return err
 	}
 	if agent == nil {
@@ -160,7 +160,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 	// Generate PKCE verifier and challenge
 	verifier, challenge, err := generatePKCE()
 	if err != nil {
-		log.Printf("[handler] OAuthInitiate PKCE error: %v", err)
+		applog.Infof("[handler] OAuthInitiate PKCE error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate PKCE")
 	}
 
@@ -204,7 +204,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 			// Anthropic supports dynamic localhost ports; OpenAI/Codex uses fixed localhost:1455.
 			listener, err := startOAuthCallbackListener(agent.Provider)
 			if err != nil {
-				log.Printf("[handler] OAuthInitiate listener error: %v", err)
+				applog.Infof("[handler] OAuthInitiate listener error: %v", err)
 				if agent.Provider == models.ProviderOpenAI {
 					return echo.NewHTTPError(http.StatusConflict, fmt.Sprintf("failed to start callback listener on localhost:%d (it may already be in use)", openAIOAuthPort))
 				}
@@ -275,11 +275,11 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 		authURLFull += "&originator=" + url.QueryEscape(openAIOriginator)
 	}
 
-	log.Printf("[handler] OAuthInitiate redirecting to OAuth for config=%s provider=%s callback=%s port=%d public_callback=%t", id, agent.Provider, redirectURI, portForLog, usePublicCallback)
+	applog.Infof("[handler] OAuthInitiate redirecting to OAuth for config=%s provider=%s callback=%s port=%d public_callback=%t", id, agent.Provider, redirectURI, portForLog, usePublicCallback)
 
 	if c.QueryParam("external") == "1" {
 		if err := openOAuthURL(authURLFull); err != nil {
-			log.Printf("[handler] OAuthInitiate external browser open failed: %v", err)
+			applog.Infof("[handler] OAuthInitiate external browser open failed: %v", err)
 			return echo.NewHTTPError(http.StatusBadGateway, "failed to open system browser")
 		}
 		return c.HTML(http.StatusOK, fmt.Sprintf(`<html><body>
@@ -305,7 +305,7 @@ func (h *Handler) startOAuthCallbackServer(ctx context.Context, cancel context.C
 	var shutdownOnce sync.Once
 	shutdown := func(reason string) {
 		shutdownOnce.Do(func() {
-			log.Printf("[handler] OAuth callback server shutting down config=%s reason=%s", configID, reason)
+			applog.Infof("[handler] OAuth callback server shutting down config=%s reason=%s", configID, reason)
 			cancel()
 			srv.Shutdown(context.Background())
 		})
@@ -333,11 +333,11 @@ func (h *Handler) startOAuthCallbackServer(ctx context.Context, cancel context.C
 		shutdown("context_done")
 	}()
 
-	log.Printf("[handler] OAuth callback server started config=%s addr=%s timeout=%s", configID, listener.Addr().String(), oauthServerTimeout)
+	applog.Infof("[handler] OAuth callback server started config=%s addr=%s timeout=%s", configID, listener.Addr().String(), oauthServerTimeout)
 	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
-		log.Printf("[handler] OAuth callback server error: %v", err)
+		applog.Infof("[handler] OAuth callback server error: %v", err)
 	}
-	log.Printf("[handler] OAuth callback server stopped config=%s", configID)
+	applog.Infof("[handler] OAuth callback server stopped config=%s", configID)
 }
 
 // OAuthCallback handles OAuth provider callbacks for both hosted and localhost flows.
@@ -395,10 +395,10 @@ func (h *Handler) OAuthManualComplete(c echo.Context) error {
 
 	expiresAt, err := h.exchangeOAuthCodeAndSaveTokens(flow, code, state)
 	if err != nil {
-		log.Printf("[handler] OAuthManualComplete exchange/save error: %v", err)
+		applog.Infof("[handler] OAuthManualComplete exchange/save error: %v", err)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "token exchange failed"})
 	}
-	log.Printf("[handler] OAuthManualComplete success config=%s provider=%s expires=%s", flow.ConfigID, flow.Provider, time.UnixMilli(expiresAt).Format(time.RFC3339))
+	applog.Infof("[handler] OAuthManualComplete success config=%s provider=%s expires=%s", flow.ConfigID, flow.Provider, time.UnixMilli(expiresAt).Format(time.RFC3339))
 	return c.JSON(http.StatusOK, map[string]string{"status": "connected"})
 }
 
@@ -414,7 +414,7 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 		if errDesc == "" {
 			errDesc = oauthErr
 		}
-		log.Printf("[handler] OAuthCallback error: %s - %s", oauthErr, errDesc)
+		applog.Infof("[handler] OAuthCallback error: %s - %s", oauthErr, errDesc)
 		fmt.Fprintf(w, `<html><body>
 			<h2>OAuth Failed</h2>
 			<p>%s</p>
@@ -442,7 +442,7 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 	oauthFlowsMu.Unlock()
 
 	if !ok {
-		log.Printf("[handler] OAuthCallback state not found or expired")
+		applog.Infof("[handler] OAuthCallback state not found or expired")
 		fmt.Fprintf(w, `<html><body>
 			<h2>Session Expired</h2>
 			<p>The OAuth session has expired. Please try again.</p>
@@ -453,7 +453,7 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 
 	expiresAt, err := h.exchangeOAuthCodeAndSaveTokens(flow, code, state)
 	if err != nil {
-		log.Printf("[handler] OAuthCallback exchange/save error: %v", err)
+		applog.Infof("[handler] OAuthCallback exchange/save error: %v", err)
 		fmt.Fprintf(w, `<html><body>
 			<h2>Token Exchange Failed</h2>
 			<p>Could not complete OAuth exchange.</p>
@@ -462,7 +462,7 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	log.Printf("[handler] OAuthCallback success config=%s provider=%s expires=%s", flow.ConfigID, flow.Provider, time.UnixMilli(expiresAt).Format(time.RFC3339))
+	applog.Infof("[handler] OAuthCallback success config=%s provider=%s expires=%s", flow.ConfigID, flow.Provider, time.UnixMilli(expiresAt).Format(time.RFC3339))
 	http.Redirect(w, r, modelsURL, http.StatusTemporaryRedirect)
 }
 
@@ -635,7 +635,7 @@ func resolveOAuthRedirectMode() string {
 	case oauthRedirectModeLocalhostManual:
 		return oauthRedirectModeLocalhostManual
 	default:
-		log.Printf("[handler] invalid OAUTH_REDIRECT_MODE=%q; defaulting to %s", mode, oauthRedirectModeAuto)
+		applog.Infof("[handler] invalid OAUTH_REDIRECT_MODE=%q; defaulting to %s", mode, oauthRedirectModeAuto)
 		return oauthRedirectModeAuto
 	}
 }
@@ -696,7 +696,7 @@ func shutdownPreviousOAuthServer(configID string) {
 	}
 	oauthServersMu.Unlock()
 	if ok {
-		log.Printf("[handler] Cancelling previous OAuth callback server for config=%s", configID)
+		applog.Infof("[handler] Cancelling previous OAuth callback server for config=%s", configID)
 		prev.Cancel()
 	}
 }
