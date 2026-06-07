@@ -65,8 +65,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							--ov-diff-del-fg: #BD7076;
 							/* Schedule-specific tokens kept explicit for cross-WebView consistency. */
 							--ov-schedule-grid-border: #15191E;
-						--ov-schedule-timeline-dash: repeating-linear-gradient(
-							to right,
+							--ov-account-limit-track: rgba(255, 255, 255, 0.12);
+							--ov-account-limit-fill: #7480ff;
+							--ov-schedule-timeline-dash: repeating-linear-gradient(
+								to right,
 							var(--ov-link-color) 0px,
 							var(--ov-link-color) 4px,
 							transparent 4px,
@@ -153,22 +155,39 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					[data-theme="light"] .ov-task-result-start-btn:hover:not(:disabled):not(.btn-disabled) {
 						background-color: hsl(var(--p) / 0.08);
 					}
-					[data-theme="light"] .ov-task-result-start-btn:focus-visible {
-						background-color: hsl(var(--p) / 0.06);
+						[data-theme="light"] .ov-task-result-start-btn:focus-visible {
+							background-color: hsl(var(--p) / 0.06);
+						}
+						[data-theme="light"] .ov-task-result-start-btn:active:not(:disabled):not(.btn-disabled) {
+							background-color: hsl(var(--p) / 0.12);
+						}
+						[data-theme="light"] {
+							--ov-schedule-grid-border: hsl(var(--bc) / 0.16);
+							--ov-account-limit-track: #D9D9E3;
+							--ov-account-limit-fill: #646fe4;
+						}
+						.ov-account-limit-bar {
+							width: 100%;
+							height: 0.5rem;
+							margin-top: 0.25rem;
+							border-radius: 9999px;
+							background-color: var(--ov-account-limit-track);
+							overflow: hidden;
+						}
+						.ov-account-limit-bar-fill {
+							height: 100%;
+							min-width: 2px;
+							border-radius: inherit;
+							background-color: var(--ov-account-limit-fill);
+						}
+						/* Theme toggle is intentionally immediate (no global transition choreography). */
+						/* Prevent layout shift when modal opens by reserving scrollbar space */
+					html {
+						scrollbar-gutter: stable;
+						overflow: hidden;
 					}
-					[data-theme="light"] .ov-task-result-start-btn:active:not(:disabled):not(.btn-disabled) {
-						background-color: hsl(var(--p) / 0.12);
-					}
-					[data-theme="light"] {
-						--ov-schedule-grid-border: hsl(var(--bc) / 0.16);
-					}
-					/* Theme toggle is intentionally immediate (no global transition choreography). */				/* Prevent layout shift when modal opens by reserving scrollbar space */
-				html {
-					scrollbar-gutter: stable;
-					overflow: hidden;
-				}
-				body {
-					overflow: hidden;
+					body {
+						overflow: hidden;
 					height: 100vh;
 					width: 100vw;
 				}

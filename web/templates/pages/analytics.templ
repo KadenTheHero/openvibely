@@ -403,7 +403,7 @@ templ analyticsContent(currentProject *models.Project) {
 													const width = pct === null ? 0 : Math.max(0, Math.min(100, pct));
 													const resetLabel = formatResetCountdown(limit.resets_at);
 													const reset = resetLabel ? `<div class="text-xs opacity-60">${resetLabel}</div>` : '';
-													return `<div class="mt-2"><div class="flex justify-between text-xs"><span>${escapeHTML(limit.label || 'limit')}</span><span>${pct === null ? 'unknown' : pct.toFixed(1) + '%'}</span></div><progress class="progress progress-primary w-full" value="${width}" max="100"></progress>${reset}</div>`;
+													return `<div class="mt-2"><div class="flex justify-between text-xs"><span>${escapeHTML(limit.label || 'limit')}</span><span>${pct === null ? 'unknown' : pct.toFixed(1) + '%'}</span></div><div class="ov-account-limit-bar" role="meter" aria-label="${escapeHTML(limit.label || 'limit')} usage" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${width.toFixed(1)}"><div class="ov-account-limit-bar-fill" style="width: ${width}%"></div></div>${reset}</div>`;
 												}).join('');
 												const error = account.error ? `<div class="alert alert-warning py-2 text-xs mt-2">${escapeHTML(account.error)}</div>` : '';
 												const providerName = (account.provider || '').toLowerCase();

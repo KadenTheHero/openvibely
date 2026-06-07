@@ -204,6 +204,12 @@ func TestLightTheme_UsesLightModernTokens(t *testing.T) {
 
 	expected := []string{
 		"--ov-l-accent: #7480ff;",
+		"--ov-account-limit-track: #D9D9E3;",
+		"--ov-account-limit-fill: #646fe4;",
+		".ov-account-limit-bar {",
+		"background-color: var(--ov-account-limit-track);",
+		".ov-account-limit-bar-fill {",
+		"background-color: var(--ov-account-limit-fill);",
 		"--ov-l-bg: #FAFAFA;",
 		"--ov-l-surface: #F5F5F5;",
 		"--ov-l-border: #E5E5E5;",
