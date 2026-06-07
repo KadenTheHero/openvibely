@@ -4,13 +4,25 @@ Use this guide to create and configure projects in OpenVibely.
 
 ## What A Project Is
 
-A project is the workspace boundary for your tasks, chat context, schedules, worker limits, and repository settings.
+A project is the workspace boundary for your tasks, chat context, schedules, worker limits, and repository settings. The selected project controls what Chat, Tasks, Schedule, Workers, Alerts, Memory, Insights, Channels, and many settings operate on.
 
 Why this matters:
 
 - Keeps unrelated work separated.
 - Lets you tune execution limits per project.
 - Defines where code operations happen (local path or managed GitHub clone).
+
+## Project-Scoped Features
+
+| Feature | How The Project Matters |
+|---|---|
+| Chat | Conversations run with the selected project context. |
+| Tasks | Board categories, task execution, review, and schedules belong to the project. |
+| Memory | Repository-local managed memory is stored under `.openvibely/memories` when memory is enabled. |
+| Skills | Project-scoped skills and agent-owned skills can override global behavior for this repository. |
+| Workers | Project worker limits prevent one workspace from consuming all execution capacity. |
+| Channels | Slack, Telegram, GitHub, and webhooks can be connected to project work. |
+| Insights | Grades, Pulse, Reflection, and Analytics summarize project activity. |
 
 ## Before You Create A Project
 
@@ -111,6 +123,15 @@ Important:
 
 - The default project cannot be deleted.
 - Deletion removes project records from OpenVibely.
+
+## First Project Checklist
+
+- Give the project a clear name that matches the repository or product area.
+- Add a repository path or URL before expecting worktree diffs and review flows.
+- Choose a default model if most tasks should use the same provider.
+- Let project-scoped memory and skills capture repository conventions as work completes.
+- Set a worker limit if the project should not consume unlimited execution slots.
+- Add channels only after the project is stable enough for team use.
 
 ## Troubleshooting
 

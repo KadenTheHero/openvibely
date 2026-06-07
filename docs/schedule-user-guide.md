@@ -34,11 +34,17 @@ Use this to plan load across days/hours instead of crowding everything into one 
    - `Repeat Every` interval (shown when repeat is not `Once`)
 4. Click `Create Scheduled Task`.
 
-Guidance:
+## Repeat Types
 
-- Use `Once` for one-off future execution.
-- Use `Daily/Weekly/Monthly` for calendar cadence.
-- Use `Every N ...` for high-frequency recurring automation.
+| Repeat Type | Use It For |
+|---|---|
+| Once | A single future run. |
+| Seconds | High-frequency testing or development-only loops. |
+| Minutes | Short operational intervals. |
+| Hours | Repeated maintenance throughout a day. |
+| Daily | Daily checks or recurring implementation tasks. |
+| Weekly | Weekly cleanup, reporting, or backlog review. |
+| Monthly | Long-running maintenance cadence. |
 
 ## Drag and Drop Rescheduling
 
@@ -68,3 +74,11 @@ From `/tasks/{id}` -> `Schedules` tab:
 - Remove schedules
 
 This is useful for precise per-task schedule maintenance.
+
+## How Schedule Relates To Tasks
+
+A schedule belongs to a task. The task defines the prompt, model, agent, attachments, repository context, and review behavior. The schedule controls only when and how often that task runs.
+
+Use the task board for immediate work. Use Schedule when the timing matters — recurring automation, deferred execution, or a calendar-based maintenance cadence.
+
+Scheduled runs enter the same worker queue as regular task runs. If worker slots are full, a scheduled run waits for a free slot just like any other task.

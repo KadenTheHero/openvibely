@@ -52,21 +52,16 @@ At the bottom input bar you can set:
 
 Then send with Enter (Shift+Enter for new line).
 
-## Orchestrate vs Plan
+## Plan And Orchestrate Modes
 
-### Orchestrate
+The chat input includes a mode selector. OpenVibely defaults to `Orchestrate` when no mode is selected, and the selected mode is remembered per project in the browser.
 
-Execution-capable mode for normal chat-driven task operations.
+| Mode | Use It When | Behavior |
+|---|---|---|
+| `Orchestrate` | You want Chat to help create, inspect, or coordinate real project work. | Enables action-oriented chat tools such as creating and managing tasks, reading project state, and coordinating workflow actions. |
+| `Plan` | You want to think through an approach before anything is created or changed. | Keeps the conversation planning-oriented and limits action tools so the assistant can analyze, propose steps, and refine the plan first. |
 
-Use this when you want actions to happen — creating, running, or updating tasks.
-
-### Plan
-
-Read-only planning mode for exploration and planning before anything is created or changed.
-
-When a `Plan` turn finishes, Chat surfaces a prompt to continue in `Orchestrate` mode so you can move from analysis to action without manually switching modes.
-
-A good default workflow is to start in `Plan` for vague or risky work, then switch to `Orchestrate` when the next task is clear.
+A good default workflow is to start in `Plan` for vague or risky work, then switch to `Orchestrate` when the next task is clear. When a `Plan` turn finishes, Chat surfaces a prompt to continue in `Orchestrate` mode so you can move from analysis to action without manually switching.
 
 ## Parallel Task Example
 
@@ -112,6 +107,15 @@ If results look unrelated, verify the currently selected project first.
 
 If no model is configured, send attempts are blocked and a toast links directly to `/models`.
 
+## Typical Flow
+
+1. Select the project in the sidebar.
+2. Open Chat.
+3. Pick `Plan` or `Orchestrate` from the chat input controls.
+4. Ask a question or describe the goal.
+5. Attach files if they help explain the request.
+6. Use the response to continue planning, create tasks, or inspect existing project work.
+
 ## When To Use Tasks Instead
 
-Use Tasks instead when you already know the exact unit of work and want board status, scheduling, or thread review without a conversational layer around it.
+Use Tasks instead when you already know the exact unit of work and want board status, scheduling, thread review, diff review, or worktree actions without a conversational layer around it.

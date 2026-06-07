@@ -108,6 +108,23 @@ In Chat Orchestrate mode, you can create a task and set a goal on it in the same
 
 For the full reference see <a href="https://docs.openvibely.ai/task-goals" target="_blank" rel="noopener noreferrer">Task Goals</a>.
 
+## Diff Review
+
+Open the `Changes` tab on any task detail page to review generated code before merging.
+
+| Surface | Use It For |
+|---|---|
+| File cards | Inspect each changed file with status, hunks, line numbers, and rename or binary metadata. |
+| Inline / split view | Toggle how textual diffs are displayed per file. |
+| Review comments | Attach line-level feedback and submit it back to the agent to trigger a revision follow-up. |
+| Worktree actions | Merge locally, resolve conflicts, clean up the worktree, or open a pull request when supported. |
+
+For worktree-backed tasks, the Changes tab shows the live worktree diff while work is running, then falls back to the preserved execution diff after merge or cleanup. Large files can be loaded on demand to keep the view responsive.
+
+Use review comments when you want the agent to revise specific lines. Use a task follow-up when the feedback is broader or not tied to a particular file.
+
+For the full reference see <a href="https://docs.openvibely.ai/task-diffs-review" target="_blank" rel="noopener noreferrer">Task Diffs & Review</a>.
+
 ## No-Model Behavior
 
 Execution paths are blocked when no models are configured. You will get an error toast with a link to `/models`.

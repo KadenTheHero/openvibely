@@ -36,10 +36,16 @@ OpenVibely is organized around a selected project. The sidebar project selector 
 | Agents | [Agents User Guide](./agents-user-guide.md) |
 | Lifecycle hooks and skills | [Lifecycle Hooks and Skills User Guide](./lifecycle-skills-user-guide.md) |
 | Workers | [Workers User Guide](./workers-user-guide.md) |
-| Tasks | [Tasks User Guide](./tasks-user-guide.md) — includes Task Goals |
+| Tasks | [Tasks User Guide](./tasks-user-guide.md) — includes Task Goals and Diff Review |
 | Task Goals | See [Tasks User Guide § Task Goals](./tasks-user-guide.md#task-goals) and <a href="https://docs.openvibely.ai/task-goals" target="_blank" rel="noopener noreferrer">Task Goals (full reference)</a> |
+| Diff review | See [Tasks User Guide § Diff Review](./tasks-user-guide.md#diff-review) and <a href="https://docs.openvibely.ai/task-diffs-review" target="_blank" rel="noopener noreferrer">Task Diffs & Review (full reference)</a> |
+| Task chaining | <a href="https://docs.openvibely.ai/task-chaining" target="_blank" rel="noopener noreferrer">Task Chaining & Branch Lineage</a> |
 | Chat | [Chat User Guide](./chat-user-guide.md) |
 | Schedule | [Schedule User Guide](./schedule-user-guide.md) |
+| Insights | [Insights User Guide](./insights-user-guide.md) |
+| Alerts | <a href="https://docs.openvibely.ai/alerts" target="_blank" rel="noopener noreferrer">Alerts (docs site)</a> |
+| Attachments | <a href="https://docs.openvibely.ai/attachments" target="_blank" rel="noopener noreferrer">Attachments As Context (docs site)</a> |
+| Git worktrees | <a href="https://docs.openvibely.ai/git-worktrees" target="_blank" rel="noopener noreferrer">Git Worktrees & Merge Safety (docs site)</a> |
 | Environment variables | [Environment Variables](./environment.md) |
 
 ## Channels
