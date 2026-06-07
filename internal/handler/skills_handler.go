@@ -19,6 +19,40 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type skillAlwaysUseRequest struct {
+	AlwaysUse bool   `json:"always_use"`
+	Scope     string `json:"scope"`
+}
+
+func (h *Handler) SetSkillAlwaysUse(c echo.Context) error {
+	handle := strings.TrimSpace(c.Param("skill"))
+	if !validDialogSkillKey(handle) {
+		return echo.NewHTTPError(http.StatusBadRequest, "skill handle must be a slug")
+	}
+	var req skillAlwaysUseRequest
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON")
+	}
+	scope := h.dialogStandaloneSkillScope(c, req.Scope)
+	root, err := h.rootForDialogScope(c, scope)
+	if err != nil {
+		return err
+	}
+	// Verify skill exists at scope before mutating the index.
+	skillPath := filepath.Join(root, "skills", handle, "SKILL.md")
+	if _, statErr := os.Stat(skillPath); statErr != nil {
+		if errors.Is(statErr, os.ErrNotExist) {
+			return echo.NewHTTPError(http.StatusNotFound, "skill not found at selected scope")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, statErr.Error())
+	}
+	indexPath := filepath.Join(root, "skills", "SKILLS.md")
+	if err := agentlibrary.SetSkillAlwaysUse(indexPath, handle, req.AlwaysUse); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return h.ListSkills(c)
+}
+
 type skillSaveRequest struct {
 	Handle      string `json:"handle"`
 	Name        string `json:"name"`
@@ -511,14 +545,27 @@ func (h *Handler) listStandaloneSkills(c echo.Context) ([]pages.SkillCard, error
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+
+	// Read always_use lists from both roots to populate AlwaysUse on each card.
+	globalAlwaysUse := alwaysUseSet(h.agentSkillRoot)
+	projectAlwaysUse := alwaysUseSet(projectRoot)
+
 	out := make([]pages.SkillCard, 0, len(catalog.Entries()))
 	for _, entry := range catalog.Entries() {
+		scope := h.scopeForStandaloneSkillPath(c, entry.AbsolutePath)
 		card := pages.SkillCard{
 			Handle: entry.Handle,
 			Name:   entry.Skill,
-			Scope:  h.scopeForStandaloneSkillPath(c, entry.AbsolutePath),
+			Scope:  scope,
 			Source: string(entry.Source),
 			Files:  listStandaloneSkillPackageFiles(entry.AbsolutePath),
+		}
+		// Populate AlwaysUse from the appropriate root's index.
+		switch scope {
+		case "global":
+			card.AlwaysUse = globalAlwaysUse[entry.Handle]
+		default: // project
+			card.AlwaysUse = projectAlwaysUse[entry.Handle]
 		}
 		card.Enabled = true // default to enabled when frontmatter is absent
 		if data, readErr := os.ReadFile(entry.AbsolutePath); readErr == nil {
@@ -540,6 +587,20 @@ func (h *Handler) listStandaloneSkills(c echo.Context) ([]pages.SkillCard, error
 		return out[i].Handle < out[j].Handle
 	})
 	return out, nil
+}
+
+// alwaysUseSet reads the SKILLS.md always_use list for root and returns a set
+// map for fast membership tests. Returns an empty map for empty/missing roots.
+func alwaysUseSet(root string) map[string]bool {
+	if root == "" {
+		return map[string]bool{}
+	}
+	meta := agentskills.ReadSkillsIndexMeta(agentskills.SkillsIndexPath(root))
+	out := make(map[string]bool, len(meta.AlwaysUse))
+	for _, h := range meta.AlwaysUse {
+		out[h] = true
+	}
+	return out
 }
 
 func (h *Handler) writeStandaloneSkillFromDialog(c echo.Context, req skillSaveRequest, requireExisting bool) (*agentlibrary.ImportResult, error) {

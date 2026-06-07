@@ -1,3 +1,8 @@
+---
+always_use:
+    - openvibely_project_guidance
+---
+
 # Standalone Skills
 
 ## openvibely_skill_lifecycle_workflow

@@ -458,3 +458,39 @@ func TestRenderAvailableAgentSkillsMarkdown_ExcludesDisabledHandles(t *testing.T
 		t.Errorf("disabled_skill must NOT appear in available_skills block:\n%s", out)
 	}
 }
+
+// TestRenderAvailableSkillsMarkdown_DoesNotLeakAlwaysUseFrontmatter verifies
+// that a SKILLS.md file containing an always_use frontmatter block does not
+// emit that block into the model-visible available_skills rendering. The
+// frontmatter is catalog policy metadata, not model instructions.
+func TestRenderAvailableSkillsMarkdown_DoesNotLeakAlwaysUseFrontmatter(t *testing.T) {
+	root := t.TempDir()
+
+	// Write a skill so the index has an H2 entry.
+	writeSkill(t, root, "guidance_skill", "skill body here")
+
+	// Prepend always_use frontmatter to the SKILLS.md that writeSkill created.
+	indexPath := SkillsIndexPath(root)
+	existing, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("read SKILLS.md: %v", err)
+	}
+	withFrontmatter := "---\nalways_use:\n  - guidance_skill\n---\n\n" + string(existing)
+	if writeErr := os.WriteFile(indexPath, []byte(withFrontmatter), 0o644); writeErr != nil {
+		t.Fatalf("write SKILLS.md with frontmatter: %v", writeErr)
+	}
+
+	out := RenderAvailableSkillsMarkdown("", root)
+
+	// The skill H2 entry must be visible.
+	if !strings.Contains(out, "## guidance_skill") {
+		t.Errorf("expected guidance_skill H2 to appear in output:\n%s", out)
+	}
+	// The frontmatter YAML must NOT appear in the model-visible block.
+	if strings.Contains(out, "always_use") {
+		t.Errorf("always_use frontmatter must NOT be leaked into model-visible available_skills:\n%s", out)
+	}
+	if strings.Contains(out, "---") {
+		t.Errorf("frontmatter delimiters must NOT be present in model-visible available_skills:\n%s", out)
+	}
+}

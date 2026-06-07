@@ -194,8 +194,24 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 			}
 		}
 	}
+
+	// Merge always-use handles from SKILLS.md frontmatter into selectedSkillHandles.
+	// This is only applied for standalone (non-agent-owned) tasks; assigned-agent
+	// tasks use their agent's private skill catalog and must not be polluted by the
+	// top-level standalone always_use settings.
+	var selectedSkillsProvenance agentskills.SkillSelectionProvenance
+	if !catalog.IsAgentOwned() {
+		selectedSkillHandles, selectedSkillsProvenance = agentskills.MergeAlwaysUseIntoSelected(catalog, w.globalSkillRoot, projectRoot, selectedSkillHandles)
+		logAlwaysUseProvenance(task.ID, selectedSkillsProvenance)
+	} else {
+		selectedSkillsProvenance = make(agentskills.SkillSelectionProvenance, len(selectedSkillHandles))
+		for _, h := range selectedSkillHandles {
+			selectedSkillsProvenance[h] = agentskills.ProvenanceSkillCurator
+		}
+	}
+
 	taskCatalog := catalog.Filter(runID+":selected", selectedSkillHandles)
-	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SelectedSkillHandles: selectedSkillHandles, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt})
+	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SelectedSkillHandles: selectedSkillHandles, SelectedSkillsProvenance: selectedSkillsProvenance, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt})
 
 	// before_run: produce context_blocks the model should see. The runbook
 	// (§Auto-Routing line 130) says these blocks are merged into the system
@@ -215,13 +231,14 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		ctx = llmcontracts.WithRuntimeTools(ctx, taskRuntimeTools)
 	}
 	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{
-		Catalog:              taskCatalog,
-		SkillIndex:           skillIndex,
-		PreparedBlocks:       preparedContext,
-		SelectedSkillHandles: selectedSkillHandles,
-		AssignedAgent:        assignedAgent,
-		TaskThreadTurn:       incomingTurn.TaskThreadTurn,
-		TurnPrompt:           incomingTurn.TurnPrompt,
+		Catalog:                  taskCatalog,
+		SkillIndex:               skillIndex,
+		PreparedBlocks:           preparedContext,
+		SelectedSkillHandles:     selectedSkillHandles,
+		SelectedSkillsProvenance: selectedSkillsProvenance,
+		AssignedAgent:            assignedAgent,
+		TaskThreadTurn:           incomingTurn.TaskThreadTurn,
+		TurnPrompt:               incomingTurn.TurnPrompt,
 	})
 	selectedMemoryEntries := explicitMemoryEntries
 	if haveSelectedMemories {
@@ -260,7 +277,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 			}
 			result := w.runLifecycleSlotFiltered(bgCtx, models.LifecycleAfterComplete, t, taskRunID, runErr, taskChatContext, w.afterCompleteHookEligible(bgCtx, t))
 			w.publishGoalEvaluationAfterComplete(bgCtx, t, result)
-		}(task, runID, err, chatContext, llmcontracts.CompositeRuntimeTools(hookMutationTools, afterCompleteRuntimeTools), lifecycleTurnContext{Catalog: taskCatalog, SelectedSkillHandles: selectedSkillHandles, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt})
+		}(task, runID, err, chatContext, llmcontracts.CompositeRuntimeTools(hookMutationTools, afterCompleteRuntimeTools), lifecycleTurnContext{Catalog: taskCatalog, SelectedSkillHandles: selectedSkillHandles, SelectedSkillsProvenance: selectedSkillsProvenance, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt})
 	}
 	return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: after}
 }
@@ -536,4 +553,25 @@ func newLifecycleTaskRunID(taskID string) string {
 		return taskID + ":" + hex.EncodeToString(b[:])
 	}
 	return taskID + ":" + time.Now().UTC().Format("20060102T150405.000000000")
+}
+
+// logAlwaysUseProvenance logs always-use injected handles so operators can see
+// which skills were forced-included deterministically from catalog metadata vs
+// selected by the Skill Curator LLM route hook.
+func logAlwaysUseProvenance(taskID string, prov agentskills.SkillSelectionProvenance) {
+	var alwaysUse, both []string
+	for handle, source := range prov {
+		switch source {
+		case agentskills.ProvenanceAlwaysUse:
+			alwaysUse = append(alwaysUse, handle)
+		case agentskills.ProvenanceBoth:
+			both = append(both, handle)
+		}
+	}
+	if len(alwaysUse) > 0 {
+		log.Printf("[lifecycle-turn] always_use injected task=%s handles=%v", taskID, alwaysUse)
+	}
+	if len(both) > 0 {
+		log.Printf("[lifecycle-turn] always_use+skill_curator overlap task=%s handles=%v", taskID, both)
+	}
 }

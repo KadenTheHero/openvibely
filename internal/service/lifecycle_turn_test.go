@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -1474,4 +1475,212 @@ func TestAfterCompleteEligibilityRunsProtectedGoalAgentOnlyForActiveGoal(t *test
 	if w.afterCompleteHookEligible(taskThreadCtx, task)(goalHook) {
 		t.Fatal("protected Goal Agent hook must not run when the goal is no longer active")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Always-use routing merge tests
+// ---------------------------------------------------------------------------
+
+func TestPrepareLifecycleTurn_AlwaysUseSkillsMergedAfterRouteTask(t *testing.T) {
+	root := t.TempDir()
+	writeLifecycleStandaloneSkill(t, root, "curator_skill", "body of curator")
+	writeLifecycleStandaloneSkill(t, root, "always_skill", "body of always")
+
+	// Mark always_skill as always_use in the SKILLS.md frontmatter.
+	skillsIndex := filepath.Join(root, "skills", "SKILLS.md")
+	if err := setAlwaysUseInIndex(skillsIndex, "always_skill"); err != nil {
+		t.Fatalf("set always use: %v", err)
+	}
+
+	// route_task selects only curator_skill; always_skill must be injected.
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleSkillRoot(root)
+	worker.SetLifecycleRunner(routeTestRunner(map[string]json.RawMessage{
+		"a-low":  routePayload([]string{"curator_skill"}, 0.5),
+		"b-high": routePayload([]string{"curator_skill"}, 0.9),
+	}))
+
+	turn := worker.PrepareLifecycleTurn(context.Background(), models.Task{ID: "task-always-use-merge"})
+	ltc := lifecycleTurnFromContext(turn.Ctx)
+	handles := ltc.SelectedSkillHandles
+
+	if !containsHandle(handles, "curator_skill") {
+		t.Errorf("curator_skill (skill_curator selected) must appear in merged handles; got %v", handles)
+	}
+	if !containsHandle(handles, "always_skill") {
+		t.Fatalf("always_skill must be injected via always_use; got %v", handles)
+	}
+	if len(handles) != 2 {
+		t.Fatalf("expected exactly 2 handles (no duplicates), got %v", handles)
+	}
+}
+
+func TestPrepareLifecycleTurn_AlwaysUseProvenanceTracked(t *testing.T) {
+	root := t.TempDir()
+	writeLifecycleStandaloneSkill(t, root, "curator_skill", "body")
+	writeLifecycleStandaloneSkill(t, root, "always_skill", "body")
+	writeLifecycleStandaloneSkill(t, root, "shared_skill", "body") // both always_use AND selected by curator
+
+	skillsIndex := filepath.Join(root, "skills", "SKILLS.md")
+	if err := setAlwaysUseInIndex(skillsIndex, "always_skill", "shared_skill"); err != nil {
+		t.Fatalf("set always use: %v", err)
+	}
+
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleSkillRoot(root)
+	worker.SetLifecycleRunner(routeTestRunner(map[string]json.RawMessage{
+		"a-low":  routePayload([]string{"curator_skill", "shared_skill"}, 0.5),
+		"b-high": routePayload([]string{"curator_skill", "shared_skill"}, 0.9),
+	}))
+
+	turn := worker.PrepareLifecycleTurn(context.Background(), models.Task{ID: "task-provenance"})
+	ltc := lifecycleTurnFromContext(turn.Ctx)
+	prov := ltc.SelectedSkillsProvenance
+
+	if prov["curator_skill"] != agentskills.ProvenanceSkillCurator {
+		t.Errorf("curator_skill: expected %q, got %q", agentskills.ProvenanceSkillCurator, prov["curator_skill"])
+	}
+	if prov["always_skill"] != agentskills.ProvenanceAlwaysUse {
+		t.Errorf("always_skill: expected %q, got %q", agentskills.ProvenanceAlwaysUse, prov["always_skill"])
+	}
+	if prov["shared_skill"] != agentskills.ProvenanceBoth {
+		t.Errorf("shared_skill: expected %q (both), got %q", agentskills.ProvenanceBoth, prov["shared_skill"])
+	}
+}
+
+func TestPrepareLifecycleTurn_DisabledAlwaysUseSkillExcluded(t *testing.T) {
+	root := t.TempDir()
+	writeLifecycleStandaloneSkill(t, root, "active_skill", "body")
+	// Write a disabled standalone skill.
+	writeLifecycleDisabledStandaloneSkill(t, root, "disabled_always", "body")
+
+	skillsIndex := filepath.Join(root, "skills", "SKILLS.md")
+	if err := setAlwaysUseInIndex(skillsIndex, "active_skill", "disabled_always"); err != nil {
+		t.Fatalf("set always use: %v", err)
+	}
+
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleSkillRoot(root)
+	worker.SetLifecycleRunner(routeTestRunner(map[string]json.RawMessage{
+		"a-low":  routePayload(nil, 0.1),
+		"b-high": routePayload(nil, 0.1),
+	}))
+
+	turn := worker.PrepareLifecycleTurn(context.Background(), models.Task{ID: "task-disabled-always"})
+	ltc := lifecycleTurnFromContext(turn.Ctx)
+	handles := ltc.SelectedSkillHandles
+
+	for _, h := range handles {
+		if h == "disabled_always" {
+			t.Fatalf("disabled always_use skill must be excluded; got handles %v", handles)
+		}
+	}
+	if !containsHandle(handles, "active_skill") {
+		t.Fatalf("enabled always_use skill must be included; got handles %v", handles)
+	}
+}
+
+func TestPrepareLifecycleTurn_AlwaysUseNotAppliedToAssignedAgentTasks(t *testing.T) {
+	root := t.TempDir()
+	writeLifecycleStandaloneSkill(t, root, "standalone_always", "body")
+	writeLifecycleTestSkill(t, root, "skill_curator", "maintain_skill_library", "body")
+
+	skillsIndex := filepath.Join(root, "skills", "SKILLS.md")
+	if err := setAlwaysUseInIndex(skillsIndex, "standalone_always"); err != nil {
+		t.Fatalf("set always use: %v", err)
+	}
+
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	agent, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindSkillCurator)
+	if err != nil || agent == nil {
+		t.Fatalf("load system agent: %v / %v", err, agent)
+	}
+
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleSkillRoot(root)
+	worker.SetLifecycleAgentRepo(agentRepo)
+	worker.SetLifecycleRepo(repository.NewLifecycleRepo(db))
+
+	turn := worker.PrepareLifecycleTurn(ctx, models.Task{
+		ID: "task-agent-no-always", Category: models.CategoryActive,
+		AgentDefinitionID: &agent.ID,
+	})
+	ltc := lifecycleTurnFromContext(turn.Ctx)
+	handles := ltc.SelectedSkillHandles
+
+	for _, h := range handles {
+		if h == "standalone_always" {
+			t.Fatalf("standalone always_use must not pollute assigned-agent task; got handles %v", handles)
+		}
+	}
+}
+
+func TestPrepareLifecycleTurn_AlwaysUseDeduplicatesExistingHandles(t *testing.T) {
+	root := t.TempDir()
+	writeLifecycleStandaloneSkill(t, root, "skill_a", "body")
+
+	skillsIndex := filepath.Join(root, "skills", "SKILLS.md")
+	if err := setAlwaysUseInIndex(skillsIndex, "skill_a"); err != nil {
+		t.Fatalf("set always use: %v", err)
+	}
+
+	// route_task also selects skill_a
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleSkillRoot(root)
+	worker.SetLifecycleRunner(routeTestRunner(map[string]json.RawMessage{
+		"a-low":  routePayload([]string{"skill_a"}, 0.5),
+		"b-high": routePayload([]string{"skill_a"}, 0.9),
+	}))
+
+	turn := worker.PrepareLifecycleTurn(context.Background(), models.Task{ID: "task-dedup"})
+	ltc := lifecycleTurnFromContext(turn.Ctx)
+	handles := ltc.SelectedSkillHandles
+
+	count := 0
+	for _, h := range handles {
+		if h == "skill_a" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("skill_a must appear exactly once after dedupliation; got %d times in %v", count, handles)
+	}
+}
+
+// setAlwaysUseInIndex is a test helper that writes always_use handles into
+// the SKILLS.md frontmatter at the given index path using the production mutation.
+func setAlwaysUseInIndex(indexPath string, handles ...string) error {
+	for _, h := range handles {
+		if err := agentlibrary.SetSkillAlwaysUse(indexPath, h, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeLifecycleDisabledStandaloneSkill writes a disabled standalone skill to root
+// and appends its header to SKILLS.md.
+func writeLifecycleDisabledStandaloneSkill(t *testing.T, root, skill, body string) {
+	t.Helper()
+	content := "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n  key: " + skill + "\n  scope: global\n  enabled: false\n---\n" + body
+	if err := os.MkdirAll(filepath.Join(root, "skills", skill), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "skills", skill, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Append to SKILLS.md even though it's disabled (it should appear in the index
+	// but be excluded from BuildCatalog which filters disabled skills).
+	appendLifecycleTestHeader(t, filepath.Join(root, "skills", "SKILLS.md"), skill)
+}
+
+func containsHandle(handles []string, target string) bool {
+	for _, h := range handles {
+		if h == target {
+			return true
+		}
+	}
+	return false
 }

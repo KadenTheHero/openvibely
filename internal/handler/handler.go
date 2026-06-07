@@ -469,6 +469,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/skills/import", h.ImportSkillPackage)
 	e.PUT("/skills/:skill", h.UpdateSkill)
 	e.POST("/skills/:skill/enabled", h.SetSkillEnabled)
+	e.POST("/skills/:skill/always_use", h.SetSkillAlwaysUse)
 	e.DELETE("/skills/:skill", h.DeleteSkill)
 	e.PUT("/agents/:id", h.UpdateAgent)
 	e.DELETE("/agents/:id", h.DeleteAgent)

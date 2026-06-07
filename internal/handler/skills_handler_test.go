@@ -714,6 +714,162 @@ func addMultipartFile(t *testing.T, writer *multipart.Writer, fieldName, filenam
 	}
 }
 
+func TestSetSkillAlwaysUse_SetsAlwaysUseFlagInIndex(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+	writeStandaloneSkill(t, root, "guidance_skill", "Guidance", "project guidance", "global")
+
+	req := httptest.NewRequest(http.MethodPost, "/skills/guidance_skill/always_use", strings.NewReader(`{"always_use":true,"scope":"global"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify SKILLS.md was updated with always_use list
+	indexData, err := os.ReadFile(filepath.Join(root, "skills", "SKILLS.md"))
+	if err != nil {
+		t.Fatalf("read SKILLS.md: %v", err)
+	}
+	meta := agentskills.ParseSkillsIndexMeta(string(indexData))
+	if len(meta.AlwaysUse) != 1 || meta.AlwaysUse[0] != "guidance_skill" {
+		t.Fatalf("expected [guidance_skill] in always_use, got %v", meta.AlwaysUse)
+	}
+
+	// Response should show "Always use" badge
+	body := rec.Body.String()
+	if !strings.Contains(body, "Always use") {
+		t.Fatalf("expected response to show 'Always use' badge; got: %s", body)
+	}
+}
+
+func TestSetSkillAlwaysUse_RemovesAlwaysUseFlag(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+	writeStandaloneSkill(t, root, "guidance_skill", "Guidance", "project guidance", "global")
+
+	// First set always_use
+	req1 := httptest.NewRequest(http.MethodPost, "/skills/guidance_skill/always_use", strings.NewReader(`{"always_use":true,"scope":"global"}`))
+	req1.Header.Set("Content-Type", "application/json")
+	req1.Header.Set("HX-Request", "true")
+	rec1 := httptest.NewRecorder()
+	e.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("set: expected 200, got %d: %s", rec1.Code, rec1.Body.String())
+	}
+
+	// Then remove always_use
+	req2 := httptest.NewRequest(http.MethodPost, "/skills/guidance_skill/always_use", strings.NewReader(`{"always_use":false,"scope":"global"}`))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("HX-Request", "true")
+	rec2 := httptest.NewRecorder()
+	e.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("remove: expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+
+	indexData, err := os.ReadFile(filepath.Join(root, "skills", "SKILLS.md"))
+	if err != nil {
+		t.Fatalf("read SKILLS.md: %v", err)
+	}
+	meta := agentskills.ParseSkillsIndexMeta(string(indexData))
+	if len(meta.AlwaysUse) != 0 {
+		t.Fatalf("expected empty always_use after removal, got %v", meta.AlwaysUse)
+	}
+	// "Always use" badge should not appear after removal
+	body := rec2.Body.String()
+	if strings.Contains(body, `badge-primary`) && strings.Contains(body, `Always use`) {
+		t.Fatalf("expected 'Always use' badge to be gone after removal")
+	}
+}
+
+func TestSetSkillAlwaysUse_IdempotentSecondSet(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+	writeStandaloneSkill(t, root, "guidance_skill", "Guidance", "project guidance", "global")
+
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/skills/guidance_skill/always_use", strings.NewReader(`{"always_use":true,"scope":"global"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("call %d: expected 200, got %d", i+1, rec.Code)
+		}
+	}
+
+	indexData, _ := os.ReadFile(filepath.Join(root, "skills", "SKILLS.md"))
+	meta := agentskills.ParseSkillsIndexMeta(string(indexData))
+	if len(meta.AlwaysUse) != 1 {
+		t.Fatalf("expected exactly 1 always_use entry (idempotent), got %v", meta.AlwaysUse)
+	}
+}
+
+func TestSetSkillAlwaysUse_Returns404ForMissingSkill(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetAgentSkillRoot(t.TempDir())
+
+	req := httptest.NewRequest(http.MethodPost, "/skills/nonexistent_skill/always_use", strings.NewReader(`{"always_use":true,"scope":"global"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing skill, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSetSkillAlwaysUse_RejectsInvalidHandle(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetAgentSkillRoot(t.TempDir())
+
+	// Use a path-traversal pattern; the router or handler must reject it.
+	req := httptest.NewRequest(http.MethodPost, "/skills/../etc/always_use", strings.NewReader(`{"always_use":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected non-200 for path-traversal handle, got 200")
+	}
+}
+
+func TestSkillsPageShowsAlwaysUseBadgeForMarkedSkills(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+	writeStandaloneSkill(t, root, "guidance_skill", "Guidance", "project guidance", "global")
+	writeStandaloneSkill(t, root, "other_skill", "Other", "other desc", "global")
+
+	// Mark guidance_skill as always_use via the SetSkillAlwaysUse mutation.
+	indexPath := filepath.Join(root, "skills", "SKILLS.md")
+	if err := agentlibrary.SetSkillAlwaysUse(indexPath, "guidance_skill", true); err != nil {
+		t.Fatalf("set always use: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/skills", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Always use") {
+		t.Fatalf("expected 'Always use' badge for guidance_skill, got:\n%s", body)
+	}
+	if !strings.Contains(body, "setSkillAlwaysUse") {
+		t.Fatalf("expected setSkillAlwaysUse JS function reference in response")
+	}
+}
+
 func writeStandaloneSkill(t *testing.T, root, handle, name, description, scope string) {
 	t.Helper()
 	decl := &agentlibrary.SkillDeclaration{

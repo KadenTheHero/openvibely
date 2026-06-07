@@ -8,15 +8,16 @@ import (
 )
 
 type SkillCard struct {
-	Handle      string
-	Name        string
+	Handle    string
+	Name      string
 	Description string
-	Scope       string
-	Source      string
-	Content     string
-	Files       []string
-	Archived    bool
-	Enabled     bool
+	Scope     string
+	Source    string
+	Content   string
+	Files     []string
+	Archived  bool
+	Enabled   bool
+	AlwaysUse bool
 }
 
 templ Skills(projects []models.Project, currentProjectID string, skills []SkillCard, canManage bool) {
@@ -38,7 +39,11 @@ func skillSearchText(skill SkillCard) string {
 	if !skill.Enabled {
 		enabledStatus = "disabled"
 	}
-	return strings.TrimSpace(skill.Handle + " " + skill.Name + " " + skill.Description + " " + skill.Scope + " " + skill.Source + " " + status + " " + enabledStatus)
+	alwaysUseStatus := ""
+	if skill.AlwaysUse {
+		alwaysUseStatus = "always use"
+	}
+	return strings.TrimSpace(skill.Handle + " " + skill.Name + " " + skill.Description + " " + skill.Scope + " " + skill.Source + " " + status + " " + enabledStatus + " " + alwaysUseStatus)
 }
 
 func defaultSkillBodyTemplate() string {
@@ -105,6 +110,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 						data-skill-content={ skill.Content }
 						data-skill-files={ strings.Join(skill.Files, "\n") }
 						data-skill-enabled={ func() string { if skill.Enabled { return "true" } else { return "false" } }() }
+						data-skill-always-use={ func() string { if skill.AlwaysUse { return "true" } else { return "false" } }() }
 						data-search-card
 						data-search-text={ skillSearchText(skill) }
 						onclick="editSkillFromData(this)"
@@ -117,7 +123,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
 										</svg>
 									</label>
-									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-56 border border-base-300">
 										<li>
 											<button onclick="editSkillFromData(this.closest('[data-skill-handle]'))">Edit</button>
 										</li>
@@ -128,6 +134,15 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 										} else {
 											<li>
 												<button data-skill-handle={ skill.Handle } data-skill-scope={ skill.Scope } onclick="setSkillEnabled(this, true)">Enable</button>
+											</li>
+										}
+										if skill.AlwaysUse {
+											<li>
+												<button data-skill-handle={ skill.Handle } data-skill-scope={ skill.Scope } onclick="setSkillAlwaysUse(this, false)">Remove always use</button>
+											</li>
+										} else {
+											<li>
+												<button data-skill-handle={ skill.Handle } data-skill-scope={ skill.Scope } onclick="setSkillAlwaysUse(this, true)">Set always use</button>
 											</li>
 										}
 										<li>
@@ -145,6 +160,9 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 								}
 								<div class="flex flex-wrap gap-2 mt-2">
 									<span class="badge badge-outline badge-sm">{ skill.Scope }</span>
+									if skill.AlwaysUse {
+										<span class="badge badge-primary badge-sm">Always use</span>
+									}
 									if !skill.Enabled {
 										<span class="badge badge-warning badge-sm">Disabled</span>
 									}
@@ -389,6 +407,32 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 					}
 				}).catch(function(err) {
 					alert(err.message || 'Failed to ' + action.toLowerCase() + ' skill.');
+				});
+			}
+
+			function setSkillAlwaysUse(button, alwaysUse) {
+				var handle = button.dataset.skillHandle || '';
+				var scope = button.dataset.skillScope || 'project';
+				if (!handle) return;
+				var action = alwaysUse ? 'Set always use for' : 'Remove always use from';
+				if (!confirm(action + ' skill "' + handle + '"?')) return;
+				fetch('/skills/' + encodeURIComponent(handle) + '/always_use' + currentSkillsProjectQuery(), {
+					method: 'POST',
+					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
+					body: JSON.stringify({always_use: alwaysUse, scope: scope})
+				}).then(function(resp) {
+					if (!resp.ok) {
+						return resp.text().then(function(text) { throw new Error(text || 'Failed to update always use setting.'); });
+					}
+					return resp.text();
+				}).then(function(html) {
+					var container = document.getElementById('skills-container');
+					if (container) {
+						container.outerHTML = html;
+						if (window.htmx) htmx.process(document.getElementById('skills-container'));
+					}
+				}).catch(function(err) {
+					alert(err.message || 'Failed to update always use setting.');
 				});
 			}
 
