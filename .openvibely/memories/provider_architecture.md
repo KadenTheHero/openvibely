@@ -31,7 +31,7 @@ Provider facts:
 - OpenAI supports Responses API, Completions API, and Codex CLI fallback.
 - OpenAI Responses `SendAgentic` does Codex-style client-side history compaction for API key and OAuth flows.
 - OpenAI compaction uses a dedicated compact prompt and preserves both the opening task objective and newest context; it compacts prior history only, so it does not fire on first/simple turns with empty history.
-- OpenAI OAuth API calls append extra embedded `Working with the user` system-prompt guidance from `internal/llm/prompt/openai_oauth_working_with_user.txt` via `internal/llm/prompt/openai_oauth_prompt.go`; this guidance is OAuth-specific rather than shared across all providers and is roughly 7k chars / 1.5k-1.8k tokens, not enough to explain large 30k+ input-token observations by itself.
+- As of task `f741edb81ccf4445e54f75245ffb98bb`, OpenAI OAuth no longer appends an extra provider-specific `Working with the user` system-prompt file; `internal/llm/prompt/openai_oauth_prompt.go` and `internal/llm/prompt/openai_oauth_working_with_user.txt` were removed, and OpenAI OAuth now uses the shared base system prompt plus provider-neutral worktree/project/lifecycle instructions like Anthropic.
 - Anthropic has no equivalent provider-specific `working_with_user` prompt file; Anthropic task/chat requests use the shared base system prompt plus provider-neutral worktree/project/lifecycle instructions.
 - Anthropic uses `ProviderAnthropic`; OAuth/API key path uses `pkg/anthropicclient`; CLI path uses subprocess. Helpers live in `models/llm_config.go`.
 - CLI-backed provider support for Anthropic and OpenAI/Codex remains a backend compatibility path, but CLI auth/options should not be exposed in the user-facing Models setup dialog; API key/OAuth setup paths remain user-facing where applicable.
@@ -47,6 +47,7 @@ Provider-native tools:
 - Anthropic sends direct versioned tool types such as `web_search_20250305` and `web_fetch_20250910` with names `web_search`/`web_fetch` through mixed raw-tools JSON.
 - Anthropic provider-managed result block types match generically as `*_tool_result` and are carried forward in assistant history between `pause_turn` continuations.
 - Anthropic agentic `tool_use` and `server_tool_use` blocks must always carry object-valued `input`; empty, nil, null, or invalid inputs are serialized as `{}`, and streaming history preserves `input` from `content_block_start` when no `input_json_delta` arrives.
+- OpenAI Responses agentic `function_call.arguments` is the analogous replay/tool-execution field, but it is a JSON string rather than an object; missing or empty arguments are normalized to `"{}"` before local tool execution and turn-continuation replay.
 
 Runtime tool facts:
 - Runtime tools are request-scoped, provider-generic, and carried through the LLM service/provider adapter path.

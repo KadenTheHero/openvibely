@@ -119,6 +119,17 @@ type agenticBlock struct {
 	IsError   bool            `json:"is_error,omitempty"`    // tool_result
 }
 
+// MarshalJSON ensures tool-use blocks always include an object-valued input.
+// Anthropic rejects echoed assistant tool_use content when the input field is
+// omitted, even for empty-input tools.
+func (b agenticBlock) MarshalJSON() ([]byte, error) {
+	type Alias agenticBlock
+	if b.Type == "tool_use" || b.Type == "server_tool_use" {
+		b.Input = normalizeAnthropicToolInput(b.Input)
+	}
+	return json.Marshal(Alias(b))
+}
+
 // thinkingConfig configures extended thinking for the API request.
 // Use BudgetTokens > 0 for a fixed budget, or 0 for adaptive (API decides).
 type thinkingConfig struct {
@@ -441,6 +452,18 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
 
 	return result, nil
+}
+
+func normalizeAnthropicToolInput(input json.RawMessage) json.RawMessage {
+	raw := bytes.TrimSpace(input)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return json.RawMessage(`{}`)
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return json.RawMessage(raw)
 }
 
 func isAnthropicProviderNativeToolName(name string) bool {
@@ -987,6 +1010,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 		id            string          // for tool_use
 		name          string          // for tool_use
 		inputJSON     strings.Builder // for tool_use (accumulated partial JSON)
+		startInput    json.RawMessage // for tool_use input present in content_block_start
 		content       strings.Builder // for provider tool result blocks
 		inToolCallTag bool            // true when inside <tool_call>...</tool_call> in text
 		tagBuf        strings.Builder // buffer for detecting partial <tool_call> tags
@@ -1038,6 +1062,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 					ID        string          `json:"id,omitempty"`
 					ToolUseID string          `json:"tool_use_id,omitempty"`
 					Name      string          `json:"name,omitempty"`
+					Input     json.RawMessage `json:"input,omitempty"`
 					Content   json.RawMessage `json:"content,omitempty"`
 				}
 				if err := json.Unmarshal(event.ContentBlock, &cb); err == nil {
@@ -1046,9 +1071,10 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 						blockID = cb.ToolUseID
 					}
 					bs := &blockState{
-						typ:  cb.Type,
-						id:   blockID,
-						name: cb.Name,
+						typ:        cb.Type,
+						id:         blockID,
+						name:       cb.Name,
+						startInput: cb.Input,
 					}
 					// Compaction and provider tool result blocks may include content
 					// in the start event.
@@ -1173,7 +1199,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 					Text: cleanedText,
 				})
 			case "tool_use":
-				inputRaw := json.RawMessage(bs.inputJSON.String())
+				inputRaw := completedAnthropicToolInput(bs.inputJSON.String(), bs.startInput)
 				result.contentBlocks = append(result.contentBlocks, agenticBlock{
 					Type:  "tool_use",
 					ID:    bs.id,
@@ -1197,7 +1223,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 				// Provider-executed server tool (web search, web fetch).
 				// Treated like tool_use for round-tripping and UI, but the
 				// provider handles execution — no local ExecuteTool call.
-				inputRaw := json.RawMessage(bs.inputJSON.String())
+				inputRaw := completedAnthropicToolInput(bs.inputJSON.String(), bs.startInput)
 				result.contentBlocks = append(result.contentBlocks, agenticBlock{
 					Type:  "server_tool_use",
 					ID:    bs.id,
@@ -1306,6 +1332,13 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 	}
 
 	return result, scanner.Err()
+}
+
+func completedAnthropicToolInput(inputDeltas string, startInput json.RawMessage) json.RawMessage {
+	if strings.TrimSpace(inputDeltas) != "" {
+		return normalizeAnthropicToolInput(json.RawMessage(inputDeltas))
+	}
+	return normalizeAnthropicToolInput(startInput)
 }
 
 // reToolCallBlock matches <tool_call>...</tool_call> XML blocks that some models

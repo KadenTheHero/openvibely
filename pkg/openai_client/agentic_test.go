@@ -98,6 +98,70 @@ func TestParseAgenticStream_WithToolUse(t *testing.T) {
 	}
 }
 
+func TestParseAgenticStream_FunctionCallMissingDoneArgumentsUsesDeltas(t *testing.T) {
+	stream := buildSSE([]string{
+		`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","call_id":"call_1","name":"read_file"}}`,
+		`{"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"file_"}`,
+		`{"type":"response.function_call_arguments.delta","output_index":1,"delta":"path\": \"main.go\"}"}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"call_1","name":"read_file"}}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":10,"output_tokens":5}}}`,
+	})
+
+	client := &Client{auth: &StoredAuth{APIKey: "test"}}
+	result, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.toolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(result.toolCalls))
+	}
+	if result.toolCalls[0].Arguments != `{"file_path": "main.go"}` {
+		t.Fatalf("tool call arguments = %q, want streamed delta args", result.toolCalls[0].Arguments)
+	}
+	if len(result.outputItems) != 1 {
+		t.Fatalf("expected 1 output item, got %d", len(result.outputItems))
+	}
+	item, ok := result.outputItems[0].(map[string]any)
+	if !ok {
+		t.Fatalf("output item type = %T, want map[string]any", result.outputItems[0])
+	}
+	if got := item["arguments"]; got != `{"file_path": "main.go"}` {
+		t.Fatalf("output item arguments = %#v, want streamed delta args", got)
+	}
+}
+
+func TestParseAgenticStream_FunctionCallMissingArgumentsDefaultsToEmptyObject(t *testing.T) {
+	stream := buildSSE([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"read_file"}}`,
+		`{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"read_file"}}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":10,"output_tokens":5}}}`,
+	})
+
+	client := &Client{auth: &StoredAuth{APIKey: "test"}}
+	result, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.toolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(result.toolCalls))
+	}
+	if result.toolCalls[0].Arguments != "{}" {
+		t.Fatalf("tool call arguments = %q, want {}", result.toolCalls[0].Arguments)
+	}
+	if len(result.outputItems) != 1 {
+		t.Fatalf("expected 1 output item, got %d", len(result.outputItems))
+	}
+	item, ok := result.outputItems[0].(map[string]any)
+	if !ok {
+		t.Fatalf("output item type = %T, want map[string]any", result.outputItems[0])
+	}
+	if got := item["arguments"]; got != "{}" {
+		t.Fatalf("output item arguments = %#v, want {}", got)
+	}
+}
+
 func TestParseAgenticStream_MultipleToolCalls(t *testing.T) {
 	stream := buildSSE([]string{
 		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"read_file"}}`,

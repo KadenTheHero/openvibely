@@ -118,6 +118,62 @@ func TestParseAgenticStream_WithToolUse(t *testing.T) {
 	}
 }
 
+func TestParseAgenticStream_ToolUseWithoutInputDeltaDefaultsEmptyObject(t *testing.T) {
+	stream := buildSSE([]string{
+		`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":10}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_empty","name":"web_search_20250305"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"message_delta","delta":{"stop_reason":"pause_turn"},"usage":{"output_tokens":4}}`,
+		`{"type":"message_stop"}`,
+	})
+
+	client := &Client{}
+	result, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.contentBlocks) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(result.contentBlocks))
+	}
+	block := result.contentBlocks[0]
+	if string(block.Input) != "{}" {
+		t.Fatalf("block input = %q, want {}", string(block.Input))
+	}
+	data, err := json.Marshal(agenticMessage{Role: "assistant", Content: result.contentBlocks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"input":{}`) {
+		t.Fatalf("assistant history missing empty tool_use input object: %s", data)
+	}
+}
+
+func TestParseAgenticStream_ToolUseStartInputPreservedWithoutDelta(t *testing.T) {
+	stream := buildSSE([]string{
+		`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":10}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_start","name":"web_fetch","input":{"url":"https://example.com"}}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"message_delta","delta":{"stop_reason":"pause_turn"},"usage":{"output_tokens":4}}`,
+		`{"type":"message_stop"}`,
+	})
+
+	client := &Client{}
+	result, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.contentBlocks) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(result.contentBlocks))
+	}
+	var input map[string]string
+	if err := json.Unmarshal(result.contentBlocks[0].Input, &input); err != nil {
+		t.Fatalf("unmarshal input: %v", err)
+	}
+	if input["url"] != "https://example.com" {
+		t.Fatalf("input.url = %q, want https://example.com", input["url"])
+	}
+}
+
 func TestParseAgenticStream_EmptyStream(t *testing.T) {
 	client := &Client{}
 	result, err := client.parseAgenticStream(strings.NewReader(""), nil, nil)
@@ -217,6 +273,42 @@ func TestAgenticBlockMarshal_ToolUse(t *testing.T) {
 	}
 	if m["name"] != "bash" {
 		t.Errorf("name = %v", m["name"])
+	}
+	input, ok := m["input"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("input = %T, want object", m["input"])
+	}
+	if input["command"] != "ls -la" {
+		t.Errorf("input.command = %v, want ls -la", input["command"])
+	}
+}
+
+func TestAgenticBlockMarshal_ToolUseEmptyInputIncludesObject(t *testing.T) {
+	for _, typ := range []string{"tool_use", "server_tool_use"} {
+		t.Run(typ, func(t *testing.T) {
+			block := agenticBlock{
+				Type: typ,
+				ID:   "toolu_empty",
+				Name: "web_search",
+			}
+
+			data, err := json.Marshal(block)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var m map[string]interface{}
+			if err := json.Unmarshal(data, &m); err != nil {
+				t.Fatal(err)
+			}
+			input, ok := m["input"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("marshaled %s missing object input: %s", typ, data)
+			}
+			if len(input) != 0 {
+				t.Fatalf("input = %#v, want empty object", input)
+			}
+		})
 	}
 }
 
@@ -1153,6 +1245,106 @@ func TestSendAgentic_PauseTurnContinuesServerToolLoop(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&toolUseCount); got == 0 {
 		t.Fatal("expected server web_search tool-use callback during pause_turn flow")
+	}
+}
+
+func TestSendAgentic_PauseTurnEchoesToolUseInputWhenMissingFromStream(t *testing.T) {
+	var turnCount int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turn := int(atomic.AddInt32(&turnCount, 1))
+		body, _ := io.ReadAll(r.Body)
+		var reqBody map[string]interface{}
+		if err := json.Unmarshal(body, &reqBody); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+
+		if turn == 2 {
+			msgs, ok := reqBody["messages"].([]interface{})
+			if !ok || len(msgs) < 2 {
+				t.Fatalf("turn 2 expected >=2 messages, got %#v", reqBody["messages"])
+			}
+			assistant, ok := msgs[1].(map[string]interface{})
+			if !ok {
+				t.Fatalf("turn 2 message 1 type mismatch: %#v", msgs[1])
+			}
+			if role, _ := assistant["role"].(string); role != "assistant" {
+				t.Fatalf("turn 2 message 1 role = %q, want assistant", role)
+			}
+			blocks, ok := assistant["content"].([]interface{})
+			if !ok || len(blocks) < 2 {
+				t.Fatalf("turn 2 assistant content expected >=2 blocks, got %#v", assistant["content"])
+			}
+			toolUse, ok := blocks[1].(map[string]interface{})
+			if !ok {
+				t.Fatalf("turn 2 assistant block 1 type mismatch: %#v", blocks[1])
+			}
+			if typ, _ := toolUse["type"].(string); typ != "tool_use" {
+				t.Fatalf("turn 2 assistant block 1 type = %q, want tool_use", typ)
+			}
+			input, ok := toolUse["input"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("turn 2 assistant tool_use missing object input: %#v", toolUse)
+			}
+			if len(input) != 0 {
+				t.Fatalf("turn 2 assistant tool_use input = %#v, want empty object", input)
+			}
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		if turn == 1 {
+			events := []string{
+				`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":20}}}`,
+				`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+				`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Searching..."}}`,
+				`{"type":"content_block_stop","index":0}`,
+				`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_web","name":"web_search_20250305"}}`,
+				`{"type":"content_block_stop","index":1}`,
+				`{"type":"message_delta","delta":{"stop_reason":"pause_turn"},"usage":{"output_tokens":8}}`,
+				`{"type":"message_stop"}`,
+			}
+			for _, evt := range events {
+				fmt.Fprintf(w, "data: %s\n\n", evt)
+			}
+			return
+		}
+
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_2","model":"claude-sonnet-4-20250514","usage":{"input_tokens":12}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Search completed."}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	client := NewWithAPIKey("test-key")
+	resp, err := client.SendAgentic(context.Background(), "search", &AgenticOptions{
+		Model:            "claude-sonnet-4-20250514",
+		MaxTokens:        2048,
+		MaxTurns:         3,
+		DisableTools:     true,
+		WebSearchEnabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt32(&turnCount); got != 2 {
+		t.Fatalf("turnCount = %d, want 2", got)
+	}
+	if !strings.Contains(resp.Text, "Search completed.") {
+		t.Fatalf("response text = %q, want final turn text", resp.Text)
 	}
 }
 

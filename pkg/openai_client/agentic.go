@@ -359,6 +359,22 @@ type openAIToolExecutionResult struct {
 	isError  bool
 }
 
+func normalizeOpenAIFunctionCallArguments(raw any) string {
+	args := strings.TrimSpace(stringFromAny(raw))
+	if args == "" {
+		return "{}"
+	}
+	return args
+}
+
+func completedOpenAIFunctionCallArguments(raw any, streamedArgs string) string {
+	args := strings.TrimSpace(stringFromAny(raw))
+	if args != "" {
+		return args
+	}
+	return normalizeOpenAIFunctionCallArguments(streamedArgs)
+}
+
 func executeOpenAIToolTasks(ctx context.Context, opts *AgenticOptions, tasks []openAIToolExecutionTask) []openAIToolExecutionResult {
 	if len(tasks) == 0 {
 		return nil
@@ -1195,14 +1211,37 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 				case "function_call":
 					callID := stringFromAny(item["call_id"])
 					name := stringFromAny(item["name"])
-					args := stringFromAny(item["arguments"])
+					fc := fnCalls[intFromAny(ev["output_index"])]
+					if fc == nil && callID != "" {
+						for _, candidate := range fnCalls {
+							if candidate != nil && candidate.callID == callID {
+								fc = candidate
+								break
+							}
+						}
+					}
+					streamedArgs := ""
+					if fc != nil {
+						streamedArgs = fc.args.String()
+						if callID == "" {
+							callID = fc.callID
+						}
+						if name == "" {
+							name = fc.name
+						}
+					}
+					args := completedOpenAIFunctionCallArguments(item["arguments"], streamedArgs)
 					if name != "" {
 						result.toolCalls = append(result.toolCalls, toolCallInfo{
 							CallID:    callID,
 							Name:      name,
 							Arguments: args,
 						})
-						// Add to output items for round-tripping
+						// Add to output items for round-tripping. OpenAI expects
+						// function_call input items to carry arguments as a JSON string;
+						// an empty object is valid, but an omitted field can make the
+						// next turn replay invalid.
+						item["arguments"] = args
 						result.outputItems = append(result.outputItems, item)
 					}
 				case "message":

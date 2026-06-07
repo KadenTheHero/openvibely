@@ -426,7 +426,7 @@ templ analyticsContent(currentProject *models.Project) {
 								async function loadUsageAnalytics(refreshUsage) {
 									try {
 										const groupBy = document.getElementById('groupBy').value;
-										const params = new URLSearchParams({ range: usageRangeParam(), group_by: groupBy });
+										const params = new URLSearchParams({ project_id: projectID, range: usageRangeParam(), group_by: groupBy });
 										if (refreshUsage) params.append('refresh', 'true');
 										const response = await fetch(`/api/analytics/usage?${params}`);
 										if (!response.ok) return;
