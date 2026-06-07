@@ -31,6 +31,9 @@ logs/
 !/.openvibely/skills/openvibely_release_workflow/scripts/
 /.openvibely/skills/openvibely_release_workflow/scripts/*
 !/.openvibely/skills/openvibely_release_workflow/scripts/*.sh
+!/.openvibely/skills/openvibely_worktree_merge_lineage_workflow/
+/.openvibely/skills/openvibely_worktree_merge_lineage_workflow/*
+!/.openvibely/skills/openvibely_worktree_merge_lineage_workflow/SKILL.md
 
 # Local SQLite runtime files
 openvibely.db
