@@ -84,3 +84,7 @@ always_use:
 ## openvibely_release_workflow
 
 [OpenVibely Release Workflow](openvibely_release_workflow/SKILL.md) — Automate the OpenVibely release process — preflight, artifact builds, changelog, and GitHub release — for a given semver version.
+
+## openvibely_local_resource_diagnostics
+
+[OpenVibely Local Resource Diagnostics](openvibely_local_resource_diagnostics/SKILL.md) — Inspect local macOS CPU, memory, and fan-pressure causes without disrupting OpenVibely or system processes.

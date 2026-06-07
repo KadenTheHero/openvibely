@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-06-06
+updated: 2026-06-07
 source: after_complete
-source_id: a21a336579af2b853222744d738f51f0
+source_id: c71470f9d7455108b1166a07bc62d86f
 confidence: high
 title: Provider Architecture
 ---
@@ -16,6 +16,7 @@ Architecture direction: consolidate model-call behavior around a normalized prov
 Current model-call shape as of 2026-06-06: OpenVibely already has a partial normalized `AgentRequest`, but it is built late, after entry-specific code has already decided where context lives. Initial worker tasks run lifecycle and typically carry selected-memory handle context through `ProjectInstructions`; chat/API chat and task-thread follow-ups share `processStreamingResponse` and carry follow-up selected-memory context through `ChatSystemContext`; queued task-thread inputs promote back into that follow-up path. Lifecycle-selected memories/skills and runtime tools are first carried through `context.Context` and extra-instruction helpers before `LLMService.callLLMDetailed` or `CallAgentDirectStreamingDetailed` constructs an `AgentRequest`. Provider adapters then make a second routing decision, which is the fragile seam that allowed OpenAI task-thread follow-ups to drop `ChatSystemContext` before the 2026-06-06 fix. Direct utility services such as architect/backlog/collision/insights/trend/upcoming calls use `LLMService.CallAgentDirect`/direct-style requests and generally do not run task/chat lifecycle memory routing unless deliberately redesigned as user/task turns.
 
 Provider paths:
+- Shared `internal/llm/stream.Writer` is the common streaming I/O path for OpenAI Responses/Completions/Chat, Anthropic API/OAuth and CLI, Codex CLI, and Ollama. Raw streamed model content must not be logged at normal/info level. The user prefers not to call a logging method on every LLM stream chunk; keep raw chunk logging disabled/commented unless actively debugging, while preserving UI streaming, persistence, callbacks, and operational metadata logs.
 - OpenAI supports Responses API, Completions API, and Codex CLI fallback. Responses `SendAgentic` does Codex-style client-side history compaction for API key and OAuth flows.
 - OpenAI compaction has pre-turn transcript-size estimation and mid-turn session-token ledger behavior using the latest observed turn footprint plus estimated locally appended items. If `context_length_exceeded` happens before threshold compaction, force-compact and retry that turn once.
 - OpenAI compaction uses a dedicated compact prompt (`openAICompactionInstructions` by default, optional override) rather than the full task system prompt. Preserve the compacted output from `/responses/compact` rather than re-summarizing/trimming it client-side.

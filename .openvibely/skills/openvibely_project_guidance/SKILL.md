@@ -31,6 +31,7 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 - Never write tests that hit real LLM APIs or spawn CLI subprocesses. Use `models.ProviderTest` with `SetLLMCaller(testutil.NewMockLLMCaller())`.
 - Strip `CLAUDECODE` from the environment when spawning Claude CLI subprocesses.
 - Never persist or log GitHub App installation access tokens, GitHub PATs, private-key material, OAuth tokens, API keys, or webhook secrets. Mint operation tokens per operation and keep token use in process.
+- Do not print raw prompts, streamed model tokens, provider payloads, OAuth/API-key data, or other content-carrying LLM data at info level. In high-frequency streaming paths, especially `internal/llm/stream.Writer`, do not call logging methods per chunk in normal code; leave raw stream `Debugf` instrumentation commented out and only temporarily uncomment it for a debugging session. For lower-frequency raw stream diagnostics outside hot chunk loops, use `internal/applog.Debugf` gated by `OPENVIBELY_LOG_LEVEL=debug`.
 - Server-side git commands that may contact remotes must run non-interactively and use the same GitHub operation-token environment injection as clone/push paths.
 - Use `TaskRepo.ClaimTask()` for atomic task claiming. Never set task status to `running` directly.
 - Use parameterized SQL with `?` placeholders.
@@ -131,17 +132,3 @@ go test ./internal/... -count=1 -timeout 60s  # Tests
 - Escape raw HTML-like tags before markdown parsing while preserving code fences/spans.
 - Centralize shared link, badge, loader, chat bubble, and semantic component styling instead of one-off utility strings.
 - Chat bubbles and input containers should not use visible borders; use depth/drop shadow.
-
-## Git And Worktrees
-
-- Chained child tasks must not dispatch until their parent reaches a terminal state.
-- Empty chained-task child category inherits the parent category; do not default it to backlog.
-- Capture branch lineage atomically with child creation.
-- Before deleting a parent branch, check for non-terminal descendants.
-- Reset merge status to `pending` only when a merged task follow-up produces new changes.
-- Failed tasks can still have uncommitted worktree edits; do not hide local merge actions solely because metadata says merged.
-- Startup auto-merge should run only on clean worktrees. Dirty worktrees must skip it.
-- If startup auto-merge conflicts, detect files, abort the merge, set conflict status, and return actionable error text.
-- Worktrees live at `.worktrees/task_<id>`; do not reconstruct paths as `repo/worktrees/<branch>`.
-- Orphan cleanup must not delete `.worktrees/task_<id>` when the task still exists but DB worktree fields are temporarily empty.
-- Tests that create temporary Git repositories for worktree setup must create the branch expected by `worktree_merge_target`, usually `main`.
