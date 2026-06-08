@@ -2474,3 +2474,101 @@ func TestProcessChatToggleAlert_NoMarker(t *testing.T) {
 		t.Errorf("expected output to be unchanged, got: %s", result)
 	}
 }
+
+// TestProcessChatModifySchedule_ReEnableSchedule verifies that re-enabling a
+// disabled schedule via the chat control plane sets Enabled=true and emits the
+// correct change marker.
+func TestProcessChatModifySchedule_ReEnableSchedule(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "ReEnable Project"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "agent", Provider: "anthropic", Model: "claude-3-5-sonnet-20241022", MaxTokens: 4096}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "ReEnable Task", Prompt: "p", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	if err := h.taskSvc.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	future := mustParseTime("2027-06-15T09:00:00Z")
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: future, NextRun: &future, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: false}
+	if err := h.scheduleRepo.Create(ctx, schedule); err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+
+	output := fmt.Sprintf(`[MODIFY_SCHEDULE]
+{"schedule_id": "%s", "enabled": true}
+[/MODIFY_SCHEDULE]`, schedule.ID)
+
+	result := h.processChatModifySchedule(ctx, "exec-reenable", project.ID, output)
+
+	if !contains(result, "enabled→true") {
+		t.Errorf("expected 'enabled→true' in result, got: %s", result)
+	}
+
+	updated, err := h.scheduleRepo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if !updated.Enabled {
+		t.Error("expected schedule.Enabled=true after re-enable via chat")
+	}
+}
+
+// TestProcessChatModifySchedule_DisablePreservesNextRun verifies that disabling
+// a schedule via the chat control plane does NOT wipe the existing NextRun
+// value — consistent with the HTTP ToggleScheduleEnabled handler.
+func TestProcessChatModifySchedule_DisablePreservesNextRun(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Preserve Project"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "agent", Provider: "anthropic", Model: "claude-3-5-sonnet-20241022", MaxTokens: 4096}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Preserve Task", Prompt: "p", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	if err := h.taskSvc.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Use a RepeatOnce schedule so ComputeNextRun always returns nil;
+	// if the fix is absent, NextRun would be wiped on disable.
+	future := mustParseTime("2027-09-01T08:00:00Z")
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: future, NextRun: &future, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	if err := h.scheduleRepo.Create(ctx, schedule); err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+
+	output := fmt.Sprintf(`[MODIFY_SCHEDULE]
+{"schedule_id": "%s", "enabled": false}
+[/MODIFY_SCHEDULE]`, schedule.ID)
+
+	result := h.processChatModifySchedule(ctx, "exec-preserve", project.ID, output)
+
+	if !contains(result, "enabled→false") {
+		t.Errorf("expected 'enabled→false' in result, got: %s", result)
+	}
+
+	updated, err := h.scheduleRepo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updated.Enabled {
+		t.Error("expected schedule.Enabled=false after disable via chat")
+	}
+	if updated.NextRun == nil {
+		t.Error("NextRun must be preserved when disabling via chat (was wiped — fix broken)")
+	}
+	if !updated.NextRun.Equal(future) {
+		t.Errorf("NextRun must equal original future time; got %v, want %v", updated.NextRun, future)
+	}
+}

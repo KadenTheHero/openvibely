@@ -1231,3 +1231,81 @@ func TestScheduleContent_ConsistentBorderStyling(t *testing.T) {
 		t.Fatal("timeline should not rely on browser-default dashed border rendering")
 	}
 }
+
+// TestBuildTaskOccurrenceMap_DisabledScheduleIncluded verifies that disabled
+// schedules are included in the occurrence map (displayed as paused, not hidden).
+func TestBuildTaskOccurrenceMap_DisabledScheduleIncluded(t *testing.T) {
+	startOfWeek := time.Date(2026, 2, 22, 0, 0, 0, 0, time.Local) // Sunday
+
+	runAt := time.Date(2026, 2, 25, 14, 0, 0, 0, time.Local).UTC() // Wednesday 14:00
+	task := repository.TaskWithSchedule{
+		Task: models.Task{ID: "disabled-task", ProjectID: "p1", Title: "Paused Task"},
+		Schedule: &models.Schedule{
+			ID:             "s-disabled",
+			TaskID:         "disabled-task",
+			RunAt:          runAt,
+			NextRun:        &runAt,
+			RepeatType:     models.RepeatOnce,
+			RepeatInterval: 1,
+			Enabled:        false,
+		},
+	}
+
+	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+	key := localKey(runAt)
+	if len(occurrenceMap[key]) != 1 {
+		t.Errorf("disabled schedule must appear in occurrence map at %s, got %d items", key, len(occurrenceMap[key]))
+	}
+}
+
+// TestScheduleContent_DisabledScheduleRenderedWithGreyedStyle renders the
+// schedule page for a week containing a disabled schedule and asserts that the
+// HTML contains the greyed/non-draggable paused card markup.
+func TestScheduleContent_DisabledScheduleRenderedWithGreyedStyle(t *testing.T) {
+	// Compute a task that falls on Wednesday of the NEXT week so it is always
+	// in the rendered range regardless of which day of the week the test runs.
+	now := time.Now()
+	startOfNextWeek := now
+	for startOfNextWeek.Weekday() != time.Sunday {
+		startOfNextWeek = startOfNextWeek.AddDate(0, 0, 1)
+	}
+	startOfNextWeek = time.Date(startOfNextWeek.Year(), startOfNextWeek.Month(), startOfNextWeek.Day(), 0, 0, 0, 0, startOfNextWeek.Location())
+	wednesday := startOfNextWeek.AddDate(0, 0, 3)
+	wednesday = time.Date(wednesday.Year(), wednesday.Month(), wednesday.Day(), 14, 0, 0, 0, wednesday.Location())
+	nextRunUTC := wednesday.UTC()
+
+	disabledTask := repository.TaskWithSchedule{
+		Task: models.Task{ID: "paused-task", ProjectID: "p1", Title: "Paused Task"},
+		Schedule: &models.Schedule{
+			ID:             "s-paused",
+			TaskID:         "paused-task",
+			RunAt:          nextRunUTC,
+			NextRun:        &nextRunUTC,
+			RepeatType:     models.RepeatOnce,
+			RepeatInterval: 1,
+			Enabled:        false,
+		},
+	}
+
+	currentProject := &models.Project{ID: "p1", Name: "P1"}
+	var buf bytes.Buffer
+	// weekOffset=1 targets next week where our Wednesday occurrence lives.
+	err := ScheduleContent(currentProject, []repository.TaskWithSchedule{disabledTask}, 1, nil).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "opacity-50 cursor-not-allowed") {
+		t.Error("expected greyed/cursor-not-allowed style for disabled schedule card")
+	}
+	if !strings.Contains(out, "paused") {
+		t.Error("expected 'paused' text for disabled schedule card")
+	}
+	if !strings.Contains(out, `draggable="false"`) {
+		t.Error("expected draggable=\"false\" for disabled schedule card")
+	}
+	if !strings.Contains(out, "line-through") {
+		t.Error("expected line-through CSS class on disabled schedule card title")
+	}
+}

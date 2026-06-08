@@ -1570,7 +1570,19 @@ func (s *SlackService) slackModifySchedule(ctx context.Context, projectID string
 	if len(changes) == 0 {
 		return fmt.Sprintf("No changes specified for schedule on task %q.", task.Title)
 	}
-	schedule.NextRun = schedule.ComputeNextRun(time.Now())
+	// Match HTTP-toggle semantics: recompute only when time-related fields
+	// changed; on re-enable recompute stale NextRun; on disable preserve it.
+	slackTimeChanged := req.Time != "" || req.Repeat != "" || req.Interval != nil
+	if slackTimeChanged {
+		schedule.NextRun = schedule.ComputeNextRun(time.Now())
+	} else if req.Enabled != nil && *req.Enabled {
+		sNow := time.Now()
+		if schedule.NextRun == nil || schedule.NextRun.Before(sNow) {
+			if next := schedule.ComputeNextRun(sNow); next != nil {
+				schedule.NextRun = next
+			}
+		}
+	}
 	if err := s.scheduleRepo.Update(ctx, schedule); err != nil {
 		return fmt.Sprintf("Error updating schedule for task %q: %v", task.Title, err)
 	}
@@ -1982,7 +1994,19 @@ func (s *SlackService) processModifySchedule(ctx context.Context, execID, projec
 			results = append(results, fmt.Sprintf("- No changes specified for schedule on task %q", task.Title))
 			continue
 		}
-		schedule.NextRun = schedule.ComputeNextRun(time.Now())
+		// Match HTTP-toggle semantics: recompute only when time-related fields
+		// changed; on re-enable recompute stale NextRun; on disable preserve it.
+		batchTimeChanged := req.Time != "" || req.Repeat != "" || req.Interval != nil
+		if batchTimeChanged {
+			schedule.NextRun = schedule.ComputeNextRun(time.Now())
+		} else if req.Enabled != nil && *req.Enabled {
+			bNow := time.Now()
+			if schedule.NextRun == nil || schedule.NextRun.Before(bNow) {
+				if next := schedule.ComputeNextRun(bNow); next != nil {
+					schedule.NextRun = next
+				}
+			}
+		}
 		if err := s.scheduleRepo.Update(ctx, schedule); err != nil {
 			results = append(results, fmt.Sprintf("- Error updating schedule for task %q: %v", task.Title, err))
 			continue

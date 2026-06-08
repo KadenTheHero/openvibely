@@ -2339,9 +2339,21 @@ func (h *Handler) processChatModifySchedule(ctx context.Context, execID, project
 			continue
 		}
 
-		// Recompute next_run
-		nextRun := schedule.ComputeNextRun(time.Now())
-		schedule.NextRun = nextRun
+		// Recompute next_run only when time-related fields changed. When only
+		// enabled changes, match HTTP-toggle semantics: preserve NextRun on
+		// disable; recompute stale/nil NextRun on re-enable.
+		timeFieldsChanged := req.Time != "" || req.Repeat != "" || req.Interval != nil || len(req.Days) > 0
+		if timeFieldsChanged {
+			schedule.NextRun = schedule.ComputeNextRun(time.Now())
+		} else if req.Enabled != nil && *req.Enabled {
+			now := time.Now()
+			if schedule.NextRun == nil || schedule.NextRun.Before(now) {
+				if next := schedule.ComputeNextRun(now); next != nil {
+					schedule.NextRun = next
+				}
+			}
+		}
+		// Disabling with no time changes: preserve NextRun as-is.
 
 		if err := h.scheduleRepo.Update(ctx, schedule); err != nil {
 			applog.Infof("[handler] processChatModifySchedule error updating schedule: %v", err)

@@ -321,3 +321,74 @@ func TestScheduleRepo_Delete(t *testing.T) {
 		t.Error("expected nil after delete")
 	}
 }
+
+func TestScheduleRepo_ToggleEnabled_Persistence(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+
+	task := createTestTask(t, taskRepo)
+	future := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+
+	sched := &models.Schedule{
+		TaskID:         task.ID,
+		RunAt:          future,
+		RepeatType:     models.RepeatDaily,
+		RepeatInterval: 1,
+		Enabled:        true,
+	}
+	if err := repo.Create(ctx, sched); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	schedID := sched.ID
+
+	// Disable — NextRun pointer is set by Create; verify it is preserved.
+	if err := repo.ToggleEnabled(ctx, schedID, false); err != nil {
+		t.Fatalf("ToggleEnabled(false): %v", err)
+	}
+	got, err := repo.GetByID(ctx, schedID)
+	if err != nil {
+		t.Fatalf("GetByID after disable: %v", err)
+	}
+	if got.Enabled {
+		t.Error("expected Enabled=false after disabling")
+	}
+	// NextRun must be preserved (not wiped) when disabling.
+	if got.NextRun == nil {
+		t.Error("expected NextRun to be preserved after disabling")
+	}
+
+	// Re-enable.
+	if err := repo.ToggleEnabled(ctx, schedID, true); err != nil {
+		t.Fatalf("ToggleEnabled(true): %v", err)
+	}
+	got, err = repo.GetByID(ctx, schedID)
+	if err != nil {
+		t.Fatalf("GetByID after re-enable: %v", err)
+	}
+	if !got.Enabled {
+		t.Error("expected Enabled=true after re-enabling")
+	}
+
+	// Round-trip: disable again then verify ListDue excludes it.
+	if err := repo.ToggleEnabled(ctx, schedID, false); err != nil {
+		t.Fatalf("second ToggleEnabled(false): %v", err)
+	}
+	// Set NextRun to the past so it would normally be due.
+	past := time.Now().Add(-time.Hour).UTC()
+	sched.ID = schedID
+	sched.NextRun = &past
+	if err := repo.Update(ctx, sched); err != nil {
+		t.Fatalf("Update NextRun to past: %v", err)
+	}
+	due, err := repo.ListDue(ctx, time.Now())
+	if err != nil {
+		t.Fatalf("ListDue: %v", err)
+	}
+	for _, d := range due {
+		if d.ID == schedID {
+			t.Error("disabled schedule must not appear in ListDue")
+		}
+	}
+}

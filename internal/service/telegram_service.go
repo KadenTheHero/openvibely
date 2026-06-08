@@ -2293,8 +2293,19 @@ func (s *TelegramService) processModifySchedule(ctx context.Context, execID, pro
 			continue
 		}
 
-		nextRun := schedule.ComputeNextRun(time.Now())
-		schedule.NextRun = nextRun
+		// Match HTTP-toggle semantics: recompute only when time-related fields
+		// changed; on re-enable recompute stale NextRun; on disable preserve it.
+		tgTimeChanged := req.Time != "" || req.Repeat != "" || req.Interval != nil || len(req.Days) > 0
+		if tgTimeChanged {
+			schedule.NextRun = schedule.ComputeNextRun(time.Now())
+		} else if req.Enabled != nil && *req.Enabled {
+			tNow := time.Now()
+			if schedule.NextRun == nil || schedule.NextRun.Before(tNow) {
+				if next := schedule.ComputeNextRun(tNow); next != nil {
+					schedule.NextRun = next
+				}
+			}
+		}
 
 		if err := s.scheduleRepo.Update(ctx, schedule); err != nil {
 			applog.Infof("[telegram] processModifySchedule error updating schedule: %v", err)

@@ -574,3 +574,86 @@ func TestTaskDetailContent_AgentSelectorAllowsNoAgentSelection(t *testing.T) {
 		t.Fatalf("edit form should not need a sentinel for the no-agent option, body=%s", body)
 	}
 }
+
+// TestTaskDetailContent_ScheduleEnabledState verifies the task detail schedule
+// card renders the correct controls and badges based on Schedule.Enabled.
+func TestTaskDetailContent_ScheduleEnabledState(t *testing.T) {
+	runAt := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
+	nextRun := runAt
+
+	tests := []struct {
+		name           string
+		enabled        bool
+		wantBadge      string   // text that MUST appear
+		wantNoBadge    string   // text that must NOT appear
+		wantButton     string   // button label that MUST appear
+		wantNoButton   string   // button label that must NOT appear
+		wantLineThrough bool    // expect line-through on next-run timestamp
+	}{
+		{
+			name:           "disabled schedule shows Disabled badge and Resume button",
+			enabled:        false,
+			wantBadge:      "Disabled",
+			wantNoBadge:    "",
+			wantButton:     "Resume",
+			wantNoButton:   "Pause",
+			wantLineThrough: true,
+		},
+		{
+			name:           "enabled schedule shows no Disabled badge and Pause button",
+			enabled:        true,
+			wantBadge:      "",
+			wantNoBadge:    "Disabled",
+			wantButton:     "Pause",
+			wantNoButton:   "Resume",
+			wantLineThrough: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &models.Task{
+				ID:        "task-sched-1",
+				Title:     "My Task",
+				ProjectID: "p1",
+				Category:  models.CategoryScheduled,
+				Status:    models.StatusPending,
+			}
+			schedules := []models.Schedule{{
+				ID:             "sched-1",
+				TaskID:         task.ID,
+				RunAt:          runAt,
+				NextRun:        &nextRun,
+				RepeatType:     models.RepeatDaily,
+				RepeatInterval: 1,
+				Enabled:        tc.enabled,
+			}}
+
+			var buf bytes.Buffer
+			err := TaskDetailContent(task, nil, nil, schedules, nil, nil, nil, "schedules", nil).Render(context.Background(), &buf)
+			if err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			out := buf.String()
+
+			if tc.wantBadge != "" && !strings.Contains(out, tc.wantBadge) {
+				t.Errorf("expected %q badge, not found in output", tc.wantBadge)
+			}
+			if tc.wantNoBadge != "" && strings.Contains(out, tc.wantNoBadge) {
+				t.Errorf("expected %q badge to be absent, but found in output", tc.wantNoBadge)
+			}
+			if !strings.Contains(out, tc.wantButton) {
+				t.Errorf("expected %q button, not found in output", tc.wantButton)
+			}
+			if strings.Contains(out, ">"+tc.wantNoButton+"<") {
+				t.Errorf("expected %q button to be absent, but found in output", tc.wantNoButton)
+			}
+			if tc.wantLineThrough && !strings.Contains(out, "line-through") {
+				t.Error("expected line-through CSS class for disabled next-run timestamp")
+			}
+			if !tc.wantLineThrough && strings.Contains(out, "line-through") {
+				t.Error("expected no line-through CSS class for enabled schedule")
+			}
+		})
+	}
+}
