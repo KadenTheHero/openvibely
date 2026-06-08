@@ -10,4 +10,4 @@
 - [Worktree and Lineage](worktree_and_lineage.md) - Isolated worktrees, merge/recovery behavior, cleanup policy, stale-metadata handling, and chained-task lineage facts.
 - [Integrations and Channels](integrations_and_channels.md) - GitHub, inbound webhook, Slack, Telegram, and channel UI/product-state facts.
 - [Usage Analytics](usage_analytics.md) - Local LLM usage tracking, provider token normalization, Analytics UI/API behavior, and OAuth account usage snapshot rules.
-- [Testing Coverage and Performance](testing_coverage_and_performance.md) - Durable Go test-suite coverage baseline, major uncovered areas, and runtime/CPU hotspots from the 2026-06-07 audit.
+- [Testing Coverage and Performance](testing_coverage_and_performance.md) - Go test-suite coverage baseline, generated templ coverage policy, durable coverage priorities, and runtime/validation caveats.

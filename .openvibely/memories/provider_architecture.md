@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-06-07
+updated: 2026-06-08
 source: task
-source_id: f741edb81ccf4445e54f75245ffb98bb
+source_id: 8a474c7b49a4363832169d74bb3c296a
 confidence: high
 title: Provider Architecture
 ---
@@ -34,8 +34,10 @@ Provider facts:
 - `Task.AgentDefinitionID` selects persona/system prompt/skills, not the provider/model; provider still comes from the selected `LLMConfig`.
 - OpenAI supports Responses API, Completions API, and Codex CLI fallback.
 - OpenAI Responses `SendAgentic` does Codex-style client-side history compaction for API key and OAuth flows.
+- Fine-grained mid-run steering is supported where OpenVibely owns the provider/tool loop and can inject at model-step boundaries, including OpenAI Responses agentic and Anthropic API/OAuth agentic paths. CLI/fallback transports such as Anthropic CLI, Codex CLI, Ollama, and OpenAI fallback paths remain coarse-grained because OpenVibely sees them as subprocess/provider calls rather than internal tool loops.
+- Provider adapter retries include a steering retry-reset hook: rows claimed during a failed retryable attempt are restored to guarded steering state before the next attempt, so a later successful attempt must actually receive the steer before it can be committed.
 - OpenAI compaction uses a dedicated compact prompt and preserves both the opening task objective and newest context; it compacts prior history only, so it does not fire on first/simple turns with empty history.
-- As of task `f741edb81ccf4445e54f75245ffb98bb`, OpenAI OAuth no longer appends an extra provider-specific `Working with the user` system-prompt file; `internal/llm/prompt/openai_oauth_prompt.go` and `internal/llm/prompt/openai_oauth_working_with_user.txt` were removed, and OpenAI OAuth now uses the shared base system prompt plus provider-neutral worktree/project/lifecycle instructions like Anthropic.
+- OpenAI OAuth no longer appends an extra provider-specific `Working with the user` system-prompt file; `internal/llm/prompt/openai_oauth_prompt.go` and `internal/llm/prompt/openai_oauth_working_with_user.txt` were removed, and OpenAI OAuth now uses the shared base system prompt plus provider-neutral worktree/project/lifecycle instructions like Anthropic.
 - Anthropic has no equivalent provider-specific `working_with_user` prompt file; Anthropic task/chat requests use the shared base system prompt plus provider-neutral worktree/project/lifecycle instructions.
 - Anthropic uses `ProviderAnthropic`; OAuth/API key path uses `pkg/anthropicclient`; CLI path uses subprocess. Helpers live in `models/llm_config.go`.
 - CLI-backed provider support for Anthropic and OpenAI/Codex remains a backend compatibility path, but CLI auth/options should not be exposed in the user-facing Models setup dialog; API key/OAuth setup paths remain user-facing where applicable.

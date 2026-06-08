@@ -254,9 +254,6 @@ After `release-notes.sh` runs, the agent must:
    - Inspect related diffs or touched paths for ambiguous commits when practical instead of guessing from subjects alone.
    - Sanity-check product and model names against the actual changed code/docs before publishing; do not rely on ambiguous commit subjects for exact marketing names or version numbers.
    - **Omit minor model version additions** (e.g. "Model X added to model selector") unless the model is a primary release feature. Adding a model to a dropdown is a maintenance change, not a release highlight. Omit it entirely or fold it into a generic "model updates" entry only if there are several such additions.
-   - **Omit bug fixes and reliability patches** unless they fix a critical, user-visible breakage that affected a core workflow. Individual crash fixes, scroll bugs, state resets, worker slot leaks, UI polish items (light/dark mode rendering, panel detail tweaks), and narrow edge-case corrections are too low-level for release notes. If several related reliability fixes exist, fold them into a single understated sentence at most, or omit entirely.
-   - **Omit UI panel detail changes** (e.g. column widths, button placement, diff rendering toggles, color coding in a sub-panel) — these are incremental polish, not release features.
-   - The bar for inclusion is: would a developer choosing whether to upgrade specifically care about this? If the answer is only "maybe, if they hit that exact bug", leave it out.
 4. **Replace both placeholder blocks** in `RELEASE_NOTES.md`: `AI_HIGHLIGHTS_PLACEHOLDER` and `AI_CHANGELOG_PLACEHOLDER`.
 5. Confirm the notes look correct before running `release-publish.sh`: no placeholder text, no duplicated commit-derived bullets, no old highlights from a previous release, no leaked secrets, and no claims about Docker/artifacts/features that the scripts did not actually build or verify.
 
@@ -369,6 +366,18 @@ Use the smallest repair that fixes the public artifact:
 6. Verify the live release after upload by listing assets and downloading/inspecting at least one replaced asset from GitHub, not just the local `dist/` copy.
 
 Never silently force-move a tag or delete release assets just because preflight reports a tag collision. Only do this for an already-published release repair after the user has asked to keep the same version or otherwise authorized mutation of the existing release.
+
+### Release branch cleanup after publish
+
+After a successful release, the `v<version>` tag is the canonical source reference for the shipped code. A temporary `release/v<version>` branch can usually be deleted, but inspect it before deletion instead of assuming it is redundant:
+
+```bash
+git fetch --prune <remote>
+git log --oneline <remote>/release/v<version> ^<remote>/main
+git show --stat <commit>
+```
+
+Preserve any durable source, docs, or skill commits that exist only on the release branch by cherry-picking or otherwise landing them on `main` first. Do not merge or cherry-pick committed `dist/<version>/` binary artifacts into `main`; release binaries belong in GitHub release assets, not source history. Once needed non-artifact commits are on `main` and the release tag points at the intended commit, delete the temporary branch with `git push <remote> --delete release/v<version>`.
 
 ---
 

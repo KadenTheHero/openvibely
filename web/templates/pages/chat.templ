@@ -1,6 +1,9 @@
 package pages
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -31,14 +34,38 @@ func chatQueuedSteerEndpoint(input models.ThreadInput) string {
 }
 
 // Chat renders the full chat page with sidebar
-templ Chat(projects []models.Project, currentProjectID string, agents []models.LLMConfig, chatHistory []models.Execution, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool) {
+templ Chat(projects []models.Project, currentProjectID string, agents []models.LLMConfig, chatHistory []models.Execution, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int) {
 	@layout.Base("Chat", projects, currentProjectID) {
-		@ChatContent(agents, chatHistory, currentProjectID, chatAttachments, pendingInputs, latestPlanComplete)
+		@ChatContent(agents, chatHistory, currentProjectID, chatAttachments, pendingInputs, latestPlanComplete, hasEarlier, windowLimit)
+	}
+}
+
+templ ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[string][]models.ChatAttachment, currentProjectID string, hasEarlier bool, windowLimit int) {
+	if hasEarlier && len(chatHistory) > 0 {
+		@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
+	}
+	for _, exec := range chatHistory {
+		<div class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
+			if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
+				@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments)
+			} else {
+				@components.ChatBubble("User", exec.PromptSent)
+			}
+			if exec.Status == models.ExecCompleted {
+				@components.ChatBubble("Assistant", exec.Output)
+			} else if exec.Status == models.ExecFailed {
+				@components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
+			} else if exec.Status == models.ExecCancelled {
+				@components.ChatBubbleError("Assistant", "Cancelled", exec.Output)
+			} else if exec.Status == models.ExecRunning {
+				@components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "")
+			}
+		</div>
 	}
 }
 
 // ChatContent renders just the chat content (for HTMX)
-templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool) {
+templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int) {
 	<div id="chat-page-root" class="h-full flex flex-col" data-project-id={ currentProjectID }>
 		<div class="mb-4 flex items-center justify-between">
 			<div>
@@ -69,25 +96,30 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			</div>
 		</div>
 		<!-- Chat Messages Container -->
-		<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6">
+		<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) }>
+			if hasEarlier && len(chatHistory) > 0 {
+				@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
+			}
 			if len(chatHistory) == 0 && len(pendingInputs) == 0 {
 				@components.ChatEmptyState("Start a conversation by typing a message below")
 			} else {
 				for _, exec := range chatHistory {
-					if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
-						@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments)
-					} else {
-						@components.ChatBubble("User", exec.PromptSent)
-					}
-					if exec.Status == models.ExecCompleted {
-						@components.ChatBubble("Assistant", exec.Output)
-					} else if exec.Status == models.ExecFailed {
-						@components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
-					} else if exec.Status == models.ExecCancelled {
-						@components.ChatBubbleError("Assistant", "Cancelled", exec.Output)
-					} else if exec.Status == models.ExecRunning {
-						@components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "")
-					}
+					<div class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
+						if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
+							@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments)
+						} else {
+							@components.ChatBubble("User", exec.PromptSent)
+						}
+						if exec.Status == models.ExecCompleted {
+							@components.ChatBubble("Assistant", exec.Output)
+						} else if exec.Status == models.ExecFailed {
+							@components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
+						} else if exec.Status == models.ExecCancelled {
+							@components.ChatBubbleError("Assistant", "Cancelled", exec.Output)
+						} else if exec.Status == models.ExecRunning {
+							@components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "")
+						}
+					</div>
 				}
 				@components.PendingThreadInputRows(pendingInputs, chatQueuedSteerEndpoint)
 			}
@@ -129,6 +161,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					var chatMessages = document.getElementById('chat-messages');
 					if (chatMessages) {
 						if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(chatMessages);
+						if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
 						if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
 						if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker);
 						if (window.maybeShowPlanCompletionPromptFromHistory) window.maybeShowPlanCompletionPromptFromHistory();
@@ -1133,10 +1166,15 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 										// CSS handles bottom padding while pending rows exist.
 										if (window.htmx) htmx.process(queuedRow);
 									} else {								// Append user bubble and streaming assistant for a real running turn.
-								chatMessages.appendChild(createUserBubble(data.message, data.source));
-								chatMessages.appendChild(createStreamingBubble(data.exec_id));
-							}
-
+									var pair = document.createElement('div');
+									pair.className = 'chat-execution-pair space-y-6';
+									pair.setAttribute('data-execution-pair', 'true');
+									pair.setAttribute('data-exec-id', data.exec_id);
+									pair.appendChild(createUserBubble(data.message, data.source));
+									pair.appendChild(createStreamingBubble(data.exec_id));
+									chatMessages.appendChild(pair);
+									if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
+								}
 							// Scroll to bottom (respect user scroll position)
 							var tracker = window._chatPageTracker;
 							if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
@@ -1181,6 +1219,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				var handleChatAfterSwap = function(event) {
 					var swapTarget = event.detail.target;
 					if (swapTarget && swapTarget.id === 'chat-messages') {
+						if (window.initChatEarlierLoader) window.initChatEarlierLoader(swapTarget);
+						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(swapTarget);
 						swapTarget.querySelectorAll('[data-exec-id]').forEach(function(el) {
 							window._chatKnownExecIds[el.getAttribute('data-exec-id')] = true;
 						});

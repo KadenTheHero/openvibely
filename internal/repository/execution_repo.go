@@ -340,28 +340,42 @@ func (r *ExecutionRepo) FindLatestActiveChatExecution(ctx context.Context, proje
 	return &e, nil
 }
 
-// ListChatHistory returns recent chat messages (CategoryChat tasks) for a project.
+// ListChatHistory returns the latest chat executions (CategoryChat tasks) for a project,
+// ordered chronologically for prompt/UI consumption.
 func (r *ExecutionRepo) ListChatHistory(ctx context.Context, projectID string, limit int) ([]models.Execution, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+executionSelectColumnsAlias+`
+	return r.listChatHistoryPage(ctx, projectID, "", limit)
+}
+
+// ListChatHistoryBefore returns the latest chat executions older than beforeExecID,
+// ordered chronologically for prepending into a visible transcript window.
+func (r *ExecutionRepo) ListChatHistoryBefore(ctx context.Context, projectID, beforeExecID string, limit int) ([]models.Execution, error) {
+	return r.listChatHistoryPage(ctx, projectID, beforeExecID, limit)
+}
+
+func (r *ExecutionRepo) listChatHistoryPage(ctx context.Context, projectID, beforeExecID string, limit int) ([]models.Execution, error) {
+	if limit <= 0 {
+		return []models.Execution{}, nil
+	}
+	query := `SELECT ` + executionSelectColumnsAlias + `
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
-		 WHERE t.project_id = ? AND t.category = 'chat'
-		 ORDER BY e.started_at ASC LIMIT ?`, projectID, limit)
+		 WHERE t.project_id = ? AND t.category = 'chat'`
+	args := []interface{}{projectID}
+	if beforeExecID != "" {
+		query += ` AND (e.started_at < (SELECT started_at FROM executions WHERE id = ?)
+			OR (e.started_at = (SELECT started_at FROM executions WHERE id = ?) AND e.rowid < (SELECT rowid FROM executions WHERE id = ?)))`
+		args = append(args, beforeExecID, beforeExecID, beforeExecID)
+	}
+	query += ` ORDER BY e.started_at DESC, e.rowid DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing chat history: %w", err)
 	}
 	defer rows.Close()
 
-	var execs []models.Execution
-	for rows.Next() {
-		e, err := scanExecutionRow(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scanning execution: %w", err)
-		}
-		execs = append(execs, e)
-	}
-	return execs, rows.Err()
+	return scanExecutionsNewestFirstAsChronological(rows)
 }
 
 // ListByTaskChronological returns all executions for a task ordered chronologically (oldest first).
@@ -373,6 +387,44 @@ func (r *ExecutionRepo) ListByTaskChronological(ctx context.Context, taskID stri
 	}
 	defer rows.Close()
 
+	return scanExecutionsChronological(rows)
+}
+
+// ListByTaskChronologicalLimit returns the latest executions for a task, ordered chronologically.
+func (r *ExecutionRepo) ListByTaskChronologicalLimit(ctx context.Context, taskID string, limit int) ([]models.Execution, error) {
+	return r.listTaskExecutionPage(ctx, taskID, "", limit)
+}
+
+// ListByTaskChronologicalBefore returns the latest executions older than beforeExecID for a task,
+// ordered chronologically for prepending into a visible transcript window.
+func (r *ExecutionRepo) ListByTaskChronologicalBefore(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, error) {
+	return r.listTaskExecutionPage(ctx, taskID, beforeExecID, limit)
+}
+
+func (r *ExecutionRepo) listTaskExecutionPage(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, error) {
+	if limit <= 0 {
+		return []models.Execution{}, nil
+	}
+	query := `SELECT ` + executionSelectColumns + ` FROM executions WHERE task_id = ?`
+	args := []interface{}{taskID}
+	if beforeExecID != "" {
+		query += ` AND (started_at < (SELECT started_at FROM executions WHERE id = ?)
+			OR (started_at = (SELECT started_at FROM executions WHERE id = ?) AND rowid < (SELECT rowid FROM executions WHERE id = ?)))`
+		args = append(args, beforeExecID, beforeExecID, beforeExecID)
+	}
+	query += ` ORDER BY started_at DESC, rowid DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing executions chronological page: %w", err)
+	}
+	defer rows.Close()
+
+	return scanExecutionsNewestFirstAsChronological(rows)
+}
+
+func scanExecutionsChronological(rows *sql.Rows) ([]models.Execution, error) {
 	var execs []models.Execution
 	for rows.Next() {
 		e, err := scanExecutionRow(rows)
@@ -382,6 +434,17 @@ func (r *ExecutionRepo) ListByTaskChronological(ctx context.Context, taskID stri
 		execs = append(execs, e)
 	}
 	return execs, rows.Err()
+}
+
+func scanExecutionsNewestFirstAsChronological(rows *sql.Rows) ([]models.Execution, error) {
+	execs, err := scanExecutionsChronological(rows)
+	if err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(execs)-1; i < j; i, j = i+1, j-1 {
+		execs[i], execs[j] = execs[j], execs[i]
+	}
+	return execs, nil
 }
 
 func (r *ExecutionRepo) UpdateDiffOutput(ctx context.Context, id string, diffOutput string) error {

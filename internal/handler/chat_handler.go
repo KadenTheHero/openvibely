@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,11 @@ import (
 
 const chatSSETimeout = chatProcessingTimeout + 30*time.Second
 
+const (
+	chatUIWindowLimitDefault = 30
+	chatUIWindowLimitMax     = 100
+)
+
 func (h *Handler) Chat(c echo.Context) error {
 	isHTMX := isHTMX(c)
 	applog.Debugf("[handler] Chat requested htmx=%v", isHTMX)
@@ -35,24 +41,17 @@ func (h *Handler) Chat(c echo.Context) error {
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
 
-	// Load recent chat history for this project (last 50 messages)
-	chatHistory, err := h.execRepo.ListChatHistory(c.Request().Context(), currentProjectID, 50)
+	limit := parseThreadWindowLimit(c.QueryParam("limit"), chatUIWindowLimitDefault, chatUIWindowLimitMax)
+	beforeExecID := strings.TrimSpace(c.QueryParam("before"))
+	chatHistory, hasEarlier, err := h.loadChatExecutionWindow(c.Request().Context(), currentProjectID, beforeExecID, limit)
 	if err != nil {
 		applog.Infof("[handler] Chat error loading chat history: %v", err)
 		// Continue even if history load fails - just show empty chat
 		chatHistory = []models.Execution{}
+		hasEarlier = false
 	}
 
-	// Load attachments for all executions in a single query
-	execIDs := make([]string, len(chatHistory))
-	for i, exec := range chatHistory {
-		execIDs[i] = exec.ID
-	}
-	chatAttachmentsByExec, err := h.chatAttachmentRepo.ListByExecutionIDs(c.Request().Context(), execIDs)
-	if err != nil {
-		applog.Infof("[handler] Chat error loading attachments: %v", err)
-		chatAttachmentsByExec = make(map[string][]models.ChatAttachment)
-	}
+	chatAttachmentsByExec := h.loadChatAttachmentsForExecutions(c.Request().Context(), chatHistory, "Chat")
 
 	pendingInputs := []models.ThreadInput{}
 	if h.threadInputRepo != nil && currentProjectID != "" {
@@ -65,13 +64,71 @@ func (h *Handler) Chat(c echo.Context) error {
 
 	latestPlanComplete := chatHistoryHasPlanCompletion(chatHistory)
 
+	if beforeExecID != "" {
+		return render(c, http.StatusOK, pages.ChatEarlierMessages(chatHistory, chatAttachmentsByExec, currentProjectID, hasEarlier, limit))
+	}
+
 	// For HTMX requests, return just the chat content
 	if isHTMX {
-		return render(c, http.StatusOK, pages.ChatContent(agents, chatHistory, currentProjectID, chatAttachmentsByExec, pendingInputs, latestPlanComplete))
+		return render(c, http.StatusOK, pages.ChatContent(agents, chatHistory, currentProjectID, chatAttachmentsByExec, pendingInputs, latestPlanComplete, hasEarlier, limit))
 	}
 
 	projects, _ := h.projectSvc.List(c.Request().Context())
-	return render(c, http.StatusOK, pages.Chat(projects, currentProjectID, agents, chatHistory, chatAttachmentsByExec, pendingInputs, latestPlanComplete))
+	return render(c, http.StatusOK, pages.Chat(projects, currentProjectID, agents, chatHistory, chatAttachmentsByExec, pendingInputs, latestPlanComplete, hasEarlier, limit))
+}
+
+func parseThreadWindowLimit(raw string, defaultLimit, maxLimit int) int {
+	limit := defaultLimit
+	if raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > maxLimit {
+		limit = maxLimit
+	}
+	return limit
+}
+
+func trimExecutionWindow(rows []models.Execution, limit int) ([]models.Execution, bool) {
+	if limit <= 0 || len(rows) <= limit {
+		return rows, false
+	}
+	return rows[len(rows)-limit:], true
+}
+
+func executionIDs(executions []models.Execution) []string {
+	execIDs := make([]string, len(executions))
+	for i, exec := range executions {
+		execIDs[i] = exec.ID
+	}
+	return execIDs
+}
+
+func (h *Handler) loadChatExecutionWindow(ctx context.Context, projectID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
+	queryLimit := limit + 1
+	var rows []models.Execution
+	var err error
+	if beforeExecID != "" {
+		rows, err = h.execRepo.ListChatHistoryBefore(ctx, projectID, beforeExecID, queryLimit)
+	} else {
+		rows, err = h.execRepo.ListChatHistory(ctx, projectID, queryLimit)
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	visible, hasEarlier := trimExecutionWindow(rows, limit)
+	return visible, hasEarlier, nil
+}
+
+func (h *Handler) loadChatAttachmentsForExecutions(ctx context.Context, executions []models.Execution, label string) map[string][]models.ChatAttachment {
+	execIDs := executionIDs(executions)
+	chatAttachmentsByExec, err := h.chatAttachmentRepo.ListByExecutionIDs(ctx, execIDs)
+	if err != nil {
+		applog.Infof("[handler] %s error loading attachments: %v", label, err)
+		return make(map[string][]models.ChatAttachment)
+	}
+	return chatAttachmentsByExec
 }
 
 func (h *Handler) ChatSend(c echo.Context) error {
@@ -541,7 +598,7 @@ func (h *Handler) ClearChat(c echo.Context) error {
 	}
 
 	// Return empty chat content
-	return render(c, http.StatusOK, pages.ChatContent(agents, []models.Execution{}, projectID, make(map[string][]models.ChatAttachment), []models.ThreadInput{}, false))
+	return render(c, http.StatusOK, pages.ChatContent(agents, []models.Execution{}, projectID, make(map[string][]models.ChatAttachment), []models.ThreadInput{}, false, false, chatUIWindowLimitDefault))
 }
 
 // chatHistoryHasPlanCompletion checks if the latest completed assistant response

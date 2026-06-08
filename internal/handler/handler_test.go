@@ -3648,7 +3648,7 @@ func TestHandler_GetTaskThread_PollsWhenQueued(t *testing.T) {
 
 	assert.Contains(t, body, `id="task-thread-view"`)
 	assert.Contains(t, body, `hx-trigger="every 3s"`)
-	assert.Contains(t, body, `hx-get="/tasks/`+task.ID+`/thread"`)
+	assert.Contains(t, body, `hx-get="/tasks/`+task.ID+`/thread?limit=30"`)
 }
 
 func TestHandler_GetTaskThread_DraftClearLogic_DoesNotTreatPollingGetAsSend(t *testing.T) {
@@ -3959,4 +3959,51 @@ func TestHandler_GradeIdeas_NoTasks(t *testing.T) {
 	rec := htmxPost(e, "/history/grade-ideas?project_id="+project.ID, nil)
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, "failed")
+}
+
+func TestHandler_GetTaskThreadRendersLatestWindowAndEarlierFragment(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Window Project")
+	task := createTask(t, h, project.ID, "Thread Window Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.Prompt = "original prompt"
+	})
+	execs := make([]*models.Execution, 0, 5)
+	for i := 1; i <= 5; i++ {
+		exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+			ex.Status = models.ExecCompleted
+			ex.PromptSent = fmt.Sprintf("turn-%d", i)
+			ex.IsFollowup = true
+		})
+		execs = append(execs, exec)
+	}
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread?limit=3")
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+	for _, expected := range []string{"turn-3", "turn-4", "turn-5", `data-window-limit="3"`, `data-earlier-loader="true"`, `before=` + execs[2].ID} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected initial thread window to contain %q\n%s", expected, body)
+		}
+	}
+	for _, unexpected := range []string{"turn-1", "turn-2"} {
+		if strings.Contains(body, unexpected) {
+			t.Fatalf("initial thread window should not contain older %q", unexpected)
+		}
+	}
+
+	rec = htmxGet(e, "/tasks/"+task.ID+"/thread?before="+execs[2].ID+"&limit=2")
+	assertCode(t, rec, http.StatusOK)
+	body = rec.Body.String()
+	for _, expected := range []string{"turn-1", "turn-2"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected earlier thread fragment to contain %q\n%s", expected, body)
+		}
+	}
+	for _, unexpected := range []string{"turn-3", "turn-4", "turn-5", "task-thread-form"} {
+		if strings.Contains(body, unexpected) {
+			t.Fatalf("earlier thread fragment should not contain %q", unexpected)
+		}
+	}
 }

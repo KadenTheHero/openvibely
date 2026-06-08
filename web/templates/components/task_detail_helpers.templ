@@ -297,16 +297,23 @@ templ TaskPrimaryAgentBanner(agentDef *models.Agent) {
 	}
 }
 
+templ TaskThreadEarlierMessages(task *models.Task, executions []models.Execution, chatAttachments map[string][]models.ChatAttachment, hasEarlier bool, windowLimit int) {
+	if hasEarlier && len(executions) > 0 {
+		@ChatEarlierMessagesLoader("task-thread-messages", fmt.Sprintf("/tasks/%s/thread?before=%s&limit=%d", task.ID, executions[0].ID, windowLimit), windowLimit)
+	}
+	@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier)
+}
+
 // TaskThreadView renders the unified thread interface for a task.
 // Uses shared chat components for message bubbles and input form.
 // Accepts agents list to show model selector matching /chat page behavior.
 // chatAttachments map is optional - when nil, no attachment indicators are shown on messages.
-templ TaskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput) {
+templ TaskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int) {
 	<div
 		id="task-thread-view"
 		class="flex flex-col flex-1 min-h-0"
 		if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
-			hx-get={ fmt.Sprintf("/tasks/%s/thread", task.ID) }
+			hx-get={ fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit) }
 			hx-trigger="every 3s"
 			hx-target="#task-thread-view"
 			hx-swap="morph:outerHTML"
@@ -315,12 +322,15 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 		data-task-id={ task.ID }
 	>
 		<!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) -->
-		<div id="task-thread-messages" class="flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0">
+		<div id="task-thread-messages" class="flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit) }>
 			@TaskPrimaryAgentBanner(agentDef)
+			if hasEarlier && len(executions) > 0 {
+				@ChatEarlierMessagesLoader("task-thread-messages", fmt.Sprintf("/tasks/%s/thread?before=%s&limit=%d", task.ID, executions[0].ID, windowLimit), windowLimit)
+			}
 			if len(executions) == 0 && len(pendingInputs) == 0 {
 				@ChatEmptyState("No messages yet. Click \"Run Now\" to start, then follow up here.")
 			} else {
-				@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view")
+				@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier)
 				@PendingThreadInputRows(pendingInputs, taskQueuedSteerEndpoint)
 				@TaskThreadStatusIndicator(task, executions)
 			}
@@ -432,6 +442,8 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 					var chatMessages = document.getElementById('task-thread-messages');
 					if (chatMessages) {
 						if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+						if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
+						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 						var taskId = _taskThreadTaskId();
 						var preservedScrollState = _getTaskThreadScrollState(taskId);
 						var restoredScrollState = _restoreTaskThreadScrollState(chatMessages, preservedScrollState);
@@ -587,6 +599,8 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 									}
 								}
 								if (window.cleanAssistantMessages) window.cleanAssistantMessages(target);
+								if (window.initChatEarlierLoader) window.initChatEarlierLoader(target);
+								if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(target);
 								if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(target, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
 								// Auto-scroll on deliberate sends even when attachments change layout;
 								// otherwise respect explicit user scroll-up intent.
@@ -619,6 +633,8 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 										}
 									}
 									if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+								if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
+								if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 									if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
 									// Auto-scroll on deliberate sends even when attachments change layout;
 									// otherwise respect explicit user scroll-up intent.
@@ -652,6 +668,8 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 									}
 								}
 								if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+								if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
+								if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 								if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
 								// Auto-scroll on deliberate sends even when attachments change layout;
 								// otherwise respect explicit user scroll-up intent.

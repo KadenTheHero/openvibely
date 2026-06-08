@@ -986,7 +986,7 @@ func TestChatMessages_RunningExecUsesSSEStreaming(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := ChatMessages(executions, task, nil, "task-thread-messages", "task-thread-view").Render(context.Background(), &buf)
+	err := ChatMessages(executions, task, nil, "task-thread-messages", "task-thread-view", false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("Failed to render ChatMessages: %v", err)
 	}
@@ -1484,7 +1484,7 @@ func TestTaskThreadView_SelectsTaskAssignedModelInDropdown(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := TaskThreadView(task, nil, agents, nil, nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskThreadView(task, nil, agents, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render TaskThreadView: %v", err)
 	}
 	content := buf.String()
@@ -1511,7 +1511,7 @@ func TestTaskThreadView_RunningThreadCanSteerFromPendingRowsOnly(t *testing.T) {
 	pending := []models.ThreadInput{{ID: "queued-task", TaskID: task.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued"}}
 
 	var buf bytes.Buffer
-	if err := TaskThreadView(task, execs, nil, nil, nil, pending).Render(context.Background(), &buf); err != nil {
+	if err := TaskThreadView(task, execs, nil, nil, nil, pending, false, 30).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render TaskThreadView: %v", err)
 	}
 	content := buf.String()
@@ -1563,7 +1563,7 @@ func TestTaskThreadView_SkipsExpensiveWorkDuringNavigation(t *testing.T) {
 		Category:  models.CategoryActive,
 	}
 	var buf bytes.Buffer
-	err := TaskThreadView(task, nil, nil, nil, nil, nil).Render(context.Background(), &buf)
+	err := TaskThreadView(task, nil, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("Failed to render TaskThreadView: %v", err)
 	}
@@ -1606,7 +1606,7 @@ func TestTaskThreadView_ClearsDraftBeforeSuccessfulThreadSwap(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := TaskThreadView(task, nil, nil, nil, nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskThreadView(task, nil, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render TaskThreadView: %v", err)
 	}
 	content := buf.String()
@@ -1640,7 +1640,7 @@ func TestTaskThreadView_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *tes
 	}
 
 	var buf bytes.Buffer
-	if err := TaskThreadView(task, nil, nil, nil, nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskThreadView(task, nil, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render TaskThreadView: %v", err)
 	}
 	content := buf.String()
@@ -1942,7 +1942,7 @@ func TestTaskThreadView_PreservesPerTaskScrollState(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := TaskThreadView(task, nil, nil, nil, nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskThreadView(task, nil, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render TaskThreadView: %v", err)
 	}
 	content := buf.String()
@@ -1990,5 +1990,109 @@ func TestChatScrollTracker_DestroyRemovesAllListeners(t *testing.T) {
 		if !strings.Contains(content, r) {
 			t.Errorf("destroy() must call %s to clean up listeners", r)
 		}
+	}
+}
+
+func TestTaskThreadView_WindowedTranscriptUsesContainerLoaderAndPruning(t *testing.T) {
+	task := &models.Task{ID: "task-1", Title: "Task", Prompt: "original", Status: models.StatusRunning}
+	execs := []models.Execution{
+		{ID: "exec-1", TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "first", Output: "done"},
+		{ID: "exec-2", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "second"},
+	}
+	var buf bytes.Buffer
+	if err := TaskThreadView(task, execs, nil, nil, nil, nil, true, 2).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task thread: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, `data-window-limit="2"`) {
+		t.Fatal("expected task thread message container to carry visible window limit")
+	}
+	if !strings.Contains(content, `data-earlier-url-base="/tasks/task-1/thread?limit=2"`) {
+		t.Fatal("expected task thread container to expose a base earlier URL for live-prune-created loaders")
+	}
+	if !strings.Contains(content, `data-earlier-loader="true"`) || !strings.Contains(content, `hx-trigger="ov:load-earlier"`) || !strings.Contains(content, `/tasks/task-1/thread?before=exec-1&amp;limit=2`) {
+		t.Fatal("expected container-scroll earlier loader for task thread")
+	}
+	if !strings.Contains(content, `hx-swap="outerHTML show:none"`) {
+		t.Fatal("expected earlier loader to disable HTMX target show scrolling")
+	}
+	if strings.Count(content, `data-execution-pair="true"`) < 2 {
+		t.Fatal("expected task thread executions to render as whole-turn pairs")
+	}
+	if strings.Count(content, `chat-execution-pair space-y-6`) < 2 {
+		t.Fatal("expected task thread execution pairs to preserve equal vertical spacing between user and assistant bubbles")
+	}
+	if strings.Contains(content, `chat-execution-pair space-y-3`) {
+		t.Fatal("execution-pair spacing must match the surrounding message-list spacing, not use a smaller internal gap")
+	}
+	if !strings.Contains(content, "window.initChatEarlierLoader") || !strings.Contains(content, "window.pruneChatExecutionWindow") {
+		t.Fatal("expected task thread to initialize load-earlier and live pruning helpers")
+	}
+}
+
+func TestChatAutoScrollScript_EarlierLoaderUsesTopIntentWithoutDuplicateRebinds(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render chat auto-scroll script: %v", err)
+	}
+	content := buf.String()
+
+	required := []string{
+		"function setEarlierLoaderBusy(loader, busy)",
+		"function recoverIdleEarlierRequest()",
+		`container.querySelector('[data-earlier-loader="true"][data-loading="true"]')`,
+		"data-earlier-loader-idle",
+		"data-earlier-loader-busy",
+		"Scroll up to load earlier messages",
+		"function getFirstVisibleExecutionPair(container)",
+		"window.bindChatEarlierHTMXLifecycle",
+		"document.body.addEventListener('htmx:afterSettle'",
+		"window.restoreChatEarlierScroll(container)",
+		"container.dataset.earlierPrevScrollHeight",
+		"container.dataset.earlierPrevScrollTop",
+		"container.dataset.earlierPrevBottomDistance",
+		"container.dataset.earlierAnchorExecId",
+		"container.dataset.earlierAnchorOffsetTop",
+		"requestAnimationFrame(function()",
+		"container.scrollTop = Math.max(0, (container.scrollHeight || 0) - prevBottomDistance)",
+		"currentOffset - anchorOffsetTop",
+		"earlierAnchorRestoring",
+		"function maybeLoadEarlier()", "addEventListener('scroll', function()",
+		"addEventListener('wheel'",
+		"event.deltaY < 0",
+		"earlierLastWheelAt",
+		"now - lastWheelAt > 500",
+		"addEventListener('touchstart'",
+		"addEventListener('touchmove'",
+		"window.bindChatEarlierKeyboardLoader",
+		"document.addEventListener('keydown'",
+		"['ArrowUp', 'PageUp', 'Home'].includes(event.key)",
+		"if (event.repeat) return",
+		`container.dataset.earlierRequestLoading === 'true' && container.querySelector('[data-earlier-loader="true"][data-loading="true"]')`,
+		"earlierGestureLocked",
+		"earlierRequestLoading",
+		"window.finishChatEarlierRequest",
+		"!event.detail.successful",
+		"loader.setAttribute('hx-swap', 'outerHTML show:none')",
+	}
+	for _, marker := range required {
+		if !strings.Contains(content, marker) {
+			t.Fatalf("expected earlier loader script to contain %q", marker)
+		}
+	}
+	if strings.Contains(content, "setTimeout(maybeLoadEarlier") {
+		t.Fatal("earlier loader must not eagerly fetch older history on initialization")
+	}
+	if strings.Contains(content, "scheduleGestureUnlock") || strings.Contains(content, "document.addEventListener('keyup'") {
+		t.Fatal("earlier loader must not unlock a consumed gesture before the HTMX request/swap completes")
+	}
+	if strings.Contains(content, "delete container.dataset.earlierLoaderBound") {
+		t.Fatal("earlier loader must not delete the bound marker and stack duplicate listeners")
+	}
+	if strings.Contains(content, `>Loading earlier messages...</div>`) {
+		t.Fatal("earlier loader must not show loading copy while idle")
+	}
+	if strings.Contains(content, "loader.dataset.prevScrollHeight") || strings.Contains(content, "loader.dataset.anchorExecId") {
+		t.Fatal("prepend anchor state must live on the stable messages container, not the loader that HTMX replaces")
 	}
 }

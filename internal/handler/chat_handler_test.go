@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -3953,5 +3954,51 @@ func Test_chatHistoryHasPlanCompletion(t *testing.T) {
 			got := chatHistoryHasPlanCompletion(tt.history)
 			assert.Equal(t, tt.want, got)
 		})
+	}
+}
+
+func TestHandler_ChatRendersLatestWindowAndEarlierFragment(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Chat Window Project")
+	execs := make([]*models.Execution, 0, 5)
+	for i := 1; i <= 5; i++ {
+		task := createTask(t, h, project.ID, fmt.Sprintf("Chat %d", i), func(tk *models.Task) {
+			tk.Category = models.CategoryChat
+			tk.Prompt = fmt.Sprintf("chat-%d", i)
+		})
+		exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+			ex.Status = models.ExecCompleted
+			ex.PromptSent = fmt.Sprintf("chat-%d", i)
+		})
+		execs = append(execs, exec)
+	}
+
+	rec := htmxGet(e, "/chat?project_id="+project.ID+"&limit=3")
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+	for _, expected := range []string{"chat-3", "chat-4", "chat-5", `data-window-limit="3"`, `data-earlier-loader="true"`, `before=` + execs[2].ID} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected initial chat window to contain %q\n%s", expected, body)
+		}
+	}
+	for _, unexpected := range []string{"chat-1", "chat-2"} {
+		if strings.Contains(body, unexpected) {
+			t.Fatalf("initial chat window should not contain older %q", unexpected)
+		}
+	}
+
+	rec = htmxGet(e, "/chat?project_id="+project.ID+"&before="+execs[2].ID+"&limit=2")
+	assertCode(t, rec, http.StatusOK)
+	body = rec.Body.String()
+	for _, expected := range []string{"chat-1", "chat-2"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected earlier chat fragment to contain %q\n%s", expected, body)
+		}
+	}
+	for _, unexpected := range []string{"chat-3", "chat-4", "chat-5", "chat-form"} {
+		if strings.Contains(body, unexpected) {
+			t.Fatalf("earlier chat fragment should not contain %q", unexpected)
+		}
 	}
 }

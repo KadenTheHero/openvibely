@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-06-07
+updated: 2026-06-08
 source: consolidation
-source_id: memory_consolidation_2026_06_07
+source_id: memory_consolidation_2026_06_08
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -12,52 +12,60 @@ title: Coding Agent Product Discipline
 This memory stores durable user preferences and product-discipline decisions for coding agents working on OpenVibely. Full execution runbooks belong in project skills.
 
 User interaction preferences:
-- For design, behavior, or feasibility questions, the user expects a direct answer without implementation changes unless explicitly requested.
+- For design, behavior, or feasibility questions, answer directly without making implementation changes unless explicitly requested.
 - If a prior response made an unsolicited code change, acknowledge it and revert or ask before proceeding.
-- The user prefers plain, direct explanations over jargon-heavy phrasing.
-- When the user asks to explain a bug in detail, provide the full causal chain, concrete failure mode, and exact affected path rather than a terse summary.
-- Summaries are expected to be concrete: cite specific files, symbols, handlers, tests, behavior affected, and verification performed when that context is available.
-- When the user asks for a broad review before completion, actively look for mistakes, unintended diff, dead code, and verification gaps.
-- If repeated reviews keep finding one issue at a time, the user may ask for audit-only mode: return a consolidated ranked problem list before making fixes.
+- Prefer plain, direct explanations over jargon-heavy phrasing.
+- Bug explanations should include the causal chain, concrete failure mode, and exact affected path when the user asks for detail.
+- Summaries should be concrete: cite specific files, symbols, handlers, tests, behavior affected, and verification performed when that context is available.
+- Broad reviews should actively look for mistakes, unintended diff, dead code, and verification gaps.
+- If repeated reviews find one issue at a time, the user may request audit-only mode: return a consolidated ranked problem list before making fixes.
+- When multiple findings are variants of one bug class, fix or audit the whole analogous class instead of narrowly addressing one instance.
 
 Model-facing prompt preferences:
-- The user prefers direct role/capability wording over low-value internal/product labels such as “built-in system agent,” “system agent configuration,” and “non-system agent,” unless the label affects authorization, routing, or correctness.
-- In model-facing prompt/tool text, avoid backend provenance/category labels that do not help the LLM, including “generated skill(s),” “protected/system agents,” “non-protected agents,” and “manually assigned agent.” Prefer behavior terms like “standalone skill(s),” “protected agents,” “user-managed agents,” and “assigned agent.”
+- Use direct role/capability wording over low-value internal/product labels unless the label affects authorization, routing, or correctness.
+- Avoid backend provenance/category labels that do not help the LLM, including “generated skill(s),” “protected/system agents,” “non-protected agents,” and “manually assigned agent.” Prefer behavior terms like “standalone skill(s),” “protected agents,” “user-managed agents,” and “assigned agent.”
 - For protected or scheduled agents, `System:` may remain in storage/UI names when it is a real identity, but model-facing prompt bodies and hook inputs should avoid `System:` headings or prefixes unless they affect behavior.
-- The user dislikes injecting the product/project name into prompts merely to make them sound project-specific.
-- The user prefers long model prompts as readable const templates with dynamic context interpolated, rather than chains of `WriteString` calls.
-- Reusable skills/runbooks should avoid naming specific current-release features as examples; those examples rot. Encode generic decision rules and feature-neutral examples instead.
+- Do not inject the product/project name into prompts merely to make them sound project-specific.
+- Prefer long model prompts as readable const templates with dynamic context interpolated, rather than chains of `WriteString` calls.
+- Reusable skills/runbooks should avoid naming specific current-release features as examples; encode generic decision rules and feature-neutral examples instead.
 
 Logging preference:
-- The user prefers very high-frequency or low-value debug traces to be left as commented `applog.Debugf` examples instead of active gated calls when method-call overhead could accumulate.
-- This especially applies to per-LLM-chunk, per-SSE-delta, per-HTMX-poll, per-diff-broadcast-tick, or per-action-routing-check logs.
+- Very high-frequency or low-value debug traces should be commented `applog.Debugf` examples instead of active gated calls when method-call overhead could accumulate.
+- This applies especially to per-LLM-chunk, per-SSE-delta, per-HTMX-poll, per-diff-broadcast-tick, or per-action-routing-check logs.
 
 Documentation preferences:
-- Useful README content and commented multi-line command examples are valuable to preserve unless there is a specific reason to trim them.
-- The user values preserving liked README/docs structure while folding in stronger positioning/selling points.
+- Preserve useful README content and commented multi-line command examples unless there is a specific reason to trim them.
+- Preserve liked README/docs structure while folding in stronger positioning/selling points.
 - Keep root `docs/` in sync with README/docs-site positioning when overlapping product concepts change.
 - When syncing in-repo docs with the docs website repo, audit recent docs-site content changes and propagate overlapping product-concept updates into the in-repo guides; the user expects more than a narrow README/environment pass when the docs-site changed agents, chat, lifecycle, models, skills, workers, tasks, or analytics content.
-- Root README is expected to stay succinct and high-level, point to `https://docs.openvibely.ai` plus the docs source repo at `/Users/dubee/go/src/github.com/openvibely/openvibely-doc`, and keep detailed environment-variable reference in `docs/environment.md`.
-- For published docs links in README/project-facing docs, new-tab HTML anchors are preferred where supported; local relative links stay as normal Markdown.
+- Root README should stay succinct and high-level, point to `https://docs.openvibely.ai` plus the docs source repo at `/Users/dubee/go/src/github.com/openvibely/openvibely-doc`, and keep detailed environment-variable reference in `docs/environment.md`.
+- Published docs links in README/project-facing docs should use new-tab HTML anchors where supported; local relative links stay normal Markdown.
 
-Maintenance and release facts:
-- The authoritative full Go test-suite command is `go test ./... -count=1 -timeout 60s`; narrower `./internal/...` runs are validation subsets.
-- The latest public release boundary is `v0.2.0`, published on 2026-06-07 and later corrected by force-moving tag `v0.2.0` to commit `13189db` so the macOS app-bundle zip fix is included.
-- Schema migrations added only after that boundary and not yet pushed publicly can be consolidated before release; this is distinct from runtime/local database-file moves such as `openvibely.db` storage migration.
-- OpenVibely has project-scoped release automation skills indexed in `.openvibely/skills/SKILLS.md`.
-- Release notes are AI-synthesized from structured unreleased commit context because commit subjects are often terse.
-- Release-note `Highlights` must summarize what is new in the target release from the changelog/commit range, not repeat static product feature bullets from previous releases; `What's Changed` is the detailed changelog section.
-- Release-note synthesis should describe user-facing capability by what it does, not by incidental UI controls or generic labels. For the 0.2.0 skill work, describe the Skill Curator as a recursive self-improvement loop that creates/patches skills from task learnings, not as a generic “Skills overhaul.”
-- Do not call out minor model-selector additions, such as “Claude Opus 4.8 added to the model selector,” as standalone release-note features unless the user explicitly asks or the model integration is itself a major release theme.
-- High-level release notes should omit CI/test infrastructure, terminal log verbosity, and other internal/developer-tooling details unless the user explicitly asks for that audience or detail level.
-- High-level release notes should omit low-level bug/reliability patches and minor UI polish details unless they fix a core workflow breakage or represent a meaningful user-facing capability; use the test of whether a developer choosing to upgrade would specifically care.
-- Release workflow must include a documentation update pass for features that are new or meaningfully changed before publishing/tagging; keep in-repo `docs/*.md` and the docs site repo at `/Users/dubee/go/src/github.com/openvibely/openvibely-doc` aligned when overlapping product concepts change.
+Maintenance and validation facts:
+- The authoritative full Go test-suite command is `go test ./... -count=1 -timeout 60s`, but project Makefile targets use a 120s timeout and are safer for full validation because `internal/handler` can exceed 60s under load.
+- OpenVibely has project-scoped release automation, docs editing, validation, Go maintenance, review, and audit skills indexed in `.openvibely/skills/SKILLS.md`.
+- Release workflow must include a documentation update pass for new or meaningfully changed features before publishing/tagging; keep in-repo `docs/*.md` and `/Users/dubee/go/src/github.com/openvibely/openvibely-doc` aligned when overlapping product concepts change.
 - Release agents should install missing required local tools such as `gh` when feasible instead of treating them as immediate user blockers; only hand back if installation/authentication fails or requires unavailable credentials/permissions.
 - Docker image publishing remains documented as a manual/pending release step unless explicit Docker credentials/tooling are present.
-- As of 2026-06-07, the release workflow's prior Windows desktop-cli blocker was fixed: `.openvibely/skills/openvibely_release_workflow/scripts/release-build.sh` no longer uses `local` at top level in the `WINDOWS_DESKTOP_OK=1` block.
-- `make package-desktop-macos` creates both `bin/openvibely-desktop` (raw intermediate Unix executable, not useful to ship) and `bin/OpenVibely.app` (the actual macOS app bundle). Release zips for macOS desktop must contain a bundle named exactly `OpenVibely.app`; a zip that extracts to `OpenVibely.app_<arch>/` is invalid for Finder/Gatekeeper expectations.
-- On 2026-06-07, OpenVibely `0.2.0` was released: real preflight passed with `gh` authenticated as `openvibely`, `release-build.sh 0.2.0` produced 8 artifacts plus `SHA256SUMS`, release notes placeholders were filled, a temporary `release/v0.2.0` branch and annotated tag `v0.2.0` were pushed, and the GitHub release was created at `https://github.com/openvibely/openvibely/releases/tag/v0.2.0`. After publication, the macOS `.app.zip` assets were found to extract to `OpenVibely.app_<arch>/`; the fix commit `13189db` was pushed to `main`, tag `v0.2.0` was force-moved to that commit, and the two macOS `.app.zip` assets plus `SHA256SUMS` were replaced in the same GitHub release. Live macOS zips now extract to `OpenVibely.app/`. The temporary `release/v0.2.0` branch was later deleted after its durable release-note skill update was cherry-picked to `main`; the `v0.2.0` tag is the canonical release reference.
-- As of the 2026-06-07 `0.2.0` release dry run, `release-build.sh` dry-run mode still leaks macOS desktop bundle filesystem operations (`cp`/`chmod`) outside the dry-run wrapper, causing misleading dry-run errors while not blocking a real release.
-- As of the 2026-06-07 `0.2.0` release dry run, `mingw-w64`/`x86_64-w64-mingw32-gcc` was not installed on the local release host, so the Windows desktop-cli artifact would be skipped unless that toolchain is installed.
+
+Release-note preferences:
+- Release notes are AI-synthesized from structured unreleased commit context because commit subjects are often terse.
+- `Highlights` must summarize what is new in the target release from the changelog/commit range, not repeat static product feature bullets from previous releases; `What's Changed` is the detailed changelog section.
+- Describe user-facing capability by what it does, not by incidental UI controls or generic labels.
+- For the 0.2.0 skill work, describe the Skill Curator as a recursive self-improvement loop that creates/patches skills from task learnings, not as a generic “Skills overhaul.”
+- Do not call out minor model-selector additions as standalone release-note features unless the user explicitly asks or the model integration is itself a major release theme.
+- High-level release notes should omit CI/test infrastructure, terminal log verbosity, low-level bug/reliability patches, and minor UI polish unless the audience explicitly needs those details or the fix affects a core workflow.
+
+Current release boundary:
+- Latest public release boundary is `v0.2.0`, published on 2026-06-07.
+- The canonical `v0.2.0` tag was force-moved to commit `13189db` after publication so the macOS app-bundle zip fix is included.
+- The GitHub release is `https://github.com/openvibely/openvibely/releases/tag/v0.2.0`; live macOS zips now extract to `OpenVibely.app/`.
+- The temporary `release/v0.2.0` branch was deleted after the durable release-note skill update was cherry-picked to `main`.
+- Schema migrations added only after `v0.2.0` and not yet pushed publicly can be consolidated before release; this is distinct from runtime/local database-file moves such as `openvibely.db` storage migration.
+
+Known release-build pitfalls as of 2026-06-07:
+- `release-build.sh` dry-run mode still leaks macOS desktop bundle filesystem operations (`cp`/`chmod`) outside the dry-run wrapper, causing misleading dry-run errors while not blocking a real release.
+- `mingw-w64`/`x86_64-w64-mingw32-gcc` was not installed on the local release host during the 0.2.0 release dry run, so the Windows desktop-cli artifact would be skipped unless that toolchain is installed.
+- MacOS desktop release zips must preserve the app bundle directory name exactly as `OpenVibely.app`; packaging architecture details live in `openvibely_architecture.md`.
 
 Operational guidance for release execution, release notes, docs editing, validation, Go maintenance, review workflows, and repo-specific coding practice belongs in the matching project skills under `.openvibely/skills/`, especially `openvibely_project_guidance`, `openvibely_validation_workflow`, `openvibely_release_workflow`, `openvibely_docs_editing_workflow`, `openvibely_go_maintenance_workflow`, and `openvibely_audit_review_workflow`.

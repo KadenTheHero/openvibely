@@ -112,3 +112,7 @@ always_use:
 ## openvibely_startup_seed_workflow
 
 [OpenVibely Startup Seeding Workflow](openvibely_startup_seed_workflow/SKILL.md) — Implement and audit fresh-database startup seeding for protected agents, default projects, and scheduled system tasks.
+
+## openvibely_scheduled_tasks_workflow
+
+[OpenVibely Scheduled Tasks Workflow](openvibely_scheduled_tasks_workflow/SKILL.md) — Implement and audit scheduled task behavior, enabled state, next-run preservation, and schedule UI consistently.

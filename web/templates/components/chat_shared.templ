@@ -6,6 +6,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // jsStringLength returns the JavaScript string.length for a Go string.
@@ -889,29 +890,34 @@ templ ChatInputCancelledRow(inputID string) {
 	<div id={ "thread-input-" + inputID } class="hidden" data-thread-input-id={ inputID }></div>
 }
 
-// ChatFollowupResponse renders user message + streaming assistant for a follow-up.
-// Used by both ChatSend (main chat) and TaskThreadSend (task thread).
-templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTargetID string, isThread bool, attachments []models.ChatAttachment) {
-	if len(attachments) > 0 {
-		@ChatBubbleWithAttachments("User", message, attachments)
-	} else {
-		@ChatBubble("User", message)
-	}
-	@ChatBubbleStreaming("Assistant", execID, messagesContainerID, pausePollingTargetID, isThread)
+templ ChatEarlierMessagesLoader(containerID, url string, limit int) {
+	<div
+		id={ containerID + "-earlier-loader" }
+		class="py-2 text-center text-xs opacity-60"
+		data-earlier-loader="true"
+		data-container-id={ containerID }
+		data-window-limit={ fmt.Sprintf("%d", limit) }
+		hx-get={ url }
+		hx-trigger="ov:load-earlier"
+		hx-target={ "#" + containerID + "-earlier-loader" }
+		hx-swap="outerHTML show:none"
+		hx-on::before-request="window.prepareChatEarlierSwap && window.prepareChatEarlierSwap(this)"
+		hx-on::after-swap="window.afterChatEarlierSwap && window.afterChatEarlierSwap(this)"
+		hx-on::after-request="if (event.detail && !event.detail.successful && window.finishChatEarlierRequest) window.finishChatEarlierRequest(this)"
+	>
+		<span data-earlier-loader-idle>Scroll up to load earlier messages</span>
+		<span data-earlier-loader-busy class="hidden"><span class="loading loading-spinner loading-xs align-middle mr-2"></span>Loading earlier messages...</span>
+	</div>
 }
 
-// ChatMessages renders a list of executions as chat message bubbles.
-// This is the shared message rendering loop used by both /chat and task thread.
-// For task thread, deduplicates the original task prompt: only shows it for the
-// first non-followup execution. Subsequent re-runs skip the user bubble.
-templ ChatMessages(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
-	for i, exec := range executions {
+templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
+	<div class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
 		<!-- User message: show for followups and first non-followup only -->
-		if exec.IsFollowup || !hasEarlierNonFollowup(executions, i) {
+		if exec.IsFollowup || (!hasEarlier && !hasEarlierNonFollowup(executions, index)) {
 			if atts, hasAtts := attachments[exec.ID]; hasAtts && len(atts) > 0 {
-				@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, i), atts)
+				@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, index), atts)
 			} else {
-				@ChatBubble("User", chatUserContent(exec, task, executions, i))
+				@ChatBubble("User", chatUserContent(exec, task, executions, index))
 			}
 		}
 		<!-- Assistant response -->
@@ -919,9 +925,34 @@ templ ChatMessages(executions []models.Execution, task *models.Task, attachments
 			@ChatBubble("Assistant", exec.Output)
 		} else if exec.Status == models.ExecFailed {
 			@ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
+		} else if exec.Status == models.ExecCancelled {
+			@ChatBubbleError("Assistant", "Cancelled", exec.Output)
 		} else if exec.Status == models.ExecRunning {
 			@ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, messagesContainerID, pausePollingTargetID)
 		}
+	</div>
+}
+
+// ChatFollowupResponse renders user message + streaming assistant for a follow-up.
+// Used by both ChatSend (main chat) and TaskThreadSend (task thread).
+templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTargetID string, isThread bool, attachments []models.ChatAttachment) {
+	<div class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ execID }>
+		if len(attachments) > 0 {
+			@ChatBubbleWithAttachments("User", message, attachments)
+		} else {
+			@ChatBubble("User", message)
+		}
+		@ChatBubbleStreaming("Assistant", execID, messagesContainerID, pausePollingTargetID, isThread)
+	</div>
+}
+
+// ChatMessages renders a list of executions as chat message bubbles.
+// This is the shared message rendering loop used by both /chat and task thread.
+// For task thread, deduplicates the original task prompt: only shows it for the
+// first non-followup execution. Subsequent re-runs skip the user bubble.
+templ ChatMessages(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, hasEarlier bool) {
+	for i, exec := range executions {
+		@ChatExecutionPair(exec, task, executions, i, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
 	}
 }
 
@@ -1821,6 +1852,285 @@ templ ChatAutoScrollScript() {
 				if (this._handlers.pointerdown) this.element.removeEventListener('pointerdown', this._handlers.pointerdown);
 			}
 		};
+
+		window.initChatEarlierLoader = function(containerOrID) {
+			var container = typeof containerOrID === 'string' ? document.getElementById(containerOrID) : containerOrID;
+			if (!container) return;
+			if (container.dataset.earlierLoaderBound === 'true') return;
+			container.dataset.earlierLoaderBound = 'true';
+
+			function setEarlierLoaderBusy(loader, busy) {
+				if (!loader) return;
+				loader.dataset.loading = busy ? 'true' : 'false';
+				var idle = loader.querySelector('[data-earlier-loader-idle]');
+				var busyEl = loader.querySelector('[data-earlier-loader-busy]');
+				if (idle) idle.classList.toggle('hidden', busy);
+				if (busyEl) busyEl.classList.toggle('hidden', !busy);
+			}
+
+			function recoverIdleEarlierRequest() {
+				if (container.dataset.earlierRequestLoading !== 'true') return true;
+				var busyLoader = container.querySelector('[data-earlier-loader="true"][data-loading="true"]');
+				if (busyLoader) return false;
+				container.dataset.earlierRequestLoading = 'false';
+				return true;
+			}
+
+			function resetGestureForNewUserIntent() {
+				if (!recoverIdleEarlierRequest()) return false;
+				container.dataset.earlierGestureLocked = 'false';
+				return true;
+			}
+
+			function maybeLoadEarlier() {
+				var loader = container.querySelector('[data-earlier-loader="true"]');
+				if (!loader || loader.dataset.loading === 'true') return;
+				if (container.dataset.earlierRequestLoading === 'true') return;
+				if (container.dataset.earlierGestureLocked === 'true') return;
+				if (container.scrollTop > 12) return;
+				container.dataset.earlierGestureLocked = 'true';
+				container.dataset.earlierRequestLoading = 'true';
+				if (window.prepareChatEarlierSwap) window.prepareChatEarlierSwap(loader);
+				setEarlierLoaderBusy(loader, true);
+				loader.dispatchEvent(new CustomEvent('ov:load-earlier', { bubbles: true }));
+			}
+
+			container.addEventListener('scroll', function() {
+				if (container.dataset.earlierAnchorRestoring === 'true') return;
+				if (container.scrollTop > 12) {
+					resetGestureForNewUserIntent();
+					return;
+				}
+				maybeLoadEarlier();
+			}, { passive: true });
+			container.addEventListener('wheel', function(event) {
+				if (event.deltaY < 0) {
+					var now = Date.now();
+					var lastWheelAt = parseInt(container.dataset.earlierLastWheelAt || '0', 10) || 0;
+					container.dataset.earlierLastWheelAt = String(now);
+					if (now - lastWheelAt > 500 && !resetGestureForNewUserIntent()) return;
+					maybeLoadEarlier();
+				}
+			}, { passive: true });
+			container.addEventListener('touchstart', function(event) {
+				if (event.touches && event.touches.length > 0) {
+					container.dataset.earlierTouchY = String(event.touches[0].clientY);
+					resetGestureForNewUserIntent();
+				}
+			}, { passive: true });
+			container.addEventListener('touchmove', function(event) {
+				var startY = parseFloat(container.dataset.earlierTouchY || '0') || 0;
+				if (event.touches && event.touches.length > 0 && event.touches[0].clientY > startY + 4) {
+					maybeLoadEarlier();
+				}
+			}, { passive: true });
+				if (window.bindChatEarlierKeyboardLoader) window.bindChatEarlierKeyboardLoader();
+				if (window.bindChatEarlierHTMXLifecycle) window.bindChatEarlierHTMXLifecycle();
+			};
+			window.bindChatEarlierKeyboardLoader = function() {
+				if (window._chatEarlierKeyboardLoaderBound) return;
+				window._chatEarlierKeyboardLoaderBound = true;
+				document.addEventListener('keydown', function(event) {
+					if (!['ArrowUp', 'PageUp', 'Home'].includes(event.key)) return;
+					if (event.repeat) return;
+					document.querySelectorAll('#chat-messages, #task-thread-messages').forEach(function(container) {
+						if (container.dataset.earlierLoaderBound !== 'true' || container.scrollTop > 12) return;
+						if (container.dataset.earlierRequestLoading === 'true' && container.querySelector('[data-earlier-loader="true"][data-loading="true"]')) return;
+						container.dataset.earlierRequestLoading = 'false';
+						container.dataset.earlierGestureLocked = 'false';
+						var loader = container.querySelector('[data-earlier-loader="true"]');
+						if (!loader || loader.dataset.loading === 'true') return;
+						if (container.dataset.earlierGestureLocked === 'true') return;
+						container.dataset.earlierGestureLocked = 'true';
+						container.dataset.earlierRequestLoading = 'true';
+						if (window.prepareChatEarlierSwap) window.prepareChatEarlierSwap(loader);
+						loader.dataset.loading = 'true';
+						var idle = loader.querySelector('[data-earlier-loader-idle]');
+						var busyEl = loader.querySelector('[data-earlier-loader-busy]');
+						if (idle) idle.classList.add('hidden');
+						if (busyEl) busyEl.classList.remove('hidden');
+						loader.dispatchEvent(new CustomEvent('ov:load-earlier', { bubbles: true }));
+					});
+				});
+			};
+			function getEarlierContainerForElement(element) {
+				if (!element || !element.getAttribute) return null;
+				var containerID = element.getAttribute('data-container-id') || '';
+				var container = containerID ? document.getElementById(containerID) : null;
+				if (!container && element.closest) container = element.closest('#chat-messages, #task-thread-messages');
+				return container;
+			}
+
+			function getFirstVisibleExecutionPair(container) {
+				var pairs = Array.prototype.slice.call(container.querySelectorAll(':scope > [data-execution-pair="true"]'));
+				var containerTop = container.getBoundingClientRect().top;
+				var containerBottom = container.getBoundingClientRect().bottom;
+				for (var i = 0; i < pairs.length; i++) {
+					var rect = pairs[i].getBoundingClientRect();
+					if (rect.bottom > containerTop + 1 && rect.top < containerBottom - 1) return { pair: pairs[i], offset: rect.top - containerTop };
+				}
+				return null;
+			}
+
+			window.prepareChatEarlierSwap = function(loader) {
+				var container = getEarlierContainerForElement(loader);
+				if (!container || container.dataset.earlierSwapPrepared === 'true') return;
+				container.dataset.earlierSwapPrepared = 'true';
+				container.dataset.earlierPrevScrollHeight = String(container.scrollHeight || 0);
+				container.dataset.earlierPrevScrollTop = String(container.scrollTop || 0);
+				container.dataset.earlierPrevBottomDistance = String((container.scrollHeight || 0) - (container.scrollTop || 0));
+				var anchor = getFirstVisibleExecutionPair(container);
+				if (anchor && anchor.pair) {
+					container.dataset.earlierAnchorExecId = anchor.pair.getAttribute('data-exec-id') || '';
+					container.dataset.earlierAnchorOffsetTop = String(anchor.offset || 0);
+				} else {
+					delete container.dataset.earlierAnchorExecId;
+					delete container.dataset.earlierAnchorOffsetTop;
+				}
+			};
+
+			function setAllEarlierLoadersIdle(container) {
+				container.querySelectorAll('[data-earlier-loader="true"]').forEach(function(loader) {
+					loader.dataset.loading = 'false';
+					var idle = loader.querySelector('[data-earlier-loader-idle]');
+					var busyEl = loader.querySelector('[data-earlier-loader-busy]');
+					if (idle) idle.classList.remove('hidden');
+					if (busyEl) busyEl.classList.add('hidden');
+				});
+			}
+
+			window.finishChatEarlierRequest = function(swapped) {
+				var container = getEarlierContainerForElement(swapped);
+				if (!container) return;
+				container.dataset.earlierRequestLoading = 'false';
+				delete container.dataset.earlierSwapPrepared;
+				setAllEarlierLoadersIdle(container);
+			};
+
+			window.afterChatEarlierSwap = function(swapped) {
+				var container = getEarlierContainerForElement(swapped);
+				if (!container) return;
+				setAllEarlierLoadersIdle(container);
+				if (window.htmx) htmx.process(container);
+				if (window.cleanAssistantMessages) window.cleanAssistantMessages(container);
+				if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(container);
+				if (window._initThreadStreaming) window._initThreadStreaming();
+			};
+
+			window.bindChatEarlierHTMXLifecycle = function() {
+				if (window._chatEarlierHTMXLifecycleBound) return;
+				window._chatEarlierHTMXLifecycleBound = true;
+				document.body.addEventListener('htmx:beforeRequest', function(event) {
+					var loader = event.detail && event.detail.elt;
+					if (!loader || !loader.matches || !loader.matches('[data-earlier-loader="true"]')) return;
+					if (window.prepareChatEarlierSwap) window.prepareChatEarlierSwap(loader);
+				});
+				document.body.addEventListener('htmx:afterSwap', function(event) {
+					var loader = event.detail && event.detail.elt;
+					if (!loader || !loader.matches || !loader.matches('[data-earlier-loader="true"]')) return;
+					if (window.afterChatEarlierSwap) window.afterChatEarlierSwap(loader);
+				});
+				document.body.addEventListener('htmx:afterSettle', function(event) {
+					var loader = event.detail && event.detail.elt;
+					if (!loader || !loader.matches || !loader.matches('[data-earlier-loader="true"]')) return;
+					var container = getEarlierContainerForElement(loader);
+					if (window.restoreChatEarlierScroll) window.restoreChatEarlierScroll(container);
+				});
+			};
+
+			window.restoreChatEarlierScroll = function(container) {
+				if (!container) return;
+				var prevHeight = parseInt(container.dataset.earlierPrevScrollHeight || '0', 10) || 0;
+				var prevTop = parseInt(container.dataset.earlierPrevScrollTop || '0', 10) || 0;
+				var prevBottomDistance = parseInt(container.dataset.earlierPrevBottomDistance || '0', 10) || 0;
+				var anchorExecID = container.dataset.earlierAnchorExecId || '';
+				var anchorOffsetTop = parseFloat(container.dataset.earlierAnchorOffsetTop || '0') || 0;
+				if (prevHeight <= 0) {
+					container.dataset.earlierRequestLoading = 'false';
+					delete container.dataset.earlierSwapPrepared;
+					return;
+				}
+				container.dataset.earlierAnchorRestoring = 'true';
+				requestAnimationFrame(function() {
+					var restored = false;
+					if (prevBottomDistance > 0) {
+						container.scrollTop = Math.max(0, (container.scrollHeight || 0) - prevBottomDistance);
+						restored = true;
+					}
+					if (!restored && anchorExecID) {
+						var anchorPair = container.querySelector(':scope > [data-exec-id="' + anchorExecID.replace(/"/g, '\\"') + '"]');
+						if (anchorPair) {
+							var containerTop = container.getBoundingClientRect().top;
+							var currentOffset = anchorPair.getBoundingClientRect().top - containerTop;
+							container.scrollTop += currentOffset - anchorOffsetTop;
+							restored = true;
+						}
+					}
+					if (!restored) {
+						container.scrollTop = prevTop + Math.max(0, (container.scrollHeight || 0) - prevHeight);
+					}
+					delete container.dataset.earlierPrevScrollHeight;
+					delete container.dataset.earlierPrevScrollTop;
+					delete container.dataset.earlierPrevBottomDistance;
+					delete container.dataset.earlierAnchorExecId;
+					delete container.dataset.earlierAnchorOffsetTop;
+					delete container.dataset.earlierSwapPrepared;
+					requestAnimationFrame(function() {
+						container.dataset.earlierAnchorRestoring = 'false';
+						container.dataset.earlierRequestLoading = 'false';
+					});
+				});
+			};
+
+			window.pruneChatExecutionWindow = function(containerOrID) {
+				var container = typeof containerOrID === 'string' ? document.getElementById(containerOrID) : containerOrID;
+				if (!container) return;
+				var limit = parseInt(container.getAttribute('data-window-limit') || '0', 10) || 0;
+				if (limit <= 0) return;
+				var pairs = Array.prototype.slice.call(container.querySelectorAll(':scope > [data-execution-pair="true"]'));
+				var pruned = false;
+				while (pairs.length > limit) {
+					var removed = pairs.shift();
+					if (removed && removed.parentNode === container) {
+						removed.remove();
+						pruned = true;
+					}
+				}
+				var first = container.querySelector(':scope > [data-execution-pair="true"]');
+				var loader = container.querySelector('[data-earlier-loader="true"]');
+				if (!loader && pruned && first) {
+					var baseURL = container.getAttribute('data-earlier-url-base') || '';
+					if (baseURL) {
+						loader = document.createElement('div');
+						loader.id = container.id + '-earlier-loader';
+						loader.className = 'py-2 text-center text-xs opacity-60';
+						loader.setAttribute('data-earlier-loader', 'true');
+						loader.setAttribute('data-container-id', container.id);
+						loader.setAttribute('data-window-limit', String(limit));
+						loader.setAttribute('hx-get', baseURL);
+						loader.setAttribute('hx-trigger', 'ov:load-earlier');
+						loader.setAttribute('hx-target', '#' + container.id + '-earlier-loader');
+						loader.setAttribute('hx-swap', 'outerHTML show:none');
+						loader.setAttribute('hx-on::before-request', 'window.prepareChatEarlierSwap && window.prepareChatEarlierSwap(this)');
+						loader.setAttribute('hx-on::after-swap', 'window.afterChatEarlierSwap && window.afterChatEarlierSwap(this)');
+						loader.setAttribute('hx-on::after-request', 'if (event.detail && !event.detail.successful && window.finishChatEarlierRequest) window.finishChatEarlierRequest(this)');
+						loader.innerHTML = '<span data-earlier-loader-idle>Scroll up to load earlier messages</span><span data-earlier-loader-busy class="hidden"><span class="loading loading-spinner loading-xs align-middle mr-2"></span>Loading earlier messages...</span>';
+						container.insertBefore(loader, container.firstChild);
+						if (window.htmx) htmx.process(loader);
+					}
+				}
+				if (first && loader) {
+					var execID = first.getAttribute('data-exec-id');
+					var hxGet = loader.getAttribute('hx-get') || '';
+					if (execID && hxGet) {
+						try {
+							var url = new URL(hxGet, window.location.origin);
+							url.searchParams.set('before', execID);
+							loader.setAttribute('hx-get', url.pathname + url.search);
+						} catch (e) {}
+					}
+				}
+			};
 
 		// resolveScrollTracker returns a tracker for `messagesEl`, creating one or
 		// rebinding the existing keyed tracker if the element changed (e.g. after a

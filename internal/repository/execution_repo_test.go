@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -783,4 +785,88 @@ func TestExecutionRepo_CompleteSuccessIfNoPendingSteeringReportsTerminalState(t 
 	if stored.Status != models.ExecCancelled || stored.Output != "partial" || stored.ErrorMessage != "cancelled" {
 		t.Fatalf("late success must not overwrite cancelled execution, got status=%s output=%q err=%q", stored.Status, stored.Output, stored.ErrorMessage)
 	}
+}
+
+func TestExecutionRepo_ChatHistoryWindowReturnsLatestChronologicalAndBeforeCursor(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	agentRepo := NewLLMConfigRepo(db)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+	agent, _ := agentRepo.GetDefault(ctx)
+
+	created := make([]models.Execution, 0, 5)
+	for i := 1; i <= 5; i++ {
+		task := &models.Task{ProjectID: "default", Title: fmt.Sprintf("Chat %d", i), Category: models.CategoryChat, Status: models.StatusPending, Prompt: fmt.Sprintf("prompt-%d", i)}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create task %d: %v", i, err)
+		}
+		exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: fmt.Sprintf("prompt-%d", i)}
+		if err := execRepo.Create(ctx, exec); err != nil {
+			t.Fatalf("create exec %d: %v", i, err)
+		}
+		created = append(created, *exec)
+	}
+
+	latest, err := execRepo.ListChatHistory(ctx, "default", 3)
+	if err != nil {
+		t.Fatalf("ListChatHistory: %v", err)
+	}
+	if got := promptsOf(latest); !reflect.DeepEqual(got, []string{"prompt-3", "prompt-4", "prompt-5"}) {
+		t.Fatalf("expected latest chat window in chronological order, got %#v", got)
+	}
+
+	earlier, err := execRepo.ListChatHistoryBefore(ctx, "default", created[2].ID, 2)
+	if err != nil {
+		t.Fatalf("ListChatHistoryBefore: %v", err)
+	}
+	if got := promptsOf(earlier); !reflect.DeepEqual(got, []string{"prompt-1", "prompt-2"}) {
+		t.Fatalf("expected earlier chat page, got %#v", got)
+	}
+}
+
+func TestExecutionRepo_TaskExecutionWindowReturnsLatestChronologicalAndBeforeCursor(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	agentRepo := NewLLMConfigRepo(db)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+	agent, _ := agentRepo.GetDefault(ctx)
+
+	task := &models.Task{ProjectID: "default", Title: "Thread Task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "prompt"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	created := make([]models.Execution, 0, 5)
+	for i := 1; i <= 5; i++ {
+		exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: fmt.Sprintf("turn-%d", i)}
+		if err := execRepo.Create(ctx, exec); err != nil {
+			t.Fatalf("create exec %d: %v", i, err)
+		}
+		created = append(created, *exec)
+	}
+
+	latest, err := execRepo.ListByTaskChronologicalLimit(ctx, task.ID, 3)
+	if err != nil {
+		t.Fatalf("ListByTaskChronologicalLimit: %v", err)
+	}
+	if got := promptsOf(latest); !reflect.DeepEqual(got, []string{"turn-3", "turn-4", "turn-5"}) {
+		t.Fatalf("expected latest task window in chronological order, got %#v", got)
+	}
+
+	earlier, err := execRepo.ListByTaskChronologicalBefore(ctx, task.ID, created[2].ID, 2)
+	if err != nil {
+		t.Fatalf("ListByTaskChronologicalBefore: %v", err)
+	}
+	if got := promptsOf(earlier); !reflect.DeepEqual(got, []string{"turn-1", "turn-2"}) {
+		t.Fatalf("expected earlier task page, got %#v", got)
+	}
+}
+
+func promptsOf(execs []models.Execution) []string {
+	out := make([]string, len(execs))
+	for i, exec := range execs {
+		out[i] = exec.PromptSent
+	}
+	return out
 }

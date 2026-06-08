@@ -27,8 +27,10 @@ import (
 )
 
 const (
-	backlogSortCookieName   = "backlog_sort"
-	completedSortCookieName = "completed_sort"
+	backlogSortCookieName        = "backlog_sort"
+	completedSortCookieName      = "completed_sort"
+	taskThreadWindowLimitDefault = 30
+	taskThreadWindowLimitMax     = 100
 )
 
 type taskSortPreferences struct {
@@ -1890,19 +1892,17 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
+	limit := parseThreadWindowLimit(c.QueryParam("limit"), taskThreadWindowLimitDefault, taskThreadWindowLimitMax)
+	beforeExecID := strings.TrimSpace(c.QueryParam("before"))
+	executions, hasEarlier, err := h.loadTaskThreadExecutionWindow(c.Request().Context(), taskID, beforeExecID, limit)
+	if err != nil {
+		applog.Infof("[handler] GetTaskThread error loading executions: %v", err)
+		executions = []models.Execution{}
+		hasEarlier = false
+	}
 	agents, _ := h.llmConfigRepo.List(c.Request().Context())
 
-	// Load chat attachments for all executions in a single query
-	execIDs := make([]string, len(executions))
-	for i, exec := range executions {
-		execIDs[i] = exec.ID
-	}
-	chatAttachmentsByExec, err := h.chatAttachmentRepo.ListByExecutionIDs(c.Request().Context(), execIDs)
-	if err != nil {
-		applog.Infof("[handler] GetTaskThread error loading attachments: %v", err)
-		chatAttachmentsByExec = make(map[string][]models.ChatAttachment)
-	}
+	chatAttachmentsByExec := h.loadChatAttachmentsForExecutions(c.Request().Context(), executions, "GetTaskThread")
 
 	pendingInputs := []models.ThreadInput{}
 	if h.threadInputRepo != nil {
@@ -1920,7 +1920,27 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		}
 	}
 
-	return render(c, http.StatusOK, components.TaskThreadView(task, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs))
+	if beforeExecID != "" {
+		return render(c, http.StatusOK, components.TaskThreadEarlierMessages(task, executions, chatAttachmentsByExec, hasEarlier, limit))
+	}
+
+	return render(c, http.StatusOK, components.TaskThreadView(task, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit))
+}
+
+func (h *Handler) loadTaskThreadExecutionWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
+	queryLimit := limit + 1
+	var rows []models.Execution
+	var err error
+	if beforeExecID != "" {
+		rows, err = h.execRepo.ListByTaskChronologicalBefore(ctx, taskID, beforeExecID, queryLimit)
+	} else {
+		rows, err = h.execRepo.ListByTaskChronologicalLimit(ctx, taskID, queryLimit)
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	visible, hasEarlier := trimExecutionWindow(rows, limit)
+	return visible, hasEarlier, nil
 }
 
 func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {

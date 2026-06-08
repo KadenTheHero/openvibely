@@ -6,14 +6,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/a-h/templ"
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+func renderChatContentForTest(agents []models.LLMConfig, history []models.Execution, projectID string, attachments map[string][]models.ChatAttachment, pending []models.ThreadInput, latestPlanComplete bool) templ.Component {
+	return ChatContent(agents, history, projectID, attachments, pending, latestPlanComplete, false, 30)
+}
 
 func TestChatContent_PlanSwitchAutoSubmitsImplementationHandoff(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -35,7 +40,7 @@ func TestChatContent_PlanCompletionPromptRestoresFromHistoryOnRefresh(t *testing
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -54,7 +59,7 @@ func TestChatContent_PlanPromptRecoveryRunsForContainerOuterHTMLSwaps(t *testing
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -73,7 +78,7 @@ func TestChatContent_PlanPromptButtonsUseDelegatedHandlers(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -95,7 +100,7 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -150,7 +155,7 @@ func TestChatContent_KebabTriggerUsesLabelForDesktopWebviewCompatibility(t *test
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -168,7 +173,7 @@ func TestChatContent_ClearChatDoesNotRequireConfirmation(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -188,7 +193,7 @@ func TestChatContent_RunningChatCanSteerFromPendingRowsOnly(t *testing.T) {
 	pending := []models.ThreadInput{{ID: "queued-1", Scope: models.ThreadInputScopeChat, ProjectID: "project-1", InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued"}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, history, "project-1", map[string][]models.ChatAttachment{}, pending, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, history, "project-1", map[string][]models.ChatAttachment{}, pending, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -220,7 +225,7 @@ func TestChatContent_RendersCancelledChatExecutions(t *testing.T) {
 	history := []models.Execution{{ID: "exec-cancelled", Status: models.ExecCancelled, PromptSent: "hello", Output: "partial"}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, history, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, history, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -234,7 +239,7 @@ func TestChatContent_LivePromotedQueuedRowsAreRemoved(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -248,7 +253,7 @@ func TestChatContent_LiveSteeringRowsAreCancelable(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -278,22 +283,26 @@ func TestChatContent_ClearsWebSendSuppressionOnRequestCompletion(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
 	content := buf.String()
 
-	beforeRequest := strings.Index(content, "htmx:beforeRequest")
-	afterRequest := strings.Index(content, "htmx:afterRequest")
-	afterSwap := strings.Index(content, "htmx:afterSwap")
-	if beforeRequest == -1 || afterRequest == -1 || afterSwap == -1 {
+	beforeRequest := strings.Index(content, "document.body.addEventListener('htmx:beforeRequest'")
+	afterRequest := strings.Index(content, "document.body.addEventListener('htmx:afterRequest'")
+	webSendClear := strings.Index(content, "window._chatWebSendInProgress = false")
+	if beforeRequest == -1 || afterRequest == -1 || webSendClear == -1 {
 		t.Fatal("expected chat form HTMX request lifecycle handlers")
 	}
-	if !(beforeRequest < afterRequest && afterRequest < afterSwap) {
-		t.Fatal("afterRequest clear should be registered between send setup and swap-specific handling")
+	if !(beforeRequest < afterRequest && afterRequest < webSendClear) {
+		t.Fatal("afterRequest clear should be registered after send setup")
 	}
-	branch := content[afterRequest:afterSwap]
+	branchEnd := strings.Index(content[afterRequest:], "window._chatKnownExecIds")
+	if branchEnd == -1 {
+		t.Fatal("expected chat live-event setup after request lifecycle handling")
+	}
+	branch := content[afterRequest : afterRequest+branchEnd]
 	if !strings.Contains(branch, "window._chatWebSendInProgress = false") {
 		t.Fatal("web-send suppression must clear on request completion for OOB-only queued responses")
 	}
@@ -303,7 +312,7 @@ func TestChatContent_LiveQueuedRowsDedupeByPendingInputDOMID(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -347,7 +356,7 @@ func TestChatContent_LiveCancelledPendingRowsAreRemoved(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -361,7 +370,7 @@ func TestChatContent_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *testin
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -385,7 +394,7 @@ func TestChatContent_ClosesChatStreamEventSourcesOnSwapAndNavigation(t *testing.
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -409,5 +418,50 @@ func TestChatContent_ClosesChatStreamEventSourcesOnSwapAndNavigation(t *testing.
 	}
 	if !strings.Contains(content, "window.closeAllChatStreamEventSources()") {
 		t.Error("expected swap/navigation cleanup to close active chat streams")
+	}
+}
+
+func TestChatContent_WindowedTranscriptUsesTopLoaderAndPrunesLivePairs(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+	history := []models.Execution{
+		{ID: "exec-1", Status: models.ExecCompleted, PromptSent: "one", Output: "done"},
+		{ID: "exec-2", Status: models.ExecRunning, PromptSent: "two"},
+	}
+
+	var buf bytes.Buffer
+	err := ChatContent(agents, history, "project-1", map[string][]models.ChatAttachment{}, nil, false, true, 2).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, `data-window-limit="2"`) {
+		t.Fatal("expected chat messages container to carry visible window limit")
+	}
+	if !strings.Contains(content, `data-earlier-url-base="/chat?project_id=project-1&amp;limit=2"`) {
+		t.Fatal("expected chat messages container to expose a base earlier URL for live-prune-created loaders")
+	}
+	if !strings.Contains(content, `data-earlier-loader="true"`) || !strings.Contains(content, `hx-trigger="ov:load-earlier"`) || !strings.Contains(content, `/chat?project_id=project-1&amp;before=exec-1&amp;limit=2`) {
+		t.Fatal("expected scroll-triggered server-side earlier loader with oldest visible execution cursor")
+	}
+	if strings.Count(content, `data-execution-pair="true"`) < 2 {
+		t.Fatal("expected rendered executions to be wrapped as whole-turn pairs")
+	}
+	if strings.Count(content, `chat-execution-pair space-y-6`) < 2 {
+		t.Fatal("expected execution pairs to preserve equal vertical spacing between user and assistant bubbles")
+	}
+	if strings.Contains(content, `chat-execution-pair space-y-3`) {
+		t.Fatal("execution-pair spacing must match the surrounding message-list spacing, not use a smaller internal gap")
+	}
+	if !strings.Contains(content, "window.initChatEarlierLoader") || !strings.Contains(content, "window.pruneChatExecutionWindow") {
+		t.Fatal("expected shared load-earlier and live pruning helpers")
+	}
+	if !strings.Contains(content, "window.initChatEarlierLoader(chatMessages)") {
+		t.Fatal("expected chat initial render to bind the load-earlier helper")
+	}
+	if !strings.Contains(content, "var pruned = false") || !strings.Contains(content, "data-earlier-url-base") || !strings.Contains(content, "container.insertBefore(loader, container.firstChild)") {
+		t.Fatal("expected pruning helper to create an earlier loader when live pruning exposes older history")
+	}
+	if !strings.Contains(content, "pair.setAttribute('data-execution-pair', 'true')") || !strings.Contains(content, "window.pruneChatExecutionWindow(chatMessages)") {
+		t.Fatal("expected live chat appends to create/prune whole execution pairs")
 	}
 }

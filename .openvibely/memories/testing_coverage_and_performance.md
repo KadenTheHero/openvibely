@@ -2,63 +2,44 @@
 name: testing_coverage_and_performance
 type: project
 created: 2026-06-07
-updated: 2026-06-07
-source: task
-source_id: 306d00927f201e4c7ac7eab51f76d871
+updated: 2026-06-08
+source: consolidation
+source_id: memory_consolidation_2026_06_08
 confidence: high
 title: Testing Coverage and Performance
 ---
 
-As of the 2026-06-07 coverage/runtime audit, OpenVibely has a large Go test suite but relatively low measured coverage because tests are concentrated in a subset of files while large service and handler areas remain untested.
+OpenVibely has a large Go test suite whose measured coverage is limited more by breadth gaps and generated templ output than by lack of test count.
 
-Baseline from `go test ./... -count=1 -timeout 60s -coverprofile=/tmp/coverage.out`:
-- Total test functions: 2,956.
-- Test files: 247.
-- Overall coverage: 47.4%.
-- Functions with 0% coverage: 2,103.
+Coverage baseline from the 2026-06-07 audit:
+- `go test ./... -count=1 -timeout 60s -coverprofile=/tmp/coverage.out` found about 2,956 test functions, 247 test files, 47.4% overall unfiltered coverage, and 2,103 functions with 0% coverage.
+- The coverage/test-count mismatch is primarily breadth bias: many granular tests exercise happy paths in already-tested files, while large adjacent files and error/pagination/webhook/retry paths remain unexecuted.
+- `internal/service` and `internal/handler` were the largest durable coverage drains by function count.
+- Major service gaps included `service/llm_service.go` at 0% measured coverage and large uncovered areas in Telegram/workflow/memory/worktree/chat action/routing/worker lifecycle/agent files/project services.
+- Major handler gaps included schedule, project, workflow, collision, analytics, trend, autonomous, backlog, insights, attachment, SSE, and thread-input handlers.
+- Entire or near-entire low/zero package areas included `cmd/server`, `internal/llm/ollama`, `internal/llm/workflow`, `internal/database/migrations`, generated `web/templates/*_templ.go`, `pkg/openai_client`, `internal/agentplugins`, `internal/models`, `internal/llm/anthropic`, and `internal/llm/openai`.
 
-Largest durable coverage drains:
-- `internal/service` had 53.7% coverage, about 730 functions not fully covered and 612 functions at 0%; 16 service files had no test file.
-- `service/llm_service.go` was a major gap at 2,201 lines with 0% measured coverage.
-- `service/telegram_service.go` was 3,538 lines with a test file but many uncovered functions; `workflow_service.go` also had many 0% functions despite existing tests.
-- `service/memory_service.go`, `service/workflow_chain.go`, `service/chat_action_runtime.go`, `service/agent_routing_strategy.go`, `service/worker_lifecycle_helpers.go`, `service/agent_files.go`, and `service/project_service.go` had no test file.
-- `internal/handler` had 63.6% coverage and about 538 uncovered functions; 16 handler files had no test file.
-- Untested handler gaps included `handler/schedule_handler.go`, `handler/project_handler.go`, `handler/workflow_handler.go`, `handler/collision_handler.go`, `handler/analytics_handler.go`, `handler/trend_handler.go`, `handler/autonomous_handler.go`, `handler/backlog_handler.go`, `handler/insights_handler.go`, `handler/attachment_handler.go`, `handler/sse_handler.go`, and `handler/thread_input_handler.go`.
-- Entire or near-entire low/zero package areas included `cmd/server`, `internal/llm/ollama`, `internal/llm/workflow`, `internal/database/migrations`, `web/templates/pages`, `web/templates/components`, `pkg/openai_client`, `internal/agentplugins`, `internal/models`, `internal/llm/anthropic`, and `internal/llm/openai`.
-
-The audit found the coverage/test-count mismatch is primarily breadth bias: many granular tests exercise happy paths in already-tested files, while large adjacent files and error/pagination/webhook/retry paths are never executed.
-
-Runtime/CPU findings from the same audit:
-- Slowest packages were `internal/handler` at about 58.7s and `internal/service` at about 51.8s.
-- `pkg/openai_client` took about 25.5s and `pkg/anthropic_client` about 18.1s, largely from streaming parser/chunk reassembly tests.
-- Test files contained about 149 `time.Sleep` calls; worst offenders included `handler/oauth_handler_test.go`, `handler/live_sse_test.go`, and `handler/chat_processing_test.go`.
-- Handler tests used `NewTestContext()` about 22 times, each creating Echo, a DB, repositories, services, and full route registration.
-- `NewTestDB()` was called about 778 times; migration caching amortized goose migration cost, but each in-memory SQLite open plus DDL/data replay still added overhead.
-- Default Go package parallelism can run the slow handler/service/client packages concurrently, increasing peak CPU load even when total work is unchanged.
-
-Follow-up implementation on 2026-06-07 added focused tests for previously untested handler/service areas:
-- Added tests for `internal/handler/schedule_handler.go`, `internal/handler/project_handler.go`, and `internal/handler/workflow_handler.go`, plus `internal/service/memory_service.go`.
-- Added `testing.Short()` guards for timing-sensitive OAuth/SSE tests that used sleeps for real TCP server startup or event timing; this only improves `go test -short ./...` / `make test-short` behavior and does not materially reduce full `go test ./...` runtime.
-- Fixed a real `AnalyzeTaskComplexity` nil-task crash in `workflow_handler.go` by checking `task == nil` after repository lookup.
-- After this work, test functions increased from about 2,956 to about 3,060; `internal/handler` coverage moved from about 63.6% to 65.2%, and `internal/service` from about 53.7% to 53.8%.
-- Full unfiltered `./...` coverage moved only from about 47.4% to 47.7%, correcting the earlier expectation that handler/service tests alone would move total coverage toward 58-62%; generated/low-covered non-internal packages, especially `web/templates/pages`, dominated the full denominator.
-
-Generated templ coverage decision from the same follow-up:
-- OpenVibely has tests for template behavior under `web/templates`, but the Go coverage profile was measuring generated `*_templ.go` files emitted by templ (`// Code generated by templ - DO NOT EDIT.`).
-- Generated `*_templ.go` files accounted for about 14,715 of 40,714 coverage-profile lines, roughly 36% of tracked statements, and dragged total reported coverage from 60.9% filtered to 47.7% unfiltered.
-- The project chose to keep running template tests but exclude generated `*_templ.go` lines from coverage summaries by filtering `coverage.out` before `go tool cover -func`.
-- `Makefile` has test targets including `test`, `test-short`, and `test-cover`; `test-cover` filters generated templ output from the coverage report.
+Coverage decisions and current state:
+- Follow-up work on 2026-06-07 added focused tests for previously untested handler/service areas, including schedule, project, workflow, collision, analytics, trend, autonomous, backlog, insights, attachment, SSE, thread-input handlers, and `internal/service/memory_service.go`.
+- A real `AnalyzeTaskComplexity` nil-task crash in `workflow_handler.go` was fixed by checking `task == nil` after repository lookup.
+- Total test functions reached about 3,176 after the handler-test additions.
+- Generated templ `*_templ.go` files are excluded from coverage summaries while template tests still run. Generated templ files accounted for about 14,715 of 40,714 coverage-profile lines, dragging total reported coverage from 60.9% filtered to 47.7% unfiltered.
+- `Makefile` test targets include `test`, `test-short`, and `test-cover`; `test-cover` filters generated templ output from the coverage report.
 - GitHub Actions test coverage summary also filters `*_templ.go` entries before reporting coverage, so CI should report the filtered coverage percentage.
+- Filtered coverage after later handler-test additions was about 61.4%.
 
-Durable improvement priorities after the follow-up:
+Durable coverage priorities:
 - Highest-ROI remaining coverage target is still `service/llm_service.go`, a large core file with 0% measured coverage; it requires careful LLM caller mocking to avoid flaky tests.
 - Expand existing `workflow_service_test.go` and `telegram_service_test.go` beyond happy paths, especially error, pagination, webhook, and retry paths.
-- Add sparse LLM adapter tests for `internal/llm/anthropic`, `internal/llm/openai`, and still-untested adapter areas such as `internal/llm/ollama` and `internal/llm/workflow`.
-- Runtime/cost follow-up on 2026-06-07 replaced several fixed-delay waits in handler tests: redundant SSE publish sleeps were removed because subscriptions are active before the initial ping, OAuth callback startup waits use a TCP port-ready poll instead of fixed `time.Sleep`, OAuth cancellation polling uses `require.Eventually`, and two chat-processing manual sleep loops were converted to `require.Eventually`. The handler package runtime improved from about 58.7s in the audit to about 52.2s for `go test ./internal/handler/... -count=1 -timeout 120s`. A shared handler `TestMain` DB was deliberately not implemented because many handler tests mutate/query global/default/list state; `NewTestDB` already caches migrations and a shared DB would need transaction rollback isolation to be safe.
-- Additional handler coverage follow-up on 2026-06-07 added 9 test files and 116 test functions for the remaining previously zero-coverage handlers: `collision_handler.go`, `analytics_handler.go`, `trend_handler.go`, `autonomous_handler.go`, `backlog_handler.go`, `insights_handler.go`, `attachment_handler.go`, `sse_handler.go`, and `thread_input_handler.go`. The tests mainly cover validation and nil-service guard contracts for service-backed handlers, plus deeper real DB-backed coverage for analytics, multipart attachment upload/delete behavior, pure SSE event formatting, and thread-input repo conflict paths. Filtered coverage excluding generated `*_templ.go` rose from 60.9% to about 61.4%; total test functions were measured at 3,176.
-- Latest runtime snapshot after handler-test additions: `internal/handler` remained the slowest package at about 60s with about 232 `NewTestContext`/`NewTestDB` references in handler tests; `internal/service` took about 48s with about 407 `NewTestDB` references plus git/worktree tests around 1s each; total test functions were measured at 3,176.
-- Runtime/cost follow-up on 2026-06-07 added a package-level `clockAfter = time.After` seam in `pkg/openai_client` and `pkg/anthropic_client` retry logic so tests can bypass real retry sleeps without changing production behavior. Retry tests that previously waited through 1s/2s/4s backoffs now swap `clockAfter` to an instant channel and run in about 0.00s each. Measured package runtime improved from about 24s to 4.9s for `pkg/openai_client` and from about 17s to 2.3s for `pkg/anthropic_client` in the affected package run, saving roughly 34s across those packages.
-- The same runtime follow-up added `testing.Short()` guards around `TestRealtimeDiffUpdates` and five worker dispatch/project-limit tests that intentionally use sleep-based goroutine/ticker timing. This improves `go test -short`/`make test-short`; full `internal/service` runtime remains heavy because LLM execution and DB-backed service tests still exercise the full mock-LLM/service stack.
+- Add sparse LLM adapter tests for `internal/llm/anthropic`, `internal/llm/openai`, `internal/llm/ollama`, and `internal/llm/workflow`.
 - Existing tests are mostly not wrong; the durable issue is narrow breadth, not excessive count. Avoid blanket `t.Parallel()` changes around shared DB setup.
-- Raw full-suite runs with `go test ./... -count=1 -timeout 60s` can fail from `internal/handler` timing out rather than from assertion failures; after the test additions the handler package has been observed passing around 55s but also taking about 76s under load. Project Makefile targets use a 120s timeout, so prefer `make test`, `make test-cover`, or `go test ./... -count=1 -timeout 120s` for authoritative full validation.
-- Handler `NewTestContext` now calls `h.SetLocalRepoPathEnabled(true)`, matching the older `setupHandlerTest` default. Project-handler tests that create local-source projects rely on this; tests that need local paths disabled should explicitly call `tc.handler.SetLocalRepoPathEnabled(false)` after creating the context.
+
+Runtime and validation facts:
+- Slowest packages in the 2026-06-07 audit were `internal/handler` at about 58.7s, `internal/service` at about 51.8s, `pkg/openai_client` at about 25.5s, and `pkg/anthropic_client` at about 18.1s.
+- Test cost came from many `time.Sleep` calls, repeated `NewTestContext()`/`NewTestDB()` setup, streaming parser/chunk reassembly tests, and DB/git/worktree-heavy service tests.
+- Fixed-delay waits in several handler tests were replaced with readiness polling or `require.Eventually`; some timing-sensitive tests gained `testing.Short()` guards.
+- `pkg/openai_client` and `pkg/anthropic_client` retry logic now have a package-level `clockAfter = time.After` seam so tests can bypass real retry sleeps without changing production behavior.
+- `TestRealtimeDiffUpdates` and several worker dispatch/project-limit tests have `testing.Short()` guards because they intentionally use sleep-based goroutine/ticker timing.
+- A shared handler `TestMain` DB was deliberately not implemented because many handler tests mutate/query global/default/list state; `NewTestDB` already caches migrations and a shared DB would need transaction rollback isolation to be safe.
+- Raw full-suite runs with `go test ./... -count=1 -timeout 60s` or `go test ./internal/... -count=1 -timeout 60s` can fail from `internal/handler` timing out under load rather than from assertion failures. Project Makefile targets use a 120s timeout, so prefer `make test`, `make test-cover`, or `go test ./... -count=1 -timeout 120s` for authoritative full validation.
+- Handler `NewTestContext` now calls `h.SetLocalRepoPathEnabled(true)`, matching the older `setupHandlerTest` default. Project-handler tests that create local-source projects rely on this; tests needing local paths disabled should explicitly call `tc.handler.SetLocalRepoPathEnabled(false)` after creating the context.
