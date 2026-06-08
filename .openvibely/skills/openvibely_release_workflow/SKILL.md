@@ -37,6 +37,8 @@ Modifier examples the agent will understand:
 
 The agent should always run `DRY_RUN=1` first, review the output, then run the full pipeline.
 
+Before a real non-dry-run release, confirm the exact commit that will receive the release tag. Run `git status --short --branch`, `git log --oneline -3`, and compare HEAD with `origin/main`/`main`. Do not build or publish from a task worktree or unmerged task-only commit by accident. If HEAD includes release-task commits that are not intended for the release, either merge/rebase them to main first or reset/check out the intended main commit before continuing; ask the user only when the intended tag target is ambiguous.
+
 ---
 
 ## Required Inputs
@@ -73,7 +75,7 @@ brew install gh
 brew install mingw-w64
 ```
 
-After installing `gh`, run `gh auth status`; if unauthenticated, run `gh auth login` or ask the user to complete GitHub authentication. For optional tools, install them when the requested release artifact or Docker step depends on them; otherwise document the skipped capability in the release summary.
+After installing `gh`, run `gh auth status`; if unauthenticated, run `gh auth login` or ask the user to complete GitHub authentication. If the user has already requested the real release and later completes `gh` authentication or another credential step, treat the original release request as still active: verify auth and preflight, then continue the release pipeline. Do not stop with a status-only summary asking whether to proceed unless a new hard blocker remains or the user explicitly changed the request to dry-run/status mode. For optional tools, install them when the requested release artifact or Docker step depends on them; otherwise document the skipped capability in the release summary.
 
 ---
 
@@ -85,10 +87,11 @@ Run `release-preflight.sh <version>` first, or let `release.sh` run it automatic
 2. **Required tools** — `go`, `git`, `zip`, `tar`, `sha256sum`/`shasum` present.
 3. **GitHub CLI auth** — `gh auth status` passes; repo push permission confirmed.
 4. **Worktree clean** — warns if uncommitted changes exist (does not block, but should be resolved before publishing).
-5. **Tag collision** — fails if `v<version>` already exists locally or in GitHub releases.
-6. **Previous tag** — finds latest `v*` tag for changelog range.
-7. **Commit count** — lists unreleased commits for review.
-8. **Build capability** — reports whether macOS desktop, Windows desktop-cli, and Docker are available on the current host.
+5. **Tag target sanity** — confirm the current HEAD is the intended release commit, normally current `main`/`origin/main`, and not an accidental task-worktree follow-up commit.
+6. **Tag collision** — fails if `v<version>` already exists locally or in GitHub releases.
+7. **Previous tag** — finds latest `v*` tag for changelog range.
+8. **Commit count** — lists unreleased commits for review.
+9. **Build capability** — reports whether macOS desktop, Windows desktop-cli, and Docker are available on the current host.
 
 ---
 
@@ -105,13 +108,14 @@ DRY_RUN=1 .openvibely/skills/openvibely_release_workflow/scripts/release.sh 0.1.
 
 The orchestrator runs steps in sequence, with a mandatory AI synthesis + docs + review pause before publishing.
 
-```
+```text
+Step 0: agent sanity check    — verify HEAD/tag target is intended main release commit
 Step 1: release-preflight.sh  — validate environment, auth, tags, build caps
-Step 2: release-build.sh      — build all artifacts → dist/0.1.1/
+Step 2: release-build.sh      — build all artifacts → dist/0.1.1/ and verify archive contents
 Step 3: release-notes.sh      — collect COMMITS.txt, render RELEASE_NOTES.md shell
 Step 4: (agent)               — read COMMITS.txt, synthesize release-specific highlights and changelog, fill placeholders
 Step 5: (agent)               — update docs for features added or meaningfully changed in this release
-Step 6: (review)              — confirm RELEASE_NOTES.md and docs updates look correct
+Step 6: (review)              — confirm RELEASE_NOTES.md, docs updates, and artifact sanity checks look correct
 Step 7: release-publish.sh    — create GitHub release, upload artifacts
 ```
 
@@ -122,11 +126,19 @@ Step 4 is not automated — the orchestrating agent reads `COMMITS.txt` and writ
 ```bash
 SCRIPTS=".openvibely/skills/openvibely_release_workflow/scripts"
 
+# 0. Confirm the release tag target before doing real release work
+git status --short --branch
+git log --oneline -3
+
 # 1. Preflight
 bash $SCRIPTS/release-preflight.sh 0.1.1
 
 # 2. Build artifacts
 bash $SCRIPTS/release-build.sh 0.1.1 ./dist/0.1.1
+
+# 2b. Verify archive contents, especially macOS .app zips
+#     The top-level extracted desktop bundle must end exactly in .app.
+unzip -Z1 ./dist/0.1.1/OpenVibely_0.1.1_darwin_amd64.app.zip | head
 
 # 3. Collect commits + render notes template
 bash $SCRIPTS/release-notes.sh 0.1.1 v0.1.0 ./dist/0.1.1
@@ -172,6 +184,45 @@ When a user asks what the release notes would look like after a dry run, read th
 
 **Casing rule:** Desktop macOS bundles use `OpenVibely_` (capitalized). All server/binary artifacts use `openvibely_` (lowercase).
 
+### macOS desktop app output
+
+When asked where the desktop app is or what `make package-desktop-macos` creates, inspect `Makefile` and explain the concrete bundle output instead of only listing release zip names. The make target builds `bin/openvibely-desktop`, then creates `bin/OpenVibely.app` with this structure:
+
+```text
+bin/OpenVibely.app/
+└── Contents/
+    ├── MacOS/
+    │   └── OpenVibely
+    └── Info.plist
+```
+
+Treat `bin/openvibely-desktop` as a staging/intermediate Unix executable, not the user-facing desktop app and not a release asset by itself. It exists so the bundle can copy it into `Contents/MacOS/OpenVibely`; the useful macOS artifact is the `.app` bundle, packaged as `.app.zip` for GitHub releases.
+
+The release build creates one `.app.zip` per macOS architecture in `dist/<version>/`: `OpenVibely_<version>_darwin_amd64.app.zip` for Intel and `OpenVibely_<version>_darwin_arm64.app.zip` for Apple Silicon. The desktop binary starts the OpenVibely backend on localhost and opens it in a native macOS WebView window; it is not Electron. Unless signing/notarization has been added and verified in the scripts, treat these as unsigned app bundles and tell users they may need Finder right-click → Open on first launch.
+
+### macOS app archive verification
+
+Do not infer the contents of a desktop release zip from its filename or from the build script path alone. Before publishing, or whenever the user challenges what a desktop artifact contains, inspect the actual archive with `unzip -l`, `unzip -Z1`, or by extracting it to a temporary directory.
+
+A valid macOS desktop release zip must extract to a top-level bundle directory whose name ends exactly in `.app` and contains an executable at `Contents/MacOS/OpenVibely`. A top-level directory like `OpenVibely.app_amd64/` or `OpenVibely.app_arm64/` is invalid because Finder will not recognize it as an application bundle; treat that as a release blocker and fix the packaging script before publishing.
+
+This exact top-level directory-name requirement is macOS-specific. Linux and Windows server/CLI archives are flat binary artifacts; verify their binary names and executable bits where applicable, but do not apply `.app` bundle naming rules to non-macOS artifacts.
+
+Example checks after a real build:
+
+```bash
+zip_path="dist/<version>/OpenVibely_<version>_darwin_amd64.app.zip"
+unzip -Z1 "$zip_path" | head -20
+
+tmpdir="$(mktemp -d)"
+unzip -q "$zip_path" -d "$tmpdir"
+find "$tmpdir" -maxdepth 2 -type d -name '*.app' -print
+test -x "$tmpdir/OpenVibely.app/Contents/MacOS/OpenVibely"
+rm -rf "$tmpdir"
+```
+
+Only state that the raw Unix executable is excluded from release assets after verifying the archive contents. The raw `bin/openvibely-desktop` / staging binary should not appear as a top-level shipped artifact inside the `.app.zip`.
+
 ---
 
 ## Release Notes Generation
@@ -194,7 +245,10 @@ After `release-notes.sh` runs, the agent must:
 3. **Synthesize a high-level, user-facing changelog** — not a dump of commit subjects. The agent should:
    - Identify what actually changed from a user's perspective.
    - Group related commits into coherent bullet points (3–8 total, plain English).
-   - Leave out noise: internal refactors, memory updates, test changes, typo fixes, chore commits, anything with no user impact.
+   - Leave out noise: internal refactors, memory updates, test changes, typo fixes, chore commits, CI/build/release-tooling changes, developer-only logging/observability flags, and anything else with no direct user impact.
+   - Omit narrow bug fixes, reliability patches, and UI polish items unless they restore or materially improve a core user workflow that a release reader would choose to upgrade for.
+   - Omit panel-detail changes, visual tweaks, and one-off light/dark-mode fixes from high-level notes; fold them into a broader feature entry only when they directly support a major release capability.
+   - Apply the upgrade-decision test before adding a bullet: would a developer or operator deciding whether to upgrade care about this item at release-note level? If not, leave it out even if the commit is user-visible.
    - Combine multiple small commits about the same feature into one bullet.
    - If commit messages are terse or technical, infer intent from context (file paths, bodies, task references).
    - Inspect related diffs or touched paths for ambiguous commits when practical instead of guessing from subjects alone.
@@ -216,7 +270,7 @@ Commit messages in this repo are not always detailed or conventional. A regex-ba
 
 The generated notes follow this structure:
 
-```
+```text
 # OpenVibely <version>
 
 <product intro paragraph>
@@ -301,7 +355,20 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 | GitHub release creation fails | If tag was pushed, delete it: `git tag -d v<ver> && git push <remote> :refs/tags/v<ver>`; delete the remote release if partially created via `gh release delete v<ver>`; then retry |
 | Partial asset upload | Use `gh release upload v<ver> <files>` to add missing assets to an existing release |
 
-The scripts never delete local branches or reset commits. Git operations are additive (create branch, create tag, push). Rollback requires manual git and GitHub CLI cleanup described above.
+### Repairing an existing published release
+
+If a release is already published and the user explicitly asks to fix or reuse the same version, treat it as an in-place release repair instead of creating a new version. Because this mutates public release state, first confirm the problem against the live release with `gh release view`, `git ls-remote --tags`, and by downloading or inspecting the affected assets. Do not assume a published asset is broken from the script or filename alone.
+
+Use the smallest repair that fixes the public artifact:
+
+1. Land the fix on the intended release branch or `main` commit using a normal push when possible.
+2. Move the existing local tag to the fixed commit with `git tag -f v<ver> <commit>`.
+3. Force-update only the release tag after explicit user authorization: `git push <remote> v<ver> --force`.
+4. Rebuild affected artifacts from the fixed commit; rebuild all artifacts if `SHA256SUMS` must represent a fresh full dist directory.
+5. Replace only affected GitHub release assets plus `SHA256SUMS`: delete old assets with `gh release delete-asset v<ver> <asset> --yes`, then upload replacements with `gh release upload v<ver> <files>`.
+6. Verify the live release after upload by listing assets and downloading/inspecting at least one replaced asset from GitHub, not just the local `dist/` copy.
+
+Never silently force-move a tag or delete release assets just because preflight reports a tag collision. Only do this for an already-published release repair after the user has asked to keep the same version or otherwise authorized mutation of the existing release.
 
 ---
 
@@ -309,7 +376,7 @@ The scripts never delete local branches or reset commits. Git operations are add
 
 After a successful run:
 
-```
+```text
 dist/<version>/
 ├── OpenVibely_<version>_darwin_amd64.app.zip
 ├── OpenVibely_<version>_darwin_arm64.app.zip
@@ -344,6 +411,7 @@ Tests cover:
 - Release branch naming (`release/v<version>`)
 - Release notes template structure (`AI_HIGHLIGHTS_PLACEHOLDER` and `AI_CHANGELOG_PLACEHOLDER` present, all required sections)
 - `COMMITS.txt` output structure (hash, date, author, subject, body fields present)
+- Real-build artifact contents for macOS `.app.zip` archives: extracted top-level bundle must end exactly in `.app` and contain `Contents/MacOS/OpenVibely`; archive listings like `OpenVibely.app_amd64/` are invalid even if the zip filename is correct.
 - If deterministic changelog grouping is replaced with AI synthesis, remove obsolete regex bucket tests and keep tests proving the placeholders and `COMMITS.txt` structure exist.
 
 ---

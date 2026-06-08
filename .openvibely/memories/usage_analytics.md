@@ -3,8 +3,8 @@ name: usage_analytics
 type: project
 created: 2026-06-03
 updated: 2026-06-07
-source: consolidation
-source_id: memory_consolidation_2026_06_07
+source: task
+source_id: 31a88fc61719854001613dab2470b548
 confidence: high
 title: Usage Analytics
 ---
@@ -36,6 +36,7 @@ Analytics surface facts:
 - Provider account cards appear before usage charts/tables.
 - The usage chart label is `Token Usage`; token-count breakdowns are labeled `Model Breakdown by Tokens`; execution-count breakdowns are labeled `Model Breakdown by Executions`.
 - Account-limit cards use the provider as the heading with normalized plan/subscription metadata underneath; raw plan types, account IDs, config IDs, emails, and provider identity fields are not public card labels.
+- Account-limit horizontal usage bars intentionally use explicit shared-theme track/fill meter markup instead of native/DaisyUI `<progress>` rendering, after a 2026-06-07 packaged macOS desktop light-mode WebView issue made the native bars invisible while web and dark modes appeared correct.
 
 OAuth account facts:
 - OpenAI ChatGPT/Codex account usage targets `https://chatgpt.com/backend-api/wham/usage`.
