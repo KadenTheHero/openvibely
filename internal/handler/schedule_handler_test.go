@@ -487,3 +487,175 @@ func TestGetModelCapacity_NotFound(t *testing.T) {
 		t.Fatalf("expected 404, got %d", rec.Code)
 	}
 }
+
+// ---- ToggleScheduleEnabled ----
+
+func TestToggleScheduleEnabled_NotFound(t *testing.T) {
+	tc := NewTestContext(t)
+	rec := tc.HTTP().Post("/schedules/nonexistent/toggle").Execute()
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestToggleScheduleEnabled_DisableAndEnable(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	future := time.Now().Add(time.Hour)
+	s := tc.CreateSchedule(task.ID).WithRunAt(future).WithRepeatType("daily").Build()
+
+	if !s.Enabled {
+		t.Fatal("expected schedule to start enabled")
+	}
+
+	// Disable
+	rec := tc.HTTP().Post("/schedules/" + s.ID + "/toggle").Execute()
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	got, _ := tc.scheduleRepo.GetByID(context.Background(), s.ID)
+	if got.Enabled {
+		t.Error("expected schedule to be disabled")
+	}
+
+	// Re-enable
+	rec = tc.HTTP().Post("/schedules/" + s.ID + "/toggle").Execute()
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d", rec.Code)
+	}
+	got, _ = tc.scheduleRepo.GetByID(context.Background(), s.ID)
+	if !got.Enabled {
+		t.Error("expected schedule to be enabled")
+	}
+}
+
+func TestToggleScheduleEnabled_HTMX_Returns200(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	s := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
+
+	rec := tc.HTMX().Post("/schedules/" + s.ID + "/toggle").Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 HTMX response, got %d", rec.Code)
+	}
+}
+
+func TestToggleScheduleEnabled_NonHTMX_RedirectContainsTaskID(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	s := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
+
+	rec := tc.HTTP().Post("/schedules/" + s.ID + "/toggle").Execute()
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d", rec.Code)
+	}
+	loc := rec.Header().Get("Location")
+	expected := "/tasks/" + task.ID
+	if loc != expected {
+		t.Errorf("expected redirect to %q, got %q", expected, loc)
+	}
+}
+
+func TestToggleScheduleEnabled_StaleNextRunRecomputed(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	// Schedule started yesterday and is daily
+	past := time.Now().Add(-25 * time.Hour)
+	s := tc.CreateSchedule(task.ID).WithRunAt(past).WithRepeatType("daily").Disabled().Build()
+
+	rec := tc.HTTP().Post("/schedules/" + s.ID + "/toggle").Execute()
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d", rec.Code)
+	}
+	got, _ := tc.scheduleRepo.GetByID(context.Background(), s.ID)
+	if !got.Enabled {
+		t.Error("expected schedule to be re-enabled")
+	}
+	if got.NextRun == nil {
+		t.Fatal("expected NextRun to be set after re-enable")
+	}
+	if !got.NextRun.After(time.Now()) {
+		t.Errorf("expected NextRun to be in the future after re-enable, got %v", got.NextRun)
+	}
+}
+
+func TestToggleScheduleEnabled_DisabledExcludedFromListDue(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	past := time.Now().Add(-time.Hour)
+	s := tc.CreateSchedule(task.ID).WithRunAt(past).Build()
+
+	// Confirm it's due while enabled
+	due, _ := tc.scheduleRepo.ListDue(context.Background(), time.Now())
+	found := false
+	for _, d := range due {
+		if d.ID == s.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected schedule to be due when enabled")
+	}
+
+	// Disable via toggle
+	rec := tc.HTTP().Post("/schedules/" + s.ID + "/toggle").Execute()
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d", rec.Code)
+	}
+
+	// Confirm it's no longer due
+	due, _ = tc.scheduleRepo.ListDue(context.Background(), time.Now())
+	for _, d := range due {
+		if d.ID == s.ID {
+			t.Error("expected disabled schedule to be excluded from ListDue")
+		}
+	}
+}
+
+// ---- APIToggleScheduleEnabled ----
+
+func TestAPIToggleScheduleEnabled_NotFound(t *testing.T) {
+	tc := NewTestContext(t)
+	rec := tc.HTTP().Post("/api/schedules/nonexistent/toggle").Execute()
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestAPIToggleScheduleEnabled_RoundTrip(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	s := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
+
+	// Toggle to disabled
+	rec := tc.HTTP().Post("/api/schedules/" + s.ID + "/toggle").Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["enabled"] != false {
+		t.Errorf("expected enabled=false, got %v", resp["enabled"])
+	}
+
+	// Toggle back to enabled
+	rec = tc.HTTP().Post("/api/schedules/" + s.ID + "/toggle").Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	resp = nil
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["enabled"] != true {
+		t.Errorf("expected enabled=true, got %v", resp["enabled"])
+	}
+}

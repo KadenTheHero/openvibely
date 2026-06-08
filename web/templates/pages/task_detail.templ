@@ -630,11 +630,35 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 														<span class="text-sm opacity-60">(every { fmt.Sprintf("%d", s.RepeatInterval) })</span>
 													}
 												}
+												if !s.Enabled {
+													<span class="badge badge-warning badge-xs ml-2">Disabled</span>
+												}
 												if s.NextRun != nil {
-													<span class="text-sm opacity-60 ml-2">Next: { s.NextRun.Local().Format("2006-01-02 3:04 PM") }</span>
+													<span class={ "text-sm ml-2", templ.KV("opacity-60", s.Enabled), templ.KV("opacity-30 line-through", !s.Enabled) }>
+														Next: { s.NextRun.Local().Format("2006-01-02 3:04 PM") }
+													</span>
 												}
 											</div>
 											<div class="flex gap-1">
+												if s.Enabled {
+													<button
+														class="btn btn-xs btn-ghost"
+														hx-post={ fmt.Sprintf("/schedules/%s/toggle", s.ID) }
+														hx-target="#task-detail-content"
+														hx-swap="outerHTML"
+													>
+														Pause
+													</button>
+												} else {
+													<button
+														class="btn btn-xs btn-outline btn-warning"
+														hx-post={ fmt.Sprintf("/schedules/%s/toggle", s.ID) }
+														hx-target="#task-detail-content"
+														hx-swap="outerHTML"
+													>
+														Resume
+													</button>
+												}
 												<button
 													class="btn btn-xs btn-ghost"
 													onclick={ templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('schedule-view-%s').classList.add('hidden'); document.getElementById('schedule-edit-%s').classList.remove('hidden')", s.ID, s.ID)} }

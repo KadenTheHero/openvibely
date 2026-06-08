@@ -439,6 +439,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/tasks/:taskId/schedule", h.CreateSchedule)
 	e.PUT("/schedules/:id", h.UpdateSchedule)
 	e.DELETE("/schedules/:id", h.DeleteSchedule)
+	e.POST("/schedules/:id/toggle", h.ToggleScheduleEnabled)
 	e.PATCH("/schedules/:scheduleId/reschedule", h.RescheduleTask)
 
 	// Attachments
@@ -507,6 +508,8 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/workers/stats/models", h.ModelWorkerStats)
 
 	// Capacity API endpoints
+	e.POST("/api/schedules/:id/toggle", h.APIToggleScheduleEnabled)
+
 	e.GET("/api/capacity/global", h.GetGlobalCapacity)
 	e.GET("/api/capacity/projects", h.GetProjectCapacities)
 	e.GET("/api/capacity/projects/:projectId", h.GetProjectCapacity)

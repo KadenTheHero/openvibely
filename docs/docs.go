@@ -1836,6 +1836,41 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/schedules/{id}/toggle": {
+            "post": {
+                "description": "Pauses a running schedule or resumes a paused one. When re-enabling, NextRun is recomputed if stale.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "schedules"
+                ],
+                "summary": "Toggle schedule enabled state",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Schedule ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated schedule",
+                        "schema": {
+                            "$ref": "#/definitions/models.Schedule"
+                        }
+                    },
+                    "404": {
+                        "description": "Schedule not found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/tasks/{id}/lifecycle-executions": {
             "get": {
                 "description": "Returns lifecycle hook invocations (routing, before-run preparation, after-complete learning) recorded for the given task.",
@@ -2728,6 +2763,62 @@ const docTemplate = `{
                 "RecommendationExpired"
             ]
         },
+        "models.RepeatType": {
+            "type": "string",
+            "enum": [
+                "once",
+                "seconds",
+                "minutes",
+                "hours",
+                "daily",
+                "weekly",
+                "monthly"
+            ],
+            "x-enum-varnames": [
+                "RepeatOnce",
+                "RepeatSeconds",
+                "RepeatMinutes",
+                "RepeatHours",
+                "RepeatDaily",
+                "RepeatWeekly",
+                "RepeatMonthly"
+            ]
+        },
+        "models.Schedule": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_run": {
+                    "type": "string"
+                },
+                "next_run": {
+                    "type": "string"
+                },
+                "repeat_interval": {
+                    "type": "integer"
+                },
+                "repeat_type": {
+                    "$ref": "#/definitions/models.RepeatType"
+                },
+                "run_at": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "models.UsageRatePoint": {
             "type": "object",
             "properties": {
@@ -3061,6 +3152,8 @@ var SwaggerInfo = &swag.Spec{
 	Description:      "REST API for OpenVibely - AI-powered task scheduling and management\nThis API provides endpoints for managing projects, tasks, and chat interactions with AI agents.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
+	LeftDelim:        "{{",
+	RightDelim:       "}}",
 }
 
 func init() {

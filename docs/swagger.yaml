@@ -452,6 +452,47 @@ definitions:
     - RecommendationAccepted
     - RecommendationRejected
     - RecommendationExpired
+  models.RepeatType:
+    enum:
+    - once
+    - seconds
+    - minutes
+    - hours
+    - daily
+    - weekly
+    - monthly
+    type: string
+    x-enum-varnames:
+    - RepeatOnce
+    - RepeatSeconds
+    - RepeatMinutes
+    - RepeatHours
+    - RepeatDaily
+    - RepeatWeekly
+    - RepeatMonthly
+  models.Schedule:
+    properties:
+      created_at:
+        type: string
+      enabled:
+        type: boolean
+      id:
+        type: string
+      last_run:
+        type: string
+      next_run:
+        type: string
+      repeat_interval:
+        type: integer
+      repeat_type:
+        $ref: '#/definitions/models.RepeatType'
+      run_at:
+        type: string
+      task_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
   models.UsageRatePoint:
     properties:
       call_count:
@@ -1883,6 +1924,30 @@ paths:
       summary: List all projects
       tags:
       - projects
+  /api/schedules/{id}/toggle:
+    post:
+      description: Pauses a running schedule or resumes a paused one. When re-enabling,
+        NextRun is recomputed if stale.
+      parameters:
+      - description: Schedule ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated schedule
+          schema:
+            $ref: '#/definitions/models.Schedule'
+        "404":
+          description: Schedule not found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Toggle schedule enabled state
+      tags:
+      - schedules
   /api/tasks/{id}/lifecycle-executions:
     get:
       description: Returns lifecycle hook invocations (routing, before-run preparation,

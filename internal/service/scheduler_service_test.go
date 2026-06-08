@@ -735,3 +735,95 @@ func TestSchedulerService_WorktreeCleanupIntegration(t *testing.T) {
 		t.Error("expected lastCleanupAt to remain zero with nil worktree service")
 	}
 }
+
+func TestSchedulerService_CheckDueTasks_SkipsDisabledSchedule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	ctx := context.Background()
+
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Disabled Scheduled Task",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    "test",
+	}
+	taskRepo.Create(ctx, task)
+
+	now := time.Now().UTC()
+	sched := &models.Schedule{
+		TaskID:         task.ID,
+		RunAt:          now.Add(-1 * time.Minute),
+		RepeatType:     models.RepeatOnce,
+		RepeatInterval: 1,
+		Enabled:        true,
+	}
+	scheduleRepo.Create(ctx, sched)
+	// Disable the schedule
+	scheduleRepo.ToggleEnabled(ctx, sched.ID, false)
+
+	svc.checkDueTasks(ctx)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Errorf("expected no task submission for disabled schedule, got task %s", submitted.ID)
+	case <-time.After(50 * time.Millisecond):
+		// expected: no submission
+	}
+}
+
+func TestSchedulerService_CheckDueTasks_ReenabledScheduleRuns(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	ctx := context.Background()
+
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Re-enabled Scheduled Task",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    "test",
+	}
+	taskRepo.Create(ctx, task)
+
+	now := time.Now().UTC()
+	sched := &models.Schedule{
+		TaskID:         task.ID,
+		RunAt:          now.Add(-1 * time.Minute),
+		RepeatType:     models.RepeatOnce,
+		RepeatInterval: 1,
+		Enabled:        false,
+	}
+	scheduleRepo.Create(ctx, sched)
+
+	// Confirm disabled schedule is not submitted
+	svc.checkDueTasks(ctx)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Errorf("expected no submission while disabled, got %s", submitted.ID)
+	case <-time.After(50 * time.Millisecond):
+		// correct
+	}
+
+	// Re-enable
+	scheduleRepo.ToggleEnabled(ctx, sched.ID, true)
+
+	// Now it should run
+	svc.checkDueTasks(ctx)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != task.ID {
+			t.Errorf("expected task %s, got %s", task.ID, submitted.ID)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Error("expected re-enabled task to be submitted")
+	}
+}
