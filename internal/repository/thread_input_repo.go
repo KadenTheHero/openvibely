@@ -585,20 +585,26 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 		if changed == 0 {
 			return ErrInputNotPending
 		}
+		if _, err := dbexec.ExecContext(ctx, `
+				UPDATE tasks
+				SET status = 'queued', category = 'active', updated_at = datetime('now')
+				WHERE id = ?`, exec.TaskID); err != nil {
+			return fmt.Errorf("reactivating task for queued input: %w", err)
+		}
 		isFollowup := 0
 		if exec.IsFollowup {
 			isFollowup = 1
 		}
 		if err := dbexec.QueryRowContext(ctx, `
-			INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
-			VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
-			RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup).Scan(&exec.ID, &exec.StartedAt); err != nil {
+				INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
+				VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
+				RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup).Scan(&exec.ID, &exec.StartedAt); err != nil {
 			return fmt.Errorf("creating promoted task execution: %w", err)
 		}
 		res, err = dbexec.ExecContext(ctx, `
-			UPDATE thread_inputs
-			SET input_status = 'applied', run_execution_id = ?, turn_id = ?, expected_turn_id = NULL, applied_at = datetime('now'), updated_at = datetime('now')
-			WHERE id = ? AND scope = 'task_thread' AND task_id = ? AND input_mode = 'queued' AND input_status = 'pending' AND expected_turn_id = id`, exec.ID, exec.ID, inputID, exec.TaskID)
+				UPDATE thread_inputs
+				SET input_status = 'applied', run_execution_id = ?, turn_id = ?, expected_turn_id = NULL, applied_at = datetime('now'), updated_at = datetime('now')
+				WHERE id = ? AND scope = 'task_thread' AND task_id = ? AND input_mode = 'queued' AND input_status = 'pending' AND expected_turn_id = id`, exec.ID, exec.ID, inputID, exec.TaskID)
 		if err != nil {
 			return fmt.Errorf("applying queued input claim: %w", err)
 		}

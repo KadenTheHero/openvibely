@@ -1038,14 +1038,8 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		}
 		return err
 	}
-	if err := h.taskRepo.UpdateStatus(ctx, input.TaskID, models.StatusQueued); err != nil {
-		applog.Infof("[handler] startQueuedTaskThreadInput task=%s error marking queued: %v", input.TaskID, err)
-	}
-	if task.Category != models.CategoryActive {
-		if err := h.taskRepo.UpdateCategory(ctx, input.TaskID, models.CategoryActive); err != nil {
-			applog.Infof("[handler] startQueuedTaskThreadInput task=%s error moving to active: %v", input.TaskID, err)
-		}
-	}
+	task.Status = models.StatusQueued
+	task.Category = models.CategoryActive
 	var attachmentContext string
 	var imageAttachments []models.Attachment
 	if input.AttachmentSessionID != "" {
@@ -3236,16 +3230,25 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 	if strings.TrimSpace(origin) == "" {
 		origin = models.TaskOriginWeb
 	}
+	activeExecutionID := ""
+	if h.execRepo != nil {
+		if active, activeErr := h.execRepo.FindActiveTaskExecution(ctx, task.ID, ""); activeErr != nil {
+			return nil, activeErr
+		} else if active != nil {
+			activeExecutionID = active.ID
+		}
+	}
 	queued := &models.ThreadInput{
-		Scope:         models.ThreadInputScopeTask,
-		ProjectID:     task.ProjectID,
-		TaskID:        task.ID,
-		AgentConfigID: agentID,
-		InputMode:     models.ThreadInputModeQueued,
-		InputStatus:   models.ThreadInputPending,
-		Content:       message,
-		Source:        origin,
-		OriginAgent:   originAgent,
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      task.ProjectID,
+		TaskID:         task.ID,
+		RunExecutionID: activeExecutionID,
+		AgentConfigID:  agentID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        message,
+		Source:         origin,
+		OriginAgent:    originAgent,
 	}
 	if err := h.threadInputRepo.CreateQueued(ctx, queued); err != nil {
 		return nil, err

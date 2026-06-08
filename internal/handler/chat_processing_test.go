@@ -1182,6 +1182,243 @@ done:
 	require.Equal(t, models.TaskGoalStatusAchieved, latest.Status)
 }
 
+func waitForExecutionTerminal(t *testing.T, h *Handler, execID string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		exec, err := h.execRepo.GetByID(context.Background(), execID)
+		if err != nil || exec == nil {
+			return false
+		}
+		return exec.Status != models.ExecRunning
+	}, 2*time.Second, 25*time.Millisecond)
+}
+
+func TestHandler_InitialTaskTurnQueuesFollowupBeforeFirstOutputAndPromotes(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Initial Turn Queued Followup Project")
+	task := createTask(t, h, project.ID, "Initial Turn Queued Followup Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusPending
+		tk.Prompt = "initial task prompt"
+		tk.AgentID = &agent.ID
+	})
+
+	started := make(chan testutil.MockLLMCall, 2)
+	releaseInitial := make(chan struct{})
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	mock.OnCall = func(ctx context.Context, call testutil.MockLLMCall) {
+		started <- call
+		if call.Prompt == "initial task prompt" {
+			select {
+			case <-releaseInitial:
+			case <-ctx.Done():
+			}
+		}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.llmSvc.ExecuteTaskWithAgent(ctx, *task, *agent)
+		done <- err
+	}()
+
+	var initial testutil.MockLLMCall
+	select {
+	case initial = <-started:
+		require.Equal(t, "initial task prompt", initial.Prompt)
+		require.NotEmpty(t, initial.ExecID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial task turn to start")
+	}
+
+	queued, err := h.enqueueTaskThreadInput(ctx, task.ID, "follow-up before first output", models.TaskOriginWeb, "")
+	require.NoError(t, err)
+	require.Equal(t, initial.ExecID, queued.RunExecutionID)
+	require.Equal(t, models.ThreadInputPending, queued.InputStatus)
+
+	pending, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, queued.ID, pending[0].ID)
+	require.Equal(t, initial.ExecID, pending[0].RunExecutionID)
+
+	select {
+	case promoted := <-started:
+		t.Fatalf("queued follow-up promoted before initial turn completed: %#v", promoted)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseInitial)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial task turn to finish")
+	}
+
+	var promoted testutil.MockLLMCall
+	select {
+	case promoted = <-started:
+		require.Equal(t, "follow-up before first output", promoted.Prompt)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued follow-up to promote")
+	}
+	promotedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, promotedTask.Category)
+	require.Equal(t, models.StatusQueued, promotedTask.Status)
+
+	stored, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+	require.NotEmpty(t, stored.RunExecutionID)
+	require.NotEqual(t, initial.ExecID, stored.RunExecutionID)
+	waitForExecutionTerminal(t, h, promoted.ExecID)
+}
+
+func TestHandler_InitialTaskTurnFailurePromotesQueuedFollowup(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Initial Failure Queued Followup Project")
+	task := createTask(t, h, project.ID, "Initial Failure Queued Followup Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusPending
+		tk.Prompt = "initial task prompt"
+		tk.AgentID = &agent.ID
+	})
+
+	started := make(chan testutil.MockLLMCall, 2)
+	releaseInitial := make(chan struct{})
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	mock.OnCall = func(callCtx context.Context, call testutil.MockLLMCall) {
+		started <- call
+		if call.Prompt == "initial task prompt" {
+			select {
+			case <-releaseInitial:
+			case <-callCtx.Done():
+			}
+			mock.Response = "[STATUS: FAILED | initial provider failed]"
+			mock.TextOnly = "[STATUS: FAILED | initial provider failed]"
+			return
+		}
+		mock.Response = "done"
+		mock.TextOnly = "done"
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.llmSvc.ExecuteTaskWithAgent(ctx, *task, *agent)
+		done <- err
+	}()
+
+	var initial testutil.MockLLMCall
+	select {
+	case initial = <-started:
+		require.Equal(t, "initial task prompt", initial.Prompt)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for failed initial task turn")
+	}
+	queued, err := h.enqueueTaskThreadInput(ctx, task.ID, "follow-up after failed initial turn", models.TaskOriginWeb, "")
+	require.NoError(t, err)
+	require.Equal(t, initial.ExecID, queued.RunExecutionID)
+	close(releaseInitial)
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for failed initial task turn to finish")
+	}
+	var promoted testutil.MockLLMCall
+	select {
+	case promoted = <-started:
+		require.Equal(t, "follow-up after failed initial turn", promoted.Prompt)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued follow-up to promote after failure")
+	}
+	stored, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+	waitForExecutionTerminal(t, h, promoted.ExecID)
+}
+
+func TestHandler_InitialTaskTurnCancellationPromotesQueuedFollowup(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx, cancel := context.WithCancel(context.Background())
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Initial Cancellation Queued Followup Project")
+	task := createTask(t, h, project.ID, "Initial Cancellation Queued Followup Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusPending
+		tk.Prompt = "initial task prompt"
+		tk.AgentID = &agent.ID
+	})
+
+	started := make(chan testutil.MockLLMCall, 2)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	mock.OnCall = func(callCtx context.Context, call testutil.MockLLMCall) {
+		started <- call
+		if call.Prompt == "initial task prompt" {
+			<-callCtx.Done()
+			mock.Err = context.Canceled
+			return
+		}
+		mock.Err = nil
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.llmSvc.ExecuteTaskWithAgent(ctx, *task, *agent)
+		done <- err
+	}()
+
+	var initial testutil.MockLLMCall
+	select {
+	case initial = <-started:
+		require.Equal(t, "initial task prompt", initial.Prompt)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for cancellable initial task turn")
+	}
+	queued, err := h.enqueueTaskThreadInput(context.Background(), task.ID, "follow-up after cancelled initial turn", models.TaskOriginWeb, "")
+	require.NoError(t, err)
+	require.Equal(t, initial.ExecID, queued.RunExecutionID)
+	cancel()
+
+	select {
+	case err := <-done:
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "task cancelled")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for cancelled initial task turn to finish")
+	}
+	var promoted testutil.MockLLMCall
+	select {
+	case promoted = <-started:
+		require.Equal(t, "follow-up after cancelled initial turn", promoted.Prompt)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued follow-up to promote after cancellation")
+	}
+	stored, err := h.threadInputRepo.GetByID(context.Background(), queued.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+	waitForExecutionTerminal(t, h, promoted.ExecID)
+}
+
 func TestHandler_WorkerCompletionPromotesQueuedTaskThreadInput(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
