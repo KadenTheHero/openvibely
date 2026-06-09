@@ -2773,6 +2773,94 @@ func TestHandler_TaskThreadSend_QueueWaitDoesNotConsumeWorkerTimeout(t *testing.
 	assert.Equal(t, models.CategoryCompleted, updatedTask.Category)
 }
 
+func TestHandler_TaskThreadSend_CancelQueuedCapacityWait(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	maxWorkers := 1
+	project := &models.Project{Name: "Cancellable Queue Project", MaxWorkers: &maxWorkers}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+
+	agent := &models.LLMConfig{
+		Name:        "Cancellable Queue Model",
+		Provider:    models.ProviderTest,
+		Model:       "test-model",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+		MaxWorkers:  1,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	h.workerSvc.SetLLMConfigRepo(h.llmConfigRepo)
+
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Task for cancellable queued followup",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+		AgentID:   &agent.ID,
+	}
+	require.NoError(t, h.taskRepo.Create(ctx, task))
+
+	providerCalled := make(chan struct{}, 1)
+	h.llmSvc.SetLLMCaller(llmCallerFunc(func(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
+		providerCalled <- struct{}{}
+		return "should not run", "", 1, nil
+	}))
+
+	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID), "should saturate project slot")
+
+	form := url.Values{}
+	form.Set("message", "Follow up that will be cancelled while queued")
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/thread", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	require.Eventually(t, func() bool {
+		updatedTask, err := h.taskSvc.GetByID(ctx, task.ID)
+		return err == nil && updatedTask != nil && updatedTask.Status == models.StatusQueued
+	}, 2*time.Second, 50*time.Millisecond)
+
+	cancelReq := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/cancel", nil)
+	cancelReq.Header.Set("HX-Request", "true")
+	cancelRec := httptest.NewRecorder()
+	e.ServeHTTP(cancelRec, cancelReq)
+	require.Equal(t, http.StatusOK, cancelRec.Code, cancelRec.Body.String())
+
+	require.Eventually(t, func() bool {
+		execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+		if err != nil || len(execs) != 1 {
+			return false
+		}
+		return execs[0].Status == models.ExecCancelled
+	}, 2*time.Second, 50*time.Millisecond)
+
+	h.workerSvc.ReleaseProjectSlot(project.ID)
+
+	select {
+	case <-providerCalled:
+		t.Fatal("provider should not run after queued follow-up cancellation")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	assert.Equal(t, models.ExecCancelled, execs[0].Status)
+	assert.Equal(t, "cancelled", execs[0].ErrorMessage)
+
+	updatedTask, err := h.taskSvc.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedTask)
+	assert.Equal(t, models.StatusCancelled, updatedTask.Status)
+	assert.Equal(t, models.CategoryBacklog, updatedTask.Category)
+}
+
 // TestHandler_Chat_ReconnectPreservesProjectID verifies that the SSE reconnection
 // and chat_response_done handlers include project_id in their HTMX refresh calls.
 // Bug: returning to browser after focus/blur caused /chat to reload without project_id,

@@ -899,6 +899,41 @@ func TestTaskService_UpdateCategory_FromCompletedToActiveResetsStatus(t *testing
 	}
 }
 
+func TestTaskService_CancelTask_AllowsQueuedTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Queued Task",
+		Prompt:    "test",
+		Status:    models.StatusQueued,
+		Category:  models.CategoryActive,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	cancelled := make(chan struct{}, 1)
+	workerSvc.RegisterCancel(task.ID, func() { cancelled <- struct{}{} })
+
+	require.NoError(t, svc.CancelTask(ctx, task.ID))
+
+	select {
+	case <-cancelled:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected queued task cancel function to be called")
+	}
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, models.StatusCancelled, updated.Status)
+	assert.Equal(t, models.CategoryBacklog, updated.Category)
+}
+
 func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsRunning(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

@@ -299,13 +299,13 @@ func (s *TaskService) CancelTask(ctx context.Context, id string) error {
 		applog.Infof("[task-svc] CancelTask not found id=%s", id)
 		return fmt.Errorf("task not found: %s", id)
 	}
-	if task.Status != models.StatusRunning {
-		applog.Infof("[task-svc] CancelTask task not running id=%s status=%s", id, task.Status)
-		return fmt.Errorf("task is not running")
+	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
+		applog.Infof("[task-svc] CancelTask task not cancellable id=%s status=%s", id, task.Status)
+		return fmt.Errorf("task is not running or queued")
 	}
 
-	// Kill the running CLI process by cancelling its context.
-	// This must happen BEFORE updating the DB status so the worker sees
+	// Kill the running CLI process or cancel a queued follow-up waiting for a worker slot.
+	// This must happen BEFORE updating the DB status so the worker/handler sees
 	// context.Canceled and marks the execution as cancelled (not failed).
 	if s.workerSvc != nil {
 		s.workerSvc.CancelRunningTask(id)
