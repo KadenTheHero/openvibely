@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -154,6 +155,85 @@ func TestLLMService_ExecuteTaskWithAgent_PromotesQueuedTaskThreadInputAfterCompl
 	}
 	if stored.InputStatus != models.ThreadInputPending {
 		t.Fatalf("service callback wiring should not itself claim queued input, got %s", stored.InputStatus)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_PreservesFailedTranscriptForTaskThreadFollowup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	project := &models.Project{Name: "Failed Thread Context", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Preserve failure", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "original task context", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "I inspected the repository and could not finish.\n[STATUS: FAILED | tests failed]"
+	mock.TextOnly = mock.Response
+	mock.Tokens = 12
+	svc.SetLLMCaller(mock)
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil || exec.Status != models.ExecFailed {
+		t.Fatalf("expected failed execution, got %#v", exec)
+	}
+	stored, err := execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("GetByID execution: %v", err)
+	}
+	if stored.PromptSent != "original task context" {
+		t.Fatalf("failed execution prompt was not preserved: %q", stored.PromptSent)
+	}
+	if stored.ErrorMessage != "tests failed" {
+		t.Fatalf("failed execution metadata was not preserved: %q", stored.ErrorMessage)
+	}
+	if !strings.Contains(stored.Output, "I inspected the repository and could not finish.") {
+		t.Fatalf("failed execution assistant transcript was not preserved: %q", stored.Output)
+	}
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID task: %v", err)
+	}
+	if updatedTask.Status != models.StatusFailed || updatedTask.Category != models.CategoryCompleted {
+		t.Fatalf("expected terminal failed task in completed category, got status=%s category=%s", updatedTask.Status, updatedTask.Category)
+	}
+
+	history, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListByTaskChronological: %v", err)
+	}
+	capture := &captureProviderAdapter{}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderTest: capture}
+	res, err := svc.CallAgentDirectStreamingDetailed(ctx, "follow up with the prior failure context", nil, *agent, "followup-exec", history, "thread context", project.RepoPath, nil, true)
+	if err != nil {
+		t.Fatalf("CallAgentDirectStreamingDetailed: %v", err)
+	}
+	got := res.ChatContext.Messages
+	want := []llmcontracts.ChatContextMessage{
+		{Role: "user", Content: "original task context"},
+		{Role: "assistant", Content: "I inspected the repository and could not finish."},
+		{Role: "user", Content: "follow up with the prior failure context"},
+		{Role: "assistant", Content: "ok"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected follow-up replay context\n got: %#v\nwant: %#v", got, want)
+	}
+	if len(capture.lastReq.ChatHistory) != 1 || capture.lastReq.ChatHistory[0].Status != models.ExecFailed {
+		t.Fatalf("provider request should include failed terminal execution history, got %#v", capture.lastReq.ChatHistory)
 	}
 }
 
@@ -324,6 +404,34 @@ func TestLLMService_CallAgentDirectStreaming_TestProviderUsesMockCaller(t *testi
 	}
 	if last.WorkDir != "/tmp/workdir" {
 		t.Fatalf("expected workdir propagated, got %q", last.WorkDir)
+	}
+}
+
+func TestLLMService_CallAgentDirectStreamingDetailed_PreservesFailedHistoryWithoutOutput(t *testing.T) {
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	capture := &captureProviderAdapter{}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
+
+	history := []models.Execution{{
+		PromptSent:    "original task prompt",
+		Status:        models.ExecFailed,
+		ErrorMessage:  "provider timeout",
+		AgentConfigID: "agent-1",
+	}}
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test"}
+	res, err := svc.CallAgentDirectStreamingDetailed(context.Background(), "follow up after failure", nil, agent, "exec-123", history, "ctx", "/tmp/workdir", nil)
+	if err != nil {
+		t.Fatalf("CallAgentDirectStreamingDetailed error: %v", err)
+	}
+	got := res.ChatContext.Messages
+	want := []llmcontracts.ChatContextMessage{
+		{Role: "user", Content: "original task prompt"},
+		{Role: "assistant", Content: "Previous execution failed before producing output: provider timeout"},
+		{Role: "user", Content: "follow up after failure"},
+		{Role: "assistant", Content: "ok"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected chat context messages\n got: %#v\nwant: %#v", got, want)
 	}
 }
 

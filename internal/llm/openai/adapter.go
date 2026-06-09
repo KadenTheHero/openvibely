@@ -11,7 +11,6 @@ import (
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
-	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
@@ -825,10 +824,8 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
 		if exec.PromptSent != "" {
 			messages = append(messages, openaiclient.Message{Role: "user", Content: exec.PromptSent})
 		}
-		if exec.Output != "" && (exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed) {
-			if cleaned := llmoutput.CleanChatOutput(exec.Output); cleaned != "" {
-				messages = append(messages, openaiclient.Message{Role: "assistant", Content: cleaned})
-			}
+		if replay := llmprompt.ReplayAssistantContent(exec); replay != "" {
+			messages = append(messages, openaiclient.Message{Role: "assistant", Content: replay})
 		}
 	}
 	return messages

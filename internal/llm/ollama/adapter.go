@@ -372,10 +372,10 @@ func buildChatHistory(systemPrompt string, history []models.Execution) []chatMes
 				Content: exec.PromptSent,
 			})
 		}
-		if exec.Output != "" {
+		if replay := llmprompt.ReplayAssistantContent(exec); replay != "" {
 			messages = append(messages, chatMessage{
 				Role:    "assistant",
-				Content: llmoutput.CleanChatOutput(exec.Output),
+				Content: replay,
 			})
 		}
 	}

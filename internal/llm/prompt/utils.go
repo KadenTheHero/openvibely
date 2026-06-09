@@ -178,26 +178,37 @@ func BuildChatHistoryText(history []models.Execution) string {
 			sb.WriteString(exec.PromptSent)
 			sb.WriteString("\n\n")
 		}
-		// Include outputs from completed and failed executions to preserve
-		// conversation context. Without this, if a prior exchange fails, the
-		// assistant's response is lost and follow-up messages like "Create the task"
-		// lack the context of what was discussed.
-		if exec.Output != "" && (exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed) {
-			cleaned := output.CleanChatOutput(exec.Output)
-			if cleaned != "" {
-				// Minimize action-heavy responses to prevent re-execution
-				if strings.Contains(exec.Output, "[CREATE_TASK]") || strings.Contains(exec.Output, "[EDIT_TASK]") ||
-					strings.Contains(exec.Output, "[SCHEDULE_TASK]") || strings.Contains(exec.Output, "[DELETE_SCHEDULE]") {
-					cleaned = "(Handled the user's request.)"
-				}
-				sb.WriteString("Assistant: ")
-				sb.WriteString(cleaned)
-				sb.WriteString("\n\n")
+		if replay := ReplayAssistantContent(exec); replay != "" {
+			// Minimize action-heavy responses to prevent re-execution.
+			if strings.Contains(exec.Output, "[CREATE_TASK]") || strings.Contains(exec.Output, "[EDIT_TASK]") ||
+				strings.Contains(exec.Output, "[SCHEDULE_TASK]") || strings.Contains(exec.Output, "[DELETE_SCHEDULE]") {
+				replay = "(Handled the user's request.)"
 			}
+			sb.WriteString("Assistant: ")
+			sb.WriteString(replay)
+			sb.WriteString("\n\n")
 		}
 	}
 	sb.WriteString("---\n\n")
 	return sb.String()
+}
+
+func ReplayAssistantContent(exec models.Execution) string {
+	if exec.Status != models.ExecCompleted && exec.Status != models.ExecFailed {
+		return ""
+	}
+	if exec.Output != "" {
+		if cleaned := output.CleanChatOutput(exec.Output); cleaned != "" {
+			return cleaned
+		}
+	}
+	if exec.Status == models.ExecFailed {
+		if errMsg := strings.TrimSpace(exec.ErrorMessage); errMsg != "" {
+			return "Previous execution failed before producing output: " + errMsg
+		}
+		return "Previous execution failed before producing output."
+	}
+	return ""
 }
 
 // MaxChatHistoryTurns is the maximum number of chat history turns to include

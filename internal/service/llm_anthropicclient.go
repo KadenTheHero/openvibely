@@ -87,8 +87,8 @@ func buildAnthropicClientHistory(chatHistory []models.Execution) []anthropicclie
 		if exec.PromptSent != "" {
 			messages = appendMergedMessage(messages, "user", exec.PromptSent)
 		}
-		if exec.Output != "" && (exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed) {
-			messages = appendMergedMessage(messages, "assistant", exec.Output)
+		if replay := llmprompt.ReplayAssistantContent(exec); replay != "" {
+			messages = appendMergedMessage(messages, "assistant", replay)
 		}
 	}
 	// Drop trailing user message — SendAgentic always appends the current

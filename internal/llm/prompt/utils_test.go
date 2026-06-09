@@ -104,6 +104,32 @@ func TestBuildChatHistoryText_IncludesFailed(t *testing.T) {
 	}
 }
 
+func TestBuildChatHistoryText_IncludesFailedWithoutOutput(t *testing.T) {
+	history := []models.Execution{
+		{PromptSent: "original task prompt", Status: models.ExecFailed, ErrorMessage: "provider timeout"},
+	}
+	result := BuildChatHistoryText(history)
+	if !strings.Contains(result, "User: original task prompt") {
+		t.Fatalf("should include prompt from failed execution, got %q", result)
+	}
+	if !strings.Contains(result, "Assistant: Previous execution failed before producing output: provider timeout") {
+		t.Fatalf("should include failure metadata from failed execution, got %q", result)
+	}
+}
+
+func TestBuildChatHistoryText_IncludesFailedWhenOutputCleansEmpty(t *testing.T) {
+	history := []models.Execution{
+		{PromptSent: "original task prompt", Output: "[STATUS: FAILED | tests failed]", Status: models.ExecFailed, ErrorMessage: "tests failed"},
+	}
+	result := BuildChatHistoryText(history)
+	if !strings.Contains(result, "User: original task prompt") {
+		t.Fatalf("should include prompt from failed execution, got %q", result)
+	}
+	if !strings.Contains(result, "Assistant: Previous execution failed before producing output: tests failed") {
+		t.Fatalf("should include failure metadata when failed output cleans empty, got %q", result)
+	}
+}
+
 func TestBuildChatHistoryText_LimitsHistory(t *testing.T) {
 	// Create 25 history entries (exceeding maxChatHistoryTurns=20)
 	var history []models.Execution

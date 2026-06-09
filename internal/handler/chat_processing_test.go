@@ -643,6 +643,65 @@ func TestProcessStreamingResponse_InteractiveChatExplicitMemoryViewRequestAuthor
 	}
 }
 
+func TestProcessStreamingResponse_TaskFollowupPreservesFailedExecutionHistory(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "followup response"
+	mock.TextOnly = "followup response"
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Failed Task Followup History Project")
+	task := createTask(t, h, project.ID, "Failed task followup history", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+		tk.Prompt = "original failed task prompt"
+	})
+	ctx := context.Background()
+	failedExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "original failed task prompt"
+	})
+	require.NoError(t, h.execRepo.Complete(ctx, failedExec.ID, models.ExecFailed, "", "provider timeout", 0, 1))
+	failedExec, err := h.execRepo.GetByID(ctx, failedExec.ID)
+	require.NoError(t, err)
+	require.NotNil(t, failedExec)
+	currentExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "what happened before?"
+		ex.IsFollowup = true
+	})
+	priorExecs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         currentExec.ID,
+		TaskID:         task.ID,
+		Message:        "what happened before?",
+		Agent:          *agent,
+		ChatHistory:    filterChatHistory(priorExecs, currentExec.ID),
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+		ChatMode:       models.ChatModeOrchestrate,
+	})
+
+	require.Equal(t, 1, mock.CallCount())
+	request := mock.LastAgentRequest()
+	require.Len(t, request.ChatHistory, 1)
+	assert.Equal(t, failedExec.ID, request.ChatHistory[0].ID)
+	assert.Equal(t, models.ExecFailed, request.ChatHistory[0].Status)
+	assert.Equal(t, "original failed task prompt", request.ChatHistory[0].PromptSent)
+	assert.Equal(t, "provider timeout", request.ChatHistory[0].ErrorMessage)
+	assert.Equal(t, "what happened before?", request.Message)
+	updatedCurrent, err := h.execRepo.GetByID(context.Background(), currentExec.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedCurrent)
+	assert.Equal(t, models.ExecCompleted, updatedCurrent.Status)
+	assert.Equal(t, "followup response", updatedCurrent.Output)
+}
+
 func TestProcessStreamingResponse_TaskFollowupRoutesMemoryFromCurrentMessage(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 

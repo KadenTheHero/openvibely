@@ -631,8 +631,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	}
 	if reason, found := llmoutput.ExtractMarker(statusCheckOutput, "[STATUS: FAILED |"); found {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent agent reported STATUS FAILED task=%s reason=%q", task.ID, reason)
-		// Clear the execution output on failure — only keep the prompt and error message.
-		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", reason, tokensUsed, durationMs); completeErr != nil {
+		// Preserve the assistant's visible failure transcript so task-thread follow-ups
+		// can replay the failed turn chronologically instead of looking like a blank task.
+		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, output, reason, tokensUsed, durationMs); completeErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
 		}
 		RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: reason, LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
@@ -1218,10 +1219,8 @@ func chatContextFromNormalizedRequest(req llmcontracts.AgentRequest, assistantOu
 		if strings.TrimSpace(turn.PromptSent) != "" {
 			messages = append(messages, llmcontracts.ChatContextMessage{Role: "user", Content: turn.PromptSent})
 		}
-		if strings.TrimSpace(turn.Output) != "" && (turn.Status == models.ExecCompleted || turn.Status == models.ExecFailed) {
-			if cleaned := llmoutput.CleanChatOutput(turn.Output); cleaned != "" {
-				messages = append(messages, llmcontracts.ChatContextMessage{Role: "assistant", Content: cleaned})
-			}
+		if replay := llmprompt.ReplayAssistantContent(turn); replay != "" {
+			messages = append(messages, llmcontracts.ChatContextMessage{Role: "assistant", Content: replay})
 		}
 	}
 	if strings.TrimSpace(req.Message) != "" {

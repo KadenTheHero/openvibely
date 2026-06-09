@@ -32,14 +32,18 @@ func TestBuildAnthropicClientHistory_AlternatingRoles(t *testing.T) {
 			},
 		},
 		{
-			name: "consecutive user messages from missing outputs are merged",
+			name: "failed executions without output preserve failure context",
 			history: []models.Execution{
-				{PromptSent: "first", Output: "", Status: models.ExecFailed},
+				{PromptSent: "first", Output: "", ErrorMessage: "provider failed", Status: models.ExecFailed},
 				{PromptSent: "second", Output: "", Status: models.ExecFailed},
 				{PromptSent: "third", Output: "response", Status: models.ExecCompleted},
 			},
 			expected: []anthropicclient.Message{
-				{Role: "user", Content: "first\n\nsecond\n\nthird"},
+				{Role: "user", Content: "first"},
+				{Role: "assistant", Content: "Previous execution failed before producing output: provider failed"},
+				{Role: "user", Content: "second"},
+				{Role: "assistant", Content: "Previous execution failed before producing output."},
+				{Role: "user", Content: "third"},
 				{Role: "assistant", Content: "response"},
 			},
 		},
@@ -55,12 +59,17 @@ func TestBuildAnthropicClientHistory_AlternatingRoles(t *testing.T) {
 			},
 		},
 		{
-			name: "only user messages with no outputs produces nil",
+			name: "only failed messages with no outputs still produce history",
 			history: []models.Execution{
 				{PromptSent: "a", Output: "", Status: models.ExecFailed},
 				{PromptSent: "b", Output: "", Status: models.ExecFailed},
 			},
-			expected: nil,
+			expected: []anthropicclient.Message{
+				{Role: "user", Content: "a"},
+				{Role: "assistant", Content: "Previous execution failed before producing output."},
+				{Role: "user", Content: "b"},
+				{Role: "assistant", Content: "Previous execution failed before producing output."},
+			},
 		},
 		{
 			name: "running status output is skipped",
