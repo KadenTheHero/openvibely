@@ -114,12 +114,12 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			timeout = modelTimeout
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	h.registerTaskCancellation(params.TaskID, cancel)
-	defer h.deregisterTaskCancellation(params.TaskID)
-	if params.IsTaskFollowup {
-		h.reactivateAchievedGoalForManualFollowup(ctx, params.TaskID, params.InputOrigin, params.InputOriginAgent)
+
+	waitCtx := context.Background()
+	var waitCancel context.CancelFunc
+	if params.IsTaskFollowup && h.workerSvc != nil {
+		waitCtx, waitCancel = context.WithCancel(context.Background())
+		h.registerTaskCancellation(params.TaskID, waitCancel)
 	}
 
 	// Enforce per-project and per-model worker constraints for task follow-ups only.
@@ -137,31 +137,23 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 
 		// Block until a per-project slot is available (respects project max_workers limit).
 		// This queues the thread follow-up instead of rejecting it when workers are at capacity.
-		waitCtx, waitCancel := context.WithTimeout(ctx, timeout)
 		if err := h.workerSvc.AcquireProjectSlot(waitCtx, params.ProjectID); err != nil {
-			waitCancel()
-			applog.Infof("[handler] processStreamingResponse exec=%s task=%s timed out waiting for project slot %s: %v",
+			applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled waiting for project slot %s: %v",
 				params.ExecID, params.TaskID, params.ProjectID, err)
-			h.completeWithFailure(context.Background(), params.ExecID, params.TaskID,
-				"project worker limit reached — timed out waiting for slot", 0, 0, params.ChannelReply)
+			h.completeWithCancellation(params.ExecID, params.TaskID, "", 0, 0, 0, params.ChannelReply)
 			h.finalizeStreamingTurn(params, "")
 			return
 		}
-		waitCancel()
 		defer h.workerSvc.ReleaseProjectSlot(params.ProjectID)
 
-		// Block until a model slot is available (respects max_workers)
-		waitCtx2, waitCancel2 := context.WithTimeout(ctx, timeout)
-		if err := h.workerSvc.AcquireModelSlot(waitCtx2, agentConfigID); err != nil {
-			waitCancel2()
-			applog.Infof("[handler] processStreamingResponse exec=%s task=%s failed to acquire model slot for %s: %v",
+		// Block until a model slot is available (respects max_workers).
+		if err := h.workerSvc.AcquireModelSlot(waitCtx, agentConfigID); err != nil {
+			applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled waiting for model slot for %s: %v",
 				params.ExecID, params.TaskID, agentConfigID, err)
-			h.completeWithFailure(context.Background(), params.ExecID, params.TaskID,
-				fmt.Sprintf("model %s at capacity, timed out waiting for slot", params.Agent.Name), 0, 0, params.ChannelReply)
+			h.completeWithCancellation(params.ExecID, params.TaskID, "", 0, 0, 0, params.ChannelReply)
 			h.finalizeStreamingTurn(params, "")
 			return
 		}
-		waitCancel2()
 		defer h.workerSvc.ReleaseModelSlot(agentConfigID)
 		applog.Infof("[handler] processStreamingResponse exec=%s acquired project + model slots for %s", params.ExecID, agentConfigID)
 
@@ -172,6 +164,19 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 				applog.Infof("[handler] processStreamingResponse exec=%s task=%s failed to update status to running: %v", params.ExecID, params.TaskID, err)
 			}
 		}
+	}
+
+	if waitCancel != nil {
+		h.deregisterTaskCancellation(params.TaskID)
+		waitCancel()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	h.registerTaskCancellation(params.TaskID, cancel)
+	defer h.deregisterTaskCancellation(params.TaskID)
+	if params.IsTaskFollowup {
+		h.reactivateAchievedGoalForManualFollowup(ctx, params.TaskID, params.InputOrigin, params.InputOriginAgent)
 	}
 
 	chatMode := params.ChatMode

@@ -760,16 +760,7 @@ func (w *WorkerService) getModelMaxWorkers(agentConfigID string) int {
 
 // AcquireModelSlot blocks until a per-model concurrency slot is available or
 // the context is cancelled. Used by chat-triggered task executions.
-// The caller must provide a context with a deadline/timeout to prevent
-// indefinite polling.
 func (w *WorkerService) AcquireModelSlot(ctx context.Context, agentConfigID string) error {
-	if _, ok := ctx.Deadline(); !ok {
-		// Safety: enforce a max wait time if the caller didn't set a deadline,
-		// to prevent unbounded CPU-burning poll loops.
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-	}
 	for {
 		if w.tryAcquireModelSlot(agentConfigID) {
 			return nil
@@ -805,14 +796,7 @@ func (w *WorkerService) TryAcquireProjectSlot(projectID string) bool {
 // AcquireProjectSlot blocks until a per-project concurrency slot is available or
 // the context is cancelled. Used by task thread follow-ups that queue when workers
 // are at capacity instead of failing fast.
-// The caller must provide a context with a deadline/timeout to prevent
-// indefinite polling.
 func (w *WorkerService) AcquireProjectSlot(ctx context.Context, projectID string) error {
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-	}
 	for {
 		if w.tryAcquireProjectSlot(projectID) {
 			return nil
