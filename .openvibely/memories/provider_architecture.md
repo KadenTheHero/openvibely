@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-06-08
+updated: 2026-06-09
 source: task
-source_id: 8a474c7b49a4363832169d74bb3c296a
+source_id: 351323f14eeac1e2ebec4226600c5b81
 confidence: high
 title: Provider Architecture
 ---
@@ -42,6 +42,11 @@ Provider facts:
 - Anthropic uses `ProviderAnthropic`; OAuth/API key path uses `pkg/anthropicclient`; CLI path uses subprocess. Helpers live in `models/llm_config.go`.
 - CLI-backed provider support for Anthropic and OpenAI/Codex remains a backend compatibility path, but CLI auth/options should not be exposed in the user-facing Models setup dialog; API key/OAuth setup paths remain user-facing where applicable.
 - As of 2026-06-07, the Models setup dialog hides Anthropic/OpenAI CLI connection options while preserving backend CLI compatibility; OAuth setup keeps the hidden `auth_method`/connection-method selects enabled so browser submissions include `oauth`, and `resolveProviderAndAuth` defaults OAuth auth-type submissions to `AuthMethodOAuth` when `auth_method` is absent.
+- OAuth access/refresh tokens are currently stored per `agent_configs` model config rather than shared per provider account, so two Anthropic model configs can have different OAuth freshness/reauth states even when both use the same Anthropic OAuth account and `ProviderAnthropic`.
+- `agent_configs.oauth_account_id` exists, but as of 2026-06-09 it is effectively provider-dependent: OpenAI OAuth populates it from the token response `id_token`/`chatgpt_account_id`, while Anthropic OAuth does not populate an account identifier, so OpenVibely cannot currently determine from stored data whether two Anthropic model configs use the same Anthropic account.
+- This per-config OAuth storage is vulnerable to refresh-token rotation divergence: if two model configs start with copied/shared Anthropic refresh token material, the first successful refresh can rotate/replace the token for that config while leaving the other config with an invalidated stale token that fails with HTTP 400/`invalid_grant`.
+- Durable architecture direction: OAuth credentials should move toward a provider-account token table, with model configs referencing the shared provider-account credential, so all Anthropic configs for the same OAuth account benefit from one rotated token pair; Anthropic needs an account-identity source such as a userinfo/account endpoint during OAuth connect before this can be reliably keyed by account.
+- Anthropic/OpenAI OAuth token refresh is reactive, not background-scheduled: there is no ticker/cron/goroutine that proactively refreshes tokens. OAuth token persistence stores access token, refresh token, and `OAuthExpiresAt` derived from the provider token endpoint's `expires_in`; the hardcoded 1-hour value is only the refresh look-ahead threshold, not the access-token TTL. `EnsureFresh` runs on user-triggered provider use such as prompting and on-demand Analytics account-usage refreshes; the provider refresh endpoint is only called when the stored access token has less than a 1-hour TTL remaining, so with roughly 8-hour access tokens active prompting usually refreshes about every 7 hours per model config. On provider 401 recovery, OpenVibely reloads the model config from the DB and may refresh/persist rotated tokens; it does not reread OAuth token material from disk, keychain, or environment variables. Anthropic does not publish a reliable refresh-token TTL for this integration; treat refresh-token expiry as opaque/server-controlled and potentially inactivity/revocation driven rather than depending on a fixed duration.
 - Anthropic OAuth refresh failures with provider error `invalid_grant` are treated as permanent reauthorization failures: the model config is marked with `oauth_needs_reauth`, the Models UI/API surface `needs_reauth`/"Re-auth Required", and successful token refresh clears the flag while atomically persisting rotated access and refresh tokens.
 - Ollama uses `/api/chat`, `ollama_base_url` migration 056, defaulting to `http://localhost:11434`.
 - Raw LLM streaming token/output content is not intended for terminal logs at info level. Shared streaming output flows through `internal/llm/stream.Writer`, including OpenAI, Anthropic API/OAuth, Anthropic CLI, Codex CLI, and Ollama paths; subprocess stdout remains piped into the streaming path rather than mirrored to `os.Stdout`.

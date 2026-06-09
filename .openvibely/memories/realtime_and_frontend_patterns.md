@@ -2,7 +2,7 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-06-08
+updated: 2026-06-09
 source: task
 source_id: e321a14e8e7ab207878350bb9e2f4068
 confidence: high
@@ -35,7 +35,7 @@ Chat/thread rendering facts:
 - Long Chat and Task Thread histories remain complete in the database but are server-windowed in the UI with scroll-top pagination.
 - Chat and Task Thread default to a visible window of 30 executions/interactions, with older pages also loading up to 30 by default and request `limit` capped at 100; the count is by execution/turn, not by individual rendered bubbles.
 - Existing long task threads are backwards compatible with the windowing strategy: no DB migration or cleanup is required, and old histories become windowed retroactively once the task thread/chat content is re-rendered through the new handlers/templates; already-open tabs that loaded the old full DOM may need refresh or an HTMX reload to benefit.
-- Browser-memory protection depends on removing old transcript execution DOM nodes from the visible window, not hiding them with CSS; whole execution pairs use removable wrappers so live pages do not grow indefinitely.
+- Browser-memory protection depends on removing old transcript execution DOM nodes from the visible window, not hiding them with CSS; whole execution pairs use removable wrappers so live pages do not grow indefinitely. Manually paged-in older messages are still just part of the bounded visible DOM window, so later Chat/task-thread appends can prune those older nodes from the top again when the window exceeds its limit; this does not delete database history and older pages remain reloadable through pagination.
 - Earlier Chat/Task Thread pages are fetched from the server with bounded `limit`/`before` routes and prepended with scroll-anchor preservation; the UI should not auto-fetch older history on initial render just because the latest window is short. The accepted prepend behavior preserves the user's previous viewport by recording bottom distance/scroll metrics before the older page inserts and restoring after HTMX settle, so newly loaded older messages appear above where the user was reading and can be scrolled through before the next top-load cycle. Because the earlier-page loader is swapped with `hx-swap="outerHTML show:none"`, prepend anchor metadata must live on the stable messages container and lifecycle handling should be bound from stable HTMX events such as `document.body` listeners rather than relying only on the replaced loader element.
 - Chat initial render, task-thread initial render, and HTMX swap paths should bind `initChatEarlierLoader`; the scroll-top loader should respond to real top-of-container user intent via scroll, wheel-up, touch-drag-down, and global keyboard navigation without eager-fetching older history on initialization.
 - Earlier-page loading should be gesture-latched and request/swap-aware: one command-arrow/scroll/wheel/touch/key gesture at the top loads at most one older page, then requires a new gesture before loading another page. The latch separates consumed-gesture state from HTMX request-in-flight state so programmatic scroll anchoring after a prepend cannot cascade additional older-page loads while the viewport remains pinned at the top. Wheel gestures require an idle gap before counting as a new gesture, touch resets on a new `touchstart`, repeated keyboard events from a held key are ignored, and anchor-restoration scroll events after prepends should not unlock or trigger the next page.

@@ -2,9 +2,9 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-06-08
+updated: 2026-06-09
 source: task
-source_id: 8a474c7b49a4363832169d74bb3c296a
+source_id: acf2a4452b2746bfd6e7c418103f4f84
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -28,12 +28,16 @@ Queueing and steering facts:
 - Thread history for future calls is rebuilt from `executions.PromptSent` and cleaned `executions.Output` as plain turns rather than provider-native tool-use messages.
 - Failed task executions remain visible terminal history rows. When a failed execution has no replayable assistant output, including empty output or marker-only output that cleans to empty, task-thread replay preserves its prompt by adding explicit failure metadata instead of leaving a trailing user-only turn that provider history builders may trim before a follow-up.
 - As of 2026-06-08, initial task executions that report agent status failed (`[STATUS: FAILED | ...]`) persist the assistant's failure transcript/output while still marking the execution and task failed, so follow-up context can replay the failed turn chronologically.
+- Task failure finalization does not clear execution diff output; `ExecutionRepo.Complete` updates terminal status/output/error metadata, while diff capture/update is a separate post-processing path. If a git worktree diff appears cleared after committing/rebasing, the task changes may simply be in the commit rather than uncommitted worktree state.
 
 Routes, modes, and runtime action facts:
 - `/chat` is the global/project-level orchestrator; the task detail Thread tab is task-specific.
 - `/chat` supports Orchestrate and Plan modes. Plan is read-only and disables marker execution.
 - Canonical chat capabilities live in `internal/chatcontrol/registry.go`.
 - Runtime tools and marker processing are mutually exclusive for a request; injected runtime tools set `ProcessMarkers=false`.
+- As of 2026-06-09, status-marker parsing treats `[STATUS: FAILED | ...]`, `[STATUS: COMPLETE | ...]`, and related markers as terminal control markers only when they appear as the final standalone non-empty line. Literal marker text in prose, code spans, code fences, bullets, quotes, examples, or lines with trailing explanatory text must not classify an agent or streaming follow-up execution as failed/completed.
+- As of 2026-06-09, chat output cleaning preserves status/tool marker text when it appears inside inline backtick code spans, while still stripping real standalone control markers outside inline code. This fixed the user-facing symptom where an attempted literal failure marker example rendered as empty backticks (`The failure marker is ``. Here it is:`).
+- The failed-task history replay and terminal-marker fixes are provider-neutral shared-layer behavior, not Anthropic-specific or Codex-specific fixes; Anthropic-style role cleanup and Codex-style output were only examples of where shared context replay or marker parsing symptoms surfaced.
 - Task creation can happen through marker compatibility, runtime action surfaces, or local app APIs depending on the active runtime.
 - Chat task creation distinguishes Agent definitions from model configs: `agent` names a selectable/enabled Agent, while `agent_id` is internal model-config selection.
 
@@ -59,8 +63,12 @@ Task execution and scheduling facts:
 - Schedules have a durable enabled/disabled state. Disabled schedules are excluded from due-run selection until re-enabled; toggling off preserves `next_run`, while toggling back on recomputes stale/past `next_run` to the next valid future occurrence.
 - Chat control-plane schedule modification supports `enabled: bool` and should stay consistent with HTTP/API schedule toggling semantics.
 - Promoted queued task-thread follow-ups move the task back to Active before starting; this reactivation happens during the queue-claim/promotion transaction before the follow-up execution is exposed, and promotion is expected after initial-turn success, failure, or cancellation.
+- Dragging or moving a failed task back to Active with no queued input must not blindly resubmit `tasks.prompt` when the latest execution overall is a failed task-thread follow-up. The Active reactivation path should retry that latest failed follow-up using the failed execution's `PromptSent` and chronological execution history; older failed follow-ups must be ignored if a later execution succeeded.
 - Zero-model guardrails block task execution and Chat send surfaces with an `Open Models` action.
 - Channel-origin runs follow the same queueing, steering, and task-thread rules. Provider-specific Slack/Telegram/GitHub/webhook facts live in `integrations_and_channels.md`.
 - Worker dispatch capacity uses global/project/model counters. Task execution cleanup is centralized in a deferred finalizer after slot acquisition so normal completion, provider errors, context cancellation returns, task claim failures, and provider panics release slots, clear pending state/cancel registration, and trigger redispatch; task-thread follow-up slot acquisition paths already use immediate defers after acquisition. Provider-panic recovery also finalizes any still-running execution rows for the panicked task as failed with completion metadata, preventing stale `ExecRunning` history after worker-level panic recovery.
+- A 2026-06-08 incident showed that concurrent task-thread follow-ups could produce synthetic failure status: one queued follow-up timed out waiting for a project worker slot, marked the task terminal/inactive, and stale-running recovery then marked a concurrently running successful execution failed with `Recovered stale running execution: owning task is terminal or inactive`.
+- As of 2026-06-09, task-thread follow-up slot waiting is intentionally not charged against `worker_timeout`: follow-ups wait for project/model slots with a cancellable no-deadline queue context, then start the turn-processing/`worker_timeout` context only after slots are acquired. `WorkerService` no longer adds a hidden fallback timeout when slot acquisition is called without a deadline; queue wait should not fail the task merely because capacity has not opened yet.
+- As of 2026-06-09, capacity-waiting task-thread follow-ups are cancellable while `queued`: `/tasks/:id/cancel` accepts queued tasks, calls the registered wait cancel function, finalizes the waiting execution as cancelled, and prevents it from later running when capacity opens. This fixed the audit finding left after removing queue-wait timeouts.
 
 Operational implementation guidance for queueing, steering, task-thread follow-ups, channel turn promotion, task-goal runtime tools, and regression coverage belongs in `.openvibely/skills/openvibely_chat_thread_turn_workflow/SKILL.md`, `.openvibely/skills/openvibely_channel_integrations_workflow/SKILL.md`, and `.openvibely/skills/openvibely_task_goals_workflow/SKILL.md`.

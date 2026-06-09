@@ -2,9 +2,9 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-06-07
+updated: 2026-06-09
 source: task
-source_id: 31a88fc61719854001613dab2470b548
+source_id: acf2a4452b2746bfd6e7c418103f4f84
 confidence: high
 title: Usage Analytics
 ---
@@ -30,6 +30,7 @@ Provider normalization facts:
 Analytics surface facts:
 - `/analytics` includes local task/execution/productivity analytics plus LLM usage/account-limit views.
 - `/api/analytics/usage` backs the Analytics page usage section.
+- Task-agent terminal paths call `RecordUsageFromResult`, including cancelled, provider-error failed, status-marker failed, and completed executions, so task model usage can appear in the Analytics usage section when provider usage data is returned.
 - The Analytics page usage fetch includes the selected `project_id` so model usage charts/tables reflect the current project.
 - Direct/background model calls can infer `project_id` from exact project repo-path `workDir` matches.
 - Analytics date/hour buckets and the built-in `month` range use app/local timezone semantics matching Schedules.

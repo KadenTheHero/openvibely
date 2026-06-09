@@ -138,6 +138,81 @@ func CleanChatOutput(output string) string {
 	return doCleanChatOutput(output, true)
 }
 
+// replaceOutsideInlineCode applies re as a global replacement with repl but
+// skips any match that falls inside an inline code span (backtick-delimited).
+// This prevents marker patterns that appear as prose examples (e.g. inside
+// backticks) from being silently erased by the cleaner.
+func replaceOutsideInlineCode(s string, re *regexp.Regexp, repl string) string {
+	ranges := inlineCodeRanges(s)
+	matches := re.FindAllStringIndex(s, -1)
+	if len(matches) == 0 {
+		return s
+	}
+	var buf strings.Builder
+	prev := 0
+	for _, m := range matches {
+		start, end := m[0], m[1]
+		if matchInAnyRange(ranges, start, end) {
+			buf.WriteString(s[prev:end]) // keep the original text
+		} else {
+			buf.WriteString(s[prev:start])
+			buf.WriteString(repl)
+		}
+		prev = end
+	}
+	buf.WriteString(s[prev:])
+	return buf.String()
+}
+
+// codeRange is a half-open byte interval [lo, hi) inside a string.
+type codeRange struct{ lo, hi int }
+
+// inlineCodeRanges returns the byte ranges of all inline code spans in s.
+// Only single-backtick spans that do not cross line boundaries are detected,
+// which covers the common prose-example case. Multi-backtick runs and code
+// fences are handled separately elsewhere.
+func inlineCodeRanges(s string) []codeRange {
+	var ranges []codeRange
+	offset := 0
+	for {
+		nl := strings.IndexByte(s[offset:], '\n')
+		var line string
+		if nl == -1 {
+			line = s[offset:]
+		} else {
+			line = s[offset : offset+nl]
+		}
+		inCode := false
+		codeStart := 0
+		for i := 0; i < len(line); i++ {
+			if line[i] == '`' {
+				if !inCode {
+					inCode = true
+					codeStart = i
+				} else {
+					ranges = append(ranges, codeRange{offset + codeStart, offset + i + 1})
+					inCode = false
+				}
+			}
+		}
+		if nl == -1 {
+			break
+		}
+		offset += nl + 1
+	}
+	return ranges
+}
+
+// matchInAnyRange reports whether the interval [start, end) overlaps any range.
+func matchInAnyRange(ranges []codeRange, start, end int) bool {
+	for _, r := range ranges {
+		if start < r.hi && end > r.lo {
+			return true
+		}
+	}
+	return false
+}
+
 // doCleanChatOutput is the shared implementation for cleaning chat output.
 // When stripSummaries is true, it also removes the result/summary sections
 // (used for LLM history context). When false, summaries are preserved (used for display).
@@ -184,9 +259,11 @@ func doCleanChatOutput(output string, stripSummaries bool) string {
 		result = strings.Join(cleaned, "\n")
 	}
 
-	// Remove markers using pre-compiled regexes (see package-level vars)
-	result = reCleanStatus.ReplaceAllString(result, "")
-	result = reCleanTool.ReplaceAllString(result, "")
+	// Remove markers using pre-compiled regexes (see package-level vars).
+	// Status and tool-use markers are skipped inside inline code spans so that
+	// prose examples like `[STATUS: FAILED | reason]` are not silently erased.
+	result = replaceOutsideInlineCode(result, reCleanStatus, "")
+	result = replaceOutsideInlineCode(result, reCleanTool, "")
 	result = reCleanProposedPlanTag.ReplaceAllString(result, "")
 	result = reCleanToolResult.ReplaceAllString(result, "")
 	result = reCleanToolResultLegacy.ReplaceAllString(result, "")

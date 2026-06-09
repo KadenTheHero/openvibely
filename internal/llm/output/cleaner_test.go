@@ -332,6 +332,49 @@ func TestCleanChatOutputForDisplay_PreservesSummaries(t *testing.T) {
 	}
 }
 
+func TestCleanChatOutput_PreservesMarkersInsideInlineCode(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "preserves STATUS FAILED inside backticks",
+			input:    "The failure marker is `[STATUS: FAILED | reason]`. Here it is:",
+			expected: "The failure marker is `[STATUS: FAILED | reason]`. Here it is:",
+		},
+		{
+			name:     "preserves STATUS SUCCESS inside backticks",
+			input:    "Use `[STATUS: SUCCESS]` when the task is done.",
+			expected: "Use `[STATUS: SUCCESS]` when the task is done.",
+		},
+		{
+			name:     "preserves Using tool inside backticks",
+			input:    "The marker `[Using tool: bash]` is stripped from history.",
+			expected: "The marker `[Using tool: bash]` is stripped from history.",
+		},
+		{
+			name:     "still strips STATUS FAILED outside backticks",
+			input:    "Could not complete.\n[STATUS: FAILED | tests failed]",
+			expected: "Could not complete.",
+		},
+		{
+			name:     "strips standalone marker but preserves prose reference in backticks",
+			input:    "Write `[STATUS: FAILED | reason]` at the end.\n\n[STATUS: FAILED | actual failure]",
+			expected: "Write `[STATUS: FAILED | reason]` at the end.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CleanChatOutput(tt.input)
+			if got != tt.expected {
+				t.Errorf("CleanChatOutput() =\n%q\nwant:\n%q", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestCleanChatOutput_StripsProposedPlanWrapperTags(t *testing.T) {
 	tests := []struct {
 		name     string
