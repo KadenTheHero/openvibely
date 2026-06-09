@@ -390,6 +390,25 @@ func (r *ExecutionRepo) ListByTaskChronological(ctx context.Context, taskID stri
 	return scanExecutionsChronological(rows)
 }
 
+func (r *ExecutionRepo) GetLatestFailedFollowupByTask(ctx context.Context, taskID string) (*models.Execution, error) {
+	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
+		`SELECT `+executionSelectColumns+`
+		 FROM executions
+		 WHERE task_id = ?
+		 ORDER BY started_at DESC, rowid DESC
+		 LIMIT 1`, taskID))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting latest task execution: %w", err)
+	}
+	if e.Status != models.ExecFailed || !e.IsFollowup {
+		return nil, nil
+	}
+	return &e, nil
+}
+
 // ListByTaskChronologicalLimit returns the latest executions for a task, ordered chronologically.
 func (r *ExecutionRepo) ListByTaskChronologicalLimit(ctx context.Context, taskID string, limit int) ([]models.Execution, error) {
 	return r.listTaskExecutionPage(ctx, taskID, "", limit)

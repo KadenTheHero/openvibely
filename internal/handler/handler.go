@@ -184,6 +184,7 @@ func New(
 	}
 	if taskSvc != nil {
 		taskSvc.SetQueuedTaskThreadFollowupHook(h.StartPendingTaskThreadFollowup)
+		taskSvc.SetFailedTaskThreadFollowupRetryHook(h.RetryLatestFailedTaskThreadFollowup)
 	}
 	return h
 }

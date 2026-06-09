@@ -237,6 +237,54 @@ func TestLLMService_ExecuteTaskWithAgent_PreservesFailedTranscriptForTaskThreadF
 	}
 }
 
+func TestLLMService_ExecuteTaskWithAgent_IgnoresStatusMarkerMentionInProse(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	project := &models.Project{Name: "Codex Marker Prose", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Explain marker syntax", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "explain why a task failed", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "The previous execution mentioned the literal marker `[STATUS: FAILED | ...]` in prose.\n\nValidation passed."
+	mock.TextOnly = mock.Response
+	svc.SetLLMCaller(mock)
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil || exec.Status != models.ExecCompleted {
+		t.Fatalf("expected marker mention in prose to complete, got %#v", exec)
+	}
+	stored, err := execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("GetByID execution: %v", err)
+	}
+	if stored.Status != models.ExecCompleted || stored.ErrorMessage != "" {
+		t.Fatalf("expected completed execution without failure metadata, got status=%s error=%q", stored.Status, stored.ErrorMessage)
+	}
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID task: %v", err)
+	}
+	if updatedTask.Status != models.StatusCompleted || updatedTask.Category != models.CategoryCompleted {
+		t.Fatalf("expected completed task, got status=%s category=%s", updatedTask.Status, updatedTask.Category)
+	}
+}
+
 func TestLLMService_ExecuteTaskWithAgent_PromotesQueuedTaskThreadInputAfterCompletionWithMultipleQueued(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

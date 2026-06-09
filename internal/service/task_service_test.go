@@ -386,6 +386,39 @@ func TestTaskService_RunTask_PromotesQueuedTaskThreadFollowupBeforeOriginalPromp
 	}
 }
 
+func TestTaskService_UpdateCategory_RetriesFailedTaskThreadFollowupBeforeOriginalPrompt(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	project := &models.Project{Name: "Manual Active Failed Followup Retry Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	workerSvc := NewWorkerService(nil, 0, nil)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	task := &models.Task{ProjectID: project.ID, Title: "Manual Active Failed Followup Retry Task", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "original prompt"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	var retriedTaskID string
+	svc.SetFailedTaskThreadFollowupRetryHook(func(ctx context.Context, taskID string) (bool, error) {
+		retriedTaskID = taskID
+		require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
+		require.NoError(t, taskRepo.UpdateCategory(ctx, taskID, models.CategoryActive))
+		return true, nil
+	})
+
+	require.NoError(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive))
+	assert.Equal(t, task.ID, retriedTaskID)
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.StatusQueued, updated.Status)
+	assert.Equal(t, models.CategoryActive, updated.Category)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("expected original task not to be submitted, got %s", submitted.Prompt)
+	default:
+	}
+}
+
 func TestTaskService_RunTask_DoesNotRerunOriginalPromptWhenQueuedFollowupPromotionFails(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

@@ -1007,6 +1007,109 @@ func (h *Handler) StartPendingTaskThreadFollowup(ctx context.Context, taskID str
 	return true, nil
 }
 
+func (h *Handler) RetryLatestFailedTaskThreadFollowup(ctx context.Context, taskID string) (bool, error) {
+	if h.execRepo == nil || h.taskRepo == nil || taskID == "" {
+		return false, nil
+	}
+	active, err := h.execRepo.HasActiveTaskExecution(ctx, taskID, "")
+	if err != nil {
+		return false, err
+	}
+	if active {
+		return false, nil
+	}
+	failed, err := h.execRepo.GetLatestFailedFollowupByTask(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if failed == nil || strings.TrimSpace(failed.PromptSent) == "" {
+		return false, nil
+	}
+	if err := h.retryFailedTaskThreadExecution(ctx, taskID, *failed); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID string, failed models.Execution) error {
+	task, err := h.taskRepo.GetByID(ctx, taskID)
+	if err != nil || task == nil {
+		if err == nil {
+			err = fmt.Errorf("task not found: %s", taskID)
+		}
+		return err
+	}
+	agent, err := h.llmConfigRepo.GetByID(ctx, failed.AgentConfigID)
+	if err != nil {
+		return err
+	}
+	if agent == nil {
+		return fmt.Errorf("model not found for failed task-thread retry: %s", failed.AgentConfigID)
+	}
+	exec := &models.Execution{
+		TaskID:        taskID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    failed.PromptSent,
+		IsFollowup:    true,
+	}
+	if err := h.execRepo.Create(ctx, exec); err != nil {
+		return err
+	}
+	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued); err != nil {
+		h.completeWithFailure(ctx, exec.ID, taskID, err.Error(), 0)
+		return err
+	}
+	if task.Category != models.CategoryActive {
+		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryActive); err != nil {
+			h.completeWithFailure(ctx, exec.ID, taskID, err.Error(), 0)
+			return err
+		}
+	}
+	if h.broadcaster != nil {
+		h.broadcaster.Publish(events.TaskEvent{
+			Type:      events.TaskThreadExecutionStarted,
+			ProjectID: task.ProjectID,
+			TaskID:    taskID,
+			TaskName:  task.Title,
+			ExecID:    exec.ID,
+			Message:   failed.PromptSent,
+		})
+	}
+	h.reactivateAchievedGoalForManualFollowup(ctx, taskID, models.TaskOriginWeb, "")
+	priorExecs, _ := h.execRepo.ListByTaskChronological(ctx, taskID)
+	priorHistory := filterChatHistory(priorExecs, exec.ID)
+	var agentDef *models.Agent
+	if task.AgentDefinitionID != nil && h.agentRepo != nil {
+		if ad, adErr := h.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
+			agentDef = ad
+		}
+	}
+	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, ""), h.taskGoalContext(ctx, task.ID, agentDef))
+	personalityContext := h.getPersonalityContext(ctx, task.ProjectID)
+	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
+	if workDirErr != nil {
+		h.completeWithFailure(ctx, exec.ID, taskID, workDirErr.Error(), 0)
+		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, exec.ID)
+		return nil
+	}
+	go h.processStreamingResponse(streamingResponseParams{
+		ExecID:          exec.ID,
+		TaskID:          taskID,
+		Message:         failed.PromptSent,
+		Agent:           *agent,
+		AgentDefinition: agentDef,
+		ChatHistory:     priorHistory,
+		ProjectID:       task.ProjectID,
+		SystemContext:   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		WorkDir:         workDir,
+		IsTaskFollowup:  true,
+		ProcessMarkers:  false,
+		InputOrigin:     models.TaskOriginWeb,
+	})
+	return nil
+}
+
 func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.ThreadInput) error {
 	task, err := h.taskRepo.GetByID(ctx, input.TaskID)
 	if err != nil || task == nil {

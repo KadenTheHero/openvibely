@@ -3434,6 +3434,57 @@ func TestProcessStreamingResponse_TaskFollowupFailedMarkerMarksTaskFailed(t *tes
 	}
 }
 
+func TestProcessStreamingResponse_TaskFollowupIgnoresStatusMarkerMentionInProse(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "The previous output mentioned the literal marker `[STATUS: FAILED | ...]` while explaining the parser.\n\nFollow-up completed."
+	mock.TextOnly = mock.Response
+	mock.Tokens = 24
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Followup Marker Prose Project")
+	task := createTask(t, h, project.ID, "Followup Marker Prose Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Please continue"
+		ex.IsFollowup = true
+	})
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "Please continue",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		SystemContext:  "continue from where you left off",
+		WorkDir:        "",
+		IsTaskFollowup: true,
+	})
+
+	updatedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if updatedExec.Status != models.ExecCompleted || updatedExec.ErrorMessage != "" {
+		t.Fatalf("expected completed execution without failure metadata, got status=%s error=%q", updatedExec.Status, updatedExec.ErrorMessage)
+	}
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updatedTask.Status != models.StatusCompleted {
+		t.Fatalf("expected task completed, got %s", updatedTask.Status)
+	}
+}
+
 func TestResolveWorktreeWorkDir_TerminalUnmergedConflictContinuesInPreservedWorktree(t *testing.T) {
 	h, _, _ := setupTestHandler(t)
 	ctx := context.Background()
@@ -4479,6 +4530,99 @@ func TestFollowupNoChangesDoesNotResetMergeStatus(t *testing.T) {
 	if updatedExec.DiffOutput != "" {
 		t.Errorf("expected no diff output for read-only followup, got %d bytes", len(updatedExec.DiffOutput))
 	}
+}
+
+func TestRetryLatestFailedTaskThreadFollowup_ReplaysFailedFollowupPromptFromActiveDrop(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Retry Failed Followup Project")
+	task := createTask(t, h, project.ID, "Retry Failed Followup Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusFailed
+		tk.AgentID = &agent.ID
+		tk.Prompt = "original task prompt"
+	})
+	initial := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "original task prompt"
+		ex.IsFollowup = false
+	})
+	require.NoError(t, h.execRepo.Complete(ctx, initial.ID, models.ExecCompleted, "initial task output", "", 3, 10))
+	failedFollowup := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "fix the failed follow-up"
+		ex.IsFollowup = true
+	})
+	require.NoError(t, h.execRepo.Complete(ctx, failedFollowup.ID, models.ExecFailed, "failed follow-up output", "provider failed", 0, 20))
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "retry complete"
+	mock.TextOnly = "retry complete"
+	h.llmSvc.SetLLMCaller(mock)
+
+	handled, err := h.RetryLatestFailedTaskThreadFollowup(ctx, task.ID)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, time.Second, 10*time.Millisecond)
+
+	call := mock.LastCall()
+	assert.Equal(t, "fix the failed follow-up", call.Prompt)
+	assert.NotEqual(t, "original task prompt", call.Prompt)
+	req := mock.LastAgentRequest()
+	require.Len(t, req.ChatHistory, 2)
+	assert.Equal(t, "original task prompt", req.ChatHistory[0].PromptSent)
+	assert.Contains(t, req.ChatHistory[0].Output, "initial task output")
+	assert.Equal(t, "fix the failed follow-up", req.ChatHistory[1].PromptSent)
+	assert.Equal(t, models.ExecFailed, req.ChatHistory[1].Status)
+	assert.Contains(t, req.ChatHistory[1].Output, "failed follow-up output")
+	require.Eventually(t, func() bool {
+		execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+		return err == nil && len(execs) == 3 && execs[2].Status == models.ExecCompleted
+	}, time.Second, 10*time.Millisecond)
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 3)
+	assert.True(t, execs[2].IsFollowup)
+	assert.Equal(t, "fix the failed follow-up", execs[2].PromptSent)
+	assert.Equal(t, models.ExecCompleted, execs[2].Status)
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.StatusCompleted, updatedTask.Status)
+	assert.Equal(t, models.CategoryCompleted, updatedTask.Category)
+}
+
+func TestRetryLatestFailedTaskThreadFollowup_IgnoresOlderFailedFollowup(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Older Failed Followup Project")
+	task := createTask(t, h, project.ID, "Older Failed Followup Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+		tk.Prompt = "original task prompt"
+	})
+	failedFollowup := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "old failed follow-up"
+		ex.IsFollowup = true
+	})
+	require.NoError(t, h.execRepo.Complete(ctx, failedFollowup.ID, models.ExecFailed, "old failure", "failed", 0, 10))
+	laterSuccess := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "later successful follow-up"
+		ex.IsFollowup = true
+	})
+	require.NoError(t, h.execRepo.Complete(ctx, laterSuccess.ID, models.ExecCompleted, "later success", "", 1, 20))
+
+	handled, err := h.RetryLatestFailedTaskThreadFollowup(ctx, task.ID)
+	require.NoError(t, err)
+	assert.False(t, handled)
 }
 
 func TestProcessStreamingResponse_TaskFollowupRateLimitFailurePreservesHistory(t *testing.T) {

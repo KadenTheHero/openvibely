@@ -16,12 +16,13 @@ import (
 var ErrDuplicateTask = errors.New("task with this name already exists in this project")
 
 type TaskService struct {
-	repo                         *repository.TaskRepo
-	attachmentRepo               *repository.AttachmentRepo
-	workerSvc                    *WorkerService
-	agentRepo                    *repository.AgentRepo
-	goalSvc                      *TaskGoalService
-	queuedTaskThreadFollowupHook func(context.Context, string) (bool, error)
+	repo                              *repository.TaskRepo
+	attachmentRepo                    *repository.AttachmentRepo
+	workerSvc                         *WorkerService
+	agentRepo                         *repository.AgentRepo
+	goalSvc                           *TaskGoalService
+	queuedTaskThreadFollowupHook      func(context.Context, string) (bool, error)
+	failedTaskThreadFollowupRetryHook func(context.Context, string) (bool, error)
 }
 
 func NewTaskService(repo *repository.TaskRepo, attachmentRepo *repository.AttachmentRepo, workerSvc *WorkerService) *TaskService {
@@ -42,6 +43,10 @@ func (s *TaskService) SetTaskGoalService(goalSvc *TaskGoalService) {
 
 func (s *TaskService) SetQueuedTaskThreadFollowupHook(hook func(context.Context, string) (bool, error)) {
 	s.queuedTaskThreadFollowupHook = hook
+}
+
+func (s *TaskService) SetFailedTaskThreadFollowupRetryHook(hook func(context.Context, string) (bool, error)) {
+	s.failedTaskThreadFollowupRetryHook = hook
 }
 
 func (s *TaskService) ListByProject(ctx context.Context, projectID, category string) ([]models.Task, error) {
@@ -174,6 +179,17 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 				return nil
 			}
 		}
+		if s.failedTaskThreadFollowupRetryHook != nil {
+			handled, err := s.failedTaskThreadFollowupRetryHook(ctx, id)
+			if err != nil {
+				applog.Infof("[task-svc] UpdateCategory failed task-thread follow-up retry failed id=%s: %v", id, err)
+				return err
+			}
+			if handled {
+				applog.Infof("[task-svc] UpdateCategory retried failed task-thread follow-up id=%s", id)
+				return nil
+			}
+		}
 		applog.Infof("[task-svc] UpdateCategory resetting status to pending and auto-submitting id=%s (was %s)", id, task.Status)
 		s.repo.UpdateStatus(ctx, id, models.StatusPending)
 		task.Status = models.StatusPending
@@ -249,6 +265,17 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 		}
 		if handled {
 			applog.Infof("[task-svc] RunTask promoted queued task-thread follow-up id=%s", id)
+			return nil
+		}
+	}
+	if s.failedTaskThreadFollowupRetryHook != nil {
+		handled, err := s.failedTaskThreadFollowupRetryHook(ctx, id)
+		if err != nil {
+			applog.Infof("[task-svc] RunTask failed task-thread follow-up retry failed id=%s: %v", id, err)
+			return err
+		}
+		if handled {
+			applog.Infof("[task-svc] RunTask retried failed task-thread follow-up id=%s", id)
 			return nil
 		}
 	}

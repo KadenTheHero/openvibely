@@ -8,19 +8,62 @@ import (
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 )
 
-// ExtractMarker looks for a marker like "[STATUS: FAILED | reason]" in the output.
+// ExtractMarker looks for a terminal marker like "[STATUS: FAILED | reason]" in the output.
 // Returns the reason text and whether the marker was found.
+//
+// Status markers are control syntax, so only a final standalone non-empty line is
+// accepted. Mentions in prose, examples, bullets, quotes, or code fences are not
+// terminal status reports.
 func ExtractMarker(output, prefix string) (string, bool) {
-	idx := strings.LastIndex(output, prefix)
-	if idx == -1 {
+	line, ok := finalStandaloneLine(output)
+	if !ok || !strings.HasPrefix(line, prefix) {
 		return "", false
 	}
-	rest := output[idx+len(prefix):]
+
+	rest := line[len(prefix):]
 	end := strings.Index(rest, "]")
 	if end == -1 {
 		return strings.TrimSpace(rest), true
 	}
+	if strings.TrimSpace(rest[end+1:]) != "" {
+		return "", false
+	}
 	return strings.TrimSpace(rest[:end]), true
+}
+
+func finalStandaloneLine(output string) (string, bool) {
+	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
+	lastNonEmpty := -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			lastNonEmpty = i
+			break
+		}
+	}
+	if lastNonEmpty == -1 {
+		return "", false
+	}
+
+	if isInsideCodeFence(lines, lastNonEmpty) {
+		return "", false
+	}
+
+	return strings.TrimSpace(lines[lastNonEmpty]), true
+}
+
+func isInsideCodeFence(lines []string, lineIndex int) bool {
+	inFence := false
+	for i := 0; i < lineIndex; i++ {
+		if isCodeFenceLine(lines[i]) {
+			inFence = !inFence
+		}
+	}
+	return inFence
+}
+
+func isCodeFenceLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
 }
 
 // Pre-compiled regexes for cleanChatOutput — compiled once at package init
