@@ -4815,7 +4815,11 @@ func TestRetryLatestFailedTaskThreadFollowup_ReplaysFailedFollowupPromptFromActi
 	assert.Contains(t, req.ChatHistory[1].Output, "failed follow-up output")
 	require.Eventually(t, func() bool {
 		execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
-		return err == nil && len(execs) == 3 && execs[2].Status == models.ExecCompleted
+		if err != nil || len(execs) != 3 || execs[2].Status != models.ExecCompleted {
+			return false
+		}
+		updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+		return err == nil && updatedTask != nil && updatedTask.Status == models.StatusCompleted && updatedTask.Category == models.CategoryCompleted
 	}, time.Second, 10*time.Millisecond)
 	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
 	require.NoError(t, err)

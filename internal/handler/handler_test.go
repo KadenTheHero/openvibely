@@ -1490,17 +1490,23 @@ func TestHandler_DeleteAllTasksByCategory(t *testing.T) {
 }
 
 func TestHandler_ActivateAllBacklogTasks(t *testing.T) {
-	h, e, _ := setupTestHandler(t)
+	tc := NewTestContext(t)
 	ctx := context.Background()
-	project1 := createProject(t, h, "Test Project 1")
-	bt1 := createTask(t, h, project1.ID, "Backlog Task 1", func(tk *models.Task) { tk.Category = models.CategoryBacklog })
-	bt2 := createTask(t, h, project1.ID, "Backlog Task 2", func(tk *models.Task) { tk.Category = models.CategoryBacklog })
+	project1 := createProject(t, tc.handler, "Test Project 1")
+	bt1 := createTask(t, tc.handler, project1.ID, "Backlog Task 1", func(tk *models.Task) { tk.Category = models.CategoryBacklog })
+	bt2 := createTask(t, tc.handler, project1.ID, "Backlog Task 2", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusCancelled
+	})
+	goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, bt2.ID, "finish the objective", service.GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	require.NoError(t, tc.handler.taskGoalSvc.PauseActiveGoalStoppedByUser(ctx, bt2.ID))
 
-	rec := htmxPost(e, "/tasks/backlog/activate?project_id="+project1.ID, nil)
+	rec := tc.HTMX().Post("/tasks/backlog/activate?project_id=" + project1.ID).Execute()
 	assertCode(t, rec, http.StatusOK)
 
 	for _, id := range []string{bt1.ID, bt2.ID} {
-		task, _ := h.taskSvc.GetByID(ctx, id)
+		task, _ := tc.handler.taskSvc.GetByID(ctx, id)
 		if task == nil {
 			t.Fatalf("expected task %s to exist", id)
 		}
@@ -1511,6 +1517,12 @@ func TestHandler_ActivateAllBacklogTasks(t *testing.T) {
 			t.Errorf("task %s: expected status pending, got %s", id, task.Status)
 		}
 	}
+	resumed, err := tc.handler.taskGoalSvc.GetGoal(ctx, bt2.ID)
+	require.NoError(t, err)
+	require.NotNil(t, resumed)
+	assert.Equal(t, goal.GoalID, resumed.GoalID)
+	assert.Equal(t, models.TaskGoalStatusActive, resumed.Status)
+	assert.Equal(t, "resumed by user", resumed.Reason)
 }
 
 func TestHandler_DeleteTask_HTMX_UpdatesKanbanBoard(t *testing.T) {

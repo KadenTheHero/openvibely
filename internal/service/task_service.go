@@ -515,6 +515,7 @@ func (s *TaskService) ActivateAllBacklog(ctx context.Context, projectID string) 
 		} else {
 			for _, task := range activeTasks {
 				if task.Status == models.StatusPending {
+					s.resumeGoalStoppedByUser(ctx, task.ID, "user")
 					s.workerSvc.Submit(task)
 				}
 			}

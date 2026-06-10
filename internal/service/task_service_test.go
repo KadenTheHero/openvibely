@@ -1582,6 +1582,56 @@ func TestTaskService_ActivateAllBacklog(t *testing.T) {
 	}
 }
 
+func TestTaskService_ActivateAllBacklog_ResumesGoalPausedByUserStop(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	workerSvc := newTestWorkerService(t)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc.SetTaskGoalService(goalSvc)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Stopped Goal Activation Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Stopped Backlog Goal",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusCancelled,
+		Prompt:    "continue",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "finish the objective", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	require.NoError(t, goalSvc.PauseActiveGoalStoppedByUser(ctx, task.ID))
+
+	count, err := svc.ActivateAllBacklog(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, models.CategoryActive, updated.Category)
+	assert.Equal(t, models.StatusPending, updated.Status)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		assert.Equal(t, task.ID, submitted.ID)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected activated task to be submitted to worker")
+	}
+
+	resumed, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, resumed)
+	assert.Equal(t, goal.GoalID, resumed.GoalID)
+	assert.Equal(t, models.TaskGoalStatusActive, resumed.Status)
+	assert.Equal(t, "resumed by user", resumed.Reason)
+}
+
 func TestWorkerService_Submit_SkipsChatTasks(t *testing.T) {
 	workerSvc := newTestWorkerService(t)
 
