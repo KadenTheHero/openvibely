@@ -1370,28 +1370,37 @@ func TestHandler_UpdateTaskCategory_AllowsScheduledTaskToScheduled(t *testing.T)
 }
 
 func TestHandler_UpdateTask_CategoryChangeFromCompletedToActive(t *testing.T) {
-	h, e, _ := setupTestHandler(t)
+	tc := NewTestContext(t)
 	ctx := context.Background()
-	task := createTask(t, h, "default", "Completed Task", func(tk *models.Task) {
+	task := createTask(t, tc.handler, "default", "Completed Task", func(tk *models.Task) {
 		tk.Category = models.CategoryCompleted
 		tk.Status = models.StatusCompleted
 	})
+	goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "finish the objective", service.GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	require.NoError(t, tc.handler.taskGoalSvc.PauseActiveGoalStoppedByUser(ctx, task.ID))
 
 	form := url.Values{}
 	form.Set("title", task.Title)
 	form.Set("category", "active")
 	form.Set("prompt", task.Prompt)
 	form.Set("priority", "0")
-	rec := htmxPut(e, "/tasks/"+task.ID, form)
+	rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(form).Execute()
 	assertCode(t, rec, http.StatusOK)
 
-	updated, _ := h.taskSvc.GetByID(ctx, task.ID)
+	updated, _ := tc.handler.taskSvc.GetByID(ctx, task.ID)
 	if updated.Category != models.CategoryActive {
 		t.Errorf("expected category 'active', got %q", updated.Category)
 	}
 	if updated.Status != models.StatusPending {
 		t.Errorf("expected status 'pending' after moving to active, got %q", updated.Status)
 	}
+	resumed, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, resumed)
+	assert.Equal(t, goal.GoalID, resumed.GoalID)
+	assert.Equal(t, models.TaskGoalStatusActive, resumed.Status)
+	assert.Equal(t, "resumed by user", resumed.Reason)
 }
 
 func TestHandler_UpdateTaskStatus_DragDrop(t *testing.T) {
@@ -1413,19 +1422,31 @@ func TestHandler_UpdateTaskStatus_DragDrop(t *testing.T) {
 }
 
 func TestHandler_UpdateTaskStatus_MovesToRunning(t *testing.T) {
-	h, e, _ := setupTestHandler(t)
+	tc := NewTestContext(t)
 	ctx := context.Background()
-	task := createTask(t, h, "default", "Test Completed Task", func(tk *models.Task) { tk.Status = models.StatusCompleted })
+	task := createTask(t, tc.handler, "default", "Test Completed Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.Category = models.CategoryActive
+	})
+	goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "finish the objective", service.GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	require.NoError(t, tc.handler.taskGoalSvc.PauseActiveGoalStoppedByUser(ctx, task.ID))
 
 	form := url.Values{}
 	form.Set("status", "running")
-	rec := htmxPatch(e, "/tasks/"+task.ID+"/status?viewing=active", form)
+	rec := tc.HTMX().Patch("/tasks/" + task.ID + "/status?viewing=active").WithForm(form).Execute()
 	assertCode(t, rec, http.StatusOK)
 
-	updated, _ := h.taskSvc.GetByID(ctx, task.ID)
+	updated, _ := tc.handler.taskSvc.GetByID(ctx, task.ID)
 	if updated.Status != models.StatusRunning {
 		t.Errorf("expected status 'running', got %q", updated.Status)
 	}
+	resumed, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, resumed)
+	assert.Equal(t, goal.GoalID, resumed.GoalID)
+	assert.Equal(t, models.TaskGoalStatusActive, resumed.Status)
+	assert.Equal(t, "resumed by user", resumed.Reason)
 }
 
 func TestHandler_DeleteAllTasksByCategory(t *testing.T) {
@@ -3091,6 +3112,59 @@ func TestHandler_TaskThreadSend(t *testing.T) {
 	if updatedTask.Category != models.CategoryActive {
 		t.Errorf("expected category active, got %s", updatedTask.Category)
 	}
+}
+
+func TestHandler_TaskThreadSend_ResumesGoalPausedByUserStop(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	agent := createAgent(t, tc.llmConfigRepo)
+	project := createProject(t, tc.handler, "Thread Resume Goal Project")
+	task := createTask(t, tc.handler, project.ID, "Thread Resume Goal Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusCancelled
+		tk.AgentID = &agent.ID
+	})
+	goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "finish the objective", service.GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	require.NoError(t, tc.handler.taskGoalSvc.PauseActiveGoalStoppedByUser(ctx, task.ID))
+
+	form := url.Values{}
+	form.Set("message", "Start again")
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/thread").WithForm(form).Execute()
+	assertCode(t, rec, http.StatusOK)
+
+	resumed, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, resumed)
+	assert.Equal(t, goal.GoalID, resumed.GoalID)
+	assert.Equal(t, models.TaskGoalStatusActive, resumed.Status)
+	assert.Equal(t, "resumed by web", resumed.Reason)
+}
+
+func TestHandler_TaskThreadSend_DoesNotResumeExplicitlyPausedGoal(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	agent := createAgent(t, tc.llmConfigRepo)
+	project := createProject(t, tc.handler, "Thread Explicit Pause Project")
+	task := createTask(t, tc.handler, project.ID, "Thread Explicit Pause Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusCancelled
+		tk.AgentID = &agent.ID
+	})
+	_, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "finish the objective", service.GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	require.NoError(t, tc.handler.taskGoalSvc.PauseGoal(ctx, task.ID, "user"))
+
+	form := url.Values{}
+	form.Set("message", "Start again")
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/thread").WithForm(form).Execute()
+	assertCode(t, rec, http.StatusOK)
+
+	paused, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, paused)
+	assert.Equal(t, models.TaskGoalStatusPaused, paused.Status)
+	assert.Equal(t, "paused by user", paused.Reason)
 }
 
 func TestHandler_TaskThreadSend_ProcessesCreateTaskMarkerFromUIFollowup(t *testing.T) {

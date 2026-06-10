@@ -100,8 +100,29 @@ func (s *TaskGoalService) PauseGoal(ctx context.Context, taskID string, actor st
 	return s.pauseGoal(ctx, taskID, reasonForActor(actor, "paused"), false)
 }
 
+const TaskGoalStoppedByUserReason = "stopped by user"
+
 func (s *TaskGoalService) PauseActiveGoalStoppedByUser(ctx context.Context, taskID string) error {
-	return s.pauseGoal(ctx, taskID, "stopped by user", true)
+	return s.pauseGoal(ctx, taskID, TaskGoalStoppedByUserReason, true)
+}
+
+func (s *TaskGoalService) ResumeGoalStoppedByUser(ctx context.Context, taskID string, actor string) (*models.TaskGoal, error) {
+	goal, err := s.repo.GetByTaskID(ctx, taskID)
+	if err != nil || goal == nil {
+		return goal, err
+	}
+	if goal.Status != models.TaskGoalStatusPaused || strings.TrimSpace(goal.Reason) != TaskGoalStoppedByUserReason {
+		return nil, nil
+	}
+	updated, err := s.repo.UpdateStatus(ctx, taskID, goal.GoalID, models.TaskGoalStatusActive, reasonForActor(actor, "resumed"), true)
+	if err != nil {
+		return nil, err
+	}
+	if updated == nil {
+		return nil, ErrTaskGoalStaleUpdate
+	}
+	s.publishGoalEvent(events.TaskGoalResumed, updated)
+	return updated, nil
 }
 
 func (s *TaskGoalService) pauseGoal(ctx context.Context, taskID string, reason string, activeOnly bool) error {

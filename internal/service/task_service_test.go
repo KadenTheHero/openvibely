@@ -104,6 +104,83 @@ func TestTaskService_Create_NonActiveDoesNotSubmit(t *testing.T) {
 	}
 }
 
+func TestTaskService_RunTask_ResumesGoalPausedByUserStop(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc.SetTaskGoalService(goalSvc)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "Stopped Goal Task", Category: models.CategoryBacklog, Status: models.StatusCancelled, Prompt: "continue"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "finish the objective", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	require.NoError(t, goalSvc.PauseActiveGoalStoppedByUser(ctx, task.ID))
+
+	require.NoError(t, svc.RunTask(ctx, task.ID))
+
+	resumed, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, resumed)
+	assert.Equal(t, goal.GoalID, resumed.GoalID)
+	assert.Equal(t, models.TaskGoalStatusActive, resumed.Status)
+	assert.Equal(t, "resumed by user", resumed.Reason)
+}
+
+func TestTaskService_RunTask_DoesNotResumeExplicitlyPausedGoal(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc.SetTaskGoalService(goalSvc)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "Explicitly Paused Goal Task", Category: models.CategoryBacklog, Status: models.StatusCancelled, Prompt: "continue"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	_, err := goalSvc.SetGoal(ctx, task.ID, "finish the objective", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	require.NoError(t, goalSvc.PauseGoal(ctx, task.ID, "user"))
+
+	require.NoError(t, svc.RunTask(ctx, task.ID))
+
+	paused, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, paused)
+	assert.Equal(t, models.TaskGoalStatusPaused, paused.Status)
+	assert.Equal(t, "paused by user", paused.Reason)
+}
+
+func TestTaskService_UpdateStatus_RunningActiveResumesGoalPausedByUserStop(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc.SetTaskGoalService(goalSvc)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "Status Start Task", Category: models.CategoryActive, Status: models.StatusCancelled, Prompt: "continue"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "finish the objective", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	require.NoError(t, goalSvc.PauseActiveGoalStoppedByUser(ctx, task.ID))
+
+	require.NoError(t, svc.UpdateStatus(ctx, task.ID, models.StatusRunning))
+
+	resumed, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, resumed)
+	assert.Equal(t, goal.GoalID, resumed.GoalID)
+	assert.Equal(t, models.TaskGoalStatusActive, resumed.Status)
+	assert.Equal(t, "resumed by user", resumed.Reason)
+}
+
 func TestTaskService_UpdateCategory_ToActiveAutoSubmits(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -1099,6 +1176,38 @@ func TestTaskService_UpdateCategory_FromActiveToBacklogCancelsQueued(t *testing.
 	assert.Equal(t, "stopped by user", paused.Reason)
 }
 
+func TestTaskService_UpdateCategory_ToActiveResumesGoalPausedByUserStop(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc.SetTaskGoalService(goalSvc)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Drag Back To Active Task",
+		Category:  models.CategoryCompleted,
+		Status:    models.StatusCancelled,
+		Prompt:    "continue",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "finish the objective", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	require.NoError(t, goalSvc.PauseActiveGoalStoppedByUser(ctx, task.ID))
+
+	require.NoError(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive))
+
+	resumed, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, resumed)
+	assert.Equal(t, goal.GoalID, resumed.GoalID)
+	assert.Equal(t, models.TaskGoalStatusActive, resumed.Status)
+	assert.Equal(t, "resumed by user", resumed.Reason)
+}
+
 func TestTaskService_UpdateCategory_FromRunningToActiveResetsStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -1569,6 +1678,40 @@ func TestTaskService_ExecuteBacklogTasks_All(t *testing.T) {
 	if !submittedIDs[task1.ID] || !submittedIDs[task2.ID] || !submittedIDs[task3.ID] {
 		t.Error("not all tasks were submitted to worker channel")
 	}
+}
+
+func TestTaskService_ExecuteBacklogTasks_ResumesGoalPausedByUserStop(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc.SetTaskGoalService(goalSvc)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Stopped Backlog Goal",
+		Category:  models.CategoryBacklog,
+		Priority:  3,
+		Status:    models.StatusCancelled,
+		Prompt:    "continue",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "finish the objective", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	require.NoError(t, goalSvc.PauseActiveGoalStoppedByUser(ctx, task.ID))
+
+	_, submitted, err := svc.ExecuteBacklogTasks(ctx, "default", 0)
+	require.NoError(t, err)
+	assert.Equal(t, 1, submitted)
+	resumed, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, resumed)
+	assert.Equal(t, goal.GoalID, resumed.GoalID)
+	assert.Equal(t, models.TaskGoalStatusActive, resumed.Status)
+	assert.Equal(t, "resumed by user", resumed.Reason)
 }
 
 func TestTaskService_ExecuteBacklogTasks_FilterByPriority(t *testing.T) {

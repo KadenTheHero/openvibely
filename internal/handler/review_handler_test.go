@@ -323,8 +323,8 @@ func TestSubmitReview_CreatesFollowupExecutionAndClearsComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("set goal: %v", err)
 	}
-	if _, err := h.taskGoalSvc.MarkAchieved(ctx, taskID, goal.GoalID, "initially satisfied"); err != nil {
-		t.Fatalf("mark achieved: %v", err)
+	if err := h.taskGoalSvc.PauseActiveGoalStoppedByUser(ctx, taskID); err != nil {
+		t.Fatalf("pause goal after user stop: %v", err)
 	}
 
 	for _, input := range []struct {
@@ -398,6 +398,13 @@ func TestSubmitReview_CreatesFollowupExecutionAndClearsComments(t *testing.T) {
 	lastCall := mockLLM.LastCall()
 	if !strings.Contains(lastCall.Prompt, "Fix nil handling") || !strings.Contains(lastCall.Prompt, "Add test coverage") {
 		t.Fatalf("expected LLM prompt to include all comments, got %q", lastCall.Prompt)
+	}
+	resumed, err := h.taskGoalSvc.GetGoal(ctx, taskID)
+	if err != nil {
+		t.Fatalf("get resumed goal: %v", err)
+	}
+	if resumed == nil || resumed.GoalID != goal.GoalID || resumed.Status != models.TaskGoalStatusActive || resumed.Reason != "resumed by web" {
+		t.Fatalf("expected review submission to resume user-stopped goal, got %+v", resumed)
 	}
 	chatCtx := mockLLM.LastAgentRequest().ChatSystemContext
 	if !strings.Contains(chatCtx, "Task goal (active):") || !strings.Contains(chatCtx, reviewGoal) {

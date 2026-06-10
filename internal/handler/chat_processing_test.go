@@ -2606,8 +2606,7 @@ func TestStartChannelTaskRunIncludesTaskGoalContext(t *testing.T) {
 	goalObjective := "Channel follow-ups must see this persisted goal"
 	goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, goalObjective, service.GoalOptions{})
 	require.NoError(t, err)
-	_, err = tc.handler.taskGoalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "initially satisfied")
-	require.NoError(t, err)
+	require.NoError(t, tc.handler.taskGoalSvc.PauseActiveGoalStoppedByUser(ctx, task.ID))
 	exec := createExec(t, tc.handler, task.ID, agent.ID, func(ex *models.Execution) {
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "channel follow-up"
@@ -2638,6 +2637,12 @@ func TestStartChannelTaskRunIncludesTaskGoalContext(t *testing.T) {
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
 	chatCtx := mock.LastAgentRequest().ChatSystemContext
 	require.Contains(t, chatCtx, "Channel task context.")
+	resumed, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, resumed)
+	require.Equal(t, goal.GoalID, resumed.GoalID)
+	require.Equal(t, models.TaskGoalStatusActive, resumed.Status)
+	require.Equal(t, "resumed by slack", resumed.Reason)
 	require.Contains(t, chatCtx, "Task goal (active):")
 	require.Contains(t, chatCtx, goalObjective)
 	require.Contains(t, chatCtx, "This assigned agent is explicitly granted these goal status tools: mark_task_goal_achieved")

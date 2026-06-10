@@ -50,6 +50,7 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 		h.completeWithFailure(context.Background(), req.ExecID, req.TaskID, workDirErr.Error(), 0, req.ReplyContext)
 		return
 	}
+	h.resumeUserStoppedGoalForManualStart(ctx, req.TaskID, req.ReplyContext.Source, "")
 	h.reactivateAchievedGoalForManualFollowup(ctx, req.TaskID, req.ReplyContext.Source, "")
 	agentDef := h.resolveTaskAgentDefinitionForTask(ctx, req.TaskID, req.AgentDefinition)
 	systemContext := combineContexts(combineContexts(req.SystemContext, h.taskGoalContext(ctx, req.TaskID, agentDef)), worktreeContext)

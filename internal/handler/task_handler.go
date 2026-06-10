@@ -1035,8 +1035,8 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	// If category changed to Active, reset status and auto-submit (same as drag & drop behavior)
 	if oldCategory != newCategory && newCategory == models.CategoryActive {
 		applog.Infof("[handler] UpdateTask category changed to Active, resetting status and auto-submitting id=%s", taskID)
-		if err := h.taskSvc.UpdateStatus(c.Request().Context(), taskID, models.StatusPending); err != nil {
-			applog.Infof("[handler] UpdateTask error resetting status: %v", err)
+		if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, models.CategoryActive); err != nil {
+			applog.Infof("[handler] UpdateTask error starting active task: %v", err)
 			return err
 		}
 	}
@@ -1791,6 +1791,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		}
 	}
 
+	h.resumeUserStoppedGoalForManualStart(c.Request().Context(), taskID, models.TaskOriginWeb, "")
 	h.reactivateAchievedGoalForManualFollowup(c.Request().Context(), taskID, models.TaskOriginWeb, "")
 
 	// Load conversation history and build system context

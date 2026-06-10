@@ -180,6 +180,7 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 	applog.Infof("[handler] SubmitReview created review exec=%s for task=%s with %d comments", exec.ID, taskID, len(comments))
 
 	// Build system context and spawn LLM processing
+	h.resumeUserStoppedGoalForManualStart(c.Request().Context(), taskID, models.TaskOriginWeb, "")
 	h.reactivateAchievedGoalForManualFollowup(c.Request().Context(), taskID, models.TaskOriginWeb, "")
 	priorExecs, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
 	priorHistory := filterChatHistory(priorExecs, exec.ID)

@@ -41,6 +41,20 @@ func (s *TaskService) SetTaskGoalService(goalSvc *TaskGoalService) {
 	s.goalSvc = goalSvc
 }
 
+func (s *TaskService) resumeGoalStoppedByUser(ctx context.Context, taskID string, actor string) {
+	if s.goalSvc == nil || taskID == "" {
+		return
+	}
+	goal, err := s.goalSvc.ResumeGoalStoppedByUser(ctx, taskID, actor)
+	if err != nil {
+		applog.Infof("[task-svc] task=%s error resuming user-stopped goal for start: %v", taskID, err)
+		return
+	}
+	if goal != nil {
+		applog.Infof("[task-svc] task=%s goal=%s resumed user-stopped goal for start", taskID, goal.GoalID)
+	}
+}
+
 func (s *TaskService) SetQueuedTaskThreadFollowupHook(hook func(context.Context, string) (bool, error)) {
 	s.queuedTaskThreadFollowupHook = hook
 }
@@ -168,6 +182,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	// If moved to Active, prefer a pending task-thread follow-up over rerunning the original prompt.
 	// ClaimTask provides atomic guard against double execution for normal task runs.
 	if category == models.CategoryActive {
+		s.resumeGoalStoppedByUser(ctx, id, "user")
 		if s.queuedTaskThreadFollowupHook != nil {
 			handled, err := s.queuedTaskThreadFollowupHook(ctx, id)
 			if err != nil {
@@ -204,16 +219,18 @@ func (s *TaskService) UpdateStatus(ctx context.Context, id string, status models
 		applog.Infof("[task-svc] UpdateStatus error: %v", err)
 		return err
 	}
-	// If status is pending and task is in Active category, auto-submit for execution
-	if status == models.StatusPending {
+	if status == models.StatusPending || status == models.StatusRunning {
 		task, err := s.repo.GetByID(ctx, id)
 		if err != nil {
 			applog.Infof("[task-svc] UpdateStatus error fetching task: %v", err)
 			return err
 		}
 		if task != nil && task.Category == models.CategoryActive {
-			applog.Infof("[task-svc] UpdateStatus auto-submitting active task id=%s", id)
-			s.workerSvc.Submit(*task)
+			s.resumeGoalStoppedByUser(ctx, id, "user")
+			if status == models.StatusPending {
+				applog.Infof("[task-svc] UpdateStatus auto-submitting active task id=%s", id)
+				s.workerSvc.Submit(*task)
+			}
 		}
 	}
 	return nil
@@ -257,6 +274,17 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 
 func (s *TaskService) RunTask(ctx context.Context, id string) error {
 	applog.Infof("[task-svc] RunTask id=%s", id)
+	task, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		applog.Infof("[task-svc] RunTask error fetching: %v", err)
+		return err
+	}
+	if task == nil {
+		applog.Infof("[task-svc] RunTask not found id=%s", id)
+		return fmt.Errorf("task not found: %s", id)
+	}
+	s.resumeGoalStoppedByUser(ctx, id, "user")
+
 	if s.queuedTaskThreadFollowupHook != nil {
 		handled, err := s.queuedTaskThreadFollowupHook(ctx, id)
 		if err != nil {
@@ -278,15 +306,6 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 			applog.Infof("[task-svc] RunTask retried failed task-thread follow-up id=%s", id)
 			return nil
 		}
-	}
-	task, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		applog.Infof("[task-svc] RunTask error fetching: %v", err)
-		return err
-	}
-	if task == nil {
-		applog.Infof("[task-svc] RunTask not found id=%s", id)
-		return fmt.Errorf("task not found: %s", id)
 	}
 
 	// Move to active category if not already active (e.g., task is in backlog).
@@ -566,6 +585,7 @@ func (s *TaskService) ExecuteBacklogTasks(ctx context.Context, projectID string,
 		}
 
 		// Submit to worker pool
+		s.resumeGoalStoppedByUser(ctx, task.ID, "user")
 		s.workerSvc.Submit(task)
 		submitted++
 	}
@@ -640,6 +660,7 @@ func (s *TaskService) ExecuteTasksByTags(ctx context.Context, tags []models.Task
 		}
 
 		// Submit to worker pool
+		s.resumeGoalStoppedByUser(ctx, task.ID, "user")
 		s.workerSvc.Submit(task)
 		submitted++
 	}

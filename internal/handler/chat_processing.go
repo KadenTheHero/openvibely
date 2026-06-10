@@ -176,6 +176,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	h.registerTaskCancellation(params.TaskID, cancel)
 	defer h.deregisterTaskCancellation(params.TaskID)
 	if params.IsTaskFollowup {
+		h.resumeUserStoppedGoalForManualStart(ctx, params.TaskID, params.InputOrigin, params.InputOriginAgent)
 		h.reactivateAchievedGoalForManualFollowup(ctx, params.TaskID, params.InputOrigin, params.InputOriginAgent)
 	}
 
@@ -1076,6 +1077,7 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 			Message:   failed.PromptSent,
 		})
 	}
+	h.resumeUserStoppedGoalForManualStart(ctx, taskID, models.TaskOriginWeb, "")
 	h.reactivateAchievedGoalForManualFollowup(ctx, taskID, models.TaskOriginWeb, "")
 	priorExecs, _ := h.execRepo.ListByTaskChronological(ctx, taskID)
 	priorHistory := filterChatHistory(priorExecs, exec.ID)
@@ -1169,6 +1171,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			PendingInputID: input.ID,
 		})
 	}
+	h.resumeUserStoppedGoalForManualStart(ctx, input.TaskID, string(input.Source), input.OriginAgent)
 	h.reactivateAchievedGoalForManualFollowup(ctx, input.TaskID, string(input.Source), input.OriginAgent)
 	priorExecs, _ := h.execRepo.ListByTaskChronological(ctx, exec.TaskID)
 	priorHistory := filterChatHistory(priorExecs, exec.ID)
@@ -3449,17 +3452,8 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 }
 
 func (h *Handler) reactivateAchievedGoalForManualFollowup(ctx context.Context, taskID, origin, originAgent string) {
-	if h.taskGoalSvc == nil || taskID == "" {
-		return
-	}
-	if strings.TrimSpace(originAgent) != "" {
-		return
-	}
-	origin = strings.TrimSpace(origin)
-	if origin == "" {
-		origin = models.TaskOriginWeb
-	}
-	if origin == models.TaskOriginSystemAgent {
+	origin, ok := normalizeManualGoalFollowupOrigin(origin, originAgent)
+	if !ok || h.taskGoalSvc == nil || taskID == "" {
 		return
 	}
 	goal, err := h.taskGoalSvc.ReactivateAchievedGoal(ctx, taskID, origin)
@@ -3470,6 +3464,35 @@ func (h *Handler) reactivateAchievedGoalForManualFollowup(ctx context.Context, t
 	if goal != nil {
 		applog.Infof("[handler] task=%s goal=%s reactivated achieved goal for %s follow-up", taskID, goal.GoalID, origin)
 	}
+}
+
+func (h *Handler) resumeUserStoppedGoalForManualStart(ctx context.Context, taskID, origin, originAgent string) {
+	origin, ok := normalizeManualGoalFollowupOrigin(origin, originAgent)
+	if !ok || h.taskGoalSvc == nil || taskID == "" {
+		return
+	}
+	goal, err := h.taskGoalSvc.ResumeGoalStoppedByUser(ctx, taskID, origin)
+	if err != nil {
+		applog.Infof("[handler] task=%s error resuming user-stopped goal for follow-up: %v", taskID, err)
+		return
+	}
+	if goal != nil {
+		applog.Infof("[handler] task=%s goal=%s resumed user-stopped goal for %s follow-up", taskID, goal.GoalID, origin)
+	}
+}
+
+func normalizeManualGoalFollowupOrigin(origin, originAgent string) (string, bool) {
+	if strings.TrimSpace(originAgent) != "" {
+		return "", false
+	}
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		origin = models.TaskOriginWeb
+	}
+	if origin == models.TaskOriginSystemAgent {
+		return "", false
+	}
+	return origin, true
 }
 
 func (h *Handler) GoalAgentAfterCompleteRuntimeTools(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
