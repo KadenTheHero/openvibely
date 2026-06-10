@@ -115,6 +115,7 @@ func TestModelsContent_ModelModalJavaScriptShape(t *testing.T) {
 		"function toggleProviderFields(selectedModel, selectedReasoningEffort)",
 		"function editModelFromData(button)",
 		"function openNewModelModal()",
+		"function discoverOpenAICompatibleModels()",
 	} {
 		if !strings.Contains(out, fn) {
 			t.Fatalf("expected rendered script to contain %s", fn)
@@ -131,6 +132,37 @@ func TestModelsContent_ModelModalJavaScriptShape(t *testing.T) {
 	} {
 		if strings.Contains(out, broken) {
 			t.Fatalf("rendered script contains known broken modal JavaScript fragment: %q", broken)
+		}
+	}
+}
+
+func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+	out := buf.String()
+
+	for _, want := range []string{
+		"Discover Models",
+		"/models/openai-compatible/available?",
+		"new URLSearchParams({base_url: baseURL})",
+		"X-OpenAI-Compatible-API-Key",
+		"data.resolved_id",
+		"setOpenAICompatibleModelValue(models[i].id, models[i].id + ' (discovered)', false)",
+		"setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id + ' (discovered)', true)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected OpenAI-compatible discovery UI to contain %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"api_key: apiKey",
+		"api_key=",
+		"openai_compatible_api_key",
+	} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("expected discovery UI not to put API key in URL or DOM data, found %q", forbidden)
 		}
 	}
 }

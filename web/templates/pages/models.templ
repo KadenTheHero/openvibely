@@ -490,11 +490,15 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 								<input type="text" id="model_base_url" name="base_url" class="input input-bordered" placeholder="https://openrouter.ai/api/v1/"/>
 								<label class="label"><span class="label-text-alt opacity-70">API root; requests go to base URL + /chat/completions.</span></label>
 							</div>
-							<div class="form-control mb-3">
-								<label class="label"><span class="label-text">Custom Model ID</span></label>
-								<input type="text" id="model_openai_compatible_custom_model" class="input input-bordered" placeholder="provider/model-id" oninput="syncOpenAICompatibleModel()"/>
-								<label class="label"><span class="label-text-alt opacity-70">Stored exactly as entered, after trimming whitespace.</span></label>
-							</div>
+								<div class="form-control mb-3">
+									<label class="label"><span class="label-text">Custom Model ID</span></label>
+									<input type="text" id="model_openai_compatible_custom_model" class="input input-bordered" placeholder="provider/model-id" oninput="syncOpenAICompatibleModel()"/>
+									<label class="label"><span class="label-text-alt opacity-70">Stored exactly as entered, after trimming whitespace.</span></label>
+								</div>
+								<div class="form-control mb-3">
+									<button type="button" class="btn btn-outline btn-sm" onclick="discoverOpenAICompatibleModels()">Discover Models</button>
+									<label class="label"><span id="openai_compatible_discovery_status" class="label-text-alt opacity-70">Best-effort: queries base URL + /models, then /v1/models when needed.</span></label>
+								</div>
 						</div>
 						<div id="ollama_fields" class="hidden">
 							<div class="form-control mb-3">							<label class="label"><span class="label-text">Base URL</span></label>
@@ -832,22 +836,61 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					}
 				}
 
-				function syncOpenAICompatibleModel() {
-					var custom = document.getElementById('model_openai_compatible_custom_model').value.trim();
-					var modelSelect = document.getElementById('model_id');
-					if (!custom) return;
-					var found = false;
-					for (var i = 0; i < modelSelect.options.length; i++) {
-						if (modelSelect.options[i].value === custom) found = true;
+					function setOpenAICompatibleModelValue(modelID, label, selectModel) {
+						var modelSelect = document.getElementById('model_id');
+						if (!modelID) return;
+						var found = false;
+						for (var i = 0; i < modelSelect.options.length; i++) {
+							if (modelSelect.options[i].value === modelID) found = true;
+						}
+						if (!found) {
+							var opt = document.createElement('option');
+							opt.value = modelID;
+							opt.textContent = label || (modelID + ' (custom)');
+							modelSelect.appendChild(opt);
+						}
+						if (selectModel !== false) {
+							modelSelect.value = modelID;
+							document.getElementById('model_openai_compatible_custom_model').value = modelID;
+						}
 					}
-					if (!found) {
-						var opt = document.createElement('option');
-						opt.value = custom;
-						opt.textContent = custom + ' (custom)';
-						modelSelect.appendChild(opt);
+
+					function syncOpenAICompatibleModel() {
+						var custom = document.getElementById('model_openai_compatible_custom_model').value.trim();
+						setOpenAICompatibleModelValue(custom, custom ? custom + ' (custom)' : '', true);
 					}
-					modelSelect.value = custom;
-				}
+
+					function discoverOpenAICompatibleModels() {
+						var baseURL = document.getElementById('model_base_url').value.trim();
+						var status = document.getElementById('openai_compatible_discovery_status');
+						if (!baseURL) {
+							status.textContent = 'Enter a base URL before discovering models.';
+							return;
+						}
+						status.textContent = 'Discovering models...';
+						var params = new URLSearchParams({base_url: baseURL});
+						var apiKey = document.getElementById('model_api_key').value.trim();
+						var headers = {'Accept': 'application/json'};
+						if (apiKey) headers['X-OpenAI-Compatible-API-Key'] = apiKey;
+						fetch('/models/openai-compatible/available?' + params.toString(), {headers: headers})
+							.then(function(resp) {
+								return resp.json().then(function(data) {
+									if (!resp.ok) throw new Error(data.error || 'Model discovery failed');
+									return data;
+								});
+							})
+							.then(function(data) {
+								var models = data.models || [];
+								for (var i = 0; i < models.length; i++) {
+									if (models[i].id) setOpenAICompatibleModelValue(models[i].id, models[i].id + ' (discovered)', false);
+								}
+								if (data.resolved_id) setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id + ' (discovered)', true);
+								status.textContent = models.length ? ('Discovered ' + models.length + ' model' + (models.length === 1 ? ' and selected it.' : 's. Choose one or enter the model ID manually.')) : 'No models returned; enter the model ID manually.';
+							})
+							.catch(function(err) {
+								status.textContent = err.message || 'Model discovery failed; enter the model ID manually.';
+							});
+					}
 
 				function hideAllInfoBoxes() {					document.getElementById('subscription_info_cli').classList.add('hidden');
 					document.getElementById('subscription_info_oauth').classList.add('hidden');
