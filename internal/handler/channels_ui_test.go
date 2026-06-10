@@ -180,10 +180,10 @@ func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
 	h.SetGitHubService(&fakeGitHubService{
 		statusFn: func(ctx context.Context) (service.GitHubConnectionStatus, error) {
 			return service.GitHubConnectionStatus{
-				Configured:    true,
-				Connected:     true,
-				AuthMode:      service.GitHubAuthModePAT,
-				AccountLogin:  "ov-user",
+				Configured:   true,
+				Connected:    true,
+				AuthMode:     service.GitHubAuthModePAT,
+				AccountLogin: "ov-user",
 			}, nil
 		},
 	})
@@ -331,8 +331,10 @@ func TestChannelsPageTelegramMenuShowsDeleteAndNoChannelMenuUsesRemove(t *testin
 	}
 }
 
-func TestChannelsPageDeleteActionsUseDestructiveStyleAndConfirm(t *testing.T) {
-	h, e, _ := setupTestHandler(t)
+func TestChannelsPageDeleteActionsUseConfirmationDialog(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	webhookRepo := repository.NewWebhookRepo(db)
+	h.SetWebhookRepo(webhookRepo)
 
 	h.SetGitHubService(&fakeGitHubService{
 		statusFn: func(ctx context.Context) (service.GitHubConnectionStatus, error) {
@@ -347,6 +349,10 @@ func TestChannelsPageDeleteActionsUseDestructiveStyleAndConfirm(t *testing.T) {
 	if err := h.settingsRepo.Set(context.Background(), "telegram_bot_token", "test-token"); err != nil {
 		t.Fatalf("failed to seed telegram token: %v", err)
 	}
+	webhook := &models.WebhookEndpoint{ProjectID: "default", Name: "Deploy Alerts", Enabled: true, DefaultPriority: 2}
+	if err := webhookRepo.Create(context.Background(), webhook); err != nil {
+		t.Fatalf("failed to seed webhook: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
 	rec := httptest.NewRecorder()
@@ -357,14 +363,57 @@ func TestChannelsPageDeleteActionsUseDestructiveStyleAndConfirm(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	for _, channelType := range []string{"github", "slack", "telegram"} {
-		card := cardSectionByType(body, channelType)
-		if !strings.Contains(card, "class=\"text-error\"") {
-			t.Fatalf("expected %s delete action to use text-error class", channelType)
+	for _, marker := range []string{
+		`id="delete_channel_confirm_modal"`,
+		`id="delete_channel_name"`,
+		`onclick="closeDeleteChannelConfirm()"`,
+		`class="btn btn-error" onclick="confirmDeleteChannel()"`,
+		`Are you sure you want to delete`,
+		`This action cannot be undone.`,
+		`htmx.ajax(pendingDeleteChannelMethod, pendingDeleteChannelURL, { swap: 'none' })`,
+	} {
+		if !strings.Contains(body, marker) {
+			t.Fatalf("expected channels delete confirmation markup to contain %q", marker)
 		}
-		if !strings.Contains(card, "hx-confirm=\"Delete this ") {
-			t.Fatalf("expected %s delete action to include confirmation", channelType)
+	}
+
+	for _, tc := range []struct {
+		channelType string
+		name        string
+		url         string
+		method      string
+	}{
+		{channelType: "github", name: "GitHub", url: "/channels/github/remove", method: "POST"},
+		{channelType: "slack", name: "Slack", url: "/channels/slack/remove", method: "POST"},
+		{channelType: "telegram", name: "Telegram Bot", url: "/channels/telegram/remove", method: "POST"},
+		{channelType: "webhook", name: "Deploy Alerts", url: "/channels/webhooks/" + webhook.ID, method: "DELETE"},
+	} {
+		card := cardSectionByType(body, tc.channelType)
+		if !strings.Contains(card, `class="text-error"`) {
+			t.Fatalf("expected %s delete action to use text-error class", tc.channelType)
 		}
+		if !strings.Contains(card, "openDeleteChannelConfirm") {
+			t.Fatalf("expected %s delete action to open confirmation dialog", tc.channelType)
+		}
+		if !strings.Contains(card, tc.name) {
+			t.Fatalf("expected %s delete action to identify %q", tc.channelType, tc.name)
+		}
+		if !strings.Contains(card, tc.url) {
+			t.Fatalf("expected %s delete action to preserve route %q", tc.channelType, tc.url)
+		}
+		if !strings.Contains(card, tc.method) {
+			t.Fatalf("expected %s delete action to preserve method %q", tc.channelType, tc.method)
+		}
+		if strings.Contains(card, `hx-confirm="Delete this `) {
+			t.Fatalf("did not expect %s delete action to use immediate delete hx-confirm", tc.channelType)
+		}
+	}
+
+	if strings.Contains(body, `hx-confirm="Delete this GitHub channel configuration?"`) ||
+		strings.Contains(body, `hx-confirm="Delete this Slack channel configuration?"`) ||
+		strings.Contains(body, `hx-confirm="Delete this Telegram channel configuration?"`) ||
+		strings.Contains(body, `hx-confirm="Delete this webhook configuration?"`) {
+		t.Fatal("did not expect channel delete actions to use immediate hx-confirm")
 	}
 }
 

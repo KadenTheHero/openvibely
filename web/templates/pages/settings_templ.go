@@ -270,7 +270,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" onclick=\"editChannelFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\"><li><button type=\"button\" onclick=\"openGitHubConfigModal()\">Edit</button></li><li><button type=\"button\" class=\"text-error\" hx-post=\"/channels/github/remove\" hx-swap=\"none\" hx-confirm=\"Delete this GitHub channel configuration?\">Delete</button></li></ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 .5a12 12 0 00-3.792 23.39c.6.112.82-.258.82-.576 0-.285-.011-1.04-.017-2.04-3.338.726-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.746.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.775.419-1.305.762-1.605-2.665-.304-5.467-1.334-5.467-5.932 0-1.31.468-2.381 1.235-3.22-.124-.303-.535-1.527.117-3.181 0 0 1.007-.322 3.3 1.23A11.52 11.52 0 0112 6.317c1.02.005 2.047.138 3.007.404 2.291-1.553 3.297-1.23 3.297-1.23.653 1.655.242 2.879.12 3.181.77.839 1.233 1.91 1.233 3.22 0 4.61-2.807 5.625-5.48 5.922.43.37.814 1.102.814 2.222 0 1.604-.014 2.896-.014 3.29 0 .32.216.694.825.576A12 12 0 0012 .5z\"></path></svg> GitHub</h3>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" onclick=\"editChannelFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\"><li><button type=\"button\" onclick=\"openGitHubConfigModal()\">Edit</button></li><li><button type=\"button\" class=\"text-error\" onclick=\"openDeleteChannelConfirm('GitHub', '/channels/github/remove', 'POST')\">Delete</button></li></ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M12 .5a12 12 0 00-3.792 23.39c.6.112.82-.258.82-.576 0-.285-.011-1.04-.017-2.04-3.338.726-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.746.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.775.419-1.305.762-1.605-2.665-.304-5.467-1.334-5.467-5.932 0-1.31.468-2.381 1.235-3.22-.124-.303-.535-1.527.117-3.181 0 0 1.007-.322 3.3 1.23A11.52 11.52 0 0112 6.317c1.02.005 2.047.138 3.007.404 2.291-1.553 3.297-1.23 3.297-1.23.653 1.655.242 2.879.12 3.181.77.839 1.233 1.91 1.233 3.22 0 4.61-2.807 5.625-5.48 5.922.43.37.814 1.102.814 2.222 0 1.604-.014 2.896-.014 3.29 0 .32.216.694.825.576A12 12 0 0012 .5z\"></path></svg> GitHub</h3>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -295,7 +295,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 					var templ_7745c5c3_Var6 string
 					templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(githubStatus.InstallationID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 214, Col: 98}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 211, Col: 98}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 					if templ_7745c5c3_Err != nil {
@@ -320,7 +320,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(githubStatus.AccountLogin)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 220, Col: 74}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 217, Col: 74}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
@@ -360,7 +360,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(githubConnectionLabel(githubStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 223, Col: 120}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 220, Col: 120}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {
@@ -404,13 +404,13 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var11 string
 			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue("Slack " + slackConnectionLabel(slackStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 249, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 246, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" onclick=\"editChannelFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\"><li><button type=\"button\" onclick=\"openSlackConfigModal()\">Edit</button></li><li><button type=\"button\" hx-post=\"/channels/slack/test\" hx-target=\"#test-result-slack\" hx-swap=\"innerHTML\">Test Connection</button></li><li><button type=\"button\" class=\"text-error\" hx-post=\"/channels/slack/remove\" hx-swap=\"none\" hx-confirm=\"Delete this Slack channel configuration?\">Delete</button></li></ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M6.6 15.6c0 1.32-1.08 2.4-2.4 2.4S1.8 16.92 1.8 15.6s1.08-2.4 2.4-2.4h2.4v2.4zM7.8 15.6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4v6c0 1.32-1.08 2.4-2.4 2.4s-2.4-1.08-2.4-2.4v-6zM10.2 6c-1.32 0-2.4-1.08-2.4-2.4S8.88 1.2 10.2 1.2s2.4 1.08 2.4 2.4V6h-2.4zM10.2 7.2c1.32 0 2.4 1.08 2.4 2.4s-1.08 2.4-2.4 2.4H4.2c-1.32 0-2.4-1.08-2.4-2.4S2.88 7.2 4.2 7.2h6zM19.8 9.6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4-1.08 2.4-2.4 2.4h-2.4V9.6zM18.6 9.6c0 1.32-1.08 2.4-2.4 2.4s-2.4-1.08-2.4-2.4v-6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4v6zM16.2 19.2c1.32 0 2.4 1.08 2.4 2.4S17.52 24 16.2 24s-2.4-1.08-2.4-2.4v-2.4h2.4zM16.2 18c-1.32 0-2.4-1.08-2.4-2.4s1.08-2.4 2.4-2.4h6c1.32 0 2.4 1.08 2.4 2.4s-1.08 2.4-2.4 2.4h-6z\"></path></svg> Slack</h3>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" onclick=\"editChannelFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\"><li><button type=\"button\" onclick=\"openSlackConfigModal()\">Edit</button></li><li><button type=\"button\" hx-post=\"/channels/slack/test\" hx-target=\"#test-result-slack\" hx-swap=\"innerHTML\">Test Connection</button></li><li><button type=\"button\" class=\"text-error\" onclick=\"openDeleteChannelConfirm('Slack', '/channels/slack/remove', 'POST')\">Delete</button></li></ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M6.6 15.6c0 1.32-1.08 2.4-2.4 2.4S1.8 16.92 1.8 15.6s1.08-2.4 2.4-2.4h2.4v2.4zM7.8 15.6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4v6c0 1.32-1.08 2.4-2.4 2.4s-2.4-1.08-2.4-2.4v-6zM10.2 6c-1.32 0-2.4-1.08-2.4-2.4S8.88 1.2 10.2 1.2s2.4 1.08 2.4 2.4V6h-2.4zM10.2 7.2c1.32 0 2.4 1.08 2.4 2.4s-1.08 2.4-2.4 2.4H4.2c-1.32 0-2.4-1.08-2.4-2.4S2.88 7.2 4.2 7.2h6zM19.8 9.6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4-1.08 2.4-2.4 2.4h-2.4V9.6zM18.6 9.6c0 1.32-1.08 2.4-2.4 2.4s-2.4-1.08-2.4-2.4v-6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4v6zM16.2 19.2c1.32 0 2.4 1.08 2.4 2.4S17.52 24 16.2 24s-2.4-1.08-2.4-2.4v-2.4h2.4zM16.2 18c-1.32 0-2.4-1.08-2.4-2.4s1.08-2.4 2.4-2.4h6c1.32 0 2.4 1.08 2.4 2.4s-1.08 2.4-2.4 2.4h-6z\"></path></svg> Slack</h3>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -433,7 +433,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				var templ_7745c5c3_Var12 string
 				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(slackStatus.TeamName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 299, Col: 71}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 293, Col: 71}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 				if templ_7745c5c3_Err != nil {
@@ -452,7 +452,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				var templ_7745c5c3_Var13 string
 				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d user(s)", len(slackAuthorizedUsers)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 305, Col: 64}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 299, Col: 64}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 				if templ_7745c5c3_Err != nil {
@@ -492,7 +492,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(slackConnectionLabel(slackStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 310, Col: 116}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 304, Col: 116}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
@@ -521,7 +521,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var17 string
 			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(telegramToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 328, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 322, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 			if templ_7745c5c3_Err != nil {
@@ -534,7 +534,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var18 string
 			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.JSONString(isBotRunning))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 329, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 323, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 			if templ_7745c5c3_Err != nil {
@@ -547,13 +547,13 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var19 string
 			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue("Telegram Bot " + telegramChannelStatusText(isBotRunning))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 331, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 325, Col: 81}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" onclick=\"editChannelFromData(this)\"><div class=\"card-body relative\"><!-- Kebab menu in top right --><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\"><li><button onclick=\"editChannelFromData(this.closest('[data-channel-type]'))\">Edit</button></li><li><button hx-post=\"/channels/telegram/test\" hx-target=\"#test-result-telegram\" hx-swap=\"innerHTML\">Test Connection</button></li><li><button type=\"button\" class=\"text-error\" hx-post=\"/channels/telegram/remove\" hx-swap=\"none\" hx-confirm=\"Delete this Telegram channel configuration?\">Delete</button></li></ul></div></div><!-- Channel content with padding for kebab menu --><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\" data-icon=\"telegram-brand\"><path d=\"M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z\"></path></svg> Telegram Bot</h3><p class=\"text-sm opacity-60\">Chat with your bot to manage tasks and get insights</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" onclick=\"editChannelFromData(this)\"><div class=\"card-body relative\"><!-- Kebab menu in top right --><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\"><li><button onclick=\"editChannelFromData(this.closest('[data-channel-type]'))\">Edit</button></li><li><button hx-post=\"/channels/telegram/test\" hx-target=\"#test-result-telegram\" hx-swap=\"innerHTML\">Test Connection</button></li><li><button type=\"button\" class=\"text-error\" onclick=\"openDeleteChannelConfirm('Telegram Bot', '/channels/telegram/remove', 'POST')\">Delete</button></li></ul></div></div><!-- Channel content with padding for kebab menu --><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\" data-icon=\"telegram-brand\"><path d=\"M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z\"></path></svg> Telegram Bot</h3><p class=\"text-sm opacity-60\">Chat with your bot to manage tasks and get insights</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -565,7 +565,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				var templ_7745c5c3_Var20 string
 				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d user(s)", len(authorizedUsers)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 387, Col: 59}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 378, Col: 59}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 				if templ_7745c5c3_Err != nil {
@@ -612,7 +612,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var21 string
 			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue("Webhook " + wh.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 409, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 400, Col: 45}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 			if templ_7745c5c3_Err != nil {
@@ -625,7 +625,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var22 string
 			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(wh.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 410, Col: 29}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 401, Col: 29}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 			if templ_7745c5c3_Err != nil {
@@ -638,7 +638,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(wh.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 411, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 402, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 			if templ_7745c5c3_Err != nil {
@@ -651,7 +651,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var24 string
 			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%t", wh.Enabled))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 412, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 403, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
 			if templ_7745c5c3_Err != nil {
@@ -664,7 +664,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var25 string
 			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(wh.PathToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 413, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 404, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 			if templ_7745c5c3_Err != nil {
@@ -677,7 +677,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var26 string
 			templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(wh.Secret)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 414, Col: 37}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 405, Col: 37}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 			if templ_7745c5c3_Err != nil {
@@ -690,7 +690,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var27 string
 			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.ResolveAttributeValue(wh.SystemInstructions)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 415, Col: 49}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 406, Col: 49}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
 			if templ_7745c5c3_Err != nil {
@@ -703,7 +703,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var28 string
 			templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", wh.DefaultPriority))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 416, Col: 75}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 407, Col: 75}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
 			if templ_7745c5c3_Err != nil {
@@ -716,7 +716,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var29 string
 			templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue(selectedWebhookAgentIDs(webhooks, webhookAgents, wh.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 417, Col: 86}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 408, Col: 86}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 			if templ_7745c5c3_Err != nil {
@@ -755,7 +755,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var32 string
 			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks/" + wh.ID + "/rotate-secret")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 432, Col: 69}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 423, Col: 69}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 			if templ_7745c5c3_Err != nil {
@@ -768,7 +768,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks/" + wh.ID + "/test")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 442, Col: 60}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 433, Col: 60}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 			if templ_7745c5c3_Err != nil {
@@ -781,54 +781,67 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var34 string
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue("#webhook-test-" + wh.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 443, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 434, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "\" hx-swap=\"innerHTML\">Test</button></li><li><button type=\"button\" class=\"text-error\" hx-delete=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "\" hx-swap=\"innerHTML\">Test</button></li><li><button type=\"button\" class=\"text-error\" data-channel-delete-name=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var35 string
-			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks/" + wh.ID)
+			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(wh.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 453, Col: 52}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 444, Col: 46}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "\" hx-swap=\"none\" hx-confirm=\"Delete this webhook configuration?\">Delete</button></li></ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 10V3L4 14h7v7l9-11h-7z\"></path></svg> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "\" data-channel-delete-url=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var36 string
-			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(wh.Name)
+			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks/" + wh.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 468, Col: 17}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 445, Col: 67}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "</h3><div class=\"mt-2 flex items-center gap-2\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "\" data-channel-delete-method=\"DELETE\" onclick=\"openDeleteChannelConfirmFromButton(this)\">Delete</button></li></ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 10V3L4 14h7v7l9-11h-7z\"></path></svg> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var37 string
+			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(wh.Name)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 459, Col: 17}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "</h3><div class=\"mt-2 flex items-center gap-2\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if wh.Enabled {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "<span class=\"badge badge-sm badge-success\">Active</span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "<span class=\"badge badge-sm badge-success\">Active</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "<span class=\"badge badge-sm badge-ghost\">Disabled</span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "<span class=\"badge badge-sm badge-ghost\">Disabled</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "</div><div class=\"mt-2\" onclick=\"event.stopPropagation()\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "</div><div class=\"mt-2\" onclick=\"event.stopPropagation()\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -836,45 +849,45 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "<button type=\"button\" class=\"btn btn-xs\" onclick=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "<button type=\"button\" class=\"btn btn-xs\" onclick=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var37 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("copyWebhookEndpointUrl('%s', this)", wh.ID)}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37.Call)
+			var templ_7745c5c3_Var38 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("copyWebhookEndpointUrl('%s', this)", wh.ID)}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38.Call)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "\">Copy URL</button></div><div id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "\">Copy URL</button></div><div id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var38 string
-			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.ResolveAttributeValue("webhook-test-" + wh.ID)
+			var templ_7745c5c3_Var39 string
+			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue("webhook-test-" + wh.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 480, Col: 40}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 471, Col: 40}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "\" class=\"mt-2\"></div></div></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "\" class=\"mt-2\"></div></div></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if !hasGitHubChannel && !hasTelegramChannel && !hasSlackChannel && len(webhooks) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "<div class=\"card bg-base-100 shadow-sm border border-dashed border-base-300\" data-search-card data-search-text=\"No channels added yet\"><div class=\"card-body\"><h3 class=\"font-semibold\">No channels added yet</h3><p class=\"text-sm opacity-70\">Use `Add Channel` to configure GitHub, Slack, Telegram Bot, or Webhooks.</p></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "<div class=\"card bg-base-100 shadow-sm border border-dashed border-base-300\" data-search-card data-search-text=\"No channels added yet\"><div class=\"card-body\"><h3 class=\"font-semibold\">No channels added yet</h3><p class=\"text-sm opacity-70\">Use `Add Channel` to configure GitHub, Slack, Telegram Bot, or Webhooks.</p></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "</div><!-- Coming Soon Section --><div class=\"mb-8\"><h3 class=\"text-lg font-semibold mb-4 opacity-70\">Coming Soon</h3><div class=\"grid grid-cols-1 md:grid-cols-2 gap-4\"><!-- Discord Placeholder --><div class=\"card bg-base-100 shadow-sm border border-base-300 opacity-50 cursor-not-allowed\" data-search-card data-search-text=\"Discord Bot Coming Soon\"><div class=\"card-body\"><h3 class=\"card-title\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z\"></path></svg> Discord Bot <span class=\"badge badge-ghost badge-sm\">Coming Soon</span></h3><p class=\"text-sm opacity-70\">Connect your Discord server for task management.</p></div></div><!-- Email Placeholder --><div class=\"card bg-base-100 shadow-sm border border-base-300 opacity-50 cursor-not-allowed\" data-search-card data-search-text=\"Email Notifications Coming Soon\"><div class=\"card-body\"><h3 class=\"card-title\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z\"></path></svg> Email Notifications <span class=\"badge badge-ghost badge-sm\">Coming Soon</span></h3><p class=\"text-sm opacity-70\">Receive email alerts for important task events.</p></div></div></div></div><!-- Channel Configuration Modal --><dialog id=\"channel_modal\" class=\"modal\"><div class=\"modal-box max-w-2xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeChannelModal()\" aria-label=\"Close channel configuration\" title=\"Close channel configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 id=\"channel_modal_title\" class=\"font-bold text-lg mb-4 pr-10\">Configure Telegram Bot</h3><form id=\"channel_form\" method=\"post\" action=\"/channels/telegram\" hx-post=\"/channels/telegram\" hx-swap=\"none\"><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text\">Bot Token</span></label><div class=\"relative\"><input type=\"password\" id=\"channel_telegram_token\" name=\"token\" class=\"input input-bordered w-full pr-10\" placeholder=\"123456789:ABCdefGHIjklMNOpqrsTUVwxyz\" required> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('channel_telegram_token', this)\" tabindex=\"-1\" aria-label=\"Toggle token visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div><label class=\"label\"><span class=\"label-text-alt opacity-70\">Get your bot token from <a href=\"https://t.me/BotFather\" target=\"_blank\" class=\"link\">BotFather</a></span></label></div><!-- Help Section --><div class=\"alert alert-info mb-4\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold text-sm\">How to Use the Bot</p><p class=\"text-xs opacity-80 mt-1\">Send natural language messages to your bot just like the Chat page. The bot can answer questions, create tasks, view execution output, and more.</p><details class=\"text-xs opacity-70 mt-2\"><summary class=\"cursor-pointer hover:opacity-100\">Optional slash command shortcuts</summary><ul class=\"list-disc list-inside space-y-1 ml-2 mt-2\"><li><code class=\"bg-base-300 px-1 rounded\">/start</code> - Welcome message and project setup</li><li><code class=\"bg-base-300 px-1 rounded\">/projects</code> - List all projects</li><li><code class=\"bg-base-300 px-1 rounded\">/switch &lt;project_id&gt;</code> - Switch active project</li></ul></details></div></div><!-- Authorized Users Section -->")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "</div><!-- Coming Soon Section --><div class=\"mb-8\"><h3 class=\"text-lg font-semibold mb-4 opacity-70\">Coming Soon</h3><div class=\"grid grid-cols-1 md:grid-cols-2 gap-4\"><!-- Discord Placeholder --><div class=\"card bg-base-100 shadow-sm border border-base-300 opacity-50 cursor-not-allowed\" data-search-card data-search-text=\"Discord Bot Coming Soon\"><div class=\"card-body\"><h3 class=\"card-title\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z\"></path></svg> Discord Bot <span class=\"badge badge-ghost badge-sm\">Coming Soon</span></h3><p class=\"text-sm opacity-70\">Connect your Discord server for task management.</p></div></div><!-- Email Placeholder --><div class=\"card bg-base-100 shadow-sm border border-base-300 opacity-50 cursor-not-allowed\" data-search-card data-search-text=\"Email Notifications Coming Soon\"><div class=\"card-body\"><h3 class=\"card-title\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z\"></path></svg> Email Notifications <span class=\"badge badge-ghost badge-sm\">Coming Soon</span></h3><p class=\"text-sm opacity-70\">Receive email alerts for important task events.</p></div></div></div></div><dialog id=\"delete_channel_confirm_modal\" class=\"modal\"><div class=\"modal-box\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeDeleteChannelConfirm()\" aria-label=\"Close delete confirmation\" title=\"Close delete confirmation\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 class=\"font-bold text-lg text-error pr-10\">Delete Channel</h3><p class=\"py-4\">Are you sure you want to delete <span id=\"delete_channel_name\" class=\"font-semibold\">this channel</span>? This action cannot be undone.</p><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeDeleteChannelConfirm()\">Cancel</button> <button type=\"button\" class=\"btn btn-error\" onclick=\"confirmDeleteChannel()\">Delete Channel</button></div></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><!-- Channel Configuration Modal --><dialog id=\"channel_modal\" class=\"modal\"><div class=\"modal-box max-w-2xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeChannelModal()\" aria-label=\"Close channel configuration\" title=\"Close channel configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 id=\"channel_modal_title\" class=\"font-bold text-lg mb-4 pr-10\">Configure Telegram Bot</h3><form id=\"channel_form\" method=\"post\" action=\"/channels/telegram\" hx-post=\"/channels/telegram\" hx-swap=\"none\"><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text\">Bot Token</span></label><div class=\"relative\"><input type=\"password\" id=\"channel_telegram_token\" name=\"token\" class=\"input input-bordered w-full pr-10\" placeholder=\"123456789:ABCdefGHIjklMNOpqrsTUVwxyz\" required> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('channel_telegram_token', this)\" tabindex=\"-1\" aria-label=\"Toggle token visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div><label class=\"label\"><span class=\"label-text-alt opacity-70\">Get your bot token from <a href=\"https://t.me/BotFather\" target=\"_blank\" class=\"link\">BotFather</a></span></label></div><!-- Help Section --><div class=\"alert alert-info mb-4\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold text-sm\">How to Use the Bot</p><p class=\"text-xs opacity-80 mt-1\">Send natural language messages to your bot just like the Chat page. The bot can answer questions, create tasks, view execution output, and more.</p><details class=\"text-xs opacity-70 mt-2\"><summary class=\"cursor-pointer hover:opacity-100\">Optional slash command shortcuts</summary><ul class=\"list-disc list-inside space-y-1 ml-2 mt-2\"><li><code class=\"bg-base-300 px-1 rounded\">/start</code> - Welcome message and project setup</li><li><code class=\"bg-base-300 px-1 rounded\">/projects</code> - List all projects</li><li><code class=\"bg-base-300 px-1 rounded\">/switch &lt;project_id&gt;</code> - Switch active project</li></ul></details></div></div><!-- Authorized Users Section -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if currentProjectID != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"></path></svg> Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Restrict bot access to specific Telegram users for this project. If no users are added, the bot is open to everyone.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"></path></svg> Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Restrict bot access to specific Telegram users for this project. If no users are added, the bot is open to everyone.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -883,296 +896,296 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "<!-- Notification Settings --><div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9\"></path></svg> Notification Settings</h4><div class=\"form-control\"><label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" class=\"toggle toggle-primary\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "<!-- Notification Settings --><div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9\"></path></svg> Notification Settings</h4><div class=\"form-control\"><label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" class=\"toggle toggle-primary\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if sendResponses {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, " checked")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, " hx-post=\"/channels/telegram/send-responses\" hx-swap=\"none\" hx-trigger=\"change\" hx-include=\"this\" name=\"enabled\" value=\"true\"><div><span class=\"label-text font-semibold\">Send task responses to Telegram</span><p class=\"text-xs opacity-50 mt-1\">When tasks created via Telegram complete or fail, send the result back to the user who created them</p></div></label></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeChannelModal()\">Cancel</button> <button type=\"submit\" id=\"channel_submit_btn\" class=\"btn btn-primary\">Save & Start Bot</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> <dialog id=\"github_config_modal\" class=\"modal\"><div class=\"modal-box max-w-2xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeGitHubConfigModal()\" aria-label=\"Close GitHub configuration\" title=\"Close GitHub configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 class=\"font-bold text-lg mb-4 pr-10\">Configure GitHub</h3><form id=\"github_config_form\" method=\"post\" action=\"/channels/github/configure\" hx-post=\"/channels/github/configure\" hx-swap=\"none\"><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text\">Authentication</span></label> <select id=\"github_auth_mode\" name=\"github_auth_mode\" class=\"select select-bordered w-full\" onchange=\"toggleGitHubAuthMode(this.value)\"><option value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var39 string
-		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.GitHubAuthModePAT)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 666, Col: 48}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if githubAuthMode == service.GitHubAuthModePAT {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, " selected")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, ">Personal Access Token (Recommended)</option> <option value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, " hx-post=\"/channels/telegram/send-responses\" hx-swap=\"none\" hx-trigger=\"change\" hx-include=\"this\" name=\"enabled\" value=\"true\"><div><span class=\"label-text font-semibold\">Send task responses to Telegram</span><p class=\"text-xs opacity-50 mt-1\">When tasks created via Telegram complete or fail, send the result back to the user who created them</p></div></label></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeChannelModal()\">Cancel</button> <button type=\"submit\" id=\"channel_submit_btn\" class=\"btn btn-primary\">Save & Start Bot</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> <dialog id=\"github_config_modal\" class=\"modal\"><div class=\"modal-box max-w-2xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeGitHubConfigModal()\" aria-label=\"Close GitHub configuration\" title=\"Close GitHub configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 class=\"font-bold text-lg mb-4 pr-10\">Configure GitHub</h3><form id=\"github_config_form\" method=\"post\" action=\"/channels/github/configure\" hx-post=\"/channels/github/configure\" hx-swap=\"none\"><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text\">Authentication</span></label> <select id=\"github_auth_mode\" name=\"github_auth_mode\" class=\"select select-bordered w-full\" onchange=\"toggleGitHubAuthMode(this.value)\"><option value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var40 string
-		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.GitHubAuthModeApp)
+		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.GitHubAuthModePAT)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 667, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 675, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, "\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if githubAuthMode == service.GitHubAuthModeApp {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, " selected")
+		if githubAuthMode == service.GitHubAuthModePAT {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, " selected")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, ">GitHub App (Advanced)</option></select> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Use PAT for local/self-hosted installs. Use GitHub App for centralized cloud deployments.</span></label></div><div id=\"github_pat_section\"><div class=\"alert alert-info mb-3 text-sm\">PAT mode is the fastest setup for local open-source usage. Create a token with repository read/write and pull request permissions.</div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub Personal Access Token</span></label><div class=\"relative\"><input type=\"password\" id=\"github_pat\" name=\"github_pat\" class=\"input input-bordered w-full pr-10 font-mono text-xs\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, ">Personal Access Token (Recommended)</option> <option value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var41 string
-		templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubPATValue)
+		templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.GitHubAuthModeApp)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 686, Col: 31}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 676, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "\" placeholder=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, "\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if githubAuthMode == service.GitHubAuthModeApp {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, " selected")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, ">GitHub App (Advanced)</option></select> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Use PAT for local/self-hosted installs. Use GitHub App for centralized cloud deployments.</span></label></div><div id=\"github_pat_section\"><div class=\"alert alert-info mb-3 text-sm\">PAT mode is the fastest setup for local open-source usage. Create a token with repository read/write and pull request permissions.</div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub Personal Access Token</span></label><div class=\"relative\"><input type=\"password\" id=\"github_pat\" name=\"github_pat\" class=\"input input-bordered w-full pr-10 font-mono text-xs\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var42 string
-		templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubPATPlaceholder(githubHasPAT))
+		templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubPATValue)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 687, Col: 57}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 695, Col: 31}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, "\"> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('github_pat', this)\" tabindex=\"-1\" aria-label=\"Toggle token visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div></div><div id=\"github_app_section\"><div class=\"alert mb-3 text-sm\">GitHub App mode is for advanced/cloud deployments where one app installation is shared by your deployment.</div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub App ID</span></label> <input type=\"text\" name=\"github_app_id\" class=\"input input-bordered\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, "\" placeholder=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var43 string
-		templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubAppID)
+		templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubPATPlaceholder(githubHasPAT))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 714, Col: 94}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 696, Col: 57}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, "\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub App Slug</span></label> <input type=\"text\" name=\"github_app_slug\" class=\"input input-bordered\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, "\"> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('github_pat', this)\" tabindex=\"-1\" aria-label=\"Toggle token visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div></div><div id=\"github_app_section\"><div class=\"alert mb-3 text-sm\">GitHub App mode is for advanced/cloud deployments where one app installation is shared by your deployment.</div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub App ID</span></label> <input type=\"text\" name=\"github_app_id\" class=\"input input-bordered\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var44 string
-		templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubAppSlug)
+		templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubAppID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 718, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 723, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub App Private Key (PEM)</span></label><div class=\"relative\"><textarea id=\"github_app_private_key\" name=\"github_app_private_key\" class=\"textarea textarea-bordered h-40 w-full pr-10 font-mono text-xs secret-textarea-masked\" placeholder=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub App Slug</span></label> <input type=\"text\" name=\"github_app_slug\" class=\"input input-bordered\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var45 string
-		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubPrivateKeyPlaceholder(githubHasPrivateKey))
+		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubAppSlug)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 727, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 727, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub App Private Key (PEM)</span></label><div class=\"relative\"><textarea id=\"github_app_private_key\" name=\"github_app_private_key\" class=\"textarea textarea-bordered h-40 w-full pr-10 font-mono text-xs secret-textarea-masked\" placeholder=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var46 string
-		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(githubPrivateKeyValue)
+		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubPrivateKeyPlaceholder(githubHasPrivateKey))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 728, Col: 32}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 736, Col: 71}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var46)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "</textarea> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-2 h-8 min-h-0 px-2\" onclick=\"toggleSecretTextareaVisibility('github_app_private_key', this)\" tabindex=\"-1\" aria-label=\"Toggle private key visibility\"><svg class=\"eye-open h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeGitHubConfigModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save GitHub Settings</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> <dialog id=\"slack_config_modal\" class=\"modal\"><div class=\"modal-box max-w-2xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeSlackConfigModal()\" aria-label=\"Close Slack configuration\" title=\"Close Slack configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 class=\"font-bold text-lg mb-4 pr-10\">Configure Slack</h3><form id=\"slack_config_form\" method=\"post\" action=\"/channels/slack/configure\" hx-post=\"/channels/slack/configure\" hx-swap=\"none\"><div class=\"alert alert-info mb-4 text-sm\"><div><p class=\"font-semibold\">Use OAuth + Socket Mode</p><p class=\"mt-1 opacity-80\">Configure `Client ID`, `Client Secret`, and `App-Level Token (xapp-...)`, then click Connect from the Slack card.</p><p class=\"mt-1 opacity-80\">If Slack blocks local OAuth with “use a complete URL beginning with https”, either use an HTTPS tunnel callback URL or select `Manual Override Token` mode with an `xoxb-...` token.</p></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Client ID</span></label> <input type=\"text\" name=\"slack_client_id\" class=\"input input-bordered\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var47 string
-		templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackClientID)
+		templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(githubPrivateKeyValue)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 774, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 737, Col: 32}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var47)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, "\" placeholder=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, "</textarea> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-2 h-8 min-h-0 px-2\" onclick=\"toggleSecretTextareaVisibility('github_app_private_key', this)\" tabindex=\"-1\" aria-label=\"Toggle private key visibility\"><svg class=\"eye-open h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeGitHubConfigModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save GitHub Settings</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> <dialog id=\"slack_config_modal\" class=\"modal\"><div class=\"modal-box max-w-2xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeSlackConfigModal()\" aria-label=\"Close Slack configuration\" title=\"Close Slack configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 class=\"font-bold text-lg mb-4 pr-10\">Configure Slack</h3><form id=\"slack_config_form\" method=\"post\" action=\"/channels/slack/configure\" hx-post=\"/channels/slack/configure\" hx-swap=\"none\"><div class=\"alert alert-info mb-4 text-sm\"><div><p class=\"font-semibold\">Use OAuth + Socket Mode</p><p class=\"mt-1 opacity-80\">Configure `Client ID`, `Client Secret`, and `App-Level Token (xapp-...)`, then click Connect from the Slack card.</p><p class=\"mt-1 opacity-80\">If Slack blocks local OAuth with “use a complete URL beginning with https”, either use an HTTPS tunnel callback URL or select `Manual Override Token` mode with an `xoxb-...` token.</p></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Client ID</span></label> <input type=\"text\" name=\"slack_client_id\" class=\"input input-bordered\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var48 string
-		templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(slackHasClientID, "Client ID"))
+		templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackClientID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 774, Col: 168}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 783, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var48)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Client Secret</span></label><div class=\"relative\"><input type=\"password\" id=\"slack_client_secret\" name=\"slack_client_secret\" class=\"input input-bordered w-full pr-10 font-mono text-xs\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "\" placeholder=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var49 string
-		templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackClientSecret)
+		templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(slackHasClientID, "Client ID"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 784, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 783, Col: 168}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var49)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "\" placeholder=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Client Secret</span></label><div class=\"relative\"><input type=\"password\" id=\"slack_client_secret\" name=\"slack_client_secret\" class=\"input input-bordered w-full pr-10 font-mono text-xs\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var50 string
-		templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(slackHasClientSecret, "Client Secret"))
+		templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackClientSecret)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 785, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 793, Col: 33}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "\"> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('slack_client_secret', this)\" tabindex=\"-1\" aria-label=\"Toggle client secret visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">App-Level Token (xapp-...)</span></label><div class=\"relative\"><input type=\"password\" id=\"slack_app_token\" name=\"slack_app_token\" class=\"input input-bordered w-full pr-10 font-mono text-xs\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "\" placeholder=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var51 string
-		templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackAppToken)
+		templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(slackHasClientSecret, "Client Secret"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 812, Col: 29}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 794, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "\" placeholder=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "\"> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('slack_client_secret', this)\" tabindex=\"-1\" aria-label=\"Toggle client secret visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">App-Level Token (xapp-...)</span></label><div class=\"relative\"><input type=\"password\" id=\"slack_app_token\" name=\"slack_app_token\" class=\"input input-bordered w-full pr-10 font-mono text-xs\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var52 string
-		templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(slackHasAppToken, "App-Level Token"))
+		templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackAppToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 813, Col: 81}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 821, Col: 29}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var52)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "\"> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('slack_app_token', this)\" tabindex=\"-1\" aria-label=\"Toggle app token visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Bot Token Source</span></label> <select id=\"slack_bot_token_mode\" name=\"slack_bot_token_mode\" class=\"select select-bordered w-full\" onchange=\"toggleSlackBotTokenMode(this.value)\"><option value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "\" placeholder=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var53 string
-		templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.SlackBotTokenSourceOAuth)
+		templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(slackHasAppToken, "App-Level Token"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 840, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 822, Col: 81}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var53)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if slackBotTokenMode == service.SlackBotTokenSourceOAuth {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, " selected")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, ">OAuth Callback Token (Recommended)</option> <option value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "\"> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('slack_app_token', this)\" tabindex=\"-1\" aria-label=\"Toggle app token visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Bot Token Source</span></label> <select id=\"slack_bot_token_mode\" name=\"slack_bot_token_mode\" class=\"select select-bordered w-full\" onchange=\"toggleSlackBotTokenMode(this.value)\"><option value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var54 string
-		templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.SlackBotTokenSourceManual)
+		templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.SlackBotTokenSourceOAuth)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 843, Col: 56}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 849, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, "\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, "\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if slackBotTokenMode == service.SlackBotTokenSourceManual {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 104, " selected")
+		if slackBotTokenMode == service.SlackBotTokenSourceOAuth {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, " selected")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 105, ">Manual Override Token</option></select> <label class=\"label\"><span class=\"label-text-alt opacity-70\">OAuth mode uses the token returned by Connect. Manual mode uses a fixed `xoxb-...` override token.</span></label></div><div id=\"slack_bot_token_override_section\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Bot Token Override (xoxb-...)</span></label><div class=\"relative\"><input type=\"password\" id=\"slack_bot_token\" name=\"slack_bot_token\" class=\"input input-bordered w-full pr-10 font-mono text-xs\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, ">OAuth Callback Token (Recommended)</option> <option value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var55 string
-		templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackBotToken)
+		templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.SlackBotTokenSourceManual)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 861, Col: 29}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 852, Col: 56}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var55)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 106, "\" placeholder=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 104, "\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if slackBotTokenMode == service.SlackBotTokenSourceManual {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 105, " selected")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 106, ">Manual Override Token</option></select> <label class=\"label\"><span class=\"label-text-alt opacity-70\">OAuth mode uses the token returned by Connect. Manual mode uses a fixed `xoxb-...` override token.</span></label></div><div id=\"slack_bot_token_override_section\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Bot Token Override (xoxb-...)</span></label><div class=\"relative\"><input type=\"password\" id=\"slack_bot_token\" name=\"slack_bot_token\" class=\"input input-bordered w-full pr-10 font-mono text-xs\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var56 string
-		templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(slackHasBotToken, "Bot Token"))
+		templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackBotToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 862, Col: 75}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 870, Col: 29}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var56)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 107, "\"> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('slack_bot_token', this)\" tabindex=\"-1\" aria-label=\"Toggle bot token visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 107, "\" placeholder=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var57 string
+		templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(slackHasBotToken, "Bot Token"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 871, Col: 75}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 108, "\"> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('slack_bot_token', this)\" tabindex=\"-1\" aria-label=\"Toggle bot token visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if currentProjectID != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 108, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"></path></svg> Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Restrict Slack access to specific users for this project. If no users are configured, access is denied until authorized users are added.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 109, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"></path></svg> Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Restrict Slack access to specific users for this project. If no users are configured, access is denied until authorized users are added.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1181,69 +1194,69 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 109, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9\"></path></svg> Notification Settings</h4><div class=\"form-control mb-4\"><label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" class=\"checkbox checkbox-primary\" name=\"slack_send_responses\" value=\"true\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 110, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9\"></path></svg> Notification Settings</h4><div class=\"form-control mb-4\"><label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" class=\"checkbox checkbox-primary\" name=\"slack_send_responses\" value=\"true\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if slackSendResponses {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 110, " checked")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 111, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 111, "> <span class=\"label-text\">Send task completion/failure notifications for Slack-created tasks</span></label></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeSlackConfigModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save Slack Settings</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><!-- Webhook Configuration Modal --><dialog id=\"webhook_modal\" class=\"modal\"><div class=\"modal-box max-w-4xl p-0 overflow-hidden\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeWebhookModal()\" aria-label=\"Close webhook configuration\" title=\"Close webhook configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><div class=\"px-6 pt-6 pb-2 pr-14\"><h3 id=\"webhook_modal_title\" class=\"font-bold text-lg\">Add Webhook</h3></div><form id=\"webhook_form\" hx-post=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var57 string
-		templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks?project_id=" + currentProjectID)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 927, Col: 89}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 112, "\" hx-swap=\"none\" data-project-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 112, "> <span class=\"label-text\">Send task completion/failure notifications for Slack-created tasks</span></label></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeSlackConfigModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save Slack Settings</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><!-- Webhook Configuration Modal --><dialog id=\"webhook_modal\" class=\"modal\"><div class=\"modal-box max-w-4xl p-0 overflow-hidden\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeWebhookModal()\" aria-label=\"Close webhook configuration\" title=\"Close webhook configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><div class=\"px-6 pt-6 pb-2 pr-14\"><h3 id=\"webhook_modal_title\" class=\"font-bold text-lg\">Add Webhook</h3></div><form id=\"webhook_form\" hx-post=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var58 string
-		templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
+		templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks?project_id=" + currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 927, Col: 141}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 936, Col: 89}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var58)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, "\" class=\"flex flex-col h-[78vh]\"><input type=\"hidden\" name=\"project_id\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, "\" hx-swap=\"none\" data-project-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var59 string
 		templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 928, Col: 68}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 936, Col: 141}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var59)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 114, "\"><div class=\"px-6 pb-3 border-b border-base-300\"><div role=\"tablist\" class=\"tabs tabs-bordered tabs-sm w-full overflow-x-auto flex-nowrap\"><button type=\"button\" role=\"tab\" class=\"tab tab-active\" data-webhook-section-tab=\"config\" aria-selected=\"true\" onclick=\"setWebhookSection('config')\">Webhook Config</button> <button type=\"button\" role=\"tab\" class=\"tab\" data-webhook-section-tab=\"agents\" aria-selected=\"false\" onclick=\"setWebhookSection('agents')\">Agents</button></div></div><div class=\"flex-1 min-h-0 px-6 py-3\"><div data-webhook-section-panel=\"config\" class=\"h-full overflow-y-auto pr-1\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" id=\"webhook_name\" name=\"name\" class=\"input input-bordered w-full\" placeholder=\"e.g. PagerDuty Alerts\" required></div><div class=\"form-control mb-3\"><label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" id=\"webhook_enabled\" name=\"enabled\" value=\"true\" class=\"toggle toggle-primary\" checked> <span class=\"label-text\">Enabled</span></label></div><div class=\"form-control mb-3\" id=\"webhook_url_row\" style=\"display:none\"><label class=\"label\"><span class=\"label-text\">Webhook URL</span></label><div class=\"join w-full\"><div class=\"text-sm font-mono bg-base-200 p-2 rounded-l break-all join-item flex-1\" id=\"webhook_url_display\">(Save first to generate URL)</div><button type=\"button\" class=\"btn btn-sm join-item\" id=\"webhook_url_copy_btn\" onclick=\"copyWebhookAbsoluteUrl('webhook_url_display', this)\">Copy</button></div></div><div class=\"form-control mb-3\" id=\"webhook_secret_row\" style=\"display:none\"><label class=\"label\"><span class=\"label-text\">Secret</span></label><div class=\"relative\"><input type=\"password\" id=\"webhook_secret_display\" class=\"input input-bordered w-full pr-10 font-mono text-sm\" readonly placeholder=\"(Secret is set on creation)\"> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('webhook_secret_display', this)\" tabindex=\"-1\" aria-label=\"Toggle secret visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">System Instructions</span></label> <textarea id=\"webhook_system_instructions\" name=\"system_instructions\" class=\"textarea textarea-bordered w-full h-20\" placeholder=\"Optional system context for the agent...\"></textarea></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Default Priority</span></label> <select id=\"webhook_default_priority\" name=\"default_priority\" class=\"select select-bordered w-full\"><option value=\"0\">Urgent (0)</option> <option value=\"1\">High (1)</option> <option value=\"2\" selected>Medium (2)</option> <option value=\"3\">Low (3)</option> <option value=\"4\">Backlog (4)</option></select></div></div><div data-webhook-section-panel=\"agents\" class=\"h-full overflow-y-auto pr-1 hidden\"><div class=\"space-y-3\"><div class=\"border border-base-300 rounded-lg p-3\"><div class=\"flex items-center justify-between mb-2\"><p class=\"text-sm font-medium\">Agents</p><p id=\"webhook_agent_selected_count\" class=\"text-xs opacity-60\">No agents selected</p></div><div class=\"mb-2\"><input type=\"text\" id=\"webhook_agent_search_input\" class=\"input input-bordered input-sm w-full\" placeholder=\"Search agents by name\" oninput=\"renderWebhookAgentList()\"></div><div id=\"webhook_agent_list\" class=\"space-y-2 max-h-[500px] overflow-auto\"></div></div></div></div></div><input type=\"hidden\" id=\"webhook_agent_ids_hidden\" name=\"agent_ids\"><div class=\"modal-action mt-0 sticky bottom-0 z-10 border-t border-base-300 bg-base-100 px-6 py-3\"><form method=\"dialog\" class=\"inline\"><button type=\"button\" class=\"btn\" onclick=\"closeWebhookModal()\">Cancel</button></form><button type=\"submit\" class=\"btn btn-primary\" onclick=\"serializeWebhookAgentData()\">Save Webhook</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><!-- Webhook available agents data for JavaScript --><div id=\"webhook_agents_data\" data-agents=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 114, "\" class=\"flex flex-col h-[78vh]\"><input type=\"hidden\" name=\"project_id\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var60 string
-		templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.ResolveAttributeValue(agentsJSON(agents))
+		templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1037, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 937, Col: 68}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var60)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 115, "\" style=\"display:none\"></div><style>\n\t\t.dropdown-content {\n\t\t\tdisplay: none;\n\t\t}\t\t\t.dropdown-content.show {\n\t\t\t\tdisplay: block;\n\t\t\t}\n\t\t\t/* Keep password toggle button fixed inside input across press/focus states */\n\t\t\t.password-toggle-btn:active,\n\t\t\t.password-toggle-btn:focus,\n\t\t\t.password-toggle-btn:focus-visible {\n\t\t\t\ttransform: translate(0, -50%) !important;\n\t\t\t}\n\t\t\t.secret-textarea-masked {\n\t\t\t\t-webkit-text-security: disc;\n\t\t\t}\n\t\t</style><script>\n\t\t\t// Webhook agent state\n\t\t\tlet webhookAvailableAgents = [];\n\t\t\tlet selectedWebhookAgentIDs = [];\n\t\t\tlet activeWebhookSection = 'config';\n\n\t\t\tfunction setWebhookSection(sectionName) {\n\t\t\t\tconst sectionNameMap = {\n\t\t\t\t\tconfig: 'config',\n\t\t\t\t\tagents: 'agents'\n\t\t\t\t};\n\t\t\t\tconst nextSection = sectionNameMap[sectionName] || 'config';\n\t\t\t\tactiveWebhookSection = nextSection;\n\t\t\t\tdocument.querySelectorAll('[data-webhook-section-tab]').forEach(tab => {\n\t\t\t\t\tconst isActive = tab.dataset.webhookSectionTab === nextSection;\n\t\t\t\t\ttab.classList.toggle('tab-active', isActive);\n\t\t\t\t\ttab.setAttribute('aria-selected', isActive ? 'true' : 'false');\n\t\t\t\t});\n\t\t\t\tdocument.querySelectorAll('[data-webhook-section-panel]').forEach(panel => {\n\t\t\t\t\tpanel.classList.toggle('hidden', panel.dataset.webhookSectionPanel !== nextSection);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction renderWebhookAgentList() {\n\t\t\t\tconst root = document.getElementById('webhook_agent_list');\n\t\t\t\tif (!root) return;\n\n\t\t\t\tconst searchTerm = (document.getElementById('webhook_agent_search_input')?.value || '').toLowerCase();\n\t\t\t\tconst filteredAgents = webhookAvailableAgents.filter(agent => {\n\t\t\t\t\tif (!searchTerm) return true;\n\t\t\t\t\treturn (agent.name || '').toLowerCase().includes(searchTerm) ||\n\t\t\t\t\t\t(agent.id || '').toLowerCase().includes(searchTerm);\n\t\t\t\t});\n\n\t\t\t\tlet html = '';\n\t\t\t\tif (filteredAgents.length === 0) {\n\t\t\t\t\thtml = '<p class=\"text-xs opacity-60 py-2\">No agents found.</p>';\n\t\t\t\t} else {\n\t\t\t\t\thtml = filteredAgents.map(agent => {\n\t\t\t\t\t\tconst checked = selectedWebhookAgentIDs.includes(agent.id) ? 'checked' : '';\n\t\t\t\t\t\treturn `\n\t\t\t\t\t\t\t<div class=\"border border-base-300 rounded-lg px-3 py-2 mb-2\">\n\t\t\t\t\t\t\t\t<div class=\"flex items-center justify-between gap-3\">\n\t\t\t\t\t\t\t\t\t<div class=\"flex items-center gap-2 min-w-0 flex-1\">\n\t\t\t\t\t\t\t\t\t\t<span class=\"font-medium text-sm truncate\" title=\"${escapeHtml(agent.id)}\">${escapeHtml(agent.name)}</span>\n\t\t\t\t\t\t\t\t\t\t<span class=\"text-[11px] opacity-60 truncate\">${escapeHtml(agent.id)}</span>\n\t\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t\t<input\n\t\t\t\t\t\t\t\t\t\ttype=\"checkbox\"\n\t\t\t\t\t\t\t\t\t\tclass=\"toggle toggle-sm toggle-primary webhook-agent-checkbox\"\n\t\t\t\t\t\t\t\t\t\tvalue=\"${escapeHtml(agent.id)}\"\n\t\t\t\t\t\t\t\t\t\taria-label=\"Enable ${escapeHtml(agent.name)}\"\n\t\t\t\t\t\t\t\t\t\t${checked}\n\t\t\t\t\t\t\t\t\t\tonchange=\"refreshSelectedWebhookAgentsFromDOM()\"\n\t\t\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t</div>`;\n\t\t\t\t\t}).join('');\n\t\t\t\t}\n\n\t\t\t\troot.innerHTML = html;\n\t\t\t\trenderWebhookSelectedAgentCount();\n\t\t\t}\n\n\t\t\tfunction refreshSelectedWebhookAgentsFromDOM() {\n\t\t\t\tconst checkboxes = document.querySelectorAll('.webhook-agent-checkbox');\n\t\t\t\tselectedWebhookAgentIDs = Array.from(checkboxes)\n\t\t\t\t\t.filter(cb => cb.checked)\n\t\t\t\t\t.map(cb => cb.value);\n\t\t\t\trenderWebhookSelectedAgentCount();\n\t\t\t}\n\n\t\t\tfunction renderWebhookSelectedAgentCount() {\n\t\t\t\tconst countEl = document.getElementById('webhook_agent_selected_count');\n\t\t\t\tif (!countEl) return;\n\t\t\t\tconst count = selectedWebhookAgentIDs.length;\n\t\t\t\tif (count === 0) {\n\t\t\t\t\tcountEl.textContent = 'No agents selected';\n\t\t\t\t} else if (count === 1) {\n\t\t\t\t\tcountEl.textContent = '1 agent selected';\n\t\t\t\t} else {\n\t\t\t\t\tcountEl.textContent = count + ' agents selected';\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction serializeWebhookAgentData() {\n\t\t\t\t// Collect selected agent IDs from toggles and put into hidden field\n\t\t\t\tconst hiddenField = document.getElementById('webhook_agent_ids_hidden');\n\t\t\t\tif (hiddenField) {\n\t\t\t\t\thiddenField.value = selectedWebhookAgentIDs.join(',');\n\t\t\t\t}\n\t\t\t}\n\n\t\tfunction escapeHtml(text) {\n\t\t\tconst div = document.createElement('div');\n\t\t\tdiv.textContent = text || '';\n\t\t\treturn div.innerHTML;\n\t\t}\n\n\t\tfunction initializeWebhookAgents() {\n\t\t\tif (webhookAvailableAgents.length > 0) return; // Already initialized\n\t\t\tconst dataEl = document.getElementById('webhook_agents_data');\n\t\t\tif (!dataEl) return;\n\t\t\ttry {\n\t\t\t\tconst agentsJSON = dataEl.getAttribute('data-agents');\n\t\t\t\twebhookAvailableAgents = JSON.parse(agentsJSON || '[]');\n\t\t\t} catch (e) {\n\t\t\t\tconsole.error('Failed to parse webhook agents data:', e);\n\t\t\t\twebhookAvailableAgents = [];\n\t\t\t}\n\t\t}\n\t\t\tfunction togglePasswordVisibility(inputId, button) {\n\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\t\n\t\t\t\tif (input.type === 'password') {\n\t\t\t\t\tinput.type = 'text';\n\t\t\t\t\teyeOpen.classList.add('hidden');\n\t\t\t\t\teyeClosed.classList.remove('hidden');\n\t\t\t\t} else {\n\t\t\t\t\tinput.type = 'password';\n\t\t\t\t\teyeOpen.classList.remove('hidden');\n\t\t\t\t\teyeClosed.classList.add('hidden');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction handleDropdownToggle(event) {\n\t\t\t\tevent.stopPropagation();\n\t\t\t\tconst dropdown = event.currentTarget.parentElement;\n\t\t\t\tconst menu = dropdown.querySelector('ul');\n\t\t\t\tconst wasOpen = menu.classList.contains('show');\n\t\t\t\t\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\n\t\t\t\t// Toggle this dropdown\n\t\t\t\tif (!wasOpen) {\n\t\t\t\t\tmenu.classList.add('show');\n\t\t\t\t\t// Close when clicking outside\n\t\t\t\t\tsetTimeout(() => {\n\t\t\t\t\t\tdocument.addEventListener('click', function closeDropdown(e) {\n\t\t\t\t\t\t\tif (!dropdown.contains(e.target)) {\n\t\t\t\t\t\t\t\tmenu.classList.remove('show');\n\t\t\t\t\t\t\t\tdocument.removeEventListener('click', closeDropdown);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\t\t\t\t\t}, 0);\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction toggleSecretTextareaVisibility(textareaId, button) {\n\t\t\t\tconst textarea = document.getElementById(textareaId);\n\t\t\t\tif (!textarea) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tconst isMasked = textarea.classList.contains('secret-textarea-masked');\n\t\t\t\tif (isMasked) {\n\t\t\t\t\ttextarea.classList.remove('secret-textarea-masked');\n\t\t\t\t\tif (eyeOpen) eyeOpen.classList.remove('hidden');\n\t\t\t\t\tif (eyeClosed) eyeClosed.classList.add('hidden');\n\t\t\t\t} else {\n\t\t\t\t\ttextarea.classList.add('secret-textarea-masked');\n\t\t\t\t\tif (eyeOpen) eyeOpen.classList.add('hidden');\n\t\t\t\t\tif (eyeClosed) eyeClosed.classList.remove('hidden');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\t\tfunction openWebhookCreateModal(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tdocument.getElementById('webhook_modal_title').textContent = 'Add Webhook';\n\t\t\t\t\tvar form = document.getElementById('webhook_form');\n\t\t\t\t\tvar pid = form.getAttribute('data-project-id') || '';\n\t\t\t\t\tform.setAttribute('hx-post', '/channels/webhooks?project_id=' + encodeURIComponent(pid));\n\t\t\t\t\tform.removeAttribute('hx-put');\n\t\t\t\t\tdocument.getElementById('webhook_name').value = '';\n\t\t\t\t\tdocument.getElementById('webhook_enabled').checked = true;\n\t\t\t\t\tdocument.getElementById('webhook_system_instructions').value = '';\n\t\t\t\t\tdocument.getElementById('webhook_default_priority').value = '2';\n\t\t\t\t\tdocument.getElementById('webhook_url_display').textContent = '(Save first to generate URL)';\n\t\t\t\t\tdocument.getElementById('webhook_secret_display').value = '';\n\t\t\t\t\tvar secretRow = document.getElementById('webhook_secret_row');\n\t\t\t\t\tif (secretRow) secretRow.style.display = 'none';\n\t\t\t\t\tvar urlRow = document.getElementById('webhook_url_row');\n\t\t\t\t\tif (urlRow) urlRow.style.display = 'none';\n\t\t\t\t\t\n\t\t\t\t\t// Initialize webhook agents from page data\n\t\t\t\t\tinitializeWebhookAgents();\n\t\t\t\t\tselectedWebhookAgentIDs = [];\n\t\t\t\t\trenderWebhookAgentList();\n\t\t\t\t\tsetWebhookSection('config');\n\t\t\t\t\t\n\t\t\t\t\thtmx.process(form);\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openWebhookEditModal(id) {\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tdocument.getElementById('webhook_modal_title').textContent = 'Edit Webhook';\n\t\t\t\t\tvar form = document.getElementById('webhook_form');\n\t\t\t\t\tvar pid = form.getAttribute('data-project-id') || '';\n\t\t\t\t\tform.removeAttribute('hx-post');\n\t\t\t\t\tform.setAttribute('hx-put', '/channels/webhooks/' + id + '?project_id=' + encodeURIComponent(pid));\n\t\t\t\t\tvar card = document.querySelector('[data-webhook-id=\"' + id + '\"]');\n\t\t\t\t\tif (card) {\n\t\t\t\t\t\tdocument.getElementById('webhook_name').value = card.getAttribute('data-webhook-name') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_enabled').checked = (card.getAttribute('data-webhook-enabled') || '') === 'true';\n\t\t\t\t\t\tdocument.getElementById('webhook_system_instructions').value = card.getAttribute('data-webhook-system') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_default_priority').value = card.getAttribute('data-webhook-default-priority') || '2';\n\t\t\t\t\t\tdocument.getElementById('webhook_secret_display').value = card.getAttribute('data-webhook-secret') || '';\n\t\t\t\t\t\tvar token = card.getAttribute('data-webhook-token') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_url_display').textContent = token ? (window.location.origin + '/webhooks/inbound/' + token) : '(Not available)';\n\t\t\t\t\t\t\n\t\t\t\t\t\t// Load selected agents from card data\n\t\t\t\t\t\tvar agentIDsCSV = card.getAttribute('data-webhook-agent-ids') || '';\n\t\t\t\t\t\tselectedWebhookAgentIDs = agentIDsCSV.split(',').map(id => id.trim()).filter(id => id !== '');\n\t\t\t\t\t}\n\t\t\t\t\tvar secretRow = document.getElementById('webhook_secret_row');\n\t\t\t\t\tif (secretRow) secretRow.style.display = '';\n\t\t\t\t\tvar urlRow = document.getElementById('webhook_url_row');\n\t\t\t\t\tif (urlRow) urlRow.style.display = '';\n\t\t\t\t\t\n\t\t\t\t\t// Initialize webhook agents and render\n\t\t\t\t\tinitializeWebhookAgents();\n\t\t\t\t\trenderWebhookAgentList();\n\t\t\t\t\tsetWebhookSection('config');\n\t\t\t\t\t\n\t\t\t\t\thtmx.process(form);\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction writeToClipboardWithFeedback(text, button, successMessage, failureMessage) {\n\t\t\t\t\t\tif (!text) {\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(failureMessage || 'Nothing to copy', 'failed');\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction onCopySuccess() {\n\t\t\t\t\t\t\tif (button) {\n\t\t\t\t\t\t\t\tvar original = button.textContent;\n\t\t\t\t\t\t\t\tbutton.textContent = 'Copied';\n\t\t\t\t\t\t\t\tsetTimeout(function() { button.textContent = original; }, 1000);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(successMessage || 'Copied to clipboard', 'completed');\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction onCopyFailure() {\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(failureMessage || 'Failed to copy to clipboard', 'failed');\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tif (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {\n\t\t\t\t\t\t\tnavigator.clipboard.writeText(text).then(onCopySuccess).catch(function() {\n\t\t\t\t\t\t\t\tvar textarea = document.createElement('textarea');\n\t\t\t\t\t\t\t\ttextarea.value = text;\n\t\t\t\t\t\t\t\ttextarea.setAttribute('readonly', '');\n\t\t\t\t\t\t\t\ttextarea.style.position = 'fixed';\n\t\t\t\t\t\t\t\ttextarea.style.opacity = '0';\n\t\t\t\t\t\t\t\tdocument.body.appendChild(textarea);\n\t\t\t\t\t\t\t\ttextarea.select();\n\t\t\t\t\t\t\t\ttextarea.setSelectionRange(0, textarea.value.length);\n\t\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\t\tif (document.execCommand('copy')) {\n\t\t\t\t\t\t\t\t\t\tonCopySuccess();\n\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\t\t\tdocument.body.removeChild(textarea);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tvar fallbackTextarea = document.createElement('textarea');\n\t\t\t\t\t\tfallbackTextarea.value = text;\n\t\t\t\t\t\tfallbackTextarea.setAttribute('readonly', '');\n\t\t\t\t\t\tfallbackTextarea.style.position = 'fixed';\n\t\t\t\t\t\tfallbackTextarea.style.opacity = '0';\n\t\t\t\t\t\tdocument.body.appendChild(fallbackTextarea);\n\t\t\t\t\t\tfallbackTextarea.select();\n\t\t\t\t\t\tfallbackTextarea.setSelectionRange(0, fallbackTextarea.value.length);\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tif (document.execCommand('copy')) {\n\t\t\t\t\t\t\t\tonCopySuccess();\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\tdocument.body.removeChild(fallbackTextarea);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\tfunction copyWebhookEndpointUrl(webhookID, button) {\n\t\t\t\t\tvar card = document.querySelector('[data-webhook-id=\"' + webhookID + '\"]');\n\t\t\t\t\tif (!card) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar token = (card.getAttribute('data-webhook-token') || '').trim();\n\t\t\t\t\tif (!token) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar url = window.location.origin + '/webhooks/inbound/' + token;\n\t\t\t\t\twriteToClipboardWithFeedback(url, button, 'Webhook URL copied', 'Failed to copy webhook URL');\n\t\t\t\t}\n\n\t\t\t\tfunction copyWebhookAbsoluteUrl(elementId, button) {\n\t\t\t\t\tvar el = document.getElementById(elementId);\n\t\t\t\t\tif (!el) return;\n\t\t\t\t\tvar val = (el.textContent || '').trim();\n\t\t\t\t\tif (!val || val.indexOf('(Save first') === 0 || val.indexOf('(Not available') === 0) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\twriteToClipboardWithFeedback(val, button, 'Webhook URL copied', 'Failed to copy webhook URL');\n\t\t\t\t}\n\n\t\t\t\tfunction closeWebhookModal() {\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\tfunction editChannelFromData(card) {\n\t\t\t\tconst type = card.dataset.channelType;\n\t\t\t\tif (type === 'telegram') {\n\t\t\t\t\tconst token = card.dataset.channelToken || '';\n\t\t\t\t\tdocument.getElementById('channel_telegram_token').value = token;\n\t\t\t\t\tdocument.getElementById('channel_modal_title').textContent = 'Configure Telegram Bot';\n\t\t\t\t\tchannel_modal.showModal();\n\t\t\t\t} else if (type === 'github') {\n\t\t\t\t\topenGitHubConfigModal();\n\t\t\t\t} else if (type === 'slack') {\n\t\t\t\t\topenSlackConfigModal();\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction closeAllDropdownMenus() {\n\t\t\t\tdocument.querySelectorAll('.dropdown ul').forEach(m => m.classList.remove('show'));\n\t\t\t}\n\n\t\t\tfunction openTelegramChannelFromMenu(event) {\n\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\tdocument.getElementById('channel_telegram_token').value = '';\n\t\t\t\tdocument.getElementById('channel_modal_title').textContent = 'Add Telegram Bot';\n\t\t\t\tchannel_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction openGitHubChannelFromMenu(event) {\n\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\topenGitHubConfigModal();\n\t\t\t}\n\n\t\t\tfunction openSlackChannelFromMenu(event) {\n\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\topenSlackConfigModal();\n\t\t\t}\n\n\t\t\tfunction closeChannelModal() {\n\t\t\t\tchannel_modal.close();\n\t\t\t}\n\n\t\t\tfunction openGitHubConfigModal() {\n\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\tif (!modal) return;\n\t\t\t\tconst modeSelect = document.getElementById('github_auth_mode');\n\t\t\t\tif (modeSelect) {\n\t\t\t\t\ttoggleGitHubAuthMode(modeSelect.value);\n\t\t\t\t}\n\t\t\t\tmodal.showModal();\n\t\t\t}\n\n\t\t\tfunction closeGitHubConfigModal() {\n\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\tif (modal) modal.close();\n\t\t\t}\n\n\t\t\tfunction openSlackConfigModal() {\n\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\tif (!modal) return;\n\t\t\t\tconst modeSelect = document.getElementById('slack_bot_token_mode');\n\t\t\t\tif (modeSelect) {\n\t\t\t\t\ttoggleSlackBotTokenMode(modeSelect.value);\n\t\t\t\t}\n\t\t\t\tmodal.showModal();\n\t\t\t}\n\n\t\t\tfunction closeSlackConfigModal() {\n\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\tif (modal) modal.close();\n\t\t\t}\n\n\t\t\tfunction toggleSlackBotTokenMode(mode) {\n\t\t\t\tconst section = document.getElementById('slack_bot_token_override_section');\n\t\t\t\tif (!section) {\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tconst normalized = (mode || '').toLowerCase();\n\t\t\t\tsection.style.display = normalized === 'manual' ? '' : 'none';\n\t\t\t}\n\n\t\t\tfunction toggleGitHubAuthMode(mode) {\n\t\t\t\tconst normalized = (mode || '').toLowerCase();\n\t\t\t\tconst patSection = document.getElementById('github_pat_section');\n\t\t\t\tconst appSection = document.getElementById('github_app_section');\n\t\t\t\tif (!patSection || !appSection) {\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tconst isAppMode = normalized === 'app';\n\t\t\t\tpatSection.style.display = isAppMode ? 'none' : '';\n\t\t\t\tappSection.style.display = isAppMode ? '' : 'none';\n\t\t\t}\n\n\t\t\t// Close modal and refresh after successful save\n\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\tif (event.detail.pathInfo.requestPath === '/channels/telegram' && event.detail.successful) {\n\t\t\t\t\tconst modal = document.getElementById('channel_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (event.detail.pathInfo.requestPath === '/channels/github/configure' && event.detail.successful) {\n\t\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (event.detail.pathInfo.requestPath === '/channels/slack/configure' && event.detail.successful) {\n\t\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\t// Close webhook modal after successful save\n\t\t\t\t\tvar rp = event.detail.pathInfo.requestPath || '';\n\t\t\t\t\tif (rp.startsWith('/channels/webhooks') && event.detail.successful) {\n\t\t\t\t\t\tvar whModal = document.getElementById('webhook_modal');\n\t\t\t\t\t\tif (whModal && whModal.open) {\n\t\t\t\t\t\t\twhModal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t});\n\n\t\t\t\tdocument.body.addEventListener('htmx:configRequest', function(event) {\n\t\t\t\t\tif (!event || !event.detail || !event.detail.path) return;\n\t\t\t\t\tif (event.detail.path.indexOf('/channels/webhooks') !== 0) return;\n\t\t\t\t\tvar params = event.detail.parameters || {};\n\t\t\t\t\tparams.agent_ids = selectedWebhookAgentIDsCSV('webhook_agent_ids');\n\t\t\t\t\tevent.detail.parameters = params;\n\t\t\t\t});\n\n\t\t\tsetTimeout(function() {\n\t\t\t\tconst modeSelect = document.getElementById('github_auth_mode');\n\t\t\t\tif (modeSelect) {\n\t\t\t\t\ttoggleGitHubAuthMode(modeSelect.value);\n\t\t\t\t}\n\t\t\t\tconst slackModeSelect = document.getElementById('slack_bot_token_mode');\n\t\t\t\tif (slackModeSelect) {\n\t\t\t\t\ttoggleSlackBotTokenMode(slackModeSelect.value);\n\t\t\t\t}\n\t\t\t}, 0);\n\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 115, "\"><div class=\"px-6 pb-3 border-b border-base-300\"><div role=\"tablist\" class=\"tabs tabs-bordered tabs-sm w-full overflow-x-auto flex-nowrap\"><button type=\"button\" role=\"tab\" class=\"tab tab-active\" data-webhook-section-tab=\"config\" aria-selected=\"true\" onclick=\"setWebhookSection('config')\">Webhook Config</button> <button type=\"button\" role=\"tab\" class=\"tab\" data-webhook-section-tab=\"agents\" aria-selected=\"false\" onclick=\"setWebhookSection('agents')\">Agents</button></div></div><div class=\"flex-1 min-h-0 px-6 py-3\"><div data-webhook-section-panel=\"config\" class=\"h-full overflow-y-auto pr-1\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" id=\"webhook_name\" name=\"name\" class=\"input input-bordered w-full\" placeholder=\"e.g. PagerDuty Alerts\" required></div><div class=\"form-control mb-3\"><label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" id=\"webhook_enabled\" name=\"enabled\" value=\"true\" class=\"toggle toggle-primary\" checked> <span class=\"label-text\">Enabled</span></label></div><div class=\"form-control mb-3\" id=\"webhook_url_row\" style=\"display:none\"><label class=\"label\"><span class=\"label-text\">Webhook URL</span></label><div class=\"join w-full\"><div class=\"text-sm font-mono bg-base-200 p-2 rounded-l break-all join-item flex-1\" id=\"webhook_url_display\">(Save first to generate URL)</div><button type=\"button\" class=\"btn btn-sm join-item\" id=\"webhook_url_copy_btn\" onclick=\"copyWebhookAbsoluteUrl('webhook_url_display', this)\">Copy</button></div></div><div class=\"form-control mb-3\" id=\"webhook_secret_row\" style=\"display:none\"><label class=\"label\"><span class=\"label-text\">Secret</span></label><div class=\"relative\"><input type=\"password\" id=\"webhook_secret_display\" class=\"input input-bordered w-full pr-10 font-mono text-sm\" readonly placeholder=\"(Secret is set on creation)\"> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('webhook_secret_display', this)\" tabindex=\"-1\" aria-label=\"Toggle secret visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">System Instructions</span></label> <textarea id=\"webhook_system_instructions\" name=\"system_instructions\" class=\"textarea textarea-bordered w-full h-20\" placeholder=\"Optional system context for the agent...\"></textarea></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Default Priority</span></label> <select id=\"webhook_default_priority\" name=\"default_priority\" class=\"select select-bordered w-full\"><option value=\"0\">Urgent (0)</option> <option value=\"1\">High (1)</option> <option value=\"2\" selected>Medium (2)</option> <option value=\"3\">Low (3)</option> <option value=\"4\">Backlog (4)</option></select></div></div><div data-webhook-section-panel=\"agents\" class=\"h-full overflow-y-auto pr-1 hidden\"><div class=\"space-y-3\"><div class=\"border border-base-300 rounded-lg p-3\"><div class=\"flex items-center justify-between mb-2\"><p class=\"text-sm font-medium\">Agents</p><p id=\"webhook_agent_selected_count\" class=\"text-xs opacity-60\">No agents selected</p></div><div class=\"mb-2\"><input type=\"text\" id=\"webhook_agent_search_input\" class=\"input input-bordered input-sm w-full\" placeholder=\"Search agents by name\" oninput=\"renderWebhookAgentList()\"></div><div id=\"webhook_agent_list\" class=\"space-y-2 max-h-[500px] overflow-auto\"></div></div></div></div></div><input type=\"hidden\" id=\"webhook_agent_ids_hidden\" name=\"agent_ids\"><div class=\"modal-action mt-0 sticky bottom-0 z-10 border-t border-base-300 bg-base-100 px-6 py-3\"><form method=\"dialog\" class=\"inline\"><button type=\"button\" class=\"btn\" onclick=\"closeWebhookModal()\">Cancel</button></form><button type=\"submit\" class=\"btn btn-primary\" onclick=\"serializeWebhookAgentData()\">Save Webhook</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><!-- Webhook available agents data for JavaScript --><div id=\"webhook_agents_data\" data-agents=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var61 string
+		templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.ResolveAttributeValue(agentsJSON(agents))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1046, Col: 63}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var61)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 116, "\" style=\"display:none\"></div><style>\n\t\t.dropdown-content {\n\t\t\tdisplay: none;\n\t\t}\t\t\t.dropdown-content.show {\n\t\t\t\tdisplay: block;\n\t\t\t}\n\t\t\t/* Keep password toggle button fixed inside input across press/focus states */\n\t\t\t.password-toggle-btn:active,\n\t\t\t.password-toggle-btn:focus,\n\t\t\t.password-toggle-btn:focus-visible {\n\t\t\t\ttransform: translate(0, -50%) !important;\n\t\t\t}\n\t\t\t.secret-textarea-masked {\n\t\t\t\t-webkit-text-security: disc;\n\t\t\t}\n\t\t</style><script>\n\t\t\t\tvar pendingDeleteChannelURL = '';\n\t\t\t\tvar pendingDeleteChannelMethod = 'POST';\n\n\t\t\t\tfunction openDeleteChannelConfirm(name, url, method) {\n\t\t\t\t\tpendingDeleteChannelURL = url || '';\n\t\t\t\t\tpendingDeleteChannelMethod = method || 'POST';\n\t\t\t\t\tvar nameEl = document.getElementById('delete_channel_name');\n\t\t\t\t\tif (nameEl) nameEl.textContent = name || 'this channel';\n\t\t\t\t\tdocument.getElementById('delete_channel_confirm_modal')?.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openDeleteChannelConfirmFromButton(button) {\n\t\t\t\t\tif (!button) return;\n\t\t\t\t\topenDeleteChannelConfirm(button.dataset.channelDeleteName, button.dataset.channelDeleteUrl, button.dataset.channelDeleteMethod);\n\t\t\t\t}\n\n\t\t\t\tfunction closeDeleteChannelConfirm() {\n\t\t\t\t\tdocument.getElementById('delete_channel_confirm_modal')?.close();\n\t\t\t\t}\n\n\t\t\t\tfunction confirmDeleteChannel() {\n\t\t\t\t\tif (!pendingDeleteChannelURL) return;\n\t\t\t\t\thtmx.ajax(pendingDeleteChannelMethod, pendingDeleteChannelURL, { swap: 'none' });\n\t\t\t\t\tcloseDeleteChannelConfirm();\n\t\t\t\t}\n\n\t\t\t\t// Webhook agent state\n\t\t\t\tlet webhookAvailableAgents = [];\n\t\t\t\tlet selectedWebhookAgentIDs = [];\n\t\t\t\tlet activeWebhookSection = 'config';\n\t\t\tfunction setWebhookSection(sectionName) {\n\t\t\t\tconst sectionNameMap = {\n\t\t\t\t\tconfig: 'config',\n\t\t\t\t\tagents: 'agents'\n\t\t\t\t};\n\t\t\t\tconst nextSection = sectionNameMap[sectionName] || 'config';\n\t\t\t\tactiveWebhookSection = nextSection;\n\t\t\t\tdocument.querySelectorAll('[data-webhook-section-tab]').forEach(tab => {\n\t\t\t\t\tconst isActive = tab.dataset.webhookSectionTab === nextSection;\n\t\t\t\t\ttab.classList.toggle('tab-active', isActive);\n\t\t\t\t\ttab.setAttribute('aria-selected', isActive ? 'true' : 'false');\n\t\t\t\t});\n\t\t\t\tdocument.querySelectorAll('[data-webhook-section-panel]').forEach(panel => {\n\t\t\t\t\tpanel.classList.toggle('hidden', panel.dataset.webhookSectionPanel !== nextSection);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction renderWebhookAgentList() {\n\t\t\t\tconst root = document.getElementById('webhook_agent_list');\n\t\t\t\tif (!root) return;\n\n\t\t\t\tconst searchTerm = (document.getElementById('webhook_agent_search_input')?.value || '').toLowerCase();\n\t\t\t\tconst filteredAgents = webhookAvailableAgents.filter(agent => {\n\t\t\t\t\tif (!searchTerm) return true;\n\t\t\t\t\treturn (agent.name || '').toLowerCase().includes(searchTerm) ||\n\t\t\t\t\t\t(agent.id || '').toLowerCase().includes(searchTerm);\n\t\t\t\t});\n\n\t\t\t\tlet html = '';\n\t\t\t\tif (filteredAgents.length === 0) {\n\t\t\t\t\thtml = '<p class=\"text-xs opacity-60 py-2\">No agents found.</p>';\n\t\t\t\t} else {\n\t\t\t\t\thtml = filteredAgents.map(agent => {\n\t\t\t\t\t\tconst checked = selectedWebhookAgentIDs.includes(agent.id) ? 'checked' : '';\n\t\t\t\t\t\treturn `\n\t\t\t\t\t\t\t<div class=\"border border-base-300 rounded-lg px-3 py-2 mb-2\">\n\t\t\t\t\t\t\t\t<div class=\"flex items-center justify-between gap-3\">\n\t\t\t\t\t\t\t\t\t<div class=\"flex items-center gap-2 min-w-0 flex-1\">\n\t\t\t\t\t\t\t\t\t\t<span class=\"font-medium text-sm truncate\" title=\"${escapeHtml(agent.id)}\">${escapeHtml(agent.name)}</span>\n\t\t\t\t\t\t\t\t\t\t<span class=\"text-[11px] opacity-60 truncate\">${escapeHtml(agent.id)}</span>\n\t\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t\t<input\n\t\t\t\t\t\t\t\t\t\ttype=\"checkbox\"\n\t\t\t\t\t\t\t\t\t\tclass=\"toggle toggle-sm toggle-primary webhook-agent-checkbox\"\n\t\t\t\t\t\t\t\t\t\tvalue=\"${escapeHtml(agent.id)}\"\n\t\t\t\t\t\t\t\t\t\taria-label=\"Enable ${escapeHtml(agent.name)}\"\n\t\t\t\t\t\t\t\t\t\t${checked}\n\t\t\t\t\t\t\t\t\t\tonchange=\"refreshSelectedWebhookAgentsFromDOM()\"\n\t\t\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t</div>`;\n\t\t\t\t\t}).join('');\n\t\t\t\t}\n\n\t\t\t\troot.innerHTML = html;\n\t\t\t\trenderWebhookSelectedAgentCount();\n\t\t\t}\n\n\t\t\tfunction refreshSelectedWebhookAgentsFromDOM() {\n\t\t\t\tconst checkboxes = document.querySelectorAll('.webhook-agent-checkbox');\n\t\t\t\tselectedWebhookAgentIDs = Array.from(checkboxes)\n\t\t\t\t\t.filter(cb => cb.checked)\n\t\t\t\t\t.map(cb => cb.value);\n\t\t\t\trenderWebhookSelectedAgentCount();\n\t\t\t}\n\n\t\t\tfunction renderWebhookSelectedAgentCount() {\n\t\t\t\tconst countEl = document.getElementById('webhook_agent_selected_count');\n\t\t\t\tif (!countEl) return;\n\t\t\t\tconst count = selectedWebhookAgentIDs.length;\n\t\t\t\tif (count === 0) {\n\t\t\t\t\tcountEl.textContent = 'No agents selected';\n\t\t\t\t} else if (count === 1) {\n\t\t\t\t\tcountEl.textContent = '1 agent selected';\n\t\t\t\t} else {\n\t\t\t\t\tcountEl.textContent = count + ' agents selected';\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction serializeWebhookAgentData() {\n\t\t\t\t// Collect selected agent IDs from toggles and put into hidden field\n\t\t\t\tconst hiddenField = document.getElementById('webhook_agent_ids_hidden');\n\t\t\t\tif (hiddenField) {\n\t\t\t\t\thiddenField.value = selectedWebhookAgentIDs.join(',');\n\t\t\t\t}\n\t\t\t}\n\n\t\tfunction escapeHtml(text) {\n\t\t\tconst div = document.createElement('div');\n\t\t\tdiv.textContent = text || '';\n\t\t\treturn div.innerHTML;\n\t\t}\n\n\t\tfunction initializeWebhookAgents() {\n\t\t\tif (webhookAvailableAgents.length > 0) return; // Already initialized\n\t\t\tconst dataEl = document.getElementById('webhook_agents_data');\n\t\t\tif (!dataEl) return;\n\t\t\ttry {\n\t\t\t\tconst agentsJSON = dataEl.getAttribute('data-agents');\n\t\t\t\twebhookAvailableAgents = JSON.parse(agentsJSON || '[]');\n\t\t\t} catch (e) {\n\t\t\t\tconsole.error('Failed to parse webhook agents data:', e);\n\t\t\t\twebhookAvailableAgents = [];\n\t\t\t}\n\t\t}\n\t\t\tfunction togglePasswordVisibility(inputId, button) {\n\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\t\n\t\t\t\tif (input.type === 'password') {\n\t\t\t\t\tinput.type = 'text';\n\t\t\t\t\teyeOpen.classList.add('hidden');\n\t\t\t\t\teyeClosed.classList.remove('hidden');\n\t\t\t\t} else {\n\t\t\t\t\tinput.type = 'password';\n\t\t\t\t\teyeOpen.classList.remove('hidden');\n\t\t\t\t\teyeClosed.classList.add('hidden');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction handleDropdownToggle(event) {\n\t\t\t\tevent.stopPropagation();\n\t\t\t\tconst dropdown = event.currentTarget.parentElement;\n\t\t\t\tconst menu = dropdown.querySelector('ul');\n\t\t\t\tconst wasOpen = menu.classList.contains('show');\n\t\t\t\t\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\n\t\t\t\t// Toggle this dropdown\n\t\t\t\tif (!wasOpen) {\n\t\t\t\t\tmenu.classList.add('show');\n\t\t\t\t\t// Close when clicking outside\n\t\t\t\t\tsetTimeout(() => {\n\t\t\t\t\t\tdocument.addEventListener('click', function closeDropdown(e) {\n\t\t\t\t\t\t\tif (!dropdown.contains(e.target)) {\n\t\t\t\t\t\t\t\tmenu.classList.remove('show');\n\t\t\t\t\t\t\t\tdocument.removeEventListener('click', closeDropdown);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\t\t\t\t\t}, 0);\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction toggleSecretTextareaVisibility(textareaId, button) {\n\t\t\t\tconst textarea = document.getElementById(textareaId);\n\t\t\t\tif (!textarea) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tconst isMasked = textarea.classList.contains('secret-textarea-masked');\n\t\t\t\tif (isMasked) {\n\t\t\t\t\ttextarea.classList.remove('secret-textarea-masked');\n\t\t\t\t\tif (eyeOpen) eyeOpen.classList.remove('hidden');\n\t\t\t\t\tif (eyeClosed) eyeClosed.classList.add('hidden');\n\t\t\t\t} else {\n\t\t\t\t\ttextarea.classList.add('secret-textarea-masked');\n\t\t\t\t\tif (eyeOpen) eyeOpen.classList.add('hidden');\n\t\t\t\t\tif (eyeClosed) eyeClosed.classList.remove('hidden');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\t\tfunction openWebhookCreateModal(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tdocument.getElementById('webhook_modal_title').textContent = 'Add Webhook';\n\t\t\t\t\tvar form = document.getElementById('webhook_form');\n\t\t\t\t\tvar pid = form.getAttribute('data-project-id') || '';\n\t\t\t\t\tform.setAttribute('hx-post', '/channels/webhooks?project_id=' + encodeURIComponent(pid));\n\t\t\t\t\tform.removeAttribute('hx-put');\n\t\t\t\t\tdocument.getElementById('webhook_name').value = '';\n\t\t\t\t\tdocument.getElementById('webhook_enabled').checked = true;\n\t\t\t\t\tdocument.getElementById('webhook_system_instructions').value = '';\n\t\t\t\t\tdocument.getElementById('webhook_default_priority').value = '2';\n\t\t\t\t\tdocument.getElementById('webhook_url_display').textContent = '(Save first to generate URL)';\n\t\t\t\t\tdocument.getElementById('webhook_secret_display').value = '';\n\t\t\t\t\tvar secretRow = document.getElementById('webhook_secret_row');\n\t\t\t\t\tif (secretRow) secretRow.style.display = 'none';\n\t\t\t\t\tvar urlRow = document.getElementById('webhook_url_row');\n\t\t\t\t\tif (urlRow) urlRow.style.display = 'none';\n\t\t\t\t\t\n\t\t\t\t\t// Initialize webhook agents from page data\n\t\t\t\t\tinitializeWebhookAgents();\n\t\t\t\t\tselectedWebhookAgentIDs = [];\n\t\t\t\t\trenderWebhookAgentList();\n\t\t\t\t\tsetWebhookSection('config');\n\t\t\t\t\t\n\t\t\t\t\thtmx.process(form);\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openWebhookEditModal(id) {\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tdocument.getElementById('webhook_modal_title').textContent = 'Edit Webhook';\n\t\t\t\t\tvar form = document.getElementById('webhook_form');\n\t\t\t\t\tvar pid = form.getAttribute('data-project-id') || '';\n\t\t\t\t\tform.removeAttribute('hx-post');\n\t\t\t\t\tform.setAttribute('hx-put', '/channels/webhooks/' + id + '?project_id=' + encodeURIComponent(pid));\n\t\t\t\t\tvar card = document.querySelector('[data-webhook-id=\"' + id + '\"]');\n\t\t\t\t\tif (card) {\n\t\t\t\t\t\tdocument.getElementById('webhook_name').value = card.getAttribute('data-webhook-name') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_enabled').checked = (card.getAttribute('data-webhook-enabled') || '') === 'true';\n\t\t\t\t\t\tdocument.getElementById('webhook_system_instructions').value = card.getAttribute('data-webhook-system') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_default_priority').value = card.getAttribute('data-webhook-default-priority') || '2';\n\t\t\t\t\t\tdocument.getElementById('webhook_secret_display').value = card.getAttribute('data-webhook-secret') || '';\n\t\t\t\t\t\tvar token = card.getAttribute('data-webhook-token') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_url_display').textContent = token ? (window.location.origin + '/webhooks/inbound/' + token) : '(Not available)';\n\t\t\t\t\t\t\n\t\t\t\t\t\t// Load selected agents from card data\n\t\t\t\t\t\tvar agentIDsCSV = card.getAttribute('data-webhook-agent-ids') || '';\n\t\t\t\t\t\tselectedWebhookAgentIDs = agentIDsCSV.split(',').map(id => id.trim()).filter(id => id !== '');\n\t\t\t\t\t}\n\t\t\t\t\tvar secretRow = document.getElementById('webhook_secret_row');\n\t\t\t\t\tif (secretRow) secretRow.style.display = '';\n\t\t\t\t\tvar urlRow = document.getElementById('webhook_url_row');\n\t\t\t\t\tif (urlRow) urlRow.style.display = '';\n\t\t\t\t\t\n\t\t\t\t\t// Initialize webhook agents and render\n\t\t\t\t\tinitializeWebhookAgents();\n\t\t\t\t\trenderWebhookAgentList();\n\t\t\t\t\tsetWebhookSection('config');\n\t\t\t\t\t\n\t\t\t\t\thtmx.process(form);\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction writeToClipboardWithFeedback(text, button, successMessage, failureMessage) {\n\t\t\t\t\t\tif (!text) {\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(failureMessage || 'Nothing to copy', 'failed');\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction onCopySuccess() {\n\t\t\t\t\t\t\tif (button) {\n\t\t\t\t\t\t\t\tvar original = button.textContent;\n\t\t\t\t\t\t\t\tbutton.textContent = 'Copied';\n\t\t\t\t\t\t\t\tsetTimeout(function() { button.textContent = original; }, 1000);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(successMessage || 'Copied to clipboard', 'completed');\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction onCopyFailure() {\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(failureMessage || 'Failed to copy to clipboard', 'failed');\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tif (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {\n\t\t\t\t\t\t\tnavigator.clipboard.writeText(text).then(onCopySuccess).catch(function() {\n\t\t\t\t\t\t\t\tvar textarea = document.createElement('textarea');\n\t\t\t\t\t\t\t\ttextarea.value = text;\n\t\t\t\t\t\t\t\ttextarea.setAttribute('readonly', '');\n\t\t\t\t\t\t\t\ttextarea.style.position = 'fixed';\n\t\t\t\t\t\t\t\ttextarea.style.opacity = '0';\n\t\t\t\t\t\t\t\tdocument.body.appendChild(textarea);\n\t\t\t\t\t\t\t\ttextarea.select();\n\t\t\t\t\t\t\t\ttextarea.setSelectionRange(0, textarea.value.length);\n\t\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\t\tif (document.execCommand('copy')) {\n\t\t\t\t\t\t\t\t\t\tonCopySuccess();\n\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\t\t\tdocument.body.removeChild(textarea);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tvar fallbackTextarea = document.createElement('textarea');\n\t\t\t\t\t\tfallbackTextarea.value = text;\n\t\t\t\t\t\tfallbackTextarea.setAttribute('readonly', '');\n\t\t\t\t\t\tfallbackTextarea.style.position = 'fixed';\n\t\t\t\t\t\tfallbackTextarea.style.opacity = '0';\n\t\t\t\t\t\tdocument.body.appendChild(fallbackTextarea);\n\t\t\t\t\t\tfallbackTextarea.select();\n\t\t\t\t\t\tfallbackTextarea.setSelectionRange(0, fallbackTextarea.value.length);\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tif (document.execCommand('copy')) {\n\t\t\t\t\t\t\t\tonCopySuccess();\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\tdocument.body.removeChild(fallbackTextarea);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\tfunction copyWebhookEndpointUrl(webhookID, button) {\n\t\t\t\t\tvar card = document.querySelector('[data-webhook-id=\"' + webhookID + '\"]');\n\t\t\t\t\tif (!card) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar token = (card.getAttribute('data-webhook-token') || '').trim();\n\t\t\t\t\tif (!token) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar url = window.location.origin + '/webhooks/inbound/' + token;\n\t\t\t\t\twriteToClipboardWithFeedback(url, button, 'Webhook URL copied', 'Failed to copy webhook URL');\n\t\t\t\t}\n\n\t\t\t\tfunction copyWebhookAbsoluteUrl(elementId, button) {\n\t\t\t\t\tvar el = document.getElementById(elementId);\n\t\t\t\t\tif (!el) return;\n\t\t\t\t\tvar val = (el.textContent || '').trim();\n\t\t\t\t\tif (!val || val.indexOf('(Save first') === 0 || val.indexOf('(Not available') === 0) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\twriteToClipboardWithFeedback(val, button, 'Webhook URL copied', 'Failed to copy webhook URL');\n\t\t\t\t}\n\n\t\t\t\tfunction closeWebhookModal() {\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\tfunction editChannelFromData(card) {\n\t\t\t\tconst type = card.dataset.channelType;\n\t\t\t\tif (type === 'telegram') {\n\t\t\t\t\tconst token = card.dataset.channelToken || '';\n\t\t\t\t\tdocument.getElementById('channel_telegram_token').value = token;\n\t\t\t\t\tdocument.getElementById('channel_modal_title').textContent = 'Configure Telegram Bot';\n\t\t\t\t\tchannel_modal.showModal();\n\t\t\t\t} else if (type === 'github') {\n\t\t\t\t\topenGitHubConfigModal();\n\t\t\t\t} else if (type === 'slack') {\n\t\t\t\t\topenSlackConfigModal();\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction closeAllDropdownMenus() {\n\t\t\t\tdocument.querySelectorAll('.dropdown ul').forEach(m => m.classList.remove('show'));\n\t\t\t}\n\n\t\t\tfunction openTelegramChannelFromMenu(event) {\n\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\tdocument.getElementById('channel_telegram_token').value = '';\n\t\t\t\tdocument.getElementById('channel_modal_title').textContent = 'Add Telegram Bot';\n\t\t\t\tchannel_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction openGitHubChannelFromMenu(event) {\n\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\topenGitHubConfigModal();\n\t\t\t}\n\n\t\t\tfunction openSlackChannelFromMenu(event) {\n\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\topenSlackConfigModal();\n\t\t\t}\n\n\t\t\tfunction closeChannelModal() {\n\t\t\t\tchannel_modal.close();\n\t\t\t}\n\n\t\t\tfunction openGitHubConfigModal() {\n\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\tif (!modal) return;\n\t\t\t\tconst modeSelect = document.getElementById('github_auth_mode');\n\t\t\t\tif (modeSelect) {\n\t\t\t\t\ttoggleGitHubAuthMode(modeSelect.value);\n\t\t\t\t}\n\t\t\t\tmodal.showModal();\n\t\t\t}\n\n\t\t\tfunction closeGitHubConfigModal() {\n\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\tif (modal) modal.close();\n\t\t\t}\n\n\t\t\tfunction openSlackConfigModal() {\n\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\tif (!modal) return;\n\t\t\t\tconst modeSelect = document.getElementById('slack_bot_token_mode');\n\t\t\t\tif (modeSelect) {\n\t\t\t\t\ttoggleSlackBotTokenMode(modeSelect.value);\n\t\t\t\t}\n\t\t\t\tmodal.showModal();\n\t\t\t}\n\n\t\t\tfunction closeSlackConfigModal() {\n\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\tif (modal) modal.close();\n\t\t\t}\n\n\t\t\tfunction toggleSlackBotTokenMode(mode) {\n\t\t\t\tconst section = document.getElementById('slack_bot_token_override_section');\n\t\t\t\tif (!section) {\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tconst normalized = (mode || '').toLowerCase();\n\t\t\t\tsection.style.display = normalized === 'manual' ? '' : 'none';\n\t\t\t}\n\n\t\t\tfunction toggleGitHubAuthMode(mode) {\n\t\t\t\tconst normalized = (mode || '').toLowerCase();\n\t\t\t\tconst patSection = document.getElementById('github_pat_section');\n\t\t\t\tconst appSection = document.getElementById('github_app_section');\n\t\t\t\tif (!patSection || !appSection) {\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tconst isAppMode = normalized === 'app';\n\t\t\t\tpatSection.style.display = isAppMode ? 'none' : '';\n\t\t\t\tappSection.style.display = isAppMode ? '' : 'none';\n\t\t\t}\n\n\t\t\t// Close modal and refresh after successful save\n\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\tif (event.detail.pathInfo.requestPath === '/channels/telegram' && event.detail.successful) {\n\t\t\t\t\tconst modal = document.getElementById('channel_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (event.detail.pathInfo.requestPath === '/channels/github/configure' && event.detail.successful) {\n\t\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (event.detail.pathInfo.requestPath === '/channels/slack/configure' && event.detail.successful) {\n\t\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\t// Close webhook modal after successful save\n\t\t\t\t\tvar rp = event.detail.pathInfo.requestPath || '';\n\t\t\t\t\tif (rp.startsWith('/channels/webhooks') && event.detail.successful) {\n\t\t\t\t\t\tvar whModal = document.getElementById('webhook_modal');\n\t\t\t\t\t\tif (whModal && whModal.open) {\n\t\t\t\t\t\t\twhModal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t});\n\n\t\t\t\tdocument.body.addEventListener('htmx:configRequest', function(event) {\n\t\t\t\t\tif (!event || !event.detail || !event.detail.path) return;\n\t\t\t\t\tif (event.detail.path.indexOf('/channels/webhooks') !== 0) return;\n\t\t\t\t\tvar params = event.detail.parameters || {};\n\t\t\t\t\tparams.agent_ids = selectedWebhookAgentIDsCSV('webhook_agent_ids');\n\t\t\t\t\tevent.detail.parameters = params;\n\t\t\t\t});\n\n\t\t\tsetTimeout(function() {\n\t\t\t\tconst modeSelect = document.getElementById('github_auth_mode');\n\t\t\t\tif (modeSelect) {\n\t\t\t\t\ttoggleGitHubAuthMode(modeSelect.value);\n\t\t\t\t}\n\t\t\t\tconst slackModeSelect = document.getElementById('slack_bot_token_mode');\n\t\t\t\tif (slackModeSelect) {\n\t\t\t\t\ttoggleSlackBotTokenMode(slackModeSelect.value);\n\t\t\t\t}\n\t\t\t}, 0);\n\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -183,16 +183,13 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 								<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
 									<li><button type="button" onclick="openGitHubConfigModal()">Edit</button></li>
 									<li>
-										<button
-											type="button"
-											class="text-error"
-											hx-post="/channels/github/remove"
-											hx-swap="none"
-											hx-confirm="Delete this GitHub channel configuration?"
-										>
-											Delete
-										</button>
-									</li>
+											<button
+												type="button"
+												class="text-error"
+												onclick="openDeleteChannelConfirm('GitHub', '/channels/github/remove', 'POST')"
+											>
+												Delete
+											</button>									</li>
 								</ul>
 							</div>
 						</div>
@@ -270,16 +267,13 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 										</button>
 									</li>
 									<li>
-										<button
-											type="button"
-											class="text-error"
-											hx-post="/channels/slack/remove"
-											hx-swap="none"
-											hx-confirm="Delete this Slack channel configuration?"
-										>
-											Delete
-										</button>
-									</li>
+											<button
+												type="button"
+												class="text-error"
+												onclick="openDeleteChannelConfirm('Slack', '/channels/slack/remove', 'POST')"
+											>
+												Delete
+											</button>									</li>
 								</ul>
 							</div>
 						</div>
@@ -356,16 +350,13 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 										</button>
 									</li>
 									<li>
-										<button
-											type="button"
-											class="text-error"
-											hx-post="/channels/telegram/remove"
-											hx-swap="none"
-											hx-confirm="Delete this Telegram channel configuration?"
-										>
-											Delete
-										</button>
-									</li>
+											<button
+												type="button"
+												class="text-error"
+												onclick="openDeleteChannelConfirm('Telegram Bot', '/channels/telegram/remove', 'POST')"
+											>
+												Delete
+											</button>									</li>
 								</ul>
 							</div>
 						</div>
@@ -447,16 +438,16 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 										</button>
 									</li>
 									<li>
-										<button
-											type="button"
-											class="text-error"
-											hx-delete={ "/channels/webhooks/" + wh.ID }
-											hx-swap="none"
-											hx-confirm="Delete this webhook configuration?"
-										>
-											Delete
-										</button>
-									</li>
+											<button
+												type="button"
+												class="text-error"
+												data-channel-delete-name={ wh.Name }
+												data-channel-delete-url={ "/channels/webhooks/" + wh.ID }
+												data-channel-delete-method="DELETE"
+												onclick="openDeleteChannelConfirmFromButton(this)"
+											>
+												Delete
+											</button>									</li>
 								</ul>
 							</div>
 						</div>
@@ -530,9 +521,27 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 			</div>
 		</div>
 
-		<!-- Channel Configuration Modal -->
-		<dialog id="channel_modal" class="modal">
-			<div class="modal-box max-w-2xl">
+			<dialog id="delete_channel_confirm_modal" class="modal">
+				<div class="modal-box">
+					<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeDeleteChannelConfirm()" aria-label="Close delete confirmation" title="Close delete confirmation">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+					</button>
+					<h3 class="font-bold text-lg text-error pr-10">Delete Channel</h3>
+					<p class="py-4">
+						Are you sure you want to delete <span id="delete_channel_name" class="font-semibold">this channel</span>? This action cannot be undone.
+					</p>
+					<div class="modal-action">
+						<button type="button" class="btn" onclick="closeDeleteChannelConfirm()">Cancel</button>
+						<button type="button" class="btn btn-error" onclick="confirmDeleteChannel()">Delete Channel</button>
+					</div>
+				</div>
+				<form method="dialog" class="modal-backdrop">
+					<button>close</button>
+				</form>
+			</dialog>
+
+			<!-- Channel Configuration Modal -->
+			<dialog id="channel_modal" class="modal">			<div class="modal-box max-w-2xl">
 				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeChannelModal()" aria-label="Close channel configuration" title="Close channel configuration">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
@@ -1053,12 +1062,37 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 			}
 		</style>
 
-		<script>
-			// Webhook agent state
-			let webhookAvailableAgents = [];
-			let selectedWebhookAgentIDs = [];
-			let activeWebhookSection = 'config';
+			<script>
+				var pendingDeleteChannelURL = '';
+				var pendingDeleteChannelMethod = 'POST';
 
+				function openDeleteChannelConfirm(name, url, method) {
+					pendingDeleteChannelURL = url || '';
+					pendingDeleteChannelMethod = method || 'POST';
+					var nameEl = document.getElementById('delete_channel_name');
+					if (nameEl) nameEl.textContent = name || 'this channel';
+					document.getElementById('delete_channel_confirm_modal')?.showModal();
+				}
+
+				function openDeleteChannelConfirmFromButton(button) {
+					if (!button) return;
+					openDeleteChannelConfirm(button.dataset.channelDeleteName, button.dataset.channelDeleteUrl, button.dataset.channelDeleteMethod);
+				}
+
+				function closeDeleteChannelConfirm() {
+					document.getElementById('delete_channel_confirm_modal')?.close();
+				}
+
+				function confirmDeleteChannel() {
+					if (!pendingDeleteChannelURL) return;
+					htmx.ajax(pendingDeleteChannelMethod, pendingDeleteChannelURL, { swap: 'none' });
+					closeDeleteChannelConfirm();
+				}
+
+				// Webhook agent state
+				let webhookAvailableAgents = [];
+				let selectedWebhookAgentIDs = [];
+				let activeWebhookSection = 'config';
 			function setWebhookSection(sectionName) {
 				const sectionNameMap = {
 					config: 'config',
