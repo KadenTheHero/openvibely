@@ -1,14 +1,18 @@
 package models
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type LLMProvider string
 
 const (
-	ProviderAnthropic LLMProvider = "anthropic"
-	ProviderOpenAI    LLMProvider = "openai"
-	ProviderOllama    LLMProvider = "ollama"
-	ProviderTest      LLMProvider = "test"
+	ProviderAnthropic        LLMProvider = "anthropic"
+	ProviderOpenAI           LLMProvider = "openai"
+	ProviderOpenAICompatible LLMProvider = "openai_compatible"
+	ProviderOllama           LLMProvider = "ollama"
+	ProviderTest             LLMProvider = "test"
 )
 
 // AuthMethod controls how configs authenticate.
@@ -54,6 +58,19 @@ type LLMConfig struct {
 	// Ollama-specific fields
 	OllamaBaseURL string `json:"ollama_base_url,omitempty"` // e.g. "http://localhost:11434"
 
+	// Provider-neutral endpoint fields used by OpenAI-compatible Chat Completions.
+	BaseURL               string `json:"base_url,omitempty"`
+	Transport             string `json:"transport,omitempty"`
+	PresetSlug            string `json:"preset_slug,omitempty"`
+	ModelsURL             string `json:"models_url,omitempty"`
+	AuthHeaderName        string `json:"auth_header_name,omitempty"`
+	AuthHeaderValuePrefix string `json:"auth_header_value_prefix,omitempty"`
+	ExtraHeadersJSON      string `json:"-"`
+	ExtraBodyJSON         string `json:"extra_body_json,omitempty"`
+	DefaultMaxTokens      int    `json:"default_max_tokens,omitempty"`
+	TokenExchangeFormat   string `json:"token_exchange_format,omitempty"`
+	TokenRefreshFormat    string `json:"token_refresh_format,omitempty"`
+
 	// Auto-start configuration
 	AutoStartTasks bool `json:"auto_start_tasks"` // When enabled, tasks created with this model start immediately
 }
@@ -97,4 +114,44 @@ func (c *LLMConfig) GetOllamaBaseURL() string {
 		return c.OllamaBaseURL
 	}
 	return "http://localhost:11434"
+}
+
+// IsOpenAICompatibleAPIKey returns true if this config uses an OpenAI-compatible Chat Completions endpoint.
+func (c *LLMConfig) IsOpenAICompatibleAPIKey() bool {
+	return c.Provider == ProviderOpenAICompatible && c.AuthMethod == AuthMethodAPIKey
+}
+
+// GetTransport returns the API transport for generic provider configs.
+func (c *LLMConfig) GetTransport() string {
+	if strings.TrimSpace(c.Transport) != "" {
+		return strings.TrimSpace(c.Transport)
+	}
+	if c.Provider == ProviderOpenAICompatible {
+		return "chat_completions"
+	}
+	return ""
+}
+
+// GetAuthHeaderName returns the inference auth header name.
+func (c *LLMConfig) GetAuthHeaderName() string {
+	if strings.TrimSpace(c.AuthHeaderName) != "" {
+		return strings.TrimSpace(c.AuthHeaderName)
+	}
+	return "Authorization"
+}
+
+// GetAuthHeaderValuePrefix returns the inference auth header value prefix.
+func (c *LLMConfig) GetAuthHeaderValuePrefix() string {
+	if strings.TrimSpace(c.AuthHeaderValuePrefix) != "" {
+		return c.AuthHeaderValuePrefix
+	}
+	return "Bearer "
+}
+
+// GetDefaultMaxTokens returns the configured provider output cap or fallback.
+func (c *LLMConfig) GetDefaultMaxTokens(fallback int) int {
+	if c.DefaultMaxTokens > 0 {
+		return c.DefaultMaxTokens
+	}
+	return fallback
 }

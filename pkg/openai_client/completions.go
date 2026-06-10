@@ -30,6 +30,12 @@ type CompletionsOptions struct {
 	Attachments      []*FileAttachment
 	// ExtraTools are appended to the default local tools (for example MCP tools).
 	ExtraTools []ToolDefinition
+	// ExtraHeaders are sent with each Chat Completions request. Values may contain
+	// provider secrets and must not be logged by callers.
+	ExtraHeaders map[string]string
+	// ExtraBody is merged into each Chat Completions request after OpenVibely-owned
+	// fields are set. Protected fields are ignored.
+	ExtraBody map[string]interface{}
 	// ToolExecutor overrides tool execution. It should return (output, isError, err).
 	// If nil, built-in local tool execution is used.
 	ToolExecutor func(ctx context.Context, name string, input json.RawMessage) (string, bool, error)
@@ -172,7 +178,9 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 
 		result.InputTokens += turnResult.inputTokens
 		result.OutputTokens += turnResult.outputTokens
+		result.TotalTokens += turnResult.totalTokens
 		result.CachedInputTokens += turnResult.cachedInputTokens
+		result.ReasoningTokens += turnResult.reasoningTokens
 		result.StopReason = turnResult.stopReason
 		if turnResult.model != "" {
 			result.Model = turnResult.model
@@ -259,6 +267,25 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	return result, nil
 }
 
+func mergeCompletionsExtraBody(payload map[string]interface{}, extra map[string]interface{}) {
+	for key, value := range extra {
+		key = strings.TrimSpace(key)
+		if key == "" || isProtectedCompletionsBodyField(key) {
+			continue
+		}
+		payload[key] = value
+	}
+}
+
+func isProtectedCompletionsBodyField(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "model", "messages", "stream", "tools", "tool_choice":
+		return true
+	default:
+		return false
+	}
+}
+
 type completionsTurnResult struct {
 	text      string
 	toolCalls []struct {
@@ -273,7 +300,9 @@ type completionsTurnResult struct {
 	model             string
 	inputTokens       int
 	outputTokens      int
+	totalTokens       int
 	cachedInputTokens int
+	reasoningTokens   int
 }
 
 func (c *Client) sendCompletionsTurn(ctx context.Context, messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) (*completionsTurnResult, error) {
@@ -290,7 +319,9 @@ func (c *Client) sendCompletionsTurn(ctx context.Context, messages []completions
 
 	if len(tools) > 0 {
 		payload["tools"] = tools
+		payload["tool_choice"] = "auto"
 	}
+	mergeCompletionsExtraBody(payload, opts.ExtraBody)
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -307,6 +338,13 @@ func (c *Client) sendCompletionsTurn(ctx context.Context, messages []completions
 			return nil, err
 		}
 		c.applyAuthHeaders(httpReq, false)
+		for k, v := range opts.ExtraHeaders {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			httpReq.Header.Set(k, v)
+		}
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "text/event-stream")
 		return httpReq, nil
@@ -388,7 +426,10 @@ func (c *Client) parseCompletionsStream(body io.Reader, onText func(string)) (*c
 					continue
 				}
 
-				idx := int(tcMap["index"].(float64))
+				idx := len(result.toolCalls)
+				if rawIndex, ok := tcMap["index"].(float64); ok && rawIndex >= 0 {
+					idx = int(rawIndex)
+				}
 				for len(result.toolCalls) <= idx {
 					result.toolCalls = append(result.toolCalls, struct {
 						ID       string `json:"id"`
@@ -430,7 +471,22 @@ func (c *Client) parseCompletionsStream(body io.Reader, onText func(string)) (*c
 			if completion, ok := usage["completion_tokens"].(float64); ok {
 				result.outputTokens = int(completion)
 			}
-			// Note: standard completions API doesn't report cached tokens
+			if total, ok := usage["total_tokens"].(float64); ok {
+				result.totalTokens = int(total)
+			}
+			if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
+				if cached, ok := details["cached_tokens"].(float64); ok {
+					result.cachedInputTokens = int(cached)
+				}
+			}
+			if details, ok := usage["completion_tokens_details"].(map[string]interface{}); ok {
+				if reasoning, ok := details["reasoning_tokens"].(float64); ok {
+					result.reasoningTokens = int(reasoning)
+				}
+			}
+			if reasoning, ok := usage["reasoning_tokens"].(float64); ok {
+				result.reasoningTokens = int(reasoning)
+			}
 		}
 	}
 

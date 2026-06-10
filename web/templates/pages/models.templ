@@ -160,9 +160,14 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						data-model-oauth-authorize-url={ agent.OAuthAuthorizeURL }
 						data-model-oauth-token-url={ agent.OAuthTokenURL }
 						data-model-oauth-scopes={ agent.OAuthScopes }
-						data-model-ollama-base-url={ agent.OllamaBaseURL }
-						data-model-auto-start-tasks={ fmt.Sprintf("%t", agent.AutoStartTasks) }
-						onclick="editModelFromData(this)"
+							data-model-ollama-base-url={ agent.OllamaBaseURL }
+							data-model-base-url={ agent.BaseURL }
+							data-model-transport={ agent.Transport }
+							data-model-preset-slug={ agent.PresetSlug }
+							data-model-models-url={ agent.ModelsURL }
+							data-model-auth-header-name={ agent.AuthHeaderName }
+							data-model-auth-header-value-prefix={ agent.AuthHeaderValuePrefix }
+							data-model-auto-start-tasks={ fmt.Sprintf("%t", agent.AutoStartTasks) }						onclick="editModelFromData(this)"
 					>
 						<div class="card-body relative">
 							<!-- Kebab menu in top right -->
@@ -230,9 +235,13 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 										} else {
 											OpenAI (OAuth - CLI) / { agent.Model }
 										}
-									} else if agent.Provider == models.ProviderOllama {
-										Ollama / { agent.Model }
-										if agent.OllamaBaseURL != "" && agent.OllamaBaseURL != "http://localhost:11434" {
+										} else if agent.Provider == models.ProviderOpenAICompatible {
+											OpenAI-Compatible (API Key) / { agent.Model }
+											if agent.BaseURL != "" {
+												<span class="text-xs opacity-40">({ agent.BaseURL })</span>
+											}
+										} else if agent.Provider == models.ProviderOllama {
+											Ollama / { agent.Model }										if agent.OllamaBaseURL != "" && agent.OllamaBaseURL != "http://localhost:11434" {
 											<span class="text-xs opacity-40">({ agent.OllamaBaseURL })</span>
 										}
 									} else {
@@ -336,10 +345,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">Provider</span></label>
 						<select name="provider" id="model_provider" class="select select-bordered" onchange="toggleProviderFields()">
-							<option value="anthropic">Anthropic</option>
-							<option value="openai">OpenAI</option>
-							<option value="ollama">Ollama</option>
-						</select>
+								<option value="anthropic">Anthropic</option>
+								<option value="openai">OpenAI</option>
+								<option value="openai_compatible">OpenAI-Compatible</option>
+								<option value="ollama">Ollama</option>						</select>
 					</div>
 					<!-- Auth type selector for Anthropic -->
 					<div id="anthropic_auth_type_field" class="form-control mb-3">
@@ -465,9 +474,30 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							</div>
 						</div>
 					</div>
-					<div id="ollama_fields" class="hidden">
-						<div class="form-control mb-3">
-							<label class="label"><span class="label-text">Base URL</span></label>
+						<div id="openai_compatible_fields" class="hidden">
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Preset</span></label>
+								<select id="model_openai_compatible_preset" name="preset_slug" class="select select-bordered" onchange="applyOpenAICompatiblePreset()">
+									<option value="openrouter">OpenRouter</option>
+									<option value="nvidia_nim">NVIDIA NIM</option>
+									<option value="vllm">Local vLLM</option>
+									<option value="custom">Custom</option>
+								</select>
+							</div>
+							<input type="hidden" id="model_openai_compatible_transport" name="transport" value="chat_completions"/>
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Base URL</span></label>
+								<input type="text" id="model_base_url" name="base_url" class="input input-bordered" placeholder="https://openrouter.ai/api/v1/"/>
+								<label class="label"><span class="label-text-alt opacity-70">API root; requests go to base URL + /chat/completions.</span></label>
+							</div>
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Custom Model ID</span></label>
+								<input type="text" id="model_openai_compatible_custom_model" class="input input-bordered" placeholder="provider/model-id" oninput="syncOpenAICompatibleModel()"/>
+								<label class="label"><span class="label-text-alt opacity-70">Stored exactly as entered, after trimming whitespace.</span></label>
+							</div>
+						</div>
+						<div id="ollama_fields" class="hidden">
+							<div class="form-control mb-3">							<label class="label"><span class="label-text">Base URL</span></label>
 							<input type="text" id="model_ollama_base_url" name="ollama_base_url" class="input input-bordered" placeholder="http://localhost:11434" value="http://localhost:11434"/>
 							<label class="label">
 								<span class="label-text-alt opacity-70">Default: http://localhost:11434</span>
@@ -481,9 +511,17 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							</label>
 						</div>
 					</div>
-					<div id="openai_api_key_info" class="mb-3 hidden">
-						<div class="alert alert-info">
-							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+						<div id="openai_compatible_info" class="mb-3 hidden">
+							<div class="alert alert-info">
+								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+								<div>
+									<p class="font-semibold">OpenAI-Compatible Chat Completions</p>
+									<p class="text-sm">Use gateways such as OpenRouter, NVIDIA NIM, LiteLLM, vLLM, or custom /chat/completions endpoints. API keys are optional for local servers.</p>
+								</div>
+							</div>
+						</div>
+						<div id="openai_api_key_info" class="mb-3 hidden">
+							<div class="alert alert-info">							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
 							<div>
 								<p class="font-semibold">OpenAI API Key</p>
 								<p class="text-sm">Enter your OpenAI API key to make direct API calls.</p>
@@ -653,9 +691,13 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					{ value: 'gpt-5.1-codex-mini', label: 'gpt-5.1-codex-mini', efforts: ['low', 'medium', 'high'] },
 					{ value: 'gpt-5-codex', label: 'gpt-5-codex', efforts: ['low', 'medium', 'high'] },
 					{ value: 'gpt-5-codex-mini', label: 'gpt-5-codex-mini', efforts: ['low', 'medium', 'high'] }
-				],
-				ollama: [
-					{ value: 'llama3.1:8b', label: 'Llama 3.1 (8B)', efforts: [] },
+					],
+					openai_compatible: [
+						{ value: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'OpenRouter Nemotron free', efforts: [] },
+						{ value: 'nvidia/nemotron-3-ultra-550b-a55b', label: 'NVIDIA Nemotron', efforts: [] },
+						{ value: 'local-model', label: 'Local/custom model', efforts: [] }
+					],
+					ollama: [					{ value: 'llama3.1:8b', label: 'Llama 3.1 (8B)', efforts: [] },
 					{ value: 'llama3.1:70b', label: 'Llama 3.1 (70B)', efforts: [] },
 					{ value: 'llama3.2:3b', label: 'Llama 3.2 (3B)', efforts: [] },
 					{ value: 'codellama:7b', label: 'Code Llama (7B)', efforts: [] },
@@ -735,8 +777,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 
 			function setModelOptions(provider, selectedModel) {
 				var modelSelect = document.getElementById('model_id');
-				var options = modelOptionsByProvider[provider] || modelOptionsByProvider.anthropic;
-
+					var options = modelOptionsByProvider[provider] || [];
 				modelSelect.innerHTML = '';
 				var hasSelected = false;
 				for (var i = 0; i < options.length; i++) {
@@ -770,15 +811,52 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					var model = document.getElementById('model_id').value;
 					var selectedEffort = document.getElementById('model_reasoning_effort').value;
 					setReasoningEffortOptions(provider, model, selectedEffort);
+					if (provider === 'openai_compatible') {
+						document.getElementById('model_openai_compatible_custom_model').value = model;
+					}
+				}
+
+				var openAICompatiblePresetDefaults = {
+					openrouter: 'https://openrouter.ai/api/v1/',
+					nvidia_nim: 'https://integrate.api.nvidia.com/v1/',
+					vllm: 'http://127.0.0.1:8000/v1/',
+					custom: ''
+				};
+
+				function applyOpenAICompatiblePreset(force) {
+					var preset = document.getElementById('model_openai_compatible_preset').value || 'custom';
+					var baseURL = document.getElementById('model_base_url');
+					var next = openAICompatiblePresetDefaults[preset] || '';
+					if (force || !baseURL.value || Object.values(openAICompatiblePresetDefaults).indexOf(baseURL.value) !== -1) {
+						baseURL.value = next;
+					}
+				}
+
+				function syncOpenAICompatibleModel() {
+					var custom = document.getElementById('model_openai_compatible_custom_model').value.trim();
+					var modelSelect = document.getElementById('model_id');
+					if (!custom) return;
+					var found = false;
+					for (var i = 0; i < modelSelect.options.length; i++) {
+						if (modelSelect.options[i].value === custom) found = true;
+					}
+					if (!found) {
+						var opt = document.createElement('option');
+						opt.value = custom;
+						opt.textContent = custom + ' (custom)';
+						modelSelect.appendChild(opt);
+					}
+					modelSelect.value = custom;
 				}
 
 				function hideAllInfoBoxes() {					document.getElementById('subscription_info_cli').classList.add('hidden');
 					document.getElementById('subscription_info_oauth').classList.add('hidden');
 					document.getElementById('subscription_info_codex').classList.add('hidden');
-					document.getElementById('ollama_info').classList.add('hidden');
-					document.getElementById('ollama_fields').classList.add('hidden');
-					document.getElementById('openai_api_key_info').classList.add('hidden');
-					document.getElementById('openai_subscription_info_cli').classList.add('hidden');
+						document.getElementById('ollama_info').classList.add('hidden');
+						document.getElementById('ollama_fields').classList.add('hidden');
+						document.getElementById('openai_compatible_info').classList.add('hidden');
+						document.getElementById('openai_compatible_fields').classList.add('hidden');
+						document.getElementById('openai_api_key_info').classList.add('hidden');					document.getElementById('openai_subscription_info_cli').classList.add('hidden');
 					document.getElementById('openai_subscription_info_oauth').classList.add('hidden');
 				}
 
@@ -856,6 +934,12 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					var modelMaxWorkers = parseInt(button.dataset.modelMaxWorkers) || 0;
 					var workerTimeout = parseInt(button.dataset.modelWorkerTimeout) || 0;
 					var ollamaBaseUrl = button.dataset.modelOllamaBaseUrl || '';
+					var baseUrl = button.dataset.modelBaseUrl || '';
+					var transport = button.dataset.modelTransport || 'chat_completions';
+					var presetSlug = button.dataset.modelPresetSlug || 'custom';
+					var modelsUrl = button.dataset.modelModelsUrl || '';
+					var authHeaderName = button.dataset.modelAuthHeaderName || '';
+					var authHeaderValuePrefix = button.dataset.modelAuthHeaderValuePrefix || '';
 					var autoStartTasks = button.dataset.modelAutoStartTasks === 'true';
 
 				// Map DB provider values to UI values
@@ -897,6 +981,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					document.getElementById('model_worker_timeout').value = workerTimeout.toString();
 					document.getElementById('model_ollama_base_url').value = ollamaBaseUrl || 'http://localhost:11434';
 					document.getElementById('model_ollama_custom_model').value = '';
+					document.getElementById('model_base_url').value = baseUrl;
+					document.getElementById('model_openai_compatible_transport').value = transport || 'chat_completions';
+					document.getElementById('model_openai_compatible_preset').value = presetSlug || 'custom';
+					document.getElementById('model_openai_compatible_custom_model').value = dbProvider === 'openai_compatible' ? model : '';
 					document.getElementById('model_auto_start_tasks').checked = autoStartTasks;
 				document.getElementById('model_submit_btn').textContent = 'Save';
 				toggleProviderFields(model, reasoningEffort);
@@ -928,9 +1016,21 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					authMethodField.classList.add('hidden');
 					document.getElementById('model_auth_method').disabled = true;
 					toggleOpenAIAuthFields();
-				} else if (provider === 'ollama') {
-					anthropicAuthTypeField.classList.add('hidden');
-					openaiAuthTypeField.classList.add('hidden');
+					} else if (provider === 'openai_compatible') {
+						anthropicAuthTypeField.classList.add('hidden');
+						openaiAuthTypeField.classList.add('hidden');
+						openaiConnectionMethodField.classList.add('hidden');
+						authMethodField.classList.add('hidden');
+						apiKeyField.classList.remove('hidden');
+						apiKeyInput.required = false;
+						document.getElementById('openai_compatible_info').classList.remove('hidden');
+						document.getElementById('openai_compatible_fields').classList.remove('hidden');
+						document.getElementById('model_auth_method').disabled = true;
+						document.getElementById('model_openai_connection_method').disabled = true;
+						if (!document.getElementById('model_base_url').value) applyOpenAICompatiblePreset(true);
+						document.getElementById('model_openai_compatible_custom_model').value = activeModel || '';
+					} else if (provider === 'ollama') {
+						anthropicAuthTypeField.classList.add('hidden');					openaiAuthTypeField.classList.add('hidden');
 					openaiConnectionMethodField.classList.add('hidden');
 					authMethodField.classList.add('hidden');
 					apiKeyField.classList.add('hidden');
@@ -1056,6 +1156,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					document.getElementById('model_worker_timeout').value = '0';
 					document.getElementById('model_ollama_base_url').value = 'http://localhost:11434';
 					document.getElementById('model_ollama_custom_model').value = '';
+					document.getElementById('model_openai_compatible_preset').value = 'openrouter';
+					document.getElementById('model_openai_compatible_transport').value = 'chat_completions';
+					document.getElementById('model_base_url').value = '';
+					document.getElementById('model_openai_compatible_custom_model').value = '';
 					document.getElementById('model_auto_start_tasks').checked = false;
 				document.getElementById('model_submit_btn').textContent = 'Create';
 				toggleProviderFields('', '');

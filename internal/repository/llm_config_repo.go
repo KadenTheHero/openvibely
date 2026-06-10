@@ -16,7 +16,7 @@ func NewLLMConfigRepo(db *sql.DB) *LLMConfigRepo {
 	return &LLMConfigRepo{db: db}
 }
 
-const llmConfigColumns = `id, name, provider, model, reasoning_effort, api_key, max_tokens, temperature, is_default, created_at, updated_at, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, max_workers, worker_timeout, oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url, oauth_scopes, ollama_base_url, auto_start_tasks`
+const llmConfigColumns = `id, name, provider, model, reasoning_effort, api_key, max_tokens, temperature, is_default, created_at, updated_at, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, max_workers, worker_timeout, oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url, oauth_scopes, ollama_base_url, base_url, transport, preset_slug, models_url, auth_header_name, auth_header_value_prefix, extra_headers_json, extra_body_json, default_max_tokens, token_exchange_format, token_refresh_format, auto_start_tasks`
 
 func scanLLMConfig(row interface{ Scan(dest ...any) error }, a *models.LLMConfig) error {
 	return row.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.ReasoningEffort, &a.APIKey,
@@ -25,7 +25,9 @@ func scanLLMConfig(row interface{ Scan(dest ...any) error }, a *models.LLMConfig
 		&a.OAuthAccountID,
 		&a.MaxWorkers, &a.WorkerTimeout,
 		&a.OAuthClientID, &a.OAuthClientSecret, &a.OAuthAuthorizeURL, &a.OAuthTokenURL, &a.OAuthScopes,
-		&a.OllamaBaseURL, &a.AutoStartTasks)
+		&a.OllamaBaseURL, &a.BaseURL, &a.Transport, &a.PresetSlug, &a.ModelsURL,
+		&a.AuthHeaderName, &a.AuthHeaderValuePrefix, &a.ExtraHeadersJSON, &a.ExtraBodyJSON,
+		&a.DefaultMaxTokens, &a.TokenExchangeFormat, &a.TokenRefreshFormat, &a.AutoStartTasks)
 }
 
 func (r *LLMConfigRepo) List(ctx context.Context) ([]models.LLMConfig, error) {
@@ -148,13 +150,15 @@ func (r *LLMConfigRepo) Create(ctx context.Context, a *models.LLMConfig) error {
 		a.AuthMethod = models.AuthMethodCLI
 	}
 	err = tx.QueryRowContext(ctx,
-		`INSERT INTO agent_configs (id, name, provider, model, reasoning_effort, api_key, max_tokens, temperature, is_default, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, max_workers, worker_timeout, oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url, oauth_scopes, ollama_base_url, auto_start_tasks)
-		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO agent_configs (id, name, provider, model, reasoning_effort, api_key, max_tokens, temperature, is_default, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, max_workers, worker_timeout, oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url, oauth_scopes, ollama_base_url, base_url, transport, preset_slug, models_url, auth_header_name, auth_header_value_prefix, extra_headers_json, extra_body_json, default_max_tokens, token_exchange_format, token_refresh_format, auto_start_tasks)
+		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 RETURNING id, created_at, updated_at`,
 		a.Name, a.Provider, a.Model, a.ReasoningEffort, a.APIKey, a.MaxTokens, a.Temperature, a.IsDefault,
 		a.AuthMethod, a.OAuthAccessToken, a.OAuthRefreshToken, a.OAuthExpiresAt, a.OAuthAccountID, a.MaxWorkers, a.WorkerTimeout,
 		a.OAuthClientID, a.OAuthClientSecret, a.OAuthAuthorizeURL, a.OAuthTokenURL, a.OAuthScopes,
-		a.OllamaBaseURL, a.AutoStartTasks).
+		a.OllamaBaseURL, a.BaseURL, a.Transport, a.PresetSlug, a.ModelsURL,
+		a.AuthHeaderName, a.AuthHeaderValuePrefix, a.ExtraHeadersJSON, a.ExtraBodyJSON,
+		a.DefaultMaxTokens, a.TokenExchangeFormat, a.TokenRefreshFormat, a.AutoStartTasks).
 		Scan(&a.ID, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("creating model config: %w", err)
@@ -189,14 +193,18 @@ func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
 		 auth_method = ?, oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?,
 		 max_workers = ?, worker_timeout = ?,
 		 oauth_client_id = ?, oauth_client_secret = ?, oauth_authorize_url = ?, oauth_token_url = ?, oauth_scopes = ?,
-		 ollama_base_url = ?, auto_start_tasks = ?,
+		 ollama_base_url = ?, base_url = ?, transport = ?, preset_slug = ?, models_url = ?,
+		 auth_header_name = ?, auth_header_value_prefix = ?, extra_headers_json = ?, extra_body_json = ?,
+		 default_max_tokens = ?, token_exchange_format = ?, token_refresh_format = ?, auto_start_tasks = ?,
 		 updated_at = datetime('now')
 		 WHERE id = ?`,
 		a.Name, a.Provider, a.Model, a.ReasoningEffort, a.APIKey, a.MaxTokens, a.Temperature, a.IsDefault,
 		a.AuthMethod, a.OAuthAccessToken, a.OAuthRefreshToken, a.OAuthExpiresAt, a.OAuthAccountID,
 		a.MaxWorkers, a.WorkerTimeout,
 		a.OAuthClientID, a.OAuthClientSecret, a.OAuthAuthorizeURL, a.OAuthTokenURL, a.OAuthScopes,
-		a.OllamaBaseURL, a.AutoStartTasks,
+		a.OllamaBaseURL, a.BaseURL, a.Transport, a.PresetSlug, a.ModelsURL,
+		a.AuthHeaderName, a.AuthHeaderValuePrefix, a.ExtraHeadersJSON, a.ExtraBodyJSON,
+		a.DefaultMaxTokens, a.TokenExchangeFormat, a.TokenRefreshFormat, a.AutoStartTasks,
 		a.ID)
 	if err != nil {
 		return fmt.Errorf("updating model config: %w", err)

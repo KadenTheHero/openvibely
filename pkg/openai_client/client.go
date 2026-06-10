@@ -101,11 +101,14 @@ func (rt *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 
 // StoredAuth holds OAuth tokens or an API key.
 type StoredAuth struct {
-	Token        string `json:"token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresAt    int64  `json:"expires_at"`
-	APIKey       string `json:"api_key,omitempty"`
-	AccountID    string `json:"account_id,omitempty"`
+	Token                 string `json:"token"`
+	RefreshToken          string `json:"refresh_token"`
+	ExpiresAt             int64  `json:"expires_at"`
+	APIKey                string `json:"api_key,omitempty"`
+	AccountID             string `json:"account_id,omitempty"`
+	AuthHeaderName        string `json:"auth_header_name,omitempty"`
+	AuthHeaderValuePrefix string `json:"auth_header_value_prefix,omitempty"`
+	AllowMissingAuth      bool   `json:"allow_missing_auth,omitempty"`
 }
 
 // OAuthTokens are refreshed OAuth credentials supplied by an external authority.
@@ -154,6 +157,7 @@ type Client struct {
 	auth                          *StoredAuth
 	httpClient                    *http.Client
 	sessionID                     string
+	apiBaseURL                    string
 	oauthUnauthorizedHandler      OAuthUnauthorizedHandler
 	oauthRefreshExternallyManaged bool
 	History                       []Message
@@ -162,6 +166,18 @@ type Client struct {
 // NewWithAPIKey creates a client using an API key.
 func NewWithAPIKey(apiKey string) *Client {
 	return newClient(&StoredAuth{APIKey: apiKey})
+}
+
+// NewWithCompatibleAPIKey creates a client for an OpenAI-compatible endpoint.
+func NewWithCompatibleAPIKey(apiKey, baseURL, authHeaderName, authHeaderValuePrefix string) *Client {
+	client := newClient(&StoredAuth{
+		APIKey:                apiKey,
+		AuthHeaderName:        authHeaderName,
+		AuthHeaderValuePrefix: authHeaderValuePrefix,
+		AllowMissingAuth:      true,
+	})
+	client.apiBaseURL = strings.TrimSpace(baseURL)
+	return client
 }
 
 // NewWithOAuthToken creates a client using an OAuth access token.
@@ -258,6 +274,9 @@ func (c *Client) EnsureValidToken() error {
 		return nil
 	}
 	if c.auth.Token == "" {
+		if c.auth.AllowMissingAuth {
+			return nil
+		}
 		return fmt.Errorf("missing OAuth access token")
 	}
 	if c.auth.ExpiresAt >= time.Now().Add(time.Hour).UnixMilli() {
@@ -449,13 +468,22 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 }
 
 func (c *Client) completionsEndpoint() (string, error) {
-	base := strings.TrimSpace(OpenAIAPIBaseURL)
+	base := strings.TrimSpace(c.apiBaseURL)
+	if base == "" {
+		base = strings.TrimSpace(OpenAIAPIBaseURL)
+	}
 	if base == "" {
 		return "", fmt.Errorf("missing base URL")
 	}
 	u, err := url.Parse(base)
 	if err != nil {
 		return "", fmt.Errorf("parse base URL %q: %w", base, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("base URL must use http or https")
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("base URL must include host")
 	}
 	u.Path = strings.TrimRight(u.Path, "/") + "/chat/completions"
 	return u.String(), nil
@@ -502,7 +530,15 @@ func (c *Client) applyAuthHeaders(req *http.Request, isChatGPTOAuth bool) {
 		token = strings.TrimSpace(c.auth.Token)
 	}
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		headerName := strings.TrimSpace(c.auth.AuthHeaderName)
+		if headerName == "" {
+			headerName = "Authorization"
+		}
+		prefix := c.auth.AuthHeaderValuePrefix
+		if prefix == "" {
+			prefix = "Bearer "
+		}
+		req.Header.Set(headerName, prefix+token)
 	}
 
 	if !isChatGPTOAuth {

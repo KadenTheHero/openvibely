@@ -8,6 +8,63 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestLLMConfigRepo_OpenAICompatibleFieldsDoNotBleedAcrossRows(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	openRouter := &models.LLMConfig{
+		Name:                  "OpenRouter",
+		Provider:              models.ProviderOpenAICompatible,
+		AuthMethod:            models.AuthMethodAPIKey,
+		Model:                 "nvidia/nemotron-3-ultra-550b-a55b:free",
+		APIKey:                "sk-or",
+		BaseURL:               "https://openrouter.ai/api/v1/",
+		Transport:             "chat_completions",
+		PresetSlug:            "openrouter",
+		ModelsURL:             "https://openrouter.ai/api/v1/models",
+		AuthHeaderName:        "Authorization",
+		AuthHeaderValuePrefix: "Bearer ",
+		DefaultMaxTokens:      1234,
+	}
+	custom := &models.LLMConfig{
+		Name:       "Custom Gateway",
+		Provider:   models.ProviderOpenAICompatible,
+		AuthMethod: models.AuthMethodAPIKey,
+		Model:      "custom-model",
+		APIKey:     "sk-custom",
+		BaseURL:    "http://127.0.0.1:8000/v1/",
+		Transport:  "chat_completions",
+		PresetSlug: "custom",
+	}
+
+	if err := repo.Create(ctx, openRouter); err != nil {
+		t.Fatalf("Create openRouter: %v", err)
+	}
+	if err := repo.Create(ctx, custom); err != nil {
+		t.Fatalf("Create custom: %v", err)
+	}
+
+	gotOpenRouter, err := repo.GetByID(ctx, openRouter.ID)
+	if err != nil {
+		t.Fatalf("GetByID openRouter: %v", err)
+	}
+	gotCustom, err := repo.GetByID(ctx, custom.ID)
+	if err != nil {
+		t.Fatalf("GetByID custom: %v", err)
+	}
+
+	if gotOpenRouter.BaseURL != openRouter.BaseURL || gotOpenRouter.PresetSlug != "openrouter" || gotOpenRouter.DefaultMaxTokens != 1234 {
+		t.Fatalf("openrouter fields not persisted: %+v", gotOpenRouter)
+	}
+	if gotCustom.BaseURL != custom.BaseURL || gotCustom.PresetSlug != "custom" {
+		t.Fatalf("custom fields not persisted: %+v", gotCustom)
+	}
+	if gotCustom.BaseURL == gotOpenRouter.BaseURL {
+		t.Fatalf("custom row reused stale base URL %q", gotCustom.BaseURL)
+	}
+}
+
 func TestLLMConfigRepo_CreateAndGetByID(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)

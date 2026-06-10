@@ -27,6 +27,123 @@ func TestCompletionsOptions_DefaultMaxTurnsNoLimit(t *testing.T) {
 	}
 }
 
+func TestSendCompletions_CompatibleBaseURLAuthAndUsage(t *testing.T) {
+	var gotPath string
+	var gotAuth string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"model\":\"provider/model\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":3,\"total_tokens\":15,\"prompt_tokens_details\":{\"cached_tokens\":4},\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = "https://api.openai.example/v1/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	client := NewWithCompatibleAPIKey("sk-compatible", srv.URL+"/v1/", "", "")
+	resp, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{
+		Model:           "provider/model",
+		MaxOutputTokens: 99,
+		DisableTools:    true,
+	})
+	if err != nil {
+		t.Fatalf("SendCompletions: %v", err)
+	}
+	if gotPath != "/v1/chat/completions" {
+		t.Fatalf("path = %q, want /v1/chat/completions", gotPath)
+	}
+	if gotAuth != "Bearer sk-compatible" {
+		t.Fatalf("Authorization = %q", gotAuth)
+	}
+	if gotBody["max_tokens"] != float64(99) {
+		t.Fatalf("max_tokens = %#v, want 99", gotBody["max_tokens"])
+	}
+	if _, ok := gotBody["input"]; ok {
+		t.Fatalf("chat completions request must not include Responses input field: %#v", gotBody)
+	}
+	if _, ok := gotBody["max_output_tokens"]; ok {
+		t.Fatalf("chat completions request must not include Responses max_output_tokens field: %#v", gotBody)
+	}
+	if resp.Text != "Hello" || resp.InputTokens != 12 || resp.OutputTokens != 3 || resp.TotalTokens != 15 || resp.CachedInputTokens != 4 || resp.ReasoningTokens != 2 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestSendCompletions_CompatibleBaseURLAllowsMissingAPIKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization = %q, want empty", got)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"Local\"}}]}\n\n" +
+				"data: {\"choices\":[{\"finish_reason\":\"stop\",\"delta\":{}}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	client := NewWithCompatibleAPIKey("", srv.URL+"/v1/", "", "")
+	resp, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{DisableTools: true})
+	if err != nil {
+		t.Fatalf("SendCompletions: %v", err)
+	}
+	if resp.Text != "Local" {
+		t.Fatalf("Text = %q", resp.Text)
+	}
+}
+
+func TestSendCompletions_ExtraHeadersAndBodyProtectOwnedFields(t *testing.T) {
+	var gotBody map[string]any
+	var gotHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("X-Provider-Route")
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"Done\"}}]}\n\n" +
+				"data: {\"choices\":[{\"finish_reason\":\"stop\",\"delta\":{}}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	client := NewWithCompatibleAPIKey("sk-compatible", srv.URL+"/v1/", "", "")
+	_, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{
+		Model:        "real-model",
+		DisableTools: true,
+		ExtraHeaders: map[string]string{"X-Provider-Route": "openrouter"},
+		ExtraBody: map[string]any{
+			"model":            "evil-model",
+			"stream":           false,
+			"reasoning_effort": "high",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendCompletions: %v", err)
+	}
+	if gotHeader != "openrouter" {
+		t.Fatalf("X-Provider-Route = %q", gotHeader)
+	}
+	if gotBody["model"] != "real-model" || gotBody["stream"] != true {
+		t.Fatalf("protected fields were overridden: %#v", gotBody)
+	}
+	if gotBody["reasoning_effort"] != "high" {
+		t.Fatalf("allowed extra body missing: %#v", gotBody)
+	}
+}
+
 func TestSendCompletions_DisableToolsSuppressesExtraTools(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)

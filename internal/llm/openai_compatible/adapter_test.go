@@ -1,0 +1,155 @@
+package openai_compatible
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+func TestAdapterCallDirectUsesConfiguredChatCompletionsEndpoint(t *testing.T) {
+	var gotPath string
+	var gotAuth string
+	var gotTitle string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		gotTitle = r.Header.Get("X-Title")
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":2,\"total_tokens\":11,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	adapter := New(nil)
+	res, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation: llmcontracts.OperationDirect,
+		Message:   "Say hi",
+		Agent: models.LLMConfig{
+			Name:             "Compatible",
+			Provider:         models.ProviderOpenAICompatible,
+			AuthMethod:       models.AuthMethodAPIKey,
+			Model:            "provider/model",
+			APIKey:           "sk-compatible",
+			BaseURL:          srv.URL + "/v1/",
+			Transport:        "chat_completions",
+			ExtraHeadersJSON: `{"X-Title":"OpenVibely"}`,
+			ExtraBodyJSON:    `{"provider":{"order":["nvidia"]},"model":"evil","stream":false}`,
+		},
+	}, ".")
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if gotPath != "/v1/chat/completions" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotAuth != "Bearer sk-compatible" {
+		t.Fatalf("auth = %q", gotAuth)
+	}
+	if gotTitle != "OpenVibely" {
+		t.Fatalf("X-Title = %q", gotTitle)
+	}
+	if _, ok := gotBody["input"]; ok {
+		t.Fatalf("unexpected Responses input field: %#v", gotBody)
+	}
+	if gotBody["model"] != "provider/model" || gotBody["stream"] != true {
+		t.Fatalf("unexpected body: %#v", gotBody)
+	}
+	if _, ok := gotBody["provider"].(map[string]any); !ok {
+		t.Fatalf("expected allowed provider extra body, got %#v", gotBody["provider"])
+	}
+	tools, ok := gotBody["tools"].([]any)
+	if !ok || len(tools) == 0 {
+		t.Fatalf("expected default tools in compatible direct request, got %#v", gotBody["tools"])
+	}
+	if res.Output != "Hello" || res.Usage.InputTokens != 8 || res.Usage.OutputTokens != 2 || res.Usage.TotalTokens != 11 || res.Usage.CachedInputTokens != 3 {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+func TestAdapterToolCallReplaysToolResult(t *testing.T) {
+	requests := 0
+	var secondMessages []any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		body, _ := io.ReadAll(r.Body)
+		var reqBody map[string]any
+		_ = json.Unmarshal(body, &reqBody)
+		if requests == 2 {
+			secondMessages, _ = reqBody["messages"].([]any)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requests == 1 {
+			_, _ = w.Write([]byte(
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"memory_view\",\"arguments\":\"{\\\"handle\\\":\"}}]}}]}\n\n" +
+					"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"usage.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+					"data: [DONE]\n\n",
+			))
+			return
+		}
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"Read it.\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2}}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "memory_view", Description: "read memory", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessRead}},
+		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if name != "memory_view" {
+				t.Fatalf("unexpected tool name %q", name)
+			}
+			return "memory contents", true, false, nil
+		},
+	})
+
+	adapter := New(nil)
+	res, err := adapter.Call(ctx, llmcontracts.AgentRequest{
+		Ctx:       ctx,
+		Operation: llmcontracts.OperationDirect,
+		Message:   "Use memory",
+		Agent: models.LLMConfig{
+			Name:       "Compatible",
+			Provider:   models.ProviderOpenAICompatible,
+			AuthMethod: models.AuthMethodAPIKey,
+			Model:      "provider/model",
+			APIKey:     "sk-compatible",
+			BaseURL:    srv.URL + "/v1/",
+			Transport:  "chat_completions",
+		},
+	}, ".")
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	if res.Output != "Read it." {
+		t.Fatalf("output = %q", res.Output)
+	}
+	foundToolMessage := false
+	for _, raw := range secondMessages {
+		msg, _ := raw.(map[string]any)
+		if msg["role"] == "tool" && msg["tool_call_id"] == "call_1" && msg["content"] == "memory contents" {
+			foundToolMessage = true
+		}
+	}
+	if !foundToolMessage {
+		t.Fatalf("tool result message not replayed: %#v", secondMessages)
+	}
+}

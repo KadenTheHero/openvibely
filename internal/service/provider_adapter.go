@@ -11,6 +11,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
+	llmopenai_compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
 	llmretry "github.com/openvibely/openvibely/internal/llm/retry"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
@@ -27,12 +28,14 @@ var resolvePluginRuntimeBundleFn = agentplugins.ResolveRuntimeBundle
 func (s *LLMService) initProviderAdapters() {
 	anthropicAdapter := llmanthropic.New(s.llmConfigRepo, s.execRepo)
 	openaiAdapter := llmopenai.New(s.llmConfigRepo, s.execRepo)
+	openaiCompatibleAdapter := llmopenai_compatible.New(s.execRepo)
 	ollamaAdapter := llmollama.New(s.execRepo)
 	s.providerAdapters = map[models.LLMProvider]ProviderAdapter{
-		models.ProviderAnthropic: &anthropicProviderAdapter{svc: s, adapter: anthropicAdapter},
-		models.ProviderOpenAI:    &openAIProviderAdapter{svc: s, adapter: openaiAdapter},
-		models.ProviderOllama:    &ollamaProviderAdapter{svc: s, adapter: ollamaAdapter},
-		models.ProviderTest:      &testProviderAdapter{svc: s},
+		models.ProviderAnthropic:        &anthropicProviderAdapter{svc: s, adapter: anthropicAdapter},
+		models.ProviderOpenAI:           &openAIProviderAdapter{svc: s, adapter: openaiAdapter},
+		models.ProviderOpenAICompatible: &openAICompatibleProviderAdapter{svc: s, adapter: openaiCompatibleAdapter},
+		models.ProviderOllama:           &ollamaProviderAdapter{svc: s, adapter: ollamaAdapter},
+		models.ProviderTest:             &testProviderAdapter{svc: s},
 	}
 }
 
@@ -277,6 +280,28 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 		default:
 			return llmcontracts.AgentResult{}, fmt.Errorf("unsupported operation: %s", req.Operation)
 		}
+	})
+}
+
+type openAICompatibleProviderAdapter struct {
+	svc     *LLMService
+	adapter *llmopenai_compatible.Adapter
+}
+
+func (a *openAICompatibleProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	_, runtimeAgentDef, _ := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
+	if runtimeAgentDef != nil {
+		req.AgentDefinition = runtimeAgentDef
+	}
+	if req.AgentDefinition != nil {
+		req.ChatSystemContext = ApplyAgentToSystemPrompt(req.ChatSystemContext, req.AgentDefinition)
+		req.ProjectInstructions = ApplyAgentToSystemPrompt(req.ProjectInstructions, req.AgentDefinition)
+		if req.AgentDefinition.Model != "" && req.AgentDefinition.Model != "inherit" {
+			req.Agent.Model = req.AgentDefinition.Model
+		}
+	}
+	return callWithRetry(req, func() (llmcontracts.AgentResult, error) {
+		return a.adapter.Call(req.Ctx, req, req.WorkDir)
 	})
 }
 

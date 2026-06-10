@@ -1,9 +1,16 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
@@ -43,6 +50,9 @@ func (h *Handler) ListModels(c echo.Context) error {
 // The UI shows "Anthropic" and "OpenAI" as single providers with auth type sub-selection,
 // while the DB stores provider and auth_method separately.
 func resolveProviderAndAuth(provider, anthropicAuthType, openaiAuthType, authMethod string) (models.LLMProvider, models.AuthMethod) {
+	if provider == string(models.ProviderOpenAICompatible) {
+		return models.ProviderOpenAICompatible, models.AuthMethodAPIKey
+	}
 	// Accept both "subscription" (legacy) and "oauth" (current) form values.
 	// Default to OAuth (not CLI) when auth_method is absent or unrecognized — the UI
 	// no longer exposes CLI as an option for these providers.
@@ -74,6 +84,130 @@ func resolveProviderAndAuth(provider, anthropicAuthType, openaiAuthType, authMet
 		return models.ProviderOpenAI, models.AuthMethodCLI
 	}
 	return models.LLMProvider(provider), models.AuthMethodCLI
+}
+
+func normalizeOpenAICompatibleTransport(transport string) string {
+	transport = strings.TrimSpace(transport)
+	if transport == "" {
+		return "chat_completions"
+	}
+	return transport
+}
+
+func validateOpenAICompatibleBaseURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("base URL is required")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid base URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("base URL must use http or https")
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("base URL must include a host")
+	}
+	if u.Scheme == "http" && !isLocalOrPrivateHost(u.Hostname()) {
+		return "", fmt.Errorf("plain http base URLs are only allowed for localhost or private development hosts")
+	}
+	return raw, nil
+}
+
+func isLocalOrPrivateHost(host string) bool {
+	host = strings.TrimSpace(strings.TrimSuffix(host, "."))
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
+}
+
+type openAICompatibleModelInfo struct {
+	ID string `json:"id"`
+}
+
+type openAICompatibleModelsResponse struct {
+	Models     []openAICompatibleModelInfo `json:"models"`
+	TriedURLs  []string                    `json:"tried_urls"`
+	ResolvedID string                      `json:"resolved_id,omitempty"`
+}
+
+func openAICompatibleModelsURLs(baseURL, modelsURL string) ([]string, error) {
+	var urls []string
+	if strings.TrimSpace(modelsURL) != "" {
+		u, err := validateOpenAICompatibleBaseURL(modelsURL)
+		if err != nil {
+			return nil, err
+		}
+		urls = append(urls, u)
+		return urls, nil
+	}
+	base, err := validateOpenAICompatibleBaseURL(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return nil, err
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/models"
+	urls = append(urls, u.String())
+
+	basePath := strings.TrimRight(u.EscapedPath(), "/")
+	if !strings.HasSuffix(basePath, "/v1/models") {
+		v1, err := url.Parse(base)
+		if err != nil {
+			return nil, err
+		}
+		v1.Path = strings.TrimRight(v1.Path, "/") + "/v1/models"
+		if v1.String() != urls[0] {
+			urls = append(urls, v1.String())
+		}
+	}
+	return urls, nil
+}
+
+func applyOpenAICompatibleForm(c echo.Context, agent *models.LLMConfig) error {
+	baseURL, err := validateOpenAICompatibleBaseURL(c.FormValue("base_url"))
+	if err != nil {
+		return err
+	}
+	agent.BaseURL = baseURL
+	agent.Transport = normalizeOpenAICompatibleTransport(c.FormValue("transport"))
+	agent.PresetSlug = strings.TrimSpace(c.FormValue("preset_slug"))
+	if agent.PresetSlug == "" {
+		agent.PresetSlug = "custom"
+	}
+	agent.ModelsURL = strings.TrimSpace(c.FormValue("models_url"))
+	agent.AuthHeaderName = strings.TrimSpace(c.FormValue("auth_header_name"))
+	agent.AuthHeaderValuePrefix = c.FormValue("auth_header_value_prefix")
+	agent.ExtraHeadersJSON = strings.TrimSpace(c.FormValue("extra_headers_json"))
+	agent.ExtraBodyJSON = strings.TrimSpace(c.FormValue("extra_body_json"))
+	if maxTokens, err := strconv.Atoi(c.FormValue("default_max_tokens")); err == nil && maxTokens > 0 {
+		agent.DefaultMaxTokens = maxTokens
+	} else {
+		agent.DefaultMaxTokens = 0
+	}
+	return nil
+}
+
+func clearOpenAICompatibleFields(agent *models.LLMConfig) {
+	agent.BaseURL = ""
+	agent.Transport = ""
+	agent.PresetSlug = ""
+	agent.ModelsURL = ""
+	agent.AuthHeaderName = ""
+	agent.AuthHeaderValuePrefix = ""
+	agent.ExtraHeadersJSON = ""
+	agent.ExtraBodyJSON = ""
+	agent.DefaultMaxTokens = 0
+	agent.TokenExchangeFormat = ""
+	agent.TokenRefreshFormat = ""
 }
 
 func (h *Handler) CreateModel(c echo.Context) error {
@@ -129,6 +263,12 @@ func (h *Handler) CreateModel(c echo.Context) error {
 			a.Model = customModel
 		}
 	}
+	if a.Provider == models.ProviderOpenAICompatible {
+		a.Model = strings.TrimSpace(a.Model)
+		if err := applyOpenAICompatibleForm(c, a); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+	}
 	if a.Provider == "" {
 		a.Provider = models.ProviderAnthropic
 	}
@@ -177,6 +317,8 @@ func (h *Handler) UpdateModel(c echo.Context) error {
 		c.FormValue("openai_auth_type"),
 		c.FormValue("auth_method"),
 	)
+	previousProvider := agent.Provider
+	previousAuthMethod := agent.AuthMethod
 	agent.Provider = provider
 	agent.AuthMethod = authMethod
 
@@ -185,8 +327,13 @@ func (h *Handler) UpdateModel(c echo.Context) error {
 	if agent.Provider == models.ProviderOpenAI {
 		agent.Model = normalizeOpenAIModel(agent.Model)
 	}
-	if apiKey := c.FormValue("api_key"); apiKey != "" {
+	if agent.Provider == models.ProviderOpenAICompatible {
+		agent.Model = strings.TrimSpace(agent.Model)
+	}
+	if apiKey, ok := formValueIfPresent(c, "api_key"); ok && apiKey != "" {
 		agent.APIKey = apiKey
+	} else if previousProvider != agent.Provider || previousAuthMethod != agent.AuthMethod {
+		agent.APIKey = ""
 	}
 	if temp, err := strconv.ParseFloat(c.FormValue("temperature"), 64); err == nil {
 		agent.Temperature = temp
@@ -231,6 +378,13 @@ func (h *Handler) UpdateModel(c echo.Context) error {
 		}
 	} else {
 		agent.OllamaBaseURL = ""
+	}
+	if agent.Provider == models.ProviderOpenAICompatible {
+		if err := applyOpenAICompatibleForm(c, agent); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+	} else {
+		clearOpenAICompatibleFields(agent)
 	}
 	if mw, err := strconv.Atoi(c.FormValue("model_max_workers")); err == nil {
 		if mw < 0 {
@@ -413,7 +567,76 @@ func formValueIfPresent(c echo.Context, key string) (string, bool) {
 	return values[0], true
 }
 
-// ListOllamaAvailableModels queries an Ollama instance for installed models.
+// ListOpenAICompatibleAvailableModels best-effort probes an OpenAI-compatible /models endpoint.
+func (h *Handler) ListOpenAICompatibleAvailableModels(c echo.Context) error {
+	urls, err := openAICompatibleModelsURLs(c.QueryParam("base_url"), c.QueryParam("models_url"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	apiKey := strings.TrimSpace(c.Request().Header.Get("X-OpenAI-Compatible-API-Key"))
+	client := &http.Client{Timeout: 10 * time.Second}
+	tried := make([]string, 0, len(urls))
+	var lastErr error
+	for _, modelsURL := range urls {
+		tried = append(tried, modelsURL)
+		models, err := fetchOpenAICompatibleModels(c.Request().Context(), client, modelsURL, apiKey)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		response := openAICompatibleModelsResponse{Models: models, TriedURLs: tried}
+		if len(models) == 1 {
+			response.ResolvedID = models[0].ID
+		}
+		return c.JSON(http.StatusOK, response)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no model discovery URLs were available")
+	}
+	applog.Infof("[handler] ListOpenAICompatibleAvailableModels error: %v", lastErr)
+	return c.JSON(http.StatusBadGateway, map[string]any{"error": lastErr.Error(), "tried_urls": tried})
+}
+
+func fetchOpenAICompatibleModels(ctx context.Context, client *http.Client, modelsURL, apiKey string) ([]openAICompatibleModelInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(apiKey) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(apiKey))
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		return nil, fmt.Errorf("%s returned %d %s", modelsURL, resp.StatusCode, http.StatusText(resp.StatusCode))
+	}
+	return decodeOpenAICompatibleModels(resp.Body)
+}
+
+func decodeOpenAICompatibleModels(body io.Reader) ([]openAICompatibleModelInfo, error) {
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode models response: %w", err)
+	}
+	models := make([]openAICompatibleModelInfo, 0, len(payload.Data))
+	for _, item := range payload.Data {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		models = append(models, openAICompatibleModelInfo{ID: id})
+	}
+	return models, nil
+}
+
 func (h *Handler) ListOllamaAvailableModels(c echo.Context) error {
 	baseURL := c.QueryParam("base_url")
 	if baseURL == "" {

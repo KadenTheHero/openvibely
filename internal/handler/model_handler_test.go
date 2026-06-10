@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -112,6 +113,15 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			wantAuthMethod: models.AuthMethodCLI,
 		},
 		{
+			name:           "openai compatible api key",
+			provider:       "openai_compatible",
+			anthropicAuth:  "",
+			openaiAuth:     "",
+			authMethod:     "",
+			wantProvider:   models.ProviderOpenAICompatible,
+			wantAuthMethod: models.AuthMethodAPIKey,
+		},
+		{
 			name:           "ollama",
 			provider:       "ollama",
 			anthropicAuth:  "",
@@ -119,8 +129,7 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			authMethod:     "",
 			wantProvider:   models.ProviderOllama,
 			wantAuthMethod: models.AuthMethodCLI,
-		},
-	}
+		}}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -133,6 +142,198 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestListOpenAICompatibleAvailableModelsUsesBaseModelsEndpoint(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	var gotPath string
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"local-model"}]}`))
+	}))
+	defer srv.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?base_url="+url.QueryEscape(srv.URL+"/v1"), nil)
+	req.Header.Set("X-OpenAI-Compatible-API-Key", "sk-test")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/v1/models" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotAuth != "Bearer sk-test" {
+		t.Fatalf("auth = %q", gotAuth)
+	}
+	var out openAICompatibleModelsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(out.Models) != 1 || out.Models[0].ID != "local-model" || out.ResolvedID != "local-model" {
+		t.Fatalf("unexpected response: %+v", out)
+	}
+}
+
+func TestListOpenAICompatibleAvailableModelsFallsBackToV1Models(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.URL.Path == "/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"fallback-model"},{"id":"other-model"}]}`))
+	}))
+	defer srv.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?base_url="+url.QueryEscape(srv.URL), nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(paths) != 2 || paths[0] != "/models" || paths[1] != "/v1/models" {
+		t.Fatalf("paths = %#v", paths)
+	}
+	var out openAICompatibleModelsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(out.Models) != 2 || out.ResolvedID != "" {
+		t.Fatalf("unexpected response: %+v", out)
+	}
+}
+
+func TestCreateModel_OpenAICompatible(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("name", "OpenRouter Nemotron")
+	form.Set("provider", "openai_compatible")
+	form.Set("model", "nvidia/nemotron-3-ultra-550b-a55b:free")
+	form.Set("api_key", "sk-or-test")
+	form.Set("base_url", "https://openrouter.ai/api/v1/")
+	form.Set("transport", "chat_completions")
+	form.Set("preset_slug", "openrouter")
+	form.Set("default_max_tokens", "16000")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	configs, err := llmConfigRepo.List(context.Background())
+	if err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	var found *models.LLMConfig
+	for i := range configs {
+		if configs[i].Name == "OpenRouter Nemotron" {
+			found = &configs[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("created model not found")
+	}
+	if found.Provider != models.ProviderOpenAICompatible || found.AuthMethod != models.AuthMethodAPIKey {
+		t.Fatalf("provider/auth = %s/%s", found.Provider, found.AuthMethod)
+	}
+	if found.Model != "nvidia/nemotron-3-ultra-550b-a55b:free" {
+		t.Fatalf("model = %q", found.Model)
+	}
+	if found.BaseURL != "https://openrouter.ai/api/v1/" || found.Transport != "chat_completions" || found.PresetSlug != "openrouter" || found.DefaultMaxTokens != 16000 {
+		t.Fatalf("compatible fields not saved: %+v", found)
+	}
+}
+
+func TestCreateModel_OpenAICompatibleRejectsInvalidBaseURL(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("name", "Bad Compatible")
+	form.Set("provider", "openai_compatible")
+	form.Set("model", "model")
+	form.Set("api_key", "sk-test")
+	form.Set("base_url", "ftp://example.com/v1")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateModel_OpenAICompatibleRejectsPublicHTTPBaseURL(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("name", "Public HTTP Compatible")
+	form.Set("provider", "openai_compatible")
+	form.Set("model", "model")
+	form.Set("api_key", "sk-test")
+	form.Set("base_url", "http://example.com/v1")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateModel_OpenAICompatibleAllowsLocalHTTPBaseURL(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("name", "Local Compatible")
+	form.Set("provider", "openai_compatible")
+	form.Set("model", "local-model")
+	form.Set("base_url", "http://127.0.0.1:8000/v1")
+	form.Set("preset_slug", "vllm")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+	configs, err := llmConfigRepo.List(context.Background())
+	if err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	for i := range configs {
+		if configs[i].Name == "Local Compatible" {
+			if configs[i].BaseURL != "http://127.0.0.1:8000/v1" {
+				t.Fatalf("base_url = %q", configs[i].BaseURL)
+			}
+			return
+		}
+	}
+	t.Fatal("created model not found")
 }
 
 func TestCreateModel_AnthropicAPIKey(t *testing.T) {
@@ -440,6 +641,145 @@ func TestCreateModel_OllamaWithCustomModel(t *testing.T) {
 	// Custom model name should override the dropdown selection
 	if found.Model != "my-fine-tuned:latest" {
 		t.Errorf("model = %q, want %q", found.Model, "my-fine-tuned:latest")
+	}
+}
+
+func TestUpdateModel_SwitchToOpenAICompatibleBlankAPIKeyClearsStaleCredential(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:       "OpenAI API Key",
+		Provider:   models.ProviderOpenAI,
+		AuthMethod: models.AuthMethodAPIKey,
+		Model:      "gpt-5.4",
+		APIKey:     "sk-openai-old",
+	}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create error: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Local Compatible")
+	form.Set("provider", "openai_compatible")
+	form.Set("model", "local-model")
+	form.Set("api_key", "")
+	form.Set("base_url", "http://127.0.0.1:8000/v1")
+	form.Set("preset_slug", "vllm")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPut, "/models/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get error: %v", err)
+	}
+	if updated.Provider != models.ProviderOpenAICompatible || updated.AuthMethod != models.AuthMethodAPIKey {
+		t.Fatalf("provider/auth = %s/%s", updated.Provider, updated.AuthMethod)
+	}
+	if updated.APIKey != "" {
+		t.Fatalf("expected stale API key cleared on provider switch, got %q", updated.APIKey)
+	}
+	if updated.BaseURL != "http://127.0.0.1:8000/v1" {
+		t.Fatalf("base_url = %q", updated.BaseURL)
+	}
+}
+
+func TestUpdateModel_SwitchProviderWithoutAPIKeyFieldClearsStaleCredential(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:       "OpenAI API Key",
+		Provider:   models.ProviderOpenAI,
+		AuthMethod: models.AuthMethodAPIKey,
+		Model:      "gpt-5.4",
+		APIKey:     "sk-openai-old",
+	}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create error: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Local Compatible")
+	form.Set("provider", "openai_compatible")
+	form.Set("model", "local-model")
+	form.Set("base_url", "http://127.0.0.1:8000/v1")
+	form.Set("preset_slug", "vllm")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPut, "/models/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get error: %v", err)
+	}
+	if updated.APIKey != "" {
+		t.Fatalf("expected stale API key cleared when key field omitted on provider switch, got %q", updated.APIKey)
+	}
+}
+
+func TestUpdateModel_SwitchAwayFromOpenAICompatibleClearsEndpointFields(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:       "Compatible",
+		Provider:   models.ProviderOpenAICompatible,
+		AuthMethod: models.AuthMethodAPIKey,
+		Model:      "provider/model",
+		APIKey:     "sk-old",
+		BaseURL:    "https://openrouter.ai/api/v1/",
+		Transport:  "chat_completions",
+		PresetSlug: "openrouter",
+	}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create error: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Compatible")
+	form.Set("provider", "anthropic")
+	form.Set("anthropic_auth_type", "api_key")
+	form.Set("model", "claude-sonnet-4-5-20250929")
+	form.Set("api_key", "sk-ant-new")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPut, "/models/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get error: %v", err)
+	}
+	if updated.Provider != models.ProviderAnthropic {
+		t.Fatalf("provider = %q", updated.Provider)
+	}
+	if updated.BaseURL != "" || updated.Transport != "" || updated.PresetSlug != "" {
+		t.Fatalf("expected compatible fields cleared, got %+v", updated)
 	}
 }
 

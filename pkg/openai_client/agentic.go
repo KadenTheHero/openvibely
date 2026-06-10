@@ -95,6 +95,7 @@ type AgenticResponse struct {
 	Model             string
 	InputTokens       int
 	OutputTokens      int
+	TotalTokens       int
 	CachedInputTokens int
 	ReasoningTokens   int
 	StopReason        string
