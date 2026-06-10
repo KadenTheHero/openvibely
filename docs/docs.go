@@ -299,7 +299,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "default": "30d",
-                        "description": "Convenience range: 7d, 30d, 90d, all",
+                        "description": "Convenience range: 7d, 30d, 90d, 365d, all",
                         "name": "range",
                         "in": "query"
                     },
@@ -426,7 +426,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "default": "30d",
-                        "description": "Convenience range: 7d, 30d, month, all",
+                        "description": "Convenience range: 7d, 30d, 90d, 365d, month, all",
                         "name": "range",
                         "in": "query"
                     },

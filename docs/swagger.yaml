@@ -995,7 +995,7 @@ paths:
         name: project_id
         type: string
       - default: 30d
-        description: 'Convenience range: 7d, 30d, 90d, all'
+        description: 'Convenience range: 7d, 30d, 90d, 365d, all'
         in: query
         name: range
         type: string
@@ -1081,7 +1081,7 @@ paths:
         name: provider
         type: string
       - default: 30d
-        description: 'Convenience range: 7d, 30d, month, all'
+        description: 'Convenience range: 7d, 30d, 90d, 365d, month, all'
         in: query
         name: range
         type: string

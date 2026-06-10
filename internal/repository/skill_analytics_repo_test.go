@@ -73,6 +73,7 @@ func TestSkillAnalyticsRepo_AgentUsageHeatmap(t *testing.T) {
 		skillEvent(projectID, "turn-1", "agent-a", "global", "provider_adapter", "selected", "skill_curator", now),
 		skillEvent(projectID, "turn-1", "agent-a", "global", "provider_adapter", "loaded", "skill_curator", now),
 		skillEvent(projectID, "turn-1", "agent-a", "global", "provider_adapter", "viewed", "manual", now),
+		skillEvent(projectID, "turn-1", "agent-a", "global", "provider_adapter", "edited", "manual", now),
 		skillEvent(projectID, "turn-2", "agent-a", "project", "frontend", "selected", "skill_curator", now),
 	)
 
@@ -87,7 +88,7 @@ func TestSkillAnalyticsRepo_AgentUsageHeatmap(t *testing.T) {
 	if cell == nil {
 		t.Fatalf("provider cell missing: %+v", heatmap.Cells)
 	}
-	if cell.ActivityCount != 3 || cell.SelectedCount != 1 || cell.LoadedCount != 1 || cell.ViewedCount != 1 {
+	if cell.ActivityCount != 3 || cell.SelectedCount != 1 || cell.LoadedCount != 1 || cell.ViewedCount != 1 || cell.EditedCount != 1 {
 		t.Fatalf("provider cell = %+v", cell)
 	}
 }

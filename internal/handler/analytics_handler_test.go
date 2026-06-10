@@ -190,7 +190,6 @@ func TestParseUsageFilter_Defaults(t *testing.T) {
 	}
 }
 
-
 func TestParseUsageFilter_ExplicitDates(t *testing.T) {
 	filter := parseUsageFilter(echoContext("/api/analytics/usage?date_from=2024-01-01&date_to=2024-01-31"))
 	if filter.DateFrom.IsZero() {
@@ -230,5 +229,21 @@ func TestParseUsageFilter_MonthRange(t *testing.T) {
 	filter := parseUsageFilter(echoContext("/api/analytics/usage?range=month"))
 	if filter.DateFrom.Day() != 1 {
 		t.Errorf("expected DateFrom day=1 for month range, got day=%d", filter.DateFrom.Day())
+	}
+}
+
+func TestParseUsageFilter_YearRange(t *testing.T) {
+	filter := parseUsageFilter(echoContext("/api/analytics/usage?range=365d"))
+	diff := filter.DateTo.Sub(filter.DateFrom)
+	if diff < 364*24*time.Hour || diff > 366*24*time.Hour {
+		t.Errorf("expected ~365d date range, got %v", diff)
+	}
+}
+
+func TestParseSkillAnalyticsFilter_YearRange(t *testing.T) {
+	filter := parseSkillAnalyticsFilter(echoContext("/api/analytics/skills?range=365d"))
+	diff := filter.DateTo.Sub(filter.DateFrom)
+	if diff < 364*24*time.Hour || diff > 366*24*time.Hour {
+		t.Errorf("expected ~365d date range, got %v", diff)
 	}
 }

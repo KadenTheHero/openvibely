@@ -57,7 +57,7 @@ func (h *Handler) Analytics(c echo.Context) error {
 // @Produce json
 // @Param project_id query string false "Project ID filter"
 // @Param provider query string false "Provider filter"
-// @Param range query string false "Convenience range: 7d, 30d, month, all" default(30d)
+// @Param range query string false "Convenience range: 7d, 30d, 90d, 365d, month, all" default(30d)
 // @Param group_by query string false "Usage rate grouping: hour, day, week, month" default(day)
 // @Param date_from query string false "Optional start datetime filter"
 // @Param date_to query string false "Optional end datetime filter"
@@ -83,7 +83,7 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 // @Tags analytics
 // @Produce json
 // @Param project_id query string false "Project ID filter"
-// @Param range query string false "Convenience range: 7d, 30d, 90d, all" default(30d)
+// @Param range query string false "Convenience range: 7d, 30d, 90d, 365d, all" default(30d)
 // @Param agent_id query string false "Agent ID filter"
 // @Param surface query string false "Surface filter"
 // @Param skill_scope query string false "Skill scope filter"
@@ -115,16 +115,12 @@ func parseSkillAnalyticsFilter(c echo.Context) repository.SkillAnalyticsFilter {
 		Limit:      10,
 	}
 	now := time.Now()
-	switch c.QueryParam("range") {
-	case "7d":
-		filter.DateFrom = now.AddDate(0, 0, -7)
+	if days, ok := analyticsRangeDays(c.QueryParam("range")); ok {
+		filter.DateFrom = now.AddDate(0, 0, -days)
 		filter.DateTo = now
-	case "90d":
-		filter.DateFrom = now.AddDate(0, 0, -90)
-		filter.DateTo = now
-	case "all":
+	} else if c.QueryParam("range") == "all" {
 		// no date bounds
-	default:
+	} else {
 		filter.DateFrom = now.AddDate(0, 0, -30)
 		filter.DateTo = now
 	}
@@ -205,22 +201,35 @@ func parseUsageFilter(c echo.Context) repository.UsageFilter {
 		// Use local time so the range boundaries match the user's calendar day,
 		// consistent with how the Schedules page uses time.Local / time.Now().
 		now := time.Now()
-		switch c.QueryParam("range") {
-		case "7d":
-			filter.DateFrom = now.AddDate(0, 0, -7)
+		if days, ok := analyticsRangeDays(c.QueryParam("range")); ok {
+			filter.DateFrom = now.AddDate(0, 0, -days)
 			filter.DateTo = now
-		case "month":
-			// Start of the current local month at midnight local time.
-			filter.DateFrom = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
-			filter.DateTo = now
-		case "all":
-			// no date bounds
-		default:
-			filter.DateFrom = now.AddDate(0, 0, -30)
-			filter.DateTo = now
+		} else {
+			switch c.QueryParam("range") {
+			case "month":
+				// Start of the current local month at midnight local time.
+				filter.DateFrom = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
+				filter.DateTo = now
+			case "all":
+				// no date bounds
+			default:
+				filter.DateFrom = now.AddDate(0, 0, -30)
+				filter.DateTo = now
+			}
 		}
 	}
 	return filter
+}
+
+func analyticsRangeDays(value string) (int, bool) {
+	if !strings.HasSuffix(value, "d") {
+		return 0, false
+	}
+	days, err := strconv.Atoi(strings.TrimSuffix(value, "d"))
+	if err != nil || days <= 0 {
+		return 0, false
+	}
+	return days, true
 }
 
 func parseAnalyticsTime(value string) time.Time {

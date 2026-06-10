@@ -199,7 +199,7 @@ func (r *SkillAnalyticsRepo) GetAgentUsage(ctx context.Context, filter SkillAnal
 		       SUM(CASE WHEN e.event_type = 'loaded' THEN 1 ELSE 0 END) loaded_count,
 		       SUM(CASE WHEN e.event_type = 'viewed' THEN 1 ELSE 0 END) viewed_count,
 		       SUM(CASE WHEN e.event_type = 'edited' THEN 1 ELSE 0 END) edited_count,
-		       COUNT(*) activity_count
+		       SUM(CASE WHEN e.event_type IN ('selected','loaded','viewed') THEN 1 ELSE 0 END) activity_count
 		FROM skill_analytics_events e
 		LEFT JOIN agents a ON a.id = e.agent_id
 		`+where+` AND e.skill_handle IN (`+inClause+`)

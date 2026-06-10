@@ -37,6 +37,7 @@ templ analyticsContent(currentProject *models.Project) {
 								<option value="7">Last 7 Days</option>
 								<option value="30" selected>Last 30 Days</option>
 								<option value="90">Last 90 Days</option>
+								<option value="365">Last Year</option>
 								<option value="all">All Time</option>
 							</select>
 						</div>
@@ -404,7 +405,7 @@ templ analyticsContent(currentProject *models.Project) {
 									const cells = heatmap.cells || [];
 									if (agents.length === 0 || skills.length === 0) { container.innerHTML = '<p class="text-center opacity-50 py-4">No agent skill activity yet</p>'; return; }
 									const byKey = new Map(cells.map(c => [(c.agent_id || '') + '\x00' + c.skill_handle, c]));
-									container.innerHTML = '<table class="table table-sm"><thead><tr><th>Agent</th>' + skills.map(s => '<th><code>' + escapeHTML(s) + '</code></th>').join('') + '</tr></thead><tbody>' + agents.map(agent => '<tr><td>' + escapeHTML(agent.agent_name || agent.agent_id || 'Unassigned') + '</td>' + skills.map(skill => { const cell = byKey.get((agent.agent_id || '') + '\x00' + skill) || {}; const value = cell.activity_count || 0; const shade = value === 0 ? 'opacity-30' : (value < 3 ? 'opacity-60' : 'opacity-100'); const title = 'selected: ' + (cell.selected_count || 0) + ' loaded: ' + (cell.loaded_count || 0) + ' viewed: ' + (cell.viewed_count || 0) + ' edited: ' + (cell.edited_count || 0); return '<td title="' + escapeHTML(title) + '"><span class="font-mono ' + shade + '">' + (value === 0 ? '░' : '█') + '</span> ' + formatNumber(value) + '</td>'; }).join('') + '</tr>').join('') + '</tbody></table>';
+									container.innerHTML = '<table class="table table-sm"><thead><tr><th>Agent</th>' + skills.map(s => '<th><code>' + escapeHTML(s) + '</code></th>').join('') + '</tr></thead><tbody>' + agents.map(agent => '<tr><td>' + escapeHTML(agent.agent_name || agent.agent_id || 'Unassigned') + '</td>' + skills.map(skill => { const cell = byKey.get((agent.agent_id || '') + '\x00' + skill) || {}; const value = (cell.selected_count || 0) + (cell.loaded_count || 0) + (cell.viewed_count || 0); const shade = value === 0 ? 'opacity-30' : (value < 3 ? 'opacity-60' : 'opacity-100'); const title = 'selected: ' + (cell.selected_count || 0) + ' loaded: ' + (cell.loaded_count || 0) + ' viewed: ' + (cell.viewed_count || 0) + ' edited: ' + (cell.edited_count || 0); return '<td title="' + escapeHTML(title) + '"><span class="font-mono ' + shade + '">' + (value === 0 ? '░' : '█') + '</span> ' + formatNumber(value) + '</td>'; }).join('') + '</tr>').join('') + '</tbody></table>';
 								}
 
 								function renderUnderusedSkills(rows) {
@@ -454,6 +455,7 @@ templ analyticsContent(currentProject *models.Project) {
 							const range = document.getElementById('dateRange').value;
 							if (range === '7') return '7d';
 							if (range === '90') return '90d';
+							if (range === '365') return '365d';
 							if (range === 'all') return 'all';
 							return '30d';
 						}
