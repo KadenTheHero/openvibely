@@ -204,6 +204,24 @@ func (r *ThreadInputRepo) GetByID(ctx context.Context, id string) (*models.Threa
 	return &input, nil
 }
 
+func (r *ThreadInputRepo) BindPreExecutionQueuedTaskInputs(ctx context.Context, taskID, executionID string) error {
+	if taskID == "" || executionID == "" {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE thread_inputs
+		SET run_execution_id = ?, updated_at = datetime('now')
+		WHERE scope = 'task_thread'
+		  AND task_id = ?
+		  AND input_mode = 'queued'
+		  AND input_status = 'pending'
+		  AND COALESCE(run_execution_id, '') = ''`, executionID, taskID)
+	if err != nil {
+		return fmt.Errorf("binding pre-execution queued task inputs: %w", err)
+	}
+	return nil
+}
+
 func (r *ThreadInputRepo) ListPendingForTask(ctx context.Context, taskID string) ([]models.ThreadInput, error) {
 	// Exclude prepared/in-flight steering rows (expected_turn_id cleared by PreparePendingTextSteering).
 	// These rows have been sent to the provider but not yet committed; the SSE applied event already

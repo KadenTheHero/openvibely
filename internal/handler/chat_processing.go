@@ -3312,6 +3312,35 @@ func hasPendingImages(sessionID string) bool {
 	return false
 }
 
+func (h *Handler) taskHasStartingFirstTurn(ctx context.Context, task *models.Task) (bool, error) {
+	if task == nil || task.ID == "" || h.execRepo == nil {
+		return false, nil
+	}
+	if task.Category != models.CategoryActive || (task.Status != models.StatusPending && task.Status != models.StatusQueued && task.Status != models.StatusRunning) {
+		return false, nil
+	}
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	if err != nil {
+		return false, err
+	}
+	return len(execs) == 0, nil
+}
+
+func (h *Handler) bindQueuedTaskInputToActiveExecutionIfAvailable(ctx context.Context, input *models.ThreadInput) error {
+	if input == nil || input.RunExecutionID != "" || h.execRepo == nil || h.threadInputRepo == nil {
+		return nil
+	}
+	active, err := h.execRepo.FindActiveTaskExecution(ctx, input.TaskID, "")
+	if err != nil || active == nil {
+		return err
+	}
+	if err := h.threadInputRepo.BindPreExecutionQueuedTaskInputs(ctx, input.TaskID, active.ID); err != nil {
+		return err
+	}
+	input.RunExecutionID = active.ID
+	return nil
+}
+
 func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, origin, originAgent string) (*models.ThreadInput, error) {
 	if h.threadInputRepo == nil {
 		return nil, fmt.Errorf("thread input queue is unavailable")
@@ -3346,6 +3375,10 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 			activeExecutionID = active.ID
 		}
 	}
+	queueBehindFirstTurn, err := h.taskHasStartingFirstTurn(ctx, task)
+	if err != nil {
+		return nil, err
+	}
 	queued := &models.ThreadInput{
 		Scope:          models.ThreadInputScopeTask,
 		ProjectID:      task.ProjectID,
@@ -3360,6 +3393,9 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 	}
 	if err := h.threadInputRepo.CreateQueued(ctx, queued); err != nil {
 		return nil, err
+	}
+	if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(ctx, queued); err != nil {
+		applog.Infof("[handler] enqueueTaskThreadInput task=%s input=%s active execution bind skipped: %v", task.ID, queued.ID, err)
 	}
 	if h.broadcaster != nil {
 		h.broadcaster.Publish(events.TaskEvent{
@@ -3381,7 +3417,9 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 			})
 		}
 	}
-	go h.PromoteQueuedTaskThreadInput(task.ID)
+	if !queueBehindFirstTurn || queued.RunExecutionID != "" {
+		go h.PromoteQueuedTaskThreadInput(task.ID)
+	}
 	return queued, nil
 }
 

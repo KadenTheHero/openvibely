@@ -330,6 +330,11 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating execution: %v", err)
 		return nil, llmcontracts.ChatContext{}, fmt.Errorf("creating execution: %w", err)
 	}
+	if s.threadInputRepo != nil {
+		if err := s.threadInputRepo.BindPreExecutionQueuedTaskInputs(ctx, task.ID, exec.ID); err != nil {
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error binding pre-execution queued inputs: %v", err)
+		}
+	}
 	applog.Infof("[agent-svc] ExecuteTaskWithAgent execution=%s created, calling LLM...", exec.ID)
 
 	// Load attachments for the task

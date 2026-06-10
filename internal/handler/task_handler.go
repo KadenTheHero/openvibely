@@ -1717,15 +1717,24 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		applog.Infof("[handler] TaskThreadSend active execution check failed task=%s: %v", taskID, activeErr)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
 	}
-	if activeExec != nil {
+	queueBehindFirstTurn, queueStateErr := h.taskHasStartingFirstTurn(c.Request().Context(), task)
+	if queueStateErr != nil {
+		applog.Infof("[handler] TaskThreadSend first-turn state check failed task=%s: %v", taskID, queueStateErr)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check task queue")
+	}
+	if activeExec != nil || queueBehindFirstTurn {
 		if h.threadInputRepo == nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
+		}
+		runExecutionID := ""
+		if activeExec != nil {
+			runExecutionID = activeExec.ID
 		}
 		queued := &models.ThreadInput{
 			Scope:               models.ThreadInputScopeTask,
 			ProjectID:           task.ProjectID,
 			TaskID:              taskID,
-			RunExecutionID:      activeExec.ID,
+			RunExecutionID:      runExecutionID,
 			AgentConfigID:       agent.ID,
 			InputMode:           models.ThreadInputModeQueued,
 			InputStatus:         models.ThreadInputPending,
@@ -1736,6 +1745,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
 			applog.Infof("[handler] TaskThreadSend error creating queued input: %v", err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue follow-up")
+		}
+		if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(c.Request().Context(), queued); err != nil {
+			applog.Infof("[handler] TaskThreadSend task=%s input=%s active execution bind skipped: %v", taskID, queued.ID, err)
 		}
 		return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID)))
 	}

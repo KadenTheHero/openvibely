@@ -1252,6 +1252,91 @@ func waitForExecutionTerminal(t *testing.T, h *Handler, execID string) {
 	}, 2*time.Second, 25*time.Millisecond)
 }
 
+func TestHandler_InitialTaskTurnQueuesRuntimeFollowupBeforeExecutionExistsAndPromotes(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Pre Execution Queued Followup Project")
+	task := createTask(t, h, project.ID, "Pre Execution Queued Followup Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusPending
+		tk.Prompt = "tell me a story about a duck"
+		tk.AgentID = &agent.ID
+	})
+
+	queued, err := h.enqueueTaskThreadInput(ctx, task.ID, "1+1=?", models.TaskOriginWeb, "")
+	require.NoError(t, err)
+	require.Empty(t, queued.RunExecutionID)
+	require.Equal(t, models.ThreadInputPending, queued.InputStatus)
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, execs, "pre-execution queueing must not create a follow-up execution")
+
+	started := make(chan testutil.MockLLMCall, 2)
+	releaseInitial := make(chan struct{})
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	mock.OnCall = func(ctx context.Context, call testutil.MockLLMCall) {
+		started <- call
+		if call.Prompt == "tell me a story about a duck" {
+			select {
+			case <-releaseInitial:
+			case <-ctx.Done():
+			}
+		}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+	h.llmSvc.SetThreadInputRepo(h.threadInputRepo)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.llmSvc.ExecuteTaskWithAgent(ctx, *task, *agent)
+		done <- err
+	}()
+
+	var initial testutil.MockLLMCall
+	select {
+	case initial = <-started:
+		require.Equal(t, "tell me a story about a duck", initial.Prompt)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial task turn")
+	}
+	bound, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.Equal(t, initial.ExecID, bound.RunExecutionID)
+	require.Equal(t, models.ThreadInputPending, bound.InputStatus)
+
+	select {
+	case promoted := <-started:
+		t.Fatalf("queued follow-up promoted before initial turn completed: %#v", promoted)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseInitial)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial task turn to finish")
+	}
+
+	var promoted testutil.MockLLMCall
+	select {
+	case promoted = <-started:
+		require.Equal(t, "1+1=?", promoted.Prompt)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued follow-up to promote")
+	}
+	stored, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+	require.NotEqual(t, initial.ExecID, stored.RunExecutionID)
+	waitForExecutionTerminal(t, h, promoted.ExecID)
+}
+
 func TestHandler_InitialTaskTurnQueuesFollowupBeforeFirstOutputAndPromotes(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil

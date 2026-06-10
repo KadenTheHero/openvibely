@@ -3099,6 +3099,37 @@ func TestHandler_TaskThreadSend_CancelledTaskIgnoresAndRepairsStaleRunningExecut
 	assert.Equal(t, "follow up after cancelled task", execs[1].PromptSent)
 }
 
+func TestHandler_TaskThreadSend_QueuesDuringStartingFirstTurnBeforeExecutionExists(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Starting First Turn Project")
+	task := createTask(t, h, project.ID, "Thread Starting First Turn Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.Prompt = "tell me a story about a duck"
+		tk.AgentID = &agent.ID
+	})
+
+	form := url.Values{}
+	form.Set("message", "1+1=?")
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "1+1=?")
+	assertContains(t, rec, `data-input-mode="queued"`)
+	assertContains(t, rec, `hx-swap-oob="beforeend"`)
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, execs, "follow-up must not create an execution while the first turn is still in lifecycle setup")
+
+	inputs, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, "1+1=?", inputs[0].Content)
+	assert.Empty(t, inputs[0].RunExecutionID, "pre-execution queued input is bound after the initial execution is created")
+}
+
 func TestHandler_TaskThreadSend_QueuesBehindActiveTurn(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

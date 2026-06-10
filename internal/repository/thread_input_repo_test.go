@@ -54,6 +54,51 @@ func TestThreadInputRepo_QueuedFIFOAndApply(t *testing.T) {
 	}
 }
 
+func TestThreadInputRepo_BindPreExecutionQueuedTaskInputsOnlyBindsUnguardedPendingRows(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	initial := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "initial"}
+	if err := execRepo.Create(ctx, initial); err != nil {
+		t.Fatalf("create initial execution: %v", err)
+	}
+	previous := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "previous"}
+	if err := execRepo.Create(ctx, previous); err != nil {
+		t.Fatalf("create previous execution: %v", err)
+	}
+
+	preExecution := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued before execution exists"}
+	alreadyGuarded := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: previous.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "already guarded"}
+	if err := repo.CreateQueued(ctx, preExecution); err != nil {
+		t.Fatalf("CreateQueued preExecution: %v", err)
+	}
+	if err := repo.CreateQueued(ctx, alreadyGuarded); err != nil {
+		t.Fatalf("CreateQueued alreadyGuarded: %v", err)
+	}
+
+	if err := repo.BindPreExecutionQueuedTaskInputs(ctx, task.ID, initial.ID); err != nil {
+		t.Fatalf("BindPreExecutionQueuedTaskInputs: %v", err)
+	}
+	bound, err := repo.GetByID(ctx, preExecution.ID)
+	if err != nil {
+		t.Fatalf("GetByID preExecution: %v", err)
+	}
+	if bound.RunExecutionID != initial.ID {
+		t.Fatalf("pre-execution input guard = %q, want %q", bound.RunExecutionID, initial.ID)
+	}
+	guarded, err := repo.GetByID(ctx, alreadyGuarded.ID)
+	if err != nil {
+		t.Fatalf("GetByID alreadyGuarded: %v", err)
+	}
+	if guarded.RunExecutionID != previous.ID {
+		t.Fatalf("already guarded input was retargeted to %q, want %q", guarded.RunExecutionID, previous.ID)
+	}
+}
+
 func TestThreadInputRepo_ClaimQueuedValidatesPendingSurface(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
