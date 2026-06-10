@@ -739,10 +739,12 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetGitHubService(githubSvc)
 	h.SetSlackService(slackSvc)
 	slackSvc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
+	slackSvc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 	slackSvc.SetChannelChatRunner(h.StartChannelChatRun)
 	slackSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
 	if telegramSvc != nil {
 		telegramSvc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
+		telegramSvc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 		telegramSvc.SetChannelChatRunner(h.StartChannelChatRun)
 		telegramSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
 		telegramSvc.SetChatBroadcaster(chatBroadcaster)

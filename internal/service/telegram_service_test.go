@@ -1365,6 +1365,37 @@ func TestTelegramService_ProcessSendToTask_QueuesWhenTaskActive(t *testing.T) {
 	assert.Equal(t, int64(12345), inputs[0].TelegramChatID)
 }
 
+func TestTelegramService_ProcessSendToTask_QueuesDuringStartingFirstTurnBeforeExecutionExists(t *testing.T) {
+	svc, projectRepo, taskRepo := newTestTelegramService(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Starting First Turn Project", RepoPath: "/tmp/test", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agents, err := svc.llmConfigRepo.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, agents)
+	task := &models.Task{Title: "Starting task", Prompt: "tell me a story about a duck", Category: models.CategoryActive, Status: models.StatusPending, ProjectID: project.ID, AgentID: &agents[0].ID}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	runnerCalled := false
+	svc.SetChannelTaskRunner(func(context.Context, ChannelTaskRunRequest) {
+		runnerCalled = true
+	})
+
+	result, err := svc.executeSendToTask(ctx, project.ID, SendToTaskRequest{TaskID: task.ID, Message: "1+1=?"}, 12345)
+	require.NoError(t, err)
+	require.Contains(t, result, "Queued message to task")
+	require.False(t, runnerCalled, "pre-execution first-turn send must not start a follow-up runner")
+	execs, err := svc.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, execs)
+	inputs, err := svc.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	require.Equal(t, "1+1=?", inputs[0].Content)
+	require.Empty(t, inputs[0].RunExecutionID)
+	require.Equal(t, models.TaskOriginTelegram, inputs[0].Source)
+	require.Equal(t, int64(12345), inputs[0].TelegramChatID)
+}
+
 func TestTelegramService_ResolveTaskReference_ByID(t *testing.T) {
 	svc, projectRepo, taskRepo := newTestTelegramService(t)
 	ctx := context.Background()
@@ -2676,9 +2707,9 @@ func TestTelegramService_GoalTools_SetGetClearPauseResume(t *testing.T) {
 	require.NoError(t, taskRepo.Create(ctx, task))
 
 	svc := &TelegramService{
-		taskSvc:     taskSvc,
-		taskRepo:    taskRepo,
-		taskGoalSvc: goalSvc,
+		taskSvc:      taskSvc,
+		taskRepo:     taskRepo,
+		taskGoalSvc:  goalSvc,
 		userProjects: make(map[int64]string),
 	}
 

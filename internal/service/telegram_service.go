@@ -42,34 +42,35 @@ var telegramUploadsDir = "uploads" // same as handler's uploadsDir
 // It acts as a proxy to the /chat page orchestrator — every message sent to the bot
 // is forwarded to the same chat assistant that powers the /chat web UI.
 type TelegramService struct {
-	bot                     *tgbotapi.BotAPI
-	taskSvc                 *TaskService
-	projectRepo             *repository.ProjectRepo
-	llmConfigRepo           *repository.LLMConfigRepo
-	taskRepo                *repository.TaskRepo
-	execRepo                *repository.ExecutionRepo
-	scheduleRepo            *repository.ScheduleRepo
-	chatAttachmentRepo      *repository.ChatAttachmentRepo
-	threadInputRepo         *repository.ThreadInputRepo
-	telegramAuthRepo        *repository.TelegramAuthRepo
-	telegramUserProjectRepo *repository.TelegramUserProjectRepo
-	settingsRepo            *repository.SettingsRepo
-	customPersonalityRepo   *repository.CustomPersonalityRepo
-	agentRepo               *repository.AgentRepo
-	alertSvc                *AlertService
-	taskGoalSvc             *TaskGoalService
-	llmSvc                  *LLMService
-	workerSvc               *WorkerService
-	chatBroadcaster         *events.ChatBroadcaster
-	queuedTurnPromoter      func(projectID string)
-	channelChatRunner       ChannelChatRunner
-	channelTaskRunner       ChannelTaskRunner
-	sendMessageFunc         func(chatID int64, text string)
-	editMessageFunc         func(chatID int64, messageID int, text string)
-	userProjects            map[int64]string // Maps Telegram user ID to active project ID
-	ctx                     context.Context
-	cancel                  context.CancelFunc
-	running                 bool
+	bot                      *tgbotapi.BotAPI
+	taskSvc                  *TaskService
+	projectRepo              *repository.ProjectRepo
+	llmConfigRepo            *repository.LLMConfigRepo
+	taskRepo                 *repository.TaskRepo
+	execRepo                 *repository.ExecutionRepo
+	scheduleRepo             *repository.ScheduleRepo
+	chatAttachmentRepo       *repository.ChatAttachmentRepo
+	threadInputRepo          *repository.ThreadInputRepo
+	telegramAuthRepo         *repository.TelegramAuthRepo
+	telegramUserProjectRepo  *repository.TelegramUserProjectRepo
+	settingsRepo             *repository.SettingsRepo
+	customPersonalityRepo    *repository.CustomPersonalityRepo
+	agentRepo                *repository.AgentRepo
+	alertSvc                 *AlertService
+	taskGoalSvc              *TaskGoalService
+	llmSvc                   *LLMService
+	workerSvc                *WorkerService
+	chatBroadcaster          *events.ChatBroadcaster
+	queuedTurnPromoter       func(projectID string)
+	queuedTaskThreadPromoter func(taskID string)
+	channelChatRunner        ChannelChatRunner
+	channelTaskRunner        ChannelTaskRunner
+	sendMessageFunc          func(chatID int64, text string)
+	editMessageFunc          func(chatID int64, messageID int, text string)
+	userProjects             map[int64]string // Maps Telegram user ID to active project ID
+	ctx                      context.Context
+	cancel                   context.CancelFunc
+	running                  bool
 }
 
 // NewTelegramService creates a new Telegram bot service
@@ -132,6 +133,10 @@ func (s *TelegramService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
 
 func (s *TelegramService) SetQueuedTurnPromoter(promoter func(projectID string)) {
 	s.queuedTurnPromoter = promoter
+}
+
+func (s *TelegramService) SetQueuedTaskThreadPromoter(promoter func(taskID string)) {
+	s.queuedTaskThreadPromoter = promoter
 }
 
 func (s *TelegramService) SetChannelChatRunner(runner ChannelChatRunner) {
@@ -1299,6 +1304,61 @@ func (s *TelegramService) executeViewTaskThread(ctx context.Context, projectID s
 	return strings.TrimSpace(formatThreadTranscript(task, executions, req.Offset, req.Limit)), nil
 }
 
+func (s *TelegramService) taskHasStartingFirstTurn(ctx context.Context, task *models.Task) (bool, error) {
+	if task == nil || task.ID == "" || s.execRepo == nil {
+		return false, nil
+	}
+	if task.Category != models.CategoryActive || (task.Status != models.StatusPending && task.Status != models.StatusQueued && task.Status != models.StatusRunning) {
+		return false, nil
+	}
+	execs, err := s.execRepo.ListByTaskChronological(ctx, task.ID)
+	if err != nil {
+		return false, err
+	}
+	return len(execs) == 0, nil
+}
+
+func (s *TelegramService) activeOrStartingTaskTurn(ctx context.Context, task *models.Task) (*models.Execution, bool, error) {
+	if s.execRepo == nil {
+		return nil, false, nil
+	}
+	activeExec, err := s.execRepo.FindActiveTaskExecution(ctx, task.ID, "")
+	if err != nil {
+		return nil, false, err
+	}
+	if activeExec != nil {
+		return activeExec, false, nil
+	}
+	starting, err := s.taskHasStartingFirstTurn(ctx, task)
+	return nil, starting, err
+}
+
+func (s *TelegramService) bindQueuedTaskInputToActiveExecutionIfAvailable(ctx context.Context, input *models.ThreadInput) error {
+	if input == nil || input.RunExecutionID != "" || s.execRepo == nil || s.threadInputRepo == nil {
+		return nil
+	}
+	active, err := s.execRepo.FindActiveTaskExecution(ctx, input.TaskID, "")
+	if err != nil || active == nil {
+		return err
+	}
+	if err := s.threadInputRepo.BindPreExecutionQueuedTaskInputs(ctx, input.TaskID, active.ID); err != nil {
+		return err
+	}
+	input.RunExecutionID = active.ID
+	return nil
+}
+
+func (s *TelegramService) shouldPromotePreExecutionQueuedInput(ctx context.Context, task *models.Task, input *models.ThreadInput) (bool, error) {
+	if task == nil || input == nil || input.RunExecutionID != "" {
+		return false, nil
+	}
+	starting, err := s.taskHasStartingFirstTurn(ctx, task)
+	if err != nil || starting {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *TelegramService) executeSendToTask(ctx context.Context, projectID string, req SendToTaskRequest, chatID int64) (string, error) {
 	if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
 		return "", fmt.Errorf("send_to_task requires task_id or title")
@@ -1312,9 +1372,17 @@ func (s *TelegramService) executeSendToTask(ctx context.Context, projectID strin
 		return "", err
 	}
 
-	if activeExec, activeErr := s.execRepo.FindActiveTaskExecution(ctx, task.ID, ""); activeErr != nil {
+	activeExec, queueBehindFirstTurn, activeErr := s.activeOrStartingTaskTurn(ctx, task)
+	if activeErr != nil {
 		return "", fmt.Errorf("checking active turn for task %q: %w", task.Title, activeErr)
-	} else if activeExec != nil {
+	}
+	if activeExec == nil && !queueBehindFirstTurn {
+		activeExec, _, activeErr = s.activeOrStartingTaskTurn(ctx, task)
+		if activeErr != nil {
+			return "", fmt.Errorf("checking active turn for task %q: %w", task.Title, activeErr)
+		}
+	}
+	if activeExec != nil || queueBehindFirstTurn {
 		if s.threadInputRepo == nil {
 			return fmt.Sprintf("Task %q is currently running. Queue is unavailable, so wait for it to finish before sending a message.", task.Title), nil
 		}
@@ -1322,11 +1390,15 @@ func (s *TelegramService) executeSendToTask(ctx context.Context, projectID strin
 		if task.AgentID != nil {
 			agentID = *task.AgentID
 		}
+		runExecutionID := ""
+		if activeExec != nil {
+			runExecutionID = activeExec.ID
+		}
 		queued := &models.ThreadInput{
 			Scope:          models.ThreadInputScopeTask,
 			ProjectID:      task.ProjectID,
 			TaskID:         task.ID,
-			RunExecutionID: activeExec.ID,
+			RunExecutionID: runExecutionID,
 			AgentConfigID:  agentID,
 			InputMode:      models.ThreadInputModeQueued,
 			InputStatus:    models.ThreadInputPending,
@@ -1336,6 +1408,16 @@ func (s *TelegramService) executeSendToTask(ctx context.Context, projectID strin
 		}
 		if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
 			return "", fmt.Errorf("queueing message for task %q: %w", task.Title, err)
+		}
+		if queued.RunExecutionID == "" {
+			if err := s.bindQueuedTaskInputToActiveExecutionIfAvailable(ctx, queued); err != nil {
+				applog.Infof("[telegram] send_to_task task=%s input=%s active execution bind skipped: %v", task.ID, queued.ID, err)
+			}
+		}
+		if shouldPromote, promoteErr := s.shouldPromotePreExecutionQueuedInput(ctx, task, queued); promoteErr != nil {
+			applog.Infof("[telegram] send_to_task task=%s input=%s promotion recheck skipped: %v", task.ID, queued.ID, promoteErr)
+		} else if shouldPromote && s.queuedTaskThreadPromoter != nil {
+			go s.queuedTaskThreadPromoter(task.ID)
 		}
 		return fmt.Sprintf("Queued message to task %q [TASK_ID:%s]. It will run after the active thread turn finishes.", task.Title, task.ID), nil
 	}

@@ -3341,6 +3341,17 @@ func (h *Handler) bindQueuedTaskInputToActiveExecutionIfAvailable(ctx context.Co
 	return nil
 }
 
+func (h *Handler) shouldPromotePreExecutionQueuedInput(ctx context.Context, task *models.Task, input *models.ThreadInput) (bool, error) {
+	if task == nil || input == nil || input.RunExecutionID != "" {
+		return false, nil
+	}
+	starting, err := h.taskHasStartingFirstTurn(ctx, task)
+	if err != nil || starting {
+		return false, err
+	}
+	return true, nil
+}
+
 func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, origin, originAgent string) (*models.ThreadInput, error) {
 	if h.threadInputRepo == nil {
 		return nil, fmt.Errorf("thread input queue is unavailable")
@@ -3417,7 +3428,9 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 			})
 		}
 	}
-	if !queueBehindFirstTurn || queued.RunExecutionID != "" {
+	if shouldPromote, promoteErr := h.shouldPromotePreExecutionQueuedInput(ctx, task, queued); promoteErr != nil {
+		applog.Infof("[handler] enqueueTaskThreadInput task=%s input=%s promotion recheck skipped: %v", task.ID, queued.ID, promoteErr)
+	} else if shouldPromote || !queueBehindFirstTurn || queued.RunExecutionID != "" {
 		go h.PromoteQueuedTaskThreadInput(task.ID)
 	}
 	return queued, nil

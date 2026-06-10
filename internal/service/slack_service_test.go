@@ -657,6 +657,53 @@ func TestSlackService_SendToTaskUsesSharedRunnerAndQueuesActiveTask(t *testing.T
 	require.NotEqual(t, models.TaskOriginSlack, updatedTask.CreatedVia, "queued channel follow-up must not hijack active task reply origin")
 }
 
+func TestSlackService_SendToTask_QueuesDuringStartingFirstTurnBeforeExecutionExists(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	slackUserProjectRepo := repository.NewSlackUserProjectRepo(db)
+	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	project := &models.Project{Name: "Slack Starting First Turn Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, agent)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	workerSvc := NewWorkerService(llmSvc, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
+	svc.SetThreadInputRepo(threadInputRepo)
+	runnerCalled := false
+	svc.SetChannelTaskRunner(func(context.Context, ChannelTaskRunRequest) {
+		runnerCalled = true
+	})
+	task := &models.Task{Title: "Slack starting task", Prompt: "tell me a story about a duck", Category: models.CategoryActive, Status: models.StatusPending, ProjectID: project.ID, AgentID: &agent.ID}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	payload := []byte(fmt.Sprintf(`{"task_id":"%s","message":"1+1=?"}`, task.ID))
+	markerCtx := slackMarkerContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
+	result := svc.slackSendToTask(ctx, project.ID, payload, markerCtx)
+	require.Contains(t, result, "Queued message to task")
+	require.False(t, runnerCalled, "pre-execution first-turn send must not start a follow-up runner")
+	execs, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, execs)
+	inputs, err := threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	require.Equal(t, "1+1=?", inputs[0].Content)
+	require.Empty(t, inputs[0].RunExecutionID)
+	require.Equal(t, models.TaskOriginSlack, inputs[0].Source)
+	require.Equal(t, "C1", inputs[0].SlackChannelID)
+}
+
 func TestSlackService_CompleteExecution_FailurePromotesQueuedChat(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

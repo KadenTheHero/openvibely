@@ -249,6 +249,7 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 			svc.SetThreadInputRepo(h.threadInputRepo)
 		}
 		svc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
+		svc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 		svc.SetChannelChatRunner(h.StartChannelChatRun)
 		svc.SetChannelTaskRunner(h.StartChannelTaskRun)
 		svc.Start()

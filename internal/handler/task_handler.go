@@ -1722,6 +1722,13 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		applog.Infof("[handler] TaskThreadSend first-turn state check failed task=%s: %v", taskID, queueStateErr)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check task queue")
 	}
+	if activeExec == nil && !queueBehindFirstTurn {
+		activeExec, activeErr = h.execRepo.FindActiveTaskExecution(c.Request().Context(), taskID, "")
+		if activeErr != nil {
+			applog.Infof("[handler] TaskThreadSend active execution recheck failed task=%s: %v", taskID, activeErr)
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
+		}
+	}
 	if activeExec != nil || queueBehindFirstTurn {
 		if h.threadInputRepo == nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
@@ -1748,6 +1755,11 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		}
 		if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(c.Request().Context(), queued); err != nil {
 			applog.Infof("[handler] TaskThreadSend task=%s input=%s active execution bind skipped: %v", taskID, queued.ID, err)
+		}
+		if shouldPromote, promoteErr := h.shouldPromotePreExecutionQueuedInput(c.Request().Context(), task, queued); promoteErr != nil {
+			applog.Infof("[handler] TaskThreadSend task=%s input=%s promotion recheck skipped: %v", taskID, queued.ID, promoteErr)
+		} else if shouldPromote {
+			go h.PromoteQueuedTaskThreadInput(taskID)
 		}
 		return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID)))
 	}

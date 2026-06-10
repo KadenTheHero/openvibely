@@ -71,27 +71,28 @@ type SlackConnectionStatus struct {
 // SlackService manages Slack OAuth, Socket Mode event processing, and
 // Slack-origin task completion notifications.
 type SlackService struct {
-	settingsRepo          *repository.SettingsRepo
-	projectRepo           *repository.ProjectRepo
-	llmConfigRepo         *repository.LLMConfigRepo
-	taskRepo              *repository.TaskRepo
-	execRepo              *repository.ExecutionRepo
-	scheduleRepo          *repository.ScheduleRepo
-	taskSvc               *TaskService
-	taskGoalSvc           *TaskGoalService
-	llmSvc                *LLMService
-	workerSvc             *WorkerService
-	slackUserProjectRepo  *repository.SlackUserProjectRepo
-	slackTaskContextRepo  *repository.SlackTaskContextRepo
-	threadInputRepo       *repository.ThreadInputRepo
-	customPersonalityRepo *repository.CustomPersonalityRepo
-	slackAuthRepo         *repository.SlackAuthRepo
-	agentRepo             *repository.AgentRepo
-	chatBroadcaster       *events.ChatBroadcaster
-	queuedTurnPromoter    func(projectID string)
-	channelChatRunner     ChannelChatRunner
-	channelTaskRunner     ChannelTaskRunner
-	alertSvc              *AlertService
+	settingsRepo             *repository.SettingsRepo
+	projectRepo              *repository.ProjectRepo
+	llmConfigRepo            *repository.LLMConfigRepo
+	taskRepo                 *repository.TaskRepo
+	execRepo                 *repository.ExecutionRepo
+	scheduleRepo             *repository.ScheduleRepo
+	taskSvc                  *TaskService
+	taskGoalSvc              *TaskGoalService
+	llmSvc                   *LLMService
+	workerSvc                *WorkerService
+	slackUserProjectRepo     *repository.SlackUserProjectRepo
+	slackTaskContextRepo     *repository.SlackTaskContextRepo
+	threadInputRepo          *repository.ThreadInputRepo
+	customPersonalityRepo    *repository.CustomPersonalityRepo
+	slackAuthRepo            *repository.SlackAuthRepo
+	agentRepo                *repository.AgentRepo
+	chatBroadcaster          *events.ChatBroadcaster
+	queuedTurnPromoter       func(projectID string)
+	queuedTaskThreadPromoter func(taskID string)
+	channelChatRunner        ChannelChatRunner
+	channelTaskRunner        ChannelTaskRunner
+	alertSvc                 *AlertService
 
 	httpClient   *http.Client
 	oauthBaseURL string
@@ -160,6 +161,10 @@ func (s *SlackService) SetAgentRepo(repo *repository.AgentRepo) {
 
 func (s *SlackService) SetQueuedTurnPromoter(promoter func(projectID string)) {
 	s.queuedTurnPromoter = promoter
+}
+
+func (s *SlackService) SetQueuedTaskThreadPromoter(promoter func(taskID string)) {
+	s.queuedTaskThreadPromoter = promoter
 }
 
 func (s *SlackService) SetChannelChatRunner(runner ChannelChatRunner) {
@@ -1240,6 +1245,61 @@ func (s *SlackService) slackViewTaskThread(ctx context.Context, projectID string
 	return strings.TrimSpace(formatThreadTranscript(task, executions, req.Offset, req.Limit))
 }
 
+func (s *SlackService) taskHasStartingFirstTurn(ctx context.Context, task *models.Task) (bool, error) {
+	if task == nil || task.ID == "" || s.execRepo == nil {
+		return false, nil
+	}
+	if task.Category != models.CategoryActive || (task.Status != models.StatusPending && task.Status != models.StatusQueued && task.Status != models.StatusRunning) {
+		return false, nil
+	}
+	execs, err := s.execRepo.ListByTaskChronological(ctx, task.ID)
+	if err != nil {
+		return false, err
+	}
+	return len(execs) == 0, nil
+}
+
+func (s *SlackService) activeOrStartingTaskTurn(ctx context.Context, task *models.Task) (*models.Execution, bool, error) {
+	if s.execRepo == nil {
+		return nil, false, nil
+	}
+	activeExec, err := s.execRepo.FindActiveTaskExecution(ctx, task.ID, "")
+	if err != nil {
+		return nil, false, err
+	}
+	if activeExec != nil {
+		return activeExec, false, nil
+	}
+	starting, err := s.taskHasStartingFirstTurn(ctx, task)
+	return nil, starting, err
+}
+
+func (s *SlackService) bindQueuedTaskInputToActiveExecutionIfAvailable(ctx context.Context, input *models.ThreadInput) error {
+	if input == nil || input.RunExecutionID != "" || s.execRepo == nil || s.threadInputRepo == nil {
+		return nil
+	}
+	active, err := s.execRepo.FindActiveTaskExecution(ctx, input.TaskID, "")
+	if err != nil || active == nil {
+		return err
+	}
+	if err := s.threadInputRepo.BindPreExecutionQueuedTaskInputs(ctx, input.TaskID, active.ID); err != nil {
+		return err
+	}
+	input.RunExecutionID = active.ID
+	return nil
+}
+
+func (s *SlackService) shouldPromotePreExecutionQueuedInput(ctx context.Context, task *models.Task, input *models.ThreadInput) (bool, error) {
+	if task == nil || input == nil || input.RunExecutionID != "" {
+		return false, nil
+	}
+	starting, err := s.taskHasStartingFirstTurn(ctx, task)
+	if err != nil || starting {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *SlackService) slackSendToTask(ctx context.Context, projectID string, input json.RawMessage, markerCtx slackMarkerContext) string {
 	var req SendToTaskRequest
 	if err := decodeRuntimeToolInput(input, &req); err != nil {
@@ -1255,9 +1315,17 @@ func (s *SlackService) slackSendToTask(ctx context.Context, projectID string, in
 	if err != nil {
 		return fmt.Sprintf("Error resolving task: %v", err)
 	}
-	if activeExec, activeErr := s.execRepo.FindActiveTaskExecution(ctx, task.ID, ""); activeErr != nil {
+	activeExec, queueBehindFirstTurn, activeErr := s.activeOrStartingTaskTurn(ctx, task)
+	if activeErr != nil {
 		return fmt.Sprintf("Error checking active turn for task %q: %v", task.Title, activeErr)
-	} else if activeExec != nil {
+	}
+	if activeExec == nil && !queueBehindFirstTurn {
+		activeExec, _, activeErr = s.activeOrStartingTaskTurn(ctx, task)
+		if activeErr != nil {
+			return fmt.Sprintf("Error checking active turn for task %q: %v", task.Title, activeErr)
+		}
+	}
+	if activeExec != nil || queueBehindFirstTurn {
 		if s.threadInputRepo == nil {
 			return fmt.Sprintf("Task %q is currently running. Queue is unavailable, so wait for it to finish before sending a message.", task.Title)
 		}
@@ -1265,11 +1333,15 @@ func (s *SlackService) slackSendToTask(ctx context.Context, projectID string, in
 		if task.AgentID != nil {
 			agentID = *task.AgentID
 		}
+		runExecutionID := ""
+		if activeExec != nil {
+			runExecutionID = activeExec.ID
+		}
 		queued := &models.ThreadInput{
 			Scope:          models.ThreadInputScopeTask,
 			ProjectID:      task.ProjectID,
 			TaskID:         task.ID,
-			RunExecutionID: activeExec.ID,
+			RunExecutionID: runExecutionID,
 			AgentConfigID:  agentID,
 			InputMode:      models.ThreadInputModeQueued,
 			InputStatus:    models.ThreadInputPending,
@@ -1282,6 +1354,16 @@ func (s *SlackService) slackSendToTask(ctx context.Context, projectID string, in
 		}
 		if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
 			return fmt.Sprintf("Error queueing message for task %q: %v", task.Title, err)
+		}
+		if queued.RunExecutionID == "" {
+			if err := s.bindQueuedTaskInputToActiveExecutionIfAvailable(ctx, queued); err != nil {
+				applog.Infof("[slack] send_to_task task=%s input=%s active execution bind skipped: %v", task.ID, queued.ID, err)
+			}
+		}
+		if shouldPromote, promoteErr := s.shouldPromotePreExecutionQueuedInput(ctx, task, queued); promoteErr != nil {
+			applog.Infof("[slack] send_to_task task=%s input=%s promotion recheck skipped: %v", task.ID, queued.ID, promoteErr)
+		} else if shouldPromote && s.queuedTaskThreadPromoter != nil {
+			go s.queuedTaskThreadPromoter(task.ID)
 		}
 		return fmt.Sprintf("Queued message to task %q [TASK_ID:%s]. It will run after the active thread turn finishes.", task.Title, task.ID)
 	}
