@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-06-08
+updated: 2026-06-09
 source: consolidation
-source_id: memory_consolidation_2026_06_08
+source_id: memory_consolidation_2026_06_09
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -42,8 +42,8 @@ Documentation preferences:
 - Published docs links in README/project-facing docs should use new-tab HTML anchors where supported; local relative links stay normal Markdown.
 
 Maintenance and validation facts:
-- The authoritative full Go test-suite command is `go test ./... -count=1 -timeout 60s`, but project Makefile targets use a 120s timeout and are safer for full validation because `internal/handler` can exceed 60s under load.
 - OpenVibely has project-scoped release automation, docs editing, validation, Go maintenance, review, and audit skills indexed in `.openvibely/skills/SKILLS.md`.
+- Full validation should prefer the project Makefile targets or `go test ./... -count=1 -timeout 120s`; shorter 60s full-suite runs can time out in `internal/handler` under load. Detailed coverage/performance facts live in `testing_coverage_and_performance.md`.
 - Release workflow must include a documentation update pass for new or meaningfully changed features before publishing/tagging; keep in-repo `docs/*.md` and `/Users/dubee/go/src/github.com/openvibely/openvibely-doc` aligned when overlapping product concepts change.
 - Release agents should install missing required local tools such as `gh` when feasible instead of treating them as immediate user blockers; only hand back if installation/authentication fails or requires unavailable credentials/permissions.
 - Docker image publishing remains documented as a manual/pending release step unless explicit Docker credentials/tooling are present.

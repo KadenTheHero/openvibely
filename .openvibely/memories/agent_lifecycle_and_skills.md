@@ -2,7 +2,7 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-06-07
+updated: 2026-06-09
 source: consolidation
 source_id: memory_consolidation_2026_06_07
 confidence: high
@@ -40,6 +40,7 @@ Skill Curator facts:
 - Skill Curator is a recursive self-improvement loop: `observe_task_for_learning` reviews completed task conversations for reusable learnings and can create or patch skills so future tasks benefit; `maintain_skill_library` consolidates and prunes the skill library on a schedule.
 - `observe_task_for_learning` is a Skill Curator `after_complete` hook, not execution as the task's assigned primary agent.
 - Cross-agent improvements belong in standalone skills.
+- Skill-library maintenance may create, patch, consolidate, or archive skills, but agents are user-managed configurations: do not create, edit, archive, route, reassign, or mutate agent metadata/tools/hooks/attachments as part of skill maintenance.
 - Assigned-agent updates are reserved for behavior specific to that assigned agent's role, purpose, private workflow, or selected agent-owned skill.
 - Agent-owned skill mutation for post-task learning uses the server-scoped `agent_skill_manage` path.
 

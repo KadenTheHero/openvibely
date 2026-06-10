@@ -47,6 +47,19 @@ Tool calls (`read_file`, `edit_file`, `write_file`, `bash`) resolve **relative p
 - `LLMService.ExecuteTaskWithAgent` creates the worktree before execution, runs startup sync when the worktree is clean, and handles post-execution merge.
 - Startup sync should use the task's `MergeTargetBranch` when set, falling back to the default branch only when no target is stored.
 
+## Task Execution Commit Messages
+
+- Task execution auto-commits are created through `WorktreeService.CommitWorktreeChanges`, but the descriptive message should be generated before that call from the current worktree diff and task/execution context rather than by changing merge mechanics.
+- Initial execution message context flows from `LLMService` after the agent run; follow-up message context flows through `handler.completeWithSuccess` using the execution row, including `Execution.PromptSent`, `IsFollowup`, and output/summary text when available.
+- Generate messages from the unstaged worktree state before staging/committing. Use `git status` plus diff summaries such as `diff --numstat`/file paths to determine touched files, scope, and deterministic fallback subjects.
+- For commit-message collectors that summarize untracked files, prefer `git status --porcelain --untracked-files=all` so nested untracked files are listed at file level instead of only as their parent directory; keep generic status helpers unchanged unless they specifically need this behavior.
+- When deriving subjects from LLM output or tool results, filter runtime/status markers before accepting a line as the summary source. Skip bracketed markers such as `[STATUS: SUCCESS]`, `[STATUS: FAILED | ...]`, `[Thinking]`, `[Using tool: ...]`, and other lifecycle/tool transcript lines so generated commit subjects describe code changes rather than agent protocol noise.
+- Preserve lifecycle distinction in the body or metadata without user-facing lifecycle jargon: use neutral wording such as `Task turn: first task turn`, `Task turn: later task turn`, or `Task turn: pre-merge capture`; avoid phase-only subjects or body labels such as `Task Complete`, `Task completed:`, `Follow-up`, `Followup:`, or `Execution phase: follow-up`.
+- Keep manual PR/conflict-resolution commit paths separate unless the task explicitly targets them; those are not the same as task execution finalization commits.
+- When explaining or auditing Changes tab commit-message behavior, distinguish the merge options: Merge commit creates a target-branch integration commit with static `Merge task: <title>`, fast-forward creates no new commit and reuses the task branch commits, squash creates a target-branch squash commit with static `Squash merge task: <title>`, and Create PR may create a dirty-worktree task-branch prep commit with static `Task updates: <title>` unless explicitly changed.
+- When auditing this feature, do not treat the already-created task branch commit subject as proof of failure if that commit was produced before the new generator ran. Verify future behavior through call sites, tests, or a later auto-commit, and call out the limitation when relevant.
+- Cover message generation with focused service tests for diff-derived subjects, later-turn context, and empty/no-summary fallback behavior.
+
 ## Follow-Up Lineage
 
 - Task-thread follow-ups to terminal merged/stale tasks should not blindly merge the current target into an old historical task branch/worktree.

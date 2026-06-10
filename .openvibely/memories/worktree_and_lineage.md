@@ -2,7 +2,7 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-06-07
+updated: 2026-06-10
 source: consolidation
 source_id: memory_consolidation_2026_06_07
 confidence: high
@@ -11,13 +11,15 @@ title: Worktree and Lineage
 
 Task execution uses isolated git worktrees in `.worktrees/task_<id>` with task-scoped branches `task/<id_prefix>-<slug>`. LLM task prompts include explicit worktree path orientation when a workdir is present, while runtime workdir enforcement remains the source of truth. Coding changes for assigned tasks must be made in the assigned task worktree, not the main checkout, unless the user explicitly asks for main-checkout changes.
 
-**Worktree path discipline (mandatory when a worktree path is given):** Tool calls resolve relative paths against the agent's working directory (main repo root), NOT the worktree. To avoid silently editing the wrong tree: (1) run `cd <worktree-path> && pwd && git branch --show-current` as the very first action; (2) prefix every `bash` command with `cd <absolute-worktree-path> &&`; (3) use absolute paths in all `read_file`/`edit_file`/`write_file` calls. Before committing, verify with `git -C <worktree-path> status` that changes are in the worktree branch. Full details in the `openvibely_worktree_merge_lineage_workflow` skill.
+Worktree path discipline is mandatory when a task provides a worktree path: relative tool paths resolve against the agent's working directory, not automatically against the task worktree, so coding agents must explicitly operate in and verify the assigned worktree branch. Procedure-level details belong in the `openvibely_worktree_merge_lineage_workflow` skill.
 
 Durable worktree model:
 - Auto-merge supports merge commit, fast-forward only, and squash merge.
 - `LLMService.ExecuteTaskWithAgent` creates the worktree before execution, runs startup sync from the latest main/default branch when the worktree is clean, and handles post-execution merge.
 - Startup sync uses the task's `MergeTargetBranch` when set, falling back to the default branch only when no target is stored.
 - Changes tab shows worktree branch diff vs target branch when available, falling back to execution diff.
+- Task execution auto-commits use generated descriptive commit messages based on actual worktree changes plus task/execution context; messages are generated immediately before staging/committing while changes are still in the worktree, for initial execution diff capture, follow-up completion, and merge-prep dirty-worktree commits. The generator expands untracked files to file-level paths and filters status/tool/terminal marker boilerplate before using LLM output as a subject source. These paths should preserve existing lineage/merge behavior while only varying the message.
+- Future task-execution auto-commits no longer use generic `Task completed:` / `Followup:` subjects or `follow-up` body values; later task turns use neutral task-turn wording. Current-state caveat from the 2026-06-10 audit: generated commit bodies still use the label `Execution phase:` with neutral values such as `later task turn`; the preferred product wording is `Task turn:`. Existing historical commits keep their original subjects. Changes-tab integration commits remain static (`Merge task:`, `Squash merge task:`), fast-forward creates no merge commit, and manual PR-prep dirty-worktree commits still use `Task updates:`.
 - Cleanup policy supports after-merge, keep, and manual.
 - Periodic cleanup removes merged worktrees and detects orphaned worktrees with no corresponding task.
 - Chained tasks carry git lineage through `base_branch`, `base_commit_sha`, and `lineage_depth`.
