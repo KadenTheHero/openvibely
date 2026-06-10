@@ -309,8 +309,21 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 			</form>
 		</dialog>
 
-		<!-- Model Modal (for both create and edit) -->
-		<dialog id="new_model_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
+			<dialog id="delete_model_confirm_modal" class="modal">
+				<div class="modal-box">
+					@ModalCloseButton("delete_model_confirm_modal", "Close delete model confirmation")
+					<h3 class="font-bold text-lg text-error pr-10">Delete Model</h3>
+					<p class="py-4">Are you sure you want to delete <strong id="delete_model_confirm_name"></strong>? This action cannot be undone.</p>
+					<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">Tasks using this model will no longer be able to select it.</div>
+					<div class="modal-action">
+						<button type="button" class="btn" onclick="delete_model_confirm_modal.close()">Cancel</button>
+						<button type="button" class="btn btn-error" onclick="confirmDeleteModel()">Delete Permanently</button>
+					</div>
+				</div>
+				<form method="dialog" class="modal-backdrop"><button>close</button></form>
+			</dialog>
+
+			<!-- Model Modal (for both create and edit) -->		<dialog id="new_model_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
 			<div class="modal-box">
 				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeModelModal()" aria-label="Close model configuration" title="Close model configuration">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -769,39 +782,36 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					document.getElementById('openai_subscription_info_oauth').classList.add('hidden');
 				}
 
-			var _deleteModelId = '';
+				var _deleteModelId = '';
+				var _deleteModelName = '';
+				var _deleteModelIsDefault = false;
 
-			function deleteModel(button) {
-				var id = button.dataset.modelId;
-				var name = button.dataset.modelName;
-				var isDefault = button.dataset.modelIsDefault === 'true';
-
-				if (isDefault) {
-					// Check if there are other models to reassign to
-					var select = document.getElementById('reassign_default_select');
-					if (!select || select.options.length === 0) {
-						if (confirm('Delete default model "' + name + '"? This action cannot be undone.')) {
-							htmx.ajax('DELETE', '/models/' + id, {
-								target: '#models-container',
-								swap: 'outerHTML'
-							}).catch(function(xhr) {
-								var msg = 'Failed to delete model.';
-								try {
-									var data = JSON.parse(xhr.responseText);
-									if (data.message) msg = data.message;
-								} catch(e) {}
-								alert(msg);
-							});
-						}
-						return;
-					}
+				function deleteModel(button) {
+					var id = button.dataset.modelId;
+					var name = button.dataset.modelName;
+					var isDefault = button.dataset.modelIsDefault === 'true';
+					if (!id) return;
 					_deleteModelId = id;
-					reassign_default_modal.showModal();
-					return;
+					_deleteModelName = name || 'this model';
+					_deleteModelIsDefault = isDefault;
+					var nameEl = document.getElementById('delete_model_confirm_name');
+					if (nameEl) nameEl.textContent = _deleteModelName;
+					var modal = document.getElementById('delete_model_confirm_modal');
+					if (modal) modal.showModal();
 				}
 
-				if (confirm('Delete model "' + name + '"? This action cannot be undone.')) {
-					htmx.ajax('DELETE', '/models/' + id, {
+				function confirmDeleteModel() {
+					if (!_deleteModelId) return;
+					var confirmModal = document.getElementById('delete_model_confirm_modal');
+					if (confirmModal) confirmModal.close();
+					if (_deleteModelIsDefault) {
+						var select = document.getElementById('reassign_default_select');
+						if (select && select.options.length > 0) {
+							reassign_default_modal.showModal();
+							return;
+						}
+					}
+					htmx.ajax('DELETE', '/models/' + _deleteModelId, {
 						target: '#models-container',
 						swap: 'outerHTML'
 					}).catch(function(xhr) {
@@ -813,7 +823,6 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						alert(msg);
 					});
 				}
-			}
 
 			function confirmDeleteDefault() {
 				var newDefaultId = document.getElementById('reassign_default_select').value;

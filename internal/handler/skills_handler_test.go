@@ -50,6 +50,39 @@ func TestSkillsPageListsGlobalAndProjectStandaloneSkillCards(t *testing.T) {
 	}
 }
 
+func TestSkillsPageDeleteConfirmationDialog(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+	writeStandaloneSkill(t, root, "debug_tests", "Debug Tests", "debug description", "global")
+
+	req := httptest.NewRequest(http.MethodGet, "/skills", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`id="delete_skill_confirm_modal" class="modal"`,
+		`id="delete_skill_confirm_name"`,
+		`onclick="delete_skill_confirm_modal.close()"`,
+		`onclick="confirmDeleteSkill()"`,
+		`class="btn btn-error"`,
+		`onclick="deleteSkill(this)"`,
+		`modal.showModal()`,
+		`htmx.ajax('DELETE', '/skills/' + encodeURIComponent(deleteSkillHandle)`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected skills delete confirmation markup/script to contain %q", want)
+		}
+	}
+	if strings.Contains(body, `confirm('Delete skill`) {
+		t.Fatal("expected skill delete flow to avoid browser confirm()")
+	}
+}
+
 func TestSkillsPageHeaderUsesAddSkillDropdownMenu(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	h.SetAgentSkillRoot(t.TempDir())

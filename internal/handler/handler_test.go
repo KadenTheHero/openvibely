@@ -768,6 +768,30 @@ func TestHandler_ListModels(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 }
 
+func TestHandler_ListModels_DeleteConfirmationDialog(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	rec := htmxGet(e, "/models")
+	assertCode(t, rec, http.StatusOK)
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		`id="delete_model_confirm_modal" class="modal"`,
+		`id="delete_model_confirm_name"`,
+		`onclick="delete_model_confirm_modal.close()"`,
+		`onclick="confirmDeleteModel()"`,
+		`class="btn btn-error"`,
+		`modal.showModal()`,
+		`htmx.ajax('DELETE', '/models/' + _deleteModelId`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected models delete confirmation markup/script to contain %q", want)
+		}
+	}
+	if strings.Contains(body, `confirm('Delete model`) {
+		t.Fatal("expected model delete flow to avoid browser confirm()")
+	}
+}
+
 func TestHandler_ListModels_DefaultBadgeUsesCanonicalClass(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 	req := httptest.NewRequest(http.MethodGet, "/models", nil)
@@ -1465,6 +1489,29 @@ func TestHandler_DeleteTask_FromDetailPage_RedirectsToList(t *testing.T) {
 		t.Fatalf("list schedules: %v", err)
 	} else if len(schedules) != 0 {
 		t.Errorf("expected 0 schedules after delete, got %d", len(schedules))
+	}
+}
+
+func TestHandler_ViewSchedule_DeleteConfirmationDialog(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Schedule Project")
+	rec := htmxGet(e, "/schedule?project_id="+project.ID)
+	assertCode(t, rec, http.StatusOK)
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		`id="delete_schedule_confirm_modal" class="modal"`,
+		`id="delete_schedule_confirm_name"`,
+		`onclick="delete_schedule_confirm_modal.close()"`,
+		`onclick="confirmDeleteSchedule()"`,
+		`class="btn btn-error"`,
+		`function openDeleteScheduleConfirm(button)`,
+		`modal.showModal()`,
+		`htmx.ajax('DELETE', '/schedules/' + deleteScheduleID`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected schedule delete confirmation markup/script to contain %q", want)
+		}
 	}
 }
 

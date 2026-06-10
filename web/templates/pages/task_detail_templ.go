@@ -1255,207 +1255,220 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 128, "\">Edit</button> <button class=\"btn btn-xs btn-ghost text-error\" hx-delete=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 128, "\">Edit</button> <button class=\"btn btn-xs btn-ghost text-error\" data-schedule-id=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var67 string
-				templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedules/%s", s.ID))
+				templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.ResolveAttributeValue(s.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 670, Col: 59}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 670, Col: 35}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var67)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 129, "\" hx-target=\"closest .card\" hx-swap=\"outerHTML swap:1s\" hx-confirm=\"Remove this schedule?\">Remove</button></div></div></div><!-- Schedule Edit Form --><div id=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 129, "\" data-schedule-title=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var68 string
-				templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("schedule-edit-%s", s.ID))
+				templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.Title)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 681, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 671, Col: 44}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var68)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 130, "\" class=\"hidden\" data-schedule-id=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 130, "\" data-schedule-target=\"closest .card\" data-schedule-swap=\"outerHTML swap:1s\" onclick=\"openDeleteScheduleConfirm(this)\">Remove</button></div></div></div><!-- Schedule Edit Form --><div id=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var69 string
-				templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.ResolveAttributeValue(s.ID)
+				templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("schedule-edit-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 681, Col: 97}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 681, Col: 56}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var69)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 131, "\"><form method=\"post\" hx-put=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 131, "\" class=\"hidden\" data-schedule-id=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var70 string
-				templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedules/%s", s.ID))
+				templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.ResolveAttributeValue(s.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 684, Col: 54}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 681, Col: 97}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var70)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 132, "\" hx-target=\"#task-detail-content\" hx-swap=\"outerHTML\"><div class=\"grid grid-cols-2 gap-4 mb-4\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Run At</span></label><div class=\"relative\" data-run-at-picker-container onclick=\"openScheduleRunAtPicker(this, event)\"><input type=\"datetime-local\" name=\"run_at\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 132, "\"><form method=\"post\" hx-put=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var71 string
-				templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.ResolveAttributeValue(components.GetScheduleEditTime(s))
+				templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedules/%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 697, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 684, Col: 54}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var71)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 133, "\" class=\"input input-bordered input-sm cursor-pointer\" data-run-at-picker required></div></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Repeat</span></label> <select name=\"repeat_type\" class=\"select select-bordered select-sm\" id=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 133, "\" hx-target=\"#task-detail-content\" hx-swap=\"outerHTML\"><div class=\"grid grid-cols-2 gap-4 mb-4\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Run At</span></label><div class=\"relative\" data-run-at-picker-container onclick=\"openScheduleRunAtPicker(this, event)\"><input type=\"datetime-local\" name=\"run_at\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var72 string
-				templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-type-%s", s.ID))
+				templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.ResolveAttributeValue(components.GetScheduleEditTime(s))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 708, Col: 126}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 697, Col: 56}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var72)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 134, "\"><option value=\"once\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if s.RepeatType == models.RepeatOnce {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 135, " selected")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 136, ">Once</option> <option value=\"seconds\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if s.RepeatType == models.RepeatSeconds {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 137, " selected")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 138, ">Every N Seconds</option> <option value=\"minutes\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if s.RepeatType == models.RepeatMinutes {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 139, " selected")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 140, ">Every N Minutes</option> <option value=\"hours\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if s.RepeatType == models.RepeatHours {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 141, " selected")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 142, ">Every N Hours</option> <option value=\"daily\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if s.RepeatType == models.RepeatDaily {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 143, " selected")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 144, ">Daily</option> <option value=\"weekly\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if s.RepeatType == models.RepeatWeekly {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 145, " selected")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 146, ">Weekly</option> <option value=\"monthly\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if s.RepeatType == models.RepeatMonthly {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 147, " selected")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 148, ">Monthly</option></select></div></div><div class=\"form-control mb-4\" id=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 134, "\" class=\"input input-bordered input-sm cursor-pointer\" data-run-at-picker required></div></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Repeat</span></label> <select name=\"repeat_type\" class=\"select select-bordered select-sm\" id=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var73 string
-				templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-interval-%s", s.ID))
+				templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-type-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 754, Col: 91}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 708, Col: 126}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var73)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 149, "\"><label class=\"label\"><span class=\"label-text\">Repeat Every</span></label><div class=\"flex items-center gap-2\"><input type=\"number\" id=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 135, "\"><option value=\"once\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if s.RepeatType == models.RepeatOnce {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 136, " selected")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 137, ">Once</option> <option value=\"seconds\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if s.RepeatType == models.RepeatSeconds {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 138, " selected")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 139, ">Every N Seconds</option> <option value=\"minutes\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if s.RepeatType == models.RepeatMinutes {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 140, " selected")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 141, ">Every N Minutes</option> <option value=\"hours\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if s.RepeatType == models.RepeatHours {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 142, " selected")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 143, ">Every N Hours</option> <option value=\"daily\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if s.RepeatType == models.RepeatDaily {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 144, " selected")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 145, ">Daily</option> <option value=\"weekly\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if s.RepeatType == models.RepeatWeekly {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 146, " selected")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 147, ">Weekly</option> <option value=\"monthly\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if s.RepeatType == models.RepeatMonthly {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 148, " selected")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 149, ">Monthly</option></select></div></div><div class=\"form-control mb-4\" id=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var74 string
-				templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-interval-input-%s", s.ID))
+				templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-interval-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 761, Col: 69}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 754, Col: 91}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var74)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 150, "\" name=\"repeat_interval\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 150, "\"><label class=\"label\"><span class=\"label-text\">Repeat Every</span></label><div class=\"flex items-center gap-2\"><input type=\"number\" id=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var75 string
-				templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", s.RepeatInterval))
+				templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-interval-input-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 763, Col: 57}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 761, Col: 69}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var75)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 151, "\" min=\"1\" step=\"1\" class=\"input input-bordered input-sm w-20\"> <span class=\"text-sm opacity-60\" id=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 151, "\" name=\"repeat_interval\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var76 string
-				templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-label-%s", s.ID))
+				templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", s.RepeatInterval))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 768, Col: 92}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 763, Col: 57}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var76)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 152, "\">day(s)</span></div></div><div class=\"flex gap-2\"><button type=\"submit\" class=\"btn btn-primary btn-sm\">Save Changes</button> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 152, "\" min=\"1\" step=\"1\" class=\"input input-bordered input-sm w-20\"> <span class=\"text-sm opacity-60\" id=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var77 string
+				templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-label-%s", s.ID))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 768, Col: 92}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var77)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 153, "\">day(s)</span></div></div><div class=\"flex gap-2\"><button type=\"submit\" class=\"btn btn-primary btn-sm\">Save Changes</button> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1463,49 +1476,49 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 153, "<button type=\"button\" class=\"btn btn-ghost btn-sm\" onclick=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 154, "<button type=\"button\" class=\"btn btn-ghost btn-sm\" onclick=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var77 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('schedule-edit-%s').classList.add('hidden'); document.getElementById('schedule-view-%s').classList.remove('hidden')", s.ID, s.ID)}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var77.Call)
+				var templ_7745c5c3_Var78 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('schedule-edit-%s').classList.add('hidden'); document.getElementById('schedule-view-%s').classList.remove('hidden')", s.ID, s.ID)}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var78.Call)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 154, "\">Cancel</button></div></form><script>\n\t\t\t\t\t\t\t\t\t\t\t\t\t(function() {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar container = document.currentScript.closest('[data-schedule-id]');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (!container) return;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar scheduleId = container.dataset.scheduleId;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatTypeSelect = document.getElementById('edit-repeat-type-' + scheduleId);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatIntervalContainer = document.getElementById('edit-repeat-interval-' + scheduleId);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatIntervalInput = document.getElementById('edit-repeat-interval-input-' + scheduleId);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatIntervalLabel = document.getElementById('edit-repeat-label-' + scheduleId);\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (!repeatTypeSelect || !repeatIntervalContainer || !repeatIntervalInput || !repeatIntervalLabel) return;\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tfunction applyIntervalValidity(enabled) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (!enabled) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.value = '1';\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.disabled = true;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.required = false;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.disabled = false;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.required = true;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar raw = (repeatIntervalInput.value || '').trim();\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (raw === '' || !/^\\d+$/.test(raw) || Number(raw) < 1) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('Repeat interval must be a whole number of at least 1');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tfunction updateRepeatInterval() {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatType = repeatTypeSelect.value;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (repeatType === 'once') {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalContainer.style.display = 'none';\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(false);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalContainer.style.display = 'block';\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tswitch(repeatType) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'seconds': repeatIntervalLabel.textContent = 'second(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'minutes': repeatIntervalLabel.textContent = 'minute(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'hours': repeatIntervalLabel.textContent = 'hour(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'daily': repeatIntervalLabel.textContent = 'day(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'weekly': repeatIntervalLabel.textContent = 'week(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'monthly': repeatIntervalLabel.textContent = 'month(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tdefault: repeatIntervalLabel.textContent = 'time(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(true);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatTypeSelect.addEventListener('change', updateRepeatInterval);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.addEventListener('input', function() {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(repeatTypeSelect.value !== 'once');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tupdateRepeatInterval();\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t})();\n\t\t\t\t\t\t\t\t\t\t\t\t\t</script></div></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 155, "\">Cancel</button></div></form><script>\n\t\t\t\t\t\t\t\t\t\t\t\t\t(function() {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar container = document.currentScript.closest('[data-schedule-id]');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (!container) return;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar scheduleId = container.dataset.scheduleId;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatTypeSelect = document.getElementById('edit-repeat-type-' + scheduleId);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatIntervalContainer = document.getElementById('edit-repeat-interval-' + scheduleId);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatIntervalInput = document.getElementById('edit-repeat-interval-input-' + scheduleId);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatIntervalLabel = document.getElementById('edit-repeat-label-' + scheduleId);\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (!repeatTypeSelect || !repeatIntervalContainer || !repeatIntervalInput || !repeatIntervalLabel) return;\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tfunction applyIntervalValidity(enabled) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (!enabled) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.value = '1';\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.disabled = true;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.required = false;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.disabled = false;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.required = true;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar raw = (repeatIntervalInput.value || '').trim();\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (raw === '' || !/^\\d+$/.test(raw) || Number(raw) < 1) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('Repeat interval must be a whole number of at least 1');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tfunction updateRepeatInterval() {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatType = repeatTypeSelect.value;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (repeatType === 'once') {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalContainer.style.display = 'none';\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(false);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalContainer.style.display = 'block';\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tswitch(repeatType) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'seconds': repeatIntervalLabel.textContent = 'second(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'minutes': repeatIntervalLabel.textContent = 'minute(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'hours': repeatIntervalLabel.textContent = 'hour(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'daily': repeatIntervalLabel.textContent = 'day(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'weekly': repeatIntervalLabel.textContent = 'week(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'monthly': repeatIntervalLabel.textContent = 'month(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tdefault: repeatIntervalLabel.textContent = 'time(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(true);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatTypeSelect.addEventListener('change', updateRepeatInterval);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.addEventListener('input', function() {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(repeatTypeSelect.value !== 'once');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tupdateRepeatInterval();\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t})();\n\t\t\t\t\t\t\t\t\t\t\t\t\t</script></div></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 155, "<p class=\"text-sm opacity-50\">No schedules configured</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 156, "<p class=\"text-sm opacity-50\">No schedules configured</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 156, "</div></div></div><!-- End Tab: Schedules --><!-- Tab: Chaining -->")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 157, "</div></div></div><!-- End Tab: Schedules --><!-- Tab: Chaining -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var78 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "chaining")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var78...)
+		var templ_7745c5c3_Var79 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "chaining")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var79...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 157, "<div id=\"tab-chaining\" class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 158, "<div id=\"tab-chaining\" class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var79 string
-		templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var78).String())
+		var templ_7745c5c3_Var80 string
+		templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var79).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var79)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var80)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 158, "\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><h4 class=\"text-lg font-bold mb-3\">Task Chaining</h4><p class=\"text-sm opacity-60 mb-4\">Configure this task to automatically create a child task when it completes. For example, an Opus planning task can spawn a Sonnet implementation task.</p>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, "\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><h4 class=\"text-lg font-bold mb-3\">Task Chaining</h4><p class=\"text-sm opacity-60 mb-4\">Configure this task to automatically create a child task when it completes. For example, an Opus planning task can spawn a Sonnet implementation task.</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1513,29 +1526,29 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, "</div></div></div><!-- End Tab: Chaining --><!-- Tab: Attachments -->")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 160, "</div></div></div><!-- End Tab: Chaining --><!-- Tab: Attachments -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var80 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "attachments")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var80...)
+		var templ_7745c5c3_Var81 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "attachments")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var81...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 160, "<div id=\"tab-attachments\" class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, "<div id=\"tab-attachments\" class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var81 string
-		templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var80).String())
+		var templ_7745c5c3_Var82 string
+		templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var81).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var81)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var82)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, "\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><h4 class=\"text-lg font-bold mb-3\">Attachments</h4>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 162, "\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><h4 class=\"text-lg font-bold mb-3\">Attachments</h4>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1543,29 +1556,29 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 162, "</div></div></div><!-- End Tab: Attachments --><!-- Tab: Lifecycle (runbook §Rollout step 17) -->")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 163, "</div></div></div><!-- End Tab: Attachments --><!-- Tab: Lifecycle (runbook §Rollout step 17) -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var82 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "lifecycle")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var82...)
+		var templ_7745c5c3_Var83 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "lifecycle")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var83...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 163, "<div id=\"tab-lifecycle\" class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 164, "<div id=\"tab-lifecycle\" class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var83 string
-		templ_7745c5c3_Var83, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var82).String())
+		var templ_7745c5c3_Var84 string
+		templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var83).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var83)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var84)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 164, "\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><div class=\"flex items-center justify-between mb-3\"><h4 class=\"text-lg font-bold\">Lifecycle Activity</h4>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 165, "\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><div class=\"flex items-center justify-between mb-3\"><h4 class=\"text-lg font-bold\">Lifecycle Activity</h4>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1573,168 +1586,176 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 165, "<button type=\"button\" class=\"btn btn-ghost btn-xs\" onclick=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 166, "<button type=\"button\" class=\"btn btn-ghost btn-xs\" onclick=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var84 templ.ComponentScript = templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "')"}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var84.Call)
+		var templ_7745c5c3_Var85 templ.ComponentScript = templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "')"}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var85.Call)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 166, "\">Refresh</button></div><p class=\"text-sm opacity-70 mb-3\">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p><div id=\"lifecycle-activity-list\" data-task-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 167, "\">Refresh</button></div><p class=\"text-sm opacity-70 mb-3\">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p><div id=\"lifecycle-activity-list\" data-task-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var85 string
-		templ_7745c5c3_Var85, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
+		var templ_7745c5c3_Var86 string
+		templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 882, Col: 61}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var85)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var86)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 167, "\" class=\"space-y-2\"><p class=\"text-sm opacity-50\">Loading lifecycle activity...</p></div></div></div><script>\n\t\t\t\t(function() {\n\t\t\t\t\tfunction statusBadge(status) {\n\t\t\t\t\t\tvar map = { completed: 'badge-success', failed: 'badge-error', skipped: 'badge-ghost', queued: 'badge-info', running: 'badge-warning' };\n\t\t\t\t\t\tvar cls = map[status] || 'badge-ghost';\n\t\t\t\t\t\treturn '<span class=\"badge ' + cls + ' badge-sm\">' + status + '</span>';\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction escapeText(value) {\n\t\t\t\t\t\t\treturn String(value == null ? '' : value)\n\t\t\t\t\t\t\t\t.replace(/&/g, '&amp;')\n\t\t\t\t\t\t\t\t.replace(/</g, '&lt;')\n\t\t\t\t\t\t\t\t.replace(/>/g, '&gt;');\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction renderBadgeRow(label, values) {\n\t\t\t\t\t\t\tif (!Array.isArray(values) || values.length === 0) return '';\n\t\t\t\t\t\t\tvar seen = Object.create(null);\n\t\t\t\t\t\t\tvar badges = [];\n\t\t\t\t\t\t\tvalues.forEach(function(value) {\n\t\t\t\t\t\t\t\tif (!value || seen[value]) return;\n\t\t\t\t\t\t\t\tseen[value] = true;\n\t\t\t\t\t\t\t\tbadges.push('<span class=\"font-mono text-xs badge badge-outline\">' + escapeText(value) + '</span>');\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tif (badges.length === 0) return '';\n\t\t\t\t\t\t\treturn '<p class=\"text-sm mt-1 flex items-center gap-2 flex-wrap\">' +\n\t\t\t\t\t\t\t\t'<span>' + escapeText(label) + ':</span> ' + badges.join(' ') +\n\t\t\t\t\t\t\t'</p>';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction memoryLabels(memories) {\n\t\t\t\t\t\t\tif (!Array.isArray(memories)) return [];\n\t\t\t\t\t\t\treturn memories.map(function(m) { return m.file || m.topic || ''; });\n\t\t\t\t\t\t}\n\t\t\t\t\t\twindow.refreshLifecycleActivity = async function(taskID) {\n\t\t\t\t\t\t\tvar container = document.getElementById('lifecycle-activity-list');\n\t\t\t\t\t\t\tif (!container) return;\n\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\tvar response = await fetch('/api/tasks/' + encodeURIComponent(taskID) + '/lifecycle-executions', { headers: { 'Accept': 'application/json' } });\n\t\t\t\t\t\t\t\tif (!response.ok) throw new Error('failed to load lifecycle executions');\n\t\t\t\t\t\t\t\tvar rows = await response.json();\n\t\t\t\t\t\t\t\tif (!Array.isArray(rows) || rows.length === 0) {\n\t\t\t\t\t\t\t\t\tcontainer.innerHTML = '<p class=\"text-sm opacity-50\">No lifecycle activity recorded yet.</p>';\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tcontainer.innerHTML = rows.map(function(r) {\n\t\t\t\t\t\t\t\t\t\tvar selectedSkills = renderBadgeRow('Selected skills', r.selected_skills);\n\t\t\t\t\t\t\t\t\t\tvar selectedMemories = renderBadgeRow('Selected memories', memoryLabels(r.selected_memories));\n\t\t\t\t\t\t\t\t\t\tvar hasStructuredRoute = selectedSkills || selectedMemories;\n\t\t\t\t\t\t\t\t\t\tvar summary = r.summary && !hasStructuredRoute ? '<p class=\"text-sm mt-1\">' + escapeText(r.summary) + '</p>' : '';\n\t\t\t\t\t\t\t\t\t\tvar error = r.error ? '<p class=\"text-xs text-error mt-1\">' + escapeText(r.error) + '</p>' : '';\n\t\t\t\t\t\t\t\t\t\tvar when = r.completed_at ? new Date(r.completed_at).toLocaleString() : new Date(r.started_at).toLocaleString();\n\t\t\t\t\t\t\t\t\t\treturn '<div class=\"border border-base-300 rounded-lg p-3\">' +\n\t\t\t\t\t\t\t\t\t\t\t'<div class=\"flex items-center justify-between flex-wrap gap-2\">' +\n\t\t\t\t\t\t\t\t\t\t\t\t'<div class=\"flex items-center gap-2 flex-wrap\">' +\n\t\t\t\t\t\t\t\t\t\t\t\t\t'<span class=\"font-mono text-xs opacity-70\">' + escapeText(r.when || '') + '</span>' +\n\t\t\t\t\t\t\t\t\t\t\t\t\t'<span class=\"text-sm font-medium\">' + escapeText(r.skill_key || '') + '</span>' +\n\t\t\t\t\t\t\t\t\t\t\t\t\tstatusBadge(r.status || '') +\n\t\t\t\t\t\t\t\t\t\t\t\t'</div>' +\n\t\t\t\t\t\t\t\t\t\t\t\t'<span class=\"text-xs opacity-60\">' + escapeText(when) + '</span>' +\n\t\t\t\t\t\t\t\t\t\t\t'</div>' +\n\t\t\t\t\t\t\t\t\t\t\tsummary + selectedSkills + selectedMemories + error +\n\t\t\t\t\t\t\t\t\t\t'</div>';\n\t\t\t\t\t\t\t\t\t}).join('');\n\t\t\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\t\tcontainer.innerHTML = '<p class=\"text-sm text-error\">' + escapeText(err.message || err) + '</p>';\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\t\t\t\t\tif (document.querySelector('[data-tab=\"lifecycle\"].tab-active')) {\n\t\t\t\t\t\tvar el = document.getElementById('lifecycle-activity-list');\n\t\t\t\t\t\tif (el) window.refreshLifecycleActivity(el.dataset.taskId);\n\t\t\t\t\t}\n\t\t\t\t\tdocument.addEventListener('click', function(ev) {\n\t\t\t\t\t\tvar tab = ev.target.closest && ev.target.closest('[data-tab=\"lifecycle\"]');\n\t\t\t\t\t\tif (!tab) return;\n\t\t\t\t\t\tvar el = document.getElementById('lifecycle-activity-list');\n\t\t\t\t\t\tif (el) window.refreshLifecycleActivity(el.dataset.taskId);\n\t\t\t\t\t});\n\t\t\t\t})();\n\t\t\t</script></div><!-- End Tab: Lifecycle --><!-- Tab: Changes -->")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "\" class=\"space-y-2\"><p class=\"text-sm opacity-50\">Loading lifecycle activity...</p></div></div></div><script>\n\t\t\t\t(function() {\n\t\t\t\t\tfunction statusBadge(status) {\n\t\t\t\t\t\tvar map = { completed: 'badge-success', failed: 'badge-error', skipped: 'badge-ghost', queued: 'badge-info', running: 'badge-warning' };\n\t\t\t\t\t\tvar cls = map[status] || 'badge-ghost';\n\t\t\t\t\t\treturn '<span class=\"badge ' + cls + ' badge-sm\">' + status + '</span>';\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction escapeText(value) {\n\t\t\t\t\t\t\treturn String(value == null ? '' : value)\n\t\t\t\t\t\t\t\t.replace(/&/g, '&amp;')\n\t\t\t\t\t\t\t\t.replace(/</g, '&lt;')\n\t\t\t\t\t\t\t\t.replace(/>/g, '&gt;');\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction renderBadgeRow(label, values) {\n\t\t\t\t\t\t\tif (!Array.isArray(values) || values.length === 0) return '';\n\t\t\t\t\t\t\tvar seen = Object.create(null);\n\t\t\t\t\t\t\tvar badges = [];\n\t\t\t\t\t\t\tvalues.forEach(function(value) {\n\t\t\t\t\t\t\t\tif (!value || seen[value]) return;\n\t\t\t\t\t\t\t\tseen[value] = true;\n\t\t\t\t\t\t\t\tbadges.push('<span class=\"font-mono text-xs badge badge-outline\">' + escapeText(value) + '</span>');\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tif (badges.length === 0) return '';\n\t\t\t\t\t\t\treturn '<p class=\"text-sm mt-1 flex items-center gap-2 flex-wrap\">' +\n\t\t\t\t\t\t\t\t'<span>' + escapeText(label) + ':</span> ' + badges.join(' ') +\n\t\t\t\t\t\t\t'</p>';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction memoryLabels(memories) {\n\t\t\t\t\t\t\tif (!Array.isArray(memories)) return [];\n\t\t\t\t\t\t\treturn memories.map(function(m) { return m.file || m.topic || ''; });\n\t\t\t\t\t\t}\n\t\t\t\t\t\twindow.refreshLifecycleActivity = async function(taskID) {\n\t\t\t\t\t\t\tvar container = document.getElementById('lifecycle-activity-list');\n\t\t\t\t\t\t\tif (!container) return;\n\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\tvar response = await fetch('/api/tasks/' + encodeURIComponent(taskID) + '/lifecycle-executions', { headers: { 'Accept': 'application/json' } });\n\t\t\t\t\t\t\t\tif (!response.ok) throw new Error('failed to load lifecycle executions');\n\t\t\t\t\t\t\t\tvar rows = await response.json();\n\t\t\t\t\t\t\t\tif (!Array.isArray(rows) || rows.length === 0) {\n\t\t\t\t\t\t\t\t\tcontainer.innerHTML = '<p class=\"text-sm opacity-50\">No lifecycle activity recorded yet.</p>';\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tcontainer.innerHTML = rows.map(function(r) {\n\t\t\t\t\t\t\t\t\t\tvar selectedSkills = renderBadgeRow('Selected skills', r.selected_skills);\n\t\t\t\t\t\t\t\t\t\tvar selectedMemories = renderBadgeRow('Selected memories', memoryLabels(r.selected_memories));\n\t\t\t\t\t\t\t\t\t\tvar hasStructuredRoute = selectedSkills || selectedMemories;\n\t\t\t\t\t\t\t\t\t\tvar summary = r.summary && !hasStructuredRoute ? '<p class=\"text-sm mt-1\">' + escapeText(r.summary) + '</p>' : '';\n\t\t\t\t\t\t\t\t\t\tvar error = r.error ? '<p class=\"text-xs text-error mt-1\">' + escapeText(r.error) + '</p>' : '';\n\t\t\t\t\t\t\t\t\t\tvar when = r.completed_at ? new Date(r.completed_at).toLocaleString() : new Date(r.started_at).toLocaleString();\n\t\t\t\t\t\t\t\t\t\treturn '<div class=\"border border-base-300 rounded-lg p-3\">' +\n\t\t\t\t\t\t\t\t\t\t\t'<div class=\"flex items-center justify-between flex-wrap gap-2\">' +\n\t\t\t\t\t\t\t\t\t\t\t\t'<div class=\"flex items-center gap-2 flex-wrap\">' +\n\t\t\t\t\t\t\t\t\t\t\t\t\t'<span class=\"font-mono text-xs opacity-70\">' + escapeText(r.when || '') + '</span>' +\n\t\t\t\t\t\t\t\t\t\t\t\t\t'<span class=\"text-sm font-medium\">' + escapeText(r.skill_key || '') + '</span>' +\n\t\t\t\t\t\t\t\t\t\t\t\t\tstatusBadge(r.status || '') +\n\t\t\t\t\t\t\t\t\t\t\t\t'</div>' +\n\t\t\t\t\t\t\t\t\t\t\t\t'<span class=\"text-xs opacity-60\">' + escapeText(when) + '</span>' +\n\t\t\t\t\t\t\t\t\t\t\t'</div>' +\n\t\t\t\t\t\t\t\t\t\t\tsummary + selectedSkills + selectedMemories + error +\n\t\t\t\t\t\t\t\t\t\t'</div>';\n\t\t\t\t\t\t\t\t\t}).join('');\n\t\t\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\t\tcontainer.innerHTML = '<p class=\"text-sm text-error\">' + escapeText(err.message || err) + '</p>';\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\t\t\t\t\tif (document.querySelector('[data-tab=\"lifecycle\"].tab-active')) {\n\t\t\t\t\t\tvar el = document.getElementById('lifecycle-activity-list');\n\t\t\t\t\t\tif (el) window.refreshLifecycleActivity(el.dataset.taskId);\n\t\t\t\t\t}\n\t\t\t\t\tdocument.addEventListener('click', function(ev) {\n\t\t\t\t\t\tvar tab = ev.target.closest && ev.target.closest('[data-tab=\"lifecycle\"]');\n\t\t\t\t\t\tif (!tab) return;\n\t\t\t\t\t\tvar el = document.getElementById('lifecycle-activity-list');\n\t\t\t\t\t\tif (el) window.refreshLifecycleActivity(el.dataset.taskId);\n\t\t\t\t\t});\n\t\t\t\t})();\n\t\t\t</script></div><!-- End Tab: Lifecycle --><!-- Tab: Changes -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var86 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "changes")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var86...)
+		var templ_7745c5c3_Var87 = []any{"task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "changes")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var87...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "<div id=\"tab-changes\" class=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var87 string
-		templ_7745c5c3_Var87, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var86).String())
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var87)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 169, "\"><div id=\"changes-content\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 169, "<div id=\"tab-changes\" class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var88 string
-		templ_7745c5c3_Var88, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes", task.ID))
+		templ_7745c5c3_Var88, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var87).String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 970, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var88)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 170, "\" hx-trigger=\"refreshChanges from:body\" hx-swap=\"innerHTML\" data-task-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 170, "\"><div id=\"changes-content\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var89 string
-		templ_7745c5c3_Var89, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
+		templ_7745c5c3_Var89, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 973, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 970, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var89)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 171, "\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 171, "\" hx-trigger=\"refreshChanges from:body\" hx-swap=\"innerHTML\" data-task-id=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var90 string
+		templ_7745c5c3_Var90, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 973, Col: 26}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var90)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 172, "\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if defaultTab == "changes" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 172, "<div class=\"card bg-base-100 shadow-sm border border-base-300\" hx-get=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 173, "<div class=\"card bg-base-100 shadow-sm border border-base-300\" hx-get=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var90 string
-			templ_7745c5c3_Var90, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes", task.ID))
+			var templ_7745c5c3_Var91 string
+			templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes", task.ID))
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 976, Col: 118}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var90)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var91)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 173, "\" hx-trigger=\"load\" hx-swap=\"outerHTML\"><div class=\"card-body\"><h4 class=\"text-lg font-bold mb-3\">File Changes</h4><p class=\"text-sm opacity-60\">Loading changes...</p></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 174, "\" hx-trigger=\"load\" hx-swap=\"outerHTML\"><div class=\"card-body\"><h4 class=\"text-lg font-bold mb-3\">File Changes</h4><p class=\"text-sm opacity-60\">Loading changes...</p></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 174, "<div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><h4 class=\"text-lg font-bold mb-3\">File Changes</h4><p class=\"text-sm opacity-60\">Changes load on demand when you open this tab.</p></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 175, "<div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><h4 class=\"text-lg font-bold mb-3\">File Changes</h4><p class=\"text-sm opacity-60\">Changes load on demand when you open this tab.</p></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 175, "</div></div><!-- End Tab: Changes --><!-- Tab: Thread -->")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 176, "</div></div><!-- End Tab: Changes --><!-- Tab: Thread -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var91 = []any{"task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "chat")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var91...)
+		var templ_7745c5c3_Var92 = []any{"task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "chat")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var92...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 176, "<div id=\"tab-chat\" class=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var92 string
-		templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var91).String())
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var92)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 177, "\"><div id=\"thread-content\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 177, "<div id=\"tab-chat\" class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var93 string
-		templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/thread", task.ID))
+		templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var92).String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 999, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var93)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 178, "\" hx-trigger=\"none\" hx-swap=\"innerHTML\" data-task-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 178, "\"><div id=\"thread-content\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var94 string
-		templ_7745c5c3_Var94, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
+		templ_7745c5c3_Var94, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/thread", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1002, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 999, Col: 53}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var94)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "\" data-loaded=\"false\" data-loading=\"false\" class=\"flex-1 flex flex-col min-h-0\"><div class=\"card bg-base-100 shadow-sm border border-base-300 flex-1 flex flex-col min-h-0 overflow-hidden\"><div class=\"card-body flex-1 flex flex-col min-h-0\"><h4 class=\"text-lg font-bold mb-3\">Thread</h4>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "\" hx-trigger=\"none\" hx-swap=\"innerHTML\" data-task-id=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var95 string
+		templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1002, Col: 26}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var95)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 180, "\" data-loaded=\"false\" data-loading=\"false\" class=\"flex-1 flex flex-col min-h-0\"><div class=\"card bg-base-100 shadow-sm border border-base-300 flex-1 flex flex-col min-h-0 overflow-hidden\"><div class=\"card-body flex-1 flex flex-col min-h-0\"><h4 class=\"text-lg font-bold mb-3\">Thread</h4>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if defaultTab == "chat" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 180, "<p class=\"text-sm opacity-60\">Thread is loading...</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 181, "<p class=\"text-sm opacity-60\">Thread is loading...</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 181, "<p class=\"text-sm opacity-60\">Thread loads on demand when you open this tab.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 182, "<p class=\"text-sm opacity-60\">Thread loads on demand when you open this tab.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 182, "</div></div></div></div><!-- End Tab: Thread --><script>\n\t\t\t\t\t\tfunction openScheduleRunAtPicker(container, event) {\n\t\t\t\t\t\t\tif (!container) return;\n\t\t\t\t\t\t\tvar pickerInput = container.querySelector('input[data-run-at-picker]');\n\t\t\t\t\t\t\tif (!pickerInput) return;\n\t\t\t\t\t\t\tif (event && event.target && !event.target.closest('input[data-run-at-picker]')) return;\n\t\t\t\t\t\t\tpickerInput.focus();\n\t\t\t\t\t\t\tif (typeof pickerInput.showPicker === 'function') {\n\t\t\t\t\t\t\t\tpickerInput.showPicker();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tvar _threadContentLoading = false;\n\t\t\t\t\tfunction _currentTaskIdFromPath() {\n\t\t\t\t\t\tvar taskIdMatch = window.location.pathname.match(/\\/tasks\\/([^\\/]+)/);\n\t\t\t\t\t\treturn taskIdMatch && taskIdMatch[1] ? taskIdMatch[1] : '';\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _isChatTabActive() {\n\t\t\t\t\t\tvar chatTab = document.querySelector('[data-tab=\"chat\"]');\n\t\t\t\t\t\tif (!chatTab || !chatTab.classList.contains('tab-active')) return false;\n\t\t\t\t\t\tvar chatPanel = document.getElementById('tab-chat');\n\t\t\t\t\t\treturn !!chatPanel && !chatPanel.classList.contains('hidden');\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _taskThreadScrollStateKey(taskId) {\n\t\t\t\t\t\treturn taskId ? 'task-thread-scroll-' + taskId : '';\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _getTaskThreadScrollState(taskId) {\n\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\t\tvar key = _taskThreadScrollStateKey(taskId || _currentTaskIdFromPath());\n\t\t\t\t\t\treturn key ? window._taskThreadScrollStates[key] : null;\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _saveTaskThreadScrollState(taskId) {\n\t\t\t\t\t\ttaskId = taskId || _currentTaskIdFromPath();\n\t\t\t\t\t\tvar key = _taskThreadScrollStateKey(taskId);\n\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\tif (!key || !chatMessages || !window.chatAutoScroll) return;\n\t\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\t\tvar nearBottom = window.chatAutoScroll.isNearBottom(chatMessages);\n\t\t\t\t\t\tvar snapshot = tracker && typeof tracker.snapshot === 'function'\n\t\t\t\t\t\t\t? tracker.snapshot()\n\t\t\t\t\t\t\t: { scrollTop: chatMessages.scrollTop || 0, userScrolledUp: !nearBottom, pinned: nearBottom };\n\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\t\twindow._taskThreadScrollStates[key] = snapshot;\n\t\t\t\t\t\twindow._taskThreadUserScrolledUp = !!snapshot.userScrolledUp;\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _restoreThreadScrollOrBottom(taskId, forceBottom) {\n\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\t\tif (!chatMessages || !window.chatAutoScroll) return;\n\n\t\t\t\t\t\t\tvar state = _getTaskThreadScrollState(taskId);\n\t\t\t\t\t\t\tif (!forceBottom && state) {\n\t\t\t\t\t\t\t\tchatMessages.scrollTop = state.pinned ? chatMessages.scrollHeight : (state.scrollTop || 0);\n\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.userScrolledUp = !!state.userScrolledUp;\n\t\t\t\t\t\t\t\twindow._taskThreadUserScrolledUp = !!state.userScrolledUp;\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tif (!forceBottom) {\n\t\t\t\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\t\t\t\tvar userScrolledUp = false;\n\t\t\t\t\t\t\t\tif (tracker && typeof tracker.userScrolledUp === 'boolean') {\n\t\t\t\t\t\t\t\t\tuserScrolledUp = tracker.userScrolledUp;\n\t\t\t\t\t\t\t\t} else if (typeof window._taskThreadUserScrolledUp === 'boolean') {\n\t\t\t\t\t\t\t\t\tuserScrolledUp = window._taskThreadUserScrolledUp;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (userScrolledUp) return;\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, !!forceBottom);\n\t\t\t\t\t\t\t_saveTaskThreadScrollState(taskId);\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _loadThreadContent(taskId) {\n\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\tif (!threadContent || !taskId) return Promise.resolve(false);\n\t\t\t\t\t\tif (threadContent.dataset.loaded === 'true') return Promise.resolve(true);\n\t\t\t\t\t\tif (_threadContentLoading) return Promise.resolve(false);\n\t\t\t\t\t\tif (typeof htmx === 'undefined') return Promise.resolve(false);\n\n\t\t\t\t\t\t_threadContentLoading = true;\n\t\t\t\t\t\tthreadContent.dataset.loading = 'true';\n\t\t\t\t\t\treturn htmx.ajax('GET', '/tasks/' + taskId + '/thread', {\n\t\t\t\t\t\t\ttarget: '#thread-content',\n\t\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t\t}).then(function() {\n\t\t\t\t\t\t\tvar updated = document.getElementById('thread-content');\n\t\t\t\t\t\t\tif (updated) {\n\t\t\t\t\t\t\t\tupdated.dataset.loaded = 'true';\n\t\t\t\t\t\t\t\tupdated.dataset.loading = 'false';\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\treturn true;\n\t\t\t\t\t\t}).catch(function(err) {\n\t\t\t\t\t\t\tconsole.error('Failed to load thread content:', err);\n\t\t\t\t\t\t\tvar updated = document.getElementById('thread-content');\n\t\t\t\t\t\t\tif (updated) updated.dataset.loading = 'false';\n\t\t\t\t\t\t\treturn false;\n\t\t\t\t\t\t}).finally(function() {\n\t\t\t\t\t\t\t_threadContentLoading = false;\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction switchTaskTab(tabName) {\n\t\t\t\t\tvar container = document.getElementById('task-detail-content');\n\t\t\t\t\tif (!container) return;\n\n\t\t\t\t\tif (_isChatTabActive()) {\n\t\t\t\t\t\t_saveTaskThreadScrollState();\n\t\t\t\t\t}\n\n\t\t\t\tcontainer.querySelectorAll('.task-tab-panel').forEach(function(panel) {\n\t\t\t\t\tpanel.classList.add('hidden');\n\t\t\t\t});\n\n\t\t\t\tcontainer.querySelectorAll('[data-tab]').forEach(function(tab) {\n\t\t\t\t\ttab.classList.remove('tab-active');\n\t\t\t\t});\n\n\t\t\t\tvar panel = container.querySelector('#tab-' + tabName);\n\t\t\t\tif (panel) panel.classList.remove('hidden');\n\n\t\t\t\t\tvar tab = container.querySelector('[data-tab=\"' + tabName + '\"]');\n\t\t\t\t\tif (tab) tab.classList.add('tab-active');\n\n\t\t\t\t\t// Auto-scroll thread to bottom when switching to thread tab\n\t\t\t\t\tif (tabName === 'chat') {\n\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\tvar taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();\n\t\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\t\t_loadThreadContent(taskId).then(function() {\n\t\t\t\t\t\t\t\t\t_restoreThreadScrollOrBottom(taskId, false);\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t_restoreThreadScrollOrBottom(taskId, false);\n\t\t\t\t\t\t\t}\t\t\t\t\t}\n\n\t\t\t\t// Reload changes content and start SSE when switching to changes tab\n\t\t\t\tif (tabName === 'changes') {\n\t\t\t\t\tvar taskIdMatch = window.location.pathname.match(/\\/tasks\\/([^\\/]+)/);\n\t\t\t\t\tif (taskIdMatch && taskIdMatch[1]) {\n\t\t\t\t\t\tvar taskId = taskIdMatch[1];\n\t\t\t\t\t\tif (typeof htmx !== 'undefined') {\n\t\t\t\t\t\t\thtmx.ajax('GET', '/tasks/' + taskId + '/changes', {\n\t\t\t\t\t\t\t\ttarget: '#changes-content',\n\t\t\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t\t\t}).then(function() {\n\t\t\t\t\t\t\t\t// Seed fingerprint so the first SSE update can detect no-ops.\n\t\t\t\t\t\t\t\tvar cc = document.getElementById('changes-content');\n\t\t\t\t\t\t\t\tif (cc) _lastDiffFingerprint = _computeDiffFingerprint(cc);\n\t\t\t\t\t\t\t}).catch(function() {});\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Start SSE for real-time file changes\n\t\t\t\t\t\t_startFileChangesSSE(taskId);\n\t\t\t\t\t}\n\t\t\t\t} else {\n\t\t\t\t\t// Stop SSE when switching away from changes tab\n\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\t// File changes are consumed from the shared sidebar live stream.\n\t\t\t\t// Keep per-task filtering in-page to avoid creating another EventSource.\n\t\t\t\tvar _fileChangesListening = false;\n\t\t\t\tvar _fileChangesUpdatePending = false;\n\t\t\t\tvar _fileChangesTaskId = null;\n\n\t\t\t\tfunction _isChangesTabActive() {\n\t\t\t\t\tvar changesTab = document.querySelector('[data-tab=\"changes\"]');\n\t\t\t\t\tif (!changesTab || !changesTab.classList.contains('tab-active')) return false;\n\t\t\t\t\tvar changesPanel = document.getElementById('tab-changes');\n\t\t\t\t\treturn !!changesPanel && !changesPanel.classList.contains('hidden');\n\t\t\t\t}\n\n\t\t\tfunction _handleSharedFileChangeEvent(event) {\n\t\t\t\tif (!_fileChangesListening || !_fileChangesTaskId) return;\n\t\t\t\tvar data = event.detail || {};\n\t\t\t\tif (!data.task_id || data.task_id !== _fileChangesTaskId) return;\n\n\t\t\t\tif (data.type === 'diff_snapshot') {\n\t\t\t\t\t_updateDiffViewer(data.diff_output || '');\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tif (data.type === 'file_modified') {\n\t\t\t\t\tconsole.log('File modified:', data.file_path, 'via', data.tool_name);\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction _startFileChangesSSE(taskId) {\n\t\t\t\tif (!taskId) return;\n\t\t\t\tif (_fileChangesListening && _fileChangesTaskId === taskId) return;\n\t\t\t\t_fileChangesTaskId = taskId;\n\t\t\t\t_fileChangesListening = true;\n\t\t\t\tconsole.log('File changes live listener active for task:', taskId);\n\t\t\t}\n\n\t\t\tfunction _stopFileChangesSSE() {\n\t\t\t\t_fileChangesListening = false;\n\t\t\t\tconsole.log('File changes live listener paused');\n\t\t\t}\n\n\t\t\t\t// Track the last diff fingerprint to skip no-op DOM replacements.\n\t\t\t\tvar _lastDiffFingerprint = '';\n\n\t\t\t\tfunction _computeDiffFingerprint(container) {\n\t\t\t\t\tvar viewer = container && container.querySelector('#diff-viewer');\n\t\t\t\t\tif (!viewer) return '';\n\t\t\t\t\t// Use a simple hash of the full diff viewer HTML for accurate\n\t\t\t\t\t// change detection. The previous badge+row-count approach missed\n\t\t\t\t\t// content changes within existing lines.\n\t\t\t\t\tvar raw = viewer.innerHTML;\n\t\t\t\t\tvar h = 0;\n\t\t\t\t\tfor (var i = 0; i < raw.length; i++) {\n\t\t\t\t\t\th = ((h << 5) - h + raw.charCodeAt(i)) | 0;\n\t\t\t\t\t}\n\t\t\t\t\treturn String(h);\n\t\t\t\t}\n\n\t\t\t\tfunction _getDiffViewMode() {\n\t\t\t\t\tvar splitBtn = document.getElementById('diff-btn-split');\n\t\t\t\t\treturn (splitBtn && splitBtn.classList.contains('btn-active')) ? 'split' : 'inline';\n\t\t\t\t}\n\n\t\t\t\tfunction _updateDiffViewer(diffOutput) {\n\t\t\t\t\tvar changesContent = document.getElementById('changes-content');\n\t\t\t\t\tif (!changesContent) return;\n\t\t\t\t\tif (!_isChangesTabActive()) return;\n\n\t\t\t\t\t// Debounce: skip if an update is already in flight\n\t\t\t\t\tif (_fileChangesUpdatePending) return;\n\t\t\t\t\t_fileChangesUpdatePending = true;\n\n\t\t\t\tvar taskId = changesContent.dataset.taskId;\n\t\t\t\tif (taskId) {\n\t\t\t\t\t// Fetch new HTML in the background WITHOUT touching the live DOM.\n\t\t\t\t\t// Only swap if content actually changed — this prevents the viewport\n\t\t\t\t\t// jumps caused by the old htmx.ajax() path which replaced innerHTML\n\t\t\t\t\t// before the fingerprint check could run.\n\t\t\t\t\tfetch('/tasks/' + taskId + '/changes', {\n\t\t\t\t\t\theaders: { 'HX-Request': 'true' }\n\t\t\t\t\t}).then(function(resp) {\n\t\t\t\t\t\tif (!resp.ok) throw new Error('HTTP ' + resp.status);\n\t\t\t\t\t\treturn resp.text();\n\t\t\t\t\t}).then(function(html) {\n\t\t\t\t\t\t_fileChangesUpdatePending = false;\n\n\t\t\t\t\t\t// Parse the response in a detached element to compute fingerprint\n\t\t\t\t\t\t// without touching the live DOM at all.\n\t\t\t\t\t\tvar offscreen = document.createElement('div');\n\t\t\t\t\t\toffscreen.innerHTML = html;\n\n\t\t\t\t\t\tvar newFp = _computeDiffFingerprint(offscreen);\n\t\t\t\t\t\tif (newFp && newFp === _lastDiffFingerprint) {\n\t\t\t\t\t\t\t// Diff unchanged — no DOM mutation, no scroll disruption.\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t_lastDiffFingerprint = newFp;\n\n\t\t\t\t\t\t// Content changed — apply the swap with UI state preservation.\n\t\t\t\t\t\tvar scrollX = window.scrollX || window.pageXOffset || 0;\n\t\t\t\t\t\tvar scrollY = window.scrollY || window.pageYOffset || 0;\n\t\t\t\t\t\tvar viewMode = _getDiffViewMode();\n\n\t\t\t\t\t\t\tchangesContent.innerHTML = html;\n\t\t\t\t\t\t\tif (typeof htmx !== 'undefined' && typeof htmx.process === 'function') {\n\t\t\t\t\t\t\t\thtmx.process(changesContent);\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t// Let the browser settle the new DOM, then restore UI state.\n\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t// Restore diff view mode (inline/split).\n\t\t\t\t\t\t\t\tif (viewMode === 'split' && typeof switchDiffView === 'function') {\n\t\t\t\t\t\t\t\t\tswitchDiffView('split');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t// Restore scroll position so the user stays where they were.\n\t\t\t\t\t\t\t\twindow.scrollTo(scrollX, scrollY);\n\t\t\t\t\t\t\t});\n\t\t\t\t\t}).catch(function() {\n\t\t\t\t\t\t_fileChangesUpdatePending = false;\n\t\t\t\t\t});\n\t\t\t\t} else {\n\t\t\t\t\t_fileChangesUpdatePending = false;\n\t\t\t\t}\n\t\t\t}\n\n\t\t\t\t// Start SSE if changes tab is active on page load and task is running/queued\n\t\t\t\t(function() {\n\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\tif (_isChatTabActive()) {\n\t\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\t\tvar taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();\n\t\t\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\t\t\t_loadThreadContent(taskId).then(function() {\n\t\t\t\t\t\t\t\t\t\t_restoreThreadScrollOrBottom(taskId, false);\n\t\t\t\t\t\t\t\t\t});\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (_isChangesTabActive()) {\n\t\t\t\t\t\t\tvar changesContent = document.getElementById('changes-content');\n\t\t\t\t\t\t\tif (changesContent) {\n\t\t\t\t\t\t\t\tvar taskId = changesContent.dataset.taskId;\n\t\t\t\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\t\t\t\t_startFileChangesSSE(taskId);\n\t\t\t\t\t\t\t\t\t// Seed fingerprint from initial server render.\n\t\t\t\t\t\t\t\t\t_lastDiffFingerprint = _computeDiffFingerprint(changesContent);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}, 100);\n\t\t\t\t})();\n\n\t\t\t\tvar _prevTaskStatus = null;\n\t\t\t\tif (window._taskDetailFileChangesHandlers) {\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.beforeUnload) {\n\t\t\t\t\t\twindow.removeEventListener('beforeunload', window._taskDetailFileChangesHandlers.beforeUnload);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.afterSettle) {\n\t\t\t\t\t\tdocument.removeEventListener('htmx:afterSettle', window._taskDetailFileChangesHandlers.afterSettle);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.beforeSwap) {\n\t\t\t\t\t\tdocument.body.removeEventListener('htmx:beforeSwap', window._taskDetailFileChangesHandlers.beforeSwap);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.beforeRequest) {\n\t\t\t\t\t\tdocument.body.removeEventListener('htmx:beforeRequest', window._taskDetailFileChangesHandlers.beforeRequest);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.fileChangeEvent) {\n\t\t\t\t\t\twindow.removeEventListener('sse-file-change-event', window._taskDetailFileChangesHandlers.fileChangeEvent);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tvar _taskDetailFileChangeEventHandler = _handleSharedFileChangeEvent;\n\n\t\t\t\tvar _taskDetailBeforeUnloadHandler = function() {\n\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t};\n\n\t\t\t\tvar _taskDetailBeforeSwapHandler = function(evt) {\n\t\t\t\t\tvar target = evt.detail && evt.detail.target;\n\t\t\t\t\tif (!target) return;\n\t\t\t\t\tif (target.id === 'main-content' || target.id === 'task-detail-content') {\n\t\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t\t\twindow.removeEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);\n\t\t\t\t\t}\n\t\t\t\t};\n\n\t\t\t\t// Block event-triggered changes refreshes while Changes tab is not active.\n\t\t\t\tvar _taskDetailBeforeRequestHandler = function(evt) {\n\t\t\t\t\tvar triggerEl = evt.detail && evt.detail.elt;\n\t\t\t\t\tif (!triggerEl) return;\n\t\t\t\t\tif (triggerEl.id === 'changes-content' && !_isChangesTabActive()) {\n\t\t\t\t\t\tevt.preventDefault();\n\t\t\t\t\t}\n\t\t\t\t};\n\n\t\t\t\t// Watch for task status changes to stop SSE and do final refresh.\n\t\t\t\tvar _taskDetailAfterSettleHandler = function(evt) {\n\t\t\t\t\tvar metrics = document.getElementById('task-detail-metrics');\n\t\t\t\t\tif (!metrics) return;\n\t\t\t\t\tvar status = metrics.dataset.taskStatus;\n\t\t\t\t\tif (!status) return;\n\t\t\t\t\tif (_prevTaskStatus === null) {\n\t\t\t\t\t_prevTaskStatus = status;\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tif (_prevTaskStatus !== status) {\n\t\t\t\t\tvar wasActive = (_prevTaskStatus === 'running' || _prevTaskStatus === 'queued');\n\t\t\t\t\tvar nowActive = (status === 'running' || status === 'queued');\n\t\t\t\t\t\tvar nowDone = (status === 'completed' || status === 'failed' || status === 'cancelled');\n\t\t\t\t\t\t_prevTaskStatus = status;\n\t\t\t\t\t\tif (wasActive && nowDone) {\n\t\t\t\t\t\t\t// Task just finished — stop SSE and do final changes refresh\n\t\t\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t\t\t\t_updateDiffViewer('final');\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (!wasActive && nowActive && _fileChangesTaskId && _isChangesTabActive()) {\n\t\t\t\t\t\t\t// Task reactivated (e.g., follow-up on completed task) while changes tab is open.\n\t\t\t\t\t\t\t// Restart SSE so realtime diff snapshots resume for this execution.\n\t\t\t\t\t\t\t_startFileChangesSSE(_fileChangesTaskId);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t};\n\n\t\t\t\twindow._taskDetailFileChangesHandlers = {\n\t\t\t\t\tbeforeUnload: _taskDetailBeforeUnloadHandler,\n\t\t\t\t\tbeforeSwap: _taskDetailBeforeSwapHandler,\n\t\t\t\t\tbeforeRequest: _taskDetailBeforeRequestHandler,\n\t\t\t\t\tafterSettle: _taskDetailAfterSettleHandler,\n\t\t\t\t\tfileChangeEvent: _taskDetailFileChangeEventHandler\n\t\t\t\t};\n\n\t\t\t\twindow.addEventListener('beforeunload', _taskDetailBeforeUnloadHandler);\n\t\t\t\tdocument.body.addEventListener('htmx:beforeSwap', _taskDetailBeforeSwapHandler);\n\t\t\t\tdocument.body.addEventListener('htmx:beforeRequest', _taskDetailBeforeRequestHandler);\n\t\t\t\tdocument.addEventListener('htmx:afterSettle', _taskDetailAfterSettleHandler);\n\t\t\t\twindow.addEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);\n\n\t\t\tfunction copyToClipboard(elementId, button) {\n\t\t\t\tvar element = document.getElementById(elementId);\n\t\t\t\tif (!element) return;\n\n\t\t\t\tvar text = element.textContent;\n\t\t\t\tnavigator.clipboard.writeText(text).then(function() {\n\t\t\t\t\tvar originalHTML = button.innerHTML;\n\t\t\t\t\tbutton.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 13l4 4L19 7\"></path></svg>';\n\t\t\t\t\tbutton.classList.add('btn-success');\n\n\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\tbutton.innerHTML = originalHTML;\n\t\t\t\t\t\tbutton.classList.remove('btn-success');\n\t\t\t\t\t}, 2000);\n\t\t\t\t}).catch(function(err) {\n\t\t\t\t\tconsole.error('Failed to copy text: ', err);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\t// Listen for showToast events from HTMX responses\n\t\t\t// Guard against multiple listener registrations\n\t\t\tif (!window._showToastListenerRegistered) {\n\t\t\t\twindow._showToastListenerRegistered = true;\n\t\t\t\t\n\t\t\t\t// Deduplication: track recent toasts by message+type key\n\t\t\t\twindow._recentToasts = window._recentToasts || new Map();\n\t\t\t\t\n\t\t\t\tdocument.body.addEventListener('showToast', function(event) {\n\t\t\t\t\tif (event.detail && event.detail.message) {\n\t\t\t\t\t\tconst container = document.getElementById('toast-container');\n\t\t\t\t\t\tif (!container) return;\n\n\t\t\t\t\t\t// Create deduplication key from message + type + taskId (if present)\n\t\t\t\t\t\tconst dedupKey = event.detail.message + '|' + (event.detail.type || 'info') + '|' + (event.detail.taskId || '');\n\t\t\t\t\t\tconst now = Date.now();\n\t\t\t\t\t\t\n\t\t\t\t\t\t// Check if this exact toast was shown recently (within 1 second)\n\t\t\t\t\t\tif (window._recentToasts.has(dedupKey)) {\n\t\t\t\t\t\t\tconst lastShown = window._recentToasts.get(dedupKey);\n\t\t\t\t\t\t\tif (now - lastShown < 1000) {\n\t\t\t\t\t\t\t\t// Duplicate toast within 1 second - skip\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\n\t\t\t\t\t\t// Record this toast\n\t\t\t\t\t\twindow._recentToasts.set(dedupKey, now);\n\t\t\t\t\t\t\n\t\t\t\t\t\t// Clean up old entries (older than 5 seconds)\n\t\t\t\t\t\tfor (const [key, timestamp] of window._recentToasts.entries()) {\n\t\t\t\t\t\t\tif (now - timestamp > 5000) {\n\t\t\t\t\t\t\t\twindow._recentToasts.delete(key);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tconst alertClass = event.detail.type === 'success' ? 'alert-success' : \n\t\t\t\t\t\t                   event.detail.type === 'error' ? 'alert-error' : \n\t\t\t\t\t\t                   event.detail.type === 'warning' ? 'alert-warning' : 'alert-info';\n\t\t\t\t\t\t\n\t\t\t\t\t\tconst icon = event.detail.type === 'success' ? \n\t\t\t\t\t\t\t'<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z\" /></svg>' :\n\t\t\t\t\t\t\t'<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\" /></svg>';\n\n\t\t\t\t\t\tconst toast = document.createElement('div');\n\t\t\t\t\t\ttoast.className = 'toast-notification alert ' + alertClass + ' shadow-lg';\n\t\t\t\t\t\ttoast.innerHTML = icon + '<span>' + event.detail.message + '</span>';\n\t\t\t\t\t\t\n\t\t\t\t\t\tcontainer.appendChild(toast);\n\n\t\t\t\t\t\t// Auto-dismiss after 4 seconds\n\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\ttoast.classList.add('toast-dismiss');\n\t\t\t\t\t\t\tsetTimeout(function() { toast.remove(); }, 300);\n\t\t\t\t\t\t}, 4000);\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 183, "</div></div></div></div><!-- End Tab: Thread --><dialog id=\"delete_schedule_confirm_modal\" class=\"modal\"><div class=\"modal-box\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = ModalCloseButton("delete_schedule_confirm_modal", "Close delete schedule confirmation").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 184, "<h3 class=\"font-bold text-lg text-error pr-10\">Delete Schedule</h3><p class=\"py-4\">Are you sure you want to delete the schedule for <strong id=\"delete_schedule_confirm_name\"></strong>? This action cannot be undone.</p><div class=\"text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4\">The task will remain, but it will no longer run on this schedule.</div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"delete_schedule_confirm_modal.close()\">Cancel</button> <button type=\"button\" class=\"btn btn-error\" onclick=\"confirmDeleteSchedule()\">Delete Permanently</button></div></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><script>\n\t\t\t\t\t\t\tvar deleteScheduleID = '';\n\t\t\t\t\t\t\tvar deleteScheduleTarget = '#task-detail-content';\n\t\t\t\t\t\t\tvar deleteScheduleTargetElement = null;\n\t\t\t\t\t\t\tvar deleteScheduleSwap = 'outerHTML';\n\n\t\t\t\t\t\t\tfunction openDeleteScheduleConfirm(button) {\n\t\t\t\t\t\t\t\tif (!button) return;\n\t\t\t\t\t\t\t\tdeleteScheduleID = button.dataset.scheduleId || '';\n\t\t\t\t\t\t\t\tif (!deleteScheduleID) return;\n\t\t\t\t\t\t\t\tdeleteScheduleTarget = button.dataset.scheduleTarget || '#task-detail-content';\n\t\t\t\t\t\t\t\tdeleteScheduleTargetElement = deleteScheduleTarget.indexOf('closest ') === 0 ? button.closest(deleteScheduleTarget.replace(/^closest\\s+/, '')) : null;\n\t\t\t\t\t\t\t\tdeleteScheduleSwap = button.dataset.scheduleSwap || 'outerHTML';\n\t\t\t\t\t\t\t\tvar nameEl = document.getElementById('delete_schedule_confirm_name');\n\t\t\t\t\t\t\t\tif (nameEl) nameEl.textContent = button.dataset.scheduleTitle || 'this task';\n\t\t\t\t\t\t\t\tvar modal = document.getElementById('delete_schedule_confirm_modal');\n\t\t\t\t\t\t\t\tif (modal) modal.showModal();\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tfunction confirmDeleteSchedule() {\n\t\t\t\t\t\t\t\tif (!deleteScheduleID) return;\n\t\t\t\t\t\t\t\tvar modal = document.getElementById('delete_schedule_confirm_modal');\n\t\t\t\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t\t\t\t\tvar target = deleteScheduleTargetElement || deleteScheduleTarget;\n\t\t\t\t\t\t\t\thtmx.ajax('DELETE', '/schedules/' + deleteScheduleID, {\n\t\t\t\t\t\t\t\t\ttarget: target,\n\t\t\t\t\t\t\t\t\tswap: deleteScheduleSwap\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tfunction openScheduleRunAtPicker(container, event) {\t\t\t\t\t\t\tif (!container) return;\n\t\t\t\t\t\t\tvar pickerInput = container.querySelector('input[data-run-at-picker]');\n\t\t\t\t\t\t\tif (!pickerInput) return;\n\t\t\t\t\t\t\tif (event && event.target && !event.target.closest('input[data-run-at-picker]')) return;\n\t\t\t\t\t\t\tpickerInput.focus();\n\t\t\t\t\t\t\tif (typeof pickerInput.showPicker === 'function') {\n\t\t\t\t\t\t\t\tpickerInput.showPicker();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tvar _threadContentLoading = false;\n\t\t\t\t\tfunction _currentTaskIdFromPath() {\n\t\t\t\t\t\tvar taskIdMatch = window.location.pathname.match(/\\/tasks\\/([^\\/]+)/);\n\t\t\t\t\t\treturn taskIdMatch && taskIdMatch[1] ? taskIdMatch[1] : '';\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _isChatTabActive() {\n\t\t\t\t\t\tvar chatTab = document.querySelector('[data-tab=\"chat\"]');\n\t\t\t\t\t\tif (!chatTab || !chatTab.classList.contains('tab-active')) return false;\n\t\t\t\t\t\tvar chatPanel = document.getElementById('tab-chat');\n\t\t\t\t\t\treturn !!chatPanel && !chatPanel.classList.contains('hidden');\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _taskThreadScrollStateKey(taskId) {\n\t\t\t\t\t\treturn taskId ? 'task-thread-scroll-' + taskId : '';\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _getTaskThreadScrollState(taskId) {\n\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\t\tvar key = _taskThreadScrollStateKey(taskId || _currentTaskIdFromPath());\n\t\t\t\t\t\treturn key ? window._taskThreadScrollStates[key] : null;\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _saveTaskThreadScrollState(taskId) {\n\t\t\t\t\t\ttaskId = taskId || _currentTaskIdFromPath();\n\t\t\t\t\t\tvar key = _taskThreadScrollStateKey(taskId);\n\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\tif (!key || !chatMessages || !window.chatAutoScroll) return;\n\t\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\t\tvar nearBottom = window.chatAutoScroll.isNearBottom(chatMessages);\n\t\t\t\t\t\tvar snapshot = tracker && typeof tracker.snapshot === 'function'\n\t\t\t\t\t\t\t? tracker.snapshot()\n\t\t\t\t\t\t\t: { scrollTop: chatMessages.scrollTop || 0, userScrolledUp: !nearBottom, pinned: nearBottom };\n\t\t\t\t\t\twindow._taskThreadScrollStates = window._taskThreadScrollStates || {};\n\t\t\t\t\t\twindow._taskThreadScrollStates[key] = snapshot;\n\t\t\t\t\t\twindow._taskThreadUserScrolledUp = !!snapshot.userScrolledUp;\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _restoreThreadScrollOrBottom(taskId, forceBottom) {\n\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\t\tif (!chatMessages || !window.chatAutoScroll) return;\n\n\t\t\t\t\t\t\tvar state = _getTaskThreadScrollState(taskId);\n\t\t\t\t\t\t\tif (!forceBottom && state) {\n\t\t\t\t\t\t\t\tchatMessages.scrollTop = state.pinned ? chatMessages.scrollHeight : (state.scrollTop || 0);\n\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.userScrolledUp = !!state.userScrolledUp;\n\t\t\t\t\t\t\t\twindow._taskThreadUserScrolledUp = !!state.userScrolledUp;\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tif (!forceBottom) {\n\t\t\t\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\t\t\t\tvar userScrolledUp = false;\n\t\t\t\t\t\t\t\tif (tracker && typeof tracker.userScrolledUp === 'boolean') {\n\t\t\t\t\t\t\t\t\tuserScrolledUp = tracker.userScrolledUp;\n\t\t\t\t\t\t\t\t} else if (typeof window._taskThreadUserScrolledUp === 'boolean') {\n\t\t\t\t\t\t\t\t\tuserScrolledUp = window._taskThreadUserScrolledUp;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (userScrolledUp) return;\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, !!forceBottom);\n\t\t\t\t\t\t\t_saveTaskThreadScrollState(taskId);\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction _loadThreadContent(taskId) {\n\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\tif (!threadContent || !taskId) return Promise.resolve(false);\n\t\t\t\t\t\tif (threadContent.dataset.loaded === 'true') return Promise.resolve(true);\n\t\t\t\t\t\tif (_threadContentLoading) return Promise.resolve(false);\n\t\t\t\t\t\tif (typeof htmx === 'undefined') return Promise.resolve(false);\n\n\t\t\t\t\t\t_threadContentLoading = true;\n\t\t\t\t\t\tthreadContent.dataset.loading = 'true';\n\t\t\t\t\t\treturn htmx.ajax('GET', '/tasks/' + taskId + '/thread', {\n\t\t\t\t\t\t\ttarget: '#thread-content',\n\t\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t\t}).then(function() {\n\t\t\t\t\t\t\tvar updated = document.getElementById('thread-content');\n\t\t\t\t\t\t\tif (updated) {\n\t\t\t\t\t\t\t\tupdated.dataset.loaded = 'true';\n\t\t\t\t\t\t\t\tupdated.dataset.loading = 'false';\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\treturn true;\n\t\t\t\t\t\t}).catch(function(err) {\n\t\t\t\t\t\t\tconsole.error('Failed to load thread content:', err);\n\t\t\t\t\t\t\tvar updated = document.getElementById('thread-content');\n\t\t\t\t\t\t\tif (updated) updated.dataset.loading = 'false';\n\t\t\t\t\t\t\treturn false;\n\t\t\t\t\t\t}).finally(function() {\n\t\t\t\t\t\t\t_threadContentLoading = false;\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction switchTaskTab(tabName) {\n\t\t\t\t\tvar container = document.getElementById('task-detail-content');\n\t\t\t\t\tif (!container) return;\n\n\t\t\t\t\tif (_isChatTabActive()) {\n\t\t\t\t\t\t_saveTaskThreadScrollState();\n\t\t\t\t\t}\n\n\t\t\t\tcontainer.querySelectorAll('.task-tab-panel').forEach(function(panel) {\n\t\t\t\t\tpanel.classList.add('hidden');\n\t\t\t\t});\n\n\t\t\t\tcontainer.querySelectorAll('[data-tab]').forEach(function(tab) {\n\t\t\t\t\ttab.classList.remove('tab-active');\n\t\t\t\t});\n\n\t\t\t\tvar panel = container.querySelector('#tab-' + tabName);\n\t\t\t\tif (panel) panel.classList.remove('hidden');\n\n\t\t\t\t\tvar tab = container.querySelector('[data-tab=\"' + tabName + '\"]');\n\t\t\t\t\tif (tab) tab.classList.add('tab-active');\n\n\t\t\t\t\t// Auto-scroll thread to bottom when switching to thread tab\n\t\t\t\t\tif (tabName === 'chat') {\n\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\tvar taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();\n\t\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\t\t_loadThreadContent(taskId).then(function() {\n\t\t\t\t\t\t\t\t\t_restoreThreadScrollOrBottom(taskId, false);\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t_restoreThreadScrollOrBottom(taskId, false);\n\t\t\t\t\t\t\t}\t\t\t\t\t}\n\n\t\t\t\t// Reload changes content and start SSE when switching to changes tab\n\t\t\t\tif (tabName === 'changes') {\n\t\t\t\t\tvar taskIdMatch = window.location.pathname.match(/\\/tasks\\/([^\\/]+)/);\n\t\t\t\t\tif (taskIdMatch && taskIdMatch[1]) {\n\t\t\t\t\t\tvar taskId = taskIdMatch[1];\n\t\t\t\t\t\tif (typeof htmx !== 'undefined') {\n\t\t\t\t\t\t\thtmx.ajax('GET', '/tasks/' + taskId + '/changes', {\n\t\t\t\t\t\t\t\ttarget: '#changes-content',\n\t\t\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t\t\t}).then(function() {\n\t\t\t\t\t\t\t\t// Seed fingerprint so the first SSE update can detect no-ops.\n\t\t\t\t\t\t\t\tvar cc = document.getElementById('changes-content');\n\t\t\t\t\t\t\t\tif (cc) _lastDiffFingerprint = _computeDiffFingerprint(cc);\n\t\t\t\t\t\t\t}).catch(function() {});\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Start SSE for real-time file changes\n\t\t\t\t\t\t_startFileChangesSSE(taskId);\n\t\t\t\t\t}\n\t\t\t\t} else {\n\t\t\t\t\t// Stop SSE when switching away from changes tab\n\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\t// File changes are consumed from the shared sidebar live stream.\n\t\t\t\t// Keep per-task filtering in-page to avoid creating another EventSource.\n\t\t\t\tvar _fileChangesListening = false;\n\t\t\t\tvar _fileChangesUpdatePending = false;\n\t\t\t\tvar _fileChangesTaskId = null;\n\n\t\t\t\tfunction _isChangesTabActive() {\n\t\t\t\t\tvar changesTab = document.querySelector('[data-tab=\"changes\"]');\n\t\t\t\t\tif (!changesTab || !changesTab.classList.contains('tab-active')) return false;\n\t\t\t\t\tvar changesPanel = document.getElementById('tab-changes');\n\t\t\t\t\treturn !!changesPanel && !changesPanel.classList.contains('hidden');\n\t\t\t\t}\n\n\t\t\tfunction _handleSharedFileChangeEvent(event) {\n\t\t\t\tif (!_fileChangesListening || !_fileChangesTaskId) return;\n\t\t\t\tvar data = event.detail || {};\n\t\t\t\tif (!data.task_id || data.task_id !== _fileChangesTaskId) return;\n\n\t\t\t\tif (data.type === 'diff_snapshot') {\n\t\t\t\t\t_updateDiffViewer(data.diff_output || '');\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tif (data.type === 'file_modified') {\n\t\t\t\t\tconsole.log('File modified:', data.file_path, 'via', data.tool_name);\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction _startFileChangesSSE(taskId) {\n\t\t\t\tif (!taskId) return;\n\t\t\t\tif (_fileChangesListening && _fileChangesTaskId === taskId) return;\n\t\t\t\t_fileChangesTaskId = taskId;\n\t\t\t\t_fileChangesListening = true;\n\t\t\t\tconsole.log('File changes live listener active for task:', taskId);\n\t\t\t}\n\n\t\t\tfunction _stopFileChangesSSE() {\n\t\t\t\t_fileChangesListening = false;\n\t\t\t\tconsole.log('File changes live listener paused');\n\t\t\t}\n\n\t\t\t\t// Track the last diff fingerprint to skip no-op DOM replacements.\n\t\t\t\tvar _lastDiffFingerprint = '';\n\n\t\t\t\tfunction _computeDiffFingerprint(container) {\n\t\t\t\t\tvar viewer = container && container.querySelector('#diff-viewer');\n\t\t\t\t\tif (!viewer) return '';\n\t\t\t\t\t// Use a simple hash of the full diff viewer HTML for accurate\n\t\t\t\t\t// change detection. The previous badge+row-count approach missed\n\t\t\t\t\t// content changes within existing lines.\n\t\t\t\t\tvar raw = viewer.innerHTML;\n\t\t\t\t\tvar h = 0;\n\t\t\t\t\tfor (var i = 0; i < raw.length; i++) {\n\t\t\t\t\t\th = ((h << 5) - h + raw.charCodeAt(i)) | 0;\n\t\t\t\t\t}\n\t\t\t\t\treturn String(h);\n\t\t\t\t}\n\n\t\t\t\tfunction _getDiffViewMode() {\n\t\t\t\t\tvar splitBtn = document.getElementById('diff-btn-split');\n\t\t\t\t\treturn (splitBtn && splitBtn.classList.contains('btn-active')) ? 'split' : 'inline';\n\t\t\t\t}\n\n\t\t\t\tfunction _updateDiffViewer(diffOutput) {\n\t\t\t\t\tvar changesContent = document.getElementById('changes-content');\n\t\t\t\t\tif (!changesContent) return;\n\t\t\t\t\tif (!_isChangesTabActive()) return;\n\n\t\t\t\t\t// Debounce: skip if an update is already in flight\n\t\t\t\t\tif (_fileChangesUpdatePending) return;\n\t\t\t\t\t_fileChangesUpdatePending = true;\n\n\t\t\t\tvar taskId = changesContent.dataset.taskId;\n\t\t\t\tif (taskId) {\n\t\t\t\t\t// Fetch new HTML in the background WITHOUT touching the live DOM.\n\t\t\t\t\t// Only swap if content actually changed — this prevents the viewport\n\t\t\t\t\t// jumps caused by the old htmx.ajax() path which replaced innerHTML\n\t\t\t\t\t// before the fingerprint check could run.\n\t\t\t\t\tfetch('/tasks/' + taskId + '/changes', {\n\t\t\t\t\t\theaders: { 'HX-Request': 'true' }\n\t\t\t\t\t}).then(function(resp) {\n\t\t\t\t\t\tif (!resp.ok) throw new Error('HTTP ' + resp.status);\n\t\t\t\t\t\treturn resp.text();\n\t\t\t\t\t}).then(function(html) {\n\t\t\t\t\t\t_fileChangesUpdatePending = false;\n\n\t\t\t\t\t\t// Parse the response in a detached element to compute fingerprint\n\t\t\t\t\t\t// without touching the live DOM at all.\n\t\t\t\t\t\tvar offscreen = document.createElement('div');\n\t\t\t\t\t\toffscreen.innerHTML = html;\n\n\t\t\t\t\t\tvar newFp = _computeDiffFingerprint(offscreen);\n\t\t\t\t\t\tif (newFp && newFp === _lastDiffFingerprint) {\n\t\t\t\t\t\t\t// Diff unchanged — no DOM mutation, no scroll disruption.\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t_lastDiffFingerprint = newFp;\n\n\t\t\t\t\t\t// Content changed — apply the swap with UI state preservation.\n\t\t\t\t\t\tvar scrollX = window.scrollX || window.pageXOffset || 0;\n\t\t\t\t\t\tvar scrollY = window.scrollY || window.pageYOffset || 0;\n\t\t\t\t\t\tvar viewMode = _getDiffViewMode();\n\n\t\t\t\t\t\t\tchangesContent.innerHTML = html;\n\t\t\t\t\t\t\tif (typeof htmx !== 'undefined' && typeof htmx.process === 'function') {\n\t\t\t\t\t\t\t\thtmx.process(changesContent);\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t// Let the browser settle the new DOM, then restore UI state.\n\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t// Restore diff view mode (inline/split).\n\t\t\t\t\t\t\t\tif (viewMode === 'split' && typeof switchDiffView === 'function') {\n\t\t\t\t\t\t\t\t\tswitchDiffView('split');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t// Restore scroll position so the user stays where they were.\n\t\t\t\t\t\t\t\twindow.scrollTo(scrollX, scrollY);\n\t\t\t\t\t\t\t});\n\t\t\t\t\t}).catch(function() {\n\t\t\t\t\t\t_fileChangesUpdatePending = false;\n\t\t\t\t\t});\n\t\t\t\t} else {\n\t\t\t\t\t_fileChangesUpdatePending = false;\n\t\t\t\t}\n\t\t\t}\n\n\t\t\t\t// Start SSE if changes tab is active on page load and task is running/queued\n\t\t\t\t(function() {\n\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\tif (_isChatTabActive()) {\n\t\t\t\t\t\t\tvar threadContent = document.getElementById('thread-content');\n\t\t\t\t\t\t\tvar taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();\n\t\t\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\t\t\t_loadThreadContent(taskId).then(function() {\n\t\t\t\t\t\t\t\t\t\t_restoreThreadScrollOrBottom(taskId, false);\n\t\t\t\t\t\t\t\t\t});\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (_isChangesTabActive()) {\n\t\t\t\t\t\t\tvar changesContent = document.getElementById('changes-content');\n\t\t\t\t\t\t\tif (changesContent) {\n\t\t\t\t\t\t\t\tvar taskId = changesContent.dataset.taskId;\n\t\t\t\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\t\t\t\t_startFileChangesSSE(taskId);\n\t\t\t\t\t\t\t\t\t// Seed fingerprint from initial server render.\n\t\t\t\t\t\t\t\t\t_lastDiffFingerprint = _computeDiffFingerprint(changesContent);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}, 100);\n\t\t\t\t})();\n\n\t\t\t\tvar _prevTaskStatus = null;\n\t\t\t\tif (window._taskDetailFileChangesHandlers) {\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.beforeUnload) {\n\t\t\t\t\t\twindow.removeEventListener('beforeunload', window._taskDetailFileChangesHandlers.beforeUnload);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.afterSettle) {\n\t\t\t\t\t\tdocument.removeEventListener('htmx:afterSettle', window._taskDetailFileChangesHandlers.afterSettle);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.beforeSwap) {\n\t\t\t\t\t\tdocument.body.removeEventListener('htmx:beforeSwap', window._taskDetailFileChangesHandlers.beforeSwap);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.beforeRequest) {\n\t\t\t\t\t\tdocument.body.removeEventListener('htmx:beforeRequest', window._taskDetailFileChangesHandlers.beforeRequest);\n\t\t\t\t\t}\n\t\t\t\t\tif (window._taskDetailFileChangesHandlers.fileChangeEvent) {\n\t\t\t\t\t\twindow.removeEventListener('sse-file-change-event', window._taskDetailFileChangesHandlers.fileChangeEvent);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tvar _taskDetailFileChangeEventHandler = _handleSharedFileChangeEvent;\n\n\t\t\t\tvar _taskDetailBeforeUnloadHandler = function() {\n\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t};\n\n\t\t\t\tvar _taskDetailBeforeSwapHandler = function(evt) {\n\t\t\t\t\tvar target = evt.detail && evt.detail.target;\n\t\t\t\t\tif (!target) return;\n\t\t\t\t\tif (target.id === 'main-content' || target.id === 'task-detail-content') {\n\t\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t\t\twindow.removeEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);\n\t\t\t\t\t}\n\t\t\t\t};\n\n\t\t\t\t// Block event-triggered changes refreshes while Changes tab is not active.\n\t\t\t\tvar _taskDetailBeforeRequestHandler = function(evt) {\n\t\t\t\t\tvar triggerEl = evt.detail && evt.detail.elt;\n\t\t\t\t\tif (!triggerEl) return;\n\t\t\t\t\tif (triggerEl.id === 'changes-content' && !_isChangesTabActive()) {\n\t\t\t\t\t\tevt.preventDefault();\n\t\t\t\t\t}\n\t\t\t\t};\n\n\t\t\t\t// Watch for task status changes to stop SSE and do final refresh.\n\t\t\t\tvar _taskDetailAfterSettleHandler = function(evt) {\n\t\t\t\t\tvar metrics = document.getElementById('task-detail-metrics');\n\t\t\t\t\tif (!metrics) return;\n\t\t\t\t\tvar status = metrics.dataset.taskStatus;\n\t\t\t\t\tif (!status) return;\n\t\t\t\t\tif (_prevTaskStatus === null) {\n\t\t\t\t\t_prevTaskStatus = status;\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tif (_prevTaskStatus !== status) {\n\t\t\t\t\tvar wasActive = (_prevTaskStatus === 'running' || _prevTaskStatus === 'queued');\n\t\t\t\t\tvar nowActive = (status === 'running' || status === 'queued');\n\t\t\t\t\t\tvar nowDone = (status === 'completed' || status === 'failed' || status === 'cancelled');\n\t\t\t\t\t\t_prevTaskStatus = status;\n\t\t\t\t\t\tif (wasActive && nowDone) {\n\t\t\t\t\t\t\t// Task just finished — stop SSE and do final changes refresh\n\t\t\t\t\t\t\t_stopFileChangesSSE();\n\t\t\t\t\t\t\t_updateDiffViewer('final');\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (!wasActive && nowActive && _fileChangesTaskId && _isChangesTabActive()) {\n\t\t\t\t\t\t\t// Task reactivated (e.g., follow-up on completed task) while changes tab is open.\n\t\t\t\t\t\t\t// Restart SSE so realtime diff snapshots resume for this execution.\n\t\t\t\t\t\t\t_startFileChangesSSE(_fileChangesTaskId);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t};\n\n\t\t\t\twindow._taskDetailFileChangesHandlers = {\n\t\t\t\t\tbeforeUnload: _taskDetailBeforeUnloadHandler,\n\t\t\t\t\tbeforeSwap: _taskDetailBeforeSwapHandler,\n\t\t\t\t\tbeforeRequest: _taskDetailBeforeRequestHandler,\n\t\t\t\t\tafterSettle: _taskDetailAfterSettleHandler,\n\t\t\t\t\tfileChangeEvent: _taskDetailFileChangeEventHandler\n\t\t\t\t};\n\n\t\t\t\twindow.addEventListener('beforeunload', _taskDetailBeforeUnloadHandler);\n\t\t\t\tdocument.body.addEventListener('htmx:beforeSwap', _taskDetailBeforeSwapHandler);\n\t\t\t\tdocument.body.addEventListener('htmx:beforeRequest', _taskDetailBeforeRequestHandler);\n\t\t\t\tdocument.addEventListener('htmx:afterSettle', _taskDetailAfterSettleHandler);\n\t\t\t\twindow.addEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);\n\n\t\t\tfunction copyToClipboard(elementId, button) {\n\t\t\t\tvar element = document.getElementById(elementId);\n\t\t\t\tif (!element) return;\n\n\t\t\t\tvar text = element.textContent;\n\t\t\t\tnavigator.clipboard.writeText(text).then(function() {\n\t\t\t\t\tvar originalHTML = button.innerHTML;\n\t\t\t\t\tbutton.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 13l4 4L19 7\"></path></svg>';\n\t\t\t\t\tbutton.classList.add('btn-success');\n\n\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\tbutton.innerHTML = originalHTML;\n\t\t\t\t\t\tbutton.classList.remove('btn-success');\n\t\t\t\t\t}, 2000);\n\t\t\t\t}).catch(function(err) {\n\t\t\t\t\tconsole.error('Failed to copy text: ', err);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\t// Listen for showToast events from HTMX responses\n\t\t\t// Guard against multiple listener registrations\n\t\t\tif (!window._showToastListenerRegistered) {\n\t\t\t\twindow._showToastListenerRegistered = true;\n\t\t\t\t\n\t\t\t\t// Deduplication: track recent toasts by message+type key\n\t\t\t\twindow._recentToasts = window._recentToasts || new Map();\n\t\t\t\t\n\t\t\t\tdocument.body.addEventListener('showToast', function(event) {\n\t\t\t\t\tif (event.detail && event.detail.message) {\n\t\t\t\t\t\tconst container = document.getElementById('toast-container');\n\t\t\t\t\t\tif (!container) return;\n\n\t\t\t\t\t\t// Create deduplication key from message + type + taskId (if present)\n\t\t\t\t\t\tconst dedupKey = event.detail.message + '|' + (event.detail.type || 'info') + '|' + (event.detail.taskId || '');\n\t\t\t\t\t\tconst now = Date.now();\n\t\t\t\t\t\t\n\t\t\t\t\t\t// Check if this exact toast was shown recently (within 1 second)\n\t\t\t\t\t\tif (window._recentToasts.has(dedupKey)) {\n\t\t\t\t\t\t\tconst lastShown = window._recentToasts.get(dedupKey);\n\t\t\t\t\t\t\tif (now - lastShown < 1000) {\n\t\t\t\t\t\t\t\t// Duplicate toast within 1 second - skip\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\n\t\t\t\t\t\t// Record this toast\n\t\t\t\t\t\twindow._recentToasts.set(dedupKey, now);\n\t\t\t\t\t\t\n\t\t\t\t\t\t// Clean up old entries (older than 5 seconds)\n\t\t\t\t\t\tfor (const [key, timestamp] of window._recentToasts.entries()) {\n\t\t\t\t\t\t\tif (now - timestamp > 5000) {\n\t\t\t\t\t\t\t\twindow._recentToasts.delete(key);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tconst alertClass = event.detail.type === 'success' ? 'alert-success' : \n\t\t\t\t\t\t                   event.detail.type === 'error' ? 'alert-error' : \n\t\t\t\t\t\t                   event.detail.type === 'warning' ? 'alert-warning' : 'alert-info';\n\t\t\t\t\t\t\n\t\t\t\t\t\tconst icon = event.detail.type === 'success' ? \n\t\t\t\t\t\t\t'<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z\" /></svg>' :\n\t\t\t\t\t\t\t'<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\" /></svg>';\n\n\t\t\t\t\t\tconst toast = document.createElement('div');\n\t\t\t\t\t\ttoast.className = 'toast-notification alert ' + alertClass + ' shadow-lg';\n\t\t\t\t\t\ttoast.innerHTML = icon + '<span>' + event.detail.message + '</span>';\n\t\t\t\t\t\t\n\t\t\t\t\t\tcontainer.appendChild(toast);\n\n\t\t\t\t\t\t// Auto-dismiss after 4 seconds\n\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\ttoast.classList.add('toast-dismiss');\n\t\t\t\t\t\t\tsetTimeout(function() { toast.remove(); }, 300);\n\t\t\t\t\t\t}, 4000);\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1760,217 +1781,217 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var95 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var95 == nil {
-			templ_7745c5c3_Var95 = templ.NopComponent
+		templ_7745c5c3_Var96 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var96 == nil {
+			templ_7745c5c3_Var96 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 183, "<div id=\"task-detail-metrics\" class=\"grid grid-cols-2 md:grid-cols-4 gap-4 mb-6\" hx-get=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var96 string
-		templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/detail-status", task.ID))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1507, Col: 58}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var96)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 184, "\" hx-trigger=\"every 3s\" hx-target=\"#task-detail-metrics\" hx-swap=\"morph:outerHTML\" data-task-status=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 185, "<div id=\"task-detail-metrics\" class=\"grid grid-cols-2 md:grid-cols-4 gap-4 mb-6\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var97 string
-		templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(task.Status))
+		templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/detail-status", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1511, Col: 40}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1548, Col: 58}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var97)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 185, "\"><div><span class=\"text-sm opacity-60\">Category:</span> <span class=\"ml-2 badge badge-sm badge-outline\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 186, "\" hx-trigger=\"every 3s\" hx-target=\"#task-detail-metrics\" hx-swap=\"morph:outerHTML\" data-task-status=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var98 string
-		templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.JoinStringErrs(string(task.Category))
+		templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(task.Status))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1515, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1552, Col: 40}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var98))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var98)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 186, "</span></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 187, "\"><div><span class=\"text-sm opacity-60\">Category:</span> <span class=\"ml-2 badge badge-sm badge-outline\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var99 string
+		templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.JoinStringErrs(string(task.Category))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1556, Col: 74}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var99))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 188, "</span></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if !(task.Status == models.StatusPending && (task.Category == models.CategoryBacklog || task.Category == models.CategoryScheduled)) {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 187, "<div><span class=\"text-sm opacity-60\">Status:</span> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 189, "<div><span class=\"text-sm opacity-60\">Status:</span> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var99 = []any{"ml-2 badge badge-sm", components.StatusBadgeClass(task.Status)}
-			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var99...)
+			var templ_7745c5c3_Var100 = []any{"ml-2 badge badge-sm", components.StatusBadgeClass(task.Status)}
+			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var100...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 188, "<span class=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var100 string
-			templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var99).String())
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var100)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 189, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 190, "<span class=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var101 string
-			templ_7745c5c3_Var101, templ_7745c5c3_Err = templ.JoinStringErrs(components.StatusLabelForTask(task.Status, task.Category))
+			templ_7745c5c3_Var101, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var100).String())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1522, Col: 143}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1, Col: 0}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var101))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 190, "</span></div>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var101)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 191, "<div><span class=\"text-sm opacity-60\">Tag:</span> ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if task.Tag != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 192, "<span class=\"ml-2 badge badge-sm badge-outline inline-flex items-center\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 191, "\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var102 string
-			templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.JoinStringErrs(components.TagLabel(task.Tag))
+			templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.JoinStringErrs(components.StatusLabelForTask(task.Status, task.Category))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1528, Col: 108}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1563, Col: 143}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var102))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 193, "</span>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 194, "<span class=\"ml-2 badge badge-sm badge-outline opacity-70\">None</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 192, "</span></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 195, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 193, "<div><span class=\"text-sm opacity-60\">Tag:</span> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if components.PriorityLabel(task.Priority) != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 196, "<div><span class=\"text-sm opacity-60\">Priority:</span> <span class=\"ml-2 badge badge-sm badge-outline\">")
+		if task.Tag != "" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 194, "<span class=\"ml-2 badge badge-sm badge-outline inline-flex items-center\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var103 string
-			templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.JoinStringErrs(components.PriorityLabel(task.Priority))
+			templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.JoinStringErrs(components.TagLabel(task.Tag))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1536, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1569, Col: 108}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var103))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 197, "</span></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 195, "</span>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		} else {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 196, "<span class=\"ml-2 badge badge-sm badge-outline opacity-70\">None</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 198, "<div><span class=\"text-sm opacity-60\">Model:</span> <span class=\"ml-2 badge badge-sm badge-outline\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 197, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var104 string
-		templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.JoinStringErrs(taskModelLabel(task, agents))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1541, Col: 81}
+		if components.PriorityLabel(task.Priority) != "" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 198, "<div><span class=\"text-sm opacity-60\">Priority:</span> <span class=\"ml-2 badge badge-sm badge-outline\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var104 string
+			templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.JoinStringErrs(components.PriorityLabel(task.Priority))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1577, Col: 93}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var104))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 199, "</span></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var104))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 199, "</span></div><div><span class=\"text-sm opacity-60\">Agent:</span> <span class=\"ml-2 badge badge-sm badge-outline\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 200, "<div><span class=\"text-sm opacity-60\">Model:</span> <span class=\"ml-2 badge badge-sm badge-outline\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var105 string
-		templ_7745c5c3_Var105, templ_7745c5c3_Err = templ.JoinStringErrs(taskAgentLabel(task, agentDefs))
+		templ_7745c5c3_Var105, templ_7745c5c3_Err = templ.JoinStringErrs(taskModelLabel(task, agents))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1545, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1582, Col: 81}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var105))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 200, "</span></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 201, "</span></div><div><span class=\"text-sm opacity-60\">Agent:</span> <span class=\"ml-2 badge badge-sm badge-outline\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var106 string
+		templ_7745c5c3_Var106, templ_7745c5c3_Err = templ.JoinStringErrs(taskAgentLabel(task, agentDefs))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1586, Col: 84}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var106))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 202, "</span></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if task.Status == models.StatusRunning && len(executions) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 201, "<div><span class=\"text-sm opacity-60\">Elapsed:</span> <span class=\"ml-2 badge badge-warning\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 203, "<div><span class=\"text-sm opacity-60\">Elapsed:</span> <span class=\"ml-2 badge badge-warning\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var106 string
-			templ_7745c5c3_Var106, templ_7745c5c3_Err = templ.JoinStringErrs(components.FormatElapsedTime(executions[len(executions)-1].StartedAt))
+			var templ_7745c5c3_Var107 string
+			templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.JoinStringErrs(components.FormatElapsedTime(executions[len(executions)-1].StartedAt))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1550, Col: 114}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1591, Col: 114}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var106))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var107))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 202, "</span></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 204, "</span></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if (task.Status == models.StatusCompleted || task.Status == models.StatusFailed) && len(executions) > 0 {
 			if dur := components.TaskLatestDuration(executions); dur != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 203, "<div><span class=\"text-sm opacity-60\">Duration:</span> <span class=\"ml-2 badge badge-sm badge-outline\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 205, "<div><span class=\"text-sm opacity-60\">Duration:</span> <span class=\"ml-2 badge badge-sm badge-outline\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var107 string
-				templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.JoinStringErrs(dur)
+				var templ_7745c5c3_Var108 string
+				templ_7745c5c3_Var108, templ_7745c5c3_Err = templ.JoinStringErrs(dur)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1557, Col: 58}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1598, Col: 58}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var107))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var108))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 204, "</span></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 206, "</span></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 205, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 207, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1994,40 +2015,40 @@ func TaskPromptPanel(task *models.Task) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var108 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var108 == nil {
-			templ_7745c5c3_Var108 = templ.NopComponent
+		templ_7745c5c3_Var109 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var109 == nil {
+			templ_7745c5c3_Var109 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 206, "<div id=\"task-prompt-panel\" class=\"card bg-base-200/50 border border-base-300 mb-4\"><div class=\"card-body p-4 gap-3\"><div class=\"text-sm font-semibold\">Prompt</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 208, "<div id=\"task-prompt-panel\" class=\"card bg-base-200/50 border border-base-300 mb-4\"><div class=\"card-body p-4 gap-3\"><div class=\"text-sm font-semibold\">Prompt</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if task.Prompt != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 207, "<div class=\"textarea textarea-bordered textarea-sm w-full min-h-32 h-auto cursor-default whitespace-pre-wrap overflow-x-auto font-sans text-sm leading-relaxed\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 209, "<div class=\"textarea textarea-bordered textarea-sm w-full min-h-32 h-auto cursor-default whitespace-pre-wrap overflow-x-auto font-sans text-sm leading-relaxed\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var109 string
-			templ_7745c5c3_Var109, templ_7745c5c3_Err = templ.JoinStringErrs(task.Prompt)
+			var templ_7745c5c3_Var110 string
+			templ_7745c5c3_Var110, templ_7745c5c3_Err = templ.JoinStringErrs(task.Prompt)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1569, Col: 177}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1610, Col: 177}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var109))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var110))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 208, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 210, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 209, "<p class=\"text-sm opacity-60\">No prompt set</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 211, "<p class=\"text-sm opacity-60\">No prompt set</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 210, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 212, "</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2051,128 +2072,128 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var110 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var110 == nil {
-			templ_7745c5c3_Var110 = templ.NopComponent
+		templ_7745c5c3_Var111 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var111 == nil {
+			templ_7745c5c3_Var111 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 211, "<div id=\"task-goal-panel\" class=\"card bg-base-200/50 border border-base-300 mb-4\" data-task-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 213, "<div id=\"task-goal-panel\" class=\"card bg-base-200/50 border border-base-300 mb-4\" data-task-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var111 string
-		templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.ResolveAttributeValue(taskID)
+		var templ_7745c5c3_Var112 string
+		templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.ResolveAttributeValue(taskID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1578, Col: 104}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1619, Col: 104}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var111)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var112)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 212, "\"><div class=\"card-body p-4 gap-3\"><div class=\"flex items-center justify-between gap-3\"><div><div class=\"text-sm font-semibold\">Goal</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 214, "\"><div class=\"card-body p-4 gap-3\"><div class=\"flex items-center justify-between gap-3\"><div><div class=\"text-sm font-semibold\">Goal</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if goal == nil || goal.Status == models.TaskGoalStatusCleared {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 213, "<div class=\"text-sm opacity-60\">No goal set</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 215, "<div class=\"text-sm opacity-60\">No goal set</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 214, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 216, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if goal != nil && goal.Status != models.TaskGoalStatusCleared {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 215, "<span class=\"badge badge-outline\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var112 string
-			templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.JoinStringErrs(string(goal.Status))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1588, Col: 60}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var112))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 216, "</span>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 217, "</div>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if goal != nil && goal.Status != models.TaskGoalStatusCleared {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 218, "<div class=\"textarea textarea-bordered textarea-sm w-full min-h-20 h-auto cursor-default whitespace-pre-wrap overflow-x-auto font-sans text-sm leading-relaxed\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 217, "<span class=\"badge badge-outline\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var113 string
-			templ_7745c5c3_Var113, templ_7745c5c3_Err = templ.JoinStringErrs(goal.Objective)
+			templ_7745c5c3_Var113, templ_7745c5c3_Err = templ.JoinStringErrs(string(goal.Status))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1592, Col: 180}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1629, Col: 60}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var113))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 219, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 218, "</span>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 219, "</div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if goal != nil && goal.Status != models.TaskGoalStatusCleared {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 220, "<div class=\"textarea textarea-bordered textarea-sm w-full min-h-20 h-auto cursor-default whitespace-pre-wrap overflow-x-auto font-sans text-sm leading-relaxed\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var114 string
+			templ_7745c5c3_Var114, templ_7745c5c3_Err = templ.JoinStringErrs(goal.Objective)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1633, Col: 180}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var114))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 221, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if goal.Reason != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 220, "<p class=\"text-xs opacity-60\">Reason: ")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var114 string
-				templ_7745c5c3_Var114, templ_7745c5c3_Err = templ.JoinStringErrs(goal.Reason)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1594, Col: 56}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var114))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 221, "</p>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 222, " ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if goal.LastCheckedAt != nil {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 223, "<p class=\"text-xs opacity-60\">Last checked: ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 222, "<p class=\"text-xs opacity-60\">Reason: ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var115 string
-				templ_7745c5c3_Var115, templ_7745c5c3_Err = templ.JoinStringErrs(goal.LastCheckedAt.Local().Format("Jan 2, 2006 3:04 PM"))
+				templ_7745c5c3_Var115, templ_7745c5c3_Err = templ.JoinStringErrs(goal.Reason)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1597, Col: 107}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1635, Col: 56}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var115))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 224, "</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 223, "</p>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 224, " ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if goal.LastCheckedAt != nil {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 225, "<p class=\"text-xs opacity-60\">Last checked: ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var116 string
+				templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.JoinStringErrs(goal.LastCheckedAt.Local().Format("Jan 2, 2006 3:04 PM"))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1638, Col: 107}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var116))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 226, "</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 225, "<p class=\"text-xs opacity-60\">Last checked: not yet</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 227, "<p class=\"text-xs opacity-60\">Last checked: not yet</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 226, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 228, "</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

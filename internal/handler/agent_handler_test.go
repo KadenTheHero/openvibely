@@ -25,6 +25,37 @@ func (f llmCallerFunc) CallModel(ctx context.Context, prompt string, attachments
 	return f(ctx, prompt, attachments, agent, execID, workDir)
 }
 
+func TestHandler_ListAgents_DeleteConfirmationDialog(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetAgentRepo(repository.NewAgentRepo(db))
+
+	req := httptest.NewRequest(http.MethodGet, "/agents?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`id="delete_agent_confirm_modal" class="modal"`,
+		`id="delete_agent_confirm_name"`,
+		`onclick="delete_agent_confirm_modal.close()"`,
+		`onclick="confirmDeleteAgent()"`,
+		`class="btn btn-error"`,
+		`onclick="openDeleteAgentConfirm(this)"`,
+		`modal.showModal()`,
+		`htmx.ajax('DELETE', '/agents/' + deleteAgentID`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected agents delete confirmation markup/script to contain %q", want)
+		}
+	}
+	if strings.Contains(body, `hx-confirm="Delete this agent`) || strings.Contains(body, `hx-delete="/agents/`) {
+		t.Fatal("expected agent delete button to open modal instead of deleting immediately")
+	}
+}
+
 func TestHandler_ListAgents_IncludesGenerateUI(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetAgentRepo(repository.NewAgentRepo(db))

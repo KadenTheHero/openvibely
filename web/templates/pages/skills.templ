@@ -176,8 +176,21 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				}
 			</div>
 		}
-		<dialog id="skill_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
-			<div class="modal-box">
+			<dialog id="delete_skill_confirm_modal" class="modal">
+				<div class="modal-box">
+					@ModalCloseButton("delete_skill_confirm_modal", "Close delete skill confirmation")
+					<h3 class="font-bold text-lg text-error pr-10">Delete Skill</h3>
+					<p class="py-4">Are you sure you want to delete <strong id="delete_skill_confirm_name"></strong>? This action cannot be undone.</p>
+					<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">The skill package and its indexed registration will be removed from the selected scope.</div>
+					<div class="modal-action">
+						<button type="button" class="btn" onclick="delete_skill_confirm_modal.close()">Cancel</button>
+						<button type="button" class="btn btn-error" onclick="confirmDeleteSkill()">Delete Permanently</button>
+					</div>
+				</div>
+				<form method="dialog" class="modal-backdrop"><button>close</button></form>
+			</dialog>
+
+			<dialog id="skill_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">			<div class="modal-box">
 				@ModalCloseButton("skill_modal", "Close skill dialog")
 				<h3 id="skill_modal_title" class="font-bold text-lg mb-4 pr-10">New Skill</h3>
 				<form id="skill_form" onsubmit="submitSkillForm(event)">
@@ -260,9 +273,11 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				<button>close</button>
 			</form>
 		</dialog>
-		<script>
-			function defaultSkillTemplate(handle, name, scope, description) {
-				handle = (handle || 'openvibely_database_migration_workflow').trim();
+			<script>
+				var deleteSkillHandle = '';
+				var deleteSkillScope = 'project';
+
+				function defaultSkillTemplate(handle, name, scope, description) {				handle = (handle || 'openvibely_database_migration_workflow').trim();
 				name = (name || 'OpenVibely Database Migration Workflow').trim();
 				scope = (scope || 'project').trim();
 				description = (description || 'Manage OpenVibely goose schema migrations, consolidation, and validation safely.').trim();
@@ -381,19 +396,27 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				skill_modal.showModal();
 			}
 
-			function deleteSkill(button) {
-				var handle = button.dataset.skillHandle || '';
-				var name = button.dataset.skillName || handle;
-				var scope = button.dataset.skillScope || 'project';
-				if (!handle) return;
-				if (!confirm('Delete skill "' + name + '"? This action cannot be undone.')) return;
-				htmx.ajax('DELETE', '/skills/' + encodeURIComponent(handle) + '?scope=' + encodeURIComponent(scope) + currentSkillsProjectQuery().replace(/^\?/, '&'), {
-					target: '#skills-container',
-					swap: 'outerHTML'
-				}).catch(function(xhr) {
-					alert((xhr && xhr.responseText) || 'Failed to delete skill.');
-				});
-			}
+				function deleteSkill(button) {
+					deleteSkillHandle = button.dataset.skillHandle || '';
+					deleteSkillScope = button.dataset.skillScope || 'project';
+					if (!deleteSkillHandle) return;
+					var nameEl = document.getElementById('delete_skill_confirm_name');
+					if (nameEl) nameEl.textContent = button.dataset.skillName || deleteSkillHandle;
+					var modal = document.getElementById('delete_skill_confirm_modal');
+					if (modal) modal.showModal();
+				}
+
+				function confirmDeleteSkill() {
+					if (!deleteSkillHandle) return;
+					var modal = document.getElementById('delete_skill_confirm_modal');
+					if (modal) modal.close();
+					htmx.ajax('DELETE', '/skills/' + encodeURIComponent(deleteSkillHandle) + '?scope=' + encodeURIComponent(deleteSkillScope) + currentSkillsProjectQuery().replace(/^\?/, '&'), {
+						target: '#skills-container',
+						swap: 'outerHTML'
+					}).catch(function(xhr) {
+						alert((xhr && xhr.responseText) || 'Failed to delete skill.');
+					});
+				}
 
 			function setSkillEnabled(button, enable) {
 				var handle = button.dataset.skillHandle || '';

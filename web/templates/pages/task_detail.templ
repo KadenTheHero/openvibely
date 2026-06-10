@@ -665,14 +665,14 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 												>
 													Edit
 												</button>
-												<button
-													class="btn btn-xs btn-ghost text-error"
-													hx-delete={ fmt.Sprintf("/schedules/%s", s.ID) }
-													hx-target="closest .card"
-													hx-swap="outerHTML swap:1s"
-													hx-confirm="Remove this schedule?"
-												>
-													Remove
+											<button
+												class="btn btn-xs btn-ghost text-error"
+												data-schedule-id={ s.ID }
+												data-schedule-title={ task.Title }
+												data-schedule-target="closest .card"
+												data-schedule-swap="outerHTML swap:1s"
+												onclick="openDeleteScheduleConfirm(this)"
+											>													Remove
 												</button>
 											</div>
 										</div>
@@ -1016,10 +1016,51 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 				</div>
 			</div>
 		</div>
-		<!-- End Tab: Thread -->
-		<script>
-						function openScheduleRunAtPicker(container, event) {
-							if (!container) return;
+			<!-- End Tab: Thread -->
+			<dialog id="delete_schedule_confirm_modal" class="modal">
+				<div class="modal-box">
+					@ModalCloseButton("delete_schedule_confirm_modal", "Close delete schedule confirmation")
+					<h3 class="font-bold text-lg text-error pr-10">Delete Schedule</h3>
+					<p class="py-4">Are you sure you want to delete the schedule for <strong id="delete_schedule_confirm_name"></strong>? This action cannot be undone.</p>
+					<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">The task will remain, but it will no longer run on this schedule.</div>
+					<div class="modal-action">
+						<button type="button" class="btn" onclick="delete_schedule_confirm_modal.close()">Cancel</button>
+						<button type="button" class="btn btn-error" onclick="confirmDeleteSchedule()">Delete Permanently</button>
+					</div>
+				</div>
+				<form method="dialog" class="modal-backdrop"><button>close</button></form>
+			</dialog>
+			<script>
+							var deleteScheduleID = '';
+							var deleteScheduleTarget = '#task-detail-content';
+							var deleteScheduleTargetElement = null;
+							var deleteScheduleSwap = 'outerHTML';
+
+							function openDeleteScheduleConfirm(button) {
+								if (!button) return;
+								deleteScheduleID = button.dataset.scheduleId || '';
+								if (!deleteScheduleID) return;
+								deleteScheduleTarget = button.dataset.scheduleTarget || '#task-detail-content';
+								deleteScheduleTargetElement = deleteScheduleTarget.indexOf('closest ') === 0 ? button.closest(deleteScheduleTarget.replace(/^closest\s+/, '')) : null;
+								deleteScheduleSwap = button.dataset.scheduleSwap || 'outerHTML';
+								var nameEl = document.getElementById('delete_schedule_confirm_name');
+								if (nameEl) nameEl.textContent = button.dataset.scheduleTitle || 'this task';
+								var modal = document.getElementById('delete_schedule_confirm_modal');
+								if (modal) modal.showModal();
+							}
+
+							function confirmDeleteSchedule() {
+								if (!deleteScheduleID) return;
+								var modal = document.getElementById('delete_schedule_confirm_modal');
+								if (modal) modal.close();
+								var target = deleteScheduleTargetElement || deleteScheduleTarget;
+								htmx.ajax('DELETE', '/schedules/' + deleteScheduleID, {
+									target: target,
+									swap: deleteScheduleSwap
+								});
+							}
+
+							function openScheduleRunAtPicker(container, event) {							if (!container) return;
 							var pickerInput = container.querySelector('input[data-run-at-picker]');
 							if (!pickerInput) return;
 							if (event && event.target && !event.target.closest('input[data-run-at-picker]')) return;

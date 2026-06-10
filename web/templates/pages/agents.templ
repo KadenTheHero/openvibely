@@ -93,10 +93,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 										<li>
 											<button
 												class="text-error"
-												hx-delete={ fmt.Sprintf("/agents/%s", agent.ID) }
-												hx-target="#agents-container"
-												hx-swap="outerHTML"
-												hx-confirm="Delete this agent? Tasks using it will be unlinked."
+												data-agent-id={ agent.ID }
+												data-agent-name={ agent.Name }
+												onclick="openDeleteAgentConfirm(this)"
 											>
 												Delete
 											</button>
@@ -138,8 +137,21 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			</div>
 		}
 
-		<dialog id="agent_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
-			<div class="modal-box max-w-4xl p-0 overflow-hidden">
+			<dialog id="delete_agent_confirm_modal" class="modal">
+				<div class="modal-box">
+					@ModalCloseButton("delete_agent_confirm_modal", "Close delete agent confirmation")
+					<h3 class="font-bold text-lg text-error pr-10">Delete Agent</h3>
+					<p class="py-4">Are you sure you want to delete <strong id="delete_agent_confirm_name"></strong>? This action cannot be undone.</p>
+					<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">Tasks using this agent will be unlinked.</div>
+					<div class="modal-action">
+						<button type="button" class="btn" onclick="delete_agent_confirm_modal.close()">Cancel</button>
+						<button type="button" class="btn btn-error" onclick="confirmDeleteAgent()">Delete Permanently</button>
+					</div>
+				</div>
+				<form method="dialog" class="modal-backdrop"><button>close</button></form>
+			</dialog>
+
+			<dialog id="agent_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">			<div class="modal-box max-w-4xl p-0 overflow-hidden">
 				@ModalCloseButton("agent_modal", "Close agent dialog")
 				<div class="px-6 pt-6 pb-2 pr-14">
 					<h3 id="agent_modal_title" class="font-bold text-lg">New Agent</h3>
@@ -430,8 +442,8 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					let agentOwnedSkillsState = { routed_skills: [], can_manage: false, protected: false };
 				let editingAgentSkillOriginalHandle = '';
 				let activeAgentSection = 'details';
-				let activeAgentID = '';
-		
+					let activeAgentID = '';
+					var deleteAgentID = '';
 		let installingPluginIDs = new Set();
 		let uninstallingPluginIDs = new Set();
 		let pendingUninstalledPluginIDs = new Set();
@@ -439,6 +451,26 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 		let removingMarketplaceNames = new Set();
 		let syncingMarketplaceNames = new Set();
 		let restoringDefaultMarketplaces = false;
+
+				function openDeleteAgentConfirm(button) {
+					if (!button) return;
+					deleteAgentID = button.dataset.agentId || '';
+					if (!deleteAgentID) return;
+					var nameEl = document.getElementById('delete_agent_confirm_name');
+					if (nameEl) nameEl.textContent = button.dataset.agentName || 'this agent';
+					var modal = document.getElementById('delete_agent_confirm_modal');
+					if (modal) modal.showModal();
+				}
+
+				function confirmDeleteAgent() {
+					if (!deleteAgentID) return;
+					var modal = document.getElementById('delete_agent_confirm_modal');
+					if (modal) modal.close();
+					htmx.ajax('DELETE', '/agents/' + deleteAgentID, {
+						target: '#agents-container',
+						swap: 'outerHTML'
+					});
+				}
 
 				function setAgentSection(sectionName) {
 					const sectionNameMap = {

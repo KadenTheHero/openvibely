@@ -7,9 +7,55 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+func TestHandler_GetTask_ScheduleDeleteConfirmationDialog(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Scheduled Delete Dialog Task",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    "Original prompt",
+	}
+	if err := h.taskSvc.Create(ctx, task); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+	createSchedule(t, h, task.ID, time.Now().Add(time.Hour))
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`id="delete_schedule_confirm_modal" class="modal"`,
+		`id="delete_schedule_confirm_name"`,
+		`onclick="delete_schedule_confirm_modal.close()"`,
+		`onclick="confirmDeleteSchedule()"`,
+		`class="btn btn-error"`,
+		`onclick="openDeleteScheduleConfirm(this)"`,
+		`data-schedule-title="Scheduled Delete Dialog Task"`,
+		`modal.showModal()`,
+		`htmx.ajax('DELETE', '/schedules/' + deleteScheduleID`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected task detail schedule delete confirmation markup/script to contain %q", want)
+		}
+	}
+	if strings.Contains(body, `hx-confirm="Remove this schedule?"`) || strings.Contains(body, `hx-delete="/schedules/`) {
+		t.Fatal("expected schedule remove button to open modal instead of deleting immediately")
+	}
+}
 
 func TestHandler_GetTask_FromSchedulePage(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
@@ -17,11 +63,11 @@ func TestHandler_GetTask_FromSchedulePage(t *testing.T) {
 
 	// Create a test task
 	task := &models.Task{
-		ProjectID:   "default",
-		Title:       "Test Schedule Task",
-		Category:    models.CategoryScheduled,
-		Status:      models.StatusPending,
-		Prompt:      "Original prompt",
+		ProjectID: "default",
+		Title:     "Test Schedule Task",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    "Original prompt",
 	}
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -56,11 +102,11 @@ func TestHandler_UpdateTask_FromSchedulePage(t *testing.T) {
 
 	// Create a test task
 	task := &models.Task{
-		ProjectID:   "default",
-		Title:       "Test Schedule Task",
-		Category:    models.CategoryScheduled,
-		Status:      models.StatusPending,
-		Prompt:      "Original prompt",
+		ProjectID: "default",
+		Title:     "Test Schedule Task",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    "Original prompt",
 	}
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -336,11 +382,11 @@ func TestHandler_UpdateTask_FromTasksPage(t *testing.T) {
 
 	// Create a test task
 	task := &models.Task{
-		ProjectID:   "default",
-		Title:       "Test Task",
-		Category:    models.CategoryActive,
-		Status:      models.StatusPending,
-		Prompt:      "Original prompt",
+		ProjectID: "default",
+		Title:     "Test Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+		Prompt:    "Original prompt",
 	}
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("failed to create task: %v", err)
