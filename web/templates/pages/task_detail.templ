@@ -2,6 +2,8 @@ package pages
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -1626,7 +1628,7 @@ templ TaskGoalPanel(taskID string, goal *models.TaskGoal) {
 					}
 				</div>
 				if goal != nil && goal.Status != models.TaskGoalStatusCleared {
-					<span class="badge badge-outline">{ string(goal.Status) }</span>
+					<span class="badge badge-outline">{ goalStatusLabel(goal) }</span>
 				}
 			</div>
 			if goal != nil && goal.Status != models.TaskGoalStatusCleared {
@@ -1649,6 +1651,16 @@ func goalValue(goal *models.TaskGoal) string {
 		return ""
 	}
 	return goal.Objective
+}
+
+func goalStatusLabel(goal *models.TaskGoal) string {
+	if goal == nil {
+		return ""
+	}
+	if goal.Status == models.TaskGoalStatusPaused && strings.EqualFold(strings.TrimSpace(goal.Reason), "stopped by user") {
+		return "Paused (stopped by user)"
+	}
+	return string(goal.Status)
 }
 
 func taskModelLabel(task *models.Task, agents []models.LLMConfig) string {

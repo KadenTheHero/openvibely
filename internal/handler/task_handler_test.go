@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 )
 
 func TestHandler_CancelTask(t *testing.T) {
@@ -62,6 +63,48 @@ func TestHandler_CancelTask(t *testing.T) {
 	}
 	if updatedTask.Category != models.CategoryBacklog {
 		t.Errorf("expected task category to be %s, got %s", models.CategoryBacklog, updatedTask.Category)
+	}
+}
+
+func TestHandler_CancelTask_PausesActiveGoalStoppedByUser(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Goal stop task",
+		Prompt:    "keep going",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+	if err := tc.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "Continue until the audit is clean", service.GoalOptions{Actor: "test"})
+	if err != nil {
+		t.Fatalf("set goal: %v", err)
+	}
+
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/cancel").Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cancel status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	paused, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get goal: %v", err)
+	}
+	if paused == nil || paused.Status != models.TaskGoalStatusPaused || paused.GoalID != goal.GoalID || paused.Reason != "stopped by user" {
+		t.Fatalf("goal after manual cancel = %+v", paused)
+	}
+	if err := tc.handler.taskGoalSvc.ResumeGoal(ctx, task.ID, "user"); err != nil {
+		t.Fatalf("resume stopped goal: %v", err)
+	}
+	resumed, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get resumed goal: %v", err)
+	}
+	if resumed.Status != models.TaskGoalStatusActive || resumed.GoalID != goal.GoalID {
+		t.Fatalf("goal after resume = %+v", resumed)
 	}
 }
 

@@ -1498,6 +1498,18 @@ func TestAfterCompleteEligibilityRunsProtectedGoalAgentOnlyForActiveGoal(t *test
 	if !w.afterCompleteHookEligible(taskThreadCtx, task)(goalHook) {
 		t.Fatal("protected Goal Agent hook must run through generic after_complete for task-thread turns with an active goal")
 	}
+	if err := goalSvc.PauseActiveGoalStoppedByUser(ctx, task.ID); err != nil {
+		t.Fatalf("pause after user stop: %v", err)
+	}
+	if w.afterCompleteHookEligible(taskThreadCtx, task)(goalHook) {
+		t.Fatal("protected Goal Agent hook must not run after the user stopped and paused the goal")
+	}
+	if err := goalSvc.ResumeGoal(ctx, task.ID, "user"); err != nil {
+		t.Fatalf("resume user-stopped goal: %v", err)
+	}
+	if !w.afterCompleteHookEligible(taskThreadCtx, task)(goalHook) {
+		t.Fatal("protected Goal Agent hook must run again after the user resumes the goal")
+	}
 	_, err = goalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "done")
 	if err != nil {
 		t.Fatalf("mark achieved: %v", err)

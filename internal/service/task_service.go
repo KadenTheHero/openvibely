@@ -153,6 +153,11 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	// to release the project concurrency slot.
 	if category != models.CategoryActive && task.Status == models.StatusRunning {
 		applog.Infof("[task-svc] UpdateCategory cancelling running task id=%s (moved to %s)", id, category)
+		if s.goalSvc != nil {
+			if err := s.goalSvc.PauseActiveGoalStoppedByUser(ctx, id); err != nil && !errors.Is(err, ErrTaskGoalNotFound) {
+				applog.Infof("[task-svc] UpdateCategory error pausing active goal after user stop id=%s: %v", id, err)
+			}
+		}
 		if s.workerSvc != nil {
 			s.workerSvc.CancelRunningTask(id)
 		}
@@ -329,6 +334,12 @@ func (s *TaskService) CancelTask(ctx context.Context, id string) error {
 	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
 		applog.Infof("[task-svc] CancelTask task not cancellable id=%s status=%s", id, task.Status)
 		return fmt.Errorf("task is not running or queued")
+	}
+
+	if s.goalSvc != nil {
+		if err := s.goalSvc.PauseActiveGoalStoppedByUser(ctx, id); err != nil && !errors.Is(err, ErrTaskGoalNotFound) {
+			applog.Infof("[task-svc] CancelTask error pausing active goal after user stop id=%s: %v", id, err)
+		}
 	}
 
 	// Kill the running CLI process or cancel a queued follow-up waiting for a worker slot.

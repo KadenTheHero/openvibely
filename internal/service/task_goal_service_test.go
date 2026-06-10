@@ -120,6 +120,44 @@ func TestTaskGoalService_ValidationPauseResumeClear(t *testing.T) {
 	}
 }
 
+func TestTaskGoalService_UserStopPausePreservesGoalForResume(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createServiceGoalTestProject(t, ctx, db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: project.ID, Title: "User Stop Goal", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "prompt", Priority: 2}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	svc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	goal, err := svc.SetGoal(ctx, task.ID, "Keep working until done", GoalOptions{Actor: "test"})
+	if err != nil {
+		t.Fatalf("set goal: %v", err)
+	}
+
+	if err := svc.PauseActiveGoalStoppedByUser(ctx, task.ID); err != nil {
+		t.Fatalf("pause after user stop: %v", err)
+	}
+	paused, err := svc.GetGoal(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get paused goal: %v", err)
+	}
+	if paused.Status != models.TaskGoalStatusPaused || paused.GoalID != goal.GoalID || paused.Reason != "stopped by user" {
+		t.Fatalf("paused after user stop = %+v", paused)
+	}
+
+	if err := svc.ResumeGoal(ctx, task.ID, "user"); err != nil {
+		t.Fatalf("resume user-stopped goal: %v", err)
+	}
+	resumed, err := svc.GetGoal(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get resumed goal: %v", err)
+	}
+	if resumed.Status != models.TaskGoalStatusActive || resumed.GoalID != goal.GoalID || resumed.Objective != goal.Objective {
+		t.Fatalf("resumed user-stopped goal = %+v", resumed)
+	}
+}
+
 func TestTaskGoalService_ResumeBlockedGoalResetsBlockerCount(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

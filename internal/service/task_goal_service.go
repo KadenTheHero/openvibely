@@ -97,6 +97,14 @@ func (s *TaskGoalService) ClearGoal(ctx context.Context, taskID string, actor st
 }
 
 func (s *TaskGoalService) PauseGoal(ctx context.Context, taskID string, actor string) error {
+	return s.pauseGoal(ctx, taskID, reasonForActor(actor, "paused"), false)
+}
+
+func (s *TaskGoalService) PauseActiveGoalStoppedByUser(ctx context.Context, taskID string) error {
+	return s.pauseGoal(ctx, taskID, "stopped by user", true)
+}
+
+func (s *TaskGoalService) pauseGoal(ctx context.Context, taskID string, reason string, activeOnly bool) error {
 	goal, err := s.repo.GetByTaskID(ctx, taskID)
 	if err != nil {
 		return err
@@ -104,7 +112,10 @@ func (s *TaskGoalService) PauseGoal(ctx context.Context, taskID string, actor st
 	if goal == nil {
 		return ErrTaskGoalNotFound
 	}
-	goal, err = s.repo.UpdateStatus(ctx, taskID, goal.GoalID, models.TaskGoalStatusPaused, reasonForActor(actor, "paused"), false)
+	if activeOnly && goal.Status != models.TaskGoalStatusActive {
+		return nil
+	}
+	goal, err = s.repo.UpdateStatus(ctx, taskID, goal.GoalID, models.TaskGoalStatusPaused, strings.TrimSpace(reason), false)
 	if err != nil {
 		return err
 	}

@@ -823,6 +823,15 @@ func (h *Handler) executeSendToTaskTool(ctx context.Context, params streamingRes
 		return "", err
 	}
 	origin, originAgent := sanitizeSendToTaskLineage(ctx, req.Origin, req.OriginAgent, params)
+	if origin == models.TaskOriginSystemAgent && originAgent == models.AgentSystemKindGoal && h.taskGoalSvc != nil {
+		goal, goalErr := h.taskGoalSvc.GetEvaluableGoal(ctx, taskID)
+		if goalErr != nil {
+			return "", goalErr
+		}
+		if goal == nil {
+			return "", fmt.Errorf("task goal is not active; continuation was not queued")
+		}
+	}
 	queued, err := h.enqueueTaskThreadInput(ctx, taskID, req.Message, origin, originAgent)
 	if err != nil {
 		return "", err

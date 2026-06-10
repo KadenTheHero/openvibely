@@ -972,7 +972,9 @@ func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsRunning(t *testi
 	taskRepo := repository.NewTaskRepo(db, nil)
 	workerSvc := newTestWorkerService(t)
 	attachmentRepo := repository.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc.SetTaskGoalService(goalSvc)
 	ctx := context.Background()
 
 	// Create a running task in the active category
@@ -984,8 +986,10 @@ func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsRunning(t *testi
 		Prompt:    "do something",
 	}
 	taskRepo.Create(ctx, task)
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "Keep going until done", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
 
-	// Move to completed — should cancel the running execution and move to backlog
+	// Move to completed — should cancel the running execution, pause the goal, and move to backlog
 	if err := svc.UpdateCategory(ctx, task.ID, models.CategoryCompleted); err != nil {
 		t.Fatalf("UpdateCategory: %v", err)
 	}
@@ -1001,6 +1005,12 @@ func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsRunning(t *testi
 	if updatedTask.Category != models.CategoryBacklog {
 		t.Errorf("expected Category=backlog for cancelled task, got %q", updatedTask.Category)
 	}
+	paused, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, paused)
+	assert.Equal(t, models.TaskGoalStatusPaused, paused.Status)
+	assert.Equal(t, goal.GoalID, paused.GoalID)
+	assert.Equal(t, "stopped by user", paused.Reason)
 }
 
 func TestTaskService_UpdateCategory_FromRunningToActiveResetsStatus(t *testing.T) {
