@@ -1741,6 +1741,103 @@ func TestContextManagementEdits_BothTypes(t *testing.T) {
 	}
 }
 
+func TestSendAgentic_FableAndMythosUseAdaptiveThinkingWithoutBudget(t *testing.T) {
+	models := []string{"claude-fable-5", "claude-mythos-5"}
+	for _, model := range models {
+		t.Run(model, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				var reqBody map[string]interface{}
+				if err := json.Unmarshal(body, &reqBody); err != nil {
+					t.Fatalf("decode request body: %v", err)
+				}
+				thinking, ok := reqBody["thinking"].(map[string]interface{})
+				if !ok {
+					t.Fatalf("thinking config missing from request: %s", string(body))
+				}
+				if got := thinking["type"]; got != "adaptive" {
+					t.Fatalf("thinking.type = %v, want adaptive", got)
+				}
+				if _, ok := thinking["budget_tokens"]; ok {
+					t.Fatalf("fable/mythos adaptive thinking must not send budget_tokens: %v", thinking)
+				}
+
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				events := []string{
+					`{"type":"message_start","message":{"id":"msg_1","model":"` + model + `","usage":{"input_tokens":10}}}`,
+					`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+					`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`,
+					`{"type":"content_block_stop","index":0}`,
+					`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`,
+					`{"type":"message_stop"}`,
+				}
+				for _, evt := range events {
+					fmt.Fprintf(w, "data: %s\n\n", evt)
+				}
+			}))
+			defer server.Close()
+
+			origHost := AnthropicAPIHost
+			AnthropicAPIHost = server.URL
+			defer func() { AnthropicAPIHost = origHost }()
+
+			client := NewWithAPIKey("test-key")
+			_, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
+				Model:          model,
+				MaxTokens:      8192,
+				EnableThinking: true,
+				BudgetTokens:   4000,
+				DisableTools:   true,
+				MaxTurns:       1,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestSendAgentic_RefusalStopReasonIsReturnedWithText(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-fable-5","usage":{"input_tokens":10}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I can’t help with that."}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"refusal"},"usage":{"output_tokens":1}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	client := NewWithAPIKey("test-key")
+	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
+		Model:        "claude-fable-5",
+		MaxTokens:    8192,
+		DisableTools: true,
+		MaxTurns:     1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StopReason != "refusal" {
+		t.Fatalf("stop reason = %q, want refusal", resp.StopReason)
+	}
+	if !strings.Contains(resp.Text, "help") {
+		t.Fatalf("response text = %q, want refusal text preserved", resp.Text)
+	}
+}
+
 func TestContextManagementEdits_NoClearThinkingWithoutThinking(t *testing.T) {
 	// Verify that clear_thinking is NOT included when thinking is disabled.
 	// The Anthropic API returns 400 "clear_thinking strategy requires thinking

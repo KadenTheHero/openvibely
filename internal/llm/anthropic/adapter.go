@@ -35,6 +35,8 @@ type claudeCodeOutputBudget struct {
 func claudeCodeOutputBudgetForModel(model string) claudeCodeOutputBudget {
 	m := strings.ToLower(strings.TrimSpace(model))
 	switch {
+	case strings.Contains(m, "claude-fable-5"), strings.Contains(m, "claude-mythos-5"):
+		return claudeCodeOutputBudget{Default: 64000, UpperLimit: 128000}
 	case strings.Contains(m, "claude-opus-4-8"), strings.Contains(m, "claude-opus-4-7"), strings.Contains(m, "claude-opus-4-6"):
 		return claudeCodeOutputBudget{Default: 64000, UpperLimit: 128000}
 	case strings.Contains(m, "claude-sonnet-4-6"):
@@ -119,6 +121,9 @@ func applyAgentToSystemPrompt(base string, agent *models.Agent) string {
 
 // errMaxTokens is returned when the API response was truncated due to max_tokens.
 var errMaxTokens = fmt.Errorf("response truncated: max_tokens limit reached (output budget exhausted before task completed)")
+
+// errRefusal is returned when Anthropic returns HTTP 200 with stop_reason=refusal.
+var errRefusal = fmt.Errorf("model refused the request: Anthropic returned stop_reason=refusal")
 
 // Adapter encapsulates Anthropic provider logic.
 type Adapter struct {
@@ -511,6 +516,9 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	if resp.StopReason == "max_tokens" {
 		return resp.Text, usage, errMaxTokens
 	}
+	if resp.StopReason == "refusal" {
+		return resp.Text, usage, errRefusal
+	}
 	return resp.Text, usage, nil
 }
 
@@ -604,6 +612,9 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	if resp.StopReason == "max_tokens" {
 		return output, usage, errMaxTokens
 	}
+	if resp.StopReason == "refusal" {
+		return output, usage, errRefusal
+	}
 	return output, usage, nil
 }
 
@@ -692,6 +703,9 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	applog.Infof("[anthropic] callStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if resp.StopReason == "max_tokens" {
 		return output, textOnly, usage, errMaxTokens
+	}
+	if resp.StopReason == "refusal" {
+		return output, textOnly, usage, errRefusal
 	}
 	return output, textOnly, usage, nil
 }

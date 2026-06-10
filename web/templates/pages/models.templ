@@ -354,6 +354,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">Model</span></label>
 						<select name="model" id="model_id" class="select select-bordered" onchange="handleModelChange()">
+							<option value="claude-fable-5">Claude Fable 5</option>
+							<option value="claude-mythos-5">Claude Mythos 5</option>
 							<option value="claude-opus-4-8">Claude Opus 4.8</option>
 							<option value="claude-opus-4-7">Claude Opus 4.7</option>
 							<option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
@@ -617,6 +619,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				};
 			var modelOptionsByProvider = {
 					anthropic: [
+						{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'max'] },
+						{ value: 'claude-mythos-5', label: 'Claude Mythos 5', efforts: ['low', 'medium', 'high', 'max'] },
 						{ value: 'claude-opus-4-8', label: 'Claude Opus 4.8', efforts: ['low', 'medium', 'high', 'max'] },
 						{ value: 'claude-opus-4-7', label: 'Claude Opus 4.7', efforts: ['low', 'medium', 'high', 'max'] },
 						{ value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', efforts: ['low', 'medium', 'high', 'max'] },

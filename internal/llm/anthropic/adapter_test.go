@@ -3,12 +3,60 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 )
+
+func TestCallDirectReturnsErrorOnRefusalStopReason(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-fable-5","usage":{"input_tokens":10}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I can’t help with that."}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"refusal"},"usage":{"output_tokens":6}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = origHost }()
+
+	adapter := New(nil, nil)
+	output, usage, err := adapter.callDirect(context.Background(), "test", nil, models.LLMConfig{
+		Name:       "Fable",
+		Provider:   models.ProviderAnthropic,
+		Model:      "claude-fable-5",
+		AuthMethod: models.AuthMethodAPIKey,
+		APIKey:     "test-key",
+	}, ".", "", nil, nil, nil, true, true)
+	if err == nil {
+		t.Fatal("expected refusal stop_reason to return an error")
+	}
+	if !strings.Contains(err.Error(), "stop_reason=refusal") {
+		t.Fatalf("error = %v, want refusal stop reason", err)
+	}
+	if !strings.Contains(output, "help") {
+		t.Fatalf("output = %q, want refusal text preserved", output)
+	}
+	if usage.OutputTokens != 6 {
+		t.Fatalf("output tokens = %d, want 6", usage.OutputTokens)
+	}
+}
 
 func TestToolSecondaryInfo_LongBashPreservesLaterContext(t *testing.T) {
 	input := map[string]any{

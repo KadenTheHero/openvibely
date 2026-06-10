@@ -42,7 +42,8 @@ type AgenticOptions struct {
 	// EnableThinking enables extended thinking (reasoning before responding).
 	// When true with BudgetTokens=0, uses adaptive thinking on supported models
 	// (Opus 4.6+), falls back to fixed budget on others.
-	// When true with BudgetTokens>0, uses that fixed budget.
+	// When true with BudgetTokens>0, uses that fixed budget except on models
+	// that only support adaptive thinking (Fable 5 and Mythos 5).
 	EnableThinking bool
 	BudgetTokens   int
 
@@ -794,6 +795,16 @@ type compactionResult struct {
 // ContextManagementBetaHeader is the beta feature flag for context management.
 const ContextManagementBetaHeader = "context-management-2025-06-27"
 
+func requiresAdaptiveThinking(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(m, "fable-5") || strings.Contains(m, "mythos-5")
+}
+
+func usesAdaptiveThinking(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(m, "opus") || requiresAdaptiveThinking(m)
+}
+
 // sendAgenticTurn sends a single streaming request and returns parsed content blocks.
 func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
 	// Build system prompt as content blocks with cache_control for prompt caching.
@@ -847,14 +858,17 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 	}
 
 	if opts.EnableThinking {
-		if opts.BudgetTokens > 0 {
+		if requiresAdaptiveThinking(opts.Model) {
+			// Fable 5 and Mythos 5 only support adaptive thinking; fixed budget_tokens errors.
+			req.Thinking = &thinkingConfig{Type: "adaptive"}
+		} else if opts.BudgetTokens > 0 {
 			// Fixed budget: use "enabled" with explicit budget_tokens
 			req.Thinking = &thinkingConfig{
 				Type:         "enabled",
 				BudgetTokens: opts.BudgetTokens,
 			}
-		} else if strings.Contains(opts.Model, "opus") {
-			// Adaptive: API decides thinking budget dynamically (only supported on Opus 4.6+)
+		} else if usesAdaptiveThinking(opts.Model) {
+			// Adaptive: API decides thinking budget dynamically.
 			req.Thinking = &thinkingConfig{Type: "adaptive"}
 		} else {
 			// Other models (Sonnet etc): use "enabled" with a default budget

@@ -23,6 +23,8 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 
 	// HTML <option> elements
 	for _, model := range []string{
+		"claude-fable-5",
+		"claude-mythos-5",
 		"claude-opus-4-8",
 		"claude-opus-4-7",
 		"claude-sonnet-4-6",
@@ -38,6 +40,8 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 		"gpt-5.5-pro",
 		"gpt-5.4-mini",
 		"gpt-5.3-codex-spark",
+		"claude-fable-5",
+		"claude-mythos-5",
 		"claude-opus-4-8",
 		"claude-opus-4-7",
 		"claude-sonnet-4-6",
@@ -58,6 +62,12 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	}
 	if !strings.Contains(out, "Matches Claude Code effort: low, medium, high, or max") {
 		t.Error("expected Claude effort behavior to be explained")
+	}
+	if !strings.Contains(out, "{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'max']") {
+		t.Error("expected Claude Fable 5 effort options")
+	}
+	if !strings.Contains(out, "{ value: 'claude-mythos-5', label: 'Claude Mythos 5', efforts: ['low', 'medium', 'high', 'max']") {
+		t.Error("expected Claude Mythos 5 effort options")
 	}
 	if !strings.Contains(out, "{ value: 'claude-opus-4-7', label: 'Claude Opus 4.7', efforts: ['low', 'medium', 'high', 'max']") {
 		t.Error("expected Claude Opus 4.7 effort options")
