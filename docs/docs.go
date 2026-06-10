@@ -3393,6 +3393,8 @@ var SwaggerInfo = &swag.Spec{
 	Description:      "REST API for OpenVibely - AI-powered task scheduling and management\nThis API provides endpoints for managing projects, tasks, and chat interactions with AI agents.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
+	LeftDelim:        "{{",
+	RightDelim:       "}}",
 }
 
 func init() {
