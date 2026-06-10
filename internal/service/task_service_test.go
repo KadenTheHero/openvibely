@@ -1013,6 +1013,92 @@ func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsRunning(t *testi
 	assert.Equal(t, "stopped by user", paused.Reason)
 }
 
+func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsQueued(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc.SetTaskGoalService(goalSvc)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Queued Active Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusQueued,
+		Prompt:    "wait for capacity",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "Keep going until done", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	cancelled := make(chan struct{}, 1)
+	workerSvc.RegisterCancel(task.ID, func() { cancelled <- struct{}{} })
+
+	require.NoError(t, svc.UpdateCategory(ctx, task.ID, models.CategoryCompleted))
+
+	select {
+	case <-cancelled:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected queued task cancel function to be called")
+	}
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedTask)
+	assert.Equal(t, models.StatusCancelled, updatedTask.Status)
+	assert.Equal(t, models.CategoryCompleted, updatedTask.Category)
+	paused, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, paused)
+	assert.Equal(t, models.TaskGoalStatusPaused, paused.Status)
+	assert.Equal(t, goal.GoalID, paused.GoalID)
+	assert.Equal(t, "stopped by user", paused.Reason)
+}
+
+func TestTaskService_UpdateCategory_FromActiveToBacklogCancelsQueued(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc.SetTaskGoalService(goalSvc)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Queued Active Task To Backlog",
+		Category:  models.CategoryActive,
+		Status:    models.StatusQueued,
+		Prompt:    "wait for capacity",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "Keep going until done", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	cancelled := make(chan struct{}, 1)
+	workerSvc.RegisterCancel(task.ID, func() { cancelled <- struct{}{} })
+
+	require.NoError(t, svc.UpdateCategory(ctx, task.ID, models.CategoryBacklog))
+
+	select {
+	case <-cancelled:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected queued task cancel function to be called")
+	}
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedTask)
+	assert.Equal(t, models.StatusCancelled, updatedTask.Status)
+	assert.Equal(t, models.CategoryBacklog, updatedTask.Category)
+	paused, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, paused)
+	assert.Equal(t, models.TaskGoalStatusPaused, paused.Status)
+	assert.Equal(t, goal.GoalID, paused.GoalID)
+	assert.Equal(t, "stopped by user", paused.Reason)
+}
+
 func TestTaskService_UpdateCategory_FromRunningToActiveResetsStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

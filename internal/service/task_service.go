@@ -149,10 +149,10 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 		return nil
 	}
 
-	// If moved AWAY from Active while running, cancel the running execution
-	// to release the project concurrency slot.
-	if category != models.CategoryActive && task.Status == models.StatusRunning {
-		applog.Infof("[task-svc] UpdateCategory cancelling running task id=%s (moved to %s)", id, category)
+	// If moved AWAY from Active while running or queued, cancel the execution
+	// to release the project concurrency slot or abort the queued wait.
+	if category != models.CategoryActive && (task.Status == models.StatusRunning || task.Status == models.StatusQueued) {
+		applog.Infof("[task-svc] UpdateCategory cancelling active task id=%s status=%s (moved to %s)", id, task.Status, category)
 		if s.goalSvc != nil {
 			if err := s.goalSvc.PauseActiveGoalStoppedByUser(ctx, id); err != nil && !errors.Is(err, ErrTaskGoalNotFound) {
 				applog.Infof("[task-svc] UpdateCategory error pausing active goal after user stop id=%s: %v", id, err)
@@ -162,7 +162,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 			s.workerSvc.CancelRunningTask(id)
 		}
 		s.repo.UpdateStatus(ctx, id, models.StatusCancelled)
-		applog.Infof("[task-svc] UpdateCategory cancelled running task id=%s and kept requested category=%s", id, category)
+		applog.Infof("[task-svc] UpdateCategory cancelled active task id=%s and kept requested category=%s", id, category)
 	}
 
 	// If moved to Active, prefer a pending task-thread follow-up over rerunning the original prompt.

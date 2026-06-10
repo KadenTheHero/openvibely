@@ -1291,6 +1291,37 @@ func TestHandler_UpdateTaskCategory_RunningActiveToCompletedStaysCompleted(t *te
 	assert.Equal(t, models.CategoryCompleted, updated.Category)
 }
 
+func TestHandler_UpdateTaskCategory_QueuedActiveToCompletedStaysCompleted(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Queued Task To Complete",
+		Category:  models.CategoryActive,
+		Status:    models.StatusQueued,
+		Prompt:    "test prompt",
+	}
+	require.NoError(t, h.taskRepo.Create(ctx, task))
+	cancelCtx, cancel := context.WithCancel(ctx)
+	h.workerSvc.RegisterCancel(task.ID, cancel)
+
+	form := url.Values{}
+	form.Set("category", "completed")
+	rec := htmxPatch(e, "/tasks/"+task.ID+"/category", form)
+	assertCode(t, rec, http.StatusOK)
+
+	select {
+	case <-cancelCtx.Done():
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected queued task cancellation when dropping active task on completed")
+	}
+	updated, err := h.taskSvc.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, models.StatusCancelled, updated.Status)
+	assert.Equal(t, models.CategoryCompleted, updated.Category)
+}
+
 func TestHandler_UpdateTaskCategory_FromCompletedToActive(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	task := createTask(t, h, "default", "Completed Task To Reactivate", func(tk *models.Task) {
