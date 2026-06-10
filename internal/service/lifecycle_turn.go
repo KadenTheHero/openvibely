@@ -127,7 +127,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	if w.afterCompleteRuntimeToolProvider != nil {
 		afterCompleteRuntimeTools = llmcontracts.CompositeRuntimeTools(afterCompleteRuntimeTools, w.afterCompleteRuntimeToolProvider(ctx, task))
 	}
-	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SkillIndex: fullSkillIndex, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt})
+	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SkillIndex: fullSkillIndex, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt, TaskRunID: runID})
 	hookReadTools := w.buildLifecycleReadRuntimeTools(task, catalog)
 	if hookReadTools != nil {
 		ctx = llmcontracts.WithRuntimeTools(ctx, hookReadTools)
@@ -224,8 +224,9 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		}
 	}
 
+	w.recordSelectedSkillEvents(ctx, task, catalog, selectedSkillHandles, selectedSkillsProvenance, lifecycleTurnContext{AssignedAgent: assignedAgent, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt, TaskRunID: runID})
 	taskCatalog := catalog.Filter(runID+":selected", selectedSkillHandles)
-	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SelectedSkillHandles: selectedSkillHandles, SelectedSkillsProvenance: selectedSkillsProvenance, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt})
+	ctx = withLifecycleTurnContext(ctx, lifecycleTurnContext{Catalog: catalog, SelectedSkillHandles: selectedSkillHandles, SelectedSkillsProvenance: selectedSkillsProvenance, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt, TaskRunID: runID})
 
 	// before_run: produce context_blocks the model should see. The runbook
 	// (§Auto-Routing line 130) says these blocks are merged into the system
@@ -253,6 +254,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		AssignedAgent:            assignedAgent,
 		TaskThreadTurn:           incomingTurn.TaskThreadTurn,
 		TurnPrompt:               incomingTurn.TurnPrompt,
+		TaskRunID:                runID,
 	})
 	selectedMemoryEntries := explicitMemoryEntries
 	if haveSelectedMemories {
@@ -291,7 +293,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 			}
 			result := w.runLifecycleSlotFiltered(bgCtx, models.LifecycleAfterComplete, t, taskRunID, runErr, taskChatContext, w.afterCompleteHookEligible(bgCtx, t))
 			w.publishGoalEvaluationAfterComplete(bgCtx, t, result)
-		}(task, runID, err, chatContext, llmcontracts.CompositeRuntimeTools(hookMutationTools, afterCompleteRuntimeTools), lifecycleTurnContext{Catalog: taskCatalog, SelectedSkillHandles: selectedSkillHandles, SelectedSkillsProvenance: selectedSkillsProvenance, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt})
+		}(task, runID, err, chatContext, llmcontracts.CompositeRuntimeTools(hookMutationTools, afterCompleteRuntimeTools), lifecycleTurnContext{Catalog: taskCatalog, SelectedSkillHandles: selectedSkillHandles, SelectedSkillsProvenance: selectedSkillsProvenance, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt, TaskRunID: runID})
 	}
 	return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: after}
 }

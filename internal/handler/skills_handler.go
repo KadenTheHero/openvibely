@@ -84,6 +84,7 @@ func (h *Handler) CreateSkill(c echo.Context) error {
 	if _, err := h.writeStandaloneSkillFromDialog(c, req, false); err != nil {
 		return err
 	}
+	h.recordManualSkillEdited(c, req.Handle, req.Scope, "")
 	return h.ListSkills(c)
 }
 
@@ -102,6 +103,7 @@ func (h *Handler) UpdateSkill(c echo.Context) error {
 	if _, err := h.writeStandaloneSkillFromDialog(c, req, true); err != nil {
 		return err
 	}
+	h.recordManualSkillEdited(c, req.Handle, req.Scope, "")
 	return h.ListSkills(c)
 }
 
@@ -139,6 +141,7 @@ func (h *Handler) ImportSkillPackage(c echo.Context) error {
 	if _, err := importer.WriteSkill(c.Request().Context(), decl, body); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	h.recordManualSkillEdited(c, decl.Skill.Key, scope, "")
 	skillDir, err := agentlibrary.SkillDir(root, decl.Skill.Key)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -224,6 +227,7 @@ func (h *Handler) SetSkillEnabled(c echo.Context) error {
 	if _, writeErr := importer.WriteSkill(c.Request().Context(), decl, body); writeErr != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, writeErr.Error())
 	}
+	h.recordManualSkillEdited(c, handle, scope, "")
 	return h.ListSkills(c)
 }
 

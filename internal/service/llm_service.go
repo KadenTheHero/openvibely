@@ -59,6 +59,7 @@ type LLMService struct {
 	fileChangeBroadcaster    *events.FileChangeBroadcaster
 	threadInputRepo          *repository.ThreadInputRepo
 	usageRepo                *repository.UsageRepo
+	skillAnalyticsRepo       *repository.SkillAnalyticsRepo
 	broadcaster              *events.Broadcaster
 	queuedTaskThreadPromoter func(taskID string)
 	// globalSkillRoot is the parent directory holding <root>/agents for global

@@ -3,12 +3,15 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/agentskills"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -72,6 +75,114 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, view)
+}
+
+// GetSkillAnalytics returns the Skill Curator analytics dashboard data.
+// @Summary Get skill analytics
+// @Description Returns top skills, selection follow-through, agent heatmap, and underused skill metrics.
+// @Tags analytics
+// @Produce json
+// @Param project_id query string false "Project ID filter"
+// @Param range query string false "Convenience range: 7d, 30d, 90d, all" default(30d)
+// @Param agent_id query string false "Agent ID filter"
+// @Param surface query string false "Surface filter"
+// @Param skill_scope query string false "Skill scope filter"
+// @Param event_type query string false "Event type filter"
+// @Success 200 {object} models.SkillAnalyticsDashboard "Skill analytics"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /api/analytics/skills [get]
+func (h *Handler) GetSkillAnalytics(c echo.Context) error {
+	if h.skillAnalyticsRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "skill analytics repository is not configured")
+	}
+	filter := parseSkillAnalyticsFilter(c)
+	enabled := h.enabledSkillsForAnalytics(c)
+	view, err := h.skillAnalyticsRepo.BuildDashboard(c.Request().Context(), filter, enabled)
+	if err != nil {
+		applog.Infof("[handler] GetSkillAnalytics error: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, view)
+}
+
+func parseSkillAnalyticsFilter(c echo.Context) repository.SkillAnalyticsFilter {
+	filter := repository.SkillAnalyticsFilter{
+		ProjectID:  strings.TrimSpace(c.QueryParam("project_id")),
+		AgentID:    strings.TrimSpace(c.QueryParam("agent_id")),
+		Surface:    strings.TrimSpace(c.QueryParam("surface")),
+		SkillScope: strings.TrimSpace(c.QueryParam("skill_scope")),
+		EventType:  strings.TrimSpace(c.QueryParam("event_type")),
+		Limit:      10,
+	}
+	now := time.Now()
+	switch c.QueryParam("range") {
+	case "7d":
+		filter.DateFrom = now.AddDate(0, 0, -7)
+		filter.DateTo = now
+	case "90d":
+		filter.DateFrom = now.AddDate(0, 0, -90)
+		filter.DateTo = now
+	case "all":
+		// no date bounds
+	default:
+		filter.DateFrom = now.AddDate(0, 0, -30)
+		filter.DateTo = now
+	}
+	return filter
+}
+
+func (h *Handler) enabledSkillsForAnalytics(c echo.Context) []repository.EnabledSkillInfo {
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	projectRoot := h.currentProjectSkillRoot(c)
+	out := []repository.EnabledSkillInfo{}
+	alwaysGlobal := alwaysUseSet(h.agentSkillRoot)
+	alwaysProject := alwaysUseSet(projectRoot)
+	if catalog, err := agentskills.BuildCatalogAll("skill-analytics", h.agentSkillRoot, projectRoot); err == nil {
+		for _, entry := range catalog.Entries() {
+			scope := models.SkillScopeGlobal
+			always := alwaysGlobal[entry.Handle]
+			if entry.Source == agentskills.SourceProject {
+				scope = models.SkillScopeProject
+				always = alwaysProject[entry.Handle]
+			}
+			out = append(out, repository.EnabledSkillInfo{Handle: entry.Handle, Scope: scope, Enabled: true, AlwaysUse: always})
+		}
+	}
+	if h.agentRepo != nil {
+		agents, err := h.agentRepo.List(c.Request().Context())
+		if err == nil {
+			seen := map[string]bool{}
+			for _, agent := range agents {
+				if projectID != "" && agent.ProjectID != "" && agent.ProjectID != projectID {
+					continue
+				}
+				projectForAgent := projectRoot
+				if agent.ProjectID != "" && agent.ProjectID != projectID && h.projectRepo != nil {
+					projectForAgent = serviceProjectSkillRoot(c, h, agent.ProjectID)
+				}
+				catalog, err := agentskills.BuildAgentCatalog("skill-analytics-agent", h.agentSkillRoot, projectForAgent, agent.Key)
+				if err != nil {
+					continue
+				}
+				for _, entry := range catalog.Entries() {
+					key := agent.ID + "\x00" + entry.Handle
+					if seen[key] {
+						continue
+					}
+					seen[key] = true
+					out = append(out, repository.EnabledSkillInfo{Handle: entry.Handle, Scope: models.SkillScopeAgentOwned, Enabled: true})
+				}
+			}
+		}
+	}
+	return out
+}
+
+func serviceProjectSkillRoot(c echo.Context, h *Handler, projectID string) string {
+	if h == nil || h.projectRepo == nil || strings.TrimSpace(projectID) == "" {
+		return ""
+	}
+	return service.ProjectSkillRootForResolver(c.Request().Context(), h.projectRepo, projectID)
 }
 
 func parseUsageFilter(c echo.Context) repository.UsageFilter {

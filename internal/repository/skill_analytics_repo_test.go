@@ -1,0 +1,199 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
+)
+
+func TestSkillAnalyticsRepo_TopSkillsAndFollowThrough(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewSkillAnalyticsRepo(db)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	projectID := defaultProjectID(t, db)
+
+	recordSkillAnalyticsEvents(t, repo,
+		skillEvent(projectID, "turn-1", "", "global", "provider_adapter", "selected", "skill_curator", now),
+		skillEvent(projectID, "turn-1", "", "global", "provider_adapter", "loaded", "skill_curator", now.Add(time.Minute)),
+		skillEvent(projectID, "turn-2", "", "global", "provider_adapter", "selected", "skill_curator", now.Add(2*time.Minute)),
+		skillEvent(projectID, "turn-3", "", "project", "frontend", "selected", "skill_curator", now.Add(3*time.Minute)),
+		skillEvent(projectID, "turn-3", "", "project", "frontend", "viewed", "manual", now.Add(4*time.Minute)),
+	)
+
+	top, err := repo.GetTopSkills(ctx, SkillAnalyticsFilter{ProjectID: projectID, Limit: 10})
+	if err != nil {
+		t.Fatalf("GetTopSkills: %v", err)
+	}
+	if len(top) < 2 {
+		t.Fatalf("expected at least two skills, got %+v", top)
+	}
+	provider := findTopSkill(top, "provider_adapter")
+	if provider == nil {
+		t.Fatalf("provider_adapter missing from top skills: %+v", top)
+	}
+	if provider.SelectedCount != 2 || provider.LoadedCount != 1 || provider.ViewedCount != 0 || provider.ActivityCount != 3 {
+		t.Fatalf("provider counts = %+v", provider)
+	}
+	if provider.FollowThroughRate == nil || *provider.FollowThroughRate != 0.5 {
+		t.Fatalf("provider follow-through = %v, want 0.5", provider.FollowThroughRate)
+	}
+
+	follow, err := repo.GetSelectionFollowThrough(ctx, SkillAnalyticsFilter{ProjectID: projectID, Limit: 10})
+	if err != nil {
+		t.Fatalf("GetSelectionFollowThrough: %v", err)
+	}
+	providerFollow := findFollowSkill(follow, "provider_adapter")
+	if providerFollow == nil {
+		t.Fatalf("provider_adapter missing from follow-through: %+v", follow)
+	}
+	if providerFollow.SelectedCount != 2 || providerFollow.LoadedOrViewed != 1 || providerFollow.IgnoredCount != 1 {
+		t.Fatalf("provider follow-through counts = %+v", providerFollow)
+	}
+	frontendFollow := findFollowSkill(follow, "frontend")
+	if frontendFollow == nil || frontendFollow.SelectedCount != 1 || frontendFollow.LoadedOrViewed != 1 || frontendFollow.IgnoredCount != 0 {
+		t.Fatalf("frontend follow-through counts = %+v", frontendFollow)
+	}
+}
+
+func TestSkillAnalyticsRepo_AgentUsageHeatmap(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewSkillAnalyticsRepo(db)
+	ctx := context.Background()
+	projectID := defaultProjectID(t, db)
+	if _, err := db.Exec(`INSERT INTO agents (id, name, key, scope) VALUES ('agent-a', 'Default Coding Agent', 'default_coding_agent', 'global')`); err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	recordSkillAnalyticsEvents(t, repo,
+		skillEvent(projectID, "turn-1", "agent-a", "global", "provider_adapter", "selected", "skill_curator", now),
+		skillEvent(projectID, "turn-1", "agent-a", "global", "provider_adapter", "loaded", "skill_curator", now),
+		skillEvent(projectID, "turn-1", "agent-a", "global", "provider_adapter", "viewed", "manual", now),
+		skillEvent(projectID, "turn-2", "agent-a", "project", "frontend", "selected", "skill_curator", now),
+	)
+
+	heatmap, err := repo.GetAgentUsage(ctx, SkillAnalyticsFilter{ProjectID: projectID, Limit: 5})
+	if err != nil {
+		t.Fatalf("GetAgentUsage: %v", err)
+	}
+	if len(heatmap.Agents) != 1 || heatmap.Agents[0].AgentName != "Default Coding Agent" {
+		t.Fatalf("agents = %+v", heatmap.Agents)
+	}
+	cell := findAgentUsageCell(heatmap.Cells, "agent-a", "provider_adapter")
+	if cell == nil {
+		t.Fatalf("provider cell missing: %+v", heatmap.Cells)
+	}
+	if cell.ActivityCount != 3 || cell.SelectedCount != 1 || cell.LoadedCount != 1 || cell.ViewedCount != 1 {
+		t.Fatalf("provider cell = %+v", cell)
+	}
+}
+
+func TestSkillAnalyticsRepo_UnderusedSkillsIncludesEnabledSkillsWithNoEvents(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewSkillAnalyticsRepo(db)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	projectID := defaultProjectID(t, db)
+	recordSkillAnalyticsEvents(t, repo,
+		skillEvent(projectID, "turn-1", "", "global", "active_skill", "selected", "skill_curator", now),
+		skillEvent(projectID, "turn-1", "", "global", "active_skill", "loaded", "skill_curator", now),
+	)
+	enabled := []EnabledSkillInfo{
+		{Handle: "never_used", Scope: models.SkillScopeGlobal, Enabled: true},
+		{Handle: "always_guidance", Scope: models.SkillScopeProject, Enabled: true, AlwaysUse: true},
+		{Handle: "active_skill", Scope: models.SkillScopeGlobal, Enabled: true},
+	}
+
+	underused, err := repo.GetUnderusedSkills(ctx, SkillAnalyticsFilter{ProjectID: projectID}, enabled)
+	if err != nil {
+		t.Fatalf("GetUnderusedSkills: %v", err)
+	}
+	if len(underused) < 3 {
+		t.Fatalf("expected enabled skills plus activity, got %+v", underused)
+	}
+	if underused[0].SkillHandle != "always_guidance" && underused[0].SkillHandle != "never_used" {
+		t.Fatalf("first underused skill should have zero activity, got %+v", underused[0])
+	}
+	never := findUnderusedSkill(underused, "never_used")
+	if never == nil || !never.Enabled || never.ActivityCount != 0 || never.LastActivity != nil {
+		t.Fatalf("never_used row = %+v", never)
+	}
+	always := findUnderusedSkill(underused, "always_guidance")
+	if always == nil || !always.AlwaysUse || always.ActivityCount != 0 {
+		t.Fatalf("always_guidance row = %+v", always)
+	}
+}
+
+func defaultProjectID(t *testing.T, db interface {
+	QueryRow(query string, args ...any) *sql.Row
+}) string {
+	t.Helper()
+	var id string
+	if err := db.QueryRow(`SELECT id FROM projects ORDER BY is_default DESC, name ASC LIMIT 1`).Scan(&id); err != nil {
+		t.Fatalf("default project id: %v", err)
+	}
+	return id
+}
+
+func recordSkillAnalyticsEvents(t *testing.T, repo *SkillAnalyticsRepo, events ...models.SkillAnalyticsEvent) {
+	t.Helper()
+	for i := range events {
+		if err := repo.RecordEvent(context.Background(), &events[i]); err != nil {
+			t.Fatalf("RecordEvent(%+v): %v", events[i], err)
+		}
+	}
+}
+
+func skillEvent(projectID, threadID, agentID, scope, handle, eventType, source string, at time.Time) models.SkillAnalyticsEvent {
+	return models.SkillAnalyticsEvent{
+		CreatedAt:   at,
+		ProjectID:   projectID,
+		ThreadID:    threadID,
+		AgentID:     agentID,
+		SkillScope:  scope,
+		SkillHandle: handle,
+		EventType:   eventType,
+		Source:      source,
+		Surface:     models.SkillSurfaceTaskThread,
+	}
+}
+
+func findTopSkill(rows []models.SkillAnalyticsSkillMetric, handle string) *models.SkillAnalyticsSkillMetric {
+	for i := range rows {
+		if rows[i].SkillHandle == handle {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+func findFollowSkill(rows []models.SkillFollowThroughMetric, handle string) *models.SkillFollowThroughMetric {
+	for i := range rows {
+		if rows[i].SkillHandle == handle {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+func findAgentUsageCell(rows []models.SkillAgentUsageCell, agentID, handle string) *models.SkillAgentUsageCell {
+	for i := range rows {
+		if rows[i].AgentID == agentID && rows[i].SkillHandle == handle {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+func findUnderusedSkill(rows []models.UnderusedSkillMetric, handle string) *models.UnderusedSkillMetric {
+	for i := range rows {
+		if rows[i].SkillHandle == handle {
+			return &rows[i]
+		}
+	}
+	return nil
+}

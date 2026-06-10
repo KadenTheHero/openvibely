@@ -120,6 +120,7 @@ func (h *Handler) CreateAgentOwnedSkill(c echo.Context) error {
 	if _, err := h.writeAgentOwnedSkillFromDialog(c, agent, req, false); err != nil {
 		return err
 	}
+	h.recordManualSkillEdited(c, req.Handle, models.SkillScopeAgentOwned, agent.ID)
 	return h.GetAgentSkills(c)
 }
 
@@ -145,6 +146,7 @@ func (h *Handler) UpdateAgentOwnedSkill(c echo.Context) error {
 	if _, err := h.writeAgentOwnedSkillFromDialog(c, agent, req, true); err != nil {
 		return err
 	}
+	h.recordManualSkillEdited(c, req.Handle, models.SkillScopeAgentOwned, agent.ID)
 	return h.GetAgentSkills(c)
 }
 
@@ -193,6 +195,7 @@ func (h *Handler) ArchiveAgentOwnedSkill(c echo.Context) error {
 	if err := os.WriteFile(path, []byte(rendered), 0o644); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	h.recordManualSkillEdited(c, handle, models.SkillScopeAgentOwned, agent.ID)
 	return h.GetAgentSkills(c)
 }
 

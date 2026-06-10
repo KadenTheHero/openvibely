@@ -60,6 +60,7 @@ type WorkerService struct {
 	agentRepo                        *repository.AgentRepo
 	lifecycleRepo                    *repository.LifecycleRepo
 	execRepo                         *repository.ExecutionRepo
+	skillAnalyticsRepo               *repository.SkillAnalyticsRepo
 	mutationRecorder                 func(models.Task) agentlibrary.MutationRecorder
 	agentRootSyncService             *AgentLibraryMaintenanceService
 	taskGoalSvc                      *TaskGoalService

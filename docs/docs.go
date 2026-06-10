@@ -279,6 +279,71 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/analytics/skills": {
+            "get": {
+                "description": "Returns top skills, selection follow-through, agent heatmap, and underused skill metrics.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get skill analytics",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project ID filter",
+                        "name": "project_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "30d",
+                        "description": "Convenience range: 7d, 30d, 90d, all",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent ID filter",
+                        "name": "agent_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Surface filter",
+                        "name": "surface",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill scope filter",
+                        "name": "skill_scope",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Event type filter",
+                        "name": "event_type",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Skill analytics",
+                        "schema": {
+                            "$ref": "#/definitions/models.SkillAnalyticsDashboard"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/analytics/success-failure-rates": {
             "get": {
                 "description": "Returns execution success/failure rates grouped by day, week, or month.",
@@ -2819,6 +2884,182 @@ const docTemplate = `{
                 }
             }
         },
+        "models.SkillAgentUsageAgent": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "agent_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.SkillAgentUsageCell": {
+            "type": "object",
+            "properties": {
+                "activity_count": {
+                    "type": "integer"
+                },
+                "agent_id": {
+                    "type": "string"
+                },
+                "agent_name": {
+                    "type": "string"
+                },
+                "edited_count": {
+                    "type": "integer"
+                },
+                "loaded_count": {
+                    "type": "integer"
+                },
+                "selected_count": {
+                    "type": "integer"
+                },
+                "skill_handle": {
+                    "type": "string"
+                },
+                "viewed_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.SkillAgentUsageHeatmap": {
+            "type": "object",
+            "properties": {
+                "agents": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.SkillAgentUsageAgent"
+                    }
+                },
+                "cells": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.SkillAgentUsageCell"
+                    }
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "models.SkillAnalyticsDashboard": {
+            "type": "object",
+            "properties": {
+                "agent_usage": {
+                    "$ref": "#/definitions/models.SkillAgentUsageHeatmap"
+                },
+                "follow_through": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.SkillFollowThroughMetric"
+                    }
+                },
+                "top_skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.SkillAnalyticsSkillMetric"
+                    }
+                },
+                "underused": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.UnderusedSkillMetric"
+                    }
+                }
+            }
+        },
+        "models.SkillAnalyticsSkillMetric": {
+            "type": "object",
+            "properties": {
+                "activity_count": {
+                    "type": "integer"
+                },
+                "edited_count": {
+                    "type": "integer"
+                },
+                "follow_through_rate": {
+                    "type": "number"
+                },
+                "last_activity": {
+                    "type": "string"
+                },
+                "loaded_count": {
+                    "type": "integer"
+                },
+                "selected_count": {
+                    "type": "integer"
+                },
+                "skill_handle": {
+                    "type": "string"
+                },
+                "skill_scope": {
+                    "type": "string"
+                },
+                "viewed_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.SkillFollowThroughMetric": {
+            "type": "object",
+            "properties": {
+                "ignored_count": {
+                    "type": "integer"
+                },
+                "loaded_or_viewed_count": {
+                    "type": "integer"
+                },
+                "selected_count": {
+                    "type": "integer"
+                },
+                "skill_handle": {
+                    "type": "string"
+                },
+                "skill_scope": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.UnderusedSkillMetric": {
+            "type": "object",
+            "properties": {
+                "activity_count": {
+                    "type": "integer"
+                },
+                "always_use": {
+                    "type": "boolean"
+                },
+                "edited_count": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "last_activity": {
+                    "type": "string"
+                },
+                "loaded_count": {
+                    "type": "integer"
+                },
+                "selected_count": {
+                    "type": "integer"
+                },
+                "skill_handle": {
+                    "type": "string"
+                },
+                "skill_scope": {
+                    "type": "string"
+                },
+                "viewed_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "models.UsageRatePoint": {
             "type": "object",
             "properties": {
@@ -3152,8 +3393,6 @@ var SwaggerInfo = &swag.Spec{
 	Description:      "REST API for OpenVibely - AI-powered task scheduling and management\nThis API provides endpoints for managing projects, tasks, and chat interactions with AI agents.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
-	LeftDelim:        "{{",
-	RightDelim:       "}}",
 }
 
 func init() {

@@ -38,6 +38,7 @@ type Handler struct {
 	execRepo                   *repository.ExecutionRepo
 	threadInputRepo            *repository.ThreadInputRepo
 	usageRepo                  *repository.UsageRepo
+	skillAnalyticsRepo         *repository.SkillAnalyticsRepo
 	workerRepo                 *repository.WorkerRepo
 	attachmentRepo             *repository.AttachmentRepo
 	chatAttachmentRepo         *repository.ChatAttachmentRepo
@@ -128,16 +129,26 @@ func New(
 ) *Handler {
 	var threadInputRepo *repository.ThreadInputRepo
 	var usageRepo *repository.UsageRepo
+	var skillAnalyticsRepo *repository.SkillAnalyticsRepo
 	var usageAnalyticsSvc *service.UsageAnalyticsService
-	if db := execRepo.DB(); db != nil {
-		threadInputRepo = repository.NewThreadInputRepo(db)
-		usageRepo = repository.NewUsageRepo(db)
-		usageAnalyticsSvc = service.NewUsageAnalyticsService(usageRepo, llmConfigRepo)
+	if execRepo != nil {
+		if db := execRepo.DB(); db != nil {
+			threadInputRepo = repository.NewThreadInputRepo(db)
+			usageRepo = repository.NewUsageRepo(db)
+			skillAnalyticsRepo = repository.NewSkillAnalyticsRepo(db)
+			usageAnalyticsSvc = service.NewUsageAnalyticsService(usageRepo, llmConfigRepo)
+		}
 	}
 
 	var h *Handler
 	if llmSvc != nil && usageRepo != nil {
 		llmSvc.SetUsageRepo(usageRepo)
+	}
+	if llmSvc != nil && skillAnalyticsRepo != nil {
+		llmSvc.SetSkillAnalyticsRepo(skillAnalyticsRepo)
+	}
+	if workerSvc != nil && skillAnalyticsRepo != nil {
+		workerSvc.SetSkillAnalyticsRepo(skillAnalyticsRepo)
 	}
 	if llmSvc != nil && threadInputRepo != nil {
 		llmSvc.SetThreadInputRepo(threadInputRepo)
@@ -172,6 +183,7 @@ func New(
 		execRepo:             execRepo,
 		threadInputRepo:      threadInputRepo,
 		usageRepo:            usageRepo,
+		skillAnalyticsRepo:   skillAnalyticsRepo,
 		usageAnalyticsSvc:    usageAnalyticsSvc,
 		workerRepo:           workerRepo,
 		attachmentRepo:       attachmentRepo,
@@ -377,6 +389,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Analytics API endpoints
 	e.GET("/api/analytics/usage", h.GetAnalyticsUsage)
+	e.GET("/api/analytics/skills", h.GetSkillAnalytics)
 	e.GET("/api/analytics/success-failure-rates", h.GetSuccessFailureRates)
 	e.GET("/api/analytics/avg-execution-time-by-task", h.GetAvgExecutionTimeByTask)
 	e.GET("/api/analytics/avg-execution-time-by-agent", h.GetAvgExecutionTimeByAgent)

@@ -40,22 +40,30 @@ func (w *WorkerService) buildLifecycleReadRuntimeTools(task models.Task, catalog
 	if catalog == nil {
 		return nil
 	}
+	var tools *llmcontracts.RuntimeTools
 	if catalog.IsAgentOwned() {
-		return agentskills.SelectedSkillRuntimeTools(catalog)
+		tools = agentskills.SelectedSkillRuntimeTools(catalog)
+	} else {
+		var inspector agentskills.AgentInspector
+		if w.agentRepo != nil {
+			inspector = newAgentInspector(w.agentRepo, w.lifecycleRepo, w.CurrentLifecycleCatalog)
+		}
+		projectRoot := projectSkillRoot(context.Background(), w.projectRepo, task.ProjectID)
+		tools = agentskills.SkillRuntimeTools(catalog, w.globalSkillRoot, projectRoot, inspector)
 	}
-	var inspector agentskills.AgentInspector
-	if w.agentRepo != nil {
-		inspector = newAgentInspector(w.agentRepo, w.lifecycleRepo, w.CurrentLifecycleCatalog)
-	}
-	projectRoot := projectSkillRoot(context.Background(), w.projectRepo, task.ProjectID)
-	return agentskills.SkillRuntimeTools(catalog, w.globalSkillRoot, projectRoot, inspector)
+	return w.instrumentSkillRuntimeTools(tools, catalog, skillAnalyticsContext{ProjectID: task.ProjectID, TaskID: task.ID, Source: models.SkillEventSourceLifecycleHook, Surface: models.SkillSurfaceLifecycleHook})
 }
 
-func (w *WorkerService) buildTaskSkillRuntimeTools(_ context.Context, _ models.Task, catalog *agentskills.Catalog) *llmcontracts.RuntimeTools {
+func (w *WorkerService) buildTaskSkillRuntimeTools(ctx context.Context, task models.Task, catalog *agentskills.Catalog) *llmcontracts.RuntimeTools {
 	if catalog == nil {
 		return nil
 	}
-	return agentskills.SelectedSkillRuntimeTools(catalog)
+	turn := lifecycleTurnFromContext(ctx)
+	agentID := ""
+	if turn.AssignedAgent != nil {
+		agentID = turn.AssignedAgent.ID
+	}
+	return w.instrumentSkillRuntimeTools(agentskills.SelectedSkillRuntimeTools(catalog), catalog, skillAnalyticsContext{ProjectID: task.ProjectID, TaskID: task.ID, ThreadID: turnThreadID(task.ID, turn), AgentID: agentID, Source: models.SkillEventSourceManual, Surface: skillAnalyticsSurface(task, turn)})
 }
 
 func (w *WorkerService) buildTaskMemoryRuntimeTools(ctx context.Context, task models.Task, memories []memory.SelectedMemory) *llmcontracts.RuntimeTools {
@@ -116,7 +124,8 @@ func (w *WorkerService) buildLifecycleRuntimeTools(task models.Task, catalog *ag
 			agentScope = "global"
 		}
 	}
-	return lifecycleRuntimeTools(catalog, inspector, importer, recorder, w.globalSkillRoot, projectRoot, assignedAgentKey, agentScope)
+	tools := lifecycleRuntimeTools(catalog, inspector, importer, recorder, w.globalSkillRoot, projectRoot, assignedAgentKey, agentScope)
+	return instrumentSkillEditRuntimeTools(w.skillAnalyticsRepo, tools, skillAnalyticsContext{ProjectID: task.ProjectID, TaskID: task.ID, AgentID: agentIDFromAgent(assignedAgent), Source: models.SkillEventSourceLifecycleHook, Surface: models.SkillSurfaceLifecycleHook})
 }
 
 func (w *WorkerService) buildLifecycleImporter(task models.Task) *agentlibrary.Importer {

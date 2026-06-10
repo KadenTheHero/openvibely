@@ -26,11 +26,15 @@ func (s *LLMService) agentDeclaredSkillRuntimeTools(ctx context.Context, task mo
 		inspector = newAgentInspector(s.agentRepo, s.lifecycleRepo, nil)
 	}
 	var readers *llmcontracts.RuntimeTools
+	readerCatalog := selectedCatalog
 	if agentExplicitlyAllowsAnyTool(agent, "skills_list", "agent_list", "agent_view") {
-		readers = agentskills.SkillRuntimeTools(mergeSkillCatalogs(task.ID+":skill-tools", standaloneCatalog, selectedCatalog), s.globalSkillRoot, projectRoot, inspector)
+		readerCatalog = mergeSkillCatalogs(task.ID+":skill-tools", standaloneCatalog, selectedCatalog)
+		readers = agentskills.SkillRuntimeTools(readerCatalog, s.globalSkillRoot, projectRoot, inspector)
 	} else if agentExplicitlyAllowsTool(agent, "skill_view") {
 		readers = agentskills.SelectedSkillRuntimeTools(selectedCatalog)
 	}
+	turn := lifecycleTurnFromContext(ctx)
+	readers = s.instrumentSkillRuntimeTools(readers, readerCatalog, skillAnalyticsContext{ProjectID: task.ProjectID, TaskID: task.ID, ThreadID: turnThreadID(task.ID, turn), AgentID: agent.ID, Source: models.SkillEventSourceManual, Surface: skillAnalyticsSurface(task, turn)})
 	var writers []*llmcontracts.RuntimeTools
 	if agentExplicitlyAllowsTool(agent, "skill_manage") || agentExplicitlyAllowsTool(agent, "agent_skill_manage") {
 		importer := s.agentSkillImporter(task)
@@ -38,11 +42,12 @@ func (s *LLMService) agentDeclaredSkillRuntimeTools(ctx context.Context, task mo
 		if s.mutationRecorder != nil {
 			recorder = s.mutationRecorder(task)
 		}
+		editMeta := skillAnalyticsContext{ProjectID: task.ProjectID, TaskID: task.ID, ThreadID: turnThreadID(task.ID, turn), AgentID: agent.ID, Source: models.SkillEventSourceManual, Surface: skillAnalyticsSurface(task, turn)}
 		if agentExplicitlyAllowsTool(agent, "skill_manage") {
-			writers = append(writers, agentlibrary.SkillMutationTools(importer, recorder))
+			writers = append(writers, instrumentSkillEditRuntimeTools(s.skillAnalyticsRepo, agentlibrary.SkillMutationTools(importer, recorder), editMeta))
 		}
 		if agentExplicitlyAllowsTool(agent, "agent_skill_manage") {
-			writers = append(writers, agentlibrary.LibraryAgentSkillMutationTools(importer, recorder))
+			writers = append(writers, instrumentSkillEditRuntimeTools(s.skillAnalyticsRepo, agentlibrary.LibraryAgentSkillMutationTools(importer, recorder), editMeta))
 		}
 	}
 	parts := []*llmcontracts.RuntimeTools{readers}

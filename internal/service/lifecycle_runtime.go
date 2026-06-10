@@ -20,15 +20,16 @@ type lifecycleTurnContextKey struct{}
 // lifecycleTurnContext carries the app-owned, frozen-per-turn skill catalog and
 // prepared prompt blocks from lifecycle hooks into LLMService prompt assembly.
 type lifecycleTurnContext struct {
-	Catalog                    *agentskills.Catalog
-	SkillIndex                 string
-	PreparedBlocks             string
-	SelectedSkillHandles       []string
-	SelectedSkillsProvenance   agentskills.SkillSelectionProvenance
-	AssignedAgent              *models.Agent
-	AfterCompleteRuntimeTools  *llmcontracts.RuntimeTools
-	TaskThreadTurn             bool
-	TurnPrompt                 string
+	Catalog                   *agentskills.Catalog
+	SkillIndex                string
+	PreparedBlocks            string
+	SelectedSkillHandles      []string
+	SelectedSkillsProvenance  agentskills.SkillSelectionProvenance
+	AssignedAgent             *models.Agent
+	AfterCompleteRuntimeTools *llmcontracts.RuntimeTools
+	TaskThreadTurn            bool
+	TurnPrompt                string
+	TaskRunID                 string
 }
 
 func withLifecycleTurnContext(ctx context.Context, turn lifecycleTurnContext) context.Context {

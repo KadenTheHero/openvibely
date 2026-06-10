@@ -493,6 +493,121 @@ definitions:
       updated_at:
         type: string
     type: object
+  models.SkillAgentUsageAgent:
+    properties:
+      agent_id:
+        type: string
+      agent_name:
+        type: string
+    type: object
+  models.SkillAgentUsageCell:
+    properties:
+      activity_count:
+        type: integer
+      agent_id:
+        type: string
+      agent_name:
+        type: string
+      edited_count:
+        type: integer
+      loaded_count:
+        type: integer
+      selected_count:
+        type: integer
+      skill_handle:
+        type: string
+      viewed_count:
+        type: integer
+    type: object
+  models.SkillAgentUsageHeatmap:
+    properties:
+      agents:
+        items:
+          $ref: '#/definitions/models.SkillAgentUsageAgent'
+        type: array
+      cells:
+        items:
+          $ref: '#/definitions/models.SkillAgentUsageCell'
+        type: array
+      skills:
+        items:
+          type: string
+        type: array
+    type: object
+  models.SkillAnalyticsDashboard:
+    properties:
+      agent_usage:
+        $ref: '#/definitions/models.SkillAgentUsageHeatmap'
+      follow_through:
+        items:
+          $ref: '#/definitions/models.SkillFollowThroughMetric'
+        type: array
+      top_skills:
+        items:
+          $ref: '#/definitions/models.SkillAnalyticsSkillMetric'
+        type: array
+      underused:
+        items:
+          $ref: '#/definitions/models.UnderusedSkillMetric'
+        type: array
+    type: object
+  models.SkillAnalyticsSkillMetric:
+    properties:
+      activity_count:
+        type: integer
+      edited_count:
+        type: integer
+      follow_through_rate:
+        type: number
+      last_activity:
+        type: string
+      loaded_count:
+        type: integer
+      selected_count:
+        type: integer
+      skill_handle:
+        type: string
+      skill_scope:
+        type: string
+      viewed_count:
+        type: integer
+    type: object
+  models.SkillFollowThroughMetric:
+    properties:
+      ignored_count:
+        type: integer
+      loaded_or_viewed_count:
+        type: integer
+      selected_count:
+        type: integer
+      skill_handle:
+        type: string
+      skill_scope:
+        type: string
+    type: object
+  models.UnderusedSkillMetric:
+    properties:
+      activity_count:
+        type: integer
+      always_use:
+        type: boolean
+      edited_count:
+        type: integer
+      enabled:
+        type: boolean
+      last_activity:
+        type: string
+      loaded_count:
+        type: integer
+      selected_count:
+        type: integer
+      skill_handle:
+        type: string
+      skill_scope:
+        type: string
+      viewed_count:
+        type: integer
+    type: object
   models.UsageRatePoint:
     properties:
       call_count:
@@ -868,6 +983,50 @@ paths:
           schema:
             $ref: '#/definitions/handler.ErrorResponse'
       summary: Get most frequent tasks
+      tags:
+      - analytics
+  /api/analytics/skills:
+    get:
+      description: Returns top skills, selection follow-through, agent heatmap, and
+        underused skill metrics.
+      parameters:
+      - description: Project ID filter
+        in: query
+        name: project_id
+        type: string
+      - default: 30d
+        description: 'Convenience range: 7d, 30d, 90d, all'
+        in: query
+        name: range
+        type: string
+      - description: Agent ID filter
+        in: query
+        name: agent_id
+        type: string
+      - description: Surface filter
+        in: query
+        name: surface
+        type: string
+      - description: Skill scope filter
+        in: query
+        name: skill_scope
+        type: string
+      - description: Event type filter
+        in: query
+        name: event_type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Skill analytics
+          schema:
+            $ref: '#/definitions/models.SkillAnalyticsDashboard'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get skill analytics
       tags:
       - analytics
   /api/analytics/success-failure-rates:
