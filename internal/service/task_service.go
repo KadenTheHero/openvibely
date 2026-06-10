@@ -162,12 +162,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 			s.workerSvc.CancelRunningTask(id)
 		}
 		s.repo.UpdateStatus(ctx, id, models.StatusCancelled)
-		// Move cancelled tasks to backlog (same behavior as CancelTask)
-		if err := s.repo.UpdateCategory(ctx, id, models.CategoryBacklog); err != nil {
-			applog.Infof("[task-svc] UpdateCategory error moving cancelled task to backlog: %v", err)
-		} else {
-			applog.Infof("[task-svc] UpdateCategory moved cancelled task to backlog id=%s", id)
-		}
+		applog.Infof("[task-svc] UpdateCategory cancelled running task id=%s and kept requested category=%s", id, category)
 	}
 
 	// If moved to Active, prefer a pending task-thread follow-up over rerunning the original prompt.

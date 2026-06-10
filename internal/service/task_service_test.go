@@ -989,12 +989,12 @@ func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsRunning(t *testi
 	goal, err := goalSvc.SetGoal(ctx, task.ID, "Keep going until done", GoalOptions{Actor: "test"})
 	require.NoError(t, err)
 
-	// Move to completed — should cancel the running execution, pause the goal, and move to backlog
+	// Move to completed — should cancel the running execution, pause the goal, and keep the requested category.
 	if err := svc.UpdateCategory(ctx, task.ID, models.CategoryCompleted); err != nil {
 		t.Fatalf("UpdateCategory: %v", err)
 	}
 
-	// Verify status was set to cancelled and category moved to backlog
+	// Verify status was set to cancelled and category stayed completed.
 	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
@@ -1002,8 +1002,8 @@ func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsRunning(t *testi
 	if updatedTask.Status != models.StatusCancelled {
 		t.Errorf("expected Status=cancelled after moving running task away from active, got %q", updatedTask.Status)
 	}
-	if updatedTask.Category != models.CategoryBacklog {
-		t.Errorf("expected Category=backlog for cancelled task, got %q", updatedTask.Category)
+	if updatedTask.Category != models.CategoryCompleted {
+		t.Errorf("expected Category=completed after dropping running task on completed, got %q", updatedTask.Category)
 	}
 	paused, err := goalSvc.GetGoal(ctx, task.ID)
 	require.NoError(t, err)
