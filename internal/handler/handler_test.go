@@ -1369,6 +1369,52 @@ func TestHandler_UpdateTaskCategory_AllowsScheduledTaskToScheduled(t *testing.T)
 	}
 }
 
+func TestHandler_UpdateTask_CategoryChangeFromActiveQueuedToCompletedStopsTask(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Queued Active Edit Stop",
+		Category:  models.CategoryActive,
+		Status:    models.StatusQueued,
+		Priority:  2,
+		Prompt:    "original prompt",
+	}
+	require.NoError(t, tc.handler.taskRepo.Create(ctx, task))
+	goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "finish the objective", service.GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	cancelCtx, cancel := context.WithCancel(ctx)
+	tc.handler.workerSvc.RegisterCancel(task.ID, cancel)
+
+	form := url.Values{}
+	form.Set("title", "Queued Active Edit Stopped")
+	form.Set("category", "completed")
+	form.Set("prompt", "updated prompt")
+	form.Set("priority", "4")
+	rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(form).Execute()
+	assertCode(t, rec, http.StatusOK)
+
+	select {
+	case <-cancelCtx.Done():
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected queued task cancellation when editing active task to completed")
+	}
+	updated, err := tc.handler.taskSvc.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, "Queued Active Edit Stopped", updated.Title)
+	assert.Equal(t, "updated prompt", updated.Prompt)
+	assert.Equal(t, 4, updated.Priority)
+	assert.Equal(t, models.StatusCancelled, updated.Status)
+	assert.Equal(t, models.CategoryCompleted, updated.Category)
+	paused, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, paused)
+	assert.Equal(t, goal.GoalID, paused.GoalID)
+	assert.Equal(t, models.TaskGoalStatusPaused, paused.Status)
+	assert.Equal(t, service.TaskGoalStoppedByUserReason, paused.Reason)
+}
+
 func TestHandler_UpdateTask_CategoryChangeFromCompletedToActive(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()

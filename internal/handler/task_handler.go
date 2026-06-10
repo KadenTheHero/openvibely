@@ -949,7 +949,9 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	}
 
 	oldCategory := task.Category
+	oldStatus := task.Status
 	newCategory := models.TaskCategory(c.FormValue("category"))
+	stopActiveViaCategoryUpdate := oldCategory == models.CategoryActive && newCategory != oldCategory && newCategory != models.CategoryActive && (oldStatus == models.StatusRunning || oldStatus == models.StatusQueued)
 	if oldCategory != newCategory && newCategory == models.CategoryActive {
 		hasModels, err := h.hasConfiguredModels(c)
 		if err != nil {
@@ -963,7 +965,11 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	}
 
 	task.Title = c.FormValue("title")
-	task.Category = newCategory
+	if stopActiveViaCategoryUpdate {
+		task.Category = oldCategory
+	} else {
+		task.Category = newCategory
+	}
 	task.Prompt = c.FormValue("prompt")
 	task.Tag = models.TaskTag(c.FormValue("tag"))
 	if p, err := strconv.Atoi(c.FormValue("priority")); err == nil {
@@ -1032,11 +1038,17 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 		}
 	}
 
-	// If category changed to Active, reset status and auto-submit (same as drag & drop behavior)
+	// Category transitions that start or stop execution use the same lifecycle path as drag & drop.
 	if oldCategory != newCategory && newCategory == models.CategoryActive {
 		applog.Infof("[handler] UpdateTask category changed to Active, resetting status and auto-submitting id=%s", taskID)
 		if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, models.CategoryActive); err != nil {
 			applog.Infof("[handler] UpdateTask error starting active task: %v", err)
+			return err
+		}
+	} else if stopActiveViaCategoryUpdate {
+		applog.Infof("[handler] UpdateTask category changed from Active while %s, cancelling id=%s", oldStatus, taskID)
+		if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, newCategory); err != nil {
+			applog.Infof("[handler] UpdateTask error stopping active task: %v", err)
 			return err
 		}
 	}
