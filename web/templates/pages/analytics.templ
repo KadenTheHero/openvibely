@@ -53,93 +53,6 @@ templ analyticsContent(currentProject *models.Project) {
 					</div>
 				</div>
 			</div>
-
-				<!-- Skill Curator Analytics -->
-				<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
-					<div class="card-body">
-						<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-							<div>
-								<h3 class="card-title text-lg">Skill Curator Analytics</h3>
-								<p class="text-sm opacity-60">Track selected, loaded, viewed, and edited skill activity.</p>
-							</div>
-							<div class="tabs tabs-boxed bg-base-200" role="tablist" aria-label="Skill analytics views">
-								<button type="button" class="tab tab-active" data-skill-panel="top" role="tab" aria-selected="true">Overview</button>
-								<button type="button" class="tab" data-skill-panel="follow" role="tab" aria-selected="false">Follow-through</button>
-								<button type="button" class="tab" data-skill-panel="agents" role="tab" aria-selected="false">Agents</button>
-								<button type="button" class="tab" data-skill-panel="underused" role="tab" aria-selected="false">Underused</button>
-							</div>
-						</div>
-
-
-						<div class="skill-analytics-panel" data-skill-panel-content="top">
-							<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-								<div class="h-64">
-									<canvas id="skillTopChart"></canvas>
-								</div>
-								<div>
-									<h4 class="font-semibold mb-2">Top Skill Details</h4>
-									<div class="overflow-x-auto max-h-64">
-										<table class="table table-sm">
-											<thead><tr><th>Skill</th><th>S</th><th>L</th><th>V</th><th>E</th><th>Follow</th></tr></thead>
-											<tbody id="skillTopTable"><tr><td colspan="6" class="text-center opacity-50">No skill events yet</td></tr></tbody>
-										</table>
-									</div>
-								</div>
-							</div>
-						</div>
-
-						<div class="skill-analytics-panel hidden" data-skill-panel-content="follow">
-							<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-								<div class="h-64">
-									<canvas id="skillFollowChart"></canvas>
-								</div>
-								<div>
-									<h4 class="font-semibold mb-2">Selection Outcomes</h4>
-									<div class="overflow-x-auto max-h-64">
-										<table class="table table-sm">
-											<thead><tr><th>Skill</th><th>Selected</th><th>Used</th><th>Ignored</th><th>Rate</th></tr></thead>
-											<tbody id="skillFollowTable"><tr><td colspan="5" class="text-center opacity-50">No selected skills yet</td></tr></tbody>
-										</table>
-									</div>
-								</div>
-							</div>
-						</div>
-
-						<div class="skill-analytics-panel hidden" data-skill-panel-content="agents">
-							<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-								<div class="h-64">
-									<canvas id="skillAgentChart"></canvas>
-								</div>
-								<div>
-									<h4 class="font-semibold mb-2">Top Agent/Skill Pairs</h4>
-									<div class="overflow-x-auto max-h-64">
-										<table class="table table-sm">
-											<thead><tr><th>Agent</th><th>Skill</th><th>Activity</th><th>S</th><th>L</th><th>V</th></tr></thead>
-											<tbody id="skillAgentTable"><tr><td colspan="6" class="text-center opacity-50">No agent skill activity yet</td></tr></tbody>
-										</table>
-									</div>
-								</div>
-							</div>
-						</div>
-
-						<div class="skill-analytics-panel hidden" data-skill-panel-content="underused">
-							<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-								<div class="h-64">
-									<canvas id="skillUnderusedChart"></canvas>
-								</div>
-								<div>
-									<h4 class="font-semibold mb-2">Least Active Enabled Skills</h4>
-									<div class="overflow-x-auto max-h-64">
-										<table class="table table-sm">
-											<thead><tr><th>Skill</th><th>Scope</th><th>Activity</th><th>Last activity</th></tr></thead>
-											<tbody id="underusedSkillsTable"><tr><td colspan="4" class="text-center opacity-50">No enabled skills found</td></tr></tbody>
-										</table>
-									</div>
-								</div>
-							</div>
-						</div>
-					</div>
-				</div>
 				<!-- Provider Account Cards -->
 				<div id="accountUsageCards" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
 					<p class="opacity-50 lg:col-span-2">No connected OAuth account snapshots yet.</p>
@@ -235,6 +148,93 @@ templ analyticsContent(currentProject *models.Project) {
 					</div>
 				</div>
 			</div>
+
+				<!-- Skill Curator Analytics -->
+				<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
+					<div class="card-body">
+						<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+							<div>
+								<h3 class="card-title text-lg">Skill Curator Analytics</h3>
+								<p class="text-sm opacity-60">Track selected, loaded, viewed, and edited skill activity.</p>
+							</div>
+							<div class="tabs tabs-boxed bg-base-200" role="tablist" aria-label="Skill analytics views">
+								<button type="button" class="tab tab-active" data-skill-panel="top" role="tab" aria-selected="true">Overview</button>
+								<button type="button" class="tab" data-skill-panel="follow" role="tab" aria-selected="false">Follow-through</button>
+								<button type="button" class="tab" data-skill-panel="agents" role="tab" aria-selected="false">Agents</button>
+								<button type="button" class="tab" data-skill-panel="underused" role="tab" aria-selected="false">Underused</button>
+							</div>
+						</div>
+
+
+						<div class="skill-analytics-panel" data-skill-panel-content="top">
+							<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+								<div class="h-64">
+									<canvas id="skillTopChart"></canvas>
+								</div>
+								<div>
+									<h4 class="font-semibold mb-2">Top Skill Details</h4>
+									<div class="overflow-x-auto max-h-64">
+										<table class="table table-sm">
+											<thead><tr><th>Skill</th><th>S</th><th>L</th><th>V</th><th>E</th><th>Follow</th></tr></thead>
+											<tbody id="skillTopTable"><tr><td colspan="6" class="text-center opacity-50">No skill events yet</td></tr></tbody>
+										</table>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<div class="skill-analytics-panel hidden" data-skill-panel-content="follow">
+							<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+								<div class="h-64">
+									<canvas id="skillFollowChart"></canvas>
+								</div>
+								<div>
+									<h4 class="font-semibold mb-2">Selection Outcomes</h4>
+									<div class="overflow-x-auto max-h-64">
+										<table class="table table-sm">
+											<thead><tr><th>Skill</th><th>Selected</th><th>Used</th><th>Ignored</th><th>Rate</th></tr></thead>
+											<tbody id="skillFollowTable"><tr><td colspan="5" class="text-center opacity-50">No selected skills yet</td></tr></tbody>
+										</table>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<div class="skill-analytics-panel hidden" data-skill-panel-content="agents">
+							<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+								<div class="h-64">
+									<canvas id="skillAgentChart"></canvas>
+								</div>
+								<div>
+									<h4 class="font-semibold mb-2">Top Agent/Skill Pairs</h4>
+									<div class="overflow-x-auto max-h-64">
+										<table class="table table-sm">
+											<thead><tr><th>Agent</th><th>Skill</th><th>Activity</th><th>S</th><th>L</th><th>V</th></tr></thead>
+											<tbody id="skillAgentTable"><tr><td colspan="6" class="text-center opacity-50">No agent skill activity yet</td></tr></tbody>
+										</table>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<div class="skill-analytics-panel hidden" data-skill-panel-content="underused">
+							<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+								<div class="h-64">
+									<canvas id="skillUnderusedChart"></canvas>
+								</div>
+								<div>
+									<h4 class="font-semibold mb-2">Least Active Enabled Skills</h4>
+									<div class="overflow-x-auto max-h-64">
+										<table class="table table-sm">
+											<thead><tr><th>Skill</th><th>Scope</th><th>Activity</th><th>Last activity</th></tr></thead>
+											<tbody id="underusedSkillsTable"><tr><td colspan="4" class="text-center opacity-50">No enabled skills found</td></tr></tbody>
+										</table>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
 			<!-- Failed Task Patterns -->
 			<div class="card bg-base-100 shadow-sm border border-base-300 mt-6">
 				<div class="card-body">
