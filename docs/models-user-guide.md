@@ -28,7 +28,7 @@ If a task is complex enough that `high` is producing shallow plans or missing ed
 2. Click `+ Add Model`.
 3. Fill:
    - `Name`
-   - `Provider` (`Anthropic`, `OpenAI`, `Ollama`, `OpenRouter`, `NVIDIA NIM`, `Local vLLM`, or `Custom OpenAI-Compatible`)
+   - `Provider` (`Anthropic`, `OpenAI`, `Ollama`, or an OpenAI-compatible preset such as `OpenRouter`, `Groq`, `LM Studio`, or `Custom OpenAI-Compatible`)
    - `Authentication` / `Connection Method` (provider-dependent)
    - `Model`
    - Optional runtime settings (`Temperature`, worker pool settings, etc.)
@@ -83,9 +83,9 @@ Where a low-level provider API still requires an output limit, OpenVibely choose
 
 ### OpenAI-Compatible Chat Completions
 
-- Provider choices in the UI include `OpenRouter`, `NVIDIA NIM`, `Local vLLM`, and `Custom OpenAI-Compatible`.
-- `OpenRouter` and `NVIDIA NIM` set hosted default base URLs and auto-load available models when selected. If you enter an API key, discovery retries with the key in a request header.
-- `Local vLLM` and `Custom OpenAI-Compatible` are manual-entry oriented. Enter the base URL and exact model ID expected by your server or gateway.
+- Provider choices in the UI include OpenRouter, NVIDIA NIM, Local vLLM, LM Studio, SGLang, LiteLLM, DeepInfra, Fireworks, Groq, Mistral, Cerebras, Together, Hugging Face Router, DeepSeek, Moonshot, DashScope, Alibaba Coding Plan, Z.AI / GLM, NovitaAI, Venice, Qianfan, Kilo Code, Arcee AI, StepFun, GMI Cloud, Chutes, Tencent TokenHub, Xiaomi MiMo, Inferrs Local, ds4 Local, and Custom OpenAI-Compatible.
+- Each non-Custom OpenAI-compatible preset sets its default base URL and auto-loads available models when selected. If you enter an API key, discovery retries with the key in a request header.
+- Local/self-hosted presets such as `Local vLLM`, `LM Studio`, `SGLang`, `LiteLLM`, `Inferrs Local`, and `ds4 Local` allow blank API keys. `Custom OpenAI-Compatible` is manual-entry oriented; enter the base URL and exact model ID expected by your server or gateway.
 - API keys are sent in headers, not URL parameters. Local/self-hosted servers may allow the API key field to remain blank.
 - OpenAI-compatible configs call `base_url + /chat/completions` and store the exact model ID after trimming whitespace.
 

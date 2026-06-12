@@ -50,7 +50,7 @@ func (h *Handler) ListModels(c echo.Context) error {
 // The UI shows "Anthropic" and "OpenAI" as single providers with auth type sub-selection,
 // while the DB stores provider and auth_method separately.
 func resolveProviderAndAuth(provider, anthropicAuthType, openaiAuthType, authMethod string) (models.LLMProvider, models.AuthMethod) {
-	if provider == string(models.ProviderOpenAICompatible) || strings.HasPrefix(provider, string(models.ProviderOpenAICompatible)+"_") {
+	if provider == string(models.ProviderOpenAICompatible) || isKnownOpenAICompatibleUIProvider(provider) {
 		return models.ProviderOpenAICompatible, models.AuthMethodAPIKey
 	}
 	// Accept both "subscription" (legacy) and "oauth" (current) form values.
@@ -84,6 +84,19 @@ func resolveProviderAndAuth(provider, anthropicAuthType, openaiAuthType, authMet
 		return models.ProviderOpenAI, models.AuthMethodCLI
 	}
 	return models.LLMProvider(provider), models.AuthMethodCLI
+}
+
+func isKnownOpenAICompatibleUIProvider(provider string) bool {
+	const prefix = "openai_compatible_"
+	if !strings.HasPrefix(provider, prefix) {
+		return false
+	}
+	switch strings.TrimPrefix(provider, prefix) {
+	case "openrouter", "nvidia_nim", "vllm", "lm_studio", "sglang", "litellm", "deepinfra", "fireworks", "groq", "mistral", "cerebras", "together", "huggingface_router", "deepseek", "moonshot", "dashscope", "dashscope_intl", "alibaba_coding_plan", "zai_glm", "novita", "venice", "qianfan", "kilo_code", "arcee", "stepfun", "stepfun_step_plan", "gmi_cloud", "chutes", "tokenhub", "tokenhub_intl", "xiaomi_mimo", "inferrs", "ds4", "custom":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeOpenAICompatibleTransport(transport string) string {

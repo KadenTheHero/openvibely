@@ -131,13 +131,22 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			wantAuthMethod: models.AuthMethodAPIKey,
 		},
 		{
-			name:           "nvidia nim provider preset maps to openai compatible api key",
-			provider:       "openai_compatible_nvidia_nim",
+			name:           "new provider preset maps to openai compatible api key",
+			provider:       "openai_compatible_groq",
 			anthropicAuth:  "",
 			openaiAuth:     "",
 			authMethod:     "",
 			wantProvider:   models.ProviderOpenAICompatible,
 			wantAuthMethod: models.AuthMethodAPIKey,
+		},
+		{
+			name:           "excluded provider preset is not normalized to openai compatible",
+			provider:       "openai_compatible_xai",
+			anthropicAuth:  "",
+			openaiAuth:     "",
+			authMethod:     "",
+			wantProvider:   models.LLMProvider("openai_compatible_xai"),
+			wantAuthMethod: models.AuthMethodCLI,
 		}, {
 			name:           "ollama",
 			provider:       "ollama",
@@ -275,6 +284,49 @@ func TestCreateModel_OpenAICompatible(t *testing.T) {
 	if found.BaseURL != "https://openrouter.ai/api/v1/" || found.Transport != "chat_completions" || found.PresetSlug != "openrouter" || found.DefaultMaxTokens != 16000 {
 		t.Fatalf("compatible fields not saved: %+v", found)
 	}
+}
+
+func TestCreateModel_OpenAICompatibleNewPresetPersistsExactFields(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("name", "Groq Llama")
+	form.Set("provider", "openai_compatible_groq")
+	form.Set("model", " llama-3.3-70b-versatile ")
+	form.Set("api_key", "gsk-test")
+	form.Set("base_url", "https://api.groq.com/openai/v1/")
+	form.Set("transport", "chat_completions")
+	form.Set("preset_slug", "groq")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	configs, err := llmConfigRepo.List(context.Background())
+	if err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+	for i := range configs {
+		if configs[i].Name == "Groq Llama" {
+			if configs[i].Provider != models.ProviderOpenAICompatible || configs[i].AuthMethod != models.AuthMethodAPIKey {
+				t.Fatalf("provider/auth = %s/%s", configs[i].Provider, configs[i].AuthMethod)
+			}
+			if configs[i].Model != "llama-3.3-70b-versatile" {
+				t.Fatalf("model = %q", configs[i].Model)
+			}
+			if configs[i].BaseURL != "https://api.groq.com/openai/v1/" || configs[i].Transport != "chat_completions" || configs[i].PresetSlug != "groq" {
+				t.Fatalf("compatible fields not saved: %+v", configs[i])
+			}
+			return
+		}
+	}
+	t.Fatal("created model not found")
 }
 
 func TestCreateModel_OpenAICompatibleRejectsInvalidBaseURL(t *testing.T) {

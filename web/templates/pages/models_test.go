@@ -143,27 +143,112 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 	}
 	out := buf.String()
 
+	presetOptions := map[string]string{
+		"openrouter":          "OpenRouter",
+		"nvidia_nim":          "NVIDIA NIM",
+		"vllm":                "Local vLLM",
+		"lm_studio":           "LM Studio",
+		"sglang":              "SGLang",
+		"litellm":             "LiteLLM",
+		"deepinfra":           "DeepInfra",
+		"fireworks":           "Fireworks",
+		"groq":                "Groq",
+		"mistral":             "Mistral",
+		"cerebras":            "Cerebras",
+		"together":            "Together",
+		"huggingface_router":  "Hugging Face Router",
+		"deepseek":            "DeepSeek",
+		"moonshot":            "Moonshot",
+		"dashscope":           "Qwen / DashScope",
+		"dashscope_intl":      "Qwen / DashScope Intl",
+		"alibaba_coding_plan": "Alibaba Coding Plan",
+		"zai_glm":             "Z.AI / GLM",
+		"novita":              "NovitaAI",
+		"venice":              "Venice",
+		"qianfan":             "Qianfan",
+		"kilo_code":           "Kilo Code",
+		"arcee":               "Arcee AI",
+		"stepfun":             "StepFun",
+		"stepfun_step_plan":   "StepFun Step Plan",
+		"gmi_cloud":           "GMI Cloud",
+		"chutes":              "Chutes",
+		"tokenhub":            "Tencent TokenHub",
+		"tokenhub_intl":       "Tencent TokenHub Intl",
+		"xiaomi_mimo":         "Xiaomi MiMo",
+		"inferrs":             "Inferrs Local",
+		"ds4":                 "ds4 Local",
+		"custom":              "Custom OpenAI-Compatible",
+	}
+	for slug, label := range presetOptions {
+		want := `<option value="openai_compatible_` + slug + `">` + label + `</option>`
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected provider dropdown to contain %q", want)
+		}
+	}
+
+	presetDefaults := map[string]string{
+		"openrouter":          "https://openrouter.ai/api/v1/",
+		"nvidia_nim":          "https://integrate.api.nvidia.com/v1/",
+		"vllm":                "http://127.0.0.1:8000/v1/",
+		"lm_studio":           "http://127.0.0.1:1234/v1/",
+		"sglang":              "http://127.0.0.1:30000/v1/",
+		"litellm":             "http://localhost:4000/v1/",
+		"deepinfra":           "https://api.deepinfra.com/v1/openai/",
+		"fireworks":           "https://api.fireworks.ai/inference/v1/",
+		"groq":                "https://api.groq.com/openai/v1/",
+		"mistral":             "https://api.mistral.ai/v1/",
+		"cerebras":            "https://api.cerebras.ai/v1/",
+		"together":            "https://api.together.xyz/v1/",
+		"huggingface_router":  "https://router.huggingface.co/v1/",
+		"deepseek":            "https://api.deepseek.com/v1/",
+		"moonshot":            "https://api.moonshot.ai/v1/",
+		"dashscope":           "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+		"dashscope_intl":      "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/",
+		"alibaba_coding_plan": "https://coding-intl.dashscope.aliyuncs.com/v1/",
+		"zai_glm":             "https://api.z.ai/api/paas/v4/",
+		"novita":              "https://api.novita.ai/openai/v1/",
+		"venice":              "https://api.venice.ai/api/v1/",
+		"qianfan":             "https://qianfan.baidubce.com/v2/",
+		"kilo_code":           "https://api.kilo.ai/api/gateway/",
+		"arcee":               "https://api.arcee.ai/api/v1/",
+		"stepfun":             "https://api.stepfun.ai/v1/",
+		"stepfun_step_plan":   "https://api.stepfun.ai/step_plan/v1/",
+		"gmi_cloud":           "https://api.gmi-serving.com/v1/",
+		"chutes":              "https://llm.chutes.ai/v1/",
+		"tokenhub":            "https://tokenhub.tencentmaas.com/v1/",
+		"tokenhub_intl":       "https://tokenhub-intl.tencentmaas.com/v1/",
+		"xiaomi_mimo":         "https://api.xiaomimimo.com/v1/",
+		"inferrs":             "http://127.0.0.1:8080/v1/",
+		"ds4":                 "http://127.0.0.1:18000/v1/",
+	}
+	for slug, baseURL := range presetDefaults {
+		if !strings.Contains(out, slug+": '"+baseURL+"'") {
+			t.Fatalf("expected preset default %s -> %s", slug, baseURL)
+		}
+	}
+
 	for _, want := range []string{
 		`<input type="hidden" id="model_provider_value" name="provider" value="anthropic"`,
 		`<select id="model_provider"`,
-		`<option value="openai_compatible_openrouter">OpenRouter</option>`,
-		`<option value="openai_compatible_nvidia_nim">NVIDIA NIM</option>`,
-		`<option value="openai_compatible_vllm">Local vLLM</option>`,
-		`<option value="openai_compatible_custom">Custom OpenAI-Compatible</option>`,
 		`oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`,
 		`onsubmit="normalizeModelFormBeforeSubmit()"`,
 		`<input type="hidden" id="model_openai_compatible_preset" name="preset_slug" value="custom"`,
-		"OpenRouter and NVIDIA NIM presets auto-load available models when selected.",
+		"OpenAI-compatible presets auto-load available models when selected; Custom stays manual.",
 		"openai_compatible_openrouter: [",
-		"openai_compatible_nvidia_nim: [",
+		"openai_compatible_groq: [",
+		"openai_compatible_deepseek: [",
+		"openai_compatible_lm_studio: [",
+		"openai_compatible_custom: [",
 		"{ value: 'nvidia/nemotron-3-ultra-550b-a55b', label: 'NVIDIA Nemotron', efforts: [] }",
-		"openai_compatible_custom: [],",
+		"{ value: 'deepseek-chat', label: 'DeepSeek Chat', efforts: [] }",
+		"{ value: 'local-model', label: 'LM Studio local model', efforts: [] }",
 		"Enter model ID manually",
 		"function modelOptionsForProvider(provider)",
-		"isHostedOpenAICompatiblePreset()",
+		"isDiscoverableOpenAICompatiblePreset()",
 		"runAutoDiscoverOpenAICompatibleModels();",
 		"var forcePresetDefaults = selectedModel === undefined && selectedReasoningEffort === undefined;",
 		"applyOpenAICompatiblePreset(forcePresetDefaults);",
+		"if (preset !== 'custom' && (force || !baseURL.value || Object.values(openAICompatiblePresetDefaults).indexOf(baseURL.value) !== -1))",
 		"providerValue.value = 'openai_compatible';",
 		"Enter the model ID manually for local or custom endpoints.",
 		"/models/openai-compatible/available?",
@@ -172,7 +257,7 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"data.resolved_id",
 		"setOpenAICompatibleModelValue(models[i].id, models[i].id + ' (discovered)', false)",
 		"setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id + ' (discovered)', true)",
-		"if (!isHostedOpenAICompatiblePreset())",
+		"if (!isDiscoverableOpenAICompatiblePreset())",
 		"document.getElementById('model_provider').value !== provider",
 	} {
 		if !strings.Contains(out, want) {
@@ -188,6 +273,10 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"api_key=",
 		"openai_compatible_api_key",
 		"Custom compatible model",
+		"openai_compatible_xai",
+		"GitHub Copilot",
+		"Bedrock",
+		"Gemini native",
 	} {
 		if strings.Contains(out, forbidden) {
 			t.Fatalf("expected discovery UI not to contain %q", forbidden)
