@@ -550,6 +550,10 @@ definitions:
         items:
           $ref: '#/definitions/models.UnderusedSkillMetric'
         type: array
+      usage_over_time:
+        items:
+          $ref: '#/definitions/models.SkillUsagePeriodMetric'
+        type: array
     type: object
   models.SkillAnalyticsSkillMetric:
     properties:
@@ -584,6 +588,21 @@ definitions:
         type: string
       skill_scope:
         type: string
+    type: object
+  models.SkillUsagePeriodMetric:
+    properties:
+      activity_count:
+        type: integer
+      edited_count:
+        type: integer
+      loaded_count:
+        type: integer
+      period:
+        type: string
+      selected_count:
+        type: integer
+      viewed_count:
+        type: integer
     type: object
   models.UnderusedSkillMetric:
     properties:
@@ -987,8 +1006,8 @@ paths:
       - analytics
   /api/analytics/skills:
     get:
-      description: Returns top skills, selection follow-through, agent heatmap, and
-        underused skill metrics.
+      description: Returns skill usage over time, top skills, selection follow-through,
+        agent heatmap, and underused skill metrics.
       parameters:
       - description: Project ID filter
         in: query
@@ -998,6 +1017,11 @@ paths:
         description: 'Convenience range: 7d, 30d, 90d, 365d, all'
         in: query
         name: range
+        type: string
+      - default: day
+        description: 'Usage trend grouping: day, week, or month'
+        in: query
+        name: group_by
         type: string
       - description: Agent ID filter
         in: query

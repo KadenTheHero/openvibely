@@ -10,6 +10,35 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestSkillAnalyticsRepo_UsageOverTime(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewSkillAnalyticsRepo(db)
+	ctx := context.Background()
+	projectID := defaultProjectID(t, db)
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	recordSkillAnalyticsEvents(t, repo,
+		skillEvent(projectID, "turn-1", "", "global", "provider_adapter", "selected", "skill_curator", now),
+		skillEvent(projectID, "turn-1", "", "global", "provider_adapter", "loaded", "skill_curator", now.Add(time.Minute)),
+		skillEvent(projectID, "turn-2", "", "project", "frontend", "viewed", "manual", now.AddDate(0, 0, 1)),
+		skillEvent(projectID, "turn-2", "", "project", "frontend", "edited", "manual", now.AddDate(0, 0, 1).Add(time.Minute)),
+	)
+
+	usage, err := repo.GetUsageOverTime(ctx, SkillAnalyticsFilter{ProjectID: projectID, GroupBy: "day"})
+	if err != nil {
+		t.Fatalf("GetUsageOverTime: %v", err)
+	}
+	if len(usage) != 2 {
+		t.Fatalf("usage periods = %+v, want 2", usage)
+	}
+	if usage[0].Period != "2026-06-10" || usage[0].SelectedCount != 1 || usage[0].LoadedCount != 1 || usage[0].ActivityCount != 2 {
+		t.Fatalf("first period = %+v", usage[0])
+	}
+	if usage[1].Period != "2026-06-11" || usage[1].ViewedCount != 1 || usage[1].EditedCount != 1 || usage[1].ActivityCount != 1 {
+		t.Fatalf("second period = %+v", usage[1])
+	}
+}
+
 func TestSkillAnalyticsRepo_TopSkillsAndFollowThrough(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewSkillAnalyticsRepo(db)

@@ -241,9 +241,12 @@ func TestParseUsageFilter_YearRange(t *testing.T) {
 }
 
 func TestParseSkillAnalyticsFilter_YearRange(t *testing.T) {
-	filter := parseSkillAnalyticsFilter(echoContext("/api/analytics/skills?range=365d"))
+	filter := parseSkillAnalyticsFilter(echoContext("/api/analytics/skills?range=365d&group_by=week"))
 	diff := filter.DateTo.Sub(filter.DateFrom)
 	if diff < 364*24*time.Hour || diff > 366*24*time.Hour {
 		t.Errorf("expected ~365d date range, got %v", diff)
+	}
+	if filter.GroupBy != "week" {
+		t.Errorf("expected group_by=week, got %q", filter.GroupBy)
 	}
 }

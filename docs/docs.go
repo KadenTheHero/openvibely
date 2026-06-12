@@ -281,7 +281,7 @@ const docTemplate = `{
         },
         "/api/analytics/skills": {
             "get": {
-                "description": "Returns top skills, selection follow-through, agent heatmap, and underused skill metrics.",
+                "description": "Returns skill usage over time, top skills, selection follow-through, agent heatmap, and underused skill metrics.",
                 "produces": [
                     "application/json"
                 ],
@@ -301,6 +301,13 @@ const docTemplate = `{
                         "default": "30d",
                         "description": "Convenience range: 7d, 30d, 90d, 365d, all",
                         "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "day",
+                        "description": "Usage trend grouping: day, week, or month",
+                        "name": "group_by",
                         "in": "query"
                     },
                     {
@@ -2970,6 +2977,12 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/models.UnderusedSkillMetric"
                     }
+                },
+                "usage_over_time": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.SkillUsagePeriodMetric"
+                    }
                 }
             }
         },
@@ -3022,6 +3035,29 @@ const docTemplate = `{
                 },
                 "skill_scope": {
                     "type": "string"
+                }
+            }
+        },
+        "models.SkillUsagePeriodMetric": {
+            "type": "object",
+            "properties": {
+                "activity_count": {
+                    "type": "integer"
+                },
+                "edited_count": {
+                    "type": "integer"
+                },
+                "loaded_count": {
+                    "type": "integer"
+                },
+                "period": {
+                    "type": "string"
+                },
+                "selected_count": {
+                    "type": "integer"
+                },
+                "viewed_count": {
+                    "type": "integer"
                 }
             }
         },

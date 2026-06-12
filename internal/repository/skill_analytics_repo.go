@@ -28,6 +28,7 @@ type SkillAnalyticsFilter struct {
 	SkillScope string
 	EventType  string
 	Limit      int
+	GroupBy    string
 }
 
 type EnabledSkillInfo struct {
@@ -75,6 +76,34 @@ func (r *SkillAnalyticsRepo) RecordEvent(ctx context.Context, event *models.Skil
 	}
 	event.CreatedAt = parseSQLiteTime(createdRaw)
 	return nil
+}
+
+func (r *SkillAnalyticsRepo) GetUsageOverTime(ctx context.Context, filter SkillAnalyticsFilter) ([]models.SkillUsagePeriodMetric, error) {
+	where, args := skillAnalyticsWhere(filter)
+	periodExpr := skillAnalyticsPeriodExpression(filter.GroupBy)
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT `+periodExpr+` AS period,
+		       SUM(CASE WHEN event_type = 'selected' THEN 1 ELSE 0 END) selected_count,
+		       SUM(CASE WHEN event_type = 'loaded' THEN 1 ELSE 0 END) loaded_count,
+		       SUM(CASE WHEN event_type = 'viewed' THEN 1 ELSE 0 END) viewed_count,
+		       SUM(CASE WHEN event_type = 'edited' THEN 1 ELSE 0 END) edited_count,
+		       SUM(CASE WHEN event_type IN ('selected','loaded','viewed') THEN 1 ELSE 0 END) activity_count
+		FROM skill_analytics_events e `+where+`
+		GROUP BY period
+		ORDER BY period ASC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("getting skill usage over time: %w", err)
+	}
+	defer rows.Close()
+	var out []models.SkillUsagePeriodMetric
+	for rows.Next() {
+		var m models.SkillUsagePeriodMetric
+		if err := rows.Scan(&m.Period, &m.SelectedCount, &m.LoadedCount, &m.ViewedCount, &m.EditedCount, &m.ActivityCount); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }
 
 func (r *SkillAnalyticsRepo) GetTopSkills(ctx context.Context, filter SkillAnalyticsFilter) ([]models.SkillAnalyticsSkillMetric, error) {
@@ -311,6 +340,10 @@ func (r *SkillAnalyticsRepo) GetUnderusedSkills(ctx context.Context, filter Skil
 }
 
 func (r *SkillAnalyticsRepo) BuildDashboard(ctx context.Context, filter SkillAnalyticsFilter, enabledSkills []EnabledSkillInfo) (*models.SkillAnalyticsDashboard, error) {
+	usage, err := r.GetUsageOverTime(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
 	top, err := r.GetTopSkills(ctx, filter)
 	if err != nil {
 		return nil, err
@@ -329,7 +362,7 @@ func (r *SkillAnalyticsRepo) BuildDashboard(ctx context.Context, filter SkillAna
 	if err != nil {
 		return nil, err
 	}
-	return &models.SkillAnalyticsDashboard{TopSkills: top, FollowThrough: follow, AgentUsage: agent, Underused: underused}, nil
+	return &models.SkillAnalyticsDashboard{UsageOverTime: usage, TopSkills: top, FollowThrough: follow, AgentUsage: agent, Underused: underused}, nil
 }
 
 func skillAnalyticsWhere(filter SkillAnalyticsFilter) (string, []any) {
@@ -378,4 +411,15 @@ func placeholders(values []string) (string, []any) {
 
 func skillMetricKey(handle, scope string) string {
 	return strings.TrimSpace(scope) + "\x00" + strings.TrimSpace(handle)
+}
+
+func skillAnalyticsPeriodExpression(groupBy string) string {
+	switch groupBy {
+	case "week":
+		return "strftime('%Y-W%W', e.created_at, 'localtime')"
+	case "month":
+		return "strftime('%Y-%m', e.created_at, 'localtime')"
+	default:
+		return "date(e.created_at, 'localtime')"
+	}
 }

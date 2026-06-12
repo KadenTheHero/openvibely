@@ -79,11 +79,12 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 
 // GetSkillAnalytics returns the Skill Curator analytics dashboard data.
 // @Summary Get skill analytics
-// @Description Returns top skills, selection follow-through, agent heatmap, and underused skill metrics.
+// @Description Returns skill usage over time, top skills, selection follow-through, agent heatmap, and underused skill metrics.
 // @Tags analytics
 // @Produce json
 // @Param project_id query string false "Project ID filter"
 // @Param range query string false "Convenience range: 7d, 30d, 90d, 365d, all" default(30d)
+// @Param group_by query string false "Usage trend grouping: day, week, or month" default(day)
 // @Param agent_id query string false "Agent ID filter"
 // @Param surface query string false "Surface filter"
 // @Param skill_scope query string false "Skill scope filter"
@@ -113,6 +114,10 @@ func parseSkillAnalyticsFilter(c echo.Context) repository.SkillAnalyticsFilter {
 		SkillScope: strings.TrimSpace(c.QueryParam("skill_scope")),
 		EventType:  strings.TrimSpace(c.QueryParam("event_type")),
 		Limit:      10,
+		GroupBy:    strings.TrimSpace(c.QueryParam("group_by")),
+	}
+	if filter.GroupBy == "" {
+		filter.GroupBy = "day"
 	}
 	now := time.Now()
 	if days, ok := analyticsRangeDays(c.QueryParam("range")); ok {
