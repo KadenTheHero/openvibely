@@ -453,10 +453,11 @@ func TestToolOutputCSS_UsesBoundedResponsiveScrollableContainer(t *testing.T) {
 		"grid-template-columns: max-content minmax(0, 1fr);",
 		".stream-tool-body-content {",
 		"overflow-x: auto;",
-		"overflow-y: auto;",
+		"overflow-y: hidden;",
 		"max-height: min(26rem, 52vh);",
 		"max-width: 100%;",
-		"overscroll-behavior: contain;",
+		`.stream-tool-body-content[data-scrollable-y="true"] {`,
+		"overflow-y: auto;",
 		"width: max-content;",
 		"min-width: 100%;",
 	}
@@ -467,5 +468,8 @@ func TestToolOutputCSS_UsesBoundedResponsiveScrollableContainer(t *testing.T) {
 	}
 	if strings.Contains(html, "max-height: none;") {
 		t.Fatal("tool output body must be height-bounded instead of unbounded")
+	}
+	if strings.Contains(html, "overscroll-behavior: contain;") {
+		t.Fatal("tool output body must not contain overscroll, because page scrolling must chain at top/bottom boundaries")
 	}
 }

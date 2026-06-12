@@ -2532,8 +2532,9 @@ templ ChatAutoScrollScript() {
 			// block must independently remember whether it was pinned to bottom.
 			var prevToolBodyScrollStates = [];
 			container.querySelectorAll('.stream-tool-body-content').forEach(function(el) {
-				var pinned = (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2;
-				prevToolBodyScrollStates.push({ scrollTop: el.scrollTop || 0, pinned: pinned });
+				var scrollableY = el.getAttribute('data-scrollable-y') === 'true' || el.scrollHeight > el.clientHeight + 1;
+				var pinned = !scrollableY || (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2;
+				prevToolBodyScrollStates.push({ scrollTop: el.scrollTop || 0, pinned: pinned, scrollableY: scrollableY });
 			});
 			if (containerKey && prevThinkingStates.length > 0) {
 				window._thinkingOpenStates[containerKey] = prevThinkingStates.slice();
@@ -2772,9 +2773,18 @@ templ ChatAutoScrollScript() {
 				}
 			}
 
-			// Restore per-tool output scroll positions. If a block was pinned before
-			// the render, keep following new output; otherwise preserve user position.
+			// Restore per-tool output scroll positions. Only genuinely overflowing
+			// blocks become vertical scroll targets; boundary wheel/touch events then
+			// chain naturally to the chat/task thread scroller.
 			container.querySelectorAll('.stream-tool-body-content').forEach(function(el, idx) {
+				var scrollableY = el.scrollHeight > el.clientHeight + 1;
+				if (scrollableY) {
+					el.setAttribute('data-scrollable-y', 'true');
+				} else {
+					el.removeAttribute('data-scrollable-y');
+					el.scrollTop = 0;
+					return;
+				}
 				var state = prevToolBodyScrollStates[idx];
 				if (!state || state.pinned) {
 					el.scrollTop = el.scrollHeight;

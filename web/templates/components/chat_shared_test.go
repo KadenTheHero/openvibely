@@ -2211,7 +2211,10 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 	required := []string{
 		"var prevToolBodyScrollStates = []",
 		"container.querySelectorAll('.stream-tool-body-content').forEach(function(el)",
-		"var pinned = (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2",
+		"var scrollableY = el.getAttribute('data-scrollable-y') === 'true' || el.scrollHeight > el.clientHeight + 1",
+		"var pinned = !scrollableY || (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2",
+		"el.setAttribute('data-scrollable-y', 'true')",
+		"el.removeAttribute('data-scrollable-y')",
 		"el.scrollTop = el.scrollHeight",
 		"el.scrollTop = state.scrollTop",
 		"var hasOut = seg.resultOutput && seg.resultOutput.trim()",

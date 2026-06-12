@@ -1644,14 +1644,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					border-top: 0.5px solid hsl(var(--bc) / 0.1);
 					padding: 4px;
 					overflow-x: auto;
-					overflow-y: auto;
+					overflow-y: hidden;
 					max-height: min(26rem, 52vh);
 					width: 100%;
 					max-width: 100%;
 					min-width: 0;
-					overscroll-behavior: contain;
 					scrollbar-width: thin;
 					scrollbar-color: hsl(var(--bc) / 0.3) transparent;
+				}
+				.stream-tool-body-content[data-scrollable-y="true"] {
+					overflow-y: auto;
 				}
 				.stream-tool-body-content:first-of-type {
 					border-top: none;
