@@ -388,20 +388,20 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 									</li>
 								}
 							}
-							<li>
-								<a
-									hx-post={ fmt.Sprintf("/tasks/backlog/activate?project_id=%s", projectID) }
-									hx-target="#kanban-board"
-									hx-swap="outerHTML"
-									hx-confirm="Are you sure you want to activate all backlog tasks? They will be moved to Active and submitted for execution."
-								>
-									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
-									</svg>
-									Activate All
-								</a>
-							</li>
-							<li>
+								<li>
+									<a
+										hx-post={ fmt.Sprintf("/tasks/backlog/activate?project_id=%s", projectID) }
+										hx-target="#kanban-board"
+										hx-swap="outerHTML"
+										hx-confirm="Are you sure you want to activate all backlog tasks? They will be moved to Active and submitted for execution."
+										class="text-sm min-h-11"
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+										</svg>
+										Activate All
+									</a>
+								</li>							<li>
 								<a
 									hx-delete={ fmt.Sprintf("/tasks/backlog?project_id=%s", projectID) }
 									hx-target="#kanban-board"

@@ -61,10 +61,23 @@ func TestKanbanColumnHasMobileSafeWidthAndTouchMenu(t *testing.T) {
 		"w-11",
 		"max-w-[calc(100vw-2rem)]",
 		`class="text-sm min-h-11`,
+		`/tasks/backlog/activate?project_id=project-1`,
 		`class="text-sm pl-8 min-h-11`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected responsive kanban column markup to contain %q, got %s", want, body)
 		}
+	}
+
+	activateIdx := strings.Index(body, `/tasks/backlog/activate?project_id=project-1`)
+	if activateIdx == -1 {
+		t.Fatalf("expected backlog activate action in markup, got %s", body)
+	}
+	activateSnippet := body[activateIdx:]
+	if len(activateSnippet) > 500 {
+		activateSnippet = activateSnippet[:500]
+	}
+	if !strings.Contains(activateSnippet, `class="text-sm min-h-11"`) {
+		t.Fatalf("expected backlog activate action to have touch-friendly min height, got %s", activateSnippet)
 	}
 }
