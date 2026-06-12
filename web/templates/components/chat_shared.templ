@@ -49,6 +49,12 @@ func chatAttachmentListID(formID string) string    { return formID + "-attachmen
 func chatSessionInputID(formID string) string      { return formID + "-session-id" }
 func chatFileInputID(formID string) string         { return formID + "-file-input" }
 func chatDropOverlayID(formID string) string       { return formID + "-drop-overlay" }
+func chatMessageHistoryStorageKey(config ChatInputFormConfig) string {
+	if config.TaskID != "" {
+		return "openvibely-task-thread-message-history-" + config.TaskID
+	}
+	return "openvibely-chat-message-history"
+}
 func selectedAgentOrAuto(agentID string) string {
 	if agentID == "" {
 		return "auto"
@@ -968,16 +974,17 @@ templ ChatEmptyState(message string) {
 
 // ChatInputForm renders a shared chat input form with attachment support.
 templ ChatInputForm(config ChatInputFormConfig) {
-	<form
-		id={ config.FormID }
-		method="post"
-		hx-post={ config.PostEndpoint }
-		hx-target={ "#" + config.TargetID }
-		hx-swap="beforeend"
-		data-input-id={ config.InputID }
-		data-clear-func-name={ config.FormID + "ClearAttachments" }
-		class="chat-input-container rounded-xl p-4 relative"
-	>
+		<form
+			id={ config.FormID }
+			method="post"
+			hx-post={ config.PostEndpoint }
+			hx-target={ "#" + config.TargetID }
+			hx-swap="beforeend"
+			data-input-id={ config.InputID }
+			data-clear-func-name={ config.FormID + "ClearAttachments" }
+			data-message-history-key={ chatMessageHistoryStorageKey(config) }
+			class="chat-input-container rounded-xl p-4 relative"
+		>
 		<!-- Drop zone overlay -->
 		<div id={ chatDropOverlayID(config.FormID) } class="hidden absolute inset-0 z-10 rounded-xl border-2 border-dashed border-primary bg-primary/10 flex items-center justify-center pointer-events-none">
 			<div class="flex flex-col items-center gap-2 text-primary">
@@ -1124,38 +1131,140 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							function markSendScrollIntent() {
 							if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
 						}
-						function safeSubmit() {
-							if (typeof form.requestSubmit === 'function') {
-								form.requestSubmit(submitBtn || undefined);
-								return;
+							function safeSubmit() {
+								if (typeof form.requestSubmit === 'function') {
+									form.requestSubmit(submitBtn || undefined);
+									return;
+								}
+								var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+								form.dispatchEvent(submitEvent);
 							}
-							var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-							form.dispatchEvent(submitEvent);
-						}
-						form.addEventListener('submit', markSendScrollIntent);
+							form.addEventListener('submit', markSendScrollIntent);
 
-			// Clear attachments function (registered on window for onclick handlers)
-			window[clearFuncName] = function() {
-				if (preview) preview.classList.add('hidden');
-				if (listContainer) listContainer.innerHTML = '';
-				if (sessionInput) sessionInput.value = '';
-				if (fileInput) fileInput.value = '';
-			};
+				var messageHistoryStorageKey = form.getAttribute('data-message-history-key') || '';
+				var messageHistoryLimit = 50;
+				var messageHistoryEntries = [];
+				var messageHistoryIndex = -1;
+				var messageHistoryDraft = '';
+				var messageHistorySubmittedValue = '';
+				var suppressMessageHistoryInputReset = false;
+
+				function loadMessageHistory() {
+					if (!messageHistoryStorageKey) return [];
+					try {
+						var raw = localStorage.getItem(messageHistoryStorageKey);
+						var parsed = raw ? JSON.parse(raw) : [];
+						if (!Array.isArray(parsed)) return [];
+						return parsed.filter(function(entry) { return typeof entry === 'string' && entry.trim() !== ''; }).slice(-messageHistoryLimit);
+					} catch (e) {
+						return [];
+					}
+				}
+
+				function saveMessageHistory(entries) {
+					if (!messageHistoryStorageKey) return;
+					try {
+						localStorage.setItem(messageHistoryStorageKey, JSON.stringify(entries.slice(-messageHistoryLimit)));
+					} catch (e) {
+						// Ignore storage failures; keyboard navigation still works for the current page load.
+					}
+				}
+
+				function rememberSubmittedMessage(message) {
+					var trimmed = (message || '').trim();
+					if (!trimmed) return;
+					messageHistoryEntries = loadMessageHistory();
+					if (messageHistoryEntries.length === 0 || messageHistoryEntries[messageHistoryEntries.length - 1] !== message) {
+						messageHistoryEntries.push(message);
+					}
+					messageHistoryEntries = messageHistoryEntries.slice(-messageHistoryLimit);
+					saveMessageHistory(messageHistoryEntries);
+				}
+
+				function resetMessageHistoryNavigation() {
+					messageHistoryIndex = -1;
+					messageHistoryDraft = '';
+				}
+
+				function setMessageInputFromHistory(value) {
+					if (!messageInput) return;
+					messageInput.value = value;
+					suppressMessageHistoryInputReset = true;
+					messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+					suppressMessageHistoryInputReset = false;
+					if (typeof messageInput.setSelectionRange === 'function') {
+						messageInput.setSelectionRange(0, 0);
+					}
+				}
+
+				function isAtFirstLineStart(textarea) {
+					if (!textarea) return false;
+					var start = typeof textarea.selectionStart === 'number' ? textarea.selectionStart : 0;
+					var end = typeof textarea.selectionEnd === 'number' ? textarea.selectionEnd : start;
+					if (start !== end) return false;
+					return start === 0;
+				}
+
+				function handleMessageHistoryKeydown(e) {
+					if (!messageInput || !messageHistoryStorageKey) return false;
+					if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Escape') return false;
+					if (e.key === 'Escape') {
+						if (messageHistoryIndex === -1) return false;
+						e.preventDefault();
+						setMessageInputFromHistory(messageHistoryDraft);
+						resetMessageHistoryNavigation();
+						return true;
+					}
+					if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && messageInput.value !== '' && !isAtFirstLineStart(messageInput)) return false;
+					if (e.key === 'ArrowDown' && messageHistoryIndex === -1) return false;
+
+					messageHistoryEntries = loadMessageHistory();
+					if (messageHistoryEntries.length === 0) return false;
+					e.preventDefault();
+
+					if (e.key === 'ArrowUp') {
+						if (messageHistoryIndex === -1) messageHistoryDraft = messageInput.value;
+						if (messageHistoryIndex < messageHistoryEntries.length - 1) messageHistoryIndex++;
+						setMessageInputFromHistory(messageHistoryEntries[messageHistoryEntries.length - 1 - messageHistoryIndex]);
+						return true;
+					}
+
+					if (messageHistoryIndex > 0) {
+						messageHistoryIndex--;
+						setMessageInputFromHistory(messageHistoryEntries[messageHistoryEntries.length - 1 - messageHistoryIndex]);
+					} else {
+						setMessageInputFromHistory(messageHistoryDraft);
+						resetMessageHistoryNavigation();
+					}
+					return true;
+				}
+
+				// Clear attachments function (registered on window for onclick handlers)
+				window[clearFuncName] = function() {
+					if (preview) preview.classList.add('hidden');
+					if (listContainer) listContainer.innerHTML = '';
+					if (sessionInput) sessionInput.value = '';
+					if (fileInput) fileInput.value = '';
+				};
 
 			// Wire up the Clear All button
 			if (clearBtn) {
 				clearBtn.onclick = function() { window[clearFuncName](); };
 			}
 
-					// Enter key submission
-					if (messageInput) {
-						messageInput.addEventListener('keydown', function(e) {
-							if (e.key === 'Enter' && !e.shiftKey) {
-								e.preventDefault();
-								safeSubmit();
-							}
-						});
-					}
+						// Keyboard submission and message history navigation
+						if (messageInput) {
+							messageInput.addEventListener('keydown', function(e) {
+								if (handleMessageHistoryKeydown(e)) return;
+								if (e.key === 'Enter' && !e.shiftKey) {
+									e.preventDefault();
+									safeSubmit();
+								}
+							});
+							messageInput.addEventListener('input', function() {
+								if (!suppressMessageHistoryInputReset) resetMessageHistoryNavigation();
+							});
+						}
 
 					// Normalize send-button clicks to the same submit path as Enter.
 						if (submitBtn) {
@@ -1628,23 +1737,27 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				});
 			})();
 
-			// Clear input and attachments after successful submission
-			form.addEventListener('htmx:beforeRequest', function() {
-				form.setAttribute('hx-post', normalPostEndpoint);
-			});
+				// Clear input and attachments after successful submission
+				form.addEventListener('htmx:beforeRequest', function() {
+					form.setAttribute('hx-post', normalPostEndpoint);
+					messageHistorySubmittedValue = messageInput ? messageInput.value : '';
+				});
 
-			form.addEventListener('htmx:afterRequest', function(event) {
-				if (event.detail.successful) {
-					var xhr = event.detail.xhr;
-					var responseText = xhr ? (xhr.responseText || '') : '';
-					// Keep user draft intact when the handler intentionally returns no content
-					// (e.g. model-setup guard toasts) so users don't lose their message.
-					if (responseText.trim() !== '') {
-						if (messageInput) messageInput.value = '';
-						if (window[clearFuncName]) window[clearFuncName]();
+				form.addEventListener('htmx:afterRequest', function(event) {
+					if (event.detail.successful) {
+						var xhr = event.detail.xhr;
+						var responseText = xhr ? (xhr.responseText || '') : '';
+						// Keep user draft intact when the handler intentionally returns no content
+						// (e.g. model-setup guard toasts) so users don't lose their message.
+						if (responseText.trim() !== '') {
+							rememberSubmittedMessage(messageHistorySubmittedValue);
+							resetMessageHistoryNavigation();
+							if (messageInput) messageInput.value = '';
+							if (window[clearFuncName]) window[clearFuncName]();
+						}
 					}
-				}
-			});
+					messageHistorySubmittedValue = '';
+				});
 		})();
 	</script>
 }

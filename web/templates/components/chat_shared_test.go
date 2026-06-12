@@ -381,6 +381,94 @@ func TestChatInputForm_EnterKeyHasRequestSubmitFallback(t *testing.T) {
 	}
 }
 
+func TestChatInputForm_MessageHistoryNavigationScript(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatInputForm(ChatInputFormConfig{
+		FormID:       "chat-form",
+		InputID:      "message-input",
+		PostEndpoint: "/chat/send",
+		TargetID:     "chat-messages",
+	}).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render ChatInputForm: %v", err)
+	}
+
+	content := buf.String()
+	required := []string{
+		`data-message-history-key="openvibely-chat-message-history"`,
+		"var messageHistoryLimit = 50;",
+		"function loadMessageHistory()",
+		"localStorage.getItem(messageHistoryStorageKey)",
+		"JSON.parse(raw)",
+		"function saveMessageHistory(entries)",
+		"localStorage.setItem(messageHistoryStorageKey, JSON.stringify(entries.slice(-messageHistoryLimit)))",
+		"function rememberSubmittedMessage(message)",
+		"messageHistoryEntries.push(message);",
+		"function handleMessageHistoryKeydown(e)",
+		"if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Escape') return false;",
+		"if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && messageInput.value !== '' && !isAtFirstLineStart(messageInput)) return false;",
+		"if (e.key === 'ArrowDown' && messageHistoryIndex === -1) return false;",
+		"if (messageHistoryIndex === -1) messageHistoryDraft = messageInput.value;",
+		"messageHistoryEntries[messageHistoryEntries.length - 1 - messageHistoryIndex]",
+		"setMessageInputFromHistory(messageHistoryDraft);",
+		"resetMessageHistoryNavigation();",
+		"rememberSubmittedMessage(messageHistorySubmittedValue);",
+	}
+	for _, r := range required {
+		if !strings.Contains(content, r) {
+			t.Fatalf("message history script missing %q", r)
+		}
+	}
+}
+
+func TestChatInputForm_MessageHistoryScopedPerTaskThread(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatInputForm(ChatInputFormConfig{
+		FormID:       "task-thread-form",
+		InputID:      "task-message-input",
+		PostEndpoint: "/tasks/task-123/thread",
+		TargetID:     "task-thread-messages",
+		TaskID:       "task-123",
+	}).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render ChatInputForm: %v", err)
+	}
+
+	content := buf.String()
+	if !strings.Contains(content, `data-message-history-key="openvibely-task-thread-message-history-task-123"`) {
+		t.Fatal("task thread form should use a task-scoped message history key")
+	}
+	if strings.Contains(content, `data-message-history-key="openvibely-chat-message-history"`) {
+		t.Fatal("task thread form must not share the global chat message history key")
+	}
+}
+
+func TestChatInputForm_MessageHistoryCursorGuardsPreventArrowHijack(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatInputForm(ChatInputFormConfig{
+		FormID:       "chat-form",
+		InputID:      "message-input",
+		PostEndpoint: "/chat/send",
+		TargetID:     "chat-messages",
+	}).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render ChatInputForm: %v", err)
+	}
+
+	content := buf.String()
+	required := []string{
+		"function isAtFirstLineStart(textarea)",
+		"if (start !== end) return false;",
+		"return start === 0;",
+		"if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && messageInput.value !== '' && !isAtFirstLineStart(messageInput)) return false;",
+	}
+	for _, r := range required {
+		if !strings.Contains(content, r) {
+			t.Fatalf("message history cursor guard missing %q", r)
+		}
+	}
+}
+
 func TestChatInputForm_RunningChatDoesNotExposeComposerSteeringControl(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatInputForm(ChatInputFormConfig{
