@@ -157,6 +157,8 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"openai_compatible_openrouter: [",
 		"openai_compatible_nvidia_nim: [",
 		"{ value: 'nvidia/nemotron-3-ultra-550b-a55b', label: 'NVIDIA Nemotron', efforts: [] }",
+		"openai_compatible_custom: [],",
+		"Enter model ID manually",
 		"function modelOptionsForProvider(provider)",
 		"isHostedOpenAICompatiblePreset()",
 		"runAutoDiscoverOpenAICompatibleModels();",
@@ -170,6 +172,8 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"data.resolved_id",
 		"setOpenAICompatibleModelValue(models[i].id, models[i].id + ' (discovered)', false)",
 		"setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id + ' (discovered)', true)",
+		"if (!isHostedOpenAICompatiblePreset())",
+		"document.getElementById('model_provider').value !== provider",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected OpenAI-compatible discovery UI to contain %q", want)
@@ -183,6 +187,7 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"api_key: apiKey",
 		"api_key=",
 		"openai_compatible_api_key",
+		"Custom compatible model",
 	} {
 		if strings.Contains(out, forbidden) {
 			t.Fatalf("expected discovery UI not to contain %q", forbidden)

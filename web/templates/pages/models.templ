@@ -700,9 +700,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					openai_compatible_vllm: [
 						{ value: 'local-model', label: 'Local vLLM model', efforts: [] }
 					],
-					openai_compatible_custom: [
-						{ value: 'local-model', label: 'Custom compatible model', efforts: [] }
-					],
+					openai_compatible_custom: [],
 					ollama: [					{ value: 'llama3.1:8b', label: 'Llama 3.1 (8B)', efforts: [] },
 					{ value: 'llama3.1:70b', label: 'Llama 3.1 (70B)', efforts: [] },
 					{ value: 'llama3.2:3b', label: 'Llama 3.2 (3B)', efforts: [] },
@@ -821,14 +819,19 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					modelSelect.appendChild(customOpt);
 				}
 
-				if (selectedModel) {
-					modelSelect.value = selectedModel;
-				} else if (options.length > 0) {
-					modelSelect.value = options[0].value;
-				}
+					if (selectedModel) {
+						modelSelect.value = selectedModel;
+					} else if (options.length > 0) {
+						modelSelect.value = options[0].value;
+					} else if (isOpenAICompatibleProvider(provider)) {
+						var manualOpt = document.createElement('option');
+						manualOpt.value = '';
+						manualOpt.textContent = 'Enter model ID manually';
+						modelSelect.appendChild(manualOpt);
+						modelSelect.value = '';
+					}
 
-				return modelSelect.value;
-			}
+					return modelSelect.value;			}
 
 				function handleModelChange() {
 					var provider = document.getElementById('model_provider').value;
@@ -919,37 +922,41 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						setOpenAICompatibleModelValue(custom, custom ? custom + ' (custom)' : '', true);
 					}
 
-					function discoverOpenAICompatibleModels() {
-						var baseURL = document.getElementById('model_base_url').value.trim();
-						var status = document.getElementById('openai_compatible_discovery_status');
-						if (!baseURL) {
-							status.textContent = 'Enter a base URL before discovering models.';
-							return;
-						}
-						status.textContent = 'Discovering models...';
-						var params = new URLSearchParams({base_url: baseURL});
-						var apiKey = document.getElementById('model_api_key').value.trim();
-						var headers = {'Accept': 'application/json'};
-						if (apiKey) headers['X-OpenAI-Compatible-API-Key'] = apiKey;
-						fetch('/models/openai-compatible/available?' + params.toString(), {headers: headers})
-							.then(function(resp) {
-								return resp.json().then(function(data) {
+						function discoverOpenAICompatibleModels() {
+							var provider = document.getElementById('model_provider').value;
+							var baseURL = document.getElementById('model_base_url').value.trim();
+							var status = document.getElementById('openai_compatible_discovery_status');
+							if (!isHostedOpenAICompatiblePreset()) {
+								if (status) status.textContent = 'Enter the model ID manually for local or custom endpoints.';
+								return;
+							}
+							if (!baseURL) {
+								status.textContent = 'Enter a base URL before discovering models.';
+								return;
+							}
+							status.textContent = 'Discovering models...';
+							var params = new URLSearchParams({base_url: baseURL});
+							var apiKey = document.getElementById('model_api_key').value.trim();
+							var headers = {'Accept': 'application/json'};
+							if (apiKey) headers['X-OpenAI-Compatible-API-Key'] = apiKey;
+							fetch('/models/openai-compatible/available?' + params.toString(), {headers: headers})
+								.then(function(resp) {								return resp.json().then(function(data) {
 									if (!resp.ok) throw new Error(data.error || 'Model discovery failed');
 									return data;
 								});
 							})
-							.then(function(data) {
-								var models = data.models || [];
-								for (var i = 0; i < models.length; i++) {
+								.then(function(data) {
+									if (document.getElementById('model_provider').value !== provider || document.getElementById('model_base_url').value.trim() !== baseURL || !isHostedOpenAICompatiblePreset()) return;
+									var models = data.models || [];								for (var i = 0; i < models.length; i++) {
 									if (models[i].id) setOpenAICompatibleModelValue(models[i].id, models[i].id + ' (discovered)', false);
 								}
 								if (data.resolved_id) setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id + ' (discovered)', true);
 								status.textContent = models.length ? ('Discovered ' + models.length + ' model' + (models.length === 1 ? ' and selected it.' : 's. Choose one or enter the model ID manually.')) : 'No models returned; enter the model ID manually.';
 							})
-							.catch(function(err) {
-								status.textContent = err.message || 'Model discovery failed; enter the model ID manually.';
-							});
-					}
+								.catch(function(err) {
+									if (document.getElementById('model_provider').value !== provider || document.getElementById('model_base_url').value.trim() !== baseURL || !isHostedOpenAICompatiblePreset()) return;
+									status.textContent = err.message || 'Model discovery failed; enter the model ID manually.';
+								});					}
 
 				function hideAllInfoBoxes() {					document.getElementById('subscription_info_cli').classList.add('hidden');
 					document.getElementById('subscription_info_oauth').classList.add('hidden');
