@@ -49,41 +49,6 @@ templ analyticsContent(currentProject *models.Project) {
 								<option value="month">Month</option>
 							</select>
 						</div>
-						<div class="form-control">
-							<label class="label"><span class="label-text">Skill Surface</span></label>
-							<select id="skillSurfaceFilter" class="select select-bordered select-sm">
-								<option value="">All surfaces</option>
-								<option value="chat">Chat</option>
-								<option value="task_thread">Task thread</option>
-								<option value="scheduled_task">Scheduled task</option>
-								<option value="lifecycle_hook">Lifecycle hook</option>
-								<option value="channel">Channel</option>
-								<option value="goal_continuation">Goal continuation</option>
-							</select>
-						</div>
-						<div class="form-control">
-							<label class="label"><span class="label-text">Skill Scope</span></label>
-							<select id="skillScopeFilter" class="select select-bordered select-sm">
-								<option value="">All scopes</option>
-								<option value="project">Project</option>
-								<option value="global">Global</option>
-								<option value="agent_owned">Agent-owned</option>
-							</select>
-						</div>
-						<div class="form-control">
-							<label class="label"><span class="label-text">Skill Event</span></label>
-							<select id="skillEventFilter" class="select select-bordered select-sm">
-								<option value="">All events</option>
-								<option value="selected">Selected</option>
-								<option value="loaded">Loaded</option>
-								<option value="viewed">Viewed</option>
-								<option value="edited">Edited</option>
-							</select>
-						</div>
-						<div class="form-control">
-							<label class="label"><span class="label-text">Agent ID</span></label>
-							<input id="skillAgentFilter" class="input input-bordered input-sm w-44" placeholder="All agents" />
-						</div>
 						<button id="refreshBtn" class="btn btn-primary btn-sm">Refresh</button>
 					</div>
 				</div>
@@ -102,6 +67,44 @@ templ analyticsContent(currentProject *models.Project) {
 								<button type="button" class="tab" data-skill-panel="follow" role="tab" aria-selected="false">Follow-through</button>
 								<button type="button" class="tab" data-skill-panel="agents" role="tab" aria-selected="false">Agents</button>
 								<button type="button" class="tab" data-skill-panel="underused" role="tab" aria-selected="false">Underused</button>
+							</div>
+						</div>
+
+						<div class="flex flex-wrap gap-3 items-end mb-4 p-3 rounded-box bg-base-200/50">
+							<div class="form-control">
+								<label class="label py-1"><span class="label-text text-xs">Surface</span></label>
+								<select id="skillSurfaceFilter" class="select select-bordered select-sm">
+									<option value="">All surfaces</option>
+									<option value="chat">Chat</option>
+									<option value="task_thread">Task thread</option>
+									<option value="scheduled_task">Scheduled task</option>
+									<option value="lifecycle_hook">Lifecycle hook</option>
+									<option value="channel">Channel</option>
+									<option value="goal_continuation">Goal continuation</option>
+								</select>
+							</div>
+							<div class="form-control">
+								<label class="label py-1"><span class="label-text text-xs">Scope</span></label>
+								<select id="skillScopeFilter" class="select select-bordered select-sm">
+									<option value="">All scopes</option>
+									<option value="project">Project</option>
+									<option value="global">Global</option>
+									<option value="agent_owned">Agent-owned</option>
+								</select>
+							</div>
+							<div class="form-control">
+								<label class="label py-1"><span class="label-text text-xs">Event</span></label>
+								<select id="skillEventFilter" class="select select-bordered select-sm">
+									<option value="">All events</option>
+									<option value="selected">Selected</option>
+									<option value="loaded">Loaded</option>
+									<option value="viewed">Viewed</option>
+									<option value="edited">Edited</option>
+								</select>
+							</div>
+							<div class="form-control">
+								<label class="label py-1"><span class="label-text text-xs">Agent ID</span></label>
+								<input id="skillAgentFilter" class="input input-bordered input-sm w-44" placeholder="All agents" />
 							</div>
 						</div>
 
@@ -157,11 +160,19 @@ templ analyticsContent(currentProject *models.Project) {
 						</div>
 
 						<div class="skill-analytics-panel hidden" data-skill-panel-content="underused">
-							<div class="overflow-x-auto max-h-96">
-								<table class="table table-sm">
-									<thead><tr><th>Skill</th><th>Scope</th><th>Always-use</th><th>S</th><th>L</th><th>V</th><th>Last activity</th></tr></thead>
-									<tbody id="underusedSkillsTable"><tr><td colspan="7" class="text-center opacity-50">No enabled skills found</td></tr></tbody>
-								</table>
+							<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+								<div class="h-64">
+									<canvas id="skillUnderusedChart"></canvas>
+								</div>
+								<div>
+									<h4 class="font-semibold mb-2">Least Active Enabled Skills</h4>
+									<div class="overflow-x-auto max-h-64">
+										<table class="table table-sm">
+											<thead><tr><th>Skill</th><th>Scope</th><th>Activity</th><th>Last activity</th></tr></thead>
+											<tbody id="underusedSkillsTable"><tr><td colspan="4" class="text-center opacity-50">No enabled skills found</td></tr></tbody>
+										</table>
+									</div>
+								</div>
 							</div>
 						</div>
 					</div>
@@ -430,24 +441,21 @@ templ analyticsContent(currentProject *models.Project) {
 								function renderSkillTop(rows) {
 									if (charts.skillTop) charts.skillTop.destroy();
 									const canvas = document.getElementById('skillTopChart');
+									const chartRows = rows.slice(0, 8).map(function(row) {
+										return Object.assign({}, row, {
+											activity: (row.selected_count || 0) + (row.loaded_count || 0) + (row.viewed_count || 0) + (row.edited_count || 0)
+										});
+									});
 									if (canvas) {
-										const totals = skillEventTotals(rows);
-							const totalEvents = totals.selected + totals.loaded + totals.viewed + totals.edited;
 										charts.skillTop = new Chart(canvas.getContext('2d'), {
-											type: 'pie',
-											data: {
-												labels: totalEvents === 0 ? ['No skill events'] : ['Selected', 'Loaded', 'Viewed', 'Edited'],
-												datasets: [{
-													data: totalEvents === 0 ? [1] : [totals.selected, totals.loaded, totals.viewed, totals.edited],
-													backgroundColor: totalEvents === 0 ? ['rgba(148, 163, 184, 0.35)'] : [
-														'rgba(59, 130, 246, 0.7)',
-														'rgba(34, 197, 94, 0.7)',
-														'rgba(251, 146, 60, 0.7)',
-														'rgba(147, 51, 234, 0.7)'
-													]
-												}]
-											},
-											options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+											type: 'bar',
+											data: { labels: chartRows.map(r => skillLabel(r.skill_handle)), datasets: [
+												{ label: 'Selected', data: chartRows.map(r => r.selected_count || 0), backgroundColor: 'rgba(59, 130, 246, 0.5)', borderColor: 'rgb(59, 130, 246)', borderWidth: 1 },
+												{ label: 'Loaded', data: chartRows.map(r => r.loaded_count || 0), backgroundColor: 'rgba(34, 197, 94, 0.5)', borderColor: 'rgb(34, 197, 94)', borderWidth: 1 },
+												{ label: 'Viewed', data: chartRows.map(r => r.viewed_count || 0), backgroundColor: 'rgba(251, 146, 60, 0.5)', borderColor: 'rgb(251, 146, 60)', borderWidth: 1 },
+												{ label: 'Edited', data: chartRows.map(r => r.edited_count || 0), backgroundColor: 'rgba(147, 51, 234, 0.5)', borderColor: 'rgb(147, 51, 234)', borderWidth: 1 }
+											] },
+											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }
 										});
 									}
 									const tbody = document.getElementById('skillTopTable');
@@ -503,10 +511,29 @@ templ analyticsContent(currentProject *models.Project) {
 								}
 
 								function renderUnderusedSkills(rows) {
+									if (charts.skillUnderused) charts.skillUnderused.destroy();
+									const canvas = document.getElementById('skillUnderusedChart');
+									const chartRows = rows.slice(0, 8).map(function(row) {
+										return Object.assign({}, row, { activity: (row.selected_count || 0) + (row.loaded_count || 0) + (row.viewed_count || 0) });
+									});
+									if (canvas) {
+										charts.skillUnderused = new Chart(canvas.getContext('2d'), {
+											type: 'bar',
+											data: {
+												labels: chartRows.map(r => skillLabel(r.skill_handle)),
+												datasets: [{ label: 'Activity', data: chartRows.map(r => r.activity), backgroundColor: 'rgba(245, 158, 11, 0.5)', borderColor: 'rgb(245, 158, 11)', borderWidth: 1 }]
+											},
+											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
+										});
+									}
 									const tbody = document.getElementById('underusedSkillsTable');
 									if (!tbody) return;
-									if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="7" class="text-center opacity-50">No enabled skills found</td></tr>'; return; }
-									tbody.innerHTML = rows.map(r => '<tr><td><code>' + escapeHTML(r.skill_handle) + '</code></td><td><span class="badge badge-ghost badge-sm">' + escapeHTML(r.skill_scope || '') + '</span></td><td>' + (r.always_use ? 'yes' : 'no') + '</td><td>' + formatNumber(r.selected_count) + '</td><td>' + formatNumber(r.loaded_count) + '</td><td>' + formatNumber(r.viewed_count) + '</td><td class="text-xs opacity-70">' + relativeTime(r.last_activity) + '</td></tr>').join('');
+									if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="4" class="text-center opacity-50">No enabled skills found</td></tr>'; return; }
+									tbody.innerHTML = rows.slice(0, 8).map(function(r) {
+										const activity = (r.selected_count || 0) + (r.loaded_count || 0) + (r.viewed_count || 0);
+										const alwaysUse = r.always_use ? ' · always-use' : '';
+										return '<tr><td><code>' + escapeHTML(r.skill_handle) + '</code></td><td><span class="badge badge-ghost badge-sm">' + escapeHTML((r.skill_scope || '') + alwaysUse) + '</span></td><td>' + formatNumber(activity) + '</td><td class="text-xs opacity-70">' + relativeTime(r.last_activity) + '</td></tr>';
+									}).join('');
 								}
 
 								function modelSeriesKeys(rows) {
