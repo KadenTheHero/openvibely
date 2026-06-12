@@ -102,6 +102,28 @@ func TestSyncTo_BundledSystemPromptsAvoidUnnecessaryInternalLabelInjection(t *te
 	}
 }
 
+func TestSyncTo_GoalAgentSkillUsesTranscriptEvidenceNotOnlyFinalClaims(t *testing.T) {
+	root := t.TempDir()
+	if err := SyncTo(root); err != nil {
+		t.Fatalf("SyncTo: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "agents", "goal", "skills", "evaluate_task_goal", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read evaluate_task_goal SKILL.md: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		"not only the assistant's final completion claim",
+		"explicit task-agent statements about actions taken, files changed, commands run, validation performed, or remaining issues",
+		"If a goal requires that some action did not happen, assistant text that says the action happened is evidence that condition is not proven by that turn",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Goal Agent prompt missing evidence guidance %q:\n%s", want, body)
+		}
+	}
+}
+
 func TestSyncTo_PreservesUserManagedIndexesButRefreshesSystemDeclaration(t *testing.T) {
 	root := t.TempDir()
 	if err := SyncTo(root); err != nil {

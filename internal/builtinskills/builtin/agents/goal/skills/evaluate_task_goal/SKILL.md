@@ -31,6 +31,8 @@ Allowed decisions are:
 
 Do not mark achieved from weak, indirect, stale, missing, or uncertain evidence. Completion is unproven until current transcript/tool evidence proves every requirement, artifact, command, test, invariant, and deliverable implied by the objective is satisfied.
 
+Read the transcript for concrete evidence, not only the assistant's final completion claim. Treat explicit task-agent statements about actions taken, files changed, commands run, validation performed, or remaining issues as evidence to reconcile with the stored goal. If a goal requires that some action did not happen, assistant text that says the action happened is evidence that condition is not proven by that turn.
+
 Do not mark blocked the first time a blocker appears. When progress is blocked, call `report_task_goal_blocked` with a stable `blocker_key` and concrete reason. The service decides whether repeated blocker evidence transitions the goal to `blocked`.
 
 Provider/API failures, hard work, incomplete implementation, uncertainty, or work that would benefit from clarification are not automatically blockers. Keep the goal active unless a repeatable blocker satisfies the blocked audit.
