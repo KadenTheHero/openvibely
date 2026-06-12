@@ -205,7 +205,7 @@ var AllAgentTools = []string{
 	// agents may inspect or maintain standalone skills. After-complete learning
 	// hooks may also improve skills owned by the task's assigned agent through
 	// server-scoped agent_skill_manage.
-	"skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "agent_skill_manage",
+	"skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "skill_import", "agent_skill_manage",
 	"memory_view",
 	"send_to_task", "set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal", "mark_task_goal_achieved", "report_task_goal_blocked",
 }

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openvibely/openvibely/internal/agentskills"
 )
 
 type fakeApplier struct {
@@ -359,5 +361,153 @@ func TestArchiveAgent_PassesThrough(t *testing.T) {
 	}
 	if len(app.archivedAgents) != 1 || app.archivedAgents[0] != "backend" {
 		t.Fatalf("applier not called: %v", app.archivedAgents)
+	}
+}
+
+func TestNormalizeStandaloneSkillPackage_RawMarkdownGeneratesRequiredFrontmatter(t *testing.T) {
+	decl, body, err := NormalizeStandaloneSkillPackage("# Raw Skill\n\nUse this skill for raw imports.\n", "raw_skill", "project")
+	if err != nil {
+		t.Fatalf("NormalizeStandaloneSkillPackage: %v", err)
+	}
+	if decl.Kind != "openvibely.agent_skill" || decl.Version != 1 || decl.Skill.Key != "raw_skill" || decl.Skill.Name != "raw_skill" || decl.Skill.Scope != "project" || decl.Skill.Enabled == nil || !*decl.Skill.Enabled {
+		t.Fatalf("unexpected declaration: %+v", decl)
+	}
+	if !strings.Contains(body, "# Raw Skill") {
+		t.Fatalf("body not preserved: %q", body)
+	}
+	rendered, err := RenderSkillMarkdown(decl, body)
+	if err != nil {
+		t.Fatalf("RenderSkillMarkdown: %v", err)
+	}
+	for _, want := range []string{"kind: openvibely.agent_skill", "version: 1", "key: raw_skill", "enabled: true", "# Raw Skill"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered SKILL.md missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestNormalizeStandaloneSkillPackage_StandardFrontmatterConvertsToOpenVibelyDeclaration(t *testing.T) {
+	content := `---
+name: Skill Creator
+description: Create and improve skills.
+---
+# Skill Creator
+`
+	decl, body, err := NormalizeStandaloneSkillPackage(content, "skill-creator", "global")
+	if err != nil {
+		t.Fatalf("NormalizeStandaloneSkillPackage: %v", err)
+	}
+	if decl.Kind != "openvibely.agent_skill" || decl.Skill.Key != "skill-creator" || decl.Skill.Name != "Skill Creator" || decl.Skill.Description != "Create and improve skills." || decl.Skill.Enabled == nil || !*decl.Skill.Enabled {
+		t.Fatalf("unexpected declaration: %+v", decl)
+	}
+	rendered, err := RenderSkillMarkdown(decl, body)
+	if err != nil {
+		t.Fatalf("RenderSkillMarkdown: %v", err)
+	}
+	if strings.Contains(rendered, "name: Skill Creator\ndescription:") || !strings.Contains(rendered, "kind: openvibely.agent_skill") || !strings.Contains(rendered, "enabled: true") {
+		t.Fatalf("standard package was not converted to OpenVibely frontmatter:\n%s", rendered)
+	}
+}
+
+func TestNormalizeStandaloneSkillPackage_ValidDeclarationNormalizesWithoutClobberingFields(t *testing.T) {
+	content := `---
+kind: openvibely.agent_skill
+version: 1
+skill:
+  key: existing_skill
+  name: Existing Skill
+  scope: global
+  description: Keep me.
+routing:
+  triggers:
+    - existing trigger
+  priority: 7
+---
+# Existing
+`
+	decl, body, err := NormalizeStandaloneSkillPackage(content, "ignored", "project")
+	if err != nil {
+		t.Fatalf("NormalizeStandaloneSkillPackage: %v", err)
+	}
+	if decl.Skill.Key != "existing_skill" || decl.Skill.Name != "Existing Skill" || decl.Skill.Description != "Keep me." || decl.Routing.Priority != 7 || len(decl.Routing.Triggers) != 1 || decl.Skill.Enabled == nil || !*decl.Skill.Enabled {
+		t.Fatalf("valid fields were clobbered: %+v", decl)
+	}
+	if decl.Skill.Scope != "project" {
+		t.Fatalf("scope should be normalized to requested import scope, got %q", decl.Skill.Scope)
+	}
+	rendered, err := RenderSkillMarkdown(decl, body)
+	if err != nil {
+		t.Fatalf("RenderSkillMarkdown: %v", err)
+	}
+	for _, want := range []string{"routing:", "priority: 7", "enabled: true", "# Existing"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered declaration missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestImportSkillPackage_WritesSkillSupportIndexAndCatalogLoads(t *testing.T) {
+	imp, _, root := newImporter(t)
+	content := `---
+name: Imported Skill
+description: Imported from disk.
+---
+# Imported Skill
+
+Use this imported skill.
+`
+	res, err := imp.ImportSkillPackage(context.Background(), content, "imported_skill", "project", []SkillPackageFile{{Path: "references/guide.md", Content: []byte("# Guide\n")}})
+	if err != nil {
+		t.Fatalf("ImportSkillPackage: %v", err)
+	}
+	if !res.Applied || len(res.Created) == 0 || res.Created[0] != "imported_skill" {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	skillPath := filepath.Join(root, "skills", "imported_skill", "SKILL.md")
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read imported skill: %v", err)
+	}
+	for _, want := range []string{"kind: openvibely.agent_skill", "key: imported_skill", "enabled: true", "Use this imported skill."} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("imported SKILL.md missing %q:\n%s", want, data)
+		}
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "skills", "imported_skill", "references", "guide.md")); err != nil || string(got) != "# Guide\n" {
+		t.Fatalf("support file mismatch got=%q err=%v", got, err)
+	}
+	index, err := os.ReadFile(filepath.Join(root, "skills", "SKILLS.md"))
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if !strings.Contains(string(index), "## imported_skill") || !strings.Contains(string(index), "imported_skill/SKILL.md") {
+		t.Fatalf("index missing imported skill:\n%s", index)
+	}
+	catalog, err := agentskills.BuildCatalog("test", root, "")
+	if err != nil {
+		t.Fatalf("BuildCatalog: %v", err)
+	}
+	if _, ok := catalog.Lookup("imported_skill"); !ok {
+		t.Fatalf("imported skill not loadable from catalog")
+	}
+}
+
+func TestReadSkillPackageFromPath_ReadsDirectorySupportFiles(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "path_skill")
+	if err := os.MkdirAll(filepath.Join(dir, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# Path Skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "references", "guide.md"), []byte("guide"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	skillMD, packageName, files, err := ReadSkillPackageFromPath(dir)
+	if err != nil {
+		t.Fatalf("ReadSkillPackageFromPath: %v", err)
+	}
+	if !strings.Contains(skillMD, "# Path Skill") || packageName != "path_skill" || len(files) != 1 || files[0].Path != "references/guide.md" || string(files[0].Content) != "guide" {
+		t.Fatalf("unexpected package read: packageName=%q files=%+v content=%q", packageName, files, skillMD)
 	}
 }

@@ -644,7 +644,7 @@ func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesScopedSkillLibrar
 	llmSvc.SetLifecycleRepo(repository.NewLifecycleRepo(db))
 	maintenanceTools := llmSvc.agentDeclaredSkillRuntimeTools(turn.Ctx, task, agent, "")
 	mergedTools := llmcontracts.CompositeRuntimeTools(maintenanceTools, rt)
-	for _, want := range []string{"skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "agent_skill_manage"} {
+	for _, want := range []string{"skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "skill_import", "agent_skill_manage"} {
 		if !mergedTools.HasDefinition(want) {
 			t.Fatalf("scheduled maintenance runtime missing %s: %#v", want, mergedTools.Definitions)
 		}

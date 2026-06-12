@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -56,6 +57,304 @@ func (r SkillRoots) ExactRootForScope(scope string) string {
 		return r.RootForScope(scope)
 	}
 	return ""
+}
+
+// SkillPackageFile is one non-SKILL.md support file included in a skill package
+// import. Paths are package-relative using slash separators.
+type SkillPackageFile struct {
+	Path    string
+	Content []byte
+}
+
+// SkillPackage captures normalized package input before it is persisted.
+type SkillPackage struct {
+	Decl         *SkillDeclaration
+	Body         string
+	PackageFiles []SkillPackageFile
+}
+
+// NormalizeStandaloneSkillPackage accepts either full OpenVibely SKILL.md
+// declarations or common standalone skill frontmatter with top-level
+// name/description fields and converts it into the declaration shape rendered by
+// RenderSkillMarkdown. Existing valid frontmatter is normalized, not replaced.
+func NormalizeStandaloneSkillPackage(content, packageName, scope string) (*SkillDeclaration, string, error) {
+	decl, body, err := ParseDeclaration(content)
+	if err == nil {
+		if decl.IsAgentRootDeclaration() || strings.TrimSpace(decl.Agent.Key) != "" {
+			return nil, body, errors.New("standalone skill packages must not set agent.key")
+		}
+		decl.Agent.Key = ""
+		decl.Kind = "openvibely.agent_skill"
+		if decl.Version <= 0 {
+			decl.Version = 1
+		}
+		if strings.TrimSpace(decl.Skill.Scope) == "" {
+			decl.Skill.Scope = scope
+		} else if strings.TrimSpace(scope) != "" {
+			decl.Skill.Scope = scope
+		}
+		if decl.Skill.Enabled == nil {
+			decl.Skill.Enabled = boolPtr(true)
+		}
+		return decl, body, nil
+	}
+	front, body, ok := SplitFrontmatter(content)
+	if !ok {
+		name := inferSkillName(packageName, content)
+		handle := packageName
+		if !isSlug(handle) {
+			handle = slugifySkillName(name)
+		}
+		if !isSlug(handle) {
+			return nil, content, fmt.Errorf("raw skill package name %q is not a valid skill key", name)
+		}
+		return &SkillDeclaration{
+			Kind:    "openvibely.agent_skill",
+			Version: 1,
+			Skill: SkillBlock{
+				Key:         handle,
+				Name:        name,
+				Scope:       scope,
+				Enabled:     boolPtr(true),
+				Description: firstMarkdownParagraph(content),
+			},
+		}, content, nil
+	}
+	var standard struct {
+		Name        string `yaml:"name"`
+		Description string `yaml:"description"`
+		Kind        string `yaml:"kind"`
+		Enabled     *bool  `yaml:"enabled"`
+	}
+	if yamlErr := yaml.Unmarshal([]byte(front), &standard); yamlErr != nil {
+		return nil, body, fmt.Errorf("standard skill frontmatter: invalid YAML: %w", yamlErr)
+	}
+	name := strings.TrimSpace(standard.Name)
+	if name == "" {
+		return nil, body, err
+	}
+	handle := name
+	if !isSlug(handle) && isSlug(packageName) {
+		handle = packageName
+	}
+	if !isSlug(handle) {
+		handle = slugifySkillName(name)
+	}
+	if !isSlug(handle) {
+		return nil, body, fmt.Errorf("standard skill frontmatter name %q is not a valid skill key", name)
+	}
+	decl = &SkillDeclaration{
+		Kind:    "openvibely.agent_skill",
+		Version: 1,
+		Skill: SkillBlock{
+			Key:         handle,
+			Name:        name,
+			Scope:       scope,
+			Enabled:     normalizeEnabledPointer(standard.Enabled),
+			Description: strings.TrimSpace(standard.Description),
+		},
+	}
+	return decl, body, nil
+}
+
+// ImportSkillPackage normalizes and writes a standalone skill package plus any
+// allowed support files, returning the regular importer result.
+func (i *Importer) ImportSkillPackage(ctx context.Context, content, packageName, scope string, files []SkillPackageFile) (*ImportResult, error) {
+	decl, body, err := NormalizeStandaloneSkillPackage(content, packageName, scope)
+	if err != nil {
+		return nil, err
+	}
+	if decl.IsAgentRootDeclaration() || strings.TrimSpace(decl.Agent.Key) != "" {
+		return nil, errors.New("standalone skill packages must not set agent.key")
+	}
+	decl.Agent.Key = ""
+	decl.Skill.Scope = scope
+	res, err := i.WriteSkill(ctx, decl, body)
+	if err != nil {
+		return res, err
+	}
+	for _, file := range files {
+		kind, rel, err := splitPackageSupportPath(file.Path)
+		if err != nil {
+			return res, err
+		}
+		fileRes, err := i.WriteSupportFile(ctx, decl.Skill.Scope, decl.Skill.Key, kind, rel, file.Content)
+		if err != nil {
+			return res, err
+		}
+		res.ChangedPaths = append(res.ChangedPaths, fileRes.ChangedPaths...)
+		res.Created = append(res.Created, fileRes.Created...)
+		res.Updated = append(res.Updated, fileRes.Updated...)
+	}
+	return res, nil
+}
+
+// ReadSkillPackageFromPath reads a package source from a SKILL.md file or a
+// directory containing SKILL.md. Only OpenVibely support directories are loaded.
+func ReadSkillPackageFromPath(source string) (skillMD string, packageName string, files []SkillPackageFile, err error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return "", "", nil, errors.New("skill_import: source path is required")
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("skill_import: stat %q: %w", source, err)
+	}
+	var skillPath, baseDir string
+	if info.IsDir() {
+		baseDir = source
+		skillPath = filepath.Join(source, "SKILL.md")
+		packageName = filepath.Base(filepath.Clean(source))
+	} else {
+		skillPath = source
+		baseDir = filepath.Dir(source)
+		packageName = filepath.Base(filepath.Clean(baseDir))
+		if filepath.Base(source) != "SKILL.md" {
+			return "", "", nil, fmt.Errorf("skill_import: source file must be SKILL.md, got %q", filepath.Base(source))
+		}
+	}
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("skill_import: read %s: %w", skillPath, err)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return "", "", nil, errors.New("skill_import: SKILL.md is empty")
+	}
+	files, err = readSkillPackageSupportFiles(baseDir)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return string(data), packageName, files, nil
+}
+
+func readSkillPackageSupportFiles(baseDir string) ([]SkillPackageFile, error) {
+	var files []SkillPackageFile
+	for _, dir := range []string{string(SupportReferences), string(SupportTemplates), string(SupportScripts), string(SupportAssets)} {
+		root := filepath.Join(baseDir, dir)
+		info, err := os.Stat(root)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("skill_import: stat %s: %w", root, err)
+		}
+		if !info.IsDir() {
+			continue
+		}
+		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				if strings.HasPrefix(entry.Name(), ".") && path != root {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			relFromBase, err := filepath.Rel(baseDir, path)
+			if err != nil {
+				return err
+			}
+			relFromBase = filepath.ToSlash(relFromBase)
+			if _, _, err := splitPackageSupportPath(relFromBase); err != nil {
+				return err
+			}
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			files = append(files, SkillPackageFile{Path: relFromBase, Content: content})
+			return nil
+		}); err != nil {
+			return nil, fmt.Errorf("skill_import: walk %s: %w", root, err)
+		}
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	return files, nil
+}
+
+func splitPackageSupportPath(path string) (SupportFileKind, string, error) {
+	rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+	if rel == "" || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") || strings.Contains(rel, "/../") || filepath.IsAbs(rel) {
+		return "", "", fmt.Errorf("skill_import: support file path %q is not allowed", path)
+	}
+	parts := strings.SplitN(rel, "/", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return "", "", fmt.Errorf("skill_import: support file path %q must be under references/, templates/, scripts/, or assets/", path)
+	}
+	kind := SupportFileKind(parts[0])
+	if !validSupportKind(kind) {
+		return "", "", fmt.Errorf("skill_import: support directory %q is not allowed", parts[0])
+	}
+	supportRel := filepath.ToSlash(filepath.Clean(parts[1]))
+	if supportRel == "." || supportRel == ".." || strings.HasPrefix(supportRel, "../") || strings.Contains(supportRel, "/../") || strings.HasPrefix(filepath.Base(supportRel), ".") {
+		return "", "", fmt.Errorf("skill_import: support file path %q is not allowed", path)
+	}
+	return kind, supportRel, nil
+}
+
+func normalizeEnabledPointer(enabled *bool) *bool {
+	if enabled == nil {
+		return boolPtr(true)
+	}
+	return enabled
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+func inferSkillName(packageName, content string) string {
+	if strings.TrimSpace(packageName) != "" {
+		return strings.TrimSpace(packageName)
+	}
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			return strings.TrimSpace(strings.TrimLeft(line, "#"))
+		}
+	}
+	return "skill"
+}
+
+func firstMarkdownParagraph(content string) string {
+	for _, para := range strings.Split(strings.TrimSpace(content), "\n\n") {
+		para = strings.TrimSpace(para)
+		if para == "" || strings.HasPrefix(para, "#") {
+			continue
+		}
+		para = strings.Join(strings.Fields(para), " ")
+		if len(para) > 160 {
+			para = strings.TrimSpace(para[:160])
+		}
+		return para
+	}
+	return "Imported skill package."
+}
+
+func slugifySkillName(name string) string {
+	var b strings.Builder
+	lastSep := false
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastSep = false
+		case r == '_' || r == '-' || r == '.':
+			if b.Len() > 0 && !lastSep {
+				b.WriteRune('_')
+				lastSep = true
+			}
+		default:
+			if b.Len() > 0 && !lastSep {
+				b.WriteRune('_')
+				lastSep = true
+			}
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return "skill"
+	}
+	return out
 }
 
 // Applier is the backend authority for agent/skill changes. The importer

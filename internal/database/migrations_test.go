@@ -325,7 +325,7 @@ func TestMigration082_NormalizesUnreleasedSkillCuratorNames(t *testing.T) {
 	if key != "skill_curator" || systemKind != "skill_curator" {
 		t.Fatalf("agent not normalized: key=%q system_kind=%q", key, systemKind)
 	}
-	if tools != `["skill_view","skills_list","agent_list","agent_view","skill_manage","agent_skill_manage"]` {
+	if tools != `["skill_view","skills_list","agent_list","agent_view","skill_manage","skill_import","agent_skill_manage"]` {
 		t.Fatalf("skill curator tools not normalized: %s", tools)
 	}
 	var routeContract string

@@ -241,7 +241,7 @@ func TestAgentLibraryMaintenanceService_EnsureProjectCreatesVisibleScheduledTask
 	if agent.GeneratedStatus != models.AgentStatusProtected || agent.SelectableAsPrimary {
 		t.Fatalf("expected protected non-selectable agent, got status=%q selectable=%v", agent.GeneratedStatus, agent.SelectableAsPrimary)
 	}
-	for _, want := range []string{"skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "agent_skill_manage"} {
+	for _, want := range []string{"skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "skill_import", "agent_skill_manage"} {
 		if !AgentAllowsTool(agent, want) {
 			t.Fatalf("expected Skill Curator to grant %s, tools=%v", want, agent.Tools)
 		}

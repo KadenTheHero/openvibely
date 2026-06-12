@@ -189,7 +189,7 @@ func instrumentSkillEditRuntimeTools(repo *repository.SkillAnalyticsRepo, base *
 	wrapped.Executor = func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		out, handled, isErr, err := base.Executor(ctx, name, input)
 		tool := strings.ToLower(strings.TrimSpace(name))
-		if handled && !isErr && err == nil && (tool == "skill_manage" || tool == "agent_skill_manage") {
+		if handled && !isErr && err == nil && (tool == "skill_manage" || tool == "skill_import" || tool == "agent_skill_manage") {
 			if handle, scope, eventType := changedSkillFromToolInput(tool, input); handle != "" {
 				recordSkillAnalyticsEvent(ctx, repo, models.SkillAnalyticsEvent{
 					ProjectID:   meta.ProjectID,

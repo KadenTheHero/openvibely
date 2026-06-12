@@ -94,24 +94,38 @@ func SkillMutationTools(importer *Importer, recorder MutationRecorder) *llmcontr
 		return nil
 	}
 	exec := func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
-		if strings.ToLower(strings.TrimSpace(name)) != "skill_manage" {
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "skill_manage":
+			res, err := runSkillManage(ctx, importer, recorder, input)
+			return marshalToolResult(res, err)
+		case "skill_import":
+			res, err := runSkillImport(ctx, importer, recorder, input)
+			return marshalToolResult(res, err)
+		default:
 			return "", false, false, nil
 		}
-		res, err := runSkillManage(ctx, importer, recorder, input)
-		return marshalToolResult(res, err)
 	}
 	return &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{{
-			Name:        "skill_manage",
-			Description: skillManageDescription,
-			Parameters:  json.RawMessage(skillManageSchema),
-		}},
+		Definitions: []llmcontracts.RuntimeToolDefinition{
+			{
+				Name:        "skill_manage",
+				Description: skillManageDescription,
+				Parameters:  json.RawMessage(skillManageSchema),
+			},
+			{
+				Name:        "skill_import",
+				Description: skillImportDescription,
+				Parameters:  json.RawMessage(skillImportSchema),
+			},
+		},
 		Executor: exec,
 		Filter: func(name string) (bool, bool) {
-			if strings.ToLower(strings.TrimSpace(name)) == "skill_manage" {
+			switch strings.ToLower(strings.TrimSpace(name)) {
+			case "skill_manage", "skill_import":
 				return true, true
+			default:
+				return false, false
 			}
-			return false, false
 		},
 	}
 }
@@ -140,7 +154,12 @@ const skillManageDescription = "Create, patch, archive, write, or remove a suppo
 	"For create/patch you MUST pass a complete standalone skills/<skill>/SKILL.md in the 'declaration' field (see field description for required frontmatter). " +
 	"Path traversal, unknown support directories, and protected artifacts are rejected." + indexUpdateReminder
 
+const skillImportDescription = "Import a standalone skill package into the project/global skill catalog from a local path or inline SKILL.md content. " +
+	"Accepts a directory containing SKILL.md, a SKILL.md file path, or inline content. " +
+	"The importer normalizes or generates OpenVibely YAML frontmatter with kind, version, skill.key/name/scope/description/enabled, writes skills/<skill>/SKILL.md, copies allowed support files, and updates skills/SKILLS.md."
+
 var skillManageSchema = buildSkillManageSchema()
+var skillImportSchema = buildSkillImportSchema()
 var agentSkillManageSchema = buildAgentSkillManageSchema()
 
 func agentSkillManageDescription(agentKey string) string {
@@ -181,6 +200,34 @@ func buildAgentSkillManageSchema() string {
     "reason": {"type": "string", "description": "Free-text reason. Recorded in the mutation audit log."}
   },
   "required": ["action"],
+  "additionalProperties": false
+}`
+}
+
+func buildSkillImportSchema() string {
+	return `{
+  "type": "object",
+  "properties": {
+    "source_path": {"type": "string", "description": "Local file or directory path to import. Directory sources must contain SKILL.md. File sources must be SKILL.md."},
+    "content": {"type": "string", "description": "Inline SKILL.md content to import instead of source_path."},
+    "package_name": {"type": "string", "description": "Optional package folder/name used to derive the skill handle when importing inline or standard-format skills."},
+    "scope": {"type": "string", "enum": ["global", "project"], "description": "Where to import the skill. Defaults to project."},
+    "files": {
+      "type": "array",
+      "description": "Optional inline support files under references/, templates/, scripts/, or assets/.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "content": {"type": "string"},
+          "content_base64": {"type": "string"}
+        },
+        "required": ["path"],
+        "additionalProperties": false
+      }
+    },
+    "reason": {"type": "string", "description": "Free-text reason. Recorded in the mutation audit log."}
+  },
   "additionalProperties": false
 }`
 }
@@ -239,6 +286,19 @@ type skillManageParams struct {
 	} `json:"support"`
 	AbsorbedInto string `json:"absorbed_into"`
 	Reason       string `json:"reason"`
+}
+
+type skillImportParams struct {
+	SourcePath  string `json:"source_path"`
+	Content     string `json:"content"`
+	PackageName string `json:"package_name"`
+	Scope       string `json:"scope"`
+	Files       []struct {
+		Path          string `json:"path"`
+		Content       string `json:"content"`
+		ContentBase64 string `json:"content_base64"`
+	} `json:"files"`
+	Reason string `json:"reason"`
 }
 
 func runAgentSkillManage(ctx context.Context, importer *Importer, recorder MutationRecorder, assignedAgentKey, scope string, allowExplicitAgent bool, input json.RawMessage) (*ImportResult, error) {
@@ -320,6 +380,66 @@ func runAgentSkillManage(ctx context.Context, importer *Importer, recorder Mutat
 	default:
 		return nil, fmt.Errorf("agent_skill_manage: unknown action %q", p.Action)
 	}
+}
+
+func runSkillImport(ctx context.Context, importer *Importer, recorder MutationRecorder, input json.RawMessage) (*ImportResult, error) {
+	var p skillImportParams
+	if err := json.Unmarshal(input, &p); err != nil {
+		return nil, fmt.Errorf("skill_import: invalid input: %w", err)
+	}
+	scope := strings.TrimSpace(p.Scope)
+	if scope == "" {
+		scope = "project"
+	}
+	if err := validateScopeValue(scope); err != nil {
+		return blockedResult(ctx, recorder, "import", "skill", strings.TrimSpace(p.PackageName), input, fmt.Errorf("skill_import: %w", err))
+	}
+	content := p.Content
+	packageName := strings.TrimSpace(p.PackageName)
+	files := make([]SkillPackageFile, 0, len(p.Files))
+	if strings.TrimSpace(p.SourcePath) != "" {
+		if strings.TrimSpace(content) != "" || len(p.Files) > 0 {
+			return blockedResult(ctx, recorder, "import", "skill", packageName, input, errors.New("skill_import: use either source_path or inline content/files, not both"))
+		}
+		var err error
+		content, packageName, files, err = ReadSkillPackageFromPath(p.SourcePath)
+		if err != nil {
+			return blockedResult(ctx, recorder, "import", "skill", packageName, input, err)
+		}
+	} else {
+		if strings.TrimSpace(content) == "" {
+			return blockedResult(ctx, recorder, "import", "skill", packageName, input, errors.New("skill_import: source_path or content is required"))
+		}
+		for _, f := range p.Files {
+			decoded, err := decodeOptionalSupportContent(f.Content, f.ContentBase64)
+			if err != nil {
+				return blockedResult(ctx, recorder, "import", "support_file", f.Path, input, fmt.Errorf("skill_import: %w", err))
+			}
+			files = append(files, SkillPackageFile{Path: f.Path, Content: decoded})
+		}
+	}
+	decl, _, err := NormalizeStandaloneSkillPackage(content, packageName, scope)
+	if err != nil {
+		return blockedResult(ctx, recorder, "import", "skill", packageName, []byte(content), err)
+	}
+	recordPayload, _ := json.Marshal(struct {
+		SourcePath  string `json:"source_path,omitempty"`
+		PackageName string `json:"package_name,omitempty"`
+		Scope       string `json:"scope"`
+		Handle      string `json:"handle"`
+		Files       int    `json:"files"`
+		Reason      string `json:"reason,omitempty"`
+	}{p.SourcePath, packageName, scope, decl.Handle(), len(files), p.Reason})
+	res, err := importer.ImportSkillPackage(ctx, content, packageName, scope, files)
+	recordMutation(ctx, recorder, "import", "skill", decl.Handle(), recordPayload, res, err)
+	return res, err
+}
+
+func decodeOptionalSupportContent(plain, b64 string) ([]byte, error) {
+	if b64 != "" || plain != "" {
+		return decodeSupportContent(plain, b64)
+	}
+	return []byte{}, nil
 }
 
 func runSkillManage(ctx context.Context, importer *Importer, recorder MutationRecorder, input json.RawMessage) (*ImportResult, error) {

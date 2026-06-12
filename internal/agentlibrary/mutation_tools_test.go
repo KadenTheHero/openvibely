@@ -68,14 +68,14 @@ func TestMutationTools_Definitions(t *testing.T) {
 	if tools == nil {
 		t.Fatalf("MutationTools returned nil")
 	}
-	if len(tools.Definitions) != 1 {
-		t.Fatalf("expected 1 definition, got %d", len(tools.Definitions))
+	if len(tools.Definitions) != 2 {
+		t.Fatalf("expected 2 definitions, got %d", len(tools.Definitions))
 	}
 	names := map[string]bool{}
 	for _, d := range tools.Definitions {
 		names[d.Name] = true
 	}
-	if !names["skill_manage"] || names["agent_manage"] {
+	if !names["skill_manage"] || !names["skill_import"] || names["agent_manage"] {
 		t.Fatalf("unexpected tool names: %v", names)
 	}
 	if !tools.HasDefinition("skill_manage") {
@@ -670,5 +670,81 @@ func TestLibraryAgentSkillMutationTools_BlocksProtectedSystemAgents(t *testing.T
 				t.Fatalf("blocked mutation should be recorded: %+v", rec.rows)
 			}
 		})
+	}
+}
+
+func TestSkillImportTool_ImportsInlineRawSkillAndIndexesCatalog(t *testing.T) {
+	imp, _, rec, projectRoot := buildTools(t)
+	tools := SkillMutationTools(imp, rec)
+	if tools == nil || !tools.HasDefinition("skill_import") {
+		t.Fatalf("expected skill_import definition")
+	}
+	params, _ := json.Marshal(map[string]any{
+		"content":      "# Inline Skill\n\nUse inline import.\n",
+		"package_name": "inline_skill",
+		"scope":        "project",
+		"files": []map[string]any{{
+			"path":    "references/guide.md",
+			"content": "guide",
+		}},
+	})
+	out, handled, isErr, err := tools.Executor(context.Background(), "skill_import", params)
+	if err != nil || !handled || isErr {
+		t.Fatalf("skill_import failed output=%s handled=%v isErr=%v err=%v", out, handled, isErr, err)
+	}
+	if !strings.Contains(out, `"created"`) || !strings.Contains(out, "inline_skill") {
+		t.Fatalf("expected confirmation JSON with imported handle, got %s", out)
+	}
+	data, err := os.ReadFile(filepath.Join(projectRoot, "skills", "inline_skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read imported skill: %v", err)
+	}
+	for _, want := range []string{"kind: openvibely.agent_skill", "key: inline_skill", "enabled: true", "# Inline Skill"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("imported SKILL.md missing %q:\n%s", want, data)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, "skills", "inline_skill", "references", "guide.md")); err != nil {
+		t.Fatalf("expected support file: %v", err)
+	}
+	catalog, err := agentskills.BuildCatalog("test", projectRoot, "")
+	if err != nil {
+		t.Fatalf("BuildCatalog: %v", err)
+	}
+	if _, ok := catalog.Lookup("inline_skill"); !ok {
+		t.Fatalf("imported skill not in catalog")
+	}
+	if len(rec.rows) != 1 || rec.rows[0].action != "import" || rec.rows[0].target != "skill" || rec.rows[0].key != "inline_skill" || !rec.rows[0].applied {
+		t.Fatalf("unexpected recorder rows: %+v", rec.rows)
+	}
+}
+
+func TestSkillImportTool_ImportsDirectorySource(t *testing.T) {
+	imp, _, _, projectRoot := buildTools(t)
+	source := filepath.Join(t.TempDir(), "dir_skill")
+	if err := os.MkdirAll(filepath.Join(source, "templates"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("---\nname: Directory Skill\ndescription: From directory.\n---\n# Directory Skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "templates", "prompt.md"), []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tools := SkillMutationTools(imp, nil)
+	params, _ := json.Marshal(map[string]any{"source_path": source, "scope": "project"})
+	out, handled, isErr, err := tools.Executor(context.Background(), "skill_import", params)
+	if err != nil || !handled || isErr {
+		t.Fatalf("skill_import path failed output=%s handled=%v isErr=%v err=%v", out, handled, isErr, err)
+	}
+	data, err := os.ReadFile(filepath.Join(projectRoot, "skills", "dir_skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read imported skill: %v", err)
+	}
+	if !strings.Contains(string(data), "name: Directory Skill") || !strings.Contains(string(data), "enabled: true") {
+		t.Fatalf("directory skill not normalized:\n%s", data)
+	}
+	if got, err := os.ReadFile(filepath.Join(projectRoot, "skills", "dir_skill", "templates", "prompt.md")); err != nil || string(got) != "prompt" {
+		t.Fatalf("template not imported got=%q err=%v", got, err)
 	}
 }

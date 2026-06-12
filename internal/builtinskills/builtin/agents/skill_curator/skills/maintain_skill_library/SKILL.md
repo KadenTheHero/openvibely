@@ -29,6 +29,7 @@ Use the read tools to inspect current state before changing anything:
 
 Use mutation tools only for validated, durable skill improvements. Do not hard-delete skills. Archive stale standalone skills with a reason and replacement handle when appropriate.
 
+- `skill_import` imports a standalone skill package from a local `source_path` directory/file or inline `content`; it normalizes or generates OpenVibely YAML frontmatter and updates the top-level `skills/SKILLS.md` index.
 - `skill_manage(action=create)` creates a standalone skill at `skills/<skill>/SKILL.md`.
 - `skill_manage(action=patch)` updates an existing standalone `SKILL.md`.
 - `skill_manage(action=write_file)` writes `references/`, `templates/`, `scripts/`, or `assets/` support files under an existing standalone skill.
@@ -64,7 +65,7 @@ During consolidation, preserve useful support files from absorbed skills, remove
 
 The top-level `skills/SKILLS.md` files are narrative discovery indexes for standalone skills. Agent-owned skills are discovered through their agent packages and should not be added to this standalone index.
 
-After any successful `skill_manage` write, the mutation tool maintains the top-level `skills/SKILLS.md` skill-link index. Use `skills_list` to verify the result when needed, but do not attempt direct index-file edits.
+After any successful `skill_import` or `skill_manage` write, the mutation tool maintains the top-level `skills/SKILLS.md` skill-link index. Use `skills_list` to verify the result when needed, but do not attempt direct index-file edits.
 
 If `skills/SKILLS.md` is missing, empty, or appears out of sync with the on-disk standalone `skills/<skill>/SKILL.md` tree, use `skill_manage` on the relevant existing skill so the mutation layer repairs the minimal skill-discovery index. Do not invent new agents to organize skills.
 

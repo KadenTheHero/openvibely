@@ -11,7 +11,7 @@ import (
 )
 
 func (s *LLMService) agentDeclaredSkillRuntimeTools(ctx context.Context, task models.Task, agent *models.Agent, workDir string) *llmcontracts.RuntimeTools {
-	if s == nil || agent == nil || !agentExplicitlyAllowsAnyTool(agent, "skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "agent_skill_manage") {
+	if s == nil || agent == nil || !agentExplicitlyAllowsAnyTool(agent, "skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "skill_import", "agent_skill_manage") {
 		return nil
 	}
 	selectedCatalog := lifecycleTurnFromContext(ctx).Catalog
@@ -36,14 +36,14 @@ func (s *LLMService) agentDeclaredSkillRuntimeTools(ctx context.Context, task mo
 	turn := lifecycleTurnFromContext(ctx)
 	readers = s.instrumentSkillRuntimeTools(readers, readerCatalog, skillAnalyticsContext{ProjectID: task.ProjectID, TaskID: task.ID, ThreadID: turnThreadID(task.ID, turn), AgentID: agent.ID, Source: models.SkillEventSourceManual, Surface: skillAnalyticsSurface(task, turn)})
 	var writers []*llmcontracts.RuntimeTools
-	if agentExplicitlyAllowsTool(agent, "skill_manage") || agentExplicitlyAllowsTool(agent, "agent_skill_manage") {
+	if agentExplicitlyAllowsTool(agent, "skill_manage") || agentExplicitlyAllowsTool(agent, "skill_import") || agentExplicitlyAllowsTool(agent, "agent_skill_manage") {
 		importer := s.agentSkillImporter(task)
 		var recorder agentlibrary.MutationRecorder
 		if s.mutationRecorder != nil {
 			recorder = s.mutationRecorder(task)
 		}
 		editMeta := skillAnalyticsContext{ProjectID: task.ProjectID, TaskID: task.ID, ThreadID: turnThreadID(task.ID, turn), AgentID: agent.ID, Source: models.SkillEventSourceManual, Surface: skillAnalyticsSurface(task, turn)}
-		if agentExplicitlyAllowsTool(agent, "skill_manage") {
+		if agentExplicitlyAllowsTool(agent, "skill_manage") || agentExplicitlyAllowsTool(agent, "skill_import") {
 			writers = append(writers, instrumentSkillEditRuntimeTools(s.skillAnalyticsRepo, agentlibrary.SkillMutationTools(importer, recorder), editMeta))
 		}
 		if agentExplicitlyAllowsTool(agent, "agent_skill_manage") {

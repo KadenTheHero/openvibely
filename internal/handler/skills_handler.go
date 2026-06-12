@@ -17,7 +17,6 @@ import (
 	"github.com/openvibely/openvibely/internal/agentskills"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/pages"
-	"gopkg.in/yaml.v3"
 )
 
 type skillAlwaysUseRequest struct {
@@ -374,48 +373,7 @@ func readUploadedSkillPackage(files []*multipart.FileHeader, paths []string) (up
 }
 
 func parseUploadedStandaloneSkillDeclaration(content, packageName, scope string) (*agentlibrary.SkillDeclaration, string, error) {
-	decl, body, err := agentlibrary.ParseDeclaration(content)
-	if err == nil {
-		decl.Skill.Scope = scope
-		return decl, body, nil
-	}
-	front, body, ok := agentlibrary.SplitFrontmatter(content)
-	if !ok {
-		return nil, body, err
-	}
-	var standard struct {
-		Name        string `yaml:"name"`
-		Description string `yaml:"description"`
-	}
-	if yamlErr := yaml.Unmarshal([]byte(front), &standard); yamlErr != nil {
-		return nil, body, fmt.Errorf("standard skill frontmatter: invalid YAML: %w", yamlErr)
-	}
-	name := strings.TrimSpace(standard.Name)
-	if name == "" {
-		return nil, body, err
-	}
-	handle := name
-	if !validDialogSkillKey(handle) && validDialogSkillKey(packageName) {
-		handle = packageName
-	}
-	if !validDialogSkillKey(handle) {
-		handle = slugifyLegacyAgentSkillName(name)
-	}
-	if !validDialogSkillKey(handle) {
-		return nil, body, fmt.Errorf("standard skill frontmatter name %q is not a valid skill key", name)
-	}
-	decl = &agentlibrary.SkillDeclaration{
-		Kind:    "openvibely.agent_skill",
-		Version: 1,
-		Skill: agentlibrary.SkillBlock{
-			Key:         handle,
-			Name:        name,
-			Scope:       scope,
-			Description: strings.TrimSpace(standard.Description),
-			// Enabled left nil: absence = enabled, keeps frontmatter clean
-		},
-	}
-	return decl, body, nil
+	return agentlibrary.NormalizeStandaloneSkillPackage(content, packageName, scope)
 }
 
 func uploadedSkillPackageName(filename string) string {

@@ -16,6 +16,7 @@ tools:
   - agent_list
   - agent_view
   - skill_manage
+  - skill_import
   - agent_skill_manage
 permissions:
   read_task_prompt: true
@@ -63,11 +64,11 @@ Do not put a skill prompt in this root file. Skill prompts live in each `skills/
 When creating or maintaining skills:
 
 - Put routable skill instructions in top-level `<root>/skills/<skill_key>/SKILL.md`.
-- Use `skill_manage` for standalone skill prompt changes and support files.
+- Use `skill_import` to import existing standalone skill packages from local paths or inline package content; use `skill_manage` for standalone skill prompt changes and support files.
 - Use `agent_skill_manage` from after-complete learning for the assigned agent's own skills, or from scheduled skill-library maintenance for maintainable agent-owned skills. Protected agents such as `skill_curator` and `memory_curator` must not be modified.
 - When `skill_view` exposes a selected skill's `skill_dir`/`scripts_dir`, bundled scripts under `scripts/` can be called with the normal runtime tools available to the task. Do not invent a separate script runner contract; document concrete commands in `SKILL.md`.
 - The mutation tools maintain the minimal top-level `skills/SKILLS.md` skill-link index for active standalone skills.
-- Do not use scoped file tools or direct file writes for skill package or index maintenance; use `skill_manage` for standalone skills and `agent_skill_manage` for maintainable agent-owned skills.
+- Do not use scoped file tools or direct file writes for skill package or index maintenance; use `skill_import` for package imports, `skill_manage` for standalone skills, and `agent_skill_manage` for maintainable agent-owned skills.
 - Do not use autonomous tools to change agent metadata, routing, tools, permissions, lifecycle hooks, or skill attachments.
 
 ## skill_curator/route_task

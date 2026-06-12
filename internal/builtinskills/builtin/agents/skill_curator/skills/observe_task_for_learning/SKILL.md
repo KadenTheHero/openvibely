@@ -28,7 +28,7 @@ Before deciding to save learning, inspect the hook input's `learning_snapshot`. 
 
 Missing skill coverage is not a no-op reason. If the transcript contains durable reusable learning and no suitable standalone skill exists, create the smallest appropriate standalone skill. If the task had an assigned agent and the learning is specific to that agent's role, workflow, or selected agent-owned skill, use `agent_skill_manage` instead. Do not create a new agent or attach standalone skills to an agent as a fallback.
 
-Use mutation tools only for durable reusable skill changes. Use `skill_manage` to create, patch, archive, write support files, or remove stale support files for standalone skills. Use `agent_skill_manage` only for skills owned by the task's assigned agent; pass only the skill key, never an agent/skill path. Agent creation, editing, skill attachment, routing changes, and archival are disabled for autonomous maintenance by product policy.
+Use mutation tools only for durable reusable skill changes. Use `skill_import` when importing a complete existing standalone skill package; use `skill_manage` to create, patch, archive, write support files, or remove stale support files for standalone skills. Use `agent_skill_manage` only for skills owned by the task's assigned agent; pass only the skill key, never an agent/skill path. Agent creation, editing, skill attachment, routing changes, and archival are disabled for autonomous maintenance by product policy.
 
 ## Skill Package Layout
 
