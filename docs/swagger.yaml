@@ -544,10 +544,6 @@ definitions:
         items:
           $ref: '#/definitions/models.SkillFollowThroughMetric'
         type: array
-      skill_usage_over_time:
-        items:
-          $ref: '#/definitions/models.SkillUsageBySkillPeriodMetric'
-        type: array
       top_skills:
         items:
           $ref: '#/definitions/models.SkillAnalyticsSkillMetric'
@@ -596,25 +592,6 @@ definitions:
         type: string
       skill_scope:
         type: string
-    type: object
-  models.SkillUsageBySkillPeriodMetric:
-    properties:
-      activity_count:
-        type: integer
-      created_count:
-        type: integer
-      edited_count:
-        type: integer
-      loaded_count:
-        type: integer
-      period:
-        type: string
-      selected_count:
-        type: integer
-      skill_handle:
-        type: string
-      viewed_count:
-        type: integer
     type: object
   models.SkillUsagePeriodMetric:
     properties:

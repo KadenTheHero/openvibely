@@ -40,39 +40,6 @@ func TestSkillAnalyticsRepo_UsageOverTime(t *testing.T) {
 	}
 }
 
-func TestSkillAnalyticsRepo_SkillUsageOverTimeTopSkillsAndEdited(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := NewSkillAnalyticsRepo(db)
-	ctx := context.Background()
-	projectID := defaultProjectID(t, db)
-	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
-
-	recordSkillAnalyticsEvents(t, repo,
-		skillEvent(projectID, "turn-1", "", "global", "provider_adapter", "selected", "skill_curator", now),
-		skillEvent(projectID, "turn-1", "", "global", "provider_adapter", "loaded", "skill_curator", now.Add(time.Minute)),
-		skillEvent(projectID, "turn-2", "", "project", "frontend", "created", "manual", now.AddDate(0, 0, 1)),
-		skillEvent(projectID, "turn-2", "", "project", "frontend", "edited", "manual", now.AddDate(0, 0, 1).Add(time.Minute)),
-		skillEvent(projectID, "turn-3", "", "project", "docs", "viewed", "manual", now.AddDate(0, 0, 1).Add(2*time.Minute)),
-	)
-
-	usage, err := repo.GetSkillUsageOverTime(ctx, SkillAnalyticsFilter{ProjectID: projectID, GroupBy: "day", Limit: 2})
-	if err != nil {
-		t.Fatalf("GetSkillUsageOverTime: %v", err)
-	}
-	if len(usage) != 3 {
-		t.Fatalf("usage periods = %+v, want 3 rows", usage)
-	}
-	if usage[0].Period != "2026-06-10" || usage[0].SkillHandle != "provider_adapter" || usage[0].ActivityCount != 2 {
-		t.Fatalf("top skill period = %+v", usage[0])
-	}
-	if usage[1].Period != "2026-06-11" || usage[1].SkillHandle != "frontend" || usage[1].CreatedCount != 1 || usage[1].EditedCount != 1 || usage[1].ActivityCount != 2 {
-		t.Fatalf("created/edited period = %+v", usage[1])
-	}
-	if usage[2].Period != "2026-06-11" || usage[2].SkillHandle != "Other" || usage[2].ViewedCount != 1 || usage[2].ActivityCount != 1 {
-		t.Fatalf("other period = %+v", usage[2])
-	}
-}
-
 func TestSkillAnalyticsRepo_TopSkillsAndFollowThrough(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewSkillAnalyticsRepo(db)

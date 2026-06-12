@@ -107,50 +107,6 @@ func (r *SkillAnalyticsRepo) GetUsageOverTime(ctx context.Context, filter SkillA
 	return out, rows.Err()
 }
 
-func (r *SkillAnalyticsRepo) GetSkillUsageOverTime(ctx context.Context, filter SkillAnalyticsFilter) ([]models.SkillUsageBySkillPeriodMetric, error) {
-	where, args := skillAnalyticsWhere(filter)
-	periodExpr := skillAnalyticsPeriodExpression(filter.GroupBy)
-	limit := filter.Limit
-	if limit <= 0 || limit > 5 {
-		limit = 5
-	}
-	queryArgs := append([]any{}, args...)
-	queryArgs = append(queryArgs, limit)
-	queryArgs = append(queryArgs, args...)
-	rows, err := r.db.QueryContext(ctx, `
-		WITH top_skills AS (
-			SELECT skill_handle
-			FROM skill_analytics_events e `+where+`
-			GROUP BY skill_handle
-			ORDER BY COUNT(*) DESC, skill_handle ASC
-			LIMIT ?
-		)
-		SELECT `+periodExpr+` AS period,
-		       CASE WHEN e.skill_handle IN (SELECT skill_handle FROM top_skills) THEN e.skill_handle ELSE 'Other' END AS skill_handle,
-		       SUM(CASE WHEN e.event_type = 'selected' THEN 1 ELSE 0 END) selected_count,
-		       SUM(CASE WHEN e.event_type = 'loaded' THEN 1 ELSE 0 END) loaded_count,
-		       SUM(CASE WHEN e.event_type = 'viewed' THEN 1 ELSE 0 END) viewed_count,
-		       SUM(CASE WHEN e.event_type = 'created' THEN 1 ELSE 0 END) created_count,
-		       SUM(CASE WHEN e.event_type = 'edited' THEN 1 ELSE 0 END) edited_count,
-		       COUNT(*) activity_count
-		FROM skill_analytics_events e `+where+`
-		GROUP BY period, CASE WHEN e.skill_handle IN (SELECT skill_handle FROM top_skills) THEN e.skill_handle ELSE 'Other' END
-		ORDER BY period ASC, activity_count DESC, skill_handle ASC`, queryArgs...)
-	if err != nil {
-		return nil, fmt.Errorf("getting skill usage over time by skill: %w", err)
-	}
-	defer rows.Close()
-	var out []models.SkillUsageBySkillPeriodMetric
-	for rows.Next() {
-		var m models.SkillUsageBySkillPeriodMetric
-		if err := rows.Scan(&m.Period, &m.SkillHandle, &m.SelectedCount, &m.LoadedCount, &m.ViewedCount, &m.CreatedCount, &m.EditedCount, &m.ActivityCount); err != nil {
-			return nil, err
-		}
-		out = append(out, m)
-	}
-	return out, rows.Err()
-}
-
 func (r *SkillAnalyticsRepo) GetTopSkills(ctx context.Context, filter SkillAnalyticsFilter) ([]models.SkillAnalyticsSkillMetric, error) {
 	where, args := skillAnalyticsWhere(filter)
 	limit := filter.Limit
@@ -392,10 +348,6 @@ func (r *SkillAnalyticsRepo) BuildDashboard(ctx context.Context, filter SkillAna
 	if err != nil {
 		return nil, err
 	}
-	skillUsage, err := r.GetSkillUsageOverTime(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
 	top, err := r.GetTopSkills(ctx, filter)
 	if err != nil {
 		return nil, err
@@ -414,7 +366,7 @@ func (r *SkillAnalyticsRepo) BuildDashboard(ctx context.Context, filter SkillAna
 	if err != nil {
 		return nil, err
 	}
-	return &models.SkillAnalyticsDashboard{UsageOverTime: usage, SkillUsageOverTime: skillUsage, TopSkills: top, FollowThrough: follow, AgentUsage: agent, Underused: underused}, nil
+	return &models.SkillAnalyticsDashboard{UsageOverTime: usage, TopSkills: top, FollowThrough: follow, AgentUsage: agent, Underused: underused}, nil
 }
 
 func skillAnalyticsWhere(filter SkillAnalyticsFilter) (string, []any) {
