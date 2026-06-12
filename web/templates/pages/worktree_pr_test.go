@@ -12,7 +12,7 @@ import (
 func TestTaskChangesWorktreeContent_RendersCreatePRInGitHubSection(t *testing.T) {
 	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
 	var buf bytes.Buffer
-	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false).Render(context.Background(), &buf); err != nil {
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()
@@ -34,17 +34,17 @@ func TestTaskChangesWorktreeContent_RendersViewPRInGitHubSection(t *testing.T) {
 	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
 	pr := &models.TaskPullRequest{TaskID: task.ID, PRNumber: 42, PRURL: "https://github.com/openvibely/openvibely/pull/42", PRState: "open"}
 	var buf bytes.Buffer
-	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, pr, false).Render(context.Background(), &buf); err != nil {
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, pr, false, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "View PR #42") {
 		t.Fatal("expected View PR link in dropdown")
 	}
-		// The View PR action must point at the absolute GitHub PR URL and use
-		// target="_blank" so the desktop bridge (in base layout) routes the click
-		// to the system browser instead of relying on Wails WebView new-window
-		// navigation, which silently drops the click.
+	// The View PR action must point at the absolute GitHub PR URL and use
+	// target="_blank" so the desktop bridge (in base layout) routes the click
+	// to the system browser instead of relying on Wails WebView new-window
+	// navigation, which silently drops the click.
 	if !strings.Contains(out, `href="https://github.com/openvibely/openvibely/pull/42"`) {
 		t.Fatal("expected View PR anchor to use absolute GitHub PR URL")
 	}
@@ -65,7 +65,7 @@ func TestTaskChangesWorktreeContent_RendersViewPRInGitHubSection(t *testing.T) {
 func TestTaskChangesWorktreeContent_LocalAndGitHubSections(t *testing.T) {
 	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
 	var buf bytes.Buffer
-	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false).Render(context.Background(), &buf); err != nil {
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()
@@ -95,6 +95,35 @@ func TestTaskChangesWorktreeContent_LocalAndGitHubSections(t *testing.T) {
 	}
 }
 
+func TestTaskChangesWorktreeContent_RebaseOnlyWhenAvailable(t *testing.T) {
+	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
+	var buf bytes.Buffer
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, true).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "/worktree/rebase") {
+		t.Fatal("expected Rebase action when task branch is behind target")
+	}
+	if !strings.Contains(out, "Rebase onto main") {
+		t.Fatal("expected Rebase action label to include target branch")
+	}
+	if !strings.Contains(out, `hx-disabled-elt="this"`) {
+		t.Fatal("expected Rebase action to disable while request is in flight")
+	}
+}
+
+func TestTaskChangesWorktreeContent_RebaseHiddenWhenUnavailable(t *testing.T) {
+	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
+	var buf bytes.Buffer
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	if strings.Contains(buf.String(), "/worktree/rebase") {
+		t.Fatal("did not expect Rebase action when task branch is not behind target")
+	}
+}
+
 func TestTaskChangesWorktreeContent_MergedStatusWithoutDiffHidesLocalSection(t *testing.T) {
 	task := &models.Task{
 		ID:             "task-1",
@@ -103,11 +132,11 @@ func TestTaskChangesWorktreeContent_MergedStatusWithoutDiffHidesLocalSection(t *
 		Status:         models.StatusCompleted,
 	}
 	var buf bytes.Buffer
-	if err := TaskChangesWorktreeContent("", task, nil, nil, nil, false).Render(context.Background(), &buf); err != nil {
+	if err := TaskChangesWorktreeContent("", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()
-		// When merged and no diff remains, local merge options should not appear.
+	// When merged and no diff remains, local merge options should not appear.
 	if strings.Contains(out, "/worktree/merge") {
 		t.Fatal("did not expect merge endpoint actions when already merged")
 	}
@@ -126,7 +155,7 @@ func TestTaskChangesWorktreeContent_ConflictStatusHidesLocalSection(t *testing.T
 	}
 
 	var buf bytes.Buffer
-	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false).Render(context.Background(), &buf); err != nil {
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
@@ -146,7 +175,7 @@ func TestTaskChangesWorktreeContent_FailedMergedStatusHidesLocalSection(t *testi
 		Status:         models.StatusFailed,
 	}
 	var buf bytes.Buffer
-	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false).Render(context.Background(), &buf); err != nil {
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()
@@ -193,7 +222,7 @@ func TestTaskChangesWorktreeContent_BranchAlreadyMergedHidesLocalSection(t *test
 		Status:         models.StatusCompleted,
 	}
 	var buf bytes.Buffer
-	if err := TaskChangesWorktreeContent("diff --git a/file.txt b/file.txt", task, nil, nil, nil, true).Render(context.Background(), &buf); err != nil {
+	if err := TaskChangesWorktreeContent("diff --git a/file.txt b/file.txt", task, nil, nil, nil, true, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()
@@ -217,7 +246,7 @@ func TestTaskChangesWorktreeContent_MergedStatusWithDiffHidesLocalSection(t *tes
 		Status:         models.StatusCompleted,
 	}
 	var buf bytes.Buffer
-	if err := TaskChangesWorktreeContent("diff --git a/file.txt b/file.txt", task, nil, nil, nil, false).Render(context.Background(), &buf); err != nil {
+	if err := TaskChangesWorktreeContent("diff --git a/file.txt b/file.txt", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()

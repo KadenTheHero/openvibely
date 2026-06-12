@@ -138,6 +138,76 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	return h.renderWorktreeInfo(c, task)
 }
 
+// RebaseTaskBranch rebases a task's worktree branch onto its target branch.
+func (h *Handler) RebaseTaskBranch(c echo.Context) error {
+	taskID := c.Param("taskId")
+	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil || task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+
+	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
+	if err != nil || project == nil || project.RepoPath == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
+	}
+	h.recoverTaskWorktreeState(c.Request().Context(), task, project)
+	if task.WorktreeBranch == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "task has no worktree branch")
+	}
+	if h.worktreeSvc == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "worktree service not available")
+	}
+
+	targetBranch := task.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = service.GetDefaultBranch(project.RepoPath)
+	}
+	if targetBranch == "" {
+		targetBranch = "main"
+	}
+
+	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || task.MergeStatus == models.MergeStatusConflict {
+		msg := "A merge conflict is already active. Resolve conflicts or abort the merge before rebasing."
+		if isHTMX(c) {
+			setHTMXToast(c, msg, "failed")
+		}
+		return c.String(http.StatusConflict, msg)
+	}
+
+	result, rebaseErr := h.worktreeSvc.RebaseBranch(c.Request().Context(), task, project.RepoPath)
+	if rebaseErr != nil {
+		applog.Infof("[handler] RebaseTaskBranch error: %v", rebaseErr)
+		errMessage := "Rebase failed"
+		if result != nil && result.ErrorMessage != "" {
+			errMessage = fmt.Sprintf("Rebase failed: %s", result.ErrorMessage)
+		} else if rebaseErr.Error() != "" {
+			errMessage = fmt.Sprintf("Rebase failed: %s", rebaseErr.Error())
+		}
+		if isHTMX(c) {
+			setHTMXToast(c, errMessage, "failed")
+		}
+		return c.String(http.StatusBadRequest, errMessage)
+	}
+
+	if result != nil && !result.Success && len(result.ConflictFiles) > 0 {
+		msg := fmt.Sprintf("Rebase onto %s had conflicts and was aborted. Resolve the conflicting files in the task worktree, then try rebase again.", targetBranch)
+		if result.ErrorMessage != "" {
+			msg = result.ErrorMessage
+		}
+		if isHTMX(c) {
+			setHTMXToast(c, msg, "failed")
+		}
+		return h.GetTaskChanges(c)
+	}
+
+	if result != nil && result.UpToDate {
+		setHTMXToast(c, fmt.Sprintf("Task branch is already up to date with %s", targetBranch), "completed")
+	} else {
+		setHTMXToast(c, fmt.Sprintf("Rebased task branch onto %s", targetBranch), "completed")
+	}
+	return h.GetTaskChanges(c)
+}
+
 // CreateTaskPullRequest creates or reuses a pull request for a task worktree branch.
 func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 	taskID := c.Param("taskId")
@@ -397,6 +467,7 @@ func (h *Handler) GetTaskChangesWorktree(c echo.Context) error {
 		// Detect already-merged branches so the changes-tab dropdown does not
 		// keep offering redundant merge actions.
 		branchAlreadyMerged := h.reconcileAlreadyMergedBranch(ctx, task)
+		rebaseAvailable := h.taskRebaseAvailable(task, project, branchAlreadyMerged)
 		if project != nil && project.RepoPath != "" {
 			targetBranch := task.MergeTargetBranch
 			if targetBranch == "" {
@@ -431,7 +502,7 @@ func (h *Handler) GetTaskChangesWorktree(c echo.Context) error {
 			}
 
 			return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-				diffOutput, task, fileStats, reviewComments, taskPR, branchAlreadyMerged,
+				diffOutput, task, fileStats, reviewComments, taskPR, branchAlreadyMerged, rebaseAvailable,
 			))
 		}
 	}

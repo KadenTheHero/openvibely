@@ -1435,6 +1435,162 @@ func TestMergeBranch_OverlappingDirtyTargetFileFails(t *testing.T) {
 	}
 }
 
+func TestRebaseBranch_RebasesOntoTarget(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	task := &models.Task{ProjectID: "default", Title: "Rebase Task", Category: models.CategoryActive, Status: models.StatusPending, MergeTargetBranch: defaultBranch}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+
+	if err := os.WriteFile(filepath.Join(wtPath, "task.txt"), []byte("task\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "task commit"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "main.txt"), []byte("main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "main.txt")
+	runGitTest(t, repoDir, "commit", "-m", "main commit")
+
+	if !IsBranchBehindTarget(repoDir, branchName, defaultBranch) {
+		t.Fatal("expected task branch to be behind target before rebase")
+	}
+	result, err := ws.RebaseBranch(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("RebaseBranch: %v", err)
+	}
+	if result == nil || !result.Success || result.UpToDate {
+		t.Fatalf("expected successful non-noop rebase, got %#v", result)
+	}
+	if IsBranchBehindTarget(repoDir, branchName, defaultBranch) {
+		t.Fatal("expected task branch to include target after rebase")
+	}
+	if out := runGitTest(t, wtPath, "log", "--oneline", defaultBranch+"..HEAD"); !strings.Contains(out, "task commit") {
+		t.Fatalf("expected rebased task commit above target, got %q", out)
+	}
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("expected merge status pending after rebase, got %q", updated.MergeStatus)
+	}
+}
+
+func TestRebaseBranch_AlreadyUpToDate(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	task := &models.Task{ProjectID: "default", Title: "Rebase Up To Date", Category: models.CategoryActive, Status: models.StatusPending, MergeTargetBranch: defaultBranch}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+	before := gitRevParseTest(t, wtPath, "HEAD")
+
+	result, err := ws.RebaseBranch(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("RebaseBranch already up to date: %v", err)
+	}
+	if result == nil || !result.Success || !result.UpToDate {
+		t.Fatalf("expected up-to-date success, got %#v", result)
+	}
+	if result.RebasedHead != before {
+		t.Fatalf("expected HEAD unchanged, got before=%s result=%s", before, result.RebasedHead)
+	}
+}
+
+func TestRebaseBranch_ConflictAborts(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	if err := os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("base\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "shared.txt")
+	runGitTest(t, repoDir, "commit", "-m", "add shared")
+
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	task := &models.Task{ProjectID: "default", Title: "Rebase Conflict", Category: models.CategoryActive, Status: models.StatusPending, MergeTargetBranch: defaultBranch}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+	if err := os.WriteFile(filepath.Join(wtPath, "shared.txt"), []byte("task change\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "task changes shared"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("target change\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "shared.txt")
+	runGitTest(t, repoDir, "commit", "-m", "target changes shared")
+
+	result, err := ws.RebaseBranch(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("expected conflict result without hard error, got %v", err)
+	}
+	if result == nil || result.Success || len(result.ConflictFiles) == 0 {
+		t.Fatalf("expected rebase conflict result, got %#v", result)
+	}
+	if !strings.Contains(strings.ToLower(result.ErrorMessage), "conflicts") || !strings.Contains(strings.ToLower(result.ErrorMessage), "aborted") {
+		t.Fatalf("expected conflict-aborted guidance, got %q", result.ErrorMessage)
+	}
+	statusOut := runGitTest(t, wtPath, "status", "--porcelain")
+	if strings.Contains(statusOut, "UU ") {
+		t.Fatalf("expected rebase conflict to be aborted, got status %q", statusOut)
+	}
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("expected pending status after aborted rebase conflict, got %q", updated.MergeStatus)
+	}
+}
+
 func TestMergeBranch_FastForward(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

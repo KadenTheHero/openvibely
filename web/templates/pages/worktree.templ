@@ -159,7 +159,7 @@ templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat)
 // into its target branch in git. When true, local merge actions are suppressed
 // regardless of the stored merge_status, because re-running a merge would be
 // redundant.
-templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, branchAlreadyMerged bool) {
+templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, branchAlreadyMerged bool, rebaseAvailable bool) {
 	<div class="card bg-base-100 shadow-sm border border-base-300">
 		<div class="card-body">
 			// Worktree branch info header
@@ -212,6 +212,22 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 										Fast-forward only
 									</button>
 								</li>
+								if rebaseAvailable {
+									<li>
+										<button
+											type="button"
+											hx-post={ fmt.Sprintf("/tasks/%s/worktree/rebase", task.ID) }
+											hx-target="#changes-content"
+											hx-swap="innerHTML"
+											hx-disabled-elt="this"
+										>
+											<span class="htmx-indicator" id="rebase-changes-indicator">
+												<span class="loading loading-spinner loading-xs"></span>
+											</span>
+											Rebase onto { mergeTargetDisplay(task) }
+										</button>
+									</li>
+								}
 								<li>
 									<button
 										type="button"

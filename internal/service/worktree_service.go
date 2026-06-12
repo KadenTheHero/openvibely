@@ -558,6 +558,15 @@ type MergeResult struct {
 	ErrorMessage  string
 }
 
+// RebaseResult holds the result of rebasing a task branch onto its target branch.
+type RebaseResult struct {
+	Success       bool
+	UpToDate      bool
+	RebasedHead   string
+	ConflictFiles []string
+	ErrorMessage  string
+}
+
 // MergeBranch merges the task branch into the target branch.
 // mergeType: "merge" (merge commit), "ff" (fast-forward only), "squash"
 func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, repoDir string, mergeType string) (*MergeResult, error) {
@@ -675,6 +684,84 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 		Success:     true,
 		MergeCommit: strings.TrimSpace(string(hashOut)),
 	}, nil
+}
+
+// RebaseBranch rebases the task worktree branch onto its target branch without merging it.
+func (ws *WorktreeService) RebaseBranch(ctx context.Context, task *models.Task, repoDir string) (*RebaseResult, error) {
+	if task == nil || task.WorktreeBranch == "" {
+		return nil, fmt.Errorf("task has no worktree branch")
+	}
+	if task.WorktreePath == "" {
+		return nil, fmt.Errorf("task has no worktree path")
+	}
+
+	targetBranch := task.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = GetDefaultBranch(repoDir)
+	}
+	if targetBranch == "" {
+		targetBranch = "main"
+	}
+
+	currentBranchOut, err := gitOutput(task.WorktreePath, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		msg := "task worktree must be on the expected task branch before rebasing"
+		return &RebaseResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
+	}
+	currentBranch := strings.TrimSpace(string(currentBranchOut))
+	if currentBranch != task.WorktreeBranch {
+		msg := fmt.Sprintf("task worktree is on branch %q, expected %q", currentBranch, task.WorktreeBranch)
+		return &RebaseResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
+	}
+
+	statusOut, err := GitStatusPorcelain(task.WorktreePath)
+	if err != nil {
+		return &RebaseResult{ErrorMessage: fmt.Sprintf("checking task worktree status: %s", err.Error())}, fmt.Errorf("checking task worktree status: %w", err)
+	}
+	if strings.TrimSpace(statusOut) != "" {
+		msg := "task worktree has uncommitted changes; commit or discard them before rebasing"
+		return &RebaseResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
+	}
+
+	if out, err := gitOutput(task.WorktreePath, "merge-base", "--is-ancestor", targetBranch, "HEAD"); err == nil {
+		headOut, headErr := gitOutput(task.WorktreePath, "rev-parse", "HEAD")
+		if headErr != nil {
+			return &RebaseResult{ErrorMessage: fmt.Sprintf("resolving task HEAD: %s", strings.TrimSpace(string(headOut)))}, fmt.Errorf("resolving task HEAD: %w", headErr)
+		}
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending)
+		return &RebaseResult{Success: true, UpToDate: true, RebasedHead: strings.TrimSpace(string(headOut))}, nil
+	} else if trimmed := strings.TrimSpace(string(out)); trimmed != "" {
+		applog.Debugf("[worktree] task branch %s is behind %s before rebase: %s", task.WorktreeBranch, targetBranch, trimmed)
+	}
+
+	_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending)
+	rebaseOut, rebaseErr := gitOutput(task.WorktreePath, "rebase", targetBranch)
+	if rebaseErr != nil {
+		conflictFiles := detectConflicts(task.WorktreePath)
+		if len(conflictFiles) > 0 {
+			_ = AbortRebase(task.WorktreePath)
+			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending)
+			return &RebaseResult{
+				Success:       false,
+				ConflictFiles: conflictFiles,
+				ErrorMessage:  fmt.Sprintf("Rebase onto %s encountered conflicts and was aborted. Resolve the conflicts in the task worktree or ask the agent to reconcile with %s, then try rebase again.", targetBranch, targetBranch),
+			}, nil
+		}
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		msg := strings.TrimSpace(string(rebaseOut))
+		if msg == "" {
+			msg = rebaseErr.Error()
+		}
+		return &RebaseResult{ErrorMessage: msg}, fmt.Errorf("rebase task branch onto %s failed: %w", targetBranch, rebaseErr)
+	}
+
+	headOut, err := gitOutput(task.WorktreePath, "rev-parse", "HEAD")
+	if err != nil {
+		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+		return &RebaseResult{ErrorMessage: fmt.Sprintf("resolving rebased HEAD: %s", strings.TrimSpace(string(headOut)))}, fmt.Errorf("resolving rebased HEAD: %w", err)
+	}
+	_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending)
+	return &RebaseResult{Success: true, RebasedHead: strings.TrimSpace(string(headOut))}, nil
 }
 
 func (ws *WorktreeService) fastForwardTaskWorktreeToTarget(ctx context.Context, task *models.Task, repoDir string, targetBranch string) (*MergeResult, error) {
@@ -1339,6 +1426,27 @@ func IsBranchTipMergedInto(repoDir string, branchName string, targetBranch strin
 
 	cmd := exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", branchName, targetBranch)
 	return cmd.Run() == nil
+}
+
+// IsBranchBehindTarget reports whether targetBranch has commits that are not
+// reachable from branchName. It is used to decide whether a task branch can be
+// usefully rebased onto its merge target.
+func IsBranchBehindTarget(repoDir string, branchName string, targetBranch string) bool {
+	if branchName == "" || targetBranch == "" {
+		return false
+	}
+	if !IsGitRepo(repoDir) {
+		return false
+	}
+	if err := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", branchName).Run(); err != nil {
+		return false
+	}
+	if err := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", targetBranch).Run(); err != nil {
+		return false
+	}
+
+	cmd := exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", targetBranch, branchName)
+	return cmd.Run() != nil
 }
 
 // HandlePostExecution handles worktree operations after task execution completes.

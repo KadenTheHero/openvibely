@@ -582,6 +582,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/tasks/:taskId/worktree", h.GetTaskWorktreeInfo)
 	e.POST("/tasks/:taskId/worktree/auto-merge", h.UpdateTaskAutoMerge)
 	e.POST("/tasks/:taskId/worktree/merge", h.MergeTaskBranch)
+	e.POST("/tasks/:taskId/worktree/rebase", h.RebaseTaskBranch)
 	e.POST("/tasks/:taskId/worktree/pull-request", h.CreateTaskPullRequest)
 	e.POST("/tasks/:taskId/worktree/resolve", h.ResolveTaskConflicts)
 	e.POST("/tasks/:taskId/worktree/abort", h.AbortTaskMerge)

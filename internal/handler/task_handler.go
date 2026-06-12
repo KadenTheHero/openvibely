@@ -637,6 +637,26 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 //
 // Active tasks (running/queued) are skipped because their worktree is in use
 // and the branch may legitimately match the target tip mid-execution.
+func (h *Handler) taskRebaseAvailable(task *models.Task, project *models.Project, branchAlreadyMerged bool) bool {
+	if task == nil || project == nil || project.RepoPath == "" || task.WorktreeBranch == "" || task.WorktreePath == "" {
+		return false
+	}
+	if branchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged || task.MergeStatus == models.MergeStatusConflict {
+		return false
+	}
+	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 {
+		return false
+	}
+	targetBranch := task.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = service.GetDefaultBranch(project.RepoPath)
+	}
+	if targetBranch == "" {
+		return false
+	}
+	return service.IsBranchBehindTarget(project.RepoPath, task.WorktreeBranch, targetBranch)
+}
+
 func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models.Task) bool {
 	if task == nil || task.WorktreeBranch == "" {
 		return false
@@ -758,6 +778,8 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
 		}
 
+		rebaseAvailable := h.taskRebaseAvailable(task, project, branchAlreadyMerged)
+
 		// Active tasks with an existing worktree should prefer live diff even if
 		// merge_status is stale from a previous run/follow-up.
 		isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
@@ -766,7 +788,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 		if !isActive && task.MergeStatus == models.MergeStatusMerged {
 			diffOutput := latestNonEmptyDiff(executions)
 			return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-				diffOutput, task, nil, reviewComments, taskPR, branchAlreadyMerged,
+				diffOutput, task, nil, reviewComments, taskPR, branchAlreadyMerged, rebaseAvailable,
 			))
 		}
 
@@ -800,7 +822,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 					}
 
 					return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-						diffOutput, task, fileStats, reviewComments, taskPR, branchAlreadyMerged,
+						diffOutput, task, fileStats, reviewComments, taskPR, branchAlreadyMerged, rebaseAvailable,
 					))
 				}
 			}
@@ -810,7 +832,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 		for i := len(executions) - 1; i >= 0; i-- {
 			if executions[i].DiffOutput != "" {
 				return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-					executions[i].DiffOutput, task, nil, reviewComments, taskPR, branchAlreadyMerged,
+					executions[i].DiffOutput, task, nil, reviewComments, taskPR, branchAlreadyMerged, rebaseAvailable,
 				))
 			}
 		}
