@@ -1031,10 +1031,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							var status = document.getElementById('openai_compatible_discovery_status');
 							var hasPresetDefault = Object.prototype.hasOwnProperty.call(openAICompatiblePresetDefaults, preset);
 							var next = hasPresetDefault ? openAICompatiblePresetDefaults[preset] : '';
-							if (hasPresetDefault && preset !== 'custom' && (force || !baseURL.value || Object.values(openAICompatiblePresetDefaults).indexOf(baseURL.value) !== -1)) {
+							if (hasPresetDefault && preset !== 'custom' && (force || (!isEditingModelForm() && !baseURL.value))) {
 								baseURL.value = next;
 							}
-								if (isDiscoverableOpenAICompatiblePreset()) {
+							if (isDiscoverableOpenAICompatiblePreset()) {
 									runAutoDiscoverOpenAICompatibleModels();
 								} else if (status) {								status.textContent = 'Enter the model ID manually for local or custom endpoints.';
 								}						}
