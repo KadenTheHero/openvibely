@@ -24,18 +24,18 @@ templ Tasks(projects []models.Project, project *models.Project, tasks []models.T
 }
 
 templ TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string) {
-	<div class="flex flex-col h-full overflow-hidden">
-		<div class="flex items-center justify-between mb-6 flex-shrink-0">
+	<div class="flex flex-col h-full min-h-0 overflow-x-hidden overflow-y-hidden">
+		<div class="flex flex-col gap-3 mb-4 flex-shrink-0 sm:flex-row sm:items-center sm:justify-between sm:mb-6">
 			<h2 class="text-2xl font-bold">Tasks</h2>
-			<div class="flex gap-2">
-				<button class="btn btn-primary btn-sm" onclick="openNewTaskModal()">
+			<div class="flex gap-2 w-full sm:w-auto">
+				<button class="btn btn-primary btn-sm min-h-11 w-full sm:w-auto" onclick="openNewTaskModal()">
 					+ Add Task
 				</button>
 			</div>
 		</div>
 
 		if project != nil {
-			<div id="tasks-page" data-project-id={ project.ID } class="flex-1 overflow-hidden">
+			<div id="tasks-page" data-project-id={ project.ID } class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto lg:overflow-y-hidden">
 			<!-- Kanban Board -->
 			@components.KanbanBoard(tasks, project.ID, backlogSort, completedSort, agents, agentDefs)
 			</div>
@@ -102,8 +102,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 								</select>
 							</div>
 						}
-						<div class="grid grid-cols-2 gap-3">
-							<div class="form-control">
+							<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">							<div class="form-control">
 								<label class="label"><span class="label-text">Category</span></label>
 								<select name="category" class="select select-bordered" id="task-category-select">
 									for _, cat := range models.SelectableCategories {

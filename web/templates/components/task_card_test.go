@@ -202,6 +202,40 @@ func TestTaskThreadStatusIndicator_Pending_NoIndicator(t *testing.T) {
 	}
 }
 
+func TestTaskCard_HasMobileSafeActionsAndReadableText(t *testing.T) {
+	task := models.Task{
+		ID:        "task-1",
+		ProjectID: "default",
+		Title:     "A very long task title that should wrap on mobile instead of overflowing the viewport or disappearing behind controls",
+		Prompt:    "A very long task prompt that should wrap safely on narrow task cards so the card remains readable without horizontal scrolling.",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskCard(task, "default", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task card: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		"min-w-0",
+		"overflow-hidden",
+		"min-h-11",
+		"h-11",
+		"w-11",
+		"pt-14",
+		"sm:pt-4",
+		"break-words",
+		"line-clamp-3",
+		"max-w-[calc(100vw-2rem)]",
+		`class="text-sm min-h-11"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected mobile-safe task card markup to contain %q, got %s", want, body)
+		}
+	}
+}
+
 func TestTaskCard_RendersGoalBadge(t *testing.T) {
 	task := models.Task{
 		ID:        "task-1",

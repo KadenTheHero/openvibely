@@ -93,7 +93,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 			templ_7745c5c3_Var3 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"flex flex-col h-full overflow-hidden\"><div class=\"flex items-center justify-between mb-6 flex-shrink-0\"><h2 class=\"text-2xl font-bold\">Tasks</h2><div class=\"flex gap-2\"><button class=\"btn btn-primary btn-sm\" onclick=\"openNewTaskModal()\">+ Add Task</button></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"flex flex-col h-full min-h-0 overflow-x-hidden overflow-y-hidden\"><div class=\"flex flex-col gap-3 mb-4 flex-shrink-0 sm:flex-row sm:items-center sm:justify-between sm:mb-6\"><h2 class=\"text-2xl font-bold\">Tasks</h2><div class=\"flex gap-2 w-full sm:w-auto\"><button class=\"btn btn-primary btn-sm min-h-11 w-full sm:w-auto\" onclick=\"openNewTaskModal()\">+ Add Task</button></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -111,7 +111,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" class=\"flex-1 overflow-hidden\"><!-- Kanban Board -->")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" class=\"flex-1 min-h-0 overflow-x-hidden overflow-y-auto lg:overflow-y-hidden\"><!-- Kanban Board -->")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -278,7 +278,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<div class=\"grid grid-cols-2 gap-3\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Category</span></label> <select name=\"category\" class=\"select select-bordered\" id=\"task-category-select\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<div class=\"grid grid-cols-1 gap-3 sm:grid-cols-2\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Category</span></label> <select name=\"category\" class=\"select select-bordered\" id=\"task-category-select\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -290,7 +290,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var12 string
 				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(cat))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 110, Col: 37}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 109, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 				if templ_7745c5c3_Err != nil {
@@ -303,7 +303,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var13 string
 				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(string(cat))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 111, Col: 24}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 110, Col: 24}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 				if templ_7745c5c3_Err != nil {

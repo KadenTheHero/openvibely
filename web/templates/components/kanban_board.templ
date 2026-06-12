@@ -2,8 +2,8 @@ package components
 
 import (
 	"fmt"
-	"strings"
 	"github.com/openvibely/openvibely/internal/models"
+	"strings"
 )
 
 func capitalize(s string) string {
@@ -59,7 +59,6 @@ func filterPendingTasks(tasks []models.Task) []models.Task {
 	return pending
 }
 
-
 func countActiveDisplayedTasks(tasks []models.Task) int {
 	count := 0
 	for _, task := range tasks {
@@ -102,7 +101,7 @@ func isSortActive(sortBy, option string) string {
 }
 
 templ KanbanBoard(tasks []models.Task, projectID string, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent) {
-	<div id="kanban-board" class="flex gap-4 overflow-x-auto h-full">
+	<div id="kanban-board" class="grid grid-cols-1 gap-4 h-full overflow-x-hidden overflow-y-auto md:grid-cols-2 lg:grid-cols-4 lg:overflow-y-hidden">
 		for _, cat := range models.AllCategories {
 			if cat == models.CategoryActive {
 				@KanbanColumn(filterActiveColumn(tasks), projectID, cat, backlogSort, completedSort, llmModels, agentDefs)
@@ -114,7 +113,7 @@ templ KanbanBoard(tasks []models.Task, projectID string, backlogSort string, com
 }
 
 templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCategory, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent) {
-	<div class="kanban-column min-w-0 bg-base-300 rounded-lg p-3 flex flex-col h-full">
+	<div class="kanban-column w-full min-w-0 bg-base-300 rounded-lg p-3 flex flex-col min-h-[18rem] lg:h-full lg:min-h-0">
 		<div class="flex items-center justify-between mb-3 flex-shrink-0">
 			<div class="flex items-center gap-2">
 				<h3 class="font-bold text-lg">{ capitalize(string(category)) }</h3>
@@ -124,20 +123,21 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 					<span class="badge badge-sm badge-ghost">{ fmt.Sprintf("%d", len(tasks)) }</span>
 				}
 			</div>
-				if category == models.CategoryCompleted {
-					<div class="dropdown dropdown-end">
-						<label tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-							</svg>
-						</label>
-						<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 z-[100]">						<li class="menu-title"><span>Sort By</span></li>
+			if category == models.CategoryCompleted {
+				<div class="dropdown dropdown-end">
+					<label tabindex="0" class="btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0" title="More actions" onclick="handleDropdownToggle(event)">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+						</svg>
+					</label>
+					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]">
+						<li class="menu-title"><span>Sort By</span></li>
 						<li>
 							<a
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=title_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm", isSortActive(completedSort, "title_asc") }
+								class={ "text-sm min-h-11", isSortActive(completedSort, "title_asc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path>
@@ -150,7 +150,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=title_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm", isSortActive(completedSort, "title_desc") }
+								class={ "text-sm min-h-11", isSortActive(completedSort, "title_desc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path>
@@ -163,7 +163,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=created_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm", isSortActive(completedSort, "created_desc") }
+								class={ "text-sm min-h-11", isSortActive(completedSort, "created_desc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
@@ -176,7 +176,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=created_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm", isSortActive(completedSort, "created_asc") }
+								class={ "text-sm min-h-11", isSortActive(completedSort, "created_asc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
@@ -189,7 +189,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=priority_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm", isSortActive(completedSort, "priority_desc") }
+								class={ "text-sm min-h-11", isSortActive(completedSort, "priority_desc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
@@ -202,7 +202,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=priority_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm", isSortActive(completedSort, "priority_asc") }
+								class={ "text-sm min-h-11", isSortActive(completedSort, "priority_asc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
@@ -218,7 +218,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 									hx-target="#kanban-board"
 									hx-swap="outerHTML"
 									hx-confirm="Are you sure you want to delete all completed tasks? This action cannot be undone."
-									class="text-error"
+									class="text-error min-h-11"
 								>
 									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
@@ -230,20 +230,21 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 					</ul>
 				</div>
 			}
-				if category == models.CategoryBacklog {
-					<div class="dropdown dropdown-end">
-						<label tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-							</svg>
-						</label>
-						<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 z-[100]">						<li class="menu-title"><span>Sort By</span></li>
+			if category == models.CategoryBacklog {
+				<div class="dropdown dropdown-end">
+					<label tabindex="0" class="btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0" title="More actions" onclick="handleDropdownToggle(event)">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+						</svg>
+					</label>
+					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]">
+						<li class="menu-title"><span>Sort By</span></li>
 						<li>
 							<a
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=title_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm", isSortActive(backlogSort, "title_asc") }
+								class={ "text-sm min-h-11", isSortActive(backlogSort, "title_asc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path>
@@ -256,7 +257,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=title_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm", isSortActive(backlogSort, "title_desc") }
+								class={ "text-sm min-h-11", isSortActive(backlogSort, "title_desc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path>
@@ -269,7 +270,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=created_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm", isSortActive(backlogSort, "created_desc") }
+								class={ "text-sm min-h-11", isSortActive(backlogSort, "created_desc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
@@ -282,7 +283,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=created_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm", isSortActive(backlogSort, "created_asc") }
+								class={ "text-sm min-h-11", isSortActive(backlogSort, "created_asc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
@@ -295,7 +296,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=priority_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm", isSortActive(backlogSort, "priority_desc") }
+								class={ "text-sm min-h-11", isSortActive(backlogSort, "priority_desc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
@@ -308,7 +309,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=priority_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm", isSortActive(backlogSort, "priority_asc") }
+								class={ "text-sm min-h-11", isSortActive(backlogSort, "priority_asc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
@@ -325,7 +326,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 										hx-target="#kanban-board"
 										hx-swap="outerHTML"
 										hx-confirm={ fmt.Sprintf("Execute all %d eligible backlog tasks? They will be moved to Active and submitted for execution.", countEligibleBacklogTasks(tasks)) }
-										class="text-sm"
+										class="text-sm min-h-11"
 									>
 										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
@@ -341,7 +342,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 											hx-target="#kanban-board"
 											hx-swap="outerHTML"
 											hx-confirm={ fmt.Sprintf("Execute %d urgent priority backlog tasks?", countEligibleBacklogByPriority(tasks, 4)) }
-											class="text-sm pl-8"
+											class="text-sm pl-8 min-h-11"
 										>
 											{ fmt.Sprintf("Execute Urgent (%d)", countEligibleBacklogByPriority(tasks, 4)) }
 										</a>
@@ -354,7 +355,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 											hx-target="#kanban-board"
 											hx-swap="outerHTML"
 											hx-confirm={ fmt.Sprintf("Execute %d high priority backlog tasks?", countEligibleBacklogByPriority(tasks, 3)) }
-											class="text-sm pl-8"
+											class="text-sm pl-8 min-h-11"
 										>
 											{ fmt.Sprintf("Execute High (%d)", countEligibleBacklogByPriority(tasks, 3)) }
 										</a>
@@ -367,7 +368,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 											hx-target="#kanban-board"
 											hx-swap="outerHTML"
 											hx-confirm={ fmt.Sprintf("Execute %d normal priority backlog tasks?", countEligibleBacklogByPriority(tasks, 2)) }
-											class="text-sm pl-8"
+											class="text-sm pl-8 min-h-11"
 										>
 											{ fmt.Sprintf("Execute Normal (%d)", countEligibleBacklogByPriority(tasks, 2)) }
 										</a>
@@ -380,7 +381,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 											hx-target="#kanban-board"
 											hx-swap="outerHTML"
 											hx-confirm={ fmt.Sprintf("Execute %d low priority backlog tasks?", countEligibleBacklogByPriority(tasks, 1)) }
-											class="text-sm pl-8"
+											class="text-sm pl-8 min-h-11"
 										>
 											{ fmt.Sprintf("Execute Low (%d)", countEligibleBacklogByPriority(tasks, 1)) }
 										</a>
@@ -406,7 +407,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 									hx-target="#kanban-board"
 									hx-swap="outerHTML"
 									hx-confirm="Are you sure you want to delete all backlog tasks? This action cannot be undone."
-									class="text-error"
+									class="text-error min-h-11"
 								>
 									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
