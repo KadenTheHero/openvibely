@@ -93,6 +93,15 @@ func NormalizeStandaloneSkillPackage(content, packageName, scope string) (*Skill
 		} else if strings.TrimSpace(scope) != "" {
 			decl.Skill.Scope = scope
 		}
+		if strings.TrimSpace(decl.Skill.Name) == "" {
+			decl.Skill.Name = inferSkillName("", body)
+			if decl.Skill.Name == "skill" {
+				decl.Skill.Name = firstNonEmpty(packageName, decl.Skill.Key)
+			}
+		}
+		if strings.TrimSpace(decl.Skill.Description) == "" {
+			decl.Skill.Description = firstMarkdownParagraph(body)
+		}
 		if decl.Skill.Enabled == nil {
 			decl.Skill.Enabled = boolPtr(true)
 		}

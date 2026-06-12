@@ -446,6 +446,35 @@ routing:
 	}
 }
 
+func TestNormalizeStandaloneSkillPackage_ValidDeclarationFillsRequiredFrontmatterFields(t *testing.T) {
+	content := `---
+kind: openvibely.agent_skill
+version: 1
+skill:
+  key: sparse_skill
+---
+# Sparse Skill
+
+Use this sparse skill body as the description.
+`
+	decl, body, err := NormalizeStandaloneSkillPackage(content, "ignored", "project")
+	if err != nil {
+		t.Fatalf("NormalizeStandaloneSkillPackage: %v", err)
+	}
+	if decl.Skill.Name == "" || decl.Skill.Description == "" || decl.Skill.Enabled == nil || !*decl.Skill.Enabled {
+		t.Fatalf("required fields were not filled: %+v", decl.Skill)
+	}
+	rendered, err := RenderSkillMarkdown(decl, body)
+	if err != nil {
+		t.Fatalf("RenderSkillMarkdown: %v", err)
+	}
+	for _, want := range []string{"name: Sparse Skill", "description: Use this sparse skill body as the description.", "enabled: true"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered declaration missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
 func TestImportSkillPackage_WritesSkillSupportIndexAndCatalogLoads(t *testing.T) {
 	imp, _, root := newImporter(t)
 	content := `---
