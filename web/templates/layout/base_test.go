@@ -438,3 +438,34 @@ func TestCollapsedSidebar_NoHoverTooltipBoxes(t *testing.T) {
 		}
 	}
 }
+
+func TestToolOutputCSS_UsesBoundedResponsiveScrollableContainer(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	expected := []string{
+		".stream-tool-body {",
+		"max-width: 100%;",
+		"min-width: 0;",
+		"grid-template-columns: max-content minmax(0, 1fr);",
+		".stream-tool-body-content {",
+		"overflow-x: auto;",
+		"overflow-y: auto;",
+		"max-height: min(26rem, 52vh);",
+		"max-width: 100%;",
+		"overscroll-behavior: contain;",
+		"width: max-content;",
+		"min-width: 100%;",
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(html, fragment) {
+			t.Fatalf("expected tool output CSS fragment %q", fragment)
+		}
+	}
+	if strings.Contains(html, "max-height: none;") {
+		t.Fatal("tool output body must be height-bounded instead of unbounded")
+	}
+}

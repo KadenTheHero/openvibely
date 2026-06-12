@@ -1615,12 +1615,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					border-radius: 5px;
 					align-items: start;
 					max-width: 100%;
+					min-width: 0;
 					margin: 4px 0;
 					font-size: 0.85em;
 				}
 				.stream-tool-body-grid {
 					display: grid;
-					grid-template-columns: max-content 1fr;
+					grid-template-columns: max-content minmax(0, 1fr);
+					max-width: 100%;
 				}
 				.stream-tool-body-row {
 					display: contents;
@@ -1643,9 +1645,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					padding: 4px;
 					overflow-x: auto;
 					overflow-y: auto;
-					max-height: none;
+					max-height: min(26rem, 52vh);
 					width: 100%;
+					max-width: 100%;
 					min-width: 0;
+					overscroll-behavior: contain;
 					scrollbar-width: thin;
 					scrollbar-color: hsl(var(--bc) / 0.3) transparent;
 				}

@@ -2494,6 +2494,15 @@ templ ChatAutoScrollScript() {
 			container.querySelectorAll('details.stream-thinking').forEach(function(d) {
 				prevThinkingStates.push(d.open);
 			});
+
+			// Preserve per-tool output scroll state across streaming re-renders.
+			// The renderer rebuilds the container on each chunk, so each tool output
+			// block must independently remember whether it was pinned to bottom.
+			var prevToolBodyScrollStates = [];
+			container.querySelectorAll('.stream-tool-body-content').forEach(function(el) {
+				var pinned = (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2;
+				prevToolBodyScrollStates.push({ scrollTop: el.scrollTop || 0, pinned: pinned });
+			});
 			if (containerKey && prevThinkingStates.length > 0) {
 				window._thinkingOpenStates[containerKey] = prevThinkingStates.slice();
 			}
@@ -2582,9 +2591,7 @@ templ ChatAutoScrollScript() {
 					inContent = seg.secondary;
 				}
 
-				// Don't show output body for Read/List Files/Write — not useful
-				var suppressOut = (dn === 'Read' || dn === 'List Files' || dn === 'Write');
-				var hasOut = !suppressOut && seg.resultOutput && seg.resultOutput.trim();
+				var hasOut = seg.resultOutput && seg.resultOutput.trim();
 
 				if (!hasIn && !hasOut) return null;
 
@@ -2732,6 +2739,17 @@ templ ChatAutoScrollScript() {
 					window._thinkingOpenStates[containerKey] = currentStates;
 				}
 			}
+
+			// Restore per-tool output scroll positions. If a block was pinned before
+			// the render, keep following new output; otherwise preserve user position.
+			container.querySelectorAll('.stream-tool-body-content').forEach(function(el, idx) {
+				var state = prevToolBodyScrollStates[idx];
+				if (!state || state.pinned) {
+					el.scrollTop = el.scrollHeight;
+				} else {
+					el.scrollTop = state.scrollTop;
+				}
+			});
 
 			// Convert [TASK_ID:xxx] references to clickable links after rendering
 			if (window.convertTaskLinksInMessage) {

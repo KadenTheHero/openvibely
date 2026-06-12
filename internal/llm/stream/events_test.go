@@ -56,6 +56,22 @@ func TestWriteEvent_TextOnlyAndRawOutput(t *testing.T) {
 	}
 }
 
+func TestWriteEvent_ToolResult_PreservesFullOutput(t *testing.T) {
+	sw := NewWriter("", "", nil, context.Background(), time.Hour)
+	defer sw.Stop()
+
+	longOutput := strings.Repeat("0123456789", 40)
+	WriteEvent(sw, Event{Type: EventToolResult, ToolName: "bash", Output: longOutput}, false)
+
+	got := sw.String()
+	if !strings.Contains(got, longOutput) {
+		t.Fatalf("expected full tool output to be preserved, got: %q", got)
+	}
+	if strings.Contains(got, longOutput[:300]+"...") {
+		t.Fatalf("tool output was truncated: %q", got)
+	}
+}
+
 func TestWriteEvent_ToolUse_SanitizesMarkerDelimiters(t *testing.T) {
 	sw := NewWriter("", "", nil, context.Background(), time.Hour)
 	defer sw.Stop()

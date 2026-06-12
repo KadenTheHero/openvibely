@@ -2185,3 +2185,37 @@ func TestChatAutoScrollScript_EarlierLoaderUsesTopIntentWithoutDuplicateRebinds(
 		t.Fatal("prepend anchor state must live on the stable messages container, not the loader that HTMX replaces")
 	}
 }
+
+func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render chat auto-scroll script: %v", err)
+	}
+	content := buf.String()
+
+	required := []string{
+		"var prevToolBodyScrollStates = []",
+		"container.querySelectorAll('.stream-tool-body-content').forEach(function(el)",
+		"var pinned = (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2",
+		"el.scrollTop = el.scrollHeight",
+		"el.scrollTop = state.scrollTop",
+		"var hasOut = seg.resultOutput && seg.resultOutput.trim()",
+		"outPre.textContent = seg.resultOutput.trim()",
+	}
+	for _, fragment := range required {
+		if !strings.Contains(content, fragment) {
+			t.Fatalf("expected tool output renderer to contain %q", fragment)
+		}
+	}
+
+	forbidden := []string{
+		"suppressOut",
+		"dn === 'Read' || dn === 'List Files' || dn === 'Write'",
+		"Don't show output body for Read/List Files/Write",
+	}
+	for _, fragment := range forbidden {
+		if strings.Contains(content, fragment) {
+			t.Fatalf("tool output renderer must not suppress non-empty outputs for any tool type; found %q", fragment)
+		}
+	}
+}

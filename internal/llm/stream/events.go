@@ -83,11 +83,7 @@ func WriteEvent(writer *Writer, event Event, skipThinking bool) {
 		if event.IsError {
 			status = "error"
 		}
-		preview := event.Output
-		if len(preview) > 300 {
-			preview = preview[:300] + "..."
-		}
-		writer.Write([]byte(fmt.Sprintf("[Tool %s %s]\n%s\n[/Tool]\n", event.ToolName, status, preview)))
+		writer.Write([]byte(fmt.Sprintf("[Tool %s %s]\n%s\n[/Tool]\n", event.ToolName, status, event.Output)))
 	case EventSessionID:
 		if event.SessionID != "" {
 			writer.SetSessionID(event.SessionID)
