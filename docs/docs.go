@@ -330,7 +330,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Event type filter",
+                        "description": "Event type filter (selected, loaded, viewed, created, edited)",
                         "name": "event_type",
                         "in": "query"
                     }
@@ -2914,6 +2914,9 @@ const docTemplate = `{
                 "agent_name": {
                     "type": "string"
                 },
+                "created_count": {
+                    "type": "integer"
+                },
                 "edited_count": {
                     "type": "integer"
                 },
@@ -2998,6 +3001,9 @@ const docTemplate = `{
                 "activity_count": {
                     "type": "integer"
                 },
+                "created_count": {
+                    "type": "integer"
+                },
                 "edited_count": {
                     "type": "integer"
                 },
@@ -3050,6 +3056,9 @@ const docTemplate = `{
                 "activity_count": {
                     "type": "integer"
                 },
+                "created_count": {
+                    "type": "integer"
+                },
                 "edited_count": {
                     "type": "integer"
                 },
@@ -3074,6 +3083,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "activity_count": {
+                    "type": "integer"
+                },
+                "created_count": {
                     "type": "integer"
                 },
                 "edited_count": {
@@ -3101,6 +3113,9 @@ const docTemplate = `{
                 },
                 "always_use": {
                     "type": "boolean"
+                },
+                "created_count": {
+                    "type": "integer"
                 },
                 "edited_count": {
                     "type": "integer"

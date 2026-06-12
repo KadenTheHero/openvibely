@@ -10,6 +10,7 @@ const (
 	SkillEventSelected = "selected"
 	SkillEventLoaded   = "loaded"
 	SkillEventViewed   = "viewed"
+	SkillEventCreated  = "created"
 	SkillEventEdited   = "edited"
 
 	SkillEventSourceSkillCurator  = "skill_curator"
@@ -56,6 +57,7 @@ type SkillUsagePeriodMetric struct {
 	SelectedCount int    `json:"selected_count"`
 	LoadedCount   int    `json:"loaded_count"`
 	ViewedCount   int    `json:"viewed_count"`
+	CreatedCount  int    `json:"created_count"`
 	EditedCount   int    `json:"edited_count"`
 	ActivityCount int    `json:"activity_count"`
 }
@@ -66,6 +68,7 @@ type SkillUsageBySkillPeriodMetric struct {
 	SelectedCount int    `json:"selected_count"`
 	LoadedCount   int    `json:"loaded_count"`
 	ViewedCount   int    `json:"viewed_count"`
+	CreatedCount  int    `json:"created_count"`
 	EditedCount   int    `json:"edited_count"`
 	ActivityCount int    `json:"activity_count"`
 }
@@ -76,6 +79,7 @@ type SkillAnalyticsSkillMetric struct {
 	SelectedCount     int        `json:"selected_count"`
 	LoadedCount       int        `json:"loaded_count"`
 	ViewedCount       int        `json:"viewed_count"`
+	CreatedCount      int        `json:"created_count"`
 	EditedCount       int        `json:"edited_count"`
 	ActivityCount     int        `json:"activity_count"`
 	FollowThroughRate *float64   `json:"follow_through_rate,omitempty"`
@@ -108,6 +112,7 @@ type SkillAgentUsageCell struct {
 	SelectedCount int    `json:"selected_count"`
 	LoadedCount   int    `json:"loaded_count"`
 	ViewedCount   int    `json:"viewed_count"`
+	CreatedCount  int    `json:"created_count"`
 	EditedCount   int    `json:"edited_count"`
 	ActivityCount int    `json:"activity_count"`
 }
@@ -120,6 +125,7 @@ type UnderusedSkillMetric struct {
 	SelectedCount int        `json:"selected_count"`
 	LoadedCount   int        `json:"loaded_count"`
 	ViewedCount   int        `json:"viewed_count"`
+	CreatedCount  int        `json:"created_count"`
 	EditedCount   int        `json:"edited_count"`
 	ActivityCount int        `json:"activity_count"`
 	LastActivity  *time.Time `json:"last_activity,omitempty"`

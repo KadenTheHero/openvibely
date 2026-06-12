@@ -7,7 +7,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func (h *Handler) recordManualSkillEdited(c echo.Context, handle, scope, agentID string) {
+func (h *Handler) recordManualSkillEvent(c echo.Context, eventType, handle, scope, agentID string) {
 	if h == nil || h.skillAnalyticsRepo == nil || strings.TrimSpace(handle) == "" {
 		return
 	}
@@ -25,8 +25,23 @@ func (h *Handler) recordManualSkillEdited(c echo.Context, handle, scope, agentID
 		AgentID:     agentID,
 		SkillScope:  normalizedScope,
 		SkillHandle: strings.TrimSpace(handle),
-		EventType:   models.SkillEventEdited,
+		EventType:   normalizedSkillAnalyticsEventType(eventType),
 		Source:      models.SkillEventSourceManual,
 		Surface:     models.SkillSurfaceTaskThread,
 	})
+}
+
+func normalizedSkillAnalyticsEventType(eventType string) string {
+	switch strings.TrimSpace(eventType) {
+	case models.SkillEventCreated:
+		return models.SkillEventCreated
+	case models.SkillEventSelected:
+		return models.SkillEventSelected
+	case models.SkillEventLoaded:
+		return models.SkillEventLoaded
+	case models.SkillEventViewed:
+		return models.SkillEventViewed
+	default:
+		return models.SkillEventEdited
+	}
 }

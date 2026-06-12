@@ -389,8 +389,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 94 {
-		t.Fatalf("max goose version = %d, want 94", maxVersion)
+	if maxVersion != 95 {
+		t.Fatalf("max goose version = %d, want 95", maxVersion)
 	}
 }
 
@@ -741,8 +741,29 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 94 {
-		t.Fatalf("max goose version = %d, want 94", maxVersion)
+	if maxVersion != 95 {
+		t.Fatalf("max goose version = %d, want 95", maxVersion)
+	}
+}
+
+func TestMigration095_AllowsCreatedSkillAnalyticsEvents(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "skill-analytics-created.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("failed to set dialect: %v", err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("failed to run migrations: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO skill_analytics_events (skill_scope, skill_handle, event_type, source, surface) VALUES ('global', 'created_skill', 'created', 'manual', 'task_thread')`); err != nil {
+		t.Fatalf("created skill analytics event rejected: %v", err)
 	}
 }
 

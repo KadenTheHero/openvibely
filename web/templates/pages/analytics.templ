@@ -155,15 +155,16 @@ templ analyticsContent(currentProject *models.Project) {
 						<div class="card-body">
 							<div class="flex flex-wrap items-end justify-between gap-3 mb-2">
 								<div>
-									<h3 class="card-title text-lg">Skills Used Over Time</h3>
-									<p class="text-sm opacity-60">Top skills plus Other by event activity.</p>
+									<h3 class="card-title text-lg">Skill Activity Over Time</h3>
+									<p class="text-sm opacity-60">Top skills plus Other by usage and skill changes.</p>
 								</div>
 								<div class="form-control">
 									<select id="skillUsageEventSelect" class="select select-bordered select-xs min-w-32">
-										<option value="activity_count" selected>All events</option>
+										<option value="activity_count" selected>All activity</option>
 										<option value="selected_count">Selected</option>
 										<option value="loaded_count">Loaded</option>
 										<option value="viewed_count">Viewed</option>
+										<option value="created_count">Created</option>
 										<option value="edited_count">Edited</option>
 									</select>
 								</div>
@@ -345,7 +346,7 @@ templ analyticsContent(currentProject *models.Project) {
 								}
 
 								function renderSkillAnalytics(data) {
-									renderSkillUsageTrend(data?.skill_usage_over_time || []);
+									renderSkillUsageTrend(data?.skill_usage_over_time || [], data?.usage_over_time || []);
 									renderSkillTop(data?.top_skills || []);
 									renderSkillFollow(data?.follow_through || []);
 									renderSkillAgentUsage(data?.agent_usage || {});
@@ -362,9 +363,10 @@ templ analyticsContent(currentProject *models.Project) {
 										acc.selected += row.selected_count || 0;
 										acc.loaded += row.loaded_count || 0;
 										acc.viewed += row.viewed_count || 0;
+										acc.created += row.created_count || 0;
 										acc.edited += row.edited_count || 0;
 										return acc;
-									}, { selected: 0, loaded: 0, viewed: 0, edited: 0 });
+									}, { selected: 0, loaded: 0, viewed: 0, created: 0, edited: 0 });
 								}
 
 
@@ -373,33 +375,42 @@ templ analyticsContent(currentProject *models.Project) {
 									return select ? select.value : 'activity_count';
 								}
 
-								function renderSkillUsageTrend(rows) {
+								function lineDataset(label, data, color) {
+									return { label: label, data: data, borderColor: color, backgroundColor: color, tension: 0.25, fill: false, pointRadius: 2, pointHoverRadius: 4 };
+								}
+
+								function renderSkillUsageTrend(rows, totals) {
 									if (charts.skillUsageTrend) charts.skillUsageTrend.destroy();
 									const canvas = document.getElementById('skillUsageTrendChart');
 									if (!canvas) return;
 									const field = skillUsageEventField();
-									const periods = uniquePeriods(rows);
-									const handles = Array.from(new Set((rows || []).map(row => row.skill_handle || 'unknown'))).sort(function(a, b) {
-										if (a === 'Other') return 1;
-										if (b === 'Other') return -1;
-										return a.localeCompare(b);
-									});
-									const values = new Map((rows || []).map(row => [(row.period || '') + '\x00' + (row.skill_handle || 'unknown'), row[field] || 0]));
+									let labels = [];
+									let datasets = [];
+									if (field === 'activity_count') {
+										const totalRows = totals || [];
+										labels = totalRows.map(row => row.period || '');
+										datasets = [
+											lineDataset('Selected', totalRows.map(row => row.selected_count || 0), 'rgb(59, 130, 246)'),
+											lineDataset('Loaded', totalRows.map(row => row.loaded_count || 0), 'rgb(34, 197, 94)'),
+											lineDataset('Viewed', totalRows.map(row => row.viewed_count || 0), 'rgb(251, 146, 60)'),
+											lineDataset('Created', totalRows.map(row => row.created_count || 0), 'rgb(20, 184, 166)'),
+											lineDataset('Edited', totalRows.map(row => row.edited_count || 0), 'rgb(147, 51, 234)')
+										];
+									} else {
+										labels = uniquePeriods(rows);
+										const handles = Array.from(new Set((rows || []).map(row => row.skill_handle || 'unknown'))).sort(function(a, b) {
+											if (a === 'Other') return 1;
+											if (b === 'Other') return -1;
+											return a.localeCompare(b);
+										});
+										const values = new Map((rows || []).map(row => [(row.period || '') + '\x00' + (row.skill_handle || 'unknown'), row[field] || 0]));
+										datasets = handles.map(function(handle, index) {
+											return lineDataset(skillLabel(handle), labels.map(period => values.get(period + '\x00' + handle) || 0), usageSeriesColors[index % usageSeriesColors.length]);
+										});
+									}
 									charts.skillUsageTrend = new Chart(canvas.getContext('2d'), {
 										type: 'line',
-										data: {
-											labels: periods,
-											datasets: handles.map(function(handle, index) {
-												return {
-													label: skillLabel(handle),
-													data: periods.map(period => values.get(period + '\x00' + handle) || 0),
-													borderColor: usageSeriesColors[index % usageSeriesColors.length],
-													backgroundColor: colorForIndex(index, 0.12),
-													tension: 0.25,
-													fill: false
-												};
-											})
-										},
+										data: { labels: labels, datasets: datasets },
 										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
 									});
 								}
@@ -409,7 +420,7 @@ templ analyticsContent(currentProject *models.Project) {
 									const canvas = document.getElementById('skillTopChart');
 									const chartRows = rows.slice(0, 8).map(function(row) {
 										return Object.assign({}, row, {
-											activity: (row.selected_count || 0) + (row.loaded_count || 0) + (row.viewed_count || 0) + (row.edited_count || 0)
+											activity: (row.selected_count || 0) + (row.loaded_count || 0) + (row.viewed_count || 0) + (row.created_count || 0) + (row.edited_count || 0)
 										});
 									});
 									if (canvas) {
@@ -419,6 +430,7 @@ templ analyticsContent(currentProject *models.Project) {
 												{ label: 'Selected', data: chartRows.map(r => r.selected_count || 0), backgroundColor: 'rgba(59, 130, 246, 0.5)', borderColor: 'rgb(59, 130, 246)', borderWidth: 1 },
 												{ label: 'Loaded', data: chartRows.map(r => r.loaded_count || 0), backgroundColor: 'rgba(34, 197, 94, 0.5)', borderColor: 'rgb(34, 197, 94)', borderWidth: 1 },
 												{ label: 'Viewed', data: chartRows.map(r => r.viewed_count || 0), backgroundColor: 'rgba(251, 146, 60, 0.5)', borderColor: 'rgb(251, 146, 60)', borderWidth: 1 },
+												{ label: 'Created', data: chartRows.map(r => r.created_count || 0), backgroundColor: 'rgba(20, 184, 166, 0.5)', borderColor: 'rgb(20, 184, 166)', borderWidth: 1 },
 												{ label: 'Edited', data: chartRows.map(r => r.edited_count || 0), backgroundColor: 'rgba(147, 51, 234, 0.5)', borderColor: 'rgb(147, 51, 234)', borderWidth: 1 }
 											] },
 											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }

@@ -328,7 +328,7 @@
                     },
                     {
                         "type": "string",
-                        "description": "Event type filter",
+                        "description": "Event type filter (selected, loaded, viewed, created, edited)",
                         "name": "event_type",
                         "in": "query"
                     }
@@ -2912,6 +2912,9 @@
                 "agent_name": {
                     "type": "string"
                 },
+                "created_count": {
+                    "type": "integer"
+                },
                 "edited_count": {
                     "type": "integer"
                 },
@@ -2996,6 +2999,9 @@
                 "activity_count": {
                     "type": "integer"
                 },
+                "created_count": {
+                    "type": "integer"
+                },
                 "edited_count": {
                     "type": "integer"
                 },
@@ -3048,6 +3054,9 @@
                 "activity_count": {
                     "type": "integer"
                 },
+                "created_count": {
+                    "type": "integer"
+                },
                 "edited_count": {
                     "type": "integer"
                 },
@@ -3072,6 +3081,9 @@
             "type": "object",
             "properties": {
                 "activity_count": {
+                    "type": "integer"
+                },
+                "created_count": {
                     "type": "integer"
                 },
                 "edited_count": {
@@ -3099,6 +3111,9 @@
                 },
                 "always_use": {
                     "type": "boolean"
+                },
+                "created_count": {
+                    "type": "integer"
                 },
                 "edited_count": {
                     "type": "integer"

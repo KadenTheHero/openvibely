@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/pages"
 	"gopkg.in/yaml.v3"
 )
@@ -81,10 +82,15 @@ func (h *Handler) CreateSkill(c echo.Context) error {
 	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON")
 	}
-	if _, err := h.writeStandaloneSkillFromDialog(c, req, false); err != nil {
+	res, err := h.writeStandaloneSkillFromDialog(c, req, false)
+	if err != nil {
 		return err
 	}
-	h.recordManualSkillEdited(c, req.Handle, req.Scope, "")
+	eventType := models.SkillEventEdited
+	if res != nil && len(res.Created) > 0 {
+		eventType = models.SkillEventCreated
+	}
+	h.recordManualSkillEvent(c, eventType, req.Handle, req.Scope, "")
 	return h.ListSkills(c)
 }
 
@@ -103,7 +109,7 @@ func (h *Handler) UpdateSkill(c echo.Context) error {
 	if _, err := h.writeStandaloneSkillFromDialog(c, req, true); err != nil {
 		return err
 	}
-	h.recordManualSkillEdited(c, req.Handle, req.Scope, "")
+	h.recordManualSkillEvent(c, models.SkillEventEdited, req.Handle, req.Scope, "")
 	return h.ListSkills(c)
 }
 
@@ -138,10 +144,10 @@ func (h *Handler) ImportSkillPackage(c echo.Context) error {
 	decl.Agent.Key = ""
 	decl.Skill.Scope = scope
 	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: h.agentSkillRoot, Project: h.currentProjectSkillRoot(c)}, nil)
-	if _, err := importer.WriteSkill(c.Request().Context(), decl, body); err != nil {
+	res, err := importer.WriteSkill(c.Request().Context(), decl, body)
+	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	h.recordManualSkillEdited(c, decl.Skill.Key, scope, "")
 	skillDir, err := agentlibrary.SkillDir(root, decl.Skill.Key)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -151,6 +157,11 @@ func (h *Handler) ImportSkillPackage(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 	}
+	eventType := models.SkillEventEdited
+	if res != nil && len(res.Created) > 0 {
+		eventType = models.SkillEventCreated
+	}
+	h.recordManualSkillEvent(c, eventType, decl.Skill.Key, scope, "")
 	return h.ListSkills(c)
 }
 
@@ -227,7 +238,7 @@ func (h *Handler) SetSkillEnabled(c echo.Context) error {
 	if _, writeErr := importer.WriteSkill(c.Request().Context(), decl, body); writeErr != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, writeErr.Error())
 	}
-	h.recordManualSkillEdited(c, handle, scope, "")
+	h.recordManualSkillEvent(c, models.SkillEventEdited, handle, scope, "")
 	return h.ListSkills(c)
 }
 

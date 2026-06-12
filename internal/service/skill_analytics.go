@@ -190,7 +190,7 @@ func instrumentSkillEditRuntimeTools(repo *repository.SkillAnalyticsRepo, base *
 		out, handled, isErr, err := base.Executor(ctx, name, input)
 		tool := strings.ToLower(strings.TrimSpace(name))
 		if handled && !isErr && err == nil && (tool == "skill_manage" || tool == "agent_skill_manage") {
-			if handle, scope := editedSkillFromToolInput(tool, input); handle != "" {
+			if handle, scope, eventType := changedSkillFromToolInput(tool, input); handle != "" {
 				recordSkillAnalyticsEvent(ctx, repo, models.SkillAnalyticsEvent{
 					ProjectID:   meta.ProjectID,
 					TaskID:      meta.TaskID,
@@ -199,7 +199,7 @@ func instrumentSkillEditRuntimeTools(repo *repository.SkillAnalyticsRepo, base *
 					AgentID:     meta.AgentID,
 					SkillScope:  scope,
 					SkillHandle: handle,
-					EventType:   models.SkillEventEdited,
+					EventType:   eventType,
 					Source:      defaultSkillAnalyticsSource(meta.Source, models.SkillEventSourceManual),
 					Surface:     defaultSkillAnalyticsSurface(meta.Surface),
 				})
@@ -210,8 +210,9 @@ func instrumentSkillEditRuntimeTools(repo *repository.SkillAnalyticsRepo, base *
 	return &wrapped
 }
 
-func editedSkillFromToolInput(tool string, input json.RawMessage) (string, string) {
+func changedSkillFromToolInput(tool string, input json.RawMessage) (string, string, string) {
 	var params struct {
+		Action      string `json:"action"`
 		Handle      string `json:"handle"`
 		Scope       string `json:"scope"`
 		Declaration string `json:"declaration"`
@@ -227,7 +228,11 @@ func editedSkillFromToolInput(tool string, input json.RawMessage) (string, strin
 	} else if strings.EqualFold(strings.TrimSpace(params.Scope), models.SkillScopeProject) {
 		scope = models.SkillScopeProject
 	}
-	return handle, scope
+	eventType := models.SkillEventEdited
+	if strings.EqualFold(strings.TrimSpace(params.Action), "create") {
+		eventType = models.SkillEventCreated
+	}
+	return handle, scope, eventType
 }
 
 func skillHandleFromDeclaration(declaration string) string {

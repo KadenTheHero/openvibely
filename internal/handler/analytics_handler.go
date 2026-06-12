@@ -88,7 +88,7 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 // @Param agent_id query string false "Agent ID filter"
 // @Param surface query string false "Surface filter"
 // @Param skill_scope query string false "Skill scope filter"
-// @Param event_type query string false "Event type filter"
+// @Param event_type query string false "Event type filter (selected, loaded, viewed, created, edited)"
 // @Success 200 {object} models.SkillAnalyticsDashboard "Skill analytics"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/skills [get]

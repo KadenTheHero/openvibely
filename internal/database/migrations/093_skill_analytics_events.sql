@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS skill_analytics_events (
     agent_id     TEXT REFERENCES agents(id) ON DELETE SET NULL,
     skill_scope  TEXT NOT NULL CHECK (skill_scope IN ('project','global','agent_owned')),
     skill_handle TEXT NOT NULL,
-    event_type   TEXT NOT NULL CHECK (event_type IN ('selected','loaded','viewed','edited')),
+    event_type   TEXT NOT NULL CHECK (event_type IN ('selected','loaded','viewed','created','edited')),
     source       TEXT NOT NULL CHECK (source IN ('skill_curator','always_use','manual','assigned_agent','lifecycle_hook','system')),
     surface      TEXT NOT NULL CHECK (surface IN ('chat','task_thread','scheduled_task','lifecycle_hook','channel','goal_continuation'))
 );

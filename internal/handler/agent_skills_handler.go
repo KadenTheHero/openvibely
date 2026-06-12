@@ -117,10 +117,15 @@ func (h *Handler) CreateAgentOwnedSkill(c echo.Context) error {
 	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid JSON")
 	}
-	if _, err := h.writeAgentOwnedSkillFromDialog(c, agent, req, false); err != nil {
+	res, err := h.writeAgentOwnedSkillFromDialog(c, agent, req, false)
+	if err != nil {
 		return err
 	}
-	h.recordManualSkillEdited(c, req.Handle, models.SkillScopeAgentOwned, agent.ID)
+	eventType := models.SkillEventEdited
+	if res != nil && len(res.Created) > 0 {
+		eventType = models.SkillEventCreated
+	}
+	h.recordManualSkillEvent(c, eventType, req.Handle, models.SkillScopeAgentOwned, agent.ID)
 	return h.GetAgentSkills(c)
 }
 
@@ -146,7 +151,7 @@ func (h *Handler) UpdateAgentOwnedSkill(c echo.Context) error {
 	if _, err := h.writeAgentOwnedSkillFromDialog(c, agent, req, true); err != nil {
 		return err
 	}
-	h.recordManualSkillEdited(c, req.Handle, models.SkillScopeAgentOwned, agent.ID)
+	h.recordManualSkillEvent(c, models.SkillEventEdited, req.Handle, models.SkillScopeAgentOwned, agent.ID)
 	return h.GetAgentSkills(c)
 }
 
@@ -195,7 +200,7 @@ func (h *Handler) ArchiveAgentOwnedSkill(c echo.Context) error {
 	if err := os.WriteFile(path, []byte(rendered), 0o644); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	h.recordManualSkillEdited(c, handle, models.SkillScopeAgentOwned, agent.ID)
+	h.recordManualSkillEvent(c, models.SkillEventEdited, handle, models.SkillScopeAgentOwned, agent.ID)
 	return h.GetAgentSkills(c)
 }
 

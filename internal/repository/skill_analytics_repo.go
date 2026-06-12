@@ -86,6 +86,7 @@ func (r *SkillAnalyticsRepo) GetUsageOverTime(ctx context.Context, filter SkillA
 		       SUM(CASE WHEN event_type = 'selected' THEN 1 ELSE 0 END) selected_count,
 		       SUM(CASE WHEN event_type = 'loaded' THEN 1 ELSE 0 END) loaded_count,
 		       SUM(CASE WHEN event_type = 'viewed' THEN 1 ELSE 0 END) viewed_count,
+		       SUM(CASE WHEN event_type = 'created' THEN 1 ELSE 0 END) created_count,
 		       SUM(CASE WHEN event_type = 'edited' THEN 1 ELSE 0 END) edited_count,
 		       COUNT(*) activity_count
 		FROM skill_analytics_events e `+where+`
@@ -98,7 +99,7 @@ func (r *SkillAnalyticsRepo) GetUsageOverTime(ctx context.Context, filter SkillA
 	var out []models.SkillUsagePeriodMetric
 	for rows.Next() {
 		var m models.SkillUsagePeriodMetric
-		if err := rows.Scan(&m.Period, &m.SelectedCount, &m.LoadedCount, &m.ViewedCount, &m.EditedCount, &m.ActivityCount); err != nil {
+		if err := rows.Scan(&m.Period, &m.SelectedCount, &m.LoadedCount, &m.ViewedCount, &m.CreatedCount, &m.EditedCount, &m.ActivityCount); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -129,6 +130,7 @@ func (r *SkillAnalyticsRepo) GetSkillUsageOverTime(ctx context.Context, filter S
 		       SUM(CASE WHEN e.event_type = 'selected' THEN 1 ELSE 0 END) selected_count,
 		       SUM(CASE WHEN e.event_type = 'loaded' THEN 1 ELSE 0 END) loaded_count,
 		       SUM(CASE WHEN e.event_type = 'viewed' THEN 1 ELSE 0 END) viewed_count,
+		       SUM(CASE WHEN e.event_type = 'created' THEN 1 ELSE 0 END) created_count,
 		       SUM(CASE WHEN e.event_type = 'edited' THEN 1 ELSE 0 END) edited_count,
 		       COUNT(*) activity_count
 		FROM skill_analytics_events e `+where+`
@@ -141,7 +143,7 @@ func (r *SkillAnalyticsRepo) GetSkillUsageOverTime(ctx context.Context, filter S
 	var out []models.SkillUsageBySkillPeriodMetric
 	for rows.Next() {
 		var m models.SkillUsageBySkillPeriodMetric
-		if err := rows.Scan(&m.Period, &m.SkillHandle, &m.SelectedCount, &m.LoadedCount, &m.ViewedCount, &m.EditedCount, &m.ActivityCount); err != nil {
+		if err := rows.Scan(&m.Period, &m.SkillHandle, &m.SelectedCount, &m.LoadedCount, &m.ViewedCount, &m.CreatedCount, &m.EditedCount, &m.ActivityCount); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -160,6 +162,7 @@ func (r *SkillAnalyticsRepo) GetTopSkills(ctx context.Context, filter SkillAnaly
 		       SUM(CASE WHEN event_type = 'selected' THEN 1 ELSE 0 END) selected_count,
 		       SUM(CASE WHEN event_type = 'loaded' THEN 1 ELSE 0 END) loaded_count,
 		       SUM(CASE WHEN event_type = 'viewed' THEN 1 ELSE 0 END) viewed_count,
+		       SUM(CASE WHEN event_type = 'created' THEN 1 ELSE 0 END) created_count,
 		       SUM(CASE WHEN event_type = 'edited' THEN 1 ELSE 0 END) edited_count,
 		       COUNT(*) activity_count,
 		       MAX(created_at) last_activity
@@ -175,7 +178,7 @@ func (r *SkillAnalyticsRepo) GetTopSkills(ctx context.Context, filter SkillAnaly
 	for rows.Next() {
 		var m models.SkillAnalyticsSkillMetric
 		var lastRaw sql.NullString
-		if err := rows.Scan(&m.SkillHandle, &m.SkillScope, &m.SelectedCount, &m.LoadedCount, &m.ViewedCount, &m.EditedCount, &m.ActivityCount, &lastRaw); err != nil {
+		if err := rows.Scan(&m.SkillHandle, &m.SkillScope, &m.SelectedCount, &m.LoadedCount, &m.ViewedCount, &m.CreatedCount, &m.EditedCount, &m.ActivityCount, &lastRaw); err != nil {
 			return nil, err
 		}
 		if m.SelectedCount > 0 {
@@ -270,6 +273,7 @@ func (r *SkillAnalyticsRepo) GetAgentUsage(ctx context.Context, filter SkillAnal
 		       SUM(CASE WHEN e.event_type = 'selected' THEN 1 ELSE 0 END) selected_count,
 		       SUM(CASE WHEN e.event_type = 'loaded' THEN 1 ELSE 0 END) loaded_count,
 		       SUM(CASE WHEN e.event_type = 'viewed' THEN 1 ELSE 0 END) viewed_count,
+		       SUM(CASE WHEN e.event_type = 'created' THEN 1 ELSE 0 END) created_count,
 		       SUM(CASE WHEN e.event_type = 'edited' THEN 1 ELSE 0 END) edited_count,
 		       SUM(CASE WHEN e.event_type IN ('selected','loaded','viewed') THEN 1 ELSE 0 END) activity_count
 		FROM skill_analytics_events e
@@ -286,7 +290,7 @@ func (r *SkillAnalyticsRepo) GetAgentUsage(ctx context.Context, filter SkillAnal
 	agentSeen := map[string]bool{}
 	for rows.Next() {
 		var cell models.SkillAgentUsageCell
-		if err := rows.Scan(&cell.AgentID, &cell.AgentName, &cell.SkillHandle, &cell.SelectedCount, &cell.LoadedCount, &cell.ViewedCount, &cell.EditedCount, &cell.ActivityCount); err != nil {
+		if err := rows.Scan(&cell.AgentID, &cell.AgentName, &cell.SkillHandle, &cell.SelectedCount, &cell.LoadedCount, &cell.ViewedCount, &cell.CreatedCount, &cell.EditedCount, &cell.ActivityCount); err != nil {
 			return models.SkillAgentUsageHeatmap{}, err
 		}
 		if !agentSeen[cell.AgentID] {
@@ -305,6 +309,7 @@ func (r *SkillAnalyticsRepo) GetUnderusedSkills(ctx context.Context, filter Skil
 		       SUM(CASE WHEN event_type = 'selected' THEN 1 ELSE 0 END) selected_count,
 		       SUM(CASE WHEN event_type = 'loaded' THEN 1 ELSE 0 END) loaded_count,
 		       SUM(CASE WHEN event_type = 'viewed' THEN 1 ELSE 0 END) viewed_count,
+		       SUM(CASE WHEN event_type = 'created' THEN 1 ELSE 0 END) created_count,
 		       SUM(CASE WHEN event_type = 'edited' THEN 1 ELSE 0 END) edited_count,
 		       COUNT(*) activity_count,
 		       MAX(created_at) last_activity
@@ -317,7 +322,7 @@ func (r *SkillAnalyticsRepo) GetUnderusedSkills(ctx context.Context, filter Skil
 	for rows.Next() {
 		var m models.UnderusedSkillMetric
 		var lastRaw sql.NullString
-		if err := rows.Scan(&m.SkillHandle, &m.SkillScope, &m.SelectedCount, &m.LoadedCount, &m.ViewedCount, &m.EditedCount, &m.ActivityCount, &lastRaw); err != nil {
+		if err := rows.Scan(&m.SkillHandle, &m.SkillScope, &m.SelectedCount, &m.LoadedCount, &m.ViewedCount, &m.CreatedCount, &m.EditedCount, &m.ActivityCount, &lastRaw); err != nil {
 			rows.Close()
 			return nil, err
 		}

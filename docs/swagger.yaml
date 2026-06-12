@@ -508,6 +508,8 @@ definitions:
         type: string
       agent_name:
         type: string
+      created_count:
+        type: integer
       edited_count:
         type: integer
       loaded_count:
@@ -563,6 +565,8 @@ definitions:
     properties:
       activity_count:
         type: integer
+      created_count:
+        type: integer
       edited_count:
         type: integer
       follow_through_rate:
@@ -597,6 +601,8 @@ definitions:
     properties:
       activity_count:
         type: integer
+      created_count:
+        type: integer
       edited_count:
         type: integer
       loaded_count:
@@ -613,6 +619,8 @@ definitions:
   models.SkillUsagePeriodMetric:
     properties:
       activity_count:
+        type: integer
+      created_count:
         type: integer
       edited_count:
         type: integer
@@ -631,6 +639,8 @@ definitions:
         type: integer
       always_use:
         type: boolean
+      created_count:
+        type: integer
       edited_count:
         type: integer
       enabled:
@@ -1056,7 +1066,7 @@ paths:
         in: query
         name: skill_scope
         type: string
-      - description: Event type filter
+      - description: Event type filter (selected, loaded, viewed, created, edited)
         in: query
         name: event_type
         type: string
