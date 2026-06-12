@@ -1737,28 +1737,30 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				});
 			})();
 
-				// Clear input and attachments after successful submission
-				form.addEventListener('htmx:beforeRequest', function() {
-					form.setAttribute('hx-post', normalPostEndpoint);
-					messageHistorySubmittedValue = messageInput ? messageInput.value : '';
-				});
+					// Clear input and attachments after successful composer submission.
+					// Ignore bubbled HTMX events from nested composer controls such as queued-input actions.
+					form.addEventListener('htmx:beforeRequest', function(event) {
+						if (!event.detail || event.detail.elt !== form) return;
+						form.setAttribute('hx-post', normalPostEndpoint);
+						messageHistorySubmittedValue = messageInput ? messageInput.value : '';
+					});
 
-				form.addEventListener('htmx:afterRequest', function(event) {
-					if (event.detail.successful) {
-						var xhr = event.detail.xhr;
-						var responseText = xhr ? (xhr.responseText || '') : '';
-						// Keep user draft intact when the handler intentionally returns no content
-						// (e.g. model-setup guard toasts) so users don't lose their message.
-						if (responseText.trim() !== '') {
-							rememberSubmittedMessage(messageHistorySubmittedValue);
-							resetMessageHistoryNavigation();
-							if (messageInput) messageInput.value = '';
-							if (window[clearFuncName]) window[clearFuncName]();
+					form.addEventListener('htmx:afterRequest', function(event) {
+						if (!event.detail || event.detail.elt !== form) return;
+						if (event.detail.successful) {
+							var xhr = event.detail.xhr;
+							var responseText = xhr ? (xhr.responseText || '') : '';
+							// Keep user draft intact when the handler intentionally returns no content
+							// (e.g. model-setup guard toasts) so users don't lose their message.
+							if (responseText.trim() !== '') {
+								rememberSubmittedMessage(messageHistorySubmittedValue);
+								resetMessageHistoryNavigation();
+								if (messageInput) messageInput.value = '';
+								if (window[clearFuncName]) window[clearFuncName]();
+							}
 						}
-					}
-					messageHistorySubmittedValue = '';
-				});
-		})();
+						messageHistorySubmittedValue = '';
+					});		})();
 	</script>
 }
 

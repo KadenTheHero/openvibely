@@ -413,6 +413,7 @@ func TestChatInputForm_MessageHistoryNavigationScript(t *testing.T) {
 		"setMessageInputFromHistory(messageHistoryDraft);",
 		"resetMessageHistoryNavigation();",
 		"rememberSubmittedMessage(messageHistorySubmittedValue);",
+		"if (!event.detail || event.detail.elt !== form) return;",
 	}
 	for _, r := range required {
 		if !strings.Contains(content, r) {
