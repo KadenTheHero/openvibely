@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -150,6 +152,65 @@ func TestGetDefaultAgentForTask_DeletedProjectAgent(t *testing.T) {
 	}
 	if !agent.IsDefault {
 		t.Error("expected the global default agent (IsDefault=true)")
+	}
+}
+
+func TestLLMService_projectIDForWorkDir_ResolvesTaskWorktreesToProject(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+	svc := NewLLMService(nil, nil, nil, projectRepo, nil, nil)
+
+	repoPath := t.TempDir()
+	project := &models.Project{
+		Name:     "Worktree Usage Project",
+		RepoPath: repoPath,
+	}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("Create project: %v", err)
+	}
+
+	for _, workDir := range []string{
+		repoPath,
+		filepath.Join(repoPath, "internal", "service"),
+		filepath.Join(repoPath, ".worktrees", "task_abc123"),
+		filepath.Join(repoPath, ".worktrees", "task_abc123", "internal", "service"),
+	} {
+		if err := os.MkdirAll(workDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll %s: %v", workDir, err)
+		}
+		if got := svc.projectIDForWorkDir(ctx, workDir); got != project.ID {
+			t.Fatalf("projectIDForWorkDir(%q) = %q, want %q", workDir, got, project.ID)
+		}
+	}
+}
+
+func TestLLMService_projectIDForWorkDir_PrefersMostSpecificProject(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+	svc := NewLLMService(nil, nil, nil, projectRepo, nil, nil)
+
+	parentRepo := t.TempDir()
+	childRepo := filepath.Join(parentRepo, "packages", "child")
+	if err := os.MkdirAll(childRepo, 0o755); err != nil {
+		t.Fatalf("MkdirAll child repo: %v", err)
+	}
+	parent := &models.Project{Name: "Parent", RepoPath: parentRepo}
+	child := &models.Project{Name: "Child", RepoPath: childRepo}
+	if err := projectRepo.Create(ctx, parent); err != nil {
+		t.Fatalf("Create parent project: %v", err)
+	}
+	if err := projectRepo.Create(ctx, child); err != nil {
+		t.Fatalf("Create child project: %v", err)
+	}
+
+	workDir := filepath.Join(childRepo, ".worktrees", "task_child")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll worktree: %v", err)
+	}
+	if got := svc.projectIDForWorkDir(ctx, workDir); got != child.ID {
+		t.Fatalf("projectIDForWorkDir(%q) = %q, want child project %q", workDir, got, child.ID)
 	}
 }
 

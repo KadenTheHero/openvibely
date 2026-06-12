@@ -746,7 +746,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if workDir != "" {
 		// For worktree tasks, capture the diff between the task branch and target.
 		if task.WorktreePath != "" && task.WorktreeBranch != "" {
-			diffOutput := s.captureWorktreeDiffAfterExecution(finalizeCtx, exec.ID, &task, repoDir)
+			diffOutput := s.captureWorktreeDiffAfterExecution(finalizeCtx, exec, &task, repoDir, output, agent)
 			if diffOutput != "" {
 				exec.DiffOutput = diffOutput
 			}
@@ -904,15 +904,91 @@ func formatSteeringInstruction(steeringMessage string) string {
 	return strings.TrimSpace(steeringMessage)
 }
 
-func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, execID string, task *models.Task, repoDir string) string {
-	if task == nil || task.WorktreePath == "" || task.WorktreeBranch == "" || repoDir == "" {
+func (s *LLMService) SummarizeWorktreeCommitDiffForAgentID(ctx context.Context, worktreePath string, agentID string, commitCtx WorktreeCommitMessageContext) string {
+	if strings.TrimSpace(agentID) == "" || s.llmConfigRepo == nil {
+		return ""
+	}
+	agent, err := s.llmConfigRepo.GetByID(ctx, agentID)
+	if err != nil || agent == nil {
+		if err != nil {
+			applog.Infof("[agent-svc] commit diff summary agent lookup failed agent=%s: %v", agentID, err)
+		}
+		return ""
+	}
+	return s.SummarizeWorktreeCommitDiff(ctx, worktreePath, *agent, commitCtx)
+}
+
+func (s *LLMService) SummarizeWorktreeCommitDiff(ctx context.Context, worktreePath string, agent models.LLMConfig, commitCtx WorktreeCommitMessageContext) string {
+	diffContext := BuildWorktreeCommitDiffContext(worktreePath)
+	if diffContext == "" {
+		return ""
+	}
+	prompt := buildWorktreeCommitSummaryPrompt(diffContext, commitCtx)
+	summaryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	output, _, err := s.CallAgentDirectNoTools(summaryCtx, prompt, nil, agent, worktreePath)
+	if err != nil {
+		applog.Infof("[agent-svc] commit diff summary failed worktree=%s: %v", worktreePath, err)
+		return ""
+	}
+	for _, summary := range summarizeCommitIntentLines(output) {
+		if summary != "" {
+			return summary
+		}
+	}
+	return ""
+}
+
+func buildWorktreeCommitSummaryPrompt(diffContext string, commitCtx WorktreeCommitMessageContext) string {
+	var b strings.Builder
+	b.WriteString("Write one concise git commit subject for these worktree changes.\n\n")
+	b.WriteString("Rules:\n")
+	b.WriteString("- Describe what actually changed in the diff, not which files were edited.\n")
+	b.WriteString("- Use plain language with no conventional prefix such as feat:, fix:, chore:, docs:, or test:.\n")
+	b.WriteString("- Do not mention tasks, task turns, follow-ups, lifecycle phases, worktrees, or file lists unless that is literally the product code being changed.\n")
+	b.WriteString("- Return only the subject line, max 72 characters.\n")
+	b.WriteString("- If supporting context conflicts with the diff, ignore the supporting context.\n\n")
+	if context := buildWorktreeCommitSupportingContext(commitCtx); context != "" {
+		b.WriteString("Supporting context, only if it agrees with the diff:\n")
+		b.WriteString(context)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Actual diff facts and hunks:\n")
+	b.WriteString(diffContext)
+	return b.String()
+}
+
+func buildWorktreeCommitSupportingContext(commitCtx WorktreeCommitMessageContext) string {
+	parts := make([]string, 0, 3)
+	if summary := strings.TrimSpace(commitCtx.Summary); summary != "" {
+		parts = append(parts, "Previous execution output: "+truncateCommitSnippet(summary, 1500))
+	}
+	if intent := strings.TrimSpace(commitCtx.TurnIntent); intent != "" {
+		parts = append(parts, "User request: "+truncateCommitSnippet(intent, 1000))
+	}
+	if title := strings.TrimSpace(commitCtx.TaskTitle); title != "" {
+		parts = append(parts, "Task title: "+truncateCommitSnippet(title, 300))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec *models.Execution, task *models.Task, repoDir string, outputSummary string, agent models.LLMConfig) string {
+	if exec == nil || task == nil || task.WorktreePath == "" || task.WorktreeBranch == "" || repoDir == "" {
 		return ""
 	}
 	targetBranch := task.MergeTargetBranch
 	if targetBranch == "" {
 		targetBranch = GetDefaultBranch(repoDir)
 	}
-	if err := CommitWorktreeChanges(task.WorktreePath, fmt.Sprintf("Task completed: %s", task.Title)); err != nil {
+	commitCtx := WorktreeCommitMessageContext{
+		Phase:      WorktreeCommitPhaseInitial,
+		TaskTitle:  task.Title,
+		TurnIntent: exec.PromptSent,
+		Summary:    outputSummary,
+	}
+	commitCtx.DiffSummary = s.SummarizeWorktreeCommitDiff(ctx, task.WorktreePath, agent, commitCtx)
+	commitMessage := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
+	if err := CommitWorktreeChanges(task.WorktreePath, commitMessage); err != nil {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, task.WorktreeBranch, err)
 	}
 
@@ -924,11 +1000,11 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 	if diffOutput == "" {
 		return ""
 	}
-	if diffErr := s.execRepo.UpdateDiffOutput(ctx, execID, diffOutput); diffErr != nil {
+	if diffErr := s.execRepo.UpdateDiffOutput(ctx, exec.ID, diffOutput); diffErr != nil {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error saving worktree diff output: %v", diffErr)
 		return diffOutput
 	}
-	applog.Infof("[agent-svc] ExecuteTaskWithAgent captured worktree diff output for exec=%s (%d bytes)", execID, len(diffOutput))
+	applog.Infof("[agent-svc] ExecuteTaskWithAgent captured worktree diff output for exec=%s (%d bytes)", exec.ID, len(diffOutput))
 	return diffOutput
 }
 
@@ -1087,15 +1163,39 @@ func (s *LLMService) projectIDForWorkDir(ctx context.Context, workDir string) st
 		applog.Infof("[usage] error resolving project for workDir=%s: %v", workDir, err)
 		return ""
 	}
+	bestProjectID := ""
+	bestRepoLen := -1
 	for _, project := range projects {
-		if strings.TrimSpace(project.RepoPath) == "" {
+		if !projectWorkDirMatches(project.RepoPath, want) {
 			continue
 		}
-		if filepath.Clean(project.RepoPath) == want {
-			return project.ID
+		repoLen := len(filepath.Clean(project.RepoPath))
+		if repoLen > bestRepoLen {
+			bestProjectID = project.ID
+			bestRepoLen = repoLen
 		}
 	}
-	return ""
+	return bestProjectID
+}
+
+func projectWorkDirMatches(repoPath string, workDir string) bool {
+	repo := strings.TrimSpace(repoPath)
+	if repo == "" || strings.TrimSpace(workDir) == "" {
+		return false
+	}
+	repo = filepath.Clean(repo)
+	want := filepath.Clean(workDir)
+	if repo == want {
+		return true
+	}
+	if rel, err := filepath.Rel(repo, want); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
+		return true
+	}
+	worktreesDir := filepath.Join(repo, ".worktrees")
+	if rel, err := filepath.Rel(worktreesDir, want); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
+		return true
+	}
+	return false
 }
 
 func (s *LLMService) directScopedFilesRuntime(ctx context.Context, agentDef *models.Agent, workDir string) (string, *llmcontracts.RuntimeTools, error) {

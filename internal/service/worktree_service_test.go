@@ -861,6 +861,255 @@ func TestSyncWorktreeFromMainAtStart_DoesNotClearDirtyConflictStatus(t *testing.
 	}
 }
 
+func TestBuildWorktreeCommitMessage_DiffSummaryBeatsUnrelatedContext(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	if err := os.MkdirAll(filepath.Join(repoDir, "web", "templates", "pages"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "web", "templates", "pages", "analytics.templ"), []byte("package pages\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	message := BuildWorktreeCommitMessage(repoDir, WorktreeCommitMessageContext{
+		Phase:       WorktreeCommitPhaseInitial,
+		TaskTitle:   "Improve worker dispatch",
+		TurnIntent:  "Fix worker dispatch when queued follow-ups are waiting",
+		Summary:     "fix worker dispatch when queued follow-ups are waiting",
+		DiffSummary: "render model usage breakdown on analytics page",
+	})
+
+	if message != "render model usage breakdown on analytics page" {
+		t.Fatalf("expected semantic diff summary, got: %q", message)
+	}
+	if strings.Contains(message, "worker") || strings.Contains(message, "follow") {
+		t.Fatalf("unrelated execution context should not override diff summary: %q", message)
+	}
+	if strings.Contains(message, "Execution phase") || strings.Contains(message, "task turn") || strings.Contains(message, "Changed files") || strings.Contains(message, "fix(") || strings.HasPrefix(message, "chore:") || strings.HasPrefix(message, "docs:") || strings.Contains(message, "\n") {
+		t.Fatalf("did not expect process metadata, prefix, or file inventory in commit message, got: %q", message)
+	}
+}
+
+func TestBuildWorktreeCommitMessage_FallsBackToPathSummaryWithoutDiffSummary(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	if err := os.MkdirAll(filepath.Join(repoDir, "internal", "service"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "internal", "service", "worker.go"), []byte("package service\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	message := BuildWorktreeCommitMessage(repoDir, WorktreeCommitMessageContext{
+		Phase:      WorktreeCommitPhaseInitial,
+		TaskTitle:  "Improve worker dispatch",
+		TurnIntent: "Fix worker dispatch when queued runs are waiting",
+		Summary:    "fix worker dispatch when queued runs are waiting",
+	})
+
+	if message != "add worker" {
+		t.Fatalf("expected deterministic diff fallback instead of stored context, got: %q", message)
+	}
+	if strings.Contains(message, "queued") || strings.Contains(message, "Execution phase") || strings.Contains(message, "task turn") || strings.Contains(message, "Changed files") || strings.Contains(message, "fix(") || strings.HasPrefix(message, "chore:") || strings.HasPrefix(message, "docs:") || strings.Contains(message, "\n") {
+		t.Fatalf("did not expect stored context, process metadata, prefix, or file inventory in commit message, got: %q", message)
+	}
+}
+
+func TestBuildWorktreeCommitMessage_LaterExecutionFromDiff(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	if err := os.MkdirAll(filepath.Join(repoDir, "internal", "service"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "internal", "service", "worktree_service_test.go"), []byte("package service\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	message := BuildWorktreeCommitMessage(repoDir, WorktreeCommitMessageContext{
+		Phase:      WorktreeCommitPhaseFollowup,
+		TaskTitle:  "Generic title",
+		TurnIntent: "Update analytics dashboard copy",
+	})
+
+	if message != "add worktree service tests" {
+		t.Fatalf("expected later execution subject from changed test file, got: %q", message)
+	}
+	if strings.Contains(message, "analytics") || strings.Contains(message, "Execution phase") || strings.Contains(message, "task turn") || strings.Contains(message, "follow-up") || strings.Contains(message, "Followup") || strings.Contains(message, "\n") {
+		t.Fatalf("did not expect unrelated context or lifecycle metadata in commit message, got: %q", message)
+	}
+}
+
+func TestSummarizeWorktreeCommitDiff_UsesActualDiffHunks(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	readmePath := filepath.Join(repoDir, "README.md")
+	if err := os.WriteFile(readmePath, []byte("# Test\n\n## Usage\nRun `openvibely serve`.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	svc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
+	mock := &testutil.MockLLMCaller{Response: "docs: document serve command usage"}
+	svc.SetLLMCaller(mock)
+	agent := models.LLMConfig{Provider: models.ProviderTest, Model: "test-model", Name: "Test Agent"}
+
+	summary := svc.SummarizeWorktreeCommitDiff(context.Background(), repoDir, agent, WorktreeCommitMessageContext{
+		TaskTitle:  "Completely unrelated worker change",
+		TurnIntent: "Fix worker dispatch",
+	})
+
+	if summary != "document serve command usage" {
+		t.Fatalf("expected cleaned LLM diff summary, got %q", summary)
+	}
+	if mock.CallCount() != 1 {
+		t.Fatalf("expected one LLM call, got %d", mock.CallCount())
+	}
+	prompt := mock.LastCall().Prompt
+	for _, want := range []string{"Actual diff facts and hunks:", "README.md", "+## Usage", "+Run `openvibely serve`.", "Supporting context, only if it agrees with the diff:"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected prompt to contain %q, got:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(summary, "docs:") || strings.Contains(summary, "worker") || strings.Contains(summary, "\n") {
+		t.Fatalf("summary should be plain one-line diff summary, got %q", summary)
+	}
+}
+
+func TestSummarizeWorktreeCommitDiff_DoesNotReadUntrackedSymlinkTargets(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("external secret must not reach prompt\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(repoDir, "linked-secret.txt")); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	svc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
+	mock := &testutil.MockLLMCaller{Response: "add safe symlink placeholder"}
+	svc.SetLLMCaller(mock)
+	agent := models.LLMConfig{Provider: models.ProviderTest, Model: "test-model", Name: "Test Agent"}
+
+	summary := svc.SummarizeWorktreeCommitDiff(context.Background(), repoDir, agent, WorktreeCommitMessageContext{})
+
+	if summary != "add safe symlink placeholder" {
+		t.Fatalf("expected cleaned model summary, got %q", summary)
+	}
+	if mock.CallCount() != 1 {
+		t.Fatalf("expected one LLM call, got %d", mock.CallCount())
+	}
+	prompt := mock.LastCall().Prompt
+	if !strings.Contains(prompt, "?? linked-secret.txt") {
+		t.Fatalf("expected symlink path to remain in status facts, got:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "external secret must not reach prompt") || strings.Contains(prompt, "Untracked file snippets:") {
+		t.Fatalf("untracked symlink target content leaked into prompt:\n%s", prompt)
+	}
+}
+
+func TestCollectUntrackedFileSnippets_DoesNotReadOutsideResolvedWorktree(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("parent symlink secret must not reach prompt\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	linkDir := filepath.Join(repoDir, "linked-dir")
+	if err := os.Symlink(outsideDir, linkDir); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+
+	snippets := collectUntrackedFileSnippets(repoDir, "?? linked-dir/secret.txt")
+
+	if snippets != "" {
+		t.Fatalf("expected no snippets for path resolved outside worktree, got:\n%s", snippets)
+	}
+}
+
+func TestSummarizeWorktreeCommitDiff_ReturnsEmptyWhenModelUnavailable(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Changed\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	summary := svc.SummarizeWorktreeCommitDiff(context.Background(), repoDir, models.LLMConfig{Provider: models.ProviderTest, Model: "test-model"}, WorktreeCommitMessageContext{})
+	if summary != "" {
+		t.Fatalf("expected empty summary when model call is unavailable, got %q", summary)
+	}
+	message := BuildWorktreeCommitMessage(repoDir, WorktreeCommitMessageContext{DiffSummary: summary})
+	if message != "update README.md" {
+		t.Fatalf("expected deterministic fallback after empty LLM summary, got %q", message)
+	}
+}
+
+func TestBuildWorktreeCommitMessage_UntrackedNestedFileSummary(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	if err := os.MkdirAll(filepath.Join(repoDir, "web", "templates"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "web", "templates", "analytics.templ"), []byte("package templates\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	message := BuildWorktreeCommitMessage(repoDir, WorktreeCommitMessageContext{})
+
+	if message != "add analytics template" {
+		t.Fatalf("unexpected subject: %q", strings.Split(message, "\n")[0])
+	}
+	if strings.Contains(message, "Changed files") || strings.Contains(message, "\n") || strings.HasPrefix(message, "chore:") {
+		t.Fatalf("did not expect file inventory body, got: %q", message)
+	}
+}
+
+func TestBuildWorktreeCommitMessage_SkipsStatusMarkerSummary(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "app.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	message := BuildWorktreeCommitMessage(repoDir, WorktreeCommitMessageContext{
+		Summary: "[STATUS: SUCCESS]",
+	})
+
+	if message != "add app" {
+		t.Fatalf("unexpected subject: %q", strings.Split(message, "\n")[0])
+	}
+	if strings.Contains(message, "STATUS") {
+		t.Fatalf("status marker leaked into commit message: %q", message)
+	}
+}
+
+func TestBuildWorktreeCommitMessage_StripsConventionalPrefixFromDiffSummary(t *testing.T) {
+	message := BuildWorktreeCommitMessage("", WorktreeCommitMessageContext{
+		DiffSummary: "fix(worktree): generate useful commit messages",
+	})
+
+	if message != "generate useful commit messages" {
+		t.Fatalf("unexpected subject: %q", message)
+	}
+}
+
+func TestBuildWorktreeCommitMessage_EmptyNoSummaryFallback(t *testing.T) {
+	message := BuildWorktreeCommitMessage("", WorktreeCommitMessageContext{})
+	if message != "update changes" {
+		t.Fatalf("unexpected fallback message: %q", message)
+	}
+	if strings.Contains(message, "Execution phase") || strings.Contains(message, "task turn") || strings.Contains(message, "follow-up") || strings.Contains(message, "Followup") {
+		t.Fatalf("did not expect lifecycle wording in fallback message: %q", message)
+	}
+}
+
+func TestBuildWorktreeCommitMessage_LaterExecutionNoSummaryFallback(t *testing.T) {
+	message := BuildWorktreeCommitMessage("", WorktreeCommitMessageContext{Phase: WorktreeCommitPhaseFollowup})
+	if message != "refine changes" {
+		t.Fatalf("unexpected later-execution fallback message: %q", message)
+	}
+	if strings.Contains(message, "Execution phase") || strings.Contains(message, "task turn") || strings.Contains(message, "follow-up") || strings.Contains(message, "Followup") {
+		t.Fatalf("did not expect lifecycle wording in later-execution fallback message: %q", message)
+	}
+}
+
 func TestCommitWorktreeChanges(t *testing.T) {
 	repoDir := createTestGitRepo(t)
 

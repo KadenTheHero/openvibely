@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -98,6 +100,68 @@ func TestCreateTaskPullRequest_CreatesAndPersistsPR(t *testing.T) {
 	}
 	if record.PRNumber != 77 {
 		t.Fatalf("expected PR number 77, got %d", record.PRNumber)
+	}
+}
+
+func TestCreateTaskPullRequest_CommitsDirtyWorktreeWithDiffSummaryMessage(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", CloneURL: "https://github.com/openvibely/openvibely.git", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		pushBranchFn: func(_ context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error {
+			return nil
+		},
+		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {
+			return nil, nil
+		},
+		createPRFn: func(_ context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 78, URL: "https://github.com/openvibely/openvibely/pull/78", State: "open"}, nil
+		},
+	})
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init", "-b", "main")
+	runGit(t, repoDir, "config", "user.email", "test@example.com")
+	runGit(t, repoDir, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("base\n"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGit(t, repoDir, "add", "README.md")
+	runGit(t, repoDir, "commit", "-m", "base")
+	runGit(t, repoDir, "checkout", "-b", "task/pr-prep")
+	if err := os.WriteFile(filepath.Join(repoDir, "analytics.templ"), []byte("model usage breakdown\n"), 0644); err != nil {
+		t.Fatalf("write analytics template: %v", err)
+	}
+
+	project := &models.Project{Name: "PR Project", RepoPath: repoDir, RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := h.projectSvc.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Create PR", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: repoDir, WorktreeBranch: "task/pr-prep", MergeTargetBranch: "main"}
+	if err := h.taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(url.Values{}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if status := runGit(t, repoDir, "status", "--porcelain"); status != "" {
+		t.Fatalf("expected clean repo after PR prep commit, got %q", status)
+	}
+	subject := runGit(t, repoDir, "log", "-1", "--pretty=%s")
+	if subject != "add analytics template" {
+		t.Fatalf("expected diff-derived PR prep commit subject, got %q", subject)
+	}
+	if strings.Contains(subject, "Task updates") || strings.Contains(subject, "Create PR") {
+		t.Fatalf("expected no static task PR-prep wording, got %q", subject)
 	}
 }
 
@@ -416,4 +480,3 @@ func TestHandler_GetTaskChanges_HidesMergeOptionsForFailedMergedTask(t *testing.
 		t.Fatalf("expected GitHub section to remain available for already-merged failed task, body=%s", body)
 	}
 }
-

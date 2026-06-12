@@ -546,6 +546,49 @@ func TestLLMService_CallAgentDirect_TestProviderUsesMockCaller(t *testing.T) {
 	}
 }
 
+func TestLLMService_CallAgentDirect_RecordsUsageForProjectWorktree(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	usageRepo := repository.NewUsageRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	repoPath := t.TempDir()
+	project := &models.Project{Name: "Usage Worktree Project", RepoPath: repoPath}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("Create project: %v", err)
+	}
+	worktreePath := filepath.Join(repoPath, ".worktrees", "task_usage")
+	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll worktree: %v", err)
+	}
+
+	svc := NewLLMService(nil, nil, nil, projectRepo, nil, nil)
+	svc.SetUsageRepo(usageRepo)
+	svc.providerAdapters[models.ProviderAnthropic] = providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		return llmcontracts.AgentResult{
+			Output:         "summarize committed diff",
+			TextOnlyOutput: "summarize committed diff",
+			Usage:          llmcontracts.Usage{InputTokens: 10, OutputTokens: 13, TotalTokens: 23},
+		}, nil
+	})
+
+	agent := models.LLMConfig{Name: "Usage Agent", Provider: models.ProviderAnthropic, Model: "claude-test", APIKey: "sk-test"}
+	if err := llmConfigRepo.Create(ctx, &agent); err != nil {
+		t.Fatalf("Create agent: %v", err)
+	}
+	if _, _, err := svc.CallAgentDirect(ctx, "summarize diff", nil, agent, worktreePath); err != nil {
+		t.Fatalf("CallAgentDirect: %v", err)
+	}
+	totals, err := usageRepo.GetUsageTotals(ctx, repository.UsageFilter{ProjectID: project.ID})
+	if err != nil {
+		t.Fatalf("GetUsageTotals: %v", err)
+	}
+	if totals.CallCount != 1 || totals.TotalTokens != 23 {
+		t.Fatalf("expected project usage call_count=1 total_tokens=23, got call_count=%d total_tokens=%d", totals.CallCount, totals.TotalTokens)
+	}
+}
+
 func TestLLMService_CallAgentDirectStreaming_TestProviderUsesMockCaller(t *testing.T) {
 	svc := &LLMService{}
 	mock := testutil.NewMockLLMCaller()

@@ -515,6 +515,481 @@ func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task
 	return nil
 }
 
+type WorktreeCommitPhase string
+
+const (
+	WorktreeCommitPhaseInitial  WorktreeCommitPhase = "initial"
+	WorktreeCommitPhaseFollowup WorktreeCommitPhase = "followup"
+	WorktreeCommitPhaseMerge    WorktreeCommitPhase = "merge-prep"
+)
+
+type WorktreeCommitMessageContext struct {
+	Phase       WorktreeCommitPhase
+	TaskTitle   string
+	TurnIntent  string
+	Summary     string
+	DiffSummary string
+}
+
+// BuildWorktreeCommitMessage builds a descriptive commit message from the
+// current uncommitted worktree diff. If an LLM summary produced from the actual
+// diff is available, it wins; otherwise the fallback is deterministic from the
+// changed paths/statuses and never from stale task text.
+func BuildWorktreeCommitMessage(worktreePath string, ctx WorktreeCommitMessageContext) string {
+	changes := collectWorktreeCommitChanges(worktreePath)
+	diffSummaries := summarizeCommitIntents(ctx.DiffSummary)
+
+	if len(changes) > 0 {
+		return summarizeCommitChanges(changes, diffSummaries)
+	}
+	if len(diffSummaries) > 0 {
+		return diffSummaries[0]
+	}
+	return fallbackCommitSummary(ctx.Phase)
+}
+
+type worktreeCommitChange struct {
+	Path   string
+	Status string
+}
+
+func collectWorktreeCommitChanges(worktreePath string) []worktreeCommitChange {
+	status := collectWorktreeCommitStatus(worktreePath)
+	if status == "" {
+		return nil
+	}
+	changes := make([]worktreeCommitChange, 0)
+	for _, line := range strings.Split(status, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		status := strings.TrimSpace(line[:minInt(2, len(line))])
+		path := strings.TrimSpace(line[minInt(3, len(line)):])
+		if strings.Contains(path, " -> ") {
+			parts := strings.Split(path, " -> ")
+			path = parts[len(parts)-1]
+		}
+		path = strings.Trim(path, `"`)
+		if path == "" {
+			continue
+		}
+		changes = append(changes, worktreeCommitChange{Path: path, Status: status})
+	}
+	return changes
+}
+
+func collectWorktreeCommitStatus(worktreePath string) string {
+	if worktreePath == "" {
+		return ""
+	}
+	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=all")
+	cmd.Dir = worktreePath
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(string(out), "\r\n")
+}
+
+func BuildWorktreeCommitDiffContext(worktreePath string) string {
+	status := collectWorktreeCommitStatus(worktreePath)
+	if status == "" {
+		return ""
+	}
+	parts := []string{"Changed files and statuses:\n" + status}
+	if diff := collectGitDiff(worktreePath, "diff", "--unified=3", "--", "."); diff != "" {
+		parts = append(parts, "Diff hunks:\n"+diff)
+	}
+	if stagedDiff := collectGitDiff(worktreePath, "diff", "--cached", "--unified=3", "--", "."); stagedDiff != "" {
+		parts = append(parts, "Staged diff hunks:\n"+stagedDiff)
+	}
+	if untracked := collectUntrackedFileSnippets(worktreePath, status); untracked != "" {
+		parts = append(parts, "Untracked file snippets:\n"+untracked)
+	}
+	return truncateCommitDiffContext(strings.Join(parts, "\n\n"))
+}
+
+func collectGitDiff(worktreePath string, args ...string) string {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = worktreePath
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func collectUntrackedFileSnippets(worktreePath string, status string) string {
+	const maxFiles = 5
+	snippets := make([]string, 0)
+	for _, line := range strings.Split(status, "\n") {
+		if !strings.HasPrefix(line, "??") {
+			continue
+		}
+		path := strings.TrimSpace(line[minInt(3, len(line)):])
+		path = strings.Trim(path, `"`)
+		if path == "" || strings.Contains(path, "..") || filepath.IsAbs(path) {
+			continue
+		}
+		fullPath := filepath.Join(worktreePath, path)
+		info, err := os.Lstat(fullPath)
+		if err != nil || info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 64*1024 {
+			continue
+		}
+		if !isResolvedPathInside(worktreePath, fullPath) {
+			continue
+		}
+		data, err := os.ReadFile(fullPath)
+		if err != nil || !looksTextForCommitSummary(data) {
+			continue
+		}
+		content := strings.TrimSpace(string(data))
+		if content == "" {
+			continue
+		}
+		snippets = append(snippets, fmt.Sprintf("--- %s ---\n%s", path, truncateCommitSnippet(content, 2000)))
+		if len(snippets) >= maxFiles {
+			break
+		}
+	}
+	return strings.Join(snippets, "\n\n")
+}
+
+func isResolvedPathInside(root string, path string) bool {
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false
+	}
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+func looksTextForCommitSummary(data []byte) bool {
+	for _, b := range data {
+		if b == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func truncateCommitSnippet(value string, max int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) <= max {
+		return value
+	}
+	return strings.TrimSpace(value[:max])
+}
+
+func truncateCommitDiffContext(value string) string {
+	const maxLen = 12000
+	value = strings.TrimSpace(value)
+	if len(value) <= maxLen {
+		return value
+	}
+	return strings.TrimSpace(value[:maxLen]) + "\n[diff truncated]"
+}
+
+func summarizeCommitIntents(values ...string) []string {
+	summaries := make([]string, 0, len(values))
+	seen := make(map[string]bool)
+	for _, value := range values {
+		for _, summary := range summarizeCommitIntentLines(value) {
+			key := strings.ToLower(summary)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			summaries = append(summaries, summary)
+		}
+	}
+	return summaries
+}
+
+func summarizeCommitIntentLines(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	for _, prefix := range []string{"IMPORTANT:", "TASK CREATION:", "---", "RESPONSE FORMAT REQUIREMENT:"} {
+		if idx := strings.Index(value, prefix); idx > 0 {
+			value = strings.TrimSpace(value[:idx])
+		}
+	}
+	summaries := make([]string, 0, 1)
+	for _, line := range strings.Split(value, "\n") {
+		line = cleanCommitSubject(line)
+		if line == "" || isCommitSubjectBoilerplate(line) {
+			continue
+		}
+		summaries = append(summaries, truncateCommitSubject(line))
+		if len(summaries) >= 3 {
+			break
+		}
+	}
+	return summaries
+}
+
+func cleanCommitSubject(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, "`*_#:-. ")
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	lower := strings.ToLower(value)
+	for _, prefix := range []string{"please ", "can you ", "could you ", "would you ", "task: ", "title: "} {
+		if strings.HasPrefix(lower, prefix) {
+			value = strings.TrimSpace(value[len(prefix):])
+			lower = strings.ToLower(value)
+		}
+	}
+	value = stripConventionalCommitPrefix(value)
+	value = strings.TrimSuffix(value, ".")
+	if value == "" {
+		return ""
+	}
+	return lowercaseInitial(value)
+}
+
+func isCommitSubjectBoilerplate(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if regexp.MustCompile(`(?i)^\[status:\s*(success|failed|needs_followup)(\s*\|[^\]]*)?\]$`).MatchString(trimmed) {
+		return true
+	}
+	lower := strings.ToLower(trimmed)
+	return strings.HasPrefix(lower, "status:") ||
+		strings.HasPrefix(lower, "using tool") ||
+		strings.HasPrefix(lower, "tool ") ||
+		strings.HasPrefix(lower, "create_task") ||
+		strings.HasPrefix(lower, "status failed") ||
+		strings.HasPrefix(lower, "status success") ||
+		strings.HasPrefix(lower, "status needs_followup")
+}
+
+func lowercaseInitial(value string) string {
+	if value == "" {
+		return ""
+	}
+	return strings.ToLower(value[:1]) + value[1:]
+}
+
+func truncateCommitSubject(value string) string {
+	const maxLen = 72
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) <= maxLen {
+		return value
+	}
+	cut := strings.LastIndex(value[:maxLen], " ")
+	if cut < 40 {
+		cut = maxLen
+	}
+	return strings.TrimSpace(value[:cut])
+}
+
+func fallbackCommitSummary(phase WorktreeCommitPhase) string {
+	switch phase {
+	case WorktreeCommitPhaseFollowup:
+		return "refine changes"
+	case WorktreeCommitPhaseMerge:
+		return "prepare changes for merge"
+	default:
+		return "update changes"
+	}
+}
+
+func stripConventionalCommitPrefix(value string) string {
+	trimmed := strings.TrimSpace(value)
+	stripped := regexp.MustCompile(`(?i)^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^)]+\))?!?:\s+`).ReplaceAllString(trimmed, "")
+	if stripped == "" {
+		return trimmed
+	}
+	return strings.TrimSpace(stripped)
+}
+
+func summarizeCommitChanges(changes []worktreeCommitChange, diffSummaries []string) string {
+	if len(changes) == 0 {
+		return ""
+	}
+	if len(diffSummaries) > 0 {
+		return diffSummaries[0]
+	}
+	verb := commitChangeVerb(changes)
+	if len(changes) == 1 {
+		return fmt.Sprintf("%s %s", verb, changeLabel(changes[0].Path))
+	}
+	return fmt.Sprintf("%s %s", verb, commonChangeLabel(changes))
+}
+
+func commitChangeVerb(changes []worktreeCommitChange) string {
+	verb := "update"
+	for _, change := range changes {
+		if strings.HasPrefix(change.Status, "A") || strings.HasPrefix(change.Status, "??") {
+			return "add"
+		}
+		if strings.HasPrefix(change.Status, "D") {
+			verb = "remove"
+		}
+	}
+	return verb
+}
+
+func commonChangeLabel(changes []worktreeCommitChange) string {
+	if len(changes) == 0 {
+		return "changes"
+	}
+	if label := commonDirectoryLabel(changes); label != "" {
+		return label
+	}
+	if label := commonBaseWordLabel(changes); label != "" {
+		return label
+	}
+	return fmt.Sprintf("%d files", len(changes))
+}
+
+func commonDirectoryLabel(changes []worktreeCommitChange) string {
+	firstDir := filepath.Dir(changes[0].Path)
+	if firstDir == "." || firstDir == "" {
+		return ""
+	}
+	for _, change := range changes[1:] {
+		if filepath.Dir(change.Path) != firstDir {
+			return ""
+		}
+	}
+	return fmt.Sprintf("%s files", pathLabel(firstDir))
+}
+
+func commonBaseWordLabel(changes []worktreeCommitChange) string {
+	counts := make(map[string]int)
+	for _, change := range changes {
+		seenForPath := make(map[string]bool)
+		for _, token := range pathTokens(change.Path) {
+			if seenForPath[token] {
+				continue
+			}
+			seenForPath[token] = true
+			counts[token]++
+		}
+	}
+	for _, token := range pathTokens(changes[0].Path) {
+		if counts[token] == len(changes) {
+			return pluralizeCommitLabel(token)
+		}
+	}
+	return ""
+}
+
+func changeLabel(path string) string {
+	base := filepath.Base(path)
+	if base == "." || base == string(filepath.Separator) || base == "" {
+		return "files"
+	}
+	lowerBase := strings.ToLower(base)
+	if lowerBase == "readme.md" {
+		return "README.md"
+	}
+	if lowerBase == "go.mod" || lowerBase == "go.sum" || lowerBase == "makefile" {
+		return base
+	}
+	ext := strings.ToLower(filepath.Ext(base))
+	name := strings.TrimSuffix(base, filepath.Ext(base))
+	label := pathLabel(name)
+	if label == "" {
+		return base
+	}
+	if label == "tests" {
+		if parent := pathLabel(filepath.Base(filepath.Dir(path))); parent != "" && parent != "tests" {
+			label = parent + " " + label
+		}
+	}
+	if ext == ".templ" && !strings.HasSuffix(label, " template") {
+		label += " template"
+	}
+	return label
+}
+
+func pathLabel(value string) string {
+	words := pathWords(value)
+	if len(words) == 0 {
+		return ""
+	}
+	if len(words) > 1 && words[len(words)-1] == "test" {
+		words = append(words[:len(words)-1], "tests")
+	}
+	return strings.Join(words, " ")
+}
+
+func pathWords(value string) []string {
+	parts := splitPathTokens(value)
+	words := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if isPathTokenNoise(part) {
+			continue
+		}
+		words = append(words, part)
+	}
+	return words
+}
+
+func pathTokens(path string) []string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	tokens := make([]string, 0)
+	for _, token := range splitPathTokens(path) {
+		if !isPathTokenNoise(token) {
+			tokens = append(tokens, token)
+		}
+	}
+	return tokens
+}
+
+func splitPathTokens(value string) []string {
+	fields := strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	})
+	tokens := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if len(field) >= 3 {
+			tokens = append(tokens, field)
+		}
+	}
+	return tokens
+}
+
+func isPathTokenNoise(value string) bool {
+	switch value {
+	case "go", "mod", "sum", "md", "templ", "tmpl", "html", "ts", "tsx", "js", "jsx", "css", "json", "yaml", "yml":
+		return true
+	default:
+		return false
+	}
+}
+
+func pluralizeCommitLabel(value string) string {
+	if value == "" {
+		return "files"
+	}
+	if strings.HasSuffix(value, "s") {
+		return value
+	}
+	return value + "s"
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // CommitWorktreeChanges stages and commits all changes in the worktree.
 func CommitWorktreeChanges(worktreePath string, message string) error {
 	if strings.TrimSpace(message) == "" {
@@ -594,7 +1069,15 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 	// reject dirty worktrees so the rebase and ref update operate on committed
 	// task branch state only.
 	if task.WorktreePath != "" && mergeType != "ff" {
-		if err := CommitWorktreeChanges(task.WorktreePath, fmt.Sprintf("Auto-commit changes for task: %s", task.Title)); err != nil {
+		commitCtx := WorktreeCommitMessageContext{
+			Phase:     WorktreeCommitPhaseMerge,
+			TaskTitle: task.Title,
+		}
+		if ws.llmSvc != nil && task.AgentID != nil {
+			commitCtx.DiffSummary = ws.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, task.WorktreePath, *task.AgentID, commitCtx)
+		}
+		message := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
+		if err := CommitWorktreeChanges(task.WorktreePath, message); err != nil {
 			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
 			return &MergeResult{ErrorMessage: err.Error()}, fmt.Errorf("auto-commit before merge failed: %w", err)
 		}
@@ -1491,7 +1974,14 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 	// Commit any changes in the worktree. If this fails, do not mark the task
 	// branch as ready/pending; otherwise the Changes tab can offer a branch merge
 	// for a branch that does not actually contain the provider's file edits.
-	msg := fmt.Sprintf("Task completed: %s", task.Title)
+	commitCtx := WorktreeCommitMessageContext{
+		Phase:     WorktreeCommitPhaseInitial,
+		TaskTitle: task.Title,
+	}
+	if ws.llmSvc != nil && task.AgentID != nil {
+		commitCtx.DiffSummary = ws.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, task.WorktreePath, *task.AgentID, commitCtx)
+	}
+	msg := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
 	if err := CommitWorktreeChanges(task.WorktreePath, msg); err != nil {
 		applog.Infof("[worktree] error committing changes for task %s: %v", task.ID, err)
 		if ws.taskRepo != nil {

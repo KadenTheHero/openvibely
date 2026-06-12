@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -252,7 +253,7 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 	}
 
 	if task.WorktreePath != "" {
-		if err := service.CommitWorktreeChanges(task.WorktreePath, fmt.Sprintf("Task updates: %s", task.Title)); err != nil {
+		if err := service.CommitWorktreeChanges(task.WorktreePath, h.buildPullRequestPrepCommitMessage(c.Request().Context(), task)); err != nil {
 			setHTMXToast(c, fmt.Sprintf("Failed to commit changes: %v", err), "failed")
 			return c.NoContent(http.StatusNoContent)
 		}
@@ -316,6 +317,17 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 
 	setHTMXToast(c, fmt.Sprintf("GitHub PR created (#%d)", pr.Number), "success")
 	return h.GetTaskChanges(c)
+}
+
+func (h *Handler) buildPullRequestPrepCommitMessage(ctx context.Context, task *models.Task) string {
+	commitCtx := service.WorktreeCommitMessageContext{
+		Phase:     service.WorktreeCommitPhaseMerge,
+		TaskTitle: task.Title,
+	}
+	if h.llmSvc != nil && task.AgentID != nil {
+		commitCtx.DiffSummary = h.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, task.WorktreePath, *task.AgentID, commitCtx)
+	}
+	return service.BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
 }
 
 // ResolveTaskConflicts triggers AI-assisted conflict resolution.

@@ -1326,11 +1326,8 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 
 	// Capture git diff after status update so it doesn't delay the UI refresh
 	if workDir != "" {
-		commitMessage := ""
-		if task != nil {
-			commitMessage = fmt.Sprintf("Followup: %s", task.Title)
-		}
-		diffOutput := h.captureTaskDiffOutput(ctx, task, workDir, commitMessage)
+		execForCommit, _ := h.execRepo.GetByID(ctx, execID)
+		diffOutput := h.captureTaskDiffOutput(ctx, task, execForCommit, workDir, output)
 
 		if diffOutput != "" {
 			if err := h.execRepo.UpdateDiffOutput(ctx, execID, diffOutput); err != nil {
@@ -1542,7 +1539,7 @@ func (h *Handler) startFollowupDiffSnapshotBroadcast(ctx context.Context, taskID
 	return stop, done
 }
 
-func (h *Handler) captureTaskDiffOutput(ctx context.Context, task *models.Task, workDir, commitMessage string) string {
+func (h *Handler) captureTaskDiffOutput(ctx context.Context, task *models.Task, exec *models.Execution, workDir string, outputSummary string) string {
 	if workDir == "" {
 		return ""
 	}
@@ -1550,9 +1547,18 @@ func (h *Handler) captureTaskDiffOutput(ctx context.Context, task *models.Task, 
 	if task != nil && task.WorktreePath != "" && task.WorktreeBranch != "" && task.WorktreePath == workDir {
 		project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 		if project != nil && project.RepoPath != "" {
-			if commitMessage != "" {
-				service.CommitWorktreeChanges(task.WorktreePath, commitMessage)
+			commitCtx := service.WorktreeCommitMessageContext{
+				Phase:     service.WorktreeCommitPhaseFollowup,
+				TaskTitle: task.Title,
+				Summary:   outputSummary,
 			}
+			if exec != nil {
+				commitCtx.TurnIntent = exec.PromptSent
+				if h.llmSvc != nil {
+					commitCtx.DiffSummary = h.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, task.WorktreePath, exec.AgentConfigID, commitCtx)
+				}
+			}
+			service.CommitWorktreeChanges(task.WorktreePath, service.BuildWorktreeCommitMessage(task.WorktreePath, commitCtx))
 			targetBranch := task.MergeTargetBranch
 			if targetBranch == "" {
 				targetBranch = service.GetDefaultBranch(project.RepoPath)
