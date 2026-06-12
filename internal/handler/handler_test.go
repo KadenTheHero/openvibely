@@ -2562,6 +2562,13 @@ func TestHandler_Analytics_APIEndpoints_ReturnJSON(t *testing.T) {
 	ctx := context.Background()
 	project := createProject(t, h, "Test Project")
 	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Provider = "anthropic"; a.Model = "claude-3-5-sonnet-20241022" })
+	compatibleAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "OpenRouter"
+		a.Provider = models.ProviderOpenAICompatible
+		a.AuthMethod = models.AuthMethodAPIKey
+		a.APIKey = "key"
+		a.Model = "deepseek/deepseek-chat-v3.1:free"
+	})
 	task := createTask(t, h, project.ID, "Analytics Test Task", func(tk *models.Task) { tk.Category = models.CategoryBacklog })
 	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.PromptSent = "test prompt" })
 	if err := h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "output", "", 100, 5000); err != nil {
@@ -2570,11 +2577,18 @@ func TestHandler_Analytics_APIEndpoints_ReturnJSON(t *testing.T) {
 	if err := h.usageRepo.RecordUsageEvent(ctx, &models.LLMUsageEvent{Provider: "anthropic", ProjectID: project.ID, TaskID: task.ID, ExecutionID: exec.ID, AgentConfigID: agent.ID, Model: agent.Model, Operation: "task", Status: "completed", InputTokens: 80, OutputTokens: 20, TotalTokens: 100}); err != nil {
 		t.Fatal(err)
 	}
+	if err := h.usageRepo.RecordUsageEvent(ctx, &models.LLMUsageEvent{Provider: string(models.ProviderOpenAICompatible), ProjectID: project.ID, TaskID: task.ID, ExecutionID: exec.ID, AgentConfigID: compatibleAgent.ID, Model: compatibleAgent.Model, Operation: "chat", Status: "completed", InputTokens: 120, OutputTokens: 45, CachedInputTokens: 20, ReasoningOutputTokens: 8, TotalTokens: 165}); err != nil {
+		t.Fatal(err)
+	}
 
 	usageRec := htmxGet(e, "/api/analytics/usage?project_id="+project.ID+"&range=all&refresh=true")
 	assertCode(t, usageRec, http.StatusOK)
-	assertContains(t, usageRec, `"total_tokens":100`)
+	assertContains(t, usageRec, `"total_tokens":265`)
 	assertContains(t, usageRec, `"model_breakdown"`)
+	assertContains(t, usageRec, `"provider":"openai_compatible"`)
+	assertContains(t, usageRec, `"model":"deepseek/deepseek-chat-v3.1:free"`)
+	assertContains(t, usageRec, `"cached_input_tokens":20`)
+	assertContains(t, usageRec, `"reasoning_output_tokens":8`)
 
 	endpoints := []string{
 		"/api/analytics/success-failure-rates", "/api/analytics/avg-execution-time-by-task",
