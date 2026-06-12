@@ -515,25 +515,25 @@ func TestHandler_TaskThread_LightModeToolCallContrastStyles(t *testing.T) {
 	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-content {`) {
 		t.Error("expected light-theme tool content block style in thread view response")
 	}
-	if !strings.Contains(body, `background: transparent;`) {
-		t.Error("expected light-theme tool outer content block to avoid extra card background")
+	if !strings.Contains(body, `background: var(--ov-l-surface);`) {
+		t.Error("expected light-theme tool content block to own the stable output surface")
 	}
 	if !strings.Contains(body, `border: none;`) {
 		t.Error("expected light-theme tool outer content block to avoid extra border")
 	}
-	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-content pre`) {
-		t.Error("expected light-theme tool inner content style in thread view response")
+	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-scroll pre`) {
+		t.Error("expected light-theme tool inner scroll content style in thread view response")
 	}
-	if !strings.Contains(body, `border: none;`) {
-		t.Error("expected light-theme tool inner content to render without border emphasis")
+	if !strings.Contains(body, `background: transparent;`) {
+		t.Error("expected light-theme tool inner content to avoid a second scrolling surface")
 	}
-	if !strings.Contains(body, `border-radius: 5px;`) {
-		t.Error("expected light-theme tool inner content to retain rounded corners")
+	if !strings.Contains(body, `overflow: hidden;`) {
+		t.Error("expected tool body shell/content to clip child backgrounds to rounded corners")
 	}
 	if !strings.Contains(body, `[data-theme="light"] .tool-status-done`) {
 		t.Error("expected light-theme tool status icon style in thread view response")
 	}
-	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-content pre`) {
+	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-scroll pre`) {
 		t.Error("expected light-theme tool body content color style in thread view response")
 	}
 	if !strings.Contains(body, `.chat-markdown a {`) {

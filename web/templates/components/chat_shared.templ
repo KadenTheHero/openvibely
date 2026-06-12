@@ -2531,7 +2531,7 @@ templ ChatAutoScrollScript() {
 			// The renderer rebuilds the container on each chunk, so each tool output
 			// block must independently remember whether it was pinned to bottom.
 			var prevToolBodyScrollStates = [];
-			container.querySelectorAll('.stream-tool-body-content').forEach(function(el) {
+			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
 				var scrollableY = el.getAttribute('data-scrollable-y') === 'true' || el.scrollHeight > el.clientHeight + 1;
 				var pinned = !scrollableY || (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2;
 				prevToolBodyScrollStates.push({ scrollTop: el.scrollTop || 0, pinned: pinned, scrollableY: scrollableY });
@@ -2641,9 +2641,12 @@ templ ChatAutoScrollScript() {
 					inLbl.textContent = inLabel;
 					var inVal = document.createElement('div');
 					inVal.className = 'stream-tool-body-content';
+					var inScroll = document.createElement('div');
+					inScroll.className = 'stream-tool-body-scroll';
 					var inPre = document.createElement('pre');
 					inPre.textContent = inContent;
-					inVal.appendChild(inPre);
+					inScroll.appendChild(inPre);
+					inVal.appendChild(inScroll);
 					inRow.appendChild(inLbl);
 					inRow.appendChild(inVal);
 					grid.appendChild(inRow);
@@ -2657,9 +2660,12 @@ templ ChatAutoScrollScript() {
 					outLbl.textContent = 'OUT';
 					var outVal = document.createElement('div');
 					outVal.className = 'stream-tool-body-content';
+					var outScroll = document.createElement('div');
+					outScroll.className = 'stream-tool-body-scroll';
 					var outPre = document.createElement('pre');
 					outPre.textContent = seg.resultOutput.trim();
-					outVal.appendChild(outPre);
+					outScroll.appendChild(outPre);
+					outVal.appendChild(outScroll);
 					outRow.appendChild(outLbl);
 					outRow.appendChild(outVal);
 					grid.appendChild(outRow);
@@ -2776,7 +2782,7 @@ templ ChatAutoScrollScript() {
 			// Restore per-tool output scroll positions. Only genuinely overflowing
 			// blocks become vertical scroll targets; boundary wheel/touch events then
 			// chain naturally to the chat/task thread scroller.
-			container.querySelectorAll('.stream-tool-body-content').forEach(function(el, idx) {
+			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el, idx) {
 				var scrollableY = el.scrollHeight > el.clientHeight + 1;
 				if (scrollableY) {
 					el.setAttribute('data-scrollable-y', 'true');
