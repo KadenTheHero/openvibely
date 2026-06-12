@@ -92,39 +92,76 @@ templ analyticsContent(currentProject *models.Project) {
 				<!-- Skill Curator Analytics -->
 				<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
 					<div class="card-body">
-						<div class="flex items-center justify-between gap-3 mb-2">
-							<h3 class="card-title text-lg">Skill Curator Analytics</h3>
-							<span class="text-xs opacity-60">S selected · L loaded · V viewed · E edited</span>
-						</div>
-						<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+						<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
 							<div>
-								<h4 class="font-semibold mb-2">Top Skills</h4>
-								<div class="h-72"><canvas id="skillTopChart"></canvas></div>
-								<div class="overflow-x-auto mt-3">
-									<table class="table table-sm">
-										<thead><tr><th>Skill</th><th>S</th><th>L</th><th>V</th><th>E</th><th>Follow-through</th></tr></thead>
-										<tbody id="skillTopTable"><tr><td colspan="6" class="text-center opacity-50">No skill events yet</td></tr></tbody>
-									</table>
-								</div>
+								<h3 class="card-title text-lg">Skill Curator Analytics</h3>
+								<p class="text-sm opacity-60">Track selected, loaded, viewed, and edited skill activity.</p>
 							</div>
-							<div>
-								<h4 class="font-semibold mb-2">Selection Follow-Through</h4>
-								<div class="h-72"><canvas id="skillFollowChart"></canvas></div>
+							<div class="tabs tabs-boxed bg-base-200" role="tablist" aria-label="Skill analytics views">
+								<button type="button" class="tab tab-active" data-skill-panel="top" role="tab" aria-selected="true">Overview</button>
+								<button type="button" class="tab" data-skill-panel="follow" role="tab" aria-selected="false">Follow-through</button>
+								<button type="button" class="tab" data-skill-panel="agents" role="tab" aria-selected="false">Agents</button>
+								<button type="button" class="tab" data-skill-panel="underused" role="tab" aria-selected="false">Underused</button>
 							</div>
 						</div>
-						<div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
-							<div>
-								<h4 class="font-semibold mb-2">Skill Usage By Agent</h4>
-								<div class="overflow-x-auto" id="skillAgentHeatmap"><p class="text-center opacity-50 py-4">No agent skill activity yet</p></div>
-							</div>
-							<div>
-								<h4 class="font-semibold mb-2">Underused Skills</h4>
-								<div class="overflow-x-auto">
-									<table class="table table-sm">
-										<thead><tr><th>Skill</th><th>Enabled</th><th>Always-use</th><th>S</th><th>L</th><th>V</th><th>E</th><th>Last activity</th></tr></thead>
-										<tbody id="underusedSkillsTable"><tr><td colspan="8" class="text-center opacity-50">No enabled skills found</td></tr></tbody>
-									</table>
+
+						<div class="skill-analytics-panel" data-skill-panel-content="top">
+							<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+								<div class="h-64">
+									<canvas id="skillTopChart"></canvas>
 								</div>
+								<div>
+									<h4 class="font-semibold mb-2">Top Skill Details</h4>
+									<div class="overflow-x-auto max-h-64">
+										<table class="table table-sm">
+											<thead><tr><th>Skill</th><th>S</th><th>L</th><th>V</th><th>E</th><th>Follow</th></tr></thead>
+											<tbody id="skillTopTable"><tr><td colspan="6" class="text-center opacity-50">No skill events yet</td></tr></tbody>
+										</table>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<div class="skill-analytics-panel hidden" data-skill-panel-content="follow">
+							<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+								<div class="h-64">
+									<canvas id="skillFollowChart"></canvas>
+								</div>
+								<div>
+									<h4 class="font-semibold mb-2">Selection Outcomes</h4>
+									<div class="overflow-x-auto max-h-64">
+										<table class="table table-sm">
+											<thead><tr><th>Skill</th><th>Selected</th><th>Used</th><th>Ignored</th><th>Rate</th></tr></thead>
+											<tbody id="skillFollowTable"><tr><td colspan="5" class="text-center opacity-50">No selected skills yet</td></tr></tbody>
+										</table>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<div class="skill-analytics-panel hidden" data-skill-panel-content="agents">
+							<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+								<div class="h-64">
+									<canvas id="skillAgentChart"></canvas>
+								</div>
+								<div>
+									<h4 class="font-semibold mb-2">Top Agent/Skill Pairs</h4>
+									<div class="overflow-x-auto max-h-64">
+										<table class="table table-sm">
+											<thead><tr><th>Agent</th><th>Skill</th><th>Activity</th><th>S</th><th>L</th><th>V</th></tr></thead>
+											<tbody id="skillAgentTable"><tr><td colspan="6" class="text-center opacity-50">No agent skill activity yet</td></tr></tbody>
+										</table>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<div class="skill-analytics-panel hidden" data-skill-panel-content="underused">
+							<div class="overflow-x-auto max-h-96">
+								<table class="table table-sm">
+									<thead><tr><th>Skill</th><th>Scope</th><th>Always-use</th><th>S</th><th>L</th><th>V</th><th>Last activity</th></tr></thead>
+									<tbody id="underusedSkillsTable"><tr><td colspan="7" class="text-center opacity-50">No enabled skills found</td></tr></tbody>
+								</table>
 							</div>
 						</div>
 					</div>
@@ -354,65 +391,122 @@ templ analyticsContent(currentProject *models.Project) {
 									} catch (e) { console.error('loadSkillAnalytics:', e); }
 								}
 
+								function setSkillAnalyticsPanel(panel) {
+									document.querySelectorAll('[data-skill-panel]').forEach(function(tab) {
+										const active = tab.dataset.skillPanel === panel;
+										tab.classList.toggle('tab-active', active);
+										tab.setAttribute('aria-selected', active ? 'true' : 'false');
+									});
+									document.querySelectorAll('[data-skill-panel-content]').forEach(function(content) {
+										content.classList.toggle('hidden', content.dataset.skillPanelContent !== panel);
+									});
+									Object.values(charts).forEach(function(chart) {
+										try { chart.resize(); } catch (e) {}
+									});
+								}
+
 								function renderSkillAnalytics(data) {
 									renderSkillTop(data?.top_skills || []);
 									renderSkillFollow(data?.follow_through || []);
-									renderSkillAgentHeatmap(data?.agent_usage || {});
+									renderSkillAgentUsage(data?.agent_usage || {});
 									renderUnderusedSkills(data?.underused || []);
+								}
+
+								function skillLabel(value) {
+									const text = String(value || 'unknown');
+									return text.length > 34 ? text.slice(0, 31) + '…' : text;
+								}
+
+								function skillEventTotals(rows) {
+									return (rows || []).reduce(function(acc, row) {
+										acc.selected += row.selected_count || 0;
+										acc.loaded += row.loaded_count || 0;
+										acc.viewed += row.viewed_count || 0;
+										acc.edited += row.edited_count || 0;
+										return acc;
+									}, { selected: 0, loaded: 0, viewed: 0, edited: 0 });
 								}
 
 								function renderSkillTop(rows) {
 									if (charts.skillTop) charts.skillTop.destroy();
 									const canvas = document.getElementById('skillTopChart');
 									if (canvas) {
+										const totals = skillEventTotals(rows);
+							const totalEvents = totals.selected + totals.loaded + totals.viewed + totals.edited;
 										charts.skillTop = new Chart(canvas.getContext('2d'), {
-											type: 'bar',
-											data: { labels: rows.map(r => r.skill_handle), datasets: [
-												{ label: 'S selected', data: rows.map(r => r.selected_count || 0), backgroundColor: 'rgba(59, 130, 246, 0.75)' },
-												{ label: 'L loaded', data: rows.map(r => r.loaded_count || 0), backgroundColor: 'rgba(34, 197, 94, 0.75)' },
-												{ label: 'V viewed', data: rows.map(r => r.viewed_count || 0), backgroundColor: 'rgba(251, 146, 60, 0.75)' },
-												{ label: 'E edited', data: rows.map(r => r.edited_count || 0), backgroundColor: 'rgba(147, 51, 234, 0.75)' }
-											] },
-											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true, beginAtZero: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }
+											type: 'pie',
+											data: {
+												labels: totalEvents === 0 ? ['No skill events'] : ['Selected', 'Loaded', 'Viewed', 'Edited'],
+												datasets: [{
+													data: totalEvents === 0 ? [1] : [totals.selected, totals.loaded, totals.viewed, totals.edited],
+													backgroundColor: totalEvents === 0 ? ['rgba(148, 163, 184, 0.35)'] : [
+														'rgba(59, 130, 246, 0.7)',
+														'rgba(34, 197, 94, 0.7)',
+														'rgba(251, 146, 60, 0.7)',
+														'rgba(147, 51, 234, 0.7)'
+													]
+												}]
+											},
+											options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
 										});
 									}
 									const tbody = document.getElementById('skillTopTable');
 									if (!tbody) return;
 									if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center opacity-50">No skill events yet</td></tr>'; return; }
-									tbody.innerHTML = rows.map(r => '<tr><td><code>' + escapeHTML(r.skill_handle) + '</code></td><td>' + formatNumber(r.selected_count) + '</td><td>' + formatNumber(r.loaded_count) + '</td><td>' + formatNumber(r.viewed_count) + '</td><td>' + formatNumber(r.edited_count) + '</td><td>' + (r.follow_through_rate === null || r.follow_through_rate === undefined ? '-' : Math.round(Number(r.follow_through_rate) * 100) + '%') + '</td></tr>').join('');
+									tbody.innerHTML = rows.slice(0, 8).map(r => '<tr><td><code>' + escapeHTML(r.skill_handle) + '</code></td><td>' + formatNumber(r.selected_count) + '</td><td>' + formatNumber(r.loaded_count) + '</td><td>' + formatNumber(r.viewed_count) + '</td><td>' + formatNumber(r.edited_count) + '</td><td>' + (r.follow_through_rate === null || r.follow_through_rate === undefined ? '-' : Math.round(Number(r.follow_through_rate) * 100) + '%') + '</td></tr>').join('');
 								}
 
 								function renderSkillFollow(rows) {
 									if (charts.skillFollow) charts.skillFollow.destroy();
 									const canvas = document.getElementById('skillFollowChart');
-									if (!canvas) return;
-									charts.skillFollow = new Chart(canvas.getContext('2d'), {
-										type: 'bar',
-										data: { labels: rows.map(r => r.skill_handle), datasets: [
-											{ label: 'Selected', data: rows.map(r => r.selected_count || 0), backgroundColor: 'rgba(59, 130, 246, 0.65)' },
-											{ label: 'Loaded/viewed', data: rows.map(r => r.loaded_or_viewed_count || 0), backgroundColor: 'rgba(34, 197, 94, 0.65)' },
-											{ label: 'Ignored', data: rows.map(r => r.ignored_count || 0), backgroundColor: 'rgba(239, 68, 68, 0.65)' }
-										] },
-										options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
-									});
+									if (canvas) {
+										charts.skillFollow = new Chart(canvas.getContext('2d'), {
+											type: 'bar',
+											data: { labels: rows.slice(0, 8).map(r => skillLabel(r.skill_handle)), datasets: [
+												{ label: 'Used', data: rows.slice(0, 8).map(r => r.loaded_or_viewed_count || 0), backgroundColor: 'rgba(34, 197, 94, 0.5)', borderColor: 'rgb(34, 197, 94)', borderWidth: 1 },
+												{ label: 'Ignored', data: rows.slice(0, 8).map(r => r.ignored_count || 0), backgroundColor: 'rgba(239, 68, 68, 0.5)', borderColor: 'rgb(239, 68, 68)', borderWidth: 1 }
+											] },
+											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }
+										});
+									}
+									const tbody = document.getElementById('skillFollowTable');
+									if (!tbody) return;
+									if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="text-center opacity-50">No selected skills yet</td></tr>'; return; }
+									tbody.innerHTML = rows.slice(0, 8).map(r => '<tr><td><code>' + escapeHTML(r.skill_handle) + '</code></td><td>' + formatNumber(r.selected_count) + '</td><td>' + formatNumber(r.loaded_or_viewed_count) + '</td><td>' + formatNumber(r.ignored_count) + '</td><td>' + (r.follow_through_rate === null || r.follow_through_rate === undefined ? '-' : Math.round(Number(r.follow_through_rate) * 100) + '%') + '</td></tr>').join('');
 								}
 
-								function renderSkillAgentHeatmap(heatmap) {
-									const container = document.getElementById('skillAgentHeatmap');
-									if (!container) return;
-									const agents = heatmap.agents || [];
-									const skills = heatmap.skills || [];
+								function renderSkillAgentUsage(heatmap) {
+									if (charts.skillAgent) charts.skillAgent.destroy();
+									const canvas = document.getElementById('skillAgentChart');
 									const cells = heatmap.cells || [];
-									if (agents.length === 0 || skills.length === 0) { container.innerHTML = '<p class="text-center opacity-50 py-4">No agent skill activity yet</p>'; return; }
-									const byKey = new Map(cells.map(c => [(c.agent_id || '') + '\x00' + c.skill_handle, c]));
-									container.innerHTML = '<table class="table table-sm"><thead><tr><th>Agent</th>' + skills.map(s => '<th><code>' + escapeHTML(s) + '</code></th>').join('') + '</tr></thead><tbody>' + agents.map(agent => '<tr><td>' + escapeHTML(agent.agent_name || agent.agent_id || 'Unassigned') + '</td>' + skills.map(skill => { const cell = byKey.get((agent.agent_id || '') + '\x00' + skill) || {}; const value = (cell.selected_count || 0) + (cell.loaded_count || 0) + (cell.viewed_count || 0); const shade = value === 0 ? 'opacity-30' : (value < 3 ? 'opacity-60' : 'opacity-100'); const title = 'selected: ' + (cell.selected_count || 0) + ' loaded: ' + (cell.loaded_count || 0) + ' viewed: ' + (cell.viewed_count || 0) + ' edited: ' + (cell.edited_count || 0); return '<td title="' + escapeHTML(title) + '"><span class="font-mono ' + shade + '">' + (value === 0 ? '░' : '█') + '</span> ' + formatNumber(value) + '</td>'; }).join('') + '</tr>').join('') + '</tbody></table>';
+									const agentNames = new Map((heatmap.agents || []).map(a => [a.agent_id || '', a.agent_name || a.agent_id || 'Unassigned']));
+									const rows = cells.map(function(cell) {
+										return Object.assign({}, cell, {
+											agent_name: agentNames.get(cell.agent_id || '') || 'Unassigned',
+											activity: (cell.selected_count || 0) + (cell.loaded_count || 0) + (cell.viewed_count || 0)
+										});
+									}).filter(row => row.activity > 0).sort((a, b) => b.activity - a.activity).slice(0, 8);
+									if (canvas) {
+										charts.skillAgent = new Chart(canvas.getContext('2d'), {
+											type: 'bar',
+											data: {
+												labels: rows.map(row => skillLabel(row.agent_name + ' · ' + row.skill_handle)),
+												datasets: [{ label: 'Activity', data: rows.map(row => row.activity), backgroundColor: 'rgba(20, 184, 166, 0.5)', borderColor: 'rgb(20, 184, 166)', borderWidth: 1 }]
+											},
+											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
+										});
+									}
+									const tbody = document.getElementById('skillAgentTable');
+									if (!tbody) return;
+									if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center opacity-50">No agent skill activity yet</td></tr>'; return; }
+									tbody.innerHTML = rows.map(row => '<tr><td>' + escapeHTML(row.agent_name) + '</td><td><code>' + escapeHTML(row.skill_handle) + '</code></td><td>' + formatNumber(row.activity) + '</td><td>' + formatNumber(row.selected_count) + '</td><td>' + formatNumber(row.loaded_count) + '</td><td>' + formatNumber(row.viewed_count) + '</td></tr>').join('');
 								}
 
 								function renderUnderusedSkills(rows) {
 									const tbody = document.getElementById('underusedSkillsTable');
 									if (!tbody) return;
-									if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="8" class="text-center opacity-50">No enabled skills found</td></tr>'; return; }
-									tbody.innerHTML = rows.map(r => '<tr><td><code>' + escapeHTML(r.skill_handle) + '</code><div class="text-xs opacity-50">' + escapeHTML(r.skill_scope || '') + '</div></td><td>' + (r.enabled ? 'yes' : 'no') + '</td><td>' + (r.always_use ? 'yes' : 'no') + '</td><td>' + formatNumber(r.selected_count) + '</td><td>' + formatNumber(r.loaded_count) + '</td><td>' + formatNumber(r.viewed_count) + '</td><td>' + formatNumber(r.edited_count) + '</td><td class="text-xs opacity-70">' + relativeTime(r.last_activity) + '</td></tr>').join('');
+									if (rows.length === 0) { tbody.innerHTML = '<tr><td colspan="7" class="text-center opacity-50">No enabled skills found</td></tr>'; return; }
+									tbody.innerHTML = rows.map(r => '<tr><td><code>' + escapeHTML(r.skill_handle) + '</code></td><td><span class="badge badge-ghost badge-sm">' + escapeHTML(r.skill_scope || '') + '</span></td><td>' + (r.always_use ? 'yes' : 'no') + '</td><td>' + formatNumber(r.selected_count) + '</td><td>' + formatNumber(r.loaded_count) + '</td><td>' + formatNumber(r.viewed_count) + '</td><td class="text-xs opacity-70">' + relativeTime(r.last_activity) + '</td></tr>').join('');
 								}
 
 								function modelSeriesKeys(rows) {
@@ -887,6 +981,9 @@ templ analyticsContent(currentProject *models.Project) {
 						});
 						const skillAgentFilter = document.getElementById('skillAgentFilter');
 						if (skillAgentFilter) skillAgentFilter.addEventListener('change', loadSkillAnalytics);
+						document.querySelectorAll('[data-skill-panel]').forEach(function(tab) {
+							tab.addEventListener('click', function() { setSkillAnalyticsPanel(tab.dataset.skillPanel); });
+						});
 							document.getElementById('groupBy').addEventListener('change', () => {
 								loadUsageAnalytics();
 								loadSuccessFailureRates();
