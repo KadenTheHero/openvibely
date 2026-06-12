@@ -1853,7 +1853,14 @@ func RecordUsageFromResult(ctx context.Context, usageRepo *repository.UsageRepo,
 }
 
 func shouldPersistUsageForProvider(agent models.LLMConfig) bool {
-	return (agent.Provider == models.ProviderAnthropic || agent.Provider == models.ProviderOpenAI) && (agent.AuthMethod == models.AuthMethodOAuth || agent.AuthMethod == models.AuthMethodAPIKey || agent.APIKey != "")
+	switch agent.Provider {
+	case models.ProviderAnthropic, models.ProviderOpenAI:
+		return agent.AuthMethod == models.AuthMethodOAuth || agent.AuthMethod == models.AuthMethodAPIKey || agent.APIKey != ""
+	case models.ProviderOpenAICompatible:
+		return agent.AuthMethod == models.AuthMethodAPIKey || agent.APIKey != ""
+	default:
+		return false
+	}
 }
 
 func usageRawJSON(usage llmcontracts.Usage) map[string]any {

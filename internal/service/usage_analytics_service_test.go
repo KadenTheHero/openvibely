@@ -21,6 +21,51 @@ import (
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
+func TestRecordUsageFromResult_PersistsOpenAICompatibleUsageAndAggregates(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewUsageRepo(db)
+	ctx := context.Background()
+
+	configRepo := repository.NewLLMConfigRepo(db)
+	compatible := models.LLMConfig{Name: "OpenRouter", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: "deepseek/deepseek-chat-v3.1:free", APIKey: "key"}
+	if err := configRepo.Create(ctx, &compatible); err != nil {
+		t.Fatalf("create compatible config: %v", err)
+	}
+
+	RecordUsageFromResult(ctx, repo, UsageCapture{Operation: "chat", Status: "completed", LatencyMs: 150, OccurredAt: time.Now().UTC()}, compatible, llmcontracts.AgentResult{Usage: llmusage.FromOpenAI(120, 45, 20, 8)})
+
+	var provider, model string
+	var inputTokens, outputTokens, cachedTokens, reasoningTokens, totalTokens int
+	if err := db.QueryRowContext(ctx, `SELECT provider, model, input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens, total_tokens FROM llm_usage_events`).Scan(&provider, &model, &inputTokens, &outputTokens, &cachedTokens, &reasoningTokens, &totalTokens); err != nil {
+		t.Fatalf("scan compatible usage event: %v", err)
+	}
+	if provider != string(models.ProviderOpenAICompatible) || model != "deepseek/deepseek-chat-v3.1:free" {
+		t.Fatalf("expected exact compatible provider/model, got provider=%q model=%q", provider, model)
+	}
+	if inputTokens != 120 || outputTokens != 45 || cachedTokens != 20 || reasoningTokens != 8 || totalTokens != 165 {
+		t.Fatalf("unexpected compatible usage tokens input=%d output=%d cached=%d reasoning=%d total=%d", inputTokens, outputTokens, cachedTokens, reasoningTokens, totalTokens)
+	}
+
+	svc := NewUsageAnalyticsService(repo, configRepo)
+	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(models.ProviderOpenAICompatible)})
+	if err != nil {
+		t.Fatalf("BuildAnalyticsUsage: %v", err)
+	}
+	if view.Totals.TotalTokens != 165 || view.Totals.CachedInputTokens != 20 || view.Totals.ReasoningOutputTokens != 8 || view.Totals.CallCount != 1 {
+		t.Fatalf("unexpected compatible usage totals: %+v", view.Totals)
+	}
+	if len(view.ModelBreakdown) != 1 {
+		t.Fatalf("expected one compatible model breakdown row, got %+v", view.ModelBreakdown)
+	}
+	breakdown := view.ModelBreakdown[0]
+	if breakdown.Provider != string(models.ProviderOpenAICompatible) || breakdown.Model != "deepseek/deepseek-chat-v3.1:free" {
+		t.Fatalf("expected exact compatible breakdown provider/model, got %+v", breakdown)
+	}
+	if breakdown.TotalTokens != 165 || breakdown.InputTokens != 120 || breakdown.OutputTokens != 45 || breakdown.CacheTokens != 20 || breakdown.ReasoningOutputTokens != 8 || breakdown.CallCount != 1 {
+		t.Fatalf("unexpected compatible model breakdown tokens: %+v", breakdown)
+	}
+}
+
 func TestRecordUsageFromResult_PersistsAnthropicAndOpenAIDetails(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewUsageRepo(db)
@@ -90,6 +135,38 @@ func TestLLMService_CallAgentDirectRecordsAPIKeyUsageWithoutExecution(t *testing
 	}
 	if totals.TotalTokens != 20 || totals.CachedInputTokens != 4 || totals.ReasoningOutputTokens != 2 {
 		t.Fatalf("unexpected direct-call totals: %+v", totals)
+	}
+}
+
+func TestLLMService_CallAgentDirectRecordsOpenAICompatibleUsage(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	configRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	usageRepo := repository.NewUsageRepo(db)
+	svc := NewLLMService(configRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetUsageRepo(usageRepo)
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		models.ProviderOpenAICompatible: staticProviderAdapter{result: llmcontracts.AgentResult{Output: "ok", Usage: llmusage.FromOpenAI(30, 12, 6, 3)}},
+	}
+	agent := models.LLMConfig{Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, APIKey: "key", Model: "provider/model:exact"}
+	if _, _, err := svc.CallAgentDirect(ctx, "hello", nil, agent, ""); err != nil {
+		t.Fatalf("CallAgentDirect: %v", err)
+	}
+
+	view, err := NewUsageAnalyticsService(usageRepo, configRepo).BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(models.ProviderOpenAICompatible)})
+	if err != nil {
+		t.Fatalf("BuildAnalyticsUsage: %v", err)
+	}
+	if view.Totals.TotalTokens != 42 || view.Totals.CachedInputTokens != 6 || view.Totals.ReasoningOutputTokens != 3 || view.Totals.CallCount != 1 {
+		t.Fatalf("unexpected compatible direct-call totals: %+v", view.Totals)
+	}
+	if len(view.ModelBreakdown) != 1 || view.ModelBreakdown[0].Provider != string(models.ProviderOpenAICompatible) || view.ModelBreakdown[0].Model != "provider/model:exact" {
+		t.Fatalf("expected compatible direct-call model breakdown with exact model id, got %+v", view.ModelBreakdown)
 	}
 }
 
