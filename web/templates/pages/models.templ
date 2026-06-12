@@ -687,9 +687,21 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					{ value: 'gpt-5-codex-mini', label: 'gpt-5-codex-mini', efforts: ['low', 'medium', 'high'] }
 					],
 					openai_compatible: [
-						{ value: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'OpenRouter Nemotron free', efforts: [] },
-						{ value: 'nvidia/nemotron-3-ultra-550b-a55b', label: 'NVIDIA Nemotron', efforts: [] },
 						{ value: 'local-model', label: 'Local/custom model', efforts: [] }
+					],
+					openai_compatible_openrouter: [
+						{ value: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'OpenRouter Nemotron free', efforts: [] },
+						{ value: 'openai/gpt-4o-mini', label: 'OpenRouter GPT-4o mini', efforts: [] },
+						{ value: 'anthropic/claude-3.5-sonnet', label: 'OpenRouter Claude 3.5 Sonnet', efforts: [] }
+					],
+					openai_compatible_nvidia_nim: [
+						{ value: 'nvidia/nemotron-3-ultra-550b-a55b', label: 'NVIDIA Nemotron', efforts: [] }
+					],
+					openai_compatible_vllm: [
+						{ value: 'local-model', label: 'Local vLLM model', efforts: [] }
+					],
+					openai_compatible_custom: [
+						{ value: 'local-model', label: 'Custom compatible model', efforts: [] }
 					],
 					ollama: [					{ value: 'llama3.1:8b', label: 'Llama 3.1 (8B)', efforts: [] },
 					{ value: 'llama3.1:70b', label: 'Llama 3.1 (70B)', efforts: [] },
@@ -720,7 +732,11 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					return canonicalProvider(provider) === 'openai_compatible';
 				}
 
-				function selectedModelOption(provider, model) {				var options = modelOptionsByProvider[provider] || [];
+				function modelOptionsForProvider(provider) {
+					return modelOptionsByProvider[provider] || modelOptionsByProvider[canonicalProvider(provider)] || [];
+				}
+
+				function selectedModelOption(provider, model) {				var options = modelOptionsForProvider(provider);
 				for (var i = 0; i < options.length; i++) {
 					if (options[i].value === model) {
 						return options[i];
@@ -786,8 +802,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 
 				function setModelOptions(provider, selectedModel) {
 					var modelSelect = document.getElementById('model_id');
-					provider = canonicalProvider(provider);
-						var options = modelOptionsByProvider[provider] || [];				modelSelect.innerHTML = '';
+					var options = modelOptionsForProvider(provider);				modelSelect.innerHTML = '';
 				var hasSelected = false;
 				for (var i = 0; i < options.length; i++) {
 					var opt = document.createElement('option');
@@ -839,19 +854,22 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 
 						var openAICompatibleDiscoveryTimer = null;
 
-						function maybeAutoDiscoverOpenAICompatibleModels() {
-							var provider = document.getElementById('model_provider').value;
-							var apiKey = document.getElementById('model_api_key').value.trim();
-							if (isOpenAICompatibleProvider(provider) && apiKey && isHostedOpenAICompatiblePreset()) {
-								discoverOpenAICompatibleModels();
+							function maybeAutoDiscoverOpenAICompatibleModels() {
+								var provider = document.getElementById('model_provider').value;
+								if (isOpenAICompatibleProvider(provider) && isHostedOpenAICompatiblePreset()) {
+									discoverOpenAICompatibleModels();
+								}
 							}
-						}
 
-						function scheduleAutoDiscoverOpenAICompatibleModels() {
-							if (openAICompatibleDiscoveryTimer) clearTimeout(openAICompatibleDiscoveryTimer);
-							openAICompatibleDiscoveryTimer = setTimeout(maybeAutoDiscoverOpenAICompatibleModels, 400);
-						}
+							function scheduleAutoDiscoverOpenAICompatibleModels() {
+								if (openAICompatibleDiscoveryTimer) clearTimeout(openAICompatibleDiscoveryTimer);
+								openAICompatibleDiscoveryTimer = setTimeout(maybeAutoDiscoverOpenAICompatibleModels, 400);
+							}
 
+							function runAutoDiscoverOpenAICompatibleModels() {
+								if (openAICompatibleDiscoveryTimer) clearTimeout(openAICompatibleDiscoveryTimer);
+								maybeAutoDiscoverOpenAICompatibleModels();
+							}
 						function applyOpenAICompatiblePreset(force) {
 							var provider = document.getElementById('model_provider').value;
 							var preset = openAICompatiblePresetForProvider(provider);
@@ -862,10 +880,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							if (force || !baseURL.value || Object.values(openAICompatiblePresetDefaults).indexOf(baseURL.value) !== -1) {
 								baseURL.value = next;
 							}
-							if (isHostedOpenAICompatiblePreset()) {
-								maybeAutoDiscoverOpenAICompatibleModels();
-							} else if (status) {
-								status.textContent = 'Enter the model ID manually for local or custom endpoints.';
+								if (isHostedOpenAICompatiblePreset()) {
+									runAutoDiscoverOpenAICompatibleModels();
+								} else if (status) {								status.textContent = 'Enter the model ID manually for local or custom endpoints.';
 							}
 						}
 						function normalizeModelFormBeforeSubmit() {
