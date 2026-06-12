@@ -28,7 +28,7 @@ If a task is complex enough that `high` is producing shallow plans or missing ed
 2. Click `+ Add Model`.
 3. Fill:
    - `Name`
-   - `Provider` (`Anthropic`, `OpenAI`, or `Ollama`)
+   - `Provider` (`Anthropic`, `OpenAI`, `Ollama`, `OpenRouter`, `NVIDIA NIM`, `Local vLLM`, or `Custom OpenAI-Compatible`)
    - `Authentication` / `Connection Method` (provider-dependent)
    - `Model`
    - Optional runtime settings (`Temperature`, worker pool settings, etc.)
@@ -79,6 +79,15 @@ Where a low-level provider API still requires an output limit, OpenVibely choose
 
 - Auth options include API key and OAuth.
 - For supported Codex models, `Codex Reasoning Effort` is available.
+- First-party OpenAI configs use OpenVibely's OpenAI/Codex provider path, not the generic OpenAI-compatible Chat Completions adapter.
+
+### OpenAI-Compatible Chat Completions
+
+- Provider choices in the UI include `OpenRouter`, `NVIDIA NIM`, `Local vLLM`, and `Custom OpenAI-Compatible`.
+- `OpenRouter` and `NVIDIA NIM` set hosted default base URLs and auto-load available models when selected. If you enter an API key, discovery retries with the key in a request header.
+- `Local vLLM` and `Custom OpenAI-Compatible` are manual-entry oriented. Enter the base URL and exact model ID expected by your server or gateway.
+- API keys are sent in headers, not URL parameters. Local/self-hosted servers may allow the API key field to remain blank.
+- OpenAI-compatible configs call `base_url + /chat/completions` and store the exact model ID after trimming whitespace.
 
 ### Ollama
 

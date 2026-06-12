@@ -39,7 +39,7 @@ Useful starting points:
 | Skill curation | Learn from completed work and improve reusable standalone or agent-owned skills for future tasks. |
 | Automation | Schedule recurring work, chain dependent tasks, and run structured multi-agent workflows from the app. |
 | External channels | Create and monitor work through Slack, Telegram, GitHub, inbound webhooks, and the REST API. |
-| Model providers | Run with Anthropic, OpenAI, or Ollama through UI-managed model configs, defaults, and auth options. |
+| Model providers | Run with Anthropic, OpenAI, Ollama, or OpenAI-compatible Chat Completions providers through UI-managed model configs, defaults, and auth options. |
 | Operations footprint | Self-host a single Go binary with SQLite by default, plus optional Docker/VPS and desktop modes. |
 | Visibility and control | Use live status, execution logs, thread history, changed files, review comments, alerts, and insights to keep AI work auditable. |
 
