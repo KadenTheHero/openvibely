@@ -83,7 +83,7 @@ Where a low-level provider API still requires an output limit, OpenVibely choose
 
 ### OpenAI-Compatible Chat Completions
 
-- Provider choices in the UI include OpenRouter, NVIDIA NIM, Local vLLM, LM Studio, SGLang, LiteLLM, DeepInfra, Fireworks, Groq, Mistral, Cerebras, Together, Hugging Face Router, DeepSeek, Moonshot, DashScope, Alibaba Coding Plan, Z.AI / GLM, NovitaAI, Venice, Qianfan, Kilo Code, Arcee AI, StepFun, GMI Cloud, Chutes, Tencent TokenHub, Xiaomi MiMo, Inferrs Local, ds4 Local, and Custom OpenAI-Compatible.
+- Provider choices in the UI include OpenRouter, NVIDIA NIM, Local vLLM, LM Studio, SGLang, LiteLLM, DeepInfra, Fireworks, Groq, Mistral, Cerebras, Together, Hugging Face Router, DeepSeek, Moonshot, DashScope, DashScope Intl, Alibaba Coding Plan, Z.AI / GLM, NovitaAI, Venice, Qianfan, Kilo Code, Arcee AI, StepFun, StepFun Step Plan, GMI Cloud, Chutes, Tencent TokenHub, Tencent TokenHub Intl, Xiaomi MiMo, Inferrs Local, ds4 Local, and Custom OpenAI-Compatible.
 - Each non-Custom OpenAI-compatible preset sets its default base URL and auto-loads available models when selected. If you enter an API key, discovery retries with the key in a request header.
 - Local/self-hosted presets such as `Local vLLM`, `LM Studio`, `SGLang`, `LiteLLM`, `Inferrs Local`, and `ds4 Local` allow blank API keys. `Custom OpenAI-Compatible` is manual-entry oriented; enter the base URL and exact model ID expected by your server or gateway.
 - API keys are sent in headers, not URL parameters. Local/self-hosted servers may allow the API key field to remain blank.

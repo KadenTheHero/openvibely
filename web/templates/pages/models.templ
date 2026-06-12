@@ -1029,15 +1029,15 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							presetInput.value = preset;
 							var baseURL = document.getElementById('model_base_url');
 							var status = document.getElementById('openai_compatible_discovery_status');
-							var next = openAICompatiblePresetDefaults[preset] || '';
-							if (preset !== 'custom' && (force || !baseURL.value || Object.values(openAICompatiblePresetDefaults).indexOf(baseURL.value) !== -1)) {
+							var hasPresetDefault = Object.prototype.hasOwnProperty.call(openAICompatiblePresetDefaults, preset);
+							var next = hasPresetDefault ? openAICompatiblePresetDefaults[preset] : '';
+							if (hasPresetDefault && preset !== 'custom' && (force || !baseURL.value || Object.values(openAICompatiblePresetDefaults).indexOf(baseURL.value) !== -1)) {
 								baseURL.value = next;
 							}
 								if (isDiscoverableOpenAICompatiblePreset()) {
 									runAutoDiscoverOpenAICompatibleModels();
 								} else if (status) {								status.textContent = 'Enter the model ID manually for local or custom endpoints.';
-							}
-						}
+								}						}
 						function normalizeModelFormBeforeSubmit() {
 							var provider = document.getElementById('model_provider').value;
 							var providerValue = document.getElementById('model_provider_value');
