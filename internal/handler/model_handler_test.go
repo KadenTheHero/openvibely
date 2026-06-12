@@ -122,6 +122,23 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			wantAuthMethod: models.AuthMethodAPIKey,
 		},
 		{
+			name:           "openrouter provider preset maps to openai compatible api key",
+			provider:       "openai_compatible_openrouter",
+			anthropicAuth:  "",
+			openaiAuth:     "",
+			authMethod:     "",
+			wantProvider:   models.ProviderOpenAICompatible,
+			wantAuthMethod: models.AuthMethodAPIKey,
+		},
+		{
+			name:           "nvidia nim provider preset maps to openai compatible api key",
+			provider:       "openai_compatible_nvidia_nim",
+			anthropicAuth:  "",
+			openaiAuth:     "",
+			authMethod:     "",
+			wantProvider:   models.ProviderOpenAICompatible,
+			wantAuthMethod: models.AuthMethodAPIKey,
+		}, {
 			name:           "ollama",
 			provider:       "ollama",
 			anthropicAuth:  "",
@@ -217,7 +234,7 @@ func TestCreateModel_OpenAICompatible(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("name", "OpenRouter Nemotron")
-	form.Set("provider", "openai_compatible")
+	form.Set("provider", "openai_compatible_openrouter")
 	form.Set("model", "nvidia/nemotron-3-ultra-550b-a55b:free")
 	form.Set("api_key", "sk-or-test")
 	form.Set("base_url", "https://openrouter.ai/api/v1/")

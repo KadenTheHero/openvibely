@@ -144,10 +144,21 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 	out := buf.String()
 
 	for _, want := range []string{
-		`onchange="applyOpenAICompatiblePreset()"`,
+		`<input type="hidden" id="model_provider_value" name="provider" value="anthropic"`,
+		`<select id="model_provider"`,
+		`<option value="openai_compatible_openrouter">OpenRouter</option>`,
+		`<option value="openai_compatible_nvidia_nim">NVIDIA NIM</option>`,
+		`<option value="openai_compatible_vllm">Local vLLM</option>`,
+		`<option value="openai_compatible_custom">Custom OpenAI-Compatible</option>`,
+		`oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`,
+		`onsubmit="normalizeModelFormBeforeSubmit()"`,
+		`<input type="hidden" id="model_openai_compatible_preset" name="preset_slug" value="custom"`,
 		"OpenRouter and NVIDIA NIM presets auto-load available models when selected.",
-		"!force && (preset === 'openrouter' || preset === 'nvidia_nim')",
-		"discoverOpenAICompatibleModels();",
+		"isHostedOpenAICompatiblePreset()",
+		"maybeAutoDiscoverOpenAICompatibleModels();",
+		"var forcePresetDefaults = selectedModel === undefined && selectedReasoningEffort === undefined;",
+		"applyOpenAICompatiblePreset(forcePresetDefaults);",
+		"providerValue.value = 'openai_compatible';",
 		"Enter the model ID manually for local or custom endpoints.",
 		"/models/openai-compatible/available?",
 		"new URLSearchParams({base_url: baseURL})",
@@ -161,6 +172,8 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
+		`<select id="model_openai_compatible_preset"`,
+		`onchange="applyOpenAICompatiblePreset()"`,
 		"Discover Models",
 		`onclick="discoverOpenAICompatibleModels()"`,
 		"api_key: apiKey",

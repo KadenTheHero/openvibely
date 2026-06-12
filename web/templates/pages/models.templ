@@ -337,19 +337,20 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeModelModal()" aria-label="Close model configuration" title="Close model configuration">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
-				<h3 id="model_modal_title" class="font-bold text-lg mb-4 pr-10">New Model Configuration</h3>
-					<form id="model_form" method="post" action="/models">					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">Name</span></label>
+					<h3 id="model_modal_title" class="font-bold text-lg mb-4 pr-10">New Model Configuration</h3>
+						<form id="model_form" method="post" action="/models" onsubmit="normalizeModelFormBeforeSubmit()">					<div class="form-control mb-3">						<label class="label"><span class="label-text">Name</span></label>
 						<input type="text" id="model_name" name="name" class="input input-bordered" required placeholder="My Model"/>
 					</div>
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">Provider</span></label>
-						<select name="provider" id="model_provider" class="select select-bordered" onchange="toggleProviderFields()">
-								<option value="anthropic">Anthropic</option>
-								<option value="openai">OpenAI</option>
-								<option value="openai_compatible">OpenAI-Compatible</option>
-								<option value="ollama">Ollama</option>						</select>
-					</div>
+							<input type="hidden" id="model_provider_value" name="provider" value="anthropic"/>
+							<select id="model_provider" class="select select-bordered" onchange="toggleProviderFields()">									<option value="anthropic">Anthropic</option>
+									<option value="openai">OpenAI</option>
+									<option value="openai_compatible_openrouter">OpenRouter</option>
+									<option value="openai_compatible_nvidia_nim">NVIDIA NIM</option>
+									<option value="openai_compatible_vllm">Local vLLM</option>
+									<option value="openai_compatible_custom">Custom OpenAI-Compatible</option>
+									<option value="ollama">Ollama</option>						</select>					</div>
 					<!-- Auth type selector for Anthropic -->
 					<div id="anthropic_auth_type_field" class="form-control mb-3">
 						<label class="label"><span class="label-text">Authentication</span></label>
@@ -395,7 +396,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							</div>
 						<div id="api_key_field" class="form-control mb-3">						<label class="label"><span class="label-text">API Key</span></label>
 						<div class="relative">
-							<input type="password" id="model_api_key" name="api_key" class="input input-bordered pr-10" placeholder="sk-ant-... (leave empty to keep existing)"/>
+							<input type="password" id="model_api_key" name="api_key" class="input input-bordered pr-10" placeholder="sk-ant-... (leave empty to keep existing)" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/>
 							<button
 								type="button"
 								class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2"
@@ -474,18 +475,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							</div>
 						</div>
 					</div>
-						<div id="openai_compatible_fields" class="hidden">
-							<div class="form-control mb-3">
-								<label class="label"><span class="label-text">Preset</span></label>
-								<select id="model_openai_compatible_preset" name="preset_slug" class="select select-bordered" onchange="applyOpenAICompatiblePreset()">
-									<option value="openrouter">OpenRouter</option>
-									<option value="nvidia_nim">NVIDIA NIM</option>
-									<option value="vllm">Local vLLM</option>
-									<option value="custom">Custom</option>
-								</select>
-							</div>
-							<input type="hidden" id="model_openai_compatible_transport" name="transport" value="chat_completions"/>
-							<div class="form-control mb-3">
+							<div id="openai_compatible_fields" class="hidden">
+								<input type="hidden" id="model_openai_compatible_preset" name="preset_slug" value="custom"/>
+								<input type="hidden" id="model_openai_compatible_transport" name="transport" value="chat_completions"/>							<div class="form-control mb-3">
 								<label class="label"><span class="label-text">Base URL</span></label>
 								<input type="text" id="model_base_url" name="base_url" class="input input-bordered" placeholder="https://openrouter.ai/api/v1/"/>
 								<label class="label"><span class="label-text-alt opacity-70">API root; requests go to base URL + /chat/completions.</span></label>
@@ -712,8 +704,23 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				]
 			};
 
-			function selectedModelOption(provider, model) {
-				var options = modelOptionsByProvider[provider] || [];
+				function canonicalProvider(provider) {
+					return provider && provider.indexOf('openai_compatible_') === 0 ? 'openai_compatible' : provider;
+				}
+
+				function openAICompatiblePresetForProvider(provider) {
+					if (provider === 'openai_compatible_openrouter') return 'openrouter';
+					if (provider === 'openai_compatible_nvidia_nim') return 'nvidia_nim';
+					if (provider === 'openai_compatible_vllm') return 'vllm';
+					if (provider === 'openai_compatible') return document.getElementById('model_openai_compatible_preset').value || 'custom';
+					return 'custom';
+				}
+
+				function isOpenAICompatibleProvider(provider) {
+					return canonicalProvider(provider) === 'openai_compatible';
+				}
+
+				function selectedModelOption(provider, model) {				var options = modelOptionsByProvider[provider] || [];
 				for (var i = 0; i < options.length; i++) {
 					if (options[i].value === model) {
 						return options[i];
@@ -777,10 +784,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				reasoningSelect.value = preferredReasoningEffort(supportedEfforts);
 			}
 
-			function setModelOptions(provider, selectedModel) {
-				var modelSelect = document.getElementById('model_id');
-					var options = modelOptionsByProvider[provider] || [];
-				modelSelect.innerHTML = '';
+				function setModelOptions(provider, selectedModel) {
+					var modelSelect = document.getElementById('model_id');
+					provider = canonicalProvider(provider);
+						var options = modelOptionsByProvider[provider] || [];				modelSelect.innerHTML = '';
 				var hasSelected = false;
 				for (var i = 0; i < options.length; i++) {
 					var opt = document.createElement('option');
@@ -812,8 +819,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					var provider = document.getElementById('model_provider').value;
 					var model = document.getElementById('model_id').value;
 					var selectedEffort = document.getElementById('model_reasoning_effort').value;
-					setReasoningEffortOptions(provider, model, selectedEffort);
-					if (provider === 'openai_compatible') {
+					setReasoningEffortOptions(canonicalProvider(provider), model, selectedEffort);
+					if (isOpenAICompatibleProvider(provider)) {
 						document.getElementById('model_openai_compatible_custom_model').value = model;
 					}
 				}
@@ -825,22 +832,54 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					custom: ''
 				};
 
-					function applyOpenAICompatiblePreset(force) {
-						var preset = document.getElementById('model_openai_compatible_preset').value || 'custom';
-						var baseURL = document.getElementById('model_base_url');
-						var status = document.getElementById('openai_compatible_discovery_status');
-						var next = openAICompatiblePresetDefaults[preset] || '';
-						if (force || !baseURL.value || Object.values(openAICompatiblePresetDefaults).indexOf(baseURL.value) !== -1) {
-							baseURL.value = next;
+						function isHostedOpenAICompatiblePreset() {
+							var preset = document.getElementById('model_openai_compatible_preset').value || 'custom';
+							return preset === 'openrouter' || preset === 'nvidia_nim';
 						}
-						if (!force && (preset === 'openrouter' || preset === 'nvidia_nim')) {
-							discoverOpenAICompatibleModels();
-						} else if (status) {
-							status.textContent = 'Enter the model ID manually for local or custom endpoints.';
+
+						var openAICompatibleDiscoveryTimer = null;
+
+						function maybeAutoDiscoverOpenAICompatibleModels() {
+							var provider = document.getElementById('model_provider').value;
+							var apiKey = document.getElementById('model_api_key').value.trim();
+							if (isOpenAICompatibleProvider(provider) && apiKey && isHostedOpenAICompatiblePreset()) {
+								discoverOpenAICompatibleModels();
+							}
 						}
-					}
-					function setOpenAICompatibleModelValue(modelID, label, selectModel) {
-						var modelSelect = document.getElementById('model_id');
+
+						function scheduleAutoDiscoverOpenAICompatibleModels() {
+							if (openAICompatibleDiscoveryTimer) clearTimeout(openAICompatibleDiscoveryTimer);
+							openAICompatibleDiscoveryTimer = setTimeout(maybeAutoDiscoverOpenAICompatibleModels, 400);
+						}
+
+						function applyOpenAICompatiblePreset(force) {
+							var provider = document.getElementById('model_provider').value;
+							var preset = openAICompatiblePresetForProvider(provider);
+							document.getElementById('model_openai_compatible_preset').value = preset;
+							var baseURL = document.getElementById('model_base_url');
+							var status = document.getElementById('openai_compatible_discovery_status');
+							var next = openAICompatiblePresetDefaults[preset] || '';
+							if (force || !baseURL.value || Object.values(openAICompatiblePresetDefaults).indexOf(baseURL.value) !== -1) {
+								baseURL.value = next;
+							}
+							if (isHostedOpenAICompatiblePreset()) {
+								maybeAutoDiscoverOpenAICompatibleModels();
+							} else if (status) {
+								status.textContent = 'Enter the model ID manually for local or custom endpoints.';
+							}
+						}
+						function normalizeModelFormBeforeSubmit() {
+							var provider = document.getElementById('model_provider').value;
+							var providerValue = document.getElementById('model_provider_value');
+							if (isOpenAICompatibleProvider(provider)) {
+								document.getElementById('model_openai_compatible_preset').value = openAICompatiblePresetForProvider(provider);
+								providerValue.value = 'openai_compatible';
+							} else {
+								providerValue.value = provider;
+							}
+						}
+
+						function setOpenAICompatibleModelValue(modelID, label, selectModel) {						var modelSelect = document.getElementById('model_id');
 						if (!modelID) return;
 						var found = false;
 						for (var i = 0; i < modelSelect.options.length; i++) {
@@ -993,15 +1032,24 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				var anthropicAuthType = 'api_key';
 				var openaiAuthType = 'api_key';
 				var openaiConnectionMethod = 'oauth';
-				if (dbProvider === 'anthropic') {
-					uiProvider = 'anthropic';
-					if (authMethod === 'api_key' || (authMethod === '' && !dbProvider)) {
-						anthropicAuthType = 'api_key';
-					} else {
-						anthropicAuthType = 'oauth';
-					}
-				} else if (dbProvider === 'openai') {
-					if (authMethod === 'api_key') {
+					if (dbProvider === 'anthropic') {
+						uiProvider = 'anthropic';
+						if (authMethod === 'api_key' || (authMethod === '' && !dbProvider)) {
+							anthropicAuthType = 'api_key';
+						} else {
+							anthropicAuthType = 'oauth';
+						}
+					} else if (dbProvider === 'openai_compatible') {
+						if (presetSlug === 'openrouter') {
+							uiProvider = 'openai_compatible_openrouter';
+						} else if (presetSlug === 'nvidia_nim') {
+							uiProvider = 'openai_compatible_nvidia_nim';
+						} else if (presetSlug === 'vllm') {
+							uiProvider = 'openai_compatible_vllm';
+						} else {
+							uiProvider = 'openai_compatible_custom';
+						}
+					} else if (dbProvider === 'openai') {					if (authMethod === 'api_key') {
 						openaiAuthType = 'api_key';
 					} else {
 						openaiAuthType = 'oauth';
@@ -1038,17 +1086,18 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 			}
 
 			function toggleProviderFields(selectedModel, selectedReasoningEffort) {
-				var provider = document.getElementById('model_provider').value;
-				var apiKeyField = document.getElementById('api_key_field');
-				var apiKeyInput = document.getElementById('model_api_key');
+					var provider = document.getElementById('model_provider').value;
+					var effectiveProvider = canonicalProvider(provider);
+					var apiKeyField = document.getElementById('api_key_field');				var apiKeyInput = document.getElementById('model_api_key');
 				var anthropicAuthTypeField = document.getElementById('anthropic_auth_type_field');
 				var openaiAuthTypeField = document.getElementById('openai_auth_type_field');
 				var openaiConnectionMethodField = document.getElementById('openai_connection_method_field');
 				var authMethodField = document.getElementById('auth_method_field');
-				var ollamaInfo = document.getElementById('ollama_info');
+					var ollamaInfo = document.getElementById('ollama_info');
+					var forcePresetDefaults = selectedModel === undefined && selectedReasoningEffort === undefined;
 
-				hideAllInfoBoxes();
-				var activeModel = setModelOptions(provider, selectedModel);
+					normalizeModelFormBeforeSubmit();
+					hideAllInfoBoxes();				var activeModel = setModelOptions(provider, selectedModel);
 
 				if (provider === 'anthropic') {
 					anthropicAuthTypeField.classList.remove('hidden');
@@ -1062,20 +1111,18 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					authMethodField.classList.add('hidden');
 					document.getElementById('model_auth_method').disabled = true;
 					toggleOpenAIAuthFields();
-					} else if (provider === 'openai_compatible') {
-						anthropicAuthTypeField.classList.add('hidden');
-						openaiAuthTypeField.classList.add('hidden');
-						openaiConnectionMethodField.classList.add('hidden');
-						authMethodField.classList.add('hidden');
-						apiKeyField.classList.remove('hidden');
-						apiKeyInput.required = false;
-						document.getElementById('openai_compatible_info').classList.remove('hidden');
-						document.getElementById('openai_compatible_fields').classList.remove('hidden');
-						document.getElementById('model_auth_method').disabled = true;
-						document.getElementById('model_openai_connection_method').disabled = true;
-						if (!document.getElementById('model_base_url').value) applyOpenAICompatiblePreset(true);
-						document.getElementById('model_openai_compatible_custom_model').value = activeModel || '';
-					} else if (provider === 'ollama') {
+						} else if (effectiveProvider === 'openai_compatible') {
+							anthropicAuthTypeField.classList.add('hidden');
+							openaiAuthTypeField.classList.add('hidden');
+							openaiConnectionMethodField.classList.add('hidden');
+							authMethodField.classList.add('hidden');
+							apiKeyField.classList.remove('hidden');
+							apiKeyInput.required = false;
+							document.getElementById('openai_compatible_info').classList.remove('hidden');
+							document.getElementById('openai_compatible_fields').classList.remove('hidden');
+							document.getElementById('model_auth_method').disabled = true;
+							document.getElementById('model_openai_connection_method').disabled = true;
+								applyOpenAICompatiblePreset(forcePresetDefaults);							document.getElementById('model_openai_compatible_custom_model').value = activeModel || '';					} else if (provider === 'ollama') {
 						anthropicAuthTypeField.classList.add('hidden');					openaiAuthTypeField.classList.add('hidden');
 					openaiConnectionMethodField.classList.add('hidden');
 					authMethodField.classList.add('hidden');
@@ -1095,8 +1142,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					document.getElementById('model_auth_method').disabled = true;
 					document.getElementById('model_openai_connection_method').disabled = true;
 				}
-					setReasoningEffortOptions(provider, activeModel, selectedReasoningEffort);
-				}
+						setReasoningEffortOptions(effectiveProvider, activeModel, selectedReasoningEffort);				}
 
 				function isEditingModelForm() {
 					return document.getElementById('model_form').dataset.mode === 'edit';

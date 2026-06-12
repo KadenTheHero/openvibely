@@ -50,7 +50,7 @@ func (h *Handler) ListModels(c echo.Context) error {
 // The UI shows "Anthropic" and "OpenAI" as single providers with auth type sub-selection,
 // while the DB stores provider and auth_method separately.
 func resolveProviderAndAuth(provider, anthropicAuthType, openaiAuthType, authMethod string) (models.LLMProvider, models.AuthMethod) {
-	if provider == string(models.ProviderOpenAICompatible) {
+	if provider == string(models.ProviderOpenAICompatible) || strings.HasPrefix(provider, string(models.ProviderOpenAICompatible)+"_") {
 		return models.ProviderOpenAICompatible, models.AuthMethodAPIKey
 	}
 	// Accept both "subscription" (legacy) and "oauth" (current) form values.
