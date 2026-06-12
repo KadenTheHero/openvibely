@@ -70,43 +70,6 @@ templ analyticsContent(currentProject *models.Project) {
 							</div>
 						</div>
 
-						<div class="flex flex-wrap gap-3 items-end mb-4 p-3 rounded-box bg-base-200/50">
-							<div class="form-control">
-								<label class="label py-1"><span class="label-text text-xs">Surface</span></label>
-								<select id="skillSurfaceFilter" class="select select-bordered select-sm">
-									<option value="">All surfaces</option>
-									<option value="chat">Chat</option>
-									<option value="task_thread">Task thread</option>
-									<option value="scheduled_task">Scheduled task</option>
-									<option value="lifecycle_hook">Lifecycle hook</option>
-									<option value="channel">Channel</option>
-									<option value="goal_continuation">Goal continuation</option>
-								</select>
-							</div>
-							<div class="form-control">
-								<label class="label py-1"><span class="label-text text-xs">Scope</span></label>
-								<select id="skillScopeFilter" class="select select-bordered select-sm">
-									<option value="">All scopes</option>
-									<option value="project">Project</option>
-									<option value="global">Global</option>
-									<option value="agent_owned">Agent-owned</option>
-								</select>
-							</div>
-							<div class="form-control">
-								<label class="label py-1"><span class="label-text text-xs">Event</span></label>
-								<select id="skillEventFilter" class="select select-bordered select-sm">
-									<option value="">All events</option>
-									<option value="selected">Selected</option>
-									<option value="loaded">Loaded</option>
-									<option value="viewed">Viewed</option>
-									<option value="edited">Edited</option>
-								</select>
-							</div>
-							<div class="form-control">
-								<label class="label py-1"><span class="label-text text-xs">Agent ID</span></label>
-								<input id="skillAgentFilter" class="input input-bordered input-sm w-44" placeholder="All agents" />
-							</div>
-						</div>
 
 						<div class="skill-analytics-panel" data-skill-panel-content="top">
 							<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -388,14 +351,6 @@ templ analyticsContent(currentProject *models.Project) {
 								async function loadSkillAnalytics() {
 									try {
 										const params = new URLSearchParams({ project_id: projectID, range: skillRangeParam() });
-										const surface = document.getElementById('skillSurfaceFilter')?.value || '';
-										const scope = document.getElementById('skillScopeFilter')?.value || '';
-										const eventType = document.getElementById('skillEventFilter')?.value || '';
-										const agentID = (document.getElementById('skillAgentFilter')?.value || '').trim();
-										if (surface) params.append('surface', surface);
-										if (scope) params.append('skill_scope', scope);
-										if (eventType) params.append('event_type', eventType);
-										if (agentID) params.append('agent_id', agentID);
 										const response = await fetch('/api/analytics/skills?' + params.toString());
 										if (!response.ok) return;
 										renderSkillAnalytics(await response.json());
@@ -1002,12 +957,6 @@ templ analyticsContent(currentProject *models.Project) {
 							loadSuccessFailureRates();
 							loadHourlyTrends();
 						});
-						['skillSurfaceFilter', 'skillScopeFilter', 'skillEventFilter'].forEach(function(id) {
-							const el = document.getElementById(id);
-							if (el) el.addEventListener('change', loadSkillAnalytics);
-						});
-						const skillAgentFilter = document.getElementById('skillAgentFilter');
-						if (skillAgentFilter) skillAgentFilter.addEventListener('change', loadSkillAnalytics);
 						document.querySelectorAll('[data-skill-panel]').forEach(function(tab) {
 							tab.addEventListener('click', function() { setSkillAnalyticsPanel(tab.dataset.skillPanel); });
 						});
