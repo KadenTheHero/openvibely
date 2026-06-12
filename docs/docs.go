@@ -2966,6 +2966,12 @@ const docTemplate = `{
                         "$ref": "#/definitions/models.SkillFollowThroughMetric"
                     }
                 },
+                "skill_usage_over_time": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.SkillUsageBySkillPeriodMetric"
+                    }
+                },
                 "top_skills": {
                     "type": "array",
                     "items": {
@@ -3035,6 +3041,32 @@ const docTemplate = `{
                 },
                 "skill_scope": {
                     "type": "string"
+                }
+            }
+        },
+        "models.SkillUsageBySkillPeriodMetric": {
+            "type": "object",
+            "properties": {
+                "activity_count": {
+                    "type": "integer"
+                },
+                "edited_count": {
+                    "type": "integer"
+                },
+                "loaded_count": {
+                    "type": "integer"
+                },
+                "period": {
+                    "type": "string"
+                },
+                "selected_count": {
+                    "type": "integer"
+                },
+                "skill_handle": {
+                    "type": "string"
+                },
+                "viewed_count": {
+                    "type": "integer"
                 }
             }
         },

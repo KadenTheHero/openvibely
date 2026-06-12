@@ -153,9 +153,20 @@ templ analyticsContent(currentProject *models.Project) {
 				<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6 mb-6">
 					<div class="card bg-base-100 shadow-sm border border-base-300">
 						<div class="card-body">
-							<div class="mb-2">
-								<h3 class="card-title text-lg">Skills Used Over Time</h3>
-								<p class="text-sm opacity-60">Total selected, loaded, viewed, and edited skill activity.</p>
+							<div class="flex flex-wrap items-end justify-between gap-3 mb-2">
+								<div>
+									<h3 class="card-title text-lg">Skills Used Over Time</h3>
+									<p class="text-sm opacity-60">Top skills plus Other by event activity.</p>
+								</div>
+								<div class="form-control">
+									<select id="skillUsageEventSelect" class="select select-bordered select-xs min-w-32">
+										<option value="activity_count" selected>All events</option>
+										<option value="selected_count">Selected</option>
+										<option value="loaded_count">Loaded</option>
+										<option value="viewed_count">Viewed</option>
+										<option value="edited_count">Edited</option>
+									</select>
+								</div>
 							</div>
 							<div class="h-64">
 								<canvas id="skillUsageTrendChart"></canvas>
@@ -334,7 +345,7 @@ templ analyticsContent(currentProject *models.Project) {
 								}
 
 								function renderSkillAnalytics(data) {
-									renderSkillUsageTrend(data?.usage_over_time || []);
+									renderSkillUsageTrend(data?.skill_usage_over_time || []);
 									renderSkillTop(data?.top_skills || []);
 									renderSkillFollow(data?.follow_through || []);
 									renderSkillAgentUsage(data?.agent_usage || {});
@@ -357,22 +368,37 @@ templ analyticsContent(currentProject *models.Project) {
 								}
 
 
+								function skillUsageEventField() {
+									const select = document.getElementById('skillUsageEventSelect');
+									return select ? select.value : 'activity_count';
+								}
+
 								function renderSkillUsageTrend(rows) {
 									if (charts.skillUsageTrend) charts.skillUsageTrend.destroy();
 									const canvas = document.getElementById('skillUsageTrendChart');
 									if (!canvas) return;
+									const field = skillUsageEventField();
+									const periods = uniquePeriods(rows);
+									const handles = Array.from(new Set((rows || []).map(row => row.skill_handle || 'unknown'))).sort(function(a, b) {
+										if (a === 'Other') return 1;
+										if (b === 'Other') return -1;
+										return a.localeCompare(b);
+									});
+									const values = new Map((rows || []).map(row => [(row.period || '') + '\x00' + (row.skill_handle || 'unknown'), row[field] || 0]));
 									charts.skillUsageTrend = new Chart(canvas.getContext('2d'), {
 										type: 'line',
 										data: {
-											labels: rows.map(row => row.period || ''),
-											datasets: [{
-												label: 'Skill events',
-												data: rows.map(row => row.activity_count || 0),
-												borderColor: 'rgb(59, 130, 246)',
-												backgroundColor: 'rgba(59, 130, 246, 0.12)',
-												tension: 0.25,
-												fill: true
-											}]
+											labels: periods,
+											datasets: handles.map(function(handle, index) {
+												return {
+													label: skillLabel(handle),
+													data: periods.map(period => values.get(period + '\x00' + handle) || 0),
+													borderColor: usageSeriesColors[index % usageSeriesColors.length],
+													backgroundColor: colorForIndex(index, 0.12),
+													tension: 0.25,
+													fill: false
+												};
+											})
 										},
 										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
 									});
@@ -909,6 +935,8 @@ templ analyticsContent(currentProject *models.Project) {
 
 						// Event listeners
 						document.getElementById('refreshBtn').addEventListener('click', function() { loadAllData(true); });
+						const skillUsageEventSelect = document.getElementById('skillUsageEventSelect');
+						if (skillUsageEventSelect) skillUsageEventSelect.addEventListener('change', loadSkillAnalytics);
 						document.getElementById('dateRange').addEventListener('change', () => {
 							loadUsageAnalytics();
 							loadSkillAnalytics();

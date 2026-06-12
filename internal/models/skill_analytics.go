@@ -43,15 +43,26 @@ type SkillAnalyticsEvent struct {
 }
 
 type SkillAnalyticsDashboard struct {
-	UsageOverTime []SkillUsagePeriodMetric    `json:"usage_over_time"`
-	TopSkills     []SkillAnalyticsSkillMetric `json:"top_skills"`
-	FollowThrough []SkillFollowThroughMetric  `json:"follow_through"`
-	AgentUsage    SkillAgentUsageHeatmap      `json:"agent_usage"`
-	Underused     []UnderusedSkillMetric      `json:"underused"`
+	UsageOverTime      []SkillUsagePeriodMetric        `json:"usage_over_time"`
+	SkillUsageOverTime []SkillUsageBySkillPeriodMetric `json:"skill_usage_over_time"`
+	TopSkills          []SkillAnalyticsSkillMetric     `json:"top_skills"`
+	FollowThrough      []SkillFollowThroughMetric      `json:"follow_through"`
+	AgentUsage         SkillAgentUsageHeatmap          `json:"agent_usage"`
+	Underused          []UnderusedSkillMetric          `json:"underused"`
 }
 
 type SkillUsagePeriodMetric struct {
 	Period        string `json:"period"`
+	SelectedCount int    `json:"selected_count"`
+	LoadedCount   int    `json:"loaded_count"`
+	ViewedCount   int    `json:"viewed_count"`
+	EditedCount   int    `json:"edited_count"`
+	ActivityCount int    `json:"activity_count"`
+}
+
+type SkillUsageBySkillPeriodMetric struct {
+	Period        string `json:"period"`
+	SkillHandle   string `json:"skill_handle"`
 	SelectedCount int    `json:"selected_count"`
 	LoadedCount   int    `json:"loaded_count"`
 	ViewedCount   int    `json:"viewed_count"`
