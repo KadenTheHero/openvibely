@@ -763,28 +763,42 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						pendingContainer.appendChild(queuedRow);
 						if (window.htmx) htmx.process(queuedRow);
 					}
-					function ensureStreamingFragment(data) {
+					var pendingFragmentExecs = {};
+					function ensureStreamingFragment(data, attempt) {
+						attempt = attempt || 0;
 						var messages = document.getElementById('task-thread-messages');
-					if (!messages || !data || data.task_id !== taskId || !data.exec_id) return;
-					if (document.querySelector('[data-exec-id="' + data.exec_id + '"]')) return;
-					removePendingRow(data.pending_input_id);
-					var terminal = document.getElementById('task-thread-terminal-status');
-					if (terminal) terminal.remove();
-					if (typeof htmx === 'undefined') return;
-					htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/executions/' + encodeURIComponent(data.exec_id) + '/fragment', {
-						target: '#task-thread-messages',
-						swap: 'beforeend'
-					}).then(function() {
-						var view = document.getElementById('task-thread-view');
-						if (view) view.setAttribute('data-task-active', 'true');
-						if (window._initThreadStreaming) window._initThreadStreaming();
-						if (window.htmx) htmx.process(messages);
-						var tracker = window._taskThreadPageTracker;
-						if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
-							window.chatAutoScroll.scrollToBottom(messages, true);
+						if (!messages || !data || data.task_id !== taskId || !data.exec_id) return;
+						if (document.querySelector('[data-exec-id="' + data.exec_id + '"]')) {
+							delete pendingFragmentExecs[data.exec_id];
+							if (window._initThreadStreaming) window._initThreadStreaming();
+							return;
 						}
-					});
-				}
+						removePendingRow(data.pending_input_id);
+						var terminal = document.getElementById('task-thread-terminal-status');
+						if (terminal) terminal.remove();
+						if (typeof htmx === 'undefined') return;
+						if (pendingFragmentExecs[data.exec_id] && attempt === 0) return;
+						pendingFragmentExecs[data.exec_id] = true;
+						htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/executions/' + encodeURIComponent(data.exec_id) + '/fragment', {
+							target: '#task-thread-messages',
+							swap: 'beforeend'
+						}).then(function() {
+							delete pendingFragmentExecs[data.exec_id];
+							var view = document.getElementById('task-thread-view');
+							if (view) view.setAttribute('data-task-active', 'true');
+							if (window._initThreadStreaming) window._initThreadStreaming();
+							if (window.htmx) htmx.process(messages);
+							var tracker = window._taskThreadPageTracker;
+							if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
+								window.chatAutoScroll.scrollToBottom(messages, true);
+							}
+						}).catch(function() {
+							delete pendingFragmentExecs[data.exec_id];
+							if (attempt < 5) {
+								setTimeout(function() { ensureStreamingFragment(data, attempt + 1); }, 150 * (attempt + 1));
+							}
+						});
+					}
 				var handler = function(event) {
 					var data = event.detail || {};
 					if (data.task_id !== taskId) return;
@@ -792,7 +806,12 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						ensureStreamingFragment(data);
 						return;
 					}
-							if (data.type === 'task_thread_input_applied' || data.type === 'task_thread_input_cancelled') {
+							if (data.type === 'task_thread_input_applied') {
+								removePendingRow(data.pending_input_id);
+								ensureStreamingFragment(data);
+								return;
+							}
+							if (data.type === 'task_thread_input_cancelled') {
 								removePendingRow(data.pending_input_id);
 								return;
 							}						if (data.type === 'task_thread_input_queued') {

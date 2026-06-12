@@ -443,10 +443,13 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						requestAnimationFrame(runRender);
 					}
 
-					var eventSource = new EventSource('/events/chat/' + execId);
-					if (!isThread && window.registerChatStreamEventSource) {
-						window.registerChatStreamEventSource(execId, eventSource);
-					}
+					var streamRetryCount = 0;
+					var eventSource = null;
+					function connectExecutionStream() {
+						eventSource = new EventSource('/events/chat/' + execId);
+						if (!isThread && window.registerChatStreamEventSource) {
+							window.registerChatStreamEventSource(execId, eventSource);
+						}
 					function removeThreadEventSource(es) {
 						if (!window._threadEventSources || !es) return;
 						var idx = window._threadEventSources.indexOf(es);
@@ -521,6 +524,15 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					});
 
 					eventSource.addEventListener('error', function(event) {
+						var retryableEarlyError = textBuffer === '' && event.data === 'execution not found' && streamRetryCount < 5;
+						eventSource.close();
+						removeThreadEventSource(eventSource);
+						removeChatEventSource(execId, eventSource);
+						if (retryableEarlyError) {
+							streamRetryCount++;
+							setTimeout(connectExecutionStream, 150 * streamRetryCount);
+							return;
+						}
 						// Hide thinking indicator and streaming dots, ensure content shows
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 						if (streamingDots) streamingDots.classList.add('hidden');
@@ -528,9 +540,6 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						if (event.data) {
 							container.appendChild(document.createTextNode('\n\nError: ' + event.data));
 						}
-						eventSource.close();
-						removeThreadEventSource(eventSource);
-						removeChatEventSource(execId, eventSource);
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
 							showThreadTerminalStatus('failed');
@@ -545,13 +554,18 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 
 					eventSource.onerror = function(error) {
 						console.error('EventSource failed:', error);
+						eventSource.close();
+						removeThreadEventSource(eventSource);
+						removeChatEventSource(execId, eventSource);
+						if (textBuffer === '' && streamRetryCount < 5) {
+							streamRetryCount++;
+							setTimeout(connectExecutionStream, 150 * streamRetryCount);
+							return;
+						}
 						// Hide thinking indicator and streaming dots, ensure content shows
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 						if (streamingDots) streamingDots.classList.add('hidden');
 						container.classList.remove('hidden');
-						eventSource.close();
-						removeThreadEventSource(eventSource);
-						removeChatEventSource(execId, eventSource);
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
 							restoreThreadPollingFallback();
@@ -560,6 +574,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 						}
 					};
+					}
+					connectExecutionStream();
 				})();
 			</script>
 		</div>
@@ -729,7 +745,8 @@ templ _initThreadStreamingScript() {
 					}
 				}
 
-				var eventSource = new EventSource('/events/chat/' + execId);
+				var eventSource = null;
+				var streamRetryCount = 0;
 				var renderScheduled = false;
 				var lastRenderedLength = 0;
 				function renderCumulativeContent(force) {
@@ -771,9 +788,11 @@ templ _initThreadStreamingScript() {
 					var idx = window._threadEventSources.indexOf(es);
 					if (idx >= 0) window._threadEventSources.splice(idx, 1);
 				}
-				// Track EventSource globally so sidebar navigation can close it
-				if (!window._threadEventSources) window._threadEventSources = [];
-				window._threadEventSources.push(eventSource);
+				function connectResumeExecutionStream() {
+					eventSource = new EventSource('/events/chat/' + execId);
+					// Track EventSource globally so sidebar navigation can close it
+					if (!window._threadEventSources) window._threadEventSources = [];
+					window._threadEventSources.push(eventSource);
 
 				eventSource.onmessage = function(event) {
 					cumulativeContent += event.data;
@@ -811,12 +830,18 @@ templ _initThreadStreamingScript() {
 				});
 
 				eventSource.addEventListener('error', function(event) {
+					var retryableEarlyError = cumulativeContent === '' && event.data === 'execution not found' && streamRetryCount < 5;
+					eventSource.close();
+					removeThreadEventSource(eventSource);
+					if (retryableEarlyError) {
+						streamRetryCount++;
+						setTimeout(connectResumeExecutionStream, 150 * streamRetryCount);
+						return;
+					}
 					if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 					if (streamingDots) streamingDots.classList.add('hidden');
 					container.classList.remove('hidden');
 					if (event.data) container.appendChild(document.createTextNode('\n\nError: ' + event.data));
-					eventSource.close();
-					removeThreadEventSource(eventSource);
 					window._taskThreadStreamingActive = false;
 					if (pauseTarget) {
 						showThreadTerminalStatus('failed');
@@ -825,16 +850,23 @@ templ _initThreadStreamingScript() {
 
 				eventSource.onerror = function(error) {
 					console.error('EventSource failed:', error);
+					eventSource.close();
+					removeThreadEventSource(eventSource);
+					if (cumulativeContent === '' && streamRetryCount < 5) {
+						streamRetryCount++;
+						setTimeout(connectResumeExecutionStream, 150 * streamRetryCount);
+						return;
+					}
 					if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 					if (streamingDots) streamingDots.classList.add('hidden');
 					container.classList.remove('hidden');
-					eventSource.close();
-					removeThreadEventSource(eventSource);
 					window._taskThreadStreamingActive = false;
 					if (pauseTarget) {
 						restoreThreadPollingFallback();
 					}
 				};
+				}
+				connectResumeExecutionStream();
 			});
 		};
 	</script>

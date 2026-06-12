@@ -121,11 +121,14 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	if errIdx == -1 {
 		t.Fatal("expected error event listener in createStreamingBubble")
 	}
-	errEnd := errIdx + 700
+	errEnd := errIdx + 1400
 	if errEnd > len(bubbleSection) {
 		errEnd = len(bubbleSection)
 	}
 	errBody := bubbleSection[errIdx:errEnd]
+	if !strings.Contains(errBody, "event.data === 'execution not found'") || !strings.Contains(errBody, "setTimeout(connectChatExecutionStream, 150 * streamRetryCount)") {
+		t.Error("error handler in createStreamingBubble must retry early execution lookup races")
+	}
 	if !strings.Contains(errBody, "_chatStreamInProgress = false") {
 		t.Error("error handler in createStreamingBubble must clear _chatStreamInProgress")
 	}
@@ -138,11 +141,14 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	if oeIdx == -1 {
 		t.Fatal("expected onerror handler in createStreamingBubble")
 	}
-	oeEnd := oeIdx + 500
+	oeEnd := oeIdx + 1200
 	if oeEnd > len(bubbleSection) {
 		oeEnd = len(bubbleSection)
 	}
 	oeBody := bubbleSection[oeIdx:oeEnd]
+	if !strings.Contains(oeBody, "setTimeout(connectChatExecutionStream, 150 * streamRetryCount)") {
+		t.Error("onerror handler in createStreamingBubble must retry empty early stream failures")
+	}
 	if !strings.Contains(oeBody, "_chatStreamInProgress = false") {
 		t.Error("onerror handler in createStreamingBubble must clear _chatStreamInProgress")
 	}

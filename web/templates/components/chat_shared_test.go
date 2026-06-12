@@ -1636,8 +1636,14 @@ func TestTaskThreadView_RunningThreadCanSteerFromPendingRowsOnly(t *testing.T) {
 	if !strings.Contains(content, "task_thread_execution_started") || !strings.Contains(content, "/thread/executions/") {
 		t.Fatal("task-thread UI must append promoted queued executions smoothly via live event fragments")
 	}
-	if !strings.Contains(content, "data.type === 'task_thread_input_applied' || data.type === 'task_thread_input_cancelled'") {
+	if !strings.Contains(content, "if (data.type === 'task_thread_input_applied')") || !strings.Contains(content, "ensureStreamingFragment(data)") {
+		t.Fatal("task-thread UI must treat applied queued input events as a backup promotion signal")
+	}
+	if !strings.Contains(content, "if (data.type === 'task_thread_input_cancelled')") || !strings.Contains(content, "removePendingRow(data.pending_input_id)") {
 		t.Fatal("task-thread UI must remove cancelled pending rows from live events")
+	}
+	if !strings.Contains(content, "pendingFragmentExecs") || !strings.Contains(content, "setTimeout(function() { ensureStreamingFragment(data, attempt + 1); }") {
+		t.Fatal("task-thread UI must retry promoted execution fragment attachment to cover commit/event timing races")
 	}
 	if !strings.Contains(content, `data-task-id="task-steer-ui"`) || !strings.Contains(content, "getAttribute('data-task-id')") {
 		t.Fatal("task-thread live script must bind to the rendered task id, not a literal templ placeholder")
@@ -1797,6 +1803,9 @@ func TestChatBubbleStreaming_ErrorClearsPlanStreamingFlag(t *testing.T) {
 		errEnd = len(content)
 	}
 	errBody := content[errIdx:errEnd]
+	if !strings.Contains(errBody, "event.data === 'execution not found'") || !strings.Contains(errBody, "setTimeout(connectExecutionStream, 150 * streamRetryCount)") {
+		t.Error("error handler must retry early execution lookup races before failing the stream")
+	}
 	if !strings.Contains(errBody, "_chatStreamInProgress = false") {
 		t.Error("error handler must clear _chatStreamInProgress for chat (non-thread) context")
 	}
@@ -1814,6 +1823,9 @@ func TestChatBubbleStreaming_ErrorClearsPlanStreamingFlag(t *testing.T) {
 		oeEnd = len(content)
 	}
 	oeBody := content[oeIdx:oeEnd]
+	if !strings.Contains(oeBody, "setTimeout(connectExecutionStream, 150 * streamRetryCount)") {
+		t.Error("onerror handler must retry empty early stream failures before clearing chat streaming state")
+	}
 	if !strings.Contains(oeBody, "_chatStreamInProgress = false") {
 		t.Error("onerror handler must clear _chatStreamInProgress for chat (non-thread) context")
 	}
@@ -1838,7 +1850,7 @@ func TestChatBubbleStreaming_ThreadErrorDoesNotEvaluatePlanPrompt(t *testing.T) 
 	if errIdx == -1 {
 		t.Fatal("ChatBubbleStreaming must have an error event listener")
 	}
-	errBody := content[errIdx : errIdx+800]
+	errBody := content[errIdx:min(len(content), errIdx+2000)]
 
 	// Thread error should do the HTMX refresh but NOT clear _chatStreamInProgress
 	// for plan prompt evaluation (plan mode is chat-only)
@@ -1865,6 +1877,9 @@ func TestInitThreadStreaming_FindsStreamingDotsByID(t *testing.T) {
 	// is now in the attribute, not as text nodes)
 	if !strings.Contains(content, "getAttribute('data-raw-content')") {
 		t.Error("_initThreadStreaming must check data-raw-content for content presence")
+	}
+	if !strings.Contains(content, "function connectResumeExecutionStream()") || !strings.Contains(content, "setTimeout(connectResumeExecutionStream, 150 * streamRetryCount)") {
+		t.Error("_initThreadStreaming must retry early execution stream races for promoted/resumed rows")
 	}
 }
 

@@ -3481,6 +3481,10 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 	}
 	errBody := body[errIdx:errEnd]
 
+	assert.Contains(t, errBody, "event.data === 'execution not found'",
+		"streaming bubble error handler must retry early execution lookup races")
+	assert.Contains(t, errBody, "setTimeout(connectExecutionStream, 150 * streamRetryCount)",
+		"streaming bubble error handler must reconnect before failing empty streams")
 	assert.Contains(t, errBody, "_chatStreamInProgress = false",
 		"streaming bubble error handler must clear _chatStreamInProgress for chat context")
 	assert.Contains(t, errBody, "evaluatePlanCompletionPrompt",
@@ -3495,6 +3499,8 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 	}
 	oeBody := body[oeIdx:oeEnd]
 
+	assert.Contains(t, oeBody, "setTimeout(connectExecutionStream, 150 * streamRetryCount)",
+		"streaming bubble onerror must reconnect before failing empty streams")
 	assert.Contains(t, oeBody, "_chatStreamInProgress = false",
 		"streaming bubble onerror must clear _chatStreamInProgress for chat context")
 	assert.Contains(t, oeBody, "evaluatePlanCompletionPrompt",

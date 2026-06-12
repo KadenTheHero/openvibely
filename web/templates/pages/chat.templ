@@ -894,10 +894,13 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					var chatMessages = document.getElementById('chat-messages');
 					var tracker = window._chatPageTracker;
 
-					var eventSource = new EventSource('/events/chat/' + execId);
-					if (window.registerChatStreamEventSource) {
-						window.registerChatStreamEventSource(execId, eventSource);
-					}
+					var streamRetryCount = 0;
+					var eventSource = null;
+					function connectChatExecutionStream() {
+						eventSource = new EventSource('/events/chat/' + execId);
+						if (window.registerChatStreamEventSource) {
+							window.registerChatStreamEventSource(execId, eventSource);
+						}
 
 					eventSource.onmessage = function(event) {
 						if (!thinking.classList.contains('hidden')) {
@@ -938,15 +941,21 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					});
 
 					eventSource.addEventListener('error', function(event) {
+						var retryableEarlyError = textBuffer === '' && event.data === 'execution not found' && streamRetryCount < 5;
+						eventSource.close();
+						if (window.unregisterChatStreamEventSource) {
+							window.unregisterChatStreamEventSource(execId, eventSource);
+						}
+						if (retryableEarlyError) {
+							streamRetryCount++;
+							setTimeout(connectChatExecutionStream, 150 * streamRetryCount);
+							return;
+						}
 						thinking.classList.add('hidden');
 						dots.classList.add('hidden');
 						contentDiv.classList.remove('hidden');
 						if (event.data) {
 							contentDiv.textContent += '\n\nError: ' + event.data;
-						}
-						eventSource.close();
-						if (window.unregisterChatStreamEventSource) {
-							window.unregisterChatStreamEventSource(execId, eventSource);
 						}
 						// Clear streaming flag and re-evaluate plan prompt on error.
 						// DOM scan finds error/partial bubble without <proposed_plan> → hides prompt.
@@ -955,16 +964,23 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					});
 
 					eventSource.onerror = function() {
-						thinking.classList.add('hidden');
-						dots.classList.add('hidden');
-						contentDiv.classList.remove('hidden');
 						eventSource.close();
 						if (window.unregisterChatStreamEventSource) {
 							window.unregisterChatStreamEventSource(execId, eventSource);
 						}
+						if (textBuffer === '' && streamRetryCount < 5) {
+							streamRetryCount++;
+							setTimeout(connectChatExecutionStream, 150 * streamRetryCount);
+							return;
+						}
+						thinking.classList.add('hidden');
+						dots.classList.add('hidden');
+						contentDiv.classList.remove('hidden');
 						window._chatStreamInProgress = false;
 						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 					};
+					}
+					connectChatExecutionStream();
 
 					return bubble;
 				}
