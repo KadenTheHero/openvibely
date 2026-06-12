@@ -144,7 +144,11 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 	out := buf.String()
 
 	for _, want := range []string{
-		"Discover Models",
+		`onchange="applyOpenAICompatiblePreset()"`,
+		"OpenRouter and NVIDIA NIM presets auto-load available models when selected.",
+		"!force && (preset === 'openrouter' || preset === 'nvidia_nim')",
+		"discoverOpenAICompatibleModels();",
+		"Enter the model ID manually for local or custom endpoints.",
 		"/models/openai-compatible/available?",
 		"new URLSearchParams({base_url: baseURL})",
 		"X-OpenAI-Compatible-API-Key",
@@ -157,12 +161,14 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
+		"Discover Models",
+		`onclick="discoverOpenAICompatibleModels()"`,
 		"api_key: apiKey",
 		"api_key=",
 		"openai_compatible_api_key",
 	} {
 		if strings.Contains(out, forbidden) {
-			t.Fatalf("expected discovery UI not to put API key in URL or DOM data, found %q", forbidden)
+			t.Fatalf("expected discovery UI not to contain %q", forbidden)
 		}
 	}
 }
