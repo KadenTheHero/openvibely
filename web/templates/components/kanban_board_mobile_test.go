@@ -20,7 +20,7 @@ func TestKanbanBoardUsesResponsiveNonScrollingLayout(t *testing.T) {
 		`id="kanban-board"`,
 		"grid-cols-1",
 		"md:grid-cols-2",
-		"lg:grid-cols-4",
+		"lg:grid-cols-3",
 		"overflow-x-hidden",
 		"overflow-y-auto",
 	} {
@@ -30,6 +30,9 @@ func TestKanbanBoardUsesResponsiveNonScrollingLayout(t *testing.T) {
 	}
 	if strings.Contains(body, "overflow-x-auto") {
 		t.Fatalf("kanban board should not force horizontal scrolling on mobile, got %s", body)
+	}
+	if strings.Contains(body, "lg:grid-cols-4") {
+		t.Fatalf("kanban board should not reserve a phantom fourth desktop column, got %s", body)
 	}
 }
 

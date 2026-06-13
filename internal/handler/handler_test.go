@@ -3095,7 +3095,7 @@ func TestTasks_DeleteButton_LightMode_NoDefaultCircularBackground(t *testing.T) 
 	}
 
 	required := []string{
-		`class="btn btn-circle btn-ghost btn-xs min-h-11 h-11 w-11 p-0 absolute top-2 right-2 z-10"`, `[data-theme="light"] .card .btn-circle.btn-ghost {`,
+		`class="btn btn-circle btn-ghost btn-xs min-h-11 h-11 w-11 p-0 lg:min-h-6 lg:h-6 lg:w-6 absolute top-2 right-2 z-10"`, `[data-theme="light"] .card .btn-circle.btn-ghost {`,
 		`background-color: transparent;`,
 		`[data-theme="light"] .card .btn-circle.btn-ghost:hover {`,
 		`background-color: #F8514922;`,
