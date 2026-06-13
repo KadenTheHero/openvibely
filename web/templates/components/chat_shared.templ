@@ -1014,17 +1014,17 @@ templ ChatEmptyState(message string) {
 
 // ChatInputForm renders a shared chat input form with attachment support.
 templ ChatInputForm(config ChatInputFormConfig) {
-		<form
-			id={ config.FormID }
-			method="post"
-			hx-post={ config.PostEndpoint }
-			hx-target={ "#" + config.TargetID }
-			hx-swap="beforeend"
-			data-input-id={ config.InputID }
-			data-clear-func-name={ config.FormID + "ClearAttachments" }
-			data-message-history-key={ chatMessageHistoryStorageKey(config) }
-			class="chat-input-container rounded-xl p-4 relative"
-		>
+	<form
+		id={ config.FormID }
+		method="post"
+		hx-post={ config.PostEndpoint }
+		hx-target={ "#" + config.TargetID }
+		hx-swap="beforeend"
+		data-input-id={ config.InputID }
+		data-clear-func-name={ config.FormID + "ClearAttachments" }
+		data-message-history-key={ chatMessageHistoryStorageKey(config) }
+		class="chat-input-container rounded-xl p-4 relative"
+	>
 		<!-- Drop zone overlay -->
 		<div id={ chatDropOverlayID(config.FormID) } class="hidden absolute inset-0 z-10 rounded-xl border-2 border-dashed border-primary bg-primary/10 flex items-center justify-center pointer-events-none">
 			<div class="flex flex-col items-center gap-2 text-primary">
@@ -1069,10 +1069,10 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			></textarea>
 		</div>
 		<!-- Bottom controls row -->
-		<div class="flex items-center justify-between pt-2">
-			<div class="flex items-center gap-1 -ml-2">
+		<div class="flex items-center justify-between gap-2 pt-2 min-w-0 overflow-hidden">
+			<div class="flex items-center gap-1 -ml-2 min-w-0 flex-1 overflow-hidden">
 				if config.ShowModelSelector {
-					<select id={ config.FormID + "-agent-select" } class="chat-model-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 max-w-[140px] rounded-lg" data-agent-input={ config.FormID + "-agent-id" }>
+					<select id={ config.FormID + "-agent-select" } class="chat-model-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[7.5rem] sm:max-w-[140px] rounded-lg" data-agent-input={ config.FormID + "-agent-id" }>
 						<option
 							value="auto"
 							if selectedAgentOrAuto(config.SelectedAgentID) == "auto" {
@@ -1098,7 +1098,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					</select>
 				}
 				if config.ShowModeSelector {
-					<select id={ config.FormID + "-mode-select" } class="chat-mode-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 max-w-[120px] rounded-lg" data-mode-input={ config.FormID + "-chat-mode" }>
+					<select id={ config.FormID + "-mode-select" } class="chat-mode-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[6rem] sm:max-w-[120px] rounded-lg" data-mode-input={ config.FormID + "-chat-mode" }>
 						<option value="orchestrate" selected>Orchestrate</option>
 						<option value="plan">Plan</option>
 					</select>
@@ -1117,7 +1117,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					</button>
 				}
 			</div>
-			<div class="flex items-center gap-2">
+			<div class="flex items-center gap-2 flex-shrink-0">
 				<!-- Attachment button -->
 				<label for={ chatFileInputID(config.FormID) } class="btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300" title="Attach files">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

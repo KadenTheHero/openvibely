@@ -302,7 +302,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "><div class=\"card-body relative max-w-full min-w-0 p-4 sm:p-6\"><div class=\"max-w-full min-w-0 pr-14 sm:pr-16\"><div class=\"flex items-start gap-3 min-w-0 max-w-full\"><div class=\"mt-0.5\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "><div class=\"card-body relative max-w-full min-w-0 p-4 sm:p-6\"><div class=\"max-w-full min-w-0 pr-20 sm:pr-24\"><div class=\"flex items-start gap-3 min-w-0 max-w-full\"><div class=\"mt-0.5\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

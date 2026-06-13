@@ -67,7 +67,7 @@ func TestAlertsContent_CardsConformToNarrowViewport(t *testing.T) {
 		`class="grid grid-cols-1 gap-4 max-w-full min-w-0"`,
 		`transition-all w-full min-w-0 max-w-full`,
 		`card-body relative max-w-full min-w-0 p-4 sm:p-6`,
-		`class="max-w-full min-w-0 pr-14 sm:pr-16"`,
+		`class="max-w-full min-w-0 pr-20 sm:pr-24"`,
 		`font-semibold break-words [overflow-wrap:anywhere]`,
 		`class="text-sm opacity-60 mt-1 break-words [overflow-wrap:anywhere]"`,
 		`class="absolute top-4 right-4 flex items-center gap-1"`,

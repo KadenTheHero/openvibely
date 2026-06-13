@@ -444,6 +444,38 @@ func TestChatInputForm_MessageHistoryScopedPerTaskThread(t *testing.T) {
 	}
 }
 
+func TestChatInputForm_MobileControlsStayContained(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatInputForm(ChatInputFormConfig{
+		FormID:            "chat-form",
+		InputID:           "message-input",
+		PostEndpoint:      "/chat/send",
+		TargetID:          "chat-messages",
+		ShowModelSelector: true,
+		ShowModeSelector:  true,
+		Agents: []models.LLMConfig{
+			{ID: "agent-1", Name: "Very Long Agent Name That Should Not Push Send Button", Model: "very-long-model-name"},
+		},
+	}).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render ChatInputForm: %v", err)
+	}
+
+	content := buf.String()
+	required := []string{
+		`class="flex items-center justify-between gap-2 pt-2 min-w-0 overflow-hidden"`,
+		`class="flex items-center gap-1 -ml-2 min-w-0 flex-1 overflow-hidden"`,
+		`w-auto min-w-0 max-w-[7.5rem] sm:max-w-[140px]`,
+		`w-auto min-w-0 max-w-[6rem] sm:max-w-[120px]`,
+		`class="flex items-center gap-2 flex-shrink-0"`,
+	}
+	for _, expected := range required {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("chat composer should keep mobile controls contained; missing %q", expected)
+		}
+	}
+}
+
 func TestChatInputForm_MessageHistoryCursorGuardsPreventArrowHijack(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatInputForm(ChatInputFormConfig{
