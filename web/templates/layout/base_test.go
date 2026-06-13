@@ -193,7 +193,7 @@ func TestPendingThreadInputsCSS_AddsTextareaGutterOnlyWhenRowsExist(t *testing.T
 	}
 }
 
-func TestChatInputContainerCSS_AccountsForVisualMargins(t *testing.T) {
+func TestChatInputContainerCSS_FillsContainerWithoutExternalGap(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render Base: %v", err)
@@ -202,13 +202,17 @@ func TestChatInputContainerCSS_AccountsForVisualMargins(t *testing.T) {
 	html := buf.String()
 	for _, expected := range []string{
 		".chat-input-container {",
-		"margin-left: 16px;",
-		"margin-right: 16px;",
-		"width: calc(100% - 32px);",
+		"box-sizing: border-box;",
+		"margin-left: 0;",
+		"margin-right: 0;",
+		"width: 100%;",
 	} {
 		if !strings.Contains(html, expected) {
-			t.Fatalf("chat input container should account for visual margins without clipping its right bevel; missing %q", expected)
+			t.Fatalf("chat input container should fill its parent without external right-side gap or clipping; missing %q", expected)
 		}
+	}
+	if strings.Contains(html, "width: calc(100% - 32px);") {
+		t.Fatal("chat input container should not shrink itself with margin-compensation width because it leaves a visible right-side gap")
 	}
 }
 
