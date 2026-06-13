@@ -52,7 +52,7 @@ func Base(title string, projects []models.Project, currentProjectID string) temp
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</main></div><!-- Sidebar --><div class=\"drawer-side\"><label for=\"sidebar-toggle\" aria-label=\"close sidebar\" class=\"drawer-overlay\"></label>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</main></div><!-- Sidebar --><div class=\"drawer-side z-[200] lg:z-auto\"><label for=\"sidebar-toggle\" aria-label=\"close sidebar\" class=\"drawer-overlay z-[190] lg:z-auto\"></label>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -215,6 +215,21 @@ func TestBase_KanbanColumnCSSDoesNotOverrideResponsiveGridWidth(t *testing.T) {
 	}
 }
 
+func TestBase_MobileDrawerLayerStaysAboveStickyPageContent(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	if !strings.Contains(html, `class="drawer-side z-[200] lg:z-auto"`) {
+		t.Fatal("mobile drawer side should be layered above sticky page content such as the Schedule timeline")
+	}
+	if !strings.Contains(html, `class="drawer-overlay z-[190] lg:z-auto"`) {
+		t.Fatal("mobile drawer overlay should sit behind the sidebar but above page content")
+	}
+}
+
 // TestLightTheme_UsesLightModernTokens verifies the light theme exposes the
 // Light 2026 token aliases and that key surfaces consume those tokens.
 func TestLightTheme_UsesLightModernTokens(t *testing.T) {

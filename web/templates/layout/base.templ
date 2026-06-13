@@ -2404,12 +2404,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						{ children... }
 					</main>
 				</div>
-				<!-- Sidebar -->
-				<div class="drawer-side">
-					<label for="sidebar-toggle" aria-label="close sidebar" class="drawer-overlay"></label>
-					@Sidebar(projects, currentProjectID)
-				</div>
-				<!-- Apply sidebar collapsed state immediately to prevent flash -->
+					<!-- Sidebar -->
+					<div class="drawer-side z-[200] lg:z-auto">
+						<label for="sidebar-toggle" aria-label="close sidebar" class="drawer-overlay z-[190] lg:z-auto"></label>
+						@Sidebar(projects, currentProjectID)
+					</div>
+					<!-- Apply sidebar collapsed state immediately to prevent flash -->
 				<script>
 					(function() {
 						if (localStorage.getItem('sidebar-collapsed') === 'true') {
