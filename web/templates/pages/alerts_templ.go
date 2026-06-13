@@ -170,7 +170,7 @@ func alertsContent(alerts []models.Alert, currentProjectID string, unreadCount i
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts?project_id=%s", currentProjectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 54, Col: 83}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 54, Col: 82}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 				if templ_7745c5c3_Err != nil {
@@ -273,7 +273,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(alertSearchText(alert))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 119, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 117, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 		if templ_7745c5c3_Err != nil {
@@ -291,7 +291,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var12 string
 			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(*alert.TaskID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 121, Col: 31}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 119, Col: 31}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 			if templ_7745c5c3_Err != nil {
@@ -302,7 +302,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "><div class=\"card-body relative max-w-full min-w-0 p-4 sm:p-6\"><div class=\"max-w-full min-w-0 pr-20 sm:pr-24\"><div class=\"flex items-start gap-3 min-w-0 max-w-full\"><div class=\"mt-0.5\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "><div class=\"card-body max-w-full min-w-0 p-4 sm:p-6\"><div class=\"flex items-start gap-3 max-w-full min-w-0\"><div class=\"mt-0.5 flex-shrink-0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -322,7 +322,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</div><div class=\"flex-1 min-w-0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</div><div class=\"flex-1 min-w-0 max-w-full\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -351,7 +351,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 145, Col: 20}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 142, Col: 19}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 		if templ_7745c5c3_Err != nil {
@@ -369,7 +369,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Message)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 148, Col: 94}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 145, Col: 93}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
@@ -387,13 +387,13 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 150, Col: 108}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 147, Col: 107}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</p></div></div><div class=\"absolute top-4 right-4 flex items-center gap-1\" onclick=\"event.stopPropagation()\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</p></div><div class=\"flex flex-shrink-0 items-center gap-1 self-start\" onclick=\"event.stopPropagation()\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -405,7 +405,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var18 string
 			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/%s/read?project_id=%s", alert.ID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 157, Col: 89}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 153, Col: 89}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 			if templ_7745c5c3_Err != nil {
@@ -423,7 +423,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/%s?project_id=%s", alert.ID, currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 169, Col: 91}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 165, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 		if templ_7745c5c3_Err != nil {
@@ -466,7 +466,7 @@ func AlertBadge(count int) templ.Component {
 			var templ_7745c5c3_Var21 string
 			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", count))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 184, Col: 94}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 180, Col: 94}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 			if templ_7745c5c3_Err != nil {

@@ -66,15 +66,23 @@ func TestAlertsContent_CardsConformToNarrowViewport(t *testing.T) {
 		`id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0"`,
 		`class="grid grid-cols-1 gap-4 max-w-full min-w-0"`,
 		`transition-all w-full min-w-0 max-w-full`,
-		`card-body relative max-w-full min-w-0 p-4 sm:p-6`,
-		`class="max-w-full min-w-0 pr-20 sm:pr-24"`,
+		`card-body max-w-full min-w-0 p-4 sm:p-6`,
+		`class="flex items-start gap-3 max-w-full min-w-0"`,
+		`class="mt-0.5 flex-shrink-0"`,
+		`class="flex-1 min-w-0 max-w-full"`,
 		`font-semibold break-words [overflow-wrap:anywhere]`,
 		`class="text-sm opacity-60 mt-1 break-words [overflow-wrap:anywhere]"`,
-		`class="absolute top-4 right-4 flex items-center gap-1"`,
+		`class="flex flex-shrink-0 items-center gap-1 self-start"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected alerts markup to include responsive class %q", want)
 		}
+	}
+	if strings.Contains(html, `absolute top-4 right-4`) {
+		t.Fatal("alert card controls should stay in normal top-row flow so long titles cannot render underneath them")
+	}
+	if strings.Contains(html, `pr-14`) || strings.Contains(html, `pr-20`) {
+		t.Fatal("alert titles should not rely on fixed right padding to avoid top-right action overlap")
 	}
 	if strings.Contains(html, "overflow-wrap-anywhere") {
 		t.Fatal("alerts should use Tailwind arbitrary overflow-wrap utility, not a non-existent class")
