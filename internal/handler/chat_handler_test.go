@@ -2903,8 +2903,12 @@ func TestHandler_Chat_ReconnectPreservesProjectID(t *testing.T) {
 	// The rendered HTML must have a chat-specific root with the requested project ID.
 	assert.Contains(t, body, `id="chat-page-root"`,
 		"chat content must render with a page-specific root")
-	assert.Contains(t, body, `id="chat-page-root" class="h-full flex flex-col" data-project-id="`+project2.ID+`"`,
+	assert.Contains(t, body, `id="chat-page-root"`,
 		"chat root must have the requested project ID")
+	assert.Contains(t, body, `data-project-id="`+project2.ID+`"`,
+		"chat root must have the requested project ID")
+	assert.Contains(t, body, `h-full flex flex-col min-w-0 max-w-full overflow-x-hidden`,
+		"chat root must contain horizontal overflow on mobile")
 
 	// The SSE reconnect and response_done refresh calls must include project_id
 	// and be scoped to the chat root element only.

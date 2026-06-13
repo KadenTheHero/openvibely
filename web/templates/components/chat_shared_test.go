@@ -1667,7 +1667,7 @@ func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
 	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto overflow-x-hidden max-w-full py-4 mb-4 space-y-6 min-h-0 min-w-0"`) {
 		t.Fatal("task thread messages pane must hide horizontal overflow at the pane boundary")
 	}
-	if !strings.Contains(content, `class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full overflow-x-hidden"`) {
+	if !strings.Contains(content, `class="chat-input-container rounded-xl p-4 relative w-full min-w-0 max-w-full overflow-x-hidden"`) {
 		t.Fatal("task thread composer must stay contained inside the mobile viewport")
 	}
 	if strings.Contains(content, `overflow-x-auto py-4 mb-4`) {

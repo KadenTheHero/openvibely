@@ -14,6 +14,30 @@ func renderChatContentForTest(agents []models.LLMConfig, history []models.Execut
 	return ChatContent(agents, history, projectID, attachments, pending, latestPlanComplete, false, 30)
 }
 
+func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Very Long Agent Name That Should Not Push Send Button", Model: "very-long-model-name", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+
+	content := buf.String()
+	required := []string{
+		`id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full overflow-x-hidden"`,
+		`id="chat-messages" class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-full min-w-0 py-4 mb-4 space-y-6"`,
+		`class="chat-input-container rounded-xl p-4 relative w-full min-w-0 max-w-full overflow-x-hidden"`,
+		`class="flex items-center justify-between gap-2 pt-2 min-w-0 overflow-hidden"`,
+		`class="flex items-center gap-2 flex-shrink-0"`,
+	}
+	for _, expected := range required {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("chat page composer should stay within the mobile viewport; missing %q", expected)
+		}
+	}
+}
+
 func TestChatContent_PlanSwitchAutoSubmitsImplementationHandoff(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 

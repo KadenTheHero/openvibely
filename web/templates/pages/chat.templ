@@ -66,7 +66,7 @@ templ ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[st
 
 // ChatContent renders just the chat content (for HTMX)
 templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int) {
-	<div id="chat-page-root" class="h-full flex flex-col" data-project-id={ currentProjectID }>
+	<div id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full overflow-x-hidden" data-project-id={ currentProjectID }>
 		<div class="mb-4 flex items-center justify-between">
 			<div>
 				<h2 class="text-2xl font-bold">Chat</h2>
@@ -96,7 +96,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			</div>
 		</div>
 		<!-- Chat Messages Container -->
-		<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) }>
+		<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-full min-w-0 py-4 mb-4 space-y-6" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) }>
 			if hasEarlier && len(chatHistory) > 0 {
 				@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 			}
