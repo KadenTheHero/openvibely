@@ -259,12 +259,18 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				// navigating away, preventing expensive morph operations (e.g. thread
 				// view's every-3s morph:outerHTML) from blocking sidebar navigation.
 				(function() {
+					function closeMobileDrawer() {
+						var sidebarToggle = document.getElementById('sidebar-toggle');
+						if (sidebarToggle) sidebarToggle.checked = false;
+					}
+
 					// Early navigation signal: set flag on capture-phase pointerdown (fires
 					// before bubble handlers and before click) so stale morph swaps can be
 					// suppressed even when the main thread is busy with thread polling work.
 					document.body.addEventListener('pointerdown', function(event) {
 						var link = event.target.closest('[data-nav-base]');
 						if (!link) return;
+						closeMobileDrawer();
 						var navBase = link.getAttribute('data-nav-base');
 						if (window.location.pathname === navBase) return;
 						window._sidebarNavigating = true;

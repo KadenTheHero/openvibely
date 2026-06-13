@@ -137,6 +137,13 @@ func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 	if !strings.Contains(html, `target.closest('#main-content')`) {
 		t.Fatal("sidebar beforeSwap must check target.closest to suppress stale inner swaps")
 	}
+	// Mobile drawer must close after a real nav option is selected.
+	if !strings.Contains(html, `document.getElementById('sidebar-toggle')`) {
+		t.Fatal("sidebar navigation script must target the mobile drawer checkbox")
+	}
+	if !strings.Contains(html, `sidebarToggle.checked = false`) {
+		t.Fatal("sidebar navigation script must uncheck the mobile drawer after nav selection")
+	}
 }
 
 func TestSidebar_MousedownEarlyNavigationSignal(t *testing.T) {
