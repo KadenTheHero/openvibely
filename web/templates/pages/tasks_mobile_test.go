@@ -21,12 +21,20 @@ func TestTasksContentHasMobileSafeShell(t *testing.T) {
 		"overflow-x-hidden",
 		"overflow-y-auto",
 		"min-h-0",
-		"flex-col",
-		"sm:flex-row",
-		"min-h-11",
+		"flex items-center justify-between mb-6 flex-shrink-0",
+		"btn btn-primary btn-sm",
+		"+ Add Task",
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("expected mobile-safe tasks page shell to contain %q, got %s", want, body)
+			t.Fatalf("expected tasks page shell to contain %q, got %s", want, body)
+		}
+	}
+	for _, unwanted := range []string{
+		"w-full sm:w-auto",
+		"sm:flex-row",
+	} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("expected tasks page add button header to follow models placement without %q, got %s", unwanted, body)
 		}
 	}
 }

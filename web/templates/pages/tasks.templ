@@ -25,13 +25,11 @@ templ Tasks(projects []models.Project, project *models.Project, tasks []models.T
 
 templ TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string) {
 	<div class="flex flex-col h-full min-h-0 overflow-x-hidden overflow-y-hidden">
-		<div class="flex flex-col gap-3 mb-4 flex-shrink-0 sm:flex-row sm:items-center sm:justify-between sm:mb-6">
+		<div class="flex items-center justify-between mb-6 flex-shrink-0">
 			<h2 class="text-2xl font-bold">Tasks</h2>
-			<div class="flex gap-2 w-full sm:w-auto">
-				<button class="btn btn-primary btn-sm min-h-11 w-full sm:w-auto" onclick="openNewTaskModal()">
-					+ Add Task
-				</button>
-			</div>
+			<button class="btn btn-primary btn-sm" onclick="openNewTaskModal()">
+				+ Add Task
+			</button>
 		</div>
 
 		if project != nil {
