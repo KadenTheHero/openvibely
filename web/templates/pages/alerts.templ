@@ -17,7 +17,7 @@ templ AlertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 }
 
 templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount int) {
-	<div id="alerts-container" class="h-full overflow-y-auto max-w-full" data-search-container>
+	<div id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0" data-search-container>
 		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">
 				Alerts
@@ -73,7 +73,7 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 				<p class="opacity-50">No alerts. You're all clear!</p>
 			</div>
 		} else {
-			<div class="grid gap-4 max-w-full">
+			<div class="grid grid-cols-1 gap-4 max-w-full min-w-0">
 				for _, alert := range alerts {
 					@alertRow(alert, currentProjectID)
 				}
@@ -114,7 +114,7 @@ func alertSearchText(alert models.Alert) string {
 
 templ alertRow(alert models.Alert, currentProjectID string) {
 	<div
-		class={ "card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all max-w-full", templ.KV("opacity-60", alert.IsRead), templ.KV("cursor-pointer", alert.TaskID != nil) }
+		class={ "card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full", templ.KV("opacity-60", alert.IsRead), templ.KV("cursor-pointer", alert.TaskID != nil) }
 		data-search-card
 		data-search-text={ alertSearchText(alert) }
 		if alert.TaskID != nil {
@@ -122,8 +122,8 @@ templ alertRow(alert models.Alert, currentProjectID string) {
 			onclick="openAlertTaskDialog(this.dataset.taskId)"
 		}
 	>
-		<div class="card-body max-w-full">
-			<div class="flex items-start justify-between gap-4 max-w-full">
+		<div class="card-body max-w-full min-w-0 p-4 sm:p-6">
+			<div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 max-w-full min-w-0">
 				<div class="flex items-start gap-3 flex-1 min-w-0 max-w-full">
 					<div class="mt-0.5">
 						if alert.Severity == models.SeverityError {
@@ -141,16 +141,16 @@ templ alertRow(alert models.Alert, currentProjectID string) {
 						}
 					</div>
 					<div class="flex-1 min-w-0">
-						<p class={ "font-semibold", templ.KV("font-bold", !alert.IsRead) }>
+						<p class={ "font-semibold break-words [overflow-wrap:anywhere]", templ.KV("font-bold", !alert.IsRead) }>
 							{ alert.Title }
 						</p>
 						if alert.Message != "" {
-							<p class="text-sm opacity-60 mt-1 break-words overflow-wrap-anywhere">{ alert.Message }</p>
+							<p class="text-sm opacity-60 mt-1 break-words [overflow-wrap:anywhere]">{ alert.Message }</p>
 						}
-						<p class="text-sm opacity-50 mt-1">{ alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM") }</p>
+						<p class="text-sm opacity-50 mt-1 break-words">{ alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM") }</p>
 					</div>
 				</div>
-				<div class="flex items-center gap-1 flex-shrink-0" onclick="event.stopPropagation()">
+				<div class="flex items-center gap-1 self-end sm:self-start flex-shrink-0" onclick="event.stopPropagation()">
 					if !alert.IsRead {
 						<button
 							class="btn btn-ghost btn-xs"

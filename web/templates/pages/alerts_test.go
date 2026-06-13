@@ -50,3 +50,33 @@ func TestAlertsContent_DeleteActionsDoNotDependOnHxConfirm(t *testing.T) {
 		t.Fatal("expected direct delete helper in alerts template")
 	}
 }
+
+func TestAlertsContent_CardsConformToNarrowViewport(t *testing.T) {
+	longText := strings.Repeat("SuperLongUnbrokenAlertToken", 8)
+	alerts := []models.Alert{{ID: "alert-1", Title: longText, Message: longText, ProjectID: "project-1"}}
+
+	var buf bytes.Buffer
+	err := AlertsContent(alerts, "project-1", 1).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render alerts content: %v", err)
+	}
+
+	html := buf.String()
+	for _, want := range []string{
+		`id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0"`,
+		`class="grid grid-cols-1 gap-4 max-w-full min-w-0"`,
+		`transition-all w-full min-w-0 max-w-full`,
+		`card-body max-w-full min-w-0 p-4 sm:p-6`,
+		`flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 max-w-full min-w-0`,
+		`font-semibold break-words [overflow-wrap:anywhere]`,
+		`class="text-sm opacity-60 mt-1 break-words [overflow-wrap:anywhere]"`,
+		`class="flex items-center gap-1 self-end sm:self-start flex-shrink-0"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected alerts markup to include responsive class %q", want)
+		}
+	}
+	if strings.Contains(html, "overflow-wrap-anywhere") {
+		t.Fatal("alerts should use Tailwind arbitrary overflow-wrap utility, not a non-existent class")
+	}
+}
