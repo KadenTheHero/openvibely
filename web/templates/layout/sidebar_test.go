@@ -137,7 +137,7 @@ func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 	if !strings.Contains(html, `target.closest('#main-content')`) {
 		t.Fatal("sidebar beforeSwap must check target.closest to suppress stale inner swaps")
 	}
-	// Mobile drawer must close after a real nav option is selected.
+	// Mobile drawer must close after HTMX has committed to a real nav request.
 	if !strings.Contains(html, `document.getElementById('sidebar-toggle')`) {
 		t.Fatal("sidebar navigation script must target the mobile drawer checkbox")
 	}
@@ -147,12 +147,21 @@ func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 
 	pointerdownStart := strings.Index(html, `addEventListener('pointerdown'`)
 	beforeRequestStart := strings.Index(html, `addEventListener('htmx:beforeRequest'`)
-	if pointerdownStart == -1 || beforeRequestStart == -1 || beforeRequestStart <= pointerdownStart {
-		t.Fatal("sidebar navigation script must keep pointerdown before htmx:beforeRequest")
+	beforeSendStart := strings.Index(html, `addEventListener('htmx:beforeSend'`)
+	if pointerdownStart == -1 || beforeRequestStart == -1 || beforeSendStart == -1 || beforeRequestStart <= pointerdownStart || beforeSendStart <= beforeRequestStart {
+		t.Fatal("sidebar navigation script must keep pointerdown before htmx:beforeRequest and close the drawer at htmx:beforeSend")
 	}
 	pointerdownBlock := html[pointerdownStart:beforeRequestStart]
 	if strings.Contains(pointerdownBlock, `closeMobileDrawer()`) || strings.Contains(pointerdownBlock, `sidebarToggle.checked = false`) {
 		t.Fatal("sidebar must not close the mobile drawer on pointerdown before the click/HTMX request can fire")
+	}
+	beforeRequestBlock := html[beforeRequestStart:beforeSendStart]
+	if strings.Contains(beforeRequestBlock, `closeMobileDrawer();`) && strings.Contains(beforeRequestBlock, `window.location.pathname !== navBase`) {
+		t.Fatal("sidebar must not close the mobile drawer in the real-navigation htmx:beforeRequest path before HTMX sends the request")
+	}
+	beforeSendBlock := html[beforeSendStart:]
+	if !strings.Contains(beforeSendBlock, `closeMobileDrawer()`) {
+		t.Fatal("sidebar must close the mobile drawer in htmx:beforeSend after HTMX accepts the nav request")
 	}
 }
 

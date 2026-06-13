@@ -290,7 +290,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								event.preventDefault();
 								return;
 							}
-							closeMobileDrawer();
 							// Abort in-flight polling to prevent morph from blocking navigation
 							window._sidebarNavigating = true;
 							var mainContent = document.getElementById('main-content');
@@ -310,6 +309,13 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								});
 								window._threadEventSources = [];
 							}
+						}
+					});
+
+					document.body.addEventListener('htmx:beforeSend', function(event) {
+						var elt = event.detail.elt;
+						if (elt && elt.hasAttribute('data-nav-base')) {
+							closeMobileDrawer();
 						}
 					});
 
