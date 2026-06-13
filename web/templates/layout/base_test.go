@@ -228,6 +228,9 @@ func TestBase_MobileDrawerLayerStaysAboveStickyPageContent(t *testing.T) {
 	if !strings.Contains(html, `class="drawer-overlay z-[190] lg:z-auto"`) {
 		t.Fatal("mobile drawer overlay should sit behind the sidebar but above page content")
 	}
+	if !strings.Contains(html, `id="sidebar" class="sidebar-aside relative z-[210] lg:z-auto`) {
+		t.Fatal("mobile sidebar panel should sit above the drawer overlay so nav links and theme toggle remain clickable")
+	}
 }
 
 // TestLightTheme_UsesLightModernTokens verifies the light theme exposes the

@@ -3018,7 +3018,7 @@ func TestSidebar_LightModeBackgroundAndNavReadability(t *testing.T) {
 
 	requiredSnippets := []string{
 		`id="sidebar"`,
-		`class="sidebar-aside bg-base-100`,
+		`class="sidebar-aside relative z-[210] lg:z-auto bg-base-100`,
 		`id="project-selector"`,
 		`--ov-l-bg: #FAFAFA;`,
 		`--ov-l-surface: #F5F5F5;`,

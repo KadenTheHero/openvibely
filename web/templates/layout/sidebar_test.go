@@ -19,6 +19,9 @@ func TestSidebar_ThemeToggleInFooter(t *testing.T) {
 
 	html := buf.String()
 
+	if !strings.Contains(html, `id="sidebar" class="sidebar-aside relative z-[210] lg:z-auto`) {
+		t.Fatal("sidebar panel must be layered above the drawer overlay so footer controls are clickable on mobile")
+	}
 	if !strings.Contains(html, "theme-toggle-pill") {
 		t.Fatal("sidebar footer must contain theme toggle pill")
 	}
