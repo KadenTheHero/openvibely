@@ -193,6 +193,28 @@ func TestPendingThreadInputsCSS_AddsTextareaGutterOnlyWhenRowsExist(t *testing.T
 	}
 }
 
+func TestBase_KanbanColumnCSSDoesNotOverrideResponsiveGridWidth(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	if strings.Contains(html, "width: calc((100% - 2rem) / 3);") {
+		t.Fatal("base CSS must not force kanban columns to one-third width; the responsive board grid owns column sizing")
+	}
+	for _, want := range []string{
+		".kanban-column {",
+		"width: 100%;",
+		"min-width: 0;",
+		"flex-shrink: 1;",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected responsive kanban column CSS fragment %q", want)
+		}
+	}
+}
+
 // TestLightTheme_UsesLightModernTokens verifies the light theme exposes the
 // Light 2026 token aliases and that key surfaces consume those tokens.
 func TestLightTheme_UsesLightModernTokens(t *testing.T) {
