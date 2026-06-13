@@ -1639,6 +1639,42 @@ func TestTaskThreadView_SelectsTaskAssignedModelInDropdown(t *testing.T) {
 	}
 }
 
+func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-thread-mobile-overflow",
+		ProjectID: "p1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+	longUnbroken := strings.Repeat("very-long-unbroken-token", 24)
+	execs := []models.Execution{{
+		ID:         "exec-wide-content",
+		TaskID:     task.ID,
+		Status:     models.ExecCompleted,
+		PromptSent: longUnbroken,
+		Output:     "```\n" + longUnbroken + "\n```",
+	}}
+
+	var buf bytes.Buffer
+	if err := TaskThreadView(task, execs, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render TaskThreadView: %v", err)
+	}
+	content := buf.String()
+
+	if !strings.Contains(content, `id="task-thread-view" class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full overflow-x-hidden"`) {
+		t.Fatal("task thread root must contain horizontal overflow so the page does not scroll sideways on mobile")
+	}
+	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto overflow-x-hidden max-w-full py-4 mb-4 space-y-6 min-h-0 min-w-0"`) {
+		t.Fatal("task thread messages pane must hide horizontal overflow at the pane boundary")
+	}
+	if !strings.Contains(content, `class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full overflow-x-hidden"`) {
+		t.Fatal("task thread composer must stay contained inside the mobile viewport")
+	}
+	if strings.Contains(content, `overflow-x-auto py-4 mb-4`) {
+		t.Fatal("task thread should not make the whole messages pane horizontally scrollable")
+	}
+}
+
 func TestTaskThreadView_RunningThreadCanSteerFromPendingRowsOnly(t *testing.T) {
 	task := &models.Task{
 		ID:        "task-steer-ui",
