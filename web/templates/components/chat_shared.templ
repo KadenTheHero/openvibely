@@ -1023,7 +1023,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 		data-input-id={ config.InputID }
 		data-clear-func-name={ config.FormID + "ClearAttachments" }
 		data-message-history-key={ chatMessageHistoryStorageKey(config) }
-		class="chat-input-container rounded-xl p-4 relative w-full min-w-0 max-w-full overflow-x-hidden"
+		class="chat-input-container rounded-xl p-4 relative w-full min-w-0 max-w-full"
 	>
 		<!-- Drop zone overlay -->
 		<div id={ chatDropOverlayID(config.FormID) } class="hidden absolute inset-0 z-10 rounded-xl border-2 border-dashed border-primary bg-primary/10 flex items-center justify-center pointer-events-none">
@@ -1069,7 +1069,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			></textarea>
 		</div>
 		<!-- Bottom controls row -->
-		<div class="flex items-center justify-between gap-2 pt-2 min-w-0 overflow-hidden">
+		<div class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden">
 			<div class="flex items-center gap-1 -ml-2 min-w-0 flex-1 overflow-hidden">
 				if config.ShowModelSelector {
 					<select id={ config.FormID + "-agent-select" } class="chat-model-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[7.5rem] sm:max-w-[140px] rounded-lg" data-agent-input={ config.FormID + "-agent-id" }>

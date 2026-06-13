@@ -193,6 +193,25 @@ func TestPendingThreadInputsCSS_AddsTextareaGutterOnlyWhenRowsExist(t *testing.T
 	}
 }
 
+func TestChatInputContainerCSS_AccountsForVisualMargins(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render Base: %v", err)
+	}
+
+	html := buf.String()
+	for _, expected := range []string{
+		".chat-input-container {",
+		"margin-left: 16px;",
+		"margin-right: 6px;",
+		"width: calc(100% - 22px);",
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("chat input container should account for visual margins without clipping its right bevel; missing %q", expected)
+		}
+	}
+}
+
 func TestBase_KanbanColumnCSSDoesNotOverrideResponsiveGridWidth(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {

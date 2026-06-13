@@ -2002,7 +2002,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 128, "\" class=\"chat-input-container rounded-xl p-4 relative w-full min-w-0 max-w-full overflow-x-hidden\"><!-- Drop zone overlay --><div id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 128, "\" class=\"chat-input-container rounded-xl p-4 relative w-full min-w-0 max-w-full\"><!-- Drop zone overlay --><div id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2211,7 +2211,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 148, "\" name=\"message\" class=\"w-full resize-none bg-transparent text-sm leading-relaxed focus:outline-none placeholder:opacity-40 p-0 text-left\" placeholder=\"Type your message... (Enter to send, Shift+Enter for new line)\" rows=\"3\" enterkeyhint=\"send\" required></textarea></div><!-- Bottom controls row --><div class=\"flex items-center justify-between gap-2 pt-2 min-w-0 overflow-hidden\"><div class=\"flex items-center gap-1 -ml-2 min-w-0 flex-1 overflow-hidden\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 148, "\" name=\"message\" class=\"w-full resize-none bg-transparent text-sm leading-relaxed focus:outline-none placeholder:opacity-40 p-0 text-left\" placeholder=\"Type your message... (Enter to send, Shift+Enter for new line)\" rows=\"3\" enterkeyhint=\"send\" required></textarea></div><!-- Bottom controls row --><div class=\"flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden\"><div class=\"flex items-center gap-1 -ml-2 min-w-0 flex-1 overflow-hidden\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
