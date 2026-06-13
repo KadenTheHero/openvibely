@@ -1795,9 +1795,8 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		} else if shouldPromote {
 			go h.PromoteQueuedTaskThreadInput(taskID)
 		}
-		return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID)))
+		return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID), queued.AttachmentSessionID != ""))
 	}
-
 	exec := &models.Execution{
 		TaskID:        taskID,
 		AgentConfigID: agent.ID,

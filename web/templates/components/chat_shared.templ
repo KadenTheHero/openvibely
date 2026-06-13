@@ -872,9 +872,17 @@ templ _initThreadStreamingScript() {
 	</script>
 }
 
-templ ChatQueuedInputRow(inputID, message, steerEndpoint string) {
+templ ChatQueuedInputRow(inputID, message, steerEndpoint string, hasAttachments bool) {
 	<div id={ "thread-input-" + inputID } class="queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-input-mode="queued" title="Queued follow-up will run after the active response finishes">
 		<div class="min-w-0 flex-1 truncate">{ message }</div>
+		if hasAttachments {
+			<div class="badge badge-ghost badge-sm shrink-0 gap-1 text-xs" title="Attachments queued with this follow-up" aria-label="Attachments queued with this follow-up">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486"></path>
+				</svg>
+				<span>Attachments queued</span>
+			</div>
+		}
 		<div class="ml-auto flex shrink-0 items-center gap-2">
 			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs font-medium" hx-post={ steerEndpoint } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Convert queued follow-up to steering">Steer</button>
 			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error" hx-post={ "/thread-inputs/" + inputID + "/cancel" } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Cancel queued follow-up" aria-label="Cancel queued follow-up">
@@ -886,9 +894,9 @@ templ ChatQueuedInputRow(inputID, message, steerEndpoint string) {
 	</div>
 }
 
-templ ChatQueuedInputRowOOB(inputID, message, steerEndpoint string) {
+templ ChatQueuedInputRowOOB(inputID, message, steerEndpoint string, hasAttachments bool) {
 	<div id="pending-thread-inputs" hx-swap-oob="beforeend">
-		@ChatQueuedInputRow(inputID, message, steerEndpoint)
+		@ChatQueuedInputRow(inputID, message, steerEndpoint, hasAttachments)
 	</div>
 }
 
@@ -913,7 +921,7 @@ templ ChatComposerQueuedInputRows(inputs []models.ThreadInput, steerEndpointFor 
 	<div id="pending-thread-inputs" class="space-y-1.5">
 		for _, input := range inputs {
 			if input.InputMode == models.ThreadInputModeQueued && steerEndpointFor != nil {
-				@ChatQueuedInputRow(input.ID, input.Content, steerEndpointFor(input))
+				@ChatQueuedInputRow(input.ID, input.Content, steerEndpointFor(input), input.AttachmentSessionID != "")
 			} else if input.InputMode == models.ThreadInputModeSteering {
 				@ChatSteeringInputRow(input.ID, input.Content)
 			}

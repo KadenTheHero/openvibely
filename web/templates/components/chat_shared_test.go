@@ -541,7 +541,7 @@ func TestPendingThreadInputRows_LeavesComposerOwnedInputsOutOfTranscript(t *test
 
 func TestChatComposerQueuedInputRows_RenderInsideInputBoxStyle(t *testing.T) {
 	inputs := []models.ThreadInput{
-		{ID: "queued-1", TaskID: "task-1", InputMode: models.ThreadInputModeQueued, Content: "queue this"},
+		{ID: "queued-1", TaskID: "task-1", InputMode: models.ThreadInputModeQueued, Content: "queue this", AttachmentSessionID: "pending-session-1"},
 		{ID: "steer-1", TaskID: "task-1", InputMode: models.ThreadInputModeSteering, Content: "steer this"},
 	}
 	var buf bytes.Buffer
@@ -565,6 +565,9 @@ func TestChatComposerQueuedInputRows_RenderInsideInputBoxStyle(t *testing.T) {
 	if !strings.Contains(content, `hx-post="/tasks/task-1/thread/queued/queued-1/steer"`) || !strings.Contains(content, "Steer") {
 		t.Fatal("queued pending row must expose Steer action")
 	}
+	if !strings.Contains(content, "Attachments queued") || !strings.Contains(content, `aria-label="Attachments queued with this follow-up"`) || !strings.Contains(content, `M15.172 7l-6.586 6.586`) {
+		t.Fatal("queued pending row with an attachment session should indicate that attachments are queued")
+	}
 	if !strings.Contains(content, `hx-post="/thread-inputs/queued-1/cancel"`) || !strings.Contains(content, `aria-label="Cancel queued follow-up"`) || !strings.Contains(content, `M19 7l-.867 12.142`) {
 		t.Fatal("queued pending row must expose the alerts trash icon cancel action")
 	}
@@ -573,6 +576,21 @@ func TestChatComposerQueuedInputRows_RenderInsideInputBoxStyle(t *testing.T) {
 	}
 	if strings.Contains(content, "Send now") || strings.Contains(content, "btn-warning") || strings.Contains(content, "bg-warning") || strings.Contains(content, ">Cancel</button>") || strings.Contains(content, ">×</button>") {
 		t.Fatal("composer pending rows should avoid old warning/text/× cancel treatments")
+	}
+}
+
+func TestChatQueuedInputRowOOB_WithAttachmentsShowsQueuedAttachmentIndicator(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatQueuedInputRowOOB("queued-1", "queue this", "/chat/queued/queued-1/steer", true).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatQueuedInputRowOOB: %v", err)
+	}
+
+	content := buf.String()
+	if !strings.Contains(content, `hx-swap-oob="beforeend"`) || !strings.Contains(content, `thread-input-queued-1`) {
+		t.Fatal("OOB queued row should append the pending input row")
+	}
+	if !strings.Contains(content, "Attachments queued") || !strings.Contains(content, `aria-label="Attachments queued with this follow-up"`) {
+		t.Fatal("OOB queued row should indicate when attachments are queued with the message")
 	}
 }
 
