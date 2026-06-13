@@ -2524,6 +2524,18 @@ func TestStartQueuedTaskThreadInputMovesCompletedTaskBackToActive(t *testing.T) 
 	require.NotEmpty(t, startEvent.ExecID)
 	require.Equal(t, input.Content, startEvent.Message)
 
+	var appliedEvent events.TaskEvent
+	select {
+	case appliedEvent = <-sub:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued task-thread applied event")
+	}
+	require.Equal(t, events.TaskThreadInputApplied, appliedEvent.Type)
+	require.Equal(t, task.ID, appliedEvent.TaskID)
+	require.Equal(t, input.ID, appliedEvent.PendingInputID)
+	require.Equal(t, startEvent.ExecID, appliedEvent.ExecID)
+	require.Equal(t, input.Content, appliedEvent.Message)
+
 	require.Eventually(t, func() bool {
 		select {
 		case <-started:

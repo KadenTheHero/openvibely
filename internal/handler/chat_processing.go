@@ -1170,6 +1170,15 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			Message:        input.Content,
 			PendingInputID: input.ID,
 		})
+		h.broadcaster.Publish(events.TaskEvent{
+			Type:           events.TaskThreadInputApplied,
+			ProjectID:      task.ProjectID,
+			TaskID:         input.TaskID,
+			TaskName:       task.Title,
+			ExecID:         exec.ID,
+			Message:        input.Content,
+			PendingInputID: input.ID,
+		})
 	}
 	h.resumeUserStoppedGoalForManualStart(ctx, input.TaskID, string(input.Source), input.OriginAgent)
 	h.reactivateAchievedGoalForManualFollowup(ctx, input.TaskID, string(input.Source), input.OriginAgent)
