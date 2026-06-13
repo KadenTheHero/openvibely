@@ -410,18 +410,30 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					z-index: 50;
 					position: relative;
 				}
-				/* Ensure modals don't cause horizontal overflow */
-				.modal-box {
-					max-width: min(56rem, calc(100vw - 2rem));
-				}
-				/* Prevent dropdown menus from causing scrollbars */
-				.dropdown-content {
-					max-height: calc(100vh - 4rem);
-					overflow-y: auto;
-				}
-				/* Chat bubble redesign - distinct card-style per message */
-				.chat-bubble-user-msg,
-				.chat-bubble-assistant-msg {
+					/* Ensure modals don't cause horizontal overflow */
+					.modal-box {
+						max-width: min(56rem, calc(100vw - 2rem));
+					}
+					@media (max-width: 640px) {
+						dialog.modal > .modal-box {
+							box-sizing: border-box;
+							width: 100vw !important;
+							max-width: 100vw !important;
+							height: 100dvh;
+							max-height: 100dvh;
+							margin: 0;
+							border-radius: 0;
+							overflow-y: auto;
+						}
+					}
+					/* Prevent dropdown menus from causing scrollbars */
+					.dropdown-content {
+						max-height: calc(100vh - 4rem);
+						overflow-y: auto;
+					}
+					/* Chat bubble redesign - distinct card-style per message */
+					.chat-bubble-user-msg,
+					.chat-bubble-assistant-msg {
 					color: hsl(var(--bc));
 					position: relative;
 					margin-left: 16px;

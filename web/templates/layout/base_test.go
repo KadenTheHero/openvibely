@@ -103,6 +103,32 @@ func TestToastDismissalCleanup(t *testing.T) {
 	}
 }
 
+func TestMobileDialogsAreFullscreen(t *testing.T) {
+	var buf bytes.Buffer
+	comp := Base("Test", []models.Project{}, "")
+	if err := comp.Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	for _, expected := range []string{
+		"@media (max-width: 640px)",
+		"dialog.modal > .modal-box",
+		"box-sizing: border-box",
+		"width: 100vw !important",
+		"max-width: 100vw !important",
+		"height: 100dvh",
+		"max-height: 100dvh",
+		"margin: 0",
+		"border-radius: 0",
+		"overflow-y: auto",
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("mobile modal fullscreen CSS missing %q", expected)
+		}
+	}
+}
+
 // TestToastDismissalBehavior documents the expected behavior for toast dismissal
 // to prevent the bug where page becomes unresponsive after toast disappears.
 func TestToastDismissalBehavior(t *testing.T) {
