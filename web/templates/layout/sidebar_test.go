@@ -144,6 +144,16 @@ func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 	if !strings.Contains(html, `sidebarToggle.checked = false`) {
 		t.Fatal("sidebar navigation script must uncheck the mobile drawer after nav selection")
 	}
+
+	pointerdownStart := strings.Index(html, `addEventListener('pointerdown'`)
+	beforeRequestStart := strings.Index(html, `addEventListener('htmx:beforeRequest'`)
+	if pointerdownStart == -1 || beforeRequestStart == -1 || beforeRequestStart <= pointerdownStart {
+		t.Fatal("sidebar navigation script must keep pointerdown before htmx:beforeRequest")
+	}
+	pointerdownBlock := html[pointerdownStart:beforeRequestStart]
+	if strings.Contains(pointerdownBlock, `closeMobileDrawer()`) || strings.Contains(pointerdownBlock, `sidebarToggle.checked = false`) {
+		t.Fatal("sidebar must not close the mobile drawer on pointerdown before the click/HTMX request can fire")
+	}
 }
 
 func TestSidebar_MousedownEarlyNavigationSignal(t *testing.T) {
