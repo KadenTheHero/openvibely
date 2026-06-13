@@ -77,7 +77,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	}
 }
 
-func TestModelsContent_ModelFormUsesNativePostSubmit(t *testing.T) {
+func TestModelsContent_ModelFormUsesHTMXSubmit(t *testing.T) {
 	agents := []models.LLMConfig{}
 	var buf bytes.Buffer
 	err := ModelsContent(agents, nil).Render(context.Background(), &buf)
@@ -89,14 +89,42 @@ func TestModelsContent_ModelFormUsesNativePostSubmit(t *testing.T) {
 	if strings.Contains(out, `onsubmit="submitModelForm(event)"`) {
 		t.Fatal("expected model form not to depend on custom submit JavaScript")
 	}
+	// The form has a native fallback action and method plus HTMX attributes.
 	if !strings.Contains(out, `id="model_form" method="post" action="/models"`) {
-		t.Fatal("expected model form to submit with native POST")
+		t.Fatal("expected model form to retain native POST fallback")
 	}
-	if !strings.Contains(out, "form.action = '/models/' + id;") {
-		t.Fatal("expected edit flow to post to the existing model URL")
+	// HTMX attributes enable in-place swap so the URL (and project_id param) is preserved.
+	if !strings.Contains(out, `hx-post="/models"`) {
+		t.Fatal("expected model form to have static hx-post attribute for HTMX submission")
 	}
-	if !strings.Contains(out, "form.action = '/models';") {
-		t.Fatal("expected create flow to post to /models")
+	if !strings.Contains(out, `hx-target="#models-container"`) {
+		t.Fatal("expected model form to have hx-target pointing at models-container")
+	}
+	if !strings.Contains(out, `hx-swap="outerHTML"`) {
+		t.Fatal("expected model form to have hx-swap outerHTML")
+	}
+	// JS dynamically updates hx-post and action to include project_id for both paths.
+	if !strings.Contains(out, "form.setAttribute('hx-post', _createUrl);") {
+		t.Fatal("expected create flow to update hx-post dynamically")
+	}
+	if !strings.Contains(out, "form.setAttribute('hx-post', _editUrl);") {
+		t.Fatal("expected edit flow to update hx-post dynamically")
+	}
+	if !strings.Contains(out, "form.action = _createUrl;") {
+		t.Fatal("expected create flow to update form action")
+	}
+	if !strings.Contains(out, "form.action = _editUrl;") {
+		t.Fatal("expected edit flow to update form action")
+	}
+	// project_id is read from the current URL so the picker is preserved on submit.
+	if !strings.Contains(out, "new URLSearchParams(window.location.search)") {
+		t.Fatal("expected JS to read project_id from URL params")
+	}
+	if !strings.Contains(out, "encodeURIComponent(_pid)") {
+		t.Fatal("expected JS to encode project_id in create URL")
+	}
+	if !strings.Contains(out, "encodeURIComponent(_editPid)") {
+		t.Fatal("expected JS to encode project_id in edit URL")
 	}
 	if !strings.Contains(out, "form.dataset.mode = 'edit';") || !strings.Contains(out, "form.dataset.mode = 'create';") {
 		t.Fatal("expected create/edit flow to track form mode")

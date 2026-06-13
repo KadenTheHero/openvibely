@@ -305,7 +305,11 @@ func (h *Handler) CreateModel(c echo.Context) error {
 		}
 		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents)))
 	}
-	return c.Redirect(http.StatusSeeOther, "/models")
+	redirectURL := "/models"
+	if projectID := c.QueryParam("project_id"); projectID != "" {
+		redirectURL += "?project_id=" + url.QueryEscape(projectID)
+	}
+	return c.Redirect(http.StatusSeeOther, redirectURL)
 }
 
 func (h *Handler) UpdateModel(c echo.Context) error {
@@ -430,7 +434,11 @@ func (h *Handler) UpdateModel(c echo.Context) error {
 		}
 		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents)))
 	}
-	return c.Redirect(http.StatusSeeOther, "/models")
+	redirectURL := "/models"
+	if projectID := c.QueryParam("project_id"); projectID != "" {
+		redirectURL += "?project_id=" + url.QueryEscape(projectID)
+	}
+	return c.Redirect(http.StatusSeeOther, redirectURL)
 }
 
 func (h *Handler) SetDefaultModel(c echo.Context) error {

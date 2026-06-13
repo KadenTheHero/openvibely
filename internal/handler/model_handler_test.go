@@ -1773,3 +1773,134 @@ func TestUpdateModel_SwitchFromSubscriptionToAPIKey(t *testing.T) {
 		t.Errorf("api_key not updated")
 	}
 }
+
+// TestCreateModel_PreservesProjectIDInRedirect verifies that when CreateModel is called
+// without an HTMX header (native form POST fallback), the redirect back to /models
+// includes the project_id query param so the project picker is not reset.
+func TestCreateModel_PreservesProjectIDInRedirect(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("name", "Project Context Model")
+	form.Set("provider", "anthropic")
+	form.Set("anthropic_auth_type", "api_key")
+	form.Set("model", "claude-sonnet-4-5-20250929")
+	form.Set("api_key", "sk-ant-proj-key")
+	form.Set("temperature", "0")
+
+	// Native POST with project_id encoded in the action URL (as the JS sets it).
+	req := httptest.NewRequest(http.MethodPost, "/models?project_id=test-project-123", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// No HX-Request header — simulates native form POST fallback.
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect, got %d: %s", rec.Code, rec.Body.String())
+	}
+	location := rec.Header().Get("Location")
+	if location != "/models?project_id=test-project-123" {
+		t.Errorf("redirect Location = %q, want %q", location, "/models?project_id=test-project-123")
+	}
+}
+
+// TestCreateModel_HTMX_NoNavigationPreservesProjectContext verifies that the HTMX
+// submission path returns an in-place 200 response (no redirect), which means the
+// browser URL (including ?project_id=) is never changed.
+func TestCreateModel_HTMX_NoNavigationPreservesProjectContext(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("name", "HTMX Project Context Model")
+	form.Set("provider", "anthropic")
+	form.Set("anthropic_auth_type", "api_key")
+	form.Set("model", "claude-sonnet-4-5-20250929")
+	form.Set("api_key", "sk-ant-htmx-proj-key")
+	form.Set("temperature", "0")
+
+	// HTMX POST — no redirect should happen; response is swapped in-place.
+	req := httptest.NewRequest(http.MethodPost, "/models?project_id=my-project", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for HTMX request (no redirect), got %d: %s", rec.Code, rec.Body.String())
+	}
+	// No Location header — browser URL unchanged, project picker preserved.
+	if loc := rec.Header().Get("Location"); loc != "" {
+		t.Errorf("expected no Location header on HTMX response, got %q", loc)
+	}
+	// Response should contain the updated models list for in-place swap.
+	body := rec.Body.String()
+	if !strings.Contains(body, "models-container") {
+		t.Errorf("HTMX response should contain models-container div for in-place swap")
+	}
+}
+
+// TestUpdateModel_PreservesProjectIDInRedirect verifies that the UpdateModel non-HTMX
+// redirect also carries the project_id forward so editing a model doesn't reset the picker.
+func TestUpdateModel_PreservesProjectIDInRedirect(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+
+	// Create a model to update.
+	agent := &models.LLMConfig{
+		Name:     "Update Redirect Model",
+		Provider: models.ProviderAnthropic,
+		Model:    "claude-sonnet-4-5-20250929",
+		APIKey:   "sk-ant-update-key",
+		IsDefault: false,
+	}
+	if err := llmConfigRepo.Create(context.Background(), agent); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Update Redirect Model Renamed")
+	form.Set("provider", "anthropic")
+	form.Set("anthropic_auth_type", "api_key")
+	form.Set("model", "claude-sonnet-4-5-20250929")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPost, "/models/"+agent.ID+"?project_id=proj-xyz", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// No HX-Request header — simulates native form POST fallback.
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect, got %d: %s", rec.Code, rec.Body.String())
+	}
+	location := rec.Header().Get("Location")
+	if location != "/models?project_id=proj-xyz" {
+		t.Errorf("redirect Location = %q, want %q", location, "/models?project_id=proj-xyz")
+	}
+}
+
+// TestCreateModel_RedirectWithoutProjectID verifies that when no project_id is in the
+// URL, the redirect goes to plain /models (no dangling query param).
+func TestCreateModel_RedirectWithoutProjectID(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("name", "No Project Model")
+	form.Set("provider", "anthropic")
+	form.Set("anthropic_auth_type", "api_key")
+	form.Set("model", "claude-sonnet-4-5-20250929")
+	form.Set("api_key", "sk-ant-noproj")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect, got %d: %s", rec.Code, rec.Body.String())
+	}
+	location := rec.Header().Get("Location")
+	if location != "/models" {
+		t.Errorf("redirect Location = %q, want plain /models", location)
+	}
+}
