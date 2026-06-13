@@ -66,11 +66,11 @@ func TestAlertsContent_CardsConformToNarrowViewport(t *testing.T) {
 		`id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0"`,
 		`class="grid grid-cols-1 gap-4 max-w-full min-w-0"`,
 		`transition-all w-full min-w-0 max-w-full`,
-		`card-body max-w-full min-w-0 p-4 sm:p-6`,
-		`flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 max-w-full min-w-0`,
+		`card-body relative max-w-full min-w-0 p-4 sm:p-6`,
+		`class="max-w-full min-w-0 pr-14 sm:pr-16"`,
 		`font-semibold break-words [overflow-wrap:anywhere]`,
 		`class="text-sm opacity-60 mt-1 break-words [overflow-wrap:anywhere]"`,
-		`class="flex items-center gap-1 self-end sm:self-start flex-shrink-0"`,
+		`class="absolute top-4 right-4 flex items-center gap-1"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected alerts markup to include responsive class %q", want)

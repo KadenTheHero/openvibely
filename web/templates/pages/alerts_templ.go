@@ -302,7 +302,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "><div class=\"card-body max-w-full min-w-0 p-4 sm:p-6\"><div class=\"flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 max-w-full min-w-0\"><div class=\"flex items-start gap-3 flex-1 min-w-0 max-w-full\"><div class=\"mt-0.5\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "><div class=\"card-body relative max-w-full min-w-0 p-4 sm:p-6\"><div class=\"max-w-full min-w-0 pr-14 sm:pr-16\"><div class=\"flex items-start gap-3 min-w-0 max-w-full\"><div class=\"mt-0.5\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -393,7 +393,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</p></div></div><div class=\"flex items-center gap-1 self-end sm:self-start flex-shrink-0\" onclick=\"event.stopPropagation()\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</p></div></div><div class=\"absolute top-4 right-4 flex items-center gap-1\" onclick=\"event.stopPropagation()\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -122,9 +122,9 @@ templ alertRow(alert models.Alert, currentProjectID string) {
 			onclick="openAlertTaskDialog(this.dataset.taskId)"
 		}
 	>
-		<div class="card-body max-w-full min-w-0 p-4 sm:p-6">
-			<div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4 max-w-full min-w-0">
-				<div class="flex items-start gap-3 flex-1 min-w-0 max-w-full">
+		<div class="card-body relative max-w-full min-w-0 p-4 sm:p-6">
+			<div class="max-w-full min-w-0 pr-14 sm:pr-16">
+				<div class="flex items-start gap-3 min-w-0 max-w-full">
 					<div class="mt-0.5">
 						if alert.Severity == models.SeverityError {
 							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-error" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -150,7 +150,7 @@ templ alertRow(alert models.Alert, currentProjectID string) {
 						<p class="text-sm opacity-50 mt-1 break-words">{ alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM") }</p>
 					</div>
 				</div>
-				<div class="flex items-center gap-1 self-end sm:self-start flex-shrink-0" onclick="event.stopPropagation()">
+				<div class="absolute top-4 right-4 flex items-center gap-1" onclick="event.stopPropagation()">
 					if !alert.IsRead {
 						<button
 							class="btn btn-ghost btn-xs"
