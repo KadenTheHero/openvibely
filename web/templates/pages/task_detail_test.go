@@ -133,6 +133,32 @@ func TestTaskDetailContent_ChangesTabHidesReviewCommentCountBadge(t *testing.T) 
 	}
 }
 
+func TestTaskDetailContent_TabsRemainScrollableOnMobile(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-tabs",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+
+	var buf bytes.Buffer
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, `role="tablist" class="tabs tabs-bordered mb-6 flex-shrink-0 w-full overflow-x-auto flex-nowrap"`) {
+		t.Fatal("expected task detail tabs to scroll horizontally instead of clipping on mobile")
+	}
+	for _, label := range []string{"Details", "Thread", "Changes", "Schedules", "Chaining", "Attachments", "Lifecycle"} {
+		if !strings.Contains(output, ">"+label+"</a>") {
+			t.Fatalf("expected %s tab to remain rendered", label)
+		}
+	}
+}
+
 func TestTaskDetailContent_ReactivatesFileChangesSSEWhenTaskBecomesActive(t *testing.T) {
 	task := &models.Task{
 		ID:        "task-2",
@@ -582,30 +608,30 @@ func TestTaskDetailContent_ScheduleEnabledState(t *testing.T) {
 	nextRun := runAt
 
 	tests := []struct {
-		name           string
-		enabled        bool
-		wantBadge      string   // text that MUST appear
-		wantNoBadge    string   // text that must NOT appear
-		wantButton     string   // button label that MUST appear
-		wantNoButton   string   // button label that must NOT appear
-		wantLineThrough bool    // expect line-through on next-run timestamp
+		name            string
+		enabled         bool
+		wantBadge       string // text that MUST appear
+		wantNoBadge     string // text that must NOT appear
+		wantButton      string // button label that MUST appear
+		wantNoButton    string // button label that must NOT appear
+		wantLineThrough bool   // expect line-through on next-run timestamp
 	}{
 		{
-			name:           "disabled schedule shows Disabled badge and Resume button",
-			enabled:        false,
-			wantBadge:      "Disabled",
-			wantNoBadge:    "",
-			wantButton:     "Resume",
-			wantNoButton:   "Pause",
+			name:            "disabled schedule shows Disabled badge and Resume button",
+			enabled:         false,
+			wantBadge:       "Disabled",
+			wantNoBadge:     "",
+			wantButton:      "Resume",
+			wantNoButton:    "Pause",
 			wantLineThrough: true,
 		},
 		{
-			name:           "enabled schedule shows no Disabled badge and Pause button",
-			enabled:        true,
-			wantBadge:      "",
-			wantNoBadge:    "Disabled",
-			wantButton:     "Pause",
-			wantNoButton:   "Resume",
+			name:            "enabled schedule shows no Disabled badge and Pause button",
+			enabled:         true,
+			wantBadge:       "",
+			wantNoBadge:     "Disabled",
+			wantButton:      "Pause",
+			wantNoButton:    "Resume",
 			wantLineThrough: false,
 		},
 	}
