@@ -203,8 +203,8 @@ func TestChatInputContainerCSS_AccountsForVisualMargins(t *testing.T) {
 	for _, expected := range []string{
 		".chat-input-container {",
 		"margin-left: 16px;",
-		"margin-right: 6px;",
-		"width: calc(100% - 22px);",
+		"margin-right: 16px;",
+		"width: calc(100% - 32px);",
 	} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("chat input container should account for visual margins without clipping its right bevel; missing %q", expected)

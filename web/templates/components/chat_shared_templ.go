@@ -2002,7 +2002,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 128, "\" class=\"chat-input-container rounded-xl p-4 relative w-full min-w-0 max-w-full\"><!-- Drop zone overlay --><div id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 128, "\" class=\"chat-input-container rounded-xl p-4 relative min-w-0 max-w-full\"><!-- Drop zone overlay --><div id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
