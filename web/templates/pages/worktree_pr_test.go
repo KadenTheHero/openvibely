@@ -7,7 +7,30 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 )
+
+func TestTaskChangesWorktreeContent_FileStatsStayContained(t *testing.T) {
+	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
+	fileStats := []service.WorktreeFileStat{
+		{Path: "web/templates/pages/this/is/a/very/deep/path/with/an/extremely-long-file-name-that-should-not-overflow-the-task-changes-container.templ", Status: "M"},
+	}
+
+	var buf bytes.Buffer
+	if err := TaskChangesWorktreeContent("diff --git", task, fileStats, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `<ul class="text-xs space-y-1 min-w-0 max-w-full overflow-hidden">`) {
+		t.Fatal("expected file stats list to constrain overflowing rows")
+	}
+	if !strings.Contains(out, `<li class="flex items-center gap-2 min-w-0 max-w-full overflow-hidden">`) {
+		t.Fatal("expected file stat row to stay within its container")
+	}
+	if !strings.Contains(out, `<span class="font-mono min-w-0 flex-1 truncate" title="web/templates/pages/this/is/a/very/deep/path/with/an/extremely-long-file-name-that-should-not-overflow-the-task-changes-container.templ">`) {
+		t.Fatal("expected long file path to truncate inside the available row width")
+	}
+}
 
 func TestTaskChangesWorktreeContent_RendersCreatePRInGitHubSection(t *testing.T) {
 	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}

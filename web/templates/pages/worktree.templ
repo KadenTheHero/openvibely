@@ -271,15 +271,15 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 
 			// File change summary list
 			if len(fileStats) > 0 {
-				<div class="mb-4 p-3 bg-base-200 rounded-lg">
-					<div class="text-sm font-semibold mb-2">
+				<div class="mb-4 p-3 bg-base-200 rounded-lg min-w-0 max-w-full overflow-hidden">
+					<div class="text-sm font-semibold mb-2 min-w-0">
 						{ fmt.Sprintf("%d file(s) changed", len(fileStats)) }
 					</div>
-					<ul class="text-xs space-y-1">
+					<ul class="text-xs space-y-1 min-w-0 max-w-full overflow-hidden">
 						for _, fs := range fileStats {
-							<li class="flex items-center gap-2">
-								<span class={ fileStatusBadgeClass(fs.Status) }>{ fileStatusChar(fs.Status) }</span>
-								<span class="font-mono">{ fs.Path }</span>
+							<li class="flex items-center gap-2 min-w-0 max-w-full overflow-hidden">
+								<span class={ fileStatusBadgeClass(fs.Status), "shrink-0" }>{ fileStatusChar(fs.Status) }</span>
+								<span class="font-mono min-w-0 flex-1 truncate" title={ fs.Path }>{ fs.Path }</span>
 							</li>
 						}
 					</ul>
