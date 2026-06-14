@@ -546,7 +546,7 @@ func TaskThreadView(task *models.Task, executions []models.Execution, agents []m
 			templ_7745c5c3_Var14 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<div id=\"task-thread-view\" class=\"flex flex-col flex-1 min-h-0 min-w-0 max-w-full overflow-x-hidden\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<div id=\"task-thread-view\" class=\"flex flex-col flex-1 min-h-0 min-w-0 max-w-full\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

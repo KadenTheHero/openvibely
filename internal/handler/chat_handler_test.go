@@ -2907,8 +2907,12 @@ func TestHandler_Chat_ReconnectPreservesProjectID(t *testing.T) {
 		"chat root must have the requested project ID")
 	assert.Contains(t, body, `data-project-id="`+project2.ID+`"`,
 		"chat root must have the requested project ID")
-	assert.Contains(t, body, `h-full flex flex-col min-w-0 max-w-full overflow-x-hidden`,
-		"chat root must contain horizontal overflow on mobile")
+	assert.Contains(t, body, `h-full flex flex-col min-w-0 max-w-full`,
+		"chat root must stay width-bounded")
+	assert.NotContains(t, body, `id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full overflow-x-hidden"`,
+		"chat root must not clip the composer shadow")
+	assert.Contains(t, body, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-full min-w-0`,
+		"chat messages pane must contain horizontal overflow")
 
 	// The SSE reconnect and response_done refresh calls must include project_id
 	// and be scoped to the chat root element only.

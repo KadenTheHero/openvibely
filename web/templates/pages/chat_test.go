@@ -25,9 +25,9 @@ func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 
 	content := buf.String()
 	required := []string{
-		`id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full overflow-x-hidden"`,
+		`id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full"`,
 		`id="chat-messages" class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-full min-w-0 py-4 mb-4 space-y-6"`,
-		`class="chat-input-shadow-gutter w-full min-w-0 max-w-full sm:max-w-3xl sm:mx-auto px-3 pt-2 pb-4"`,
+		`class="chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4"`,
 		`class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"`,
 		`class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden"`,
 		`class="flex items-center gap-2 flex-shrink-0"`,
@@ -36,6 +36,12 @@ func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 		if !strings.Contains(content, expected) {
 			t.Fatalf("chat page composer should stay within the mobile viewport; missing %q", expected)
 		}
+	}
+	if strings.Contains(content, `id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full overflow-x-hidden"`) {
+		t.Fatal("chat page root must not clip the composer shadow; horizontal containment belongs on the messages pane and inner controls")
+	}
+	if strings.Contains(content, `sm:max-w-3xl`) || strings.Contains(content, `sm:mx-auto`) || strings.Contains(content, `px-3 pt-2 pb-4`) {
+		t.Fatal("chat page composer must not add desktop side gaps or mobile right-side empty space")
 	}
 	if strings.Contains(content, `chat-input-container rounded-xl p-4 relative w-full`) {
 		t.Fatal("chat page composer shell should not use w-full with visual margins because that clips the rounded right edge")

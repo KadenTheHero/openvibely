@@ -311,7 +311,7 @@ templ TaskThreadEarlierMessages(task *models.Task, executions []models.Execution
 templ TaskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int) {
 	<div
 		id="task-thread-view"
-		class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full overflow-x-hidden"
+		class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full"
 		if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
 			hx-get={ fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit) }
 			hx-trigger="every 3s"
