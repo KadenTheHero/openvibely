@@ -43,7 +43,7 @@ func agentMCPJSON(mcpServers []models.MCPServerConfig) string {
 }
 
 templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOption) {
-	<div id="agents-container" data-search-container>
+	<div id="agents-container" class="overflow-x-hidden max-w-full min-w-0" data-search-container>
 		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Agents</h2>
 			<button class="btn btn-primary btn-sm" onclick="openNewAgentModal()">
@@ -60,10 +60,10 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				</button>
 			</div>
 		} else {
-			<div class="grid gap-4">
+			<div class="grid grid-cols-1 gap-4 max-w-full min-w-0">
 				for _, agent := range agents {
 					<div
-						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full"
 						data-agent-id={ agent.ID }
 						data-agent-name={ agent.Name }
 						data-agent-description={ agent.Description }
@@ -103,16 +103,16 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 									</ul>
 								</div>
 							</div>
-							<div class="pr-12">
+							<div class="pr-12 min-w-0 max-w-full">
 								<h3 class="font-bold">
 									{ agent.Name }
 								</h3>
 								if agent.Description != "" {
 									<p class="text-sm opacity-60 mt-1 line-clamp-2">{ agent.Description }</p>
 								}
-								<div class="flex flex-wrap gap-2 mt-2">
+								<div class="flex flex-wrap gap-2 mt-2 max-w-full overflow-x-hidden">
 									if agent.Model != "inherit" {
-										<span class="badge badge-outline badge-sm">model: { agent.Model }</span>
+										<span class="badge badge-outline badge-sm max-w-full truncate">model: { agent.Model }</span>
 									}
 									if len(agent.Tools) > 0 {
 										<span class="badge badge-outline badge-sm">{ fmt.Sprintf("%d tools", len(agent.Tools)) }</span>
