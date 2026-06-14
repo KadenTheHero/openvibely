@@ -268,15 +268,26 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 		"width: 100%;",
 		"max-width: 100%;",
 		"overflow-wrap: anywhere;",
-		"left: 0;",
-		"left: 2px;",
-	} {
+		"left: -9px;",
+		"left: -7px;"} {
 		if !strings.Contains(bubbleCSS, expected) {
 			t.Fatalf("chat bubble tail should stay attached to a full-row uninset bubble body so bubble width aligns with composer without clipping; missing %q", expected)
 		}
 	}
 	if strings.Contains(bubbleCSS, "margin-left: 16px;") {
 		t.Fatal("chat bubble body should not be inset by the left tail because it makes bubbles look narrower than the composer")
+	}
+	messagesStart := strings.Index(html, "#chat-messages,")
+	if messagesStart == -1 {
+		t.Fatal("expected chat messages scrollbar CSS block")
+	}
+	messagesEnd := strings.Index(html[messagesStart:], "#chat-messages::-webkit-scrollbar")
+	if messagesEnd == -1 {
+		t.Fatal("expected end of chat messages scrollbar CSS block")
+	}
+	messagesCSS := html[messagesStart : messagesStart+messagesEnd]
+	if strings.Contains(messagesCSS, "scrollbar-gutter: stable;") {
+		t.Fatal("chat message scrollports should not reserve a permanent right gutter that makes bubbles appear narrower than the composer")
 	}
 }
 

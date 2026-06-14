@@ -432,24 +432,24 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						overflow-y: auto;
 					}
 					/* Chat bubble redesign - distinct card-style per message */
-						.chat-bubble-user-msg,
-						.chat-bubble-assistant-msg {
-							color: hsl(var(--bc));
-							position: relative;
-							margin-left: 0;
-							box-sizing: border-box;
-							width: 100%;
-							max-width: 100%;
-							overflow-wrap: anywhere;
-							word-break: break-word;
-						}
-						/* Left pointer arrow for all chat bubbles */
-						.chat-bubble-user-msg::before,
-						.chat-bubble-assistant-msg::before {
+					.chat-bubble-user-msg,
+					.chat-bubble-assistant-msg {
+						color: hsl(var(--bc));
+						position: relative;
+						margin-left: 0;
+						box-sizing: border-box;
+						width: 100%;
+						max-width: 100%;
+						overflow-wrap: anywhere;
+						word-break: break-word;
+					}
+					/* Left pointer arrow for all chat bubbles. Keep it outside the body so it stays visible without shrinking the bubble width. */
+					.chat-bubble-user-msg::before,
+					.chat-bubble-assistant-msg::before {
 						content: '';
 						position: absolute;
 						top: 14px;
-						left: 0;
+						left: -9px;
 						width: 0;
 						height: 0;
 						border-top: 8px solid transparent;
@@ -461,7 +461,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						content: '';
 						position: absolute;
 						top: 15px;
-						left: 2px;
+						left: -7px;
 						width: 0;
 						height: 0;
 						border-top: 7px solid transparent;
@@ -510,28 +510,26 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				#pending-thread-inputs:has([data-thread-input-id]) {
 					padding-bottom: 1rem;
 				}
-				/* Thin scrollbar for chat messages to minimize width impact on alignment */
-				#chat-messages,
-				#task-thread-messages {
-					scrollbar-width: thin;
-					scrollbar-color: hsl(var(--bc) / 0.2) transparent;
-					scrollbar-gutter: stable;
-				}
-				#chat-messages::-webkit-scrollbar,
-			#task-thread-messages::-webkit-scrollbar {
-				width: 6px;
-			}
-			#chat-messages::-webkit-scrollbar-track,
-			#task-thread-messages::-webkit-scrollbar-track {
-				background: transparent;
-			}
-			#chat-messages::-webkit-scrollbar-thumb,
-			#task-thread-messages::-webkit-scrollbar-thumb {
-				background-color: hsl(var(--bc) / 0.2);
-				border-radius: 3px;
-			}
-			/* Remove outlines/borders from chat selectors */
-				.chat-model-select,
+					/* Thin scrollbar for chat messages to minimize width impact on alignment */
+					#chat-messages,
+					#task-thread-messages {
+						scrollbar-width: thin;
+						scrollbar-color: hsl(var(--bc) / 0.2) transparent;
+					}
+					#chat-messages::-webkit-scrollbar,
+					#task-thread-messages::-webkit-scrollbar {
+						width: 6px;
+					}
+					#chat-messages::-webkit-scrollbar-track,
+					#task-thread-messages::-webkit-scrollbar-track {
+						background: transparent;
+					}
+					#chat-messages::-webkit-scrollbar-thumb,
+					#task-thread-messages::-webkit-scrollbar-thumb {
+						background-color: hsl(var(--bc) / 0.2);
+						border-radius: 3px;
+					}
+					/* Remove outlines/borders from chat selectors */				.chat-model-select,
 					.chat-mode-select {
 					border: none !important;
 					outline: none !important;
