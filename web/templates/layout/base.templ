@@ -436,14 +436,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					.chat-bubble-assistant-msg {
 						color: hsl(var(--bc));
 						position: relative;
-						margin-left: 0;
-						box-sizing: border-box;
-						width: 100%;
-						max-width: 100%;
-						overflow-wrap: anywhere;
-						word-break: break-word;
+						margin-left: 16px;
 					}
-					/* Left pointer arrow for all chat bubbles. Keep it outside the body so it stays visible without shrinking the bubble width. */
+					/* Left pointer arrow for all chat bubbles */
 					.chat-bubble-user-msg::before,
 					.chat-bubble-assistant-msg::before {
 						content: '';
@@ -502,23 +497,31 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.chat-input-container {
 					background-color: hsl(var(--b1));
 					border: none;
-					box-sizing: border-box;
-					margin-left: 0;
-					margin-right: 0;
-					width: 100%;
+					margin-left: 16px;
+					margin-right: 6px;
 				}
 					#pending-thread-inputs:has([data-thread-input-id]) {
 						padding-bottom: 1rem;
 					}
-					/* Chat transcripts remain scrollable, but the scrollbar must not reserve or paint a right-side track that makes bubbles appear shorter than the composer. */
+					/* Thin scrollbar for chat messages to minimize width impact on alignment */
 					#chat-messages,
 					#task-thread-messages {
-						scrollbar-width: none;
+						scrollbar-width: thin;
+						scrollbar-color: hsl(var(--bc) / 0.2) transparent;
+						scrollbar-gutter: stable;
 					}
 					#chat-messages::-webkit-scrollbar,
 					#task-thread-messages::-webkit-scrollbar {
-						width: 0;
-						height: 0;
+						width: 6px;
+					}
+					#chat-messages::-webkit-scrollbar-track,
+					#task-thread-messages::-webkit-scrollbar-track {
+						background: transparent;
+					}
+					#chat-messages::-webkit-scrollbar-thumb,
+					#task-thread-messages::-webkit-scrollbar-thumb {
+						background-color: hsl(var(--bc) / 0.2);
+						border-radius: 3px;
 					}
 					/* Remove outlines/borders from chat selectors */
 					.chat-model-select,
