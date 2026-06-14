@@ -434,14 +434,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				/* Chat bubble redesign - distinct card-style per message */
 				/* #chat-page-root and #task-thread-view are shifted left by 16px so bubble
 				   bodies align with other page card left-edges (e.g. kanban columns).
-				   margin-right: 16px counters the width expansion from the negative left margin.
+				   No margin-right: the container extends to the parent's full right edge so
+				   bubbles and input align with agents/models card right edges.
 				   The scrollport and input gutter each get padding-left: 16px to keep the
 				   9px tail arrow inside the container boundary (tail at left: -9px from
 				   bubble's 0 margin = 7px from the scrollport border — well within 16px). */
 				#chat-page-root,
 				#task-thread-view {
 					margin-left: -16px;
-					margin-right: 16px;
 				}
 				/* Input gutter also gains padding-left to re-align the composer to the same
 				   24px left edge as other page content, matching the scrollport offset. */
@@ -513,23 +513,22 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				background-color: hsl(var(--b1));
 				border: none;
 				margin-left: 0;
-				margin-right: 6px;
 			}					#pending-thread-inputs:has([data-thread-input-id]) {
 						padding-bottom: 1rem;
 					}
-					/* Chat message scrollports: padding-right reserves space for right-side bubble
-					   shadows and ensures bubble right edge aligns with the composer (which uses
-					   margin-right: 6px). scrollbar-gutter: stable is intentionally omitted —
-					   macOS overlay scrollbars reserve 0px regardless of the declared gutter,
-					   making it unreliable for alignment. The ::webkit-scrollbar overrides are
-					   also omitted so the native overlay scrollbar is used on WebKit/Blink
-					   (visually inside the pane, zero track width). */
+					/* Chat message scrollports: padding-left provides room for the 9px tail arrow
+					   (which renders at left: -9px relative to the bubble body) and aligns the
+					   bubble body with the parent's left content edge. No padding-right needed —
+					   the native overlay scrollbar on macOS paints over content without stealing
+					   width; on other platforms the browser's classic scrollbar naturally reduces
+					   the scrollport content width without any explicit reservation.
+					   scrollbar-gutter: stable is intentionally omitted — macOS overlay
+					   scrollbars reserve 0px regardless of the declared gutter. */
 				#chat-messages,
 				#task-thread-messages {
 					scrollbar-width: thin;
 					scrollbar-color: hsl(var(--bc) / 0.2) transparent;
 					padding-left: 16px;
-					padding-right: 6px;
 				}					/* Remove outlines/borders from chat selectors */
 					.chat-model-select,
 					.chat-mode-select {
