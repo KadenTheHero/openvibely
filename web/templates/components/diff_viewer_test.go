@@ -1727,6 +1727,54 @@ func TestLoadDiffFileCard_BlockedFileShowsReason(t *testing.T) {
 	}
 }
 
+func TestDiffViewerChangedFilesBadgesStayContained(t *testing.T) {
+	diff := `diff --git a/src/short.go b/src/short.go
+--- a/src/short.go
++++ b/src/short.go
+@@ -1 +1,2 @@
+ package src
++var Short = true
+diff --git a/web/templates/components/really-long-directory-name/another-long-directory-name/this-is-an-extremely-long-file-name-that-must-not-overflow-the-task-changes-changed-files-pill-container.go b/web/templates/components/really-long-directory-name/another-long-directory-name/this-is-an-extremely-long-file-name-that-must-not-overflow-the-task-changes-changed-files-pill-container.go
+--- a/web/templates/components/really-long-directory-name/another-long-directory-name/this-is-an-extremely-long-file-name-that-must-not-overflow-the-task-changes-changed-files-pill-container.go
++++ b/web/templates/components/really-long-directory-name/another-long-directory-name/this-is-an-extremely-long-file-name-that-must-not-overflow-the-task-changes-changed-files-pill-container.go
+@@ -1 +1,2 @@
+ package components
++var Long = true
+`
+
+	for name, render := range map[string]func() (string, error){
+		"DiffViewer": func() (string, error) {
+			var buf bytes.Buffer
+			err := DiffViewer(diff).Render(context.Background(), &buf)
+			return buf.String(), err
+		},
+		"DiffViewerWithReview": func() (string, error) {
+			var buf bytes.Buffer
+			err := DiffViewerWithReview(diff, "task123", nil).Render(context.Background(), &buf)
+			return buf.String(), err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			body, err := render()
+			if err != nil {
+				t.Fatalf("render failed: %v", err)
+			}
+			if !strings.Contains(body, `<div class="mb-4 p-3 bg-base-200 rounded-lg min-w-0 max-w-full overflow-hidden">`) {
+				t.Fatal("changed files card must constrain horizontal overflow")
+			}
+			if !strings.Contains(body, `<div class="flex flex-wrap gap-1 min-w-0 max-w-full overflow-hidden">`) {
+				t.Fatal("changed files badge group must wrap within its container")
+			}
+			if !strings.Contains(body, `class="badge badge-sm badge-outline cursor-pointer hover:badge-primary max-w-full min-w-0 overflow-hidden"`) {
+				t.Fatal("changed file badge must be constrained to the available width")
+			}
+			if !strings.Contains(body, `<span class="block truncate min-w-0">.../another-long-directory-name/this-is-an-extremely-long-file-name-that-must-not-overflow-the-task-changes-changed-files-pill-container.go</span>`) {
+				t.Fatal("changed file badge label must truncate inside the pill")
+			}
+		})
+	}
+}
+
 // TestDiffViewerToolbar_ResponsiveNonOverlappingLayout verifies the toolbar
 // layout classes that caused controls to visually overlap.
 //
@@ -1736,6 +1784,7 @@ func TestLoadDiffFileCard_BlockedFileShowsReason(t *testing.T) {
 // shrank to ~0 px while the right group stayed at its natural width starting
 // at x≈0, placing "files changed", "Submit Review", and "Inline/Split" all at
 // the same horizontal position — a visible overlap.
+
 func TestDiffViewerToolbar_ResponsiveNonOverlappingLayout(t *testing.T) {
 	diff := `diff --git a/main.go b/main.go
 --- a/main.go

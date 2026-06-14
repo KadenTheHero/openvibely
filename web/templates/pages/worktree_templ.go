@@ -337,27 +337,27 @@ func TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats 
 			return templ_7745c5c3_Err
 		}
 		if task.WorktreeBranch != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<div class=\"flex items-center justify-between gap-2 mb-4\"><div class=\"min-w-0\"><h4 class=\"text-lg font-bold\">Worktree Changes</h4><p class=\"text-sm opacity-60\">Changes on branch <code class=\"bg-base-200 px-1.5 py-0.5 rounded text-xs\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<div class=\"flex flex-wrap items-start justify-between gap-2 mb-4 min-w-0 max-w-full\"><div class=\"min-w-0 max-w-full flex-1\"><h4 class=\"text-lg font-bold\">Worktree Changes</h4><p class=\"text-sm opacity-60 min-w-0 max-w-full break-words [overflow-wrap:anywhere]\">Changes on branch <code class=\"bg-base-200 px-1.5 py-0.5 rounded text-xs break-all\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var18 string
 			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(task.WorktreeBranch)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 172, Col: 84}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 172, Col: 94}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</code> vs <code class=\"bg-base-200 px-1.5 py-0.5 rounded text-xs\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</code> vs <code class=\"bg-base-200 px-1.5 py-0.5 rounded text-xs break-all\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var19 string
 			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(mergeTargetDisplay(task))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 174, Col: 89}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 174, Col: 99}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 			if templ_7745c5c3_Err != nil {

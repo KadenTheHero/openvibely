@@ -32,6 +32,33 @@ func TestTaskChangesWorktreeContent_FileStatsStayContained(t *testing.T) {
 	}
 }
 
+func TestTaskChangesWorktreeContent_HeaderLabelsStayContained(t *testing.T) {
+	task := &models.Task{
+		ID:                "task-1",
+		WorktreeBranch:    "task/this-is-a-very-long-worktree-branch-name-that-should-not-overflow-the-task-changes-header-on-mobile",
+		MergeTargetBranch: "main/this-is-a-very-long-target-branch-name-that-should-not-overflow-the-task-changes-header-on-mobile",
+		MergeStatus:       models.MergeStatusPending,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `<div class="flex flex-wrap items-start justify-between gap-2 mb-4 min-w-0 max-w-full">`) {
+		t.Fatal("expected worktree header row to wrap within the card without clipping the actions dropdown")
+	}
+	if !strings.Contains(out, `<p class="text-sm opacity-60 min-w-0 max-w-full break-words [overflow-wrap:anywhere]">`) {
+		t.Fatal("expected branch summary to break long labels instead of widening the card")
+	}
+	if !strings.Contains(out, `<code class="bg-base-200 px-1.5 py-0.5 rounded text-xs break-all">task/this-is-a-very-long-worktree-branch-name-that-should-not-overflow-the-task-changes-header-on-mobile</code>`) {
+		t.Fatal("expected worktree branch label to break inside the header")
+	}
+	if !strings.Contains(out, `<code class="bg-base-200 px-1.5 py-0.5 rounded text-xs break-all">main/this-is-a-very-long-target-branch-name-that-should-not-overflow-the-task-changes-header-on-mobile</code>`) {
+		t.Fatal("expected target branch label to break inside the header")
+	}
+}
+
 func TestTaskChangesWorktreeContent_RendersCreatePRInGitHubSection(t *testing.T) {
 	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
 	var buf bytes.Buffer
