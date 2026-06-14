@@ -1,9 +1,9 @@
 root = "."
-tmp_dir = "tmp"
+tmp_dir = "/tmp/openvibely-air"
 [build]
-cmd = "templ generate && go build -o ./tmp/openvibely ./cmd/server"
-bin = "./tmp/openvibely"
-full_bin = "./tmp/openvibely"
+cmd = "templ generate && go build -o /tmp/openvibely-air/openvibely ./cmd/server"
+bin = "/tmp/openvibely-air/openvibely"
+full_bin = "/tmp/openvibely-air/openvibely"
 delay = 1000
 exclude_dir = [".git", ".openvibely", ".worktrees", "bin", "logs", "repos", "tmp", "uploads"]
 exclude_file = []
@@ -13,7 +13,7 @@ follow_symlink = false
 include_dir = []
 include_ext = ["go", "templ", "html", "css", "js"]
 kill_delay = "500ms"
-log = "air-build.log"
+log = "/tmp/openvibely-air/air-build.log"
 poll = false
 send_interrupt = true
 stop_on_error = true
