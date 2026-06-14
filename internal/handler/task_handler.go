@@ -29,7 +29,7 @@ import (
 const (
 	backlogSortCookieName        = "backlog_sort"
 	completedSortCookieName      = "completed_sort"
-	taskThreadWindowLimitDefault = 30
+	taskThreadWindowLimitDefault = 5
 	taskThreadWindowLimitMax     = 100
 )
 

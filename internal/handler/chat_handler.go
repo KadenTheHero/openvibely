@@ -25,7 +25,7 @@ import (
 const chatSSETimeout = chatProcessingTimeout + 30*time.Second
 
 const (
-	chatUIWindowLimitDefault = 30
+	chatUIWindowLimitDefault = 5
 	chatUIWindowLimitMax     = 100
 )
 
