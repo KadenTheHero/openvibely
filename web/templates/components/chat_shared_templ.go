@@ -2229,7 +2229,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 150, "\" class=\"chat-model-select chat-custom-select-btn select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[7.5rem] sm:max-w-[140px] rounded-lg\" data-agent-input=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 150, "\" class=\"chat-model-select chat-custom-select-btn btn btn-ghost btn-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[7.5rem] sm:max-w-[140px] rounded-lg flex items-center gap-1 px-2\" data-agent-input=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2255,7 +2255,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 152, "\" aria-haspopup=\"listbox\" aria-expanded=\"false\"><span class=\"chat-custom-select-label truncate block pointer-events-none max-w-full overflow-hidden\"></span></button><ul class=\"chat-custom-select-options\" aria-hidden=\"true\" style=\"display:none\"><li data-value=\"auto\">Auto</li><li data-value=\"default\">Default</li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 152, "\" aria-haspopup=\"listbox\" aria-expanded=\"false\"><span class=\"chat-custom-select-label truncate flex-1 min-w-0 pointer-events-none\"></span><svg class=\"flex-shrink-0 pointer-events-none\" xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"6 9 12 15 18 9\"></polyline></svg></button><ul class=\"chat-custom-select-options\" aria-hidden=\"true\" style=\"display:none\"><li data-value=\"auto\">Auto</li><li data-value=\"default\">Default</li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2323,7 +2323,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, "\" class=\"chat-mode-select chat-custom-select-btn select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[6rem] sm:max-w-[120px] rounded-lg\" data-mode-input=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, "\" class=\"chat-mode-select chat-custom-select-btn btn btn-ghost btn-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[6rem] sm:max-w-[120px] rounded-lg flex items-center gap-1 px-2\" data-mode-input=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2349,7 +2349,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, "\" aria-haspopup=\"listbox\" aria-expanded=\"false\"><span class=\"chat-custom-select-label truncate block pointer-events-none max-w-full overflow-hidden\"></span></button><ul class=\"chat-custom-select-options\" aria-hidden=\"true\" style=\"display:none\"><li data-value=\"orchestrate\">Orchestrate</li><li data-value=\"plan\">Plan</li></ul></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, "\" aria-haspopup=\"listbox\" aria-expanded=\"false\"><span class=\"chat-custom-select-label truncate flex-1 min-w-0 pointer-events-none\"></span><svg class=\"flex-shrink-0 pointer-events-none\" xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"6 9 12 15 18 9\"></polyline></svg></button><ul class=\"chat-custom-select-options\" aria-hidden=\"true\" style=\"display:none\"><li data-value=\"orchestrate\">Orchestrate</li><li data-value=\"plan\">Plan</li></ul></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
