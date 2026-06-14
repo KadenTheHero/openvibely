@@ -462,9 +462,9 @@ func TestChatInputForm_MobileControlsStayContained(t *testing.T) {
 	}
 
 	content := buf.String()
-	gutterClass := `class="chat-input-shadow-gutter min-w-0 max-w-full px-3 pt-2 pb-4"`
+	gutterClass := `class="chat-input-shadow-gutter w-full min-w-0 max-w-full sm:max-w-3xl sm:mx-auto px-3 pt-2 pb-4"`
 	if !strings.Contains(content, gutterClass) {
-		t.Fatalf("chat composer should render inside a shadow gutter so parent overflow containment does not crop the bubble-style shadow; missing %q", gutterClass)
+		t.Fatalf("chat composer should render inside a width-limited shadow gutter so parent overflow containment does not crop the bubble-style shadow or leave a wide desktop empty area; missing %q", gutterClass)
 	}
 	formClass := `class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"`
 	if !strings.Contains(content, formClass) {
@@ -1684,8 +1684,8 @@ func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
 	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto overflow-x-hidden max-w-full py-4 mb-4 space-y-6 min-h-0 min-w-0"`) {
 		t.Fatal("task thread messages pane must hide horizontal overflow at the pane boundary")
 	}
-	if !strings.Contains(content, `class="chat-input-shadow-gutter min-w-0 max-w-full px-3 pt-2 pb-4"`) {
-		t.Fatal("task thread composer must reserve a small internal gutter so parent overflow containment does not crop the shadow")
+	if !strings.Contains(content, `class="chat-input-shadow-gutter w-full min-w-0 max-w-full sm:max-w-3xl sm:mx-auto px-3 pt-2 pb-4"`) {
+		t.Fatal("task thread composer must reserve a width-limited internal gutter so parent overflow containment does not crop the shadow or leave a wide desktop empty area")
 	}
 	if !strings.Contains(content, `class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"`) {
 		t.Fatal("task thread composer shell must fill its shadow gutter without clipping")

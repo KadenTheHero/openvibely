@@ -27,7 +27,7 @@ func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 	required := []string{
 		`id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full overflow-x-hidden"`,
 		`id="chat-messages" class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden max-w-full min-w-0 py-4 mb-4 space-y-6"`,
-		`class="chat-input-shadow-gutter min-w-0 max-w-full px-3 pt-2 pb-4"`,
+		`class="chat-input-shadow-gutter w-full min-w-0 max-w-full sm:max-w-3xl sm:mx-auto px-3 pt-2 pb-4"`,
 		`class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"`,
 		`class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden"`,
 		`class="flex items-center gap-2 flex-shrink-0"`,
