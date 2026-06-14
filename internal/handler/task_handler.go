@@ -48,13 +48,39 @@ func getSortPreference(c echo.Context, cookieName string) string {
 func getSortPreferences(c echo.Context) taskSortPreferences {
 	return taskSortPreferences{
 		Backlog:   getSortPreference(c, backlogSortCookieName),
-		Completed: getSortPreference(c, completedSortCookieName),
+		Completed: getCompletedSortPreference(c),
 	}
 }
 
-func isValidTaskSort(sortBy string) bool {
+// getCompletedSortPreference reads the completed-sort cookie and migrates
+// stale values written by older code that used created_asc/created_desc
+// for the completed column.
+func getCompletedSortPreference(c echo.Context) string {
+	cookie, err := c.Cookie(completedSortCookieName)
+	if err != nil {
+		return ""
+	}
+	switch cookie.Value {
+	case "created_asc":
+		return "completed_asc"
+	case "created_desc":
+		return "completed_desc"
+	}
+	return cookie.Value
+}
+
+func isValidBacklogSort(sortBy string) bool {
 	switch sortBy {
-	case "title_asc", "title_desc", "created_asc", "created_desc", "completed_asc", "completed_desc", "priority_asc", "priority_desc":
+	case "title_asc", "title_desc", "created_asc", "created_desc", "priority_asc", "priority_desc":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidCompletedSort(sortBy string) bool {
+	switch sortBy {
+	case "title_asc", "title_desc", "completed_asc", "completed_desc", "priority_asc", "priority_desc":
 		return true
 	default:
 		return false
@@ -1588,7 +1614,7 @@ func (h *Handler) SetBacklogSort(c echo.Context) error {
 	sortBy := c.QueryParam("sort")
 	applog.Infof("[handler] SetBacklogSort project=%s sort=%s", projectID, sortBy)
 
-	if !isValidTaskSort(sortBy) {
+	if !isValidBacklogSort(sortBy) {
 		applog.Infof("[handler] SetBacklogSort invalid sort: %s", sortBy)
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid sort parameter")
 	}
@@ -1617,7 +1643,7 @@ func (h *Handler) SetCompletedSort(c echo.Context) error {
 	sortBy := c.QueryParam("sort")
 	applog.Infof("[handler] SetCompletedSort project=%s sort=%s", projectID, sortBy)
 
-	if !isValidTaskSort(sortBy) {
+	if !isValidCompletedSort(sortBy) {
 		applog.Infof("[handler] SetCompletedSort invalid sort: %s", sortBy)
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid sort parameter")
 	}

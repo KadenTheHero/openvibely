@@ -104,6 +104,19 @@ func TestSetBacklogSort(t *testing.T) {
 			wantStatus: http.StatusBadRequest,
 			wantCookie: false,
 		},
+		// completed_asc/completed_desc are completed-column-only keys and must be rejected by the backlog endpoint
+		{
+			name:       "completed_asc rejected",
+			sortBy:     "completed_asc",
+			wantStatus: http.StatusBadRequest,
+			wantCookie: false,
+		},
+		{
+			name:       "completed_desc rejected",
+			sortBy:     "completed_desc",
+			wantStatus: http.StatusBadRequest,
+			wantCookie: false,
+		},
 	}
 
 	for _, tt := range tests {

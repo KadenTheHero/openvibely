@@ -110,6 +110,7 @@ type Task struct {
 	HasGoal           bool         `json:"has_goal,omitempty"` // Derived: task has a non-cleared persisted goal
 	CreatedAt         time.Time    `json:"created_at"`
 	UpdatedAt         time.Time    `json:"updated_at"`
+	CompletedAt       *time.Time   `json:"completed_at,omitempty"`
 }
 
 // IsTerminalStatus returns true if the task status is terminal (completed/failed/cancelled).
