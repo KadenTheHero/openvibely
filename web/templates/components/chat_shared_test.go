@@ -1651,11 +1651,13 @@ func TestTaskThreadView_SelectsTaskAssignedModelInDropdown(t *testing.T) {
 	if !strings.Contains(content, `id="task-thread-form-agent-id" name="agent_id" value="opus-config"`) {
 		t.Fatal("task thread hidden agent input must default to the task-assigned model")
 	}
-	if strings.Contains(content, `<option value="auto" selected`) {
-		t.Fatal("task thread dropdown must not select Auto when the task has an assigned model")
+	// Custom select button stores the selected value in data-current-value (no <option selected> in the new implementation)
+	if !strings.Contains(content, `data-current-value="opus-config"`) {
+		t.Fatal("task thread model selector button must carry data-current-value matching the task-assigned model")
 	}
-	if !strings.Contains(content, `<option value="opus-config" selected`) {
-		t.Fatal("task thread dropdown must select the task-assigned model option")
+	// The option list must contain the opus-config entry
+	if !strings.Contains(content, `<li data-value="opus-config"`) {
+		t.Fatal("task thread model option list must include the task-assigned model option")
 	}
 }
 

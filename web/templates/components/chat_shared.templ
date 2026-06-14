@@ -1073,36 +1073,45 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			<div class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden">
 				<div class="flex items-center gap-1 -ml-2 min-w-0 flex-1 overflow-hidden">
 					if config.ShowModelSelector {
-						<select id={ config.FormID + "-agent-select" } class="chat-model-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[7.5rem] sm:max-w-[140px] rounded-lg" data-agent-input={ config.FormID + "-agent-id" }>
-							<option
-								value="auto"
-								if selectedAgentOrAuto(config.SelectedAgentID) == "auto" {
-									selected
+						<!-- Custom mobile-safe model selector: replaces native <select> to avoid
+						     incorrect popup positioning inside overflow:auto containers on mobile Chrome. -->
+						<div class="relative inline-flex min-w-0">
+							<button
+								type="button"
+								id={ config.FormID + "-agent-select" }
+								class="chat-model-select chat-custom-select-btn select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[7.5rem] sm:max-w-[140px] rounded-lg"
+								data-agent-input={ config.FormID + "-agent-id" }
+								data-current-value={ selectedAgentOrAuto(config.SelectedAgentID) }
+								aria-haspopup="listbox"
+								aria-expanded="false"
+							><span class="chat-custom-select-label truncate block pointer-events-none max-w-full overflow-hidden"></span></button>
+							<ul class="chat-custom-select-options" aria-hidden="true" style="display:none">
+								<li data-value="auto">Auto</li>
+								<li data-value="default">Default</li>
+								for _, agent := range config.Agents {
+									<li data-value={ agent.ID }>{ agent.Name } ({ agent.Model })</li>
 								}
-							>Auto</option>
-							<option
-								value="default"
-								if config.SelectedAgentID == "default" {
-									selected
-								}
-							>Default</option>
-							for _, agent := range config.Agents {
-								<option
-									value={ agent.ID }
-									if config.SelectedAgentID == agent.ID {
-										selected
-									}
-								>
-									{ agent.Name } ({ agent.Model })
-								</option>
-							}
-						</select>
+							</ul>
+						</div>
 					}
 					if config.ShowModeSelector {
-						<select id={ config.FormID + "-mode-select" } class="chat-mode-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[6rem] sm:max-w-[120px] rounded-lg" data-mode-input={ config.FormID + "-chat-mode" }>
-							<option value="orchestrate" selected>Orchestrate</option>
-							<option value="plan">Plan</option>
-						</select>
+						<!-- Custom mobile-safe mode selector: replaces native <select> to avoid
+						     incorrect popup positioning inside overflow:auto containers on mobile Chrome. -->
+						<div class="relative inline-flex min-w-0">
+							<button
+								type="button"
+								id={ config.FormID + "-mode-select" }
+								class="chat-mode-select chat-custom-select-btn select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[6rem] sm:max-w-[120px] rounded-lg"
+								data-mode-input={ config.FormID + "-chat-mode" }
+								data-current-value={ chatModeOrDefault(config.ChatMode) }
+								aria-haspopup="listbox"
+								aria-expanded="false"
+							><span class="chat-custom-select-label truncate block pointer-events-none max-w-full overflow-hidden"></span></button>
+							<ul class="chat-custom-select-options" aria-hidden="true" style="display:none">
+								<li data-value="orchestrate">Orchestrate</li>
+								<li data-value="plan">Plan</li>
+							</ul>
+						</div>
 					}
 					<!-- Cancel button for running tasks -->
 					if config.TaskID != "" && config.IsRunning {
@@ -1148,6 +1157,179 @@ templ ChatInputForm(config ChatInputFormConfig) {
 	</div>
 	<!-- Shared input form scripts: Enter key, file upload, drag-and-drop -->
 	<script type="text/javascript">
+		// Global portal-style custom select implementation.
+		// Positioned with getBoundingClientRect() + position:fixed so it always
+		// anchors near the trigger button regardless of scroll within overflow:auto
+		// containers — fixing the mobile Chrome popup displacement bug.
+		// Guard ensures this runs only once even when multiple ChatInputForms exist.
+		if (!window._chatCustomSelectPanelReady) {
+			window._chatCustomSelectPanelReady = true;
+
+			var _cspanel = document.createElement('ul');
+			_cspanel.id = 'chat-custom-select-panel';
+			_cspanel.setAttribute('role', 'listbox');
+			_cspanel.style.cssText = 'position:fixed;z-index:9999;display:none;list-style:none;margin:0;padding:4px 0;' +
+				'min-width:160px;max-height:280px;overflow-y:auto;border-radius:8px;' +
+				'border:1px solid oklch(var(--bc)/0.15);background:oklch(var(--b1));' +
+				'box-shadow:0 4px 20px rgba(0,0,0,0.18);';
+			document.body.appendChild(_cspanel);
+
+			var _csActiveBtn = null;
+
+			function _csClose() {
+				if (_csActiveBtn) {
+					_csActiveBtn.setAttribute('aria-expanded', 'false');
+					_csActiveBtn = null;
+				}
+				_cspanel.style.display = 'none';
+				_cspanel.innerHTML = '';
+			}
+
+			function _csOpen(btn) {
+				_csClose();
+				var optList = btn.parentElement && btn.parentElement.querySelector('.chat-custom-select-options');
+				if (!optList) return;
+				var currentValue = btn.dataset.currentValue || '';
+				_cspanel.innerHTML = '';
+				var items = optList.querySelectorAll('li[data-value]');
+				items.forEach(function(li) {
+					var val = li.dataset.value;
+					var label = li.textContent.trim();
+					var item = document.createElement('li');
+					item.setAttribute('role', 'option');
+					item.setAttribute('aria-selected', val === currentValue ? 'true' : 'false');
+					item.dataset.value = val;
+					item.style.cssText = 'display:flex;align-items:center;gap:6px;padding:6px 12px;cursor:pointer;' +
+						'font-size:0.75rem;line-height:1.4;white-space:nowrap;' +
+						(val === currentValue ? 'background:oklch(var(--p)/0.12);font-weight:600;' : '');
+					var textSpan = document.createElement('span');
+					textSpan.style.cssText = 'flex:1;min-width:0;';
+					textSpan.textContent = label;
+					item.appendChild(textSpan);
+					if (val === currentValue) {
+						var checkSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+						checkSvg.setAttribute('style', 'width:12px;height:12px;flex-shrink:0;');
+						checkSvg.setAttribute('fill', 'none');
+						checkSvg.setAttribute('viewBox', '0 0 24 24');
+						checkSvg.setAttribute('stroke', 'currentColor');
+						checkSvg.setAttribute('stroke-width', '2.5');
+						var checkPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+						checkPath.setAttribute('stroke-linecap', 'round');
+						checkPath.setAttribute('stroke-linejoin', 'round');
+						checkPath.setAttribute('d', 'M5 13l4 4L19 7');
+						checkSvg.appendChild(checkPath);
+						item.appendChild(checkSvg);
+					}
+					item.addEventListener('mouseenter', function() { this.style.background = 'oklch(var(--b3)/1)'; });
+					item.addEventListener('mouseleave', function() {
+						this.style.background = this.dataset.value === currentValue ? 'oklch(var(--p)/0.12)' : '';
+					});
+					item.addEventListener('click', function(e) {
+						e.preventDefault();
+						e.stopPropagation();
+						var prevBtn = _csActiveBtn;
+						_csClose();
+						if (!prevBtn) return;
+						window._setChatCustomSelectValue(prevBtn, val);
+						prevBtn.dispatchEvent(new CustomEvent('chat-select-change', { detail: { value: val }, bubbles: true }));
+					});
+					_cspanel.appendChild(item);
+				});
+
+				// Position using getBoundingClientRect() — accurate on mobile regardless of
+				// scroll position within overflow:auto ancestor containers.
+				var rect = btn.getBoundingClientRect();
+				var panelEstH = Math.min(280, items.length * 34 + 10);
+				var spaceAbove = rect.top;
+				var spaceBelow = window.innerHeight - rect.bottom;
+				_cspanel.style.display = 'block';
+				_cspanel.style.minWidth = Math.max(rect.width, 160) + 'px';
+				if (spaceAbove >= panelEstH || spaceAbove > spaceBelow) {
+					// Open upward (preferred when composer is at bottom of screen)
+					_cspanel.style.top = 'auto';
+					_cspanel.style.bottom = (window.innerHeight - rect.top) + 'px';
+				} else {
+					// Open downward
+					_cspanel.style.top = rect.bottom + 'px';
+					_cspanel.style.bottom = 'auto';
+				}
+				_cspanel.style.left = rect.left + 'px';
+				// Correct horizontal overflow after paint
+				requestAnimationFrame(function() {
+					var pr = _cspanel.getBoundingClientRect();
+					if (pr.right > window.innerWidth - 4) {
+						_cspanel.style.left = Math.max(4, window.innerWidth - pr.width - 4) + 'px';
+					}
+				});
+				_csActiveBtn = btn;
+				btn.setAttribute('aria-expanded', 'true');
+			}
+
+			window._openChatCustomSelectPanel = _csOpen;
+			window._closeChatCustomSelectPanel = _csClose;
+
+			// Close on outside click (capture phase to beat other handlers)
+			document.addEventListener('click', function(e) {
+				if (_cspanel.style.display === 'none') return;
+				if (_csActiveBtn && (_csActiveBtn === e.target || _csActiveBtn.contains(e.target))) return;
+				if (_cspanel === e.target || _cspanel.contains(e.target)) return;
+				_csClose();
+			}, true);
+
+			// Close on Escape
+			document.addEventListener('keydown', function(e) {
+				if (e.key === 'Escape') _csClose();
+			});
+
+			// Reposition on resize so the panel stays near the trigger
+			window.addEventListener('resize', function() {
+				if (_csActiveBtn) _csOpen(_csActiveBtn);
+			});
+		}
+
+		// Initialize a custom select button: sets initial label from current value and binds click.
+		window._initChatCustomSelect = function(btn) {
+			var currentValue = btn.dataset.currentValue;
+			var optList = btn.parentElement && btn.parentElement.querySelector('.chat-custom-select-options');
+			if (!optList) return;
+			var matchingLi = null;
+			optList.querySelectorAll('li[data-value]').forEach(function(li) {
+				if (li.dataset.value === currentValue) matchingLi = li;
+			});
+			var firstLi = optList.querySelector('li[data-value]');
+			var label = matchingLi ? matchingLi.textContent.trim() : (firstLi ? firstLi.textContent.trim() : '');
+			var labelEl = btn.querySelector('.chat-custom-select-label');
+			if (labelEl) labelEl.textContent = label;
+			if (!btn._chatCustomSelectBound) {
+				btn._chatCustomSelectBound = true;
+				btn.addEventListener('click', function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					if (btn.getAttribute('aria-expanded') === 'true') {
+						if (window._closeChatCustomSelectPanel) window._closeChatCustomSelectPanel();
+					} else {
+						if (window._openChatCustomSelectPanel) window._openChatCustomSelectPanel(btn);
+					}
+				});
+			}
+		};
+
+		// Update a custom select button's displayed label and stored value.
+		window._setChatCustomSelectValue = function(btn, value) {
+			if (!btn) return;
+			var optList = btn.parentElement && btn.parentElement.querySelector('.chat-custom-select-options');
+			if (!optList) return;
+			var matchingLi = null;
+			optList.querySelectorAll('li[data-value]').forEach(function(li) {
+				if (li.dataset.value === value) matchingLi = li;
+			});
+			if (!matchingLi) return;
+			var label = matchingLi.textContent.trim();
+			var labelEl = btn.querySelector('.chat-custom-select-label');
+			if (labelEl) labelEl.textContent = label;
+			btn.dataset.currentValue = value;
+		};
+
 		(function() {
 			// Find our form by walking up from the script tag
 			var script = document.currentScript;
@@ -1164,9 +1346,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			var dropOverlay = form.querySelector('[id$="-drop-overlay"]');
 			var clearBtn = form.querySelector('[data-clear-func]');
 			var clearFuncName = clearBtn ? clearBtn.getAttribute('data-clear-func') : (formId + 'ClearAttachments');
-				var agentSelect = form.querySelector('select[id$="-agent-select"]');
+				var agentSelect = form.querySelector('[id$="-agent-select"]');
 				var agentInput = agentSelect ? document.getElementById(agentSelect.getAttribute('data-agent-input')) : null;
-					var modeSelect = form.querySelector('select[id$="-mode-select"]');
+					var modeSelect = form.querySelector('[id$="-mode-select"]');
 					var modeInput = modeSelect ? document.getElementById(modeSelect.getAttribute('data-mode-input')) : null;
 						var submitBtn = form.querySelector('button[type="submit"]');
 						var normalPostEndpoint = form.getAttribute('hx-post') || form.getAttribute('action') || '';
@@ -1323,30 +1505,41 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			var modeStorageKey = projectId ? 'chat-mode-' + projectId : '';
 
 			if (agentSelect && agentInput) {
+				var agentOptList = agentSelect.parentElement ? agentSelect.parentElement.querySelector('.chat-custom-select-options') : null;
+				// Initialize the custom select UI (set label from current value, bind click handler)
+				if (window._initChatCustomSelect) window._initChatCustomSelect(agentSelect);
 				// Restore persisted selection
 				if (modelStorageKey) {
 					var saved = localStorage.getItem(modelStorageKey);
 					if (saved) {
-						// Verify the saved option still exists in the dropdown
-						var optExists = Array.from(agentSelect.options).some(function(opt) { return opt.value === saved; });
+						// Verify the saved option still exists in the list
+						var optExists = false;
+						if (agentOptList) {
+							agentOptList.querySelectorAll('li[data-value]').forEach(function(li) {
+								if (li.dataset.value === saved) optExists = true;
+							});
+						}
 						if (optExists) {
-							agentSelect.value = saved;
+							if (window._setChatCustomSelectValue) window._setChatCustomSelectValue(agentSelect, saved);
 							agentInput.value = saved;
 						} else {
 							localStorage.removeItem(modelStorageKey);
 						}
 					}
 				}
-				agentSelect.addEventListener('change', function() {
-					agentInput.value = this.value;
+				agentSelect.addEventListener('chat-select-change', function(e) {
+					agentInput.value = e.detail.value;
 					if (modelStorageKey) {
-						localStorage.setItem(modelStorageKey, this.value);
+						localStorage.setItem(modelStorageKey, e.detail.value);
 					}
 				});
 			}
 
 			// Chat mode selector -> hidden input sync + localStorage persistence
 			if (modeSelect && modeInput) {
+				var modeOptList = modeSelect.parentElement ? modeSelect.parentElement.querySelector('.chat-custom-select-options') : null;
+				// Initialize the custom select UI (set label from current value, bind click handler)
+				if (window._initChatCustomSelect) window._initChatCustomSelect(modeSelect);
 				function reevaluatePlanPrompt() {
 					setTimeout(function() {
 						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
@@ -1356,16 +1549,21 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				modeSelect.dataset.hydrated = 'false';
 				// Ensure UI reflects current hidden default first
 				if (modeInput.value) {
-					modeSelect.value = modeInput.value;
+					if (window._setChatCustomSelectValue) window._setChatCustomSelectValue(modeSelect, modeInput.value);
 				}
 
 				// Restore persisted selection
 				if (modeStorageKey) {
 					var savedMode = localStorage.getItem(modeStorageKey);
 					if (savedMode) {
-						var modeExists = Array.from(modeSelect.options).some(function(opt) { return opt.value === savedMode; });
+						var modeExists = false;
+						if (modeOptList) {
+							modeOptList.querySelectorAll('li[data-value]').forEach(function(li) {
+								if (li.dataset.value === savedMode) modeExists = true;
+							});
+						}
 						if (modeExists) {
-							modeSelect.value = savedMode;
+							if (window._setChatCustomSelectValue) window._setChatCustomSelectValue(modeSelect, savedMode);
 							modeInput.value = savedMode;
 							reevaluatePlanPrompt();
 						} else {
@@ -1375,10 +1573,10 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				}
 				modeSelect.dataset.hydrated = 'true';
 
-				modeSelect.addEventListener('change', function() {
-					modeInput.value = this.value;
+				modeSelect.addEventListener('chat-select-change', function(e) {
+					modeInput.value = e.detail.value;
 					if (modeStorageKey) {
-						localStorage.setItem(modeStorageKey, this.value);
+						localStorage.setItem(modeStorageKey, e.detail.value);
 					}
 					modeSelect.dataset.hydrated = 'true';
 					reevaluatePlanPrompt();

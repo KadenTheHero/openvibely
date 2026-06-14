@@ -438,7 +438,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			window.currentChatModeValue = function() {
 				var form = document.getElementById('chat-form');
 				if (!form) return '';
-				var modeSelect = form.querySelector('select[id$="-mode-select"]');
+				// Support both native <select> (legacy) and custom select button
+				var modeSelect = form.querySelector('[id$="-mode-select"]');
 				var modeInput = form.querySelector('input[name="chat_mode"]');
 
 				var persistedMode = '';
@@ -448,9 +449,14 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					if (pid) persistedMode = localStorage.getItem('chat-mode-' + pid) || '';
 				}
 
-				if (modeSelect && modeSelect.value) {
+				// Read value from native select or custom select button
+				var modeValue = '';
+				if (modeSelect) {
+					modeValue = modeSelect.tagName === 'SELECT' ? modeSelect.value : (modeSelect.dataset.currentValue || '');
+				}
+				if (modeValue) {
 					var selectHydrated = modeSelect.dataset && modeSelect.dataset.hydrated === 'true';
-					if (selectHydrated || !persistedMode) return modeSelect.value;
+					if (selectHydrated || !persistedMode) return modeValue;
 					return persistedMode;
 				}
 
@@ -499,9 +505,16 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				var form = document.getElementById('chat-form');
 				if (!form) return;
 				var modeInput = form.querySelector('input[name="chat_mode"]');
-				var modeSelect = form.querySelector('select[id$="-mode-select"]');
+				// Support both native <select> (legacy) and custom select button
+				var modeSelect = form.querySelector('[id$="-mode-select"]');
 				if (modeInput) modeInput.value = mode;
-				if (modeSelect) modeSelect.value = mode;
+				if (modeSelect) {
+					if (modeSelect.tagName === 'SELECT') {
+						modeSelect.value = mode;
+					} else if (window._setChatCustomSelectValue) {
+						window._setChatCustomSelectValue(modeSelect, mode);
+					}
+				}
 
 				var chatRoot = document.getElementById('chat-page-root');
 				if (chatRoot) {
