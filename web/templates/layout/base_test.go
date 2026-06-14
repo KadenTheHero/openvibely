@@ -3,6 +3,7 @@ package layout
 import (
 	"bytes"
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -112,19 +113,47 @@ func TestMobileDialogsAreFullscreen(t *testing.T) {
 	html := buf.String()
 
 	for _, expected := range []string{
-		"@media (max-width: 640px)",
-		"dialog.modal > .modal-box",
-		"box-sizing: border-box",
+		"@media (max-width: 640px), ((max-width: 1024px) and (max-height: 500px) and (orientation: landscape))",
+		"dialog.modal {",
+		"box-sizing: border-box !important",
 		"width: 100vw !important",
 		"max-width: 100vw !important",
-		"height: 100dvh",
-		"max-height: 100dvh",
-		"margin: 0",
-		"border-radius: 0",
-		"overflow-y: auto",
+		"height: 100dvh !important",
+		"max-height: 100dvh !important",
+		"margin: 0 !important",
+		"align-items: stretch !important",
+		"justify-items: stretch !important",
+		"padding: 0 !important",
+		"dialog.modal > .modal-box",
+		"box-sizing: border-box !important",
+		"width: 100vw !important",
+		"max-width: 100vw !important",
+		"height: 100dvh !important",
+		"max-height: 100dvh !important",
+		"margin: 0 !important",
+		"border-radius: 0 !important",
+		"overflow-y: auto !important",
 	} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("mobile modal fullscreen CSS missing %q", expected)
+		}
+	}
+
+	for _, landscapePhone := range []string{"667x375", "736x414", "844x390", "932x430"} {
+		widthValue, heightValue, ok := strings.Cut(landscapePhone, "x")
+		if !ok {
+			t.Fatalf("invalid landscape phone fixture %q", landscapePhone)
+		}
+		width, err := strconv.Atoi(widthValue)
+		if err != nil {
+			t.Fatalf("invalid landscape phone fixture width %q: %v", widthValue, err)
+		}
+		height, err := strconv.Atoi(heightValue)
+		if err != nil {
+			t.Fatalf("invalid landscape phone fixture height %q: %v", heightValue, err)
+		}
+		if width <= 640 || width > 1024 || height > 500 {
+			t.Fatalf("landscape phone fixture %s must document a >640px, <=1024px wide and <=500px high viewport", landscapePhone)
 		}
 	}
 }
