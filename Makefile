@@ -18,7 +18,9 @@ install-tools:
 
 # Development with live reload
 dev:
-	PATH="$(GO_BIN):$(PATH)" $(GO_BIN)/air -c .air.toml
+	OPENVIBELY_ENABLE_LOCAL_REPO_PATH="$${OPENVIBELY_ENABLE_LOCAL_REPO_PATH:-true}" \
+	PATH="$(GO_BIN):$(PATH)" \
+	$(GO_BIN)/air -c .air.toml
 
 # Generate templ files (no global binary required)
 templ:
