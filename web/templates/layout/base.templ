@@ -1252,78 +1252,81 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					box-shadow: none !important;
 				}
 
-				/* --- Chat bubbles --- */
-				[data-theme="light"] .chat-bubble-user-msg,
-				[data-theme="light"] .chat-bubble-assistant-msg {
-					--chat-user-bg: #FFFFFF;
-					--chat-user-border: var(--ov-l-border);
-					--chat-assistant-bg: #FFFFFF;
-					--chat-assistant-border: var(--ov-l-border);
-					background-color: #FFFFFF;
-					color: var(--ov-l-text-strong);
-					border: 1px solid var(--ov-l-border);
-					box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.03);
-				}
-				[data-theme="light"] .chat-bubble-user-msg code,
-				[data-theme="light"] .chat-bubble-assistant-msg code {
-					background-color: var(--ov-l-surface);
-					color: var(--ov-l-text-strong);
-					border-color: var(--ov-l-border);
-				}
-				[data-theme="light"] .chat-bubble-user-msg pre,
-				[data-theme="light"] .chat-bubble-assistant-msg pre {
-					background-color: var(--ov-l-surface);
-					border-color: var(--ov-l-border);
-				}
-				/* Light mode chat input */
-				[data-theme="light"] .chat-input-container {
-					background-color: #FFFFFF;
-					border: 1px solid var(--ov-l-border);
-					box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.03);
-				}
-				/* Light mode tool call cards — keep subtle surfaces with readable foreground */
-				[data-theme="light"] .stream-tool-summary {
-					color: var(--ov-l-text-strong);
-				}
-				[data-theme="light"] .stream-tool-summary .tool-name-text {
-					color: var(--ov-l-text-strong);
-				}
-				[data-theme="light"] .stream-tool-summary .tool-name-secondary {
-					color: var(--ov-l-text-muted);
-				}
-				[data-theme="light"] .stream-tool-summary .tool-spinner {
-					color: var(--ov-l-text-muted);
-					opacity: 0.72;
-				}
-				[data-theme="light"] .stream-tool-body {
-					border: none;
-					background: transparent;
-				}
-				[data-theme="light"] .stream-tool-body-row {
-					border-top-color: transparent;
-				}
-				[data-theme="light"] .stream-tool-body-label {
-					color: var(--ov-l-text-muted);
-					opacity: 1;
-				}
-				[data-theme="light"] .stream-tool-body-content {
-					background: var(--ov-l-surface);
-					border: none;
-				}
-				[data-theme="light"] .stream-tool-body-scroll pre {
-					background: transparent;
-					border: none;
-				}
-				[data-theme="light"] .stream-tool-body-content,
-				[data-theme="light"] .stream-tool-body-scroll pre {
-					color: var(--ov-l-text-strong);
-				}
-				[data-theme="light"] .tool-status-done {
-					color: var(--ov-l-success);
-				}
-				[data-theme="light"] .tool-status-error {
-					color: var(--ov-l-error);
-				}
+					/* --- Chat bubbles --- */
+					[data-theme="light"] {
+						--ov-chat-surface-shadow: 0 1px 6px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.03);
+					}
+					[data-theme="light"] .chat-bubble-user-msg,
+					[data-theme="light"] .chat-bubble-assistant-msg {
+						--chat-user-bg: #FFFFFF;
+						--chat-user-border: var(--ov-l-border);
+						--chat-assistant-bg: #FFFFFF;
+						--chat-assistant-border: var(--ov-l-border);
+						background-color: #FFFFFF;
+						color: var(--ov-l-text-strong);
+						border: 1px solid var(--ov-l-border);
+						box-shadow: var(--ov-chat-surface-shadow);
+					}
+					[data-theme="light"] .chat-bubble-user-msg code,
+					[data-theme="light"] .chat-bubble-assistant-msg code {
+						background-color: var(--ov-l-surface);
+						color: var(--ov-l-text-strong);
+						border-color: var(--ov-l-border);
+					}
+					[data-theme="light"] .chat-bubble-user-msg pre,
+					[data-theme="light"] .chat-bubble-assistant-msg pre {
+						background-color: var(--ov-l-surface);
+						border-color: var(--ov-l-border);
+					}
+					/* Light mode chat input */
+					[data-theme="light"] .chat-input-container {
+						background-color: #FFFFFF;
+						border: 1px solid var(--ov-l-border);
+						box-shadow: var(--ov-chat-surface-shadow);
+					}
+					/* Light mode tool call cards — keep subtle surfaces with readable foreground */
+					[data-theme="light"] .stream-tool-summary {
+						color: var(--ov-l-text-strong);
+					}
+					[data-theme="light"] .stream-tool-summary .tool-name-text {
+						color: var(--ov-l-text-strong);
+					}
+					[data-theme="light"] .stream-tool-summary .tool-name-secondary {
+						color: var(--ov-l-text-muted);
+					}
+					[data-theme="light"] .stream-tool-summary .tool-spinner {
+						color: var(--ov-l-text-muted);
+						opacity: 0.72;
+					}
+					[data-theme="light"] .stream-tool-body {
+						border: none;
+						background: transparent;
+					}
+					[data-theme="light"] .stream-tool-body-row {
+						border-top-color: transparent;
+					}
+					[data-theme="light"] .stream-tool-body-label {
+						color: var(--ov-l-text-muted);
+						opacity: 1;
+					}
+					[data-theme="light"] .stream-tool-body-content {
+						background: var(--ov-l-surface);
+						border: none;
+					}
+					[data-theme="light"] .stream-tool-body-scroll pre {
+						background: transparent;
+						border: none;
+					}
+					[data-theme="light"] .stream-tool-body-content,
+					[data-theme="light"] .stream-tool-body-scroll pre {
+						color: var(--ov-l-text-strong);
+					}
+					[data-theme="light"] .tool-status-done {
+						color: var(--ov-l-success);
+					}
+					[data-theme="light"] .tool-status-error {
+						color: var(--ov-l-error);
+					}
 
 					/* --- Tabs (dark mode) --- */
 					[data-theme="dark"] .tabs-bordered {
@@ -1335,35 +1338,38 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					[data-theme="dark"] .tab-active {
 						border-bottom-color: rgba(255, 255, 255, 0.3) !important;
 					}
-				/* --- Chat bubbles (dark mode) --- */
-				[data-theme="dark"] .chat-bubble-user-msg,
-				[data-theme="dark"] .chat-bubble-assistant-msg {
-					--chat-user-bg: #2b3039;
-					--chat-user-border: transparent;
-					--chat-assistant-bg: #2b3039;
-					--chat-assistant-border: transparent;
-					background-color: #2b3039;
-					border: none;
-					box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
-				}
-				[data-theme="dark"] .chat-bubble-user-msg code,
-				[data-theme="dark"] .chat-bubble-assistant-msg code {
-					background-color: rgba(0, 0, 0, 0.25);
-					border-color: rgba(255, 255, 255, 0.1);
-				}
-				[data-theme="dark"] .chat-bubble-user-msg pre,
-				[data-theme="dark"] .chat-bubble-assistant-msg pre {
-					background-color: rgba(0, 0, 0, 0.2);
-					border-color: rgba(255, 255, 255, 0.1);
-				}
-				/* Dark mode chat input */
-				[data-theme="dark"] .chat-input-container {
-					background-color: #2b3039;
-					border: none;
-					box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
-				}
+					/* --- Chat bubbles (dark mode) --- */
+					[data-theme="dark"] {
+						--ov-chat-surface-shadow: 0 1px 6px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.12);
+					}
+					[data-theme="dark"] .chat-bubble-user-msg,
+					[data-theme="dark"] .chat-bubble-assistant-msg {
+						--chat-user-bg: #2b3039;
+						--chat-user-border: transparent;
+						--chat-assistant-bg: #2b3039;
+						--chat-assistant-border: transparent;
+						background-color: #2b3039;
+						border: none;
+						box-shadow: var(--ov-chat-surface-shadow);
+					}
+					[data-theme="dark"] .chat-bubble-user-msg code,
+					[data-theme="dark"] .chat-bubble-assistant-msg code {
+						background-color: rgba(0, 0, 0, 0.25);
+						border-color: rgba(255, 255, 255, 0.1);
+					}
+					[data-theme="dark"] .chat-bubble-user-msg pre,
+					[data-theme="dark"] .chat-bubble-assistant-msg pre {
+						background-color: rgba(0, 0, 0, 0.2);
+						border-color: rgba(255, 255, 255, 0.1);
+					}
+					/* Dark mode chat input */
+					[data-theme="dark"] .chat-input-container {
+						background-color: #2b3039;
+						border: none;
+						box-shadow: var(--ov-chat-surface-shadow);
+					}
 
-				/* --- Outline buttons (New Project, etc.) --- */
+					/* --- Outline buttons (New Project, etc.) --- */
 				[data-theme="light"] .btn-outline {
 					border-color: var(--ov-l-border-strong);
 					color: var(--ov-l-text);
