@@ -3933,7 +3933,7 @@ func TestHandler_GetTaskThread_PollsWhenQueued(t *testing.T) {
 
 	assert.Contains(t, body, `id="task-thread-view"`)
 	assert.Contains(t, body, `hx-trigger="every 3s"`)
-	assert.Contains(t, body, `hx-get="/tasks/`+task.ID+`/thread?limit=30"`)
+	assert.Contains(t, body, fmt.Sprintf(`hx-get="/tasks/%s/thread?limit=%d"`, task.ID, taskThreadWindowLimitDefault))
 }
 
 func TestHandler_GetTaskThread_DraftClearLogic_DoesNotTreatPollingGetAsSend(t *testing.T) {
