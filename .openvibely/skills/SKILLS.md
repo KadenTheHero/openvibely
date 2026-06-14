@@ -77,6 +77,10 @@ always_use:
 
 [OpenVibely Model Usage Tracking Workflow](openvibely_model_usage_tracking_workflow/SKILL.md) — Implement and audit OpenVibely model usage persistence, aggregation, provider capture, and Analytics UI.
 
+## openvibely_recursive_self_improvement_bootstrap
+
+[OpenVibely Recursive Self-Improvement Bootstrap](openvibely_recursive_self_improvement_bootstrap/SKILL.md) — Bootstrap an autonomous, reviewable OpenVibely loop that turns project vision, specs, and defect lists into prioritized tasks, goals, schedules, wakeups, memory, and skills.
+
 ## openvibely_project_guidance
 
 [OpenVibely Project Guidance](openvibely_project_guidance/SKILL.md) — Static coding-agent guidance for working in the OpenVibely repository.
@@ -116,3 +120,34 @@ always_use:
 ## openvibely_scheduled_tasks_workflow
 
 [OpenVibely Scheduled Tasks Workflow](openvibely_scheduled_tasks_workflow/SKILL.md) — Implement and audit scheduled task behavior, enabled state, next-run preservation, and schedule UI consistently.
+
+## openvibely_anthropic_oauth_model_workflow
+
+[OpenVibely Anthropic OAuth Model Workflow](openvibely_anthropic_oauth_model_workflow/SKILL.md) — Verify and implement Anthropic model support through OpenVibely's OAuth/agentic request path.
+
+## openvibely_dynamic_task_loop_workflow
+
+[OpenVibely Dynamic Task Loop Workflow](openvibely_dynamic_task_loop_workflow/SKILL.md) — Implement and audit dynamic task loop wakeups, Loop Agent tooling, scheduler enqueue paths, and UI cancellation safely.
+
+## openvibely_skill_analytics_workflow
+
+[OpenVibely Skill Analytics Workflow](openvibely_skill_analytics_workflow/SKILL.md) — Implement and audit OpenVibely Skill Curator analytics telemetry, aggregations, and dashboard surfaces.
+## openvibely_spec_runbook_workflow
+
+[OpenVibely Spec And Runbook Workflow](openvibely_spec_runbook_workflow/SKILL.md) — Resolve and follow OpenVibely source-of-truth specs and sibling runbooks before implementation.
+
+## openvibely_skill_import_workflow
+
+[OpenVibely Skill Import Workflow](openvibely_skill_import_workflow/SKILL.md) — Implement and audit OpenVibely skill package import across runtime tools, UI upload, YAML normalization, grants, and catalog indexing.
+
+## openvibely_tool_output_rendering_workflow
+
+[OpenVibely Tool Output Rendering Workflow](openvibely_tool_output_rendering_workflow/SKILL.md) — Diagnose and fix OpenVibely task/chat tool-result output persistence, rendering, scrolling, and streaming behavior.
+
+## openvibely_mobile_dropdown_positioning
+
+[OpenVibely Mobile Dropdown Positioning](openvibely_mobile_dropdown_positioning/SKILL.md) — Diagnose and fix mobile dropdown/popover positioning in OpenVibely scrollable templ/HTMX UI.
+
+## openvibely_responsive_templ_layout_workflow
+
+[OpenVibely Responsive Templ Layout Workflow](openvibely_responsive_templ_layout_workflow/SKILL.md) — Diagnose and fix responsive Tailwind/DaisyUI layout issues in OpenVibely templ UI without relying on screenshots.

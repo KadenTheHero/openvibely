@@ -16,6 +16,7 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 
 - Never create documentation or summary files for your work. Do not create `*_FIX.md`, `*_SUMMARY.md`, `*_VERIFICATION.md`, `README_*.md`, `TECHNICAL_*.md`, `ACTION_PLAN_*.md`, `FINDINGS_*.md`, `INVESTIGATION_*.md`, `COMMIT_MESSAGE.txt`, QA checklist files, or similar summary markdown. The code and commit messages are the documentation.
 - Before editing code, verify the actual filesystem target. Run or otherwise confirm `pwd`, `git status --short --branch`, and `git worktree list` when the task mentions an isolated worktree, follow-up task branch, or explicit worktree path. If the current tool working directory is not the assigned worktree, use absolute paths into the assigned worktree for file tools and `git -C <worktree>`/`cd <worktree> && ...` for shell commands. Do not rely on relative paths until this is confirmed; accidental edits to the main checkout must be treated as a workflow bug and repaired before continuing.
+- When a task is explicitly governed by a source-of-truth spec or runbook path, read that file before edits. If the exact file is missing, first verify the worktree/path and search for the exact filename or a clearly matching spec in the repo; if still absent, stop and report a blocker instead of implementing from assumptions or similarly named docs.
 - Avoid validation loops, but do not leave compile or test failures unresolved after code edits. Make all intended code changes first, run the required validation chain once, fix any failures, and rerun only when needed to confirm the fix.
 - If code changed, use `-count=1` for tests. Skip it only when re-running without code changes and cached results are acceptable.
 - Avoid read-only tool loops. Repeated `read_file`, `list_files`, and `grep_search` calls without progress usually mean missing objective or weak handoff context.
@@ -93,8 +94,13 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 
 ```bash
 ./start.sh              # Start server (logs to logs/openvibely.log)
-make dev                # Development with live reload
-go test ./internal/... -count=1 -timeout 60s  # Tests
+make dev                # Runs air for Go backend rebuild/restart on Go changes
+```
+
+`make dev` is not a complete browser hot-reload pipeline. In this repo it invokes `air`; when no `.air.toml` is present, air falls back to default Go-file watching/rebuild behavior. For UI work, `.templ` edits still need `templ generate` (or a separate templ watch) before the generated Go changes are picked up, Tailwind/CSS changes need their own configured watcher or rebuild, and the browser generally needs a manual refresh after the server restarts.
+
+```bash
+go test ./internal/... -count=1 -timeout 60s  # Focused/internal tests; use the validation workflow for full-suite commands and timeout guidance
 ```
 
 ## Key Files

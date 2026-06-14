@@ -2,9 +2,9 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-06-07
-source: task
-source_id: task_474f3c7f2c8dc82584f10774929f8e06
+updated: 2026-06-12
+source: consolidation
+source_id: memory_consolidation_2026_06_12
 confidence: high
 title: Integrations and Channels
 ---
@@ -47,4 +47,4 @@ Telegram facts:
 - Telegram-origin Chat and `send_to_task` paths use shared runner/queued task-thread behavior in production.
 - Telegram `Start`/`Stop` is nil-safe for partially constructed/test services.
 
-Operational guidance for implementing and debugging GitHub, Slack, Telegram, webhook, and channel UI behavior lives in the project skill `.openvibely/skills/openvibely_channel_integrations_workflow/SKILL.md`. Shared queueing/steering rules remain in `.openvibely/skills/openvibely_chat_thread_turn_workflow/SKILL.md`; task-goal behavior remains in `.openvibely/skills/openvibely_task_goals_workflow/SKILL.md`.
+Operational guidance belongs in `openvibely_channel_integrations_workflow`; shared queueing/steering and task-goal rules live in their dedicated workflow skills.

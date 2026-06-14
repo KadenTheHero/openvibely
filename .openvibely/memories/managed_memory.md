@@ -2,24 +2,22 @@
 name: managed_memory
 type: project
 created: 2026-05-09
-updated: 2026-06-07
+updated: 2026-06-13
 source: consolidation
-source_id: memory_consolidation_2026_06_07
+source_id: memory_consolidation_2026_06_13
 confidence: high
 title: Managed Memory
 ---
 
 OpenVibely managed memory is model-backed, tool-driven, project-scoped, and stored under the selected project's repo-local `.openvibely/memories/` directory. The directory stays flat: `MEMORIES.md` is the compact index and focused top-level topic files hold durable context. The old `user/`, `feedback/`, `project/`, and `runs/` subdirectory model is obsolete.
 
-Durable storage facts:
-- Managed memory requires a selected project with a valid local `repo_path`.
+Durable storage and boundaries:
+- Managed memory requires a selected project with a valid local `repo_path` for file operations.
 - `MemoryService` owns path resolution, file storage, context building, extraction, consolidation, and DB metadata.
 - Existing SQLite task/chat execution history is the transcript source; JSONL transcript storage and app-owned memory roots are not part of the current design.
 - Startup/runtime paths may create `.openvibely/memories/` and `MEMORIES.md` when missing. Topic files are created by explicit durable-memory writes.
-- Memory schedule seeding is separate from repo-local memory directory initialization: the default project can receive the visible Memory Consolidation scheduled task even when it has no `repo_path`, while actual memory file operations still require a valid local repo path.
+- Memory schedule seeding is separate from repo-local memory initialization: the default project can receive the visible Memory Consolidation scheduled task even when it has no `repo_path`, while actual memory file operations still require a valid local repo path.
 - Managed-memory tools are scoped to the memory directory and reject traversal, absolute paths, and symlink escapes.
-
-Content boundaries:
 - Memory stores durable contextual notes: user preferences, product direction, architectural decisions, workflow constraints, current-state facts, recurring pitfalls, incidents, and repeated feedback.
 - Memory excludes raw complaints, assistant boilerplate, one-off prompts, transient logs, raw transcripts, secrets, provider-internal terminology, task-by-task summaries, Chat page prompts, mode-control text, and procedure-only runbooks.
 - Static repository operating instructions belong in app-managed skills and selected managed memory, not repo-root `AGENTS.md` or `CLAUDE.md`.
@@ -37,6 +35,6 @@ Lifecycle facts:
 Scheduled consolidation:
 - Memory consolidation runs as a normal scheduled task assigned to Memory Curator with the `consolidate_memory` skill.
 - Each project has a real system-created scheduled task visible on the Schedule page while hidden from the normal Tasks board.
-- Runtime execution uses the generic scheduled-agent path and scoped memory-file tools; separate hidden-run behavior and bespoke memory-specific scheduler surfaces are not part of the intended design.
+- Runtime execution uses the generic scheduled-agent path and scoped memory-file tools; separate hidden-run behavior and bespoke memory-specific scheduler surfaces are not intended.
 
-Operational implementation guidance for managed-memory routing, selected-memory lifecycle hooks, `memory_view` authorization, provider propagation, and memory troubleshooting belongs in `.openvibely/skills/openvibely_skill_lifecycle_workflow/SKILL.md`, `.openvibely/skills/openvibely_lifecycle_hook_workflow/SKILL.md`, and `.openvibely/skills/openvibely_chat_provider_test_workflow/SKILL.md`.
+Operational implementation guidance belongs in project skills such as `openvibely_skill_lifecycle_workflow`, `openvibely_lifecycle_hook_workflow`, and `openvibely_chat_provider_test_workflow`.

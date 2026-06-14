@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-06-10
+updated: 2026-06-12
 source: consolidation
-source_id: memory_consolidation_2026_06_07
+source_id: memory_consolidation_2026_06_12
 confidence: high
 title: Worktree and Lineage
 ---
@@ -15,14 +15,24 @@ Worktree path discipline is mandatory when a task provides a worktree path: rela
 
 Durable worktree model:
 - Auto-merge supports merge commit, fast-forward only, and squash merge.
-- `LLMService.ExecuteTaskWithAgent` creates the worktree before execution, runs startup sync from the latest main/default branch when the worktree is clean, and handles post-execution merge.
+- Task Changes local actions include merge commit, fast-forward only, squash merge, and rebase onto the task's target/default branch when the task branch is behind and no active merge/conflict state is present.
+- Changes-tab rebase runs against the task worktree, refreshes the Changes partial on success/already-up-to-date/conflict result, and treats already-up-to-date as an informational success.
+- `LLMService.ExecuteTaskWithAgent` creates the worktree before execution, runs startup sync from the latest target/default branch when the worktree is clean, and handles post-execution merge.
 - Startup sync uses the task's `MergeTargetBranch` when set, falling back to the default branch only when no target is stored.
 - Changes tab shows worktree branch diff vs target branch when available, falling back to execution diff.
-- Task execution auto-commits use generated descriptive commit messages based on actual worktree changes plus task/execution context; messages are generated immediately before staging/committing while changes are still in the worktree, for initial execution diff capture, follow-up completion, and merge-prep dirty-worktree commits. The generator expands untracked files to file-level paths and filters status/tool/terminal marker boilerplate before using LLM output as a subject source. These paths should preserve existing lineage/merge behavior while only varying the message.
-- Future task-execution auto-commits no longer use generic `Task completed:` / `Followup:` subjects or `follow-up` body values; later task turns use neutral task-turn wording. Current-state caveat from the 2026-06-10 audit: generated commit bodies still use the label `Execution phase:` with neutral values such as `later task turn`; the preferred product wording is `Task turn:`. Existing historical commits keep their original subjects. Changes-tab integration commits remain static (`Merge task:`, `Squash merge task:`), fast-forward creates no merge commit, and manual PR-prep dirty-worktree commits still use `Task updates:`.
 - Cleanup policy supports after-merge, keep, and manual.
 - Periodic cleanup removes merged worktrees and detects orphaned worktrees with no corresponding task.
 - Chained tasks carry git lineage through `base_branch`, `base_commit_sha`, and `lineage_depth`.
+
+Commit-message direction:
+- Task execution auto-commits use generated descriptive commit messages driven by the actual worktree diff. Generation happens while changes are still in the worktree for initial execution diff capture, later task-thread completion, post-execution safety capture, merge-prep dirty-worktree commits, and manual GitHub PR-prep dirty-worktree commits.
+- Commit-message generation first collects compact diff facts/hunks from actual changes (`git status --porcelain --untracked-files=all`, unstaged/staged diffs, and snippets for untracked text files) and sends that to an LLM prompt requesting one plain subject.
+- Task title, prompt, and execution output are supporting context only and must be ignored when they conflict with the diff. Stored execution text must not become the subject by itself.
+- If no usable LLM summary is available, fall back deterministically from diff/path/status facts with plain subject-only summaries such as `add <label>`, `update <label>`, `remove <label>`, `update <area> files`, `update <n> files`, `update changes`, `refine changes`, or `prepare changes for merge`.
+- Commit-summary diff context must not follow untracked symlinks or read snippet content outside the worktree. Inspect untracked paths with `Lstat`-style behavior, skip symlinks before reading content, and verify resolved paths remain inside the resolved worktree.
+- Task-execution commit subjects should be concise, subject-only, and plain language. Strip provider/status/tool boilerplate and conventional commit prefixes from LLM-provided candidates when needed.
+- Do not add a `Changed files:` body; do not invent `task` scopes or mention task/worktree machinery unless it is the actual code scope; do not use generic `Task completed:`/`Followup:` subjects or lifecycle labels.
+- Existing historical commits keep their original subjects. Changes-tab integration commits remain static (`Merge task:`, `Squash merge task:`), and fast-forward creates no merge commit.
 
 Follow-up lineage direction:
 - Task-thread follow-ups to terminal merged/stale tasks are guarded against blindly merging the current target into an old historical task branch/worktree.
@@ -32,6 +42,7 @@ Follow-up lineage direction:
 
 Merge and metadata direction:
 - Manual merge conflicts from `/tasks/:id/worktree/merge` are handled results, not ordinary request failures.
+- Changes-tab rebase conflicts are handled by aborting the rebase and surfacing guidance; because no rebase remains in progress after abort, the task should not be left in `MergeStatusConflict` solely from that aborted rebase.
 - Local merges do not use a blanket dirty-target guard; dirty-but-non-overlapping target checkout changes are allowed.
 - Git overwrite/refusal cases without unmerged files surface as merge failures rather than conflict-resolution states.
 - Changes-tab and local merge handlers revalidate stale `merge_status` and recover conventional worktree metadata before hiding or rejecting merge actions.
@@ -45,4 +56,4 @@ Cleanup and descendant direction:
 - Locked worktrees are skipped rather than removed manually.
 - Cleanup does not delete branches with non-terminal descendants.
 
-Operational guidance for implementing or auditing worktree merge, Changes tab recovery, cleanup, and lineage behavior lives in the project skill `.openvibely/skills/openvibely_worktree_merge_lineage_workflow/SKILL.md`. Manual rebase-only work remains covered by `.openvibely/skills/openvibely_git_worktree_rebase_workflow/SKILL.md`.
+Operational guidance belongs in `openvibely_worktree_merge_lineage_workflow`; manual rebase-only work remains covered by `openvibely_git_worktree_rebase_workflow`.
