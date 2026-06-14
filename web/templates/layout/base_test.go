@@ -254,11 +254,13 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 		".chat-bubble-assistant-msg {",
 		"position: relative;",
 		"margin-left: 0;",
+		"max-width: 100%;",
+		"overflow-wrap: anywhere;",
 		"left: 0;",
 		"left: 2px;",
 	} {
 		if !strings.Contains(html, expected) {
-			t.Fatalf("chat bubble tail should stay attached to an uninset bubble body so bubble width aligns with composer without clipping in overflow-contained panes; missing %q", expected)
+			t.Fatalf("chat bubble tail should stay attached to an uninset bubble body so bubble width aligns with composer without clipping; missing %q", expected)
 		}
 	}
 	if strings.Contains(html, "margin-left: 16px;") {

@@ -432,15 +432,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						overflow-y: auto;
 					}
 					/* Chat bubble redesign - distinct card-style per message */
-					.chat-bubble-user-msg,
-					.chat-bubble-assistant-msg {
-						color: hsl(var(--bc));
-						position: relative;
-						margin-left: 0;
-					}
-					/* Left pointer arrow for all chat bubbles */
-					.chat-bubble-user-msg::before,
-					.chat-bubble-assistant-msg::before {
+						.chat-bubble-user-msg,
+						.chat-bubble-assistant-msg {
+							color: hsl(var(--bc));
+							position: relative;
+							margin-left: 0;
+							max-width: 100%;
+							overflow-wrap: anywhere;
+							word-break: break-word;
+						}
+						/* Left pointer arrow for all chat bubbles */
+						.chat-bubble-user-msg::before,
+						.chat-bubble-assistant-msg::before {
 						content: '';
 						position: absolute;
 						top: 14px;
