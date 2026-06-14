@@ -434,36 +434,36 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					/* Chat bubble redesign - distinct card-style per message */
 					.chat-bubble-user-msg,
 					.chat-bubble-assistant-msg {
-					color: hsl(var(--bc));
-					position: relative;
-					margin-left: 16px;
-				}
-				/* Left pointer arrow for all chat bubbles */
-				.chat-bubble-user-msg::before,
-				.chat-bubble-assistant-msg::before {
-					content: '';
-					position: absolute;
-					top: 14px;
-					left: -9px;
-					width: 0;
-					height: 0;
-					border-top: 8px solid transparent;
-					border-bottom: 8px solid transparent;
-					border-right: 9px solid var(--chat-user-border, hsl(var(--bc) / 0.15));
-				}
-				.chat-bubble-user-msg::after,
-				.chat-bubble-assistant-msg::after {
-					content: '';
-					position: absolute;
-					top: 15px;
-					left: -7px;
-					width: 0;
-					height: 0;
-					border-top: 7px solid transparent;
-					border-bottom: 7px solid transparent;
-					border-right: 8px solid var(--chat-user-bg, hsl(var(--b1)));
-				}
-				/* Code block styling in chat messages */
+						color: hsl(var(--bc));
+						position: relative;
+						margin-left: 0;
+					}
+					/* Left pointer arrow for all chat bubbles */
+					.chat-bubble-user-msg::before,
+					.chat-bubble-assistant-msg::before {
+						content: '';
+						position: absolute;
+						top: 14px;
+						left: 0;
+						width: 0;
+						height: 0;
+						border-top: 8px solid transparent;
+						border-bottom: 8px solid transparent;
+						border-right: 9px solid var(--chat-user-border, hsl(var(--bc) / 0.15));
+					}
+					.chat-bubble-user-msg::after,
+					.chat-bubble-assistant-msg::after {
+						content: '';
+						position: absolute;
+						top: 15px;
+						left: 2px;
+						width: 0;
+						height: 0;
+						border-top: 7px solid transparent;
+						border-bottom: 7px solid transparent;
+						border-right: 8px solid var(--chat-user-bg, hsl(var(--b1)));
+					}
+					/* Code block styling in chat messages */
 				.chat-bubble-user-msg code,
 				.chat-bubble-assistant-msg code {
 					background-color: hsl(var(--b2));

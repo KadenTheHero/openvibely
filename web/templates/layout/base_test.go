@@ -242,6 +242,30 @@ func TestChatInputContainerCSS_FillsContainerWithoutExternalGap(t *testing.T) {
 	}
 }
 
+func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render Base: %v", err)
+	}
+
+	html := buf.String()
+	for _, expected := range []string{
+		".chat-bubble-user-msg,",
+		".chat-bubble-assistant-msg {",
+		"position: relative;",
+		"margin-left: 0;",
+		"left: 0;",
+		"left: 2px;",
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("chat bubble tail should stay attached to an uninset bubble body so bubble width aligns with composer without clipping in overflow-contained panes; missing %q", expected)
+		}
+	}
+	if strings.Contains(html, "margin-left: 16px;") {
+		t.Fatal("chat bubble body should not be inset by the left tail because it makes bubbles look narrower than the composer")
+	}
+}
+
 func TestChatInputContainerCSS_UsesSameSurfaceShadowAsMessageBubbles(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
