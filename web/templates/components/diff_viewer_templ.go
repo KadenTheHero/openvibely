@@ -607,7 +607,7 @@ func diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, revi
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\"><!-- Toolbar --><div class=\"flex items-center justify-between mb-4\"><div class=\"flex items-center gap-2\"><span class=\"text-sm font-medium opacity-70\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\"><!-- Toolbar --><div class=\"flex flex-wrap items-center gap-y-2 mb-4\"><div class=\"flex items-center gap-2 flex-1 min-w-0\"><span class=\"text-sm font-medium opacity-70\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -643,7 +643,7 @@ func diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, revi
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</div><div class=\"flex items-center gap-3\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</div><div class=\"flex items-center gap-3 flex-shrink-0 ml-auto\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1576,7 +1576,7 @@ func diffViewerContent(metas []DiffFileRenderMeta) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "\"><!-- Toolbar --><div class=\"flex items-center justify-between mb-4\"><div class=\"flex items-center gap-2\"><span class=\"text-sm font-medium opacity-70\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "\"><!-- Toolbar --><div class=\"flex flex-wrap items-center gap-y-2 mb-4\"><div class=\"flex items-center gap-2 flex-1 min-w-0\"><span class=\"text-sm font-medium opacity-70\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1612,7 +1612,7 @@ func diffViewerContent(metas []DiffFileRenderMeta) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "</div><div class=\"join\"><button class=\"btn btn-sm join-item btn-active\" id=\"diff-btn-inline\" onclick=\"switchDiffView('inline')\">Inline</button> <button class=\"btn btn-sm join-item\" id=\"diff-btn-split\" onclick=\"switchDiffView('split')\">Split</button></div></div><!-- File List -->")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "</div><div class=\"join flex-shrink-0 ml-auto\"><button class=\"btn btn-sm join-item btn-active\" id=\"diff-btn-inline\" onclick=\"switchDiffView('inline')\">Inline</button> <button class=\"btn btn-sm join-item\" id=\"diff-btn-split\" onclick=\"switchDiffView('split')\">Split</button></div></div><!-- File List -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

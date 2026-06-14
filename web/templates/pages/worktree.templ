@@ -164,8 +164,8 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 		<div class="card-body">
 			// Worktree branch info header
 			if task.WorktreeBranch != "" {
-				<div class="flex items-center justify-between mb-4">
-					<div>
+				<div class="flex items-center justify-between gap-2 mb-4">
+					<div class="min-w-0">
 						<h4 class="text-lg font-bold">Worktree Changes</h4>
 						<p class="text-sm opacity-60">
 							Changes on branch
@@ -175,8 +175,8 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 						</p>
 					</div>
 					// Unified actions dropdown with Local and GitHub sections
-							<div class="dropdown dropdown-end" id="changes-actions-dropdown">
-								<div tabindex="0" role="button" class="btn btn-primary btn-sm">
+							<div class="dropdown dropdown-end flex-shrink-0" id="changes-actions-dropdown">
+								<div tabindex="0" role="button" class="btn btn-primary btn-sm whitespace-nowrap">
 									Actions
 									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 							</svg>
