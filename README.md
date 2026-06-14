@@ -63,20 +63,14 @@ Open `http://localhost:3001`.
 
 ## Optional Developer Workflow
 
-Install extra tooling only if you want advanced dev workflows:
+Live reload while editing Go, templ, HTML, CSS, or JS files:
 
 ```bash
 make install-tools
 make dev
 ```
 
-`make install-tools` gives you:
-
-1. `air` for `make dev` live reload
-2. `swag` for Swagger generation
-3. `goose` CLI (optional; normal app migrate flow does not require it)
-
-Default URL with `make dev` (or direct server run without `PORT` override): `http://localhost:3001`
+Open `http://localhost:3001`.
 
 ## First-Time In-App Setup
 
@@ -158,8 +152,10 @@ Both modes share 100% of the backend code; no forking.
 ### Web Server (local / VPS / Docker)
 
 ```bash
-./start.sh          # Quick start
-make build && make run
+./start.sh              # Simple local build + run
+make install-tools      # One-time setup for live reload tooling
+make dev                # Live reload while editing
+make build && make run  # Explicit production-style build + run
 ```
 
 Config is env-driven (`PORT`, `DATABASE_PATH`, `PROJECT_REPO_ROOT`, etc.). See [`docs/environment.md`](./docs/environment.md) for the full reference.
