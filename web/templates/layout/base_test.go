@@ -274,6 +274,9 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 			t.Fatalf("chat bubble tail should stay attached to a full-row uninset bubble body so bubble width aligns with composer without clipping; missing %q", expected)
 		}
 	}
+	if !strings.Contains(html, "scrollbar-width: thin;") {
+		t.Fatal("chat message scrollbars should stay thin so the visible track minimally affects bubble/composer alignment")
+	}
 	if strings.Contains(bubbleCSS, "margin-left: 16px;") {
 		t.Fatal("chat bubble body should not be inset by the left tail because it makes bubbles look narrower than the composer")
 	}

@@ -1687,7 +1687,7 @@ func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
 	if strings.Contains(content, `id="task-thread-view" class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full overflow-x-hidden"`) {
 		t.Fatal("task thread root must not clip the composer shadow; horizontal containment belongs on the messages pane and inner controls")
 	}
-	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto max-w-full -mx-3 px-3 py-4 mb-4 space-y-6 min-h-0 min-w-0"`) {
+	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto max-w-full -ml-3 -mr-[18px] pl-3 pr-3 py-4 mb-4 space-y-6 min-h-0 min-w-0"`) {
 		t.Fatal("task thread messages pane must stay width-bounded without clipping bubble shadows")
 	}
 	if strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto overflow-x-hidden`) {

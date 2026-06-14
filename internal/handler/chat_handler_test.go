@@ -2911,7 +2911,7 @@ func TestHandler_Chat_ReconnectPreservesProjectID(t *testing.T) {
 		"chat root must stay width-bounded")
 	assert.NotContains(t, body, `id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full overflow-x-hidden"`,
 		"chat root must not clip the composer shadow")
-	assert.Contains(t, body, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto max-w-full min-w-0 -mx-3 px-3 py-4`,
+	assert.Contains(t, body, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto max-w-full min-w-0 -ml-3 -mr-[18px] pl-3 pr-3 py-4`,
 		"chat messages pane must stay width-bounded without clipping bubble shadows")
 	assert.NotContains(t, body, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden`,
 		"chat messages pane must not hard-clip chat bubble shadows")
