@@ -261,9 +261,9 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 	}
 	bubbleCSS := html[bubbleStart : bubbleStart+bubbleEnd]
 
-	// Bubbles themselves have margin-left: 0; the 16px shift is handled by the
-	// #chat-page-root / #task-thread-view margin offset so bubble bodies align
-	// with other page card left-edges (e.g. kanban column left border).
+	// Bubbles themselves have margin-left: 0; the 16px shift lives on the scrollports
+	// and input gutter (not on the root containers) so the roots stay full parent-content
+	// width and the right edge aligns with agents/models cards.
 	for _, expected := range []string{
 		".chat-bubble-user-msg,",
 		".chat-bubble-assistant-msg {",
@@ -275,22 +275,33 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 			t.Fatalf("chat bubble CSS block missing expected rule; missing %q", expected)
 		}
 	}
-	// Verify the page-root shift rules exist: -16px left margin (no right margin so the
-	// container extends to the parent's full right edge, matching agents/models card width).
-	// scrollport padding-left: 16px keeps the 9px tail inside the container boundary.
+	// Verify the scrollport/gutter shift rules exist:
+	//   - margin-left: -16px shifts the scrollport left so bubble bodies align with card edges
+	//   - width: calc(100% + 16px) explicitly compensates the cross-axis size for flex children
+	//     (negative margins don't auto-expand flex item width) and overrides any max-w-full cap
+	//   - max-width: none removes the Tailwind max-w-full cap that would otherwise clamp the right edge
+	//   - padding-left: 16px re-aligns bubble/composer body to the parent content left edge and
+	//     provides 7px of room for the 9px tail arrow (16-9=7px inside the scrollport border)
 	for _, expected := range []string{
-		"#chat-page-root,",
-		"#task-thread-view {",
-		"margin-left: -16px;",
+		"#chat-messages,",
+		"#task-thread-messages,",
 		".chat-input-shadow-gutter {",
+		"margin-left: -16px;",
+		"width: calc(100% + 16px);",
+		"max-width: none;",
 		"padding-left: 16px;",
 	} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("chat left-alignment shift CSS missing %q", expected)
 		}
 	}
-	// No margin-right on #chat-page-root / #task-thread-view — the container must extend
-	// to the parent's right edge so bubbles and input align with agents/models cards.
+	// The ROOT containers (#chat-page-root / #task-thread-view) must NOT have margin-left: -16px —
+	// it was moved to the scrollports/gutter where width: calc(100% + 16px) can compensate correctly.
+	// Keeping -16px on the roots + max-w-full made the right edge 16px short of the parent content area.
+	if strings.Contains(html, "#chat-page-root,\n\t\t\t\t#task-thread-view {\n\t\t\t\t\tmargin-left: -16px;") {
+		t.Fatal("margin-left: -16px must NOT be on #chat-page-root / #task-thread-view roots; it should be on the scrollports/gutter with width: calc(100% + 16px)")
+	}
+	// No margin-right anywhere in the chat shift block — everything must reach the right edge.
 	if strings.Contains(html, "margin-right: 16px;") {
 		t.Fatal("chat container must not have margin-right: 16px; it makes the chat pane narrower than agents/models cards")
 	}
