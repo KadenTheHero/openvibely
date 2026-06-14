@@ -484,7 +484,7 @@ func TestChatInputForm_MobileControlsStayContained(t *testing.T) {
 	}
 	required := []string{
 		`class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden"`,
-		`class="flex items-center gap-1 -ml-2 min-w-0 flex-1"`,
+		`class="flex items-center gap-1 min-w-0 flex-1"`,
 		`w-auto min-w-0 max-w-[7.5rem] sm:max-w-[140px]`,
 		`w-auto min-w-0 max-w-[6rem] sm:max-w-[120px]`,
 		`class="flex items-center gap-2 flex-shrink-0"`,
