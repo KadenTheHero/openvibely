@@ -1264,12 +1264,16 @@ func TestBuildTaskOccurrenceMap_DisabledScheduleIncluded(t *testing.T) {
 func TestScheduleContent_DisabledScheduleRenderedWithGreyedStyle(t *testing.T) {
 	// Compute a task that falls on Wednesday of the NEXT week so it is always
 	// in the rendered range regardless of which day of the week the test runs.
+	// Mirror getStartOfWeek(1) exactly: rewind to this week's Sunday, then add 7 days.
+	// Going forward to find Sunday fails when today IS Sunday — it stops immediately
+	// and targets this week, not next week.
 	now := time.Now()
 	startOfNextWeek := now
 	for startOfNextWeek.Weekday() != time.Sunday {
-		startOfNextWeek = startOfNextWeek.AddDate(0, 0, 1)
+		startOfNextWeek = startOfNextWeek.AddDate(0, 0, -1)
 	}
 	startOfNextWeek = time.Date(startOfNextWeek.Year(), startOfNextWeek.Month(), startOfNextWeek.Day(), 0, 0, 0, 0, startOfNextWeek.Location())
+	startOfNextWeek = startOfNextWeek.AddDate(0, 0, 7)
 	wednesday := startOfNextWeek.AddDate(0, 0, 3)
 	wednesday = time.Date(wednesday.Year(), wednesday.Month(), wednesday.Day(), 14, 0, 0, 0, wednesday.Location())
 	nextRunUTC := wednesday.UTC()

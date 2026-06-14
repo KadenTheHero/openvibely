@@ -3132,7 +3132,9 @@ func TestHandler_Chat_PlanCompletionPrompt_ModeRestoreReevaluatesOnHydration(t *
 
 	modeBlockIdx := strings.Index(body, "if (modeSelect && modeInput) {")
 	require.NotEqual(t, -1, modeBlockIdx, "mode selector wiring must exist")
-	modeBlock := body[modeBlockIdx : modeBlockIdx+1600]
+	// Window is 2500 chars to cover the full modeSelect block including the
+	// chat-select-change listener which follows the persisted-restore section.
+	modeBlock := body[modeBlockIdx : modeBlockIdx+2500]
 
 	assert.Contains(t, modeBlock, "function reevaluatePlanPrompt()",
 		"mode selector wiring must define prompt reevaluation helper")
@@ -3147,10 +3149,12 @@ func TestHandler_Chat_PlanCompletionPrompt_ModeRestoreReevaluatesOnHydration(t *
 	assert.Contains(t, modeBlock, "reevaluatePlanPrompt();",
 		"mode restore/change must re-evaluate CTA visibility from history")
 
-	changeIdx := strings.Index(modeBlock, "modeSelect.addEventListener('change', function() {")
+	// The mode selector uses the custom chat-select-change event (not the native
+	// change event) because the UI is a portal-based custom select, not a <select>.
+	changeIdx := strings.Index(modeBlock, "modeSelect.addEventListener('chat-select-change', function(e) {")
 	require.NotEqual(t, -1, changeIdx, "mode change handler must exist")
 	changeBody := modeBlock[changeIdx:]
-	assert.Contains(t, changeBody, "modeInput.value = this.value;",
+	assert.Contains(t, changeBody, "modeInput.value = e.detail.value;",
 		"mode change must keep hidden input synchronized")
 	assert.Contains(t, changeBody, "reevaluatePlanPrompt();",
 		"mode change must re-evaluate plan CTA visibility")
