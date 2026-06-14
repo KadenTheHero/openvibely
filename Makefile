@@ -1,18 +1,24 @@
 .PHONY: dev build build-desktop package-desktop-macos run migrate templ css clean install-tools test test-short test-cover
 
+TEMPL_VERSION := $(shell go list -m -f '{{.Version}}' github.com/a-h/templ)
+SWAG_VERSION := $(shell go list -m -f '{{.Version}}' github.com/swaggo/swag)
+GOOSE_VERSION := $(shell go list -m -f '{{.Version}}' github.com/pressly/goose/v3)
+AIR_VERSION := v1.65.3
+GO_BIN := $(shell go env GOBIN)
+ifeq ($(GO_BIN),)
+GO_BIN := $(shell go env GOPATH)/bin
+endif
+
 # Install development tools
 install-tools:
-	go install github.com/a-h/templ/cmd/templ@latest
-	go install github.com/pressly/goose/v3/cmd/goose@latest
-	go install github.com/air-verse/air@latest
-	go install github.com/swaggo/swag/cmd/swag@latest
+	go install github.com/a-h/templ/cmd/templ@$(TEMPL_VERSION)
+	go install github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION)
+	go install github.com/air-verse/air@$(AIR_VERSION)
+	go install github.com/swaggo/swag/cmd/swag@$(SWAG_VERSION)
 
 # Development with live reload
 dev:
-	air
-
-TEMPL_VERSION := $(shell go list -m -f '{{.Version}}' github.com/a-h/templ)
-SWAG_VERSION := $(shell go list -m -f '{{.Version}}' github.com/swaggo/swag)
+	PATH="$(GO_BIN):$(PATH)" $(GO_BIN)/air -c .air.toml
 
 # Generate templ files (no global binary required)
 templ:
