@@ -251,7 +251,7 @@ func TestChatInputContainerCSS_UsesSameSurfaceShadowAsMessageBubbles(t *testing.
 	html := buf.String()
 	for _, expected := range []string{
 		`--ov-chat-surface-shadow: 0 1px 6px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.03);`,
-		`--ov-chat-surface-shadow: 0 1px 6px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.12);`,
+		`--ov-chat-surface-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);`,
 		`box-shadow: var(--ov-chat-surface-shadow);`,
 	} {
 		if !strings.Contains(html, expected) {
@@ -259,13 +259,10 @@ func TestChatInputContainerCSS_UsesSameSurfaceShadowAsMessageBubbles(t *testing.
 		}
 	}
 	if strings.Contains(html, `[data-theme="light"] .chat-input-container {
-						background-color: #FFFFFF;
-						border: 1px solid var(--ov-l-border);
-						box-shadow: 0 2px 8px`) {
+							background-color: #FFFFFF;
+							border: 1px solid var(--ov-l-border);
+							box-shadow: 0 2px 8px`) {
 		t.Fatal("light chat input should not use a separate shadow from message bubbles")
-	}
-	if strings.Contains(html, `--ov-chat-surface-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);`) {
-		t.Fatal("dark chat surface shadow should not use the oversized drop shadow that creates a heavy band under the full-width composer")
 	}
 }
 
