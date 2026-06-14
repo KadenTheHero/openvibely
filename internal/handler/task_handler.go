@@ -470,6 +470,23 @@ func (h *Handler) GetTaskDetailStatus(c echo.Context) error {
 	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, executions, agents, agentDefs))
 }
 
+// GetTaskDetailActions returns just the action buttons fragment (Run Now / Edit / Delete).
+// Called by the task detail page when a task_status_changed SSE event or polling detects
+// that a task has transitioned to a terminal state, so the buttons update without a full refresh.
+func (h *Handler) GetTaskDetailActions(c echo.Context) error {
+	taskID := c.Param("taskId")
+
+	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+
+	return render(c, http.StatusOK, pages.TaskDetailActions(task))
+}
+
 func latestNonEmptyDiff(executions []models.Execution) string {
 	for i := len(executions) - 1; i >= 0; i-- {
 		if executions[i].DiffOutput != "" {

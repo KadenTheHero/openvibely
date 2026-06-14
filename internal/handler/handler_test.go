@@ -414,6 +414,68 @@ func TestHandler_GetTaskDetailStatus(t *testing.T) {
 	}
 }
 
+func TestHandler_GetTaskDetailActions(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	project := createProject(t, h, "Test Project")
+	task := createTask(t, h, project.ID, "Actions Test Task")
+
+	makeRequest := func(taskID string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/detail-actions", nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetPath("/tasks/:taskId/detail-actions")
+		c.SetParamNames("taskId")
+		c.SetParamValues(taskID)
+		if err := h.GetTaskDetailActions(c); err != nil {
+			t.Fatalf("GetTaskDetailActions(%s) failed: %v", taskID, err)
+		}
+		return rec
+	}
+
+	// Pending task: Run Now is enabled (hx-post present), Edit visible
+	rec := makeRequest(task.ID)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `id="task-detail-actions"`)
+	assertContains(t, rec, "Run Now")
+	assertContains(t, rec, `hx-post`)
+	assertContains(t, rec, "Edit")
+	assertNotContains(t, rec, "disabled")
+
+	// Running task: Run Now disabled (no hx-post), Edit hidden
+	task.Status = models.StatusRunning
+	if err := h.taskSvc.Update(ctx, task); err != nil {
+		t.Fatalf("failed to update task: %v", err)
+	}
+	rec2 := makeRequest(task.ID)
+	assertContains(t, rec2, "disabled")
+	assertNotContains(t, rec2, `hx-post`)
+	assertNotContains(t, rec2, `btn btn-secondary btn-sm`) // Edit hidden when running
+
+	// Completed task: Run Now re-enabled (hx-post back), Edit visible
+	task.Status = models.StatusCompleted
+	if err := h.taskSvc.Update(ctx, task); err != nil {
+		t.Fatalf("failed to update task: %v", err)
+	}
+	rec3 := makeRequest(task.ID)
+	assertContains(t, rec3, `hx-post`)
+	assertContains(t, rec3, "Edit")
+	assertNotContains(t, rec3, "disabled")
+
+	// Not found: expect 404
+	req404 := httptest.NewRequest(http.MethodGet, "/tasks/no-such-task/detail-actions", nil)
+	rec404 := httptest.NewRecorder()
+	c404 := e.NewContext(req404, rec404)
+	c404.SetPath("/tasks/:taskId/detail-actions")
+	c404.SetParamNames("taskId")
+	c404.SetParamValues("no-such-task")
+	if err := h.GetTaskDetailActions(c404); err == nil {
+		t.Error("expected error for nonexistent task")
+	}
+}
+
 func TestHandler_GetTask_RunningTask(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	agent := createAgent(t, llmConfigRepo)

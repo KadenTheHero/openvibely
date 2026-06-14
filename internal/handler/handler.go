@@ -424,6 +424,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Tasks (task-specific, no project in URL)
 	e.GET("/tasks/:taskId/executions", h.GetTaskExecutions)
 	e.GET("/tasks/:taskId/detail-status", h.GetTaskDetailStatus)
+	e.GET("/tasks/:taskId/detail-actions", h.GetTaskDetailActions)
 	e.GET("/tasks/:taskId/changes", h.GetTaskChanges)
 	e.GET("/tasks/:taskId/changes/file", h.GetTaskChangesFile)
 	e.POST("/tasks/:taskId/changes/live", h.GetTaskChangesLive)

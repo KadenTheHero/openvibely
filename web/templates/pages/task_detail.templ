@@ -131,40 +131,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 								@WorktreeInfoPanel(task, nil)
 							</div>
 						}
-						<div class="flex gap-2">
-							if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
-								<button
-									class="btn btn-primary btn-sm"
-									disabled
-									title="Task is already running or queued"
-								>
-									Run Now
-								</button>
-							} else {
-								<button
-									class="btn btn-primary btn-sm"
-									hx-post={ fmt.Sprintf("/tasks/%s/run", task.ID) }
-									hx-swap="none"
-									hx-on::after-request={ templ.ComponentScript{Call: fmt.Sprintf("if(event.detail.successful) { htmx.ajax('GET', '/tasks/%s?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'}); }", task.ID)} }
-								>
-									Run Now
-								</button>
-							}
-							if task.Status != models.StatusRunning {
-								<button
-									class="btn btn-secondary btn-sm"
-									onclick="document.getElementById('task-detail-view').classList.add('hidden'); document.getElementById('task-detail-edit').classList.remove('hidden')"
-								>
-									Edit
-								</button>
-							}
-							<button
-								class="btn btn-sm btn-error btn-outline"
-								onclick="document.getElementById('delete-task-modal').showModal()"
-							>
-								Delete
-							</button>
-						</div>
+						@TaskDetailActions(task)
 						<!-- Delete Confirmation Modal -->
 						<dialog id="delete-task-modal" class="modal">
 							<div class="modal-box">
@@ -1375,6 +1342,22 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 				}, 100);
 				})();
 
+				// Refresh the action buttons (Run Now / Edit / Delete) via the lightweight
+				// /tasks/:id/detail-actions fragment endpoint.  Called both from the polling
+				// afterSettle handler (up to 3s after completion) and from the SSE task-event
+				// listener below (fires immediately on task_status_changed events).
+				function _refreshTaskDetailActions() {
+					var actions = document.getElementById('task-detail-actions');
+					if (!actions) return;
+					var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
+					if (!taskIdMatch || !taskIdMatch[1]) return;
+					if (typeof htmx === 'undefined') return;
+					htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/detail-actions', {
+						target: '#task-detail-actions',
+						swap: 'outerHTML'
+					});
+				}
+
 				var _prevTaskStatus = null;
 				if (window._taskDetailFileChangesHandlers) {
 					if (window._taskDetailFileChangesHandlers.beforeUnload) {
@@ -1392,9 +1375,26 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 					if (window._taskDetailFileChangesHandlers.fileChangeEvent) {
 						window.removeEventListener('sse-file-change-event', window._taskDetailFileChangesHandlers.fileChangeEvent);
 					}
+					if (window._taskDetailFileChangesHandlers.taskEvent) {
+						window.removeEventListener('sse-task-event', window._taskDetailFileChangesHandlers.taskEvent);
+					}
 				}
 
 				var _taskDetailFileChangeEventHandler = _handleSharedFileChangeEvent;
+
+				// Listen for SSE task_status_changed events so action buttons refresh immediately
+				// on task completion — without waiting up to 3s for the next metrics poll cycle.
+				var _taskDetailTaskEventHandler = function(event) {
+					var data = event.detail || {};
+					if (data.type !== 'task_status_changed') return;
+					// Only react to this task's events
+					var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
+					if (!taskIdMatch || !taskIdMatch[1] || data.task_id !== taskIdMatch[1]) return;
+					var terminalStatuses = { completed: true, failed: true, cancelled: true };
+					if (terminalStatuses[data.status]) {
+						_refreshTaskDetailActions();
+					}
+				};
 
 				var _taskDetailBeforeUnloadHandler = function() {
 					_stopFileChangesSSE();
@@ -1406,6 +1406,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 					if (target.id === 'main-content' || target.id === 'task-detail-content') {
 						_stopFileChangesSSE();
 						window.removeEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);
+						window.removeEventListener('sse-task-event', _taskDetailTaskEventHandler);
 					}
 				};
 
@@ -1434,9 +1435,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 						var nowDone = (status === 'completed' || status === 'failed' || status === 'cancelled');
 						_prevTaskStatus = status;
 						if (wasActive && nowDone) {
-							// Task just finished — stop SSE and do final changes refresh
+							// Task just finished — stop SSE, do final changes refresh, and update action buttons
 							_stopFileChangesSSE();
 							_updateDiffViewer('final');
+							_refreshTaskDetailActions();
 						}
 						if (!wasActive && nowActive && _fileChangesTaskId && _isChangesTabActive()) {
 							// Task reactivated (e.g., follow-up on completed task) while changes tab is open.
@@ -1451,7 +1453,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 					beforeSwap: _taskDetailBeforeSwapHandler,
 					beforeRequest: _taskDetailBeforeRequestHandler,
 					afterSettle: _taskDetailAfterSettleHandler,
-					fileChangeEvent: _taskDetailFileChangeEventHandler
+					fileChangeEvent: _taskDetailFileChangeEventHandler,
+					taskEvent: _taskDetailTaskEventHandler
 				};
 
 				window.addEventListener('beforeunload', _taskDetailBeforeUnloadHandler);
@@ -1459,6 +1462,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 				document.body.addEventListener('htmx:beforeRequest', _taskDetailBeforeRequestHandler);
 				document.addEventListener('htmx:afterSettle', _taskDetailAfterSettleHandler);
 				window.addEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);
+				window.addEventListener('sse-task-event', _taskDetailTaskEventHandler);
 
 			function copyToClipboard(elementId, button) {
 				var element = document.getElementById(elementId);
@@ -1538,6 +1542,46 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 				});
 			}
 		</script>
+	</div>
+}
+
+// TaskDetailActions renders the action buttons (Run Now / Edit / Delete) for the details tab.
+// This fragment is independently refreshable via GET /tasks/:taskId/detail-actions so that
+// action button state (disabled Run Now, hidden Edit) updates in real time when a task finishes.
+templ TaskDetailActions(task *models.Task) {
+	<div id="task-detail-actions" class="flex gap-2">
+		if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
+			<button
+				class="btn btn-primary btn-sm"
+				disabled
+				title="Task is already running or queued"
+			>
+				Run Now
+			</button>
+		} else {
+			<button
+				class="btn btn-primary btn-sm"
+				hx-post={ fmt.Sprintf("/tasks/%s/run", task.ID) }
+				hx-swap="none"
+				hx-on::after-request={ templ.ComponentScript{Call: fmt.Sprintf("if(event.detail.successful) { htmx.ajax('GET', '/tasks/%s?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'}); }", task.ID)} }
+			>
+				Run Now
+			</button>
+		}
+		if task.Status != models.StatusRunning {
+			<button
+				class="btn btn-secondary btn-sm"
+				onclick="document.getElementById('task-detail-view').classList.add('hidden'); document.getElementById('task-detail-edit').classList.remove('hidden')"
+			>
+				Edit
+			</button>
+		}
+		<button
+			class="btn btn-sm btn-error btn-outline"
+			onclick="document.getElementById('delete-task-modal').showModal()"
+		>
+			Delete
+		</button>
 	</div>
 }
 
