@@ -2911,10 +2911,12 @@ func TestHandler_Chat_ReconnectPreservesProjectID(t *testing.T) {
 		"chat root must stay width-bounded")
 	assert.NotContains(t, body, `id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full overflow-x-hidden"`,
 		"chat root must not clip the composer shadow")
-	assert.Contains(t, body, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto max-w-full min-w-0 -ml-3 -mr-[29px] pl-3 pr-3 py-4`,
-		"chat messages pane must stay width-bounded without clipping bubble shadows")
+	assert.Contains(t, body, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto max-w-full min-w-0 -mx-3 px-3 py-4`,
+		"chat messages pane must stay width-bounded with a symmetric shadow gutter")
 	assert.NotContains(t, body, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden`,
 		"chat messages pane must not hard-clip chat bubble shadows")
+	assert.NotContains(t, body, `-mr-[29px]`,
+		"chat messages pane must not use fixed right-margin scrollbar compensation because it leaves bubbles visually shorter than the input")
 
 	// The SSE reconnect and response_done refresh calls must include project_id
 	// and be scoped to the chat root element only.

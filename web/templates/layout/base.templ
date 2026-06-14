@@ -507,42 +507,33 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					margin-right: 0;
 					width: 100%;
 				}
-				#pending-thread-inputs:has([data-thread-input-id]) {
-					padding-bottom: 1rem;
-				}
-					/* Thin scrollbar for chat messages to minimize width impact on alignment */
+					#pending-thread-inputs:has([data-thread-input-id]) {
+						padding-bottom: 1rem;
+					}
+					/* Chat transcripts remain scrollable, but the scrollbar must not reserve or paint a right-side track that makes bubbles appear shorter than the composer. */
 					#chat-messages,
 					#task-thread-messages {
-						scrollbar-width: thin;
-						scrollbar-color: hsl(var(--bc) / 0.2) transparent;
+						scrollbar-width: none;
 					}
 					#chat-messages::-webkit-scrollbar,
 					#task-thread-messages::-webkit-scrollbar {
-						width: 6px;
+						width: 0;
+						height: 0;
 					}
-					#chat-messages::-webkit-scrollbar-track,
-					#task-thread-messages::-webkit-scrollbar-track {
-						background: transparent;
-					}
-					#chat-messages::-webkit-scrollbar-thumb,
-					#task-thread-messages::-webkit-scrollbar-thumb {
-						background-color: hsl(var(--bc) / 0.2);
-						border-radius: 3px;
-					}
-					/* Remove outlines/borders from chat selectors */				.chat-model-select,
+					/* Remove outlines/borders from chat selectors */
+					.chat-model-select,
 					.chat-mode-select {
-					border: none !important;
-					outline: none !important;
-					box-shadow: none !important;
-				}
-				.chat-model-select:focus,
+						border: none !important;
+						outline: none !important;
+						box-shadow: none !important;
+					}
+					.chat-model-select:focus,
 					.chat-mode-select:focus {
-					border: none !important;
-					outline: none !important;
-					box-shadow: none !important;
-				}
-				/* Collapsible sidebar */
-				.sidebar-aside {
+						border: none !important;
+						outline: none !important;
+							box-shadow: none !important;
+						}
+						/* Collapsible sidebar */				.sidebar-aside {
 					transition: width 0.2s ease;
 					overflow: hidden;
 				}

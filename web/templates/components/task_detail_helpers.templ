@@ -322,7 +322,7 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 		data-task-id={ task.ID }
 	>
 		<!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) -->
-		<div id="task-thread-messages" class="flex-1 overflow-y-auto max-w-full -ml-3 -mr-[29px] pl-3 pr-3 py-4 mb-4 space-y-6 min-h-0 min-w-0" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit) }>
+		<div id="task-thread-messages" class="flex-1 overflow-y-auto max-w-full -mx-3 px-3 py-4 mb-4 space-y-6 min-h-0 min-w-0" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit) }>
 			@TaskPrimaryAgentBanner(agentDef)
 			if hasEarlier && len(executions) > 0 {
 				@ChatEarlierMessagesLoader("task-thread-messages", fmt.Sprintf("/tasks/%s/thread?before=%s&limit=%d", task.ID, executions[0].ID, windowLimit), windowLimit)

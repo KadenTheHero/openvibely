@@ -26,7 +26,7 @@ func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 	content := buf.String()
 	required := []string{
 		`id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full"`,
-		`id="chat-messages" class="flex-1 min-h-0 overflow-y-auto max-w-full min-w-0 -ml-3 -mr-[29px] pl-3 pr-3 py-4 mb-4 space-y-6"`,
+		`id="chat-messages" class="flex-1 min-h-0 overflow-y-auto max-w-full min-w-0 -mx-3 px-3 py-4 mb-4 space-y-6"`,
 		`class="chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4"`,
 		`class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"`,
 		`class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden"`,
@@ -42,6 +42,9 @@ func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 	}
 	if strings.Contains(content, `sm:max-w-3xl`) || strings.Contains(content, `sm:mx-auto`) || strings.Contains(content, `px-3 pt-2 pb-4`) {
 		t.Fatal("chat page composer must not add desktop side gaps or mobile right-side empty space")
+	}
+	if strings.Contains(content, `-mr-[29px]`) || strings.Contains(content, `-mr-[18px]`) {
+		t.Fatal("chat message panes must not use fixed right-margin scrollbar compensation because it still leaves bubbles visually shorter than the input in real browsers")
 	}
 	if strings.Contains(content, `chat-input-container rounded-xl p-4 relative w-full`) {
 		t.Fatal("chat page composer shell should not use w-full with visual margins because that clips the rounded right edge")
