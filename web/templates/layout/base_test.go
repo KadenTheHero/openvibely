@@ -249,21 +249,33 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 	}
 
 	html := buf.String()
+	bubbleStart := strings.Index(html, ".chat-bubble-user-msg,")
+	if bubbleStart == -1 {
+		t.Fatal("expected chat bubble CSS block")
+	}
+	bubbleEnd := strings.Index(html[bubbleStart:], "/* Code block styling in chat messages */")
+	if bubbleEnd == -1 {
+		t.Fatal("expected end of chat bubble CSS block")
+	}
+	bubbleCSS := html[bubbleStart : bubbleStart+bubbleEnd]
+
 	for _, expected := range []string{
 		".chat-bubble-user-msg,",
 		".chat-bubble-assistant-msg {",
 		"position: relative;",
 		"margin-left: 0;",
+		"box-sizing: border-box;",
+		"width: 100%;",
 		"max-width: 100%;",
 		"overflow-wrap: anywhere;",
 		"left: 0;",
 		"left: 2px;",
 	} {
-		if !strings.Contains(html, expected) {
-			t.Fatalf("chat bubble tail should stay attached to an uninset bubble body so bubble width aligns with composer without clipping; missing %q", expected)
+		if !strings.Contains(bubbleCSS, expected) {
+			t.Fatalf("chat bubble tail should stay attached to a full-row uninset bubble body so bubble width aligns with composer without clipping; missing %q", expected)
 		}
 	}
-	if strings.Contains(html, "margin-left: 16px;") {
+	if strings.Contains(bubbleCSS, "margin-left: 16px;") {
 		t.Fatal("chat bubble body should not be inset by the left tail because it makes bubbles look narrower than the composer")
 	}
 }
