@@ -228,7 +228,7 @@ func TestChatInputContainerCSS_FillsContainerWithoutExternalGap(t *testing.T) {
 	html := buf.String()
 	for _, expected := range []string{
 		".chat-input-container {",
-		"margin-left: 16px;",
+		"margin-left: 0;",
 		"margin-right: 6px;",
 	} {
 		if !strings.Contains(html, expected) {
@@ -257,15 +257,33 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 	}
 	bubbleCSS := html[bubbleStart : bubbleStart+bubbleEnd]
 
+	// Bubbles themselves have margin-left: 0; the 16px shift is handled by the
+	// #chat-page-root / #task-thread-view margin offset so bubble bodies align
+	// with other page card left-edges (e.g. kanban column left border).
 	for _, expected := range []string{
 		".chat-bubble-user-msg,",
 		".chat-bubble-assistant-msg {",
 		"position: relative;",
-		"margin-left: 16px;",
+		"margin-left: 0;",
 		"left: -9px;",
 		"left: -7px;"} {
 		if !strings.Contains(bubbleCSS, expected) {
-			t.Fatalf("chat bubble tail should be visible via left margin space; missing %q", expected)
+			t.Fatalf("chat bubble CSS block missing expected rule; missing %q", expected)
+		}
+	}
+	// Verify the page-root shift rules exist: -16px left margin (+ 16px right to
+	// preserve width) aligns bubble body left with other page card left-edges, and
+	// scrollport padding-left: 16px keeps the 9px tail inside the container boundary.
+	for _, expected := range []string{
+		"#chat-page-root,",
+		"#task-thread-view {",
+		"margin-left: -16px;",
+		"margin-right: 16px;",
+		".chat-input-shadow-gutter {",
+		"padding-left: 16px;",
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("chat left-alignment shift CSS missing %q", expected)
 		}
 	}
 	// Extract the #chat-messages / #task-thread-messages CSS block and verify:
@@ -286,6 +304,7 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 
 	for _, expected := range []string{
 		"scrollbar-width: thin;",
+		"padding-left: 16px;",
 		"padding-right: 6px;",
 	} {
 		if !strings.Contains(chatScrollCSS, expected) {
