@@ -57,8 +57,13 @@ func TestKanbanColumnHasMobileSafeWidthAndTouchMenu(t *testing.T) {
 	for _, want := range []string{
 		"kanban-column",
 		"w-full",
-		"min-h-[18rem]",
+		// Mobile height: fixed dvh-based height so each dropzone is independently scrollable
+		// and at least two task cards are visible in the viewport.
+		"h-[60dvh]",
+		"min-h-[24rem]",
+		// Desktop override: full-height grid layout, clearing the mobile fixed height.
 		"lg:h-full",
+		"lg:min-h-0",
 		"min-h-11",
 		"h-11",
 		"w-11",
@@ -70,6 +75,15 @@ func TestKanbanColumnHasMobileSafeWidthAndTouchMenu(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected responsive kanban column markup to contain %q, got %s", want, body)
 		}
+	}
+
+	// Old 18rem minimum was too short to show two task cards; ensure it is gone.
+	if strings.Contains(body, "min-h-[18rem]") {
+		t.Fatalf("kanban column must not use old min-h-[18rem] which is too short to show two task cards on mobile, got %s", body)
+	}
+	// The dropzone inside the column must be independently scrollable.
+	if !strings.Contains(body, "overflow-y-auto") {
+		t.Fatalf("kanban column dropzone must have overflow-y-auto for independent scroll on mobile, got %s", body)
 	}
 
 	activateIdx := strings.Index(body, `/tasks/backlog/activate?project_id=project-1`)
