@@ -1726,3 +1726,105 @@ func TestLoadDiffFileCard_BlockedFileShowsReason(t *testing.T) {
 		t.Error("expected blocked load reason for oversized single file")
 	}
 }
+
+// TestDiffViewerToolbar_ResponsiveNonOverlappingLayout verifies the toolbar
+// layout classes that caused controls to visually overlap.
+//
+// Root-cause: the outer wrapper used gap-y-2 (vertical gap only — zero column
+// gap), the left group used flex-1 min-w-0 (could shrink to 0 px), and the
+// right group used flex-shrink-0 ml-auto. On narrow viewports the left group
+// shrank to ~0 px while the right group stayed at its natural width starting
+// at x≈0, placing "files changed", "Submit Review", and "Inline/Split" all at
+// the same horizontal position — a visible overlap.
+func TestDiffViewerToolbar_ResponsiveNonOverlappingLayout(t *testing.T) {
+	diff := `diff --git a/main.go b/main.go
+--- a/main.go
++++ b/main.go
+@@ -1,3 +1,4 @@
+ package main
++import "fmt"
+ func main() {
+ }
+`
+	t.Run("DiffViewerWithReview toolbar uses gap-2 not gap-y-2", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := DiffViewerWithReview(diff, "task123", nil).Render(context.Background(), &buf); err != nil {
+			t.Fatalf("render failed: %v", err)
+		}
+		body := buf.String()
+		// gap-y-2 adds only a row gap (no column gap between left and right groups
+		// on the same line). gap-2 adds both row and column gaps so controls are
+		// separated even when sharing a row.
+		if strings.Contains(body, `class="flex flex-wrap items-center gap-y-2 mb-4"`) {
+			t.Error("toolbar outer container must not use gap-y-2 (vertical-only gap); use gap-2 so left and right control groups have a horizontal separator")
+		}
+		if !strings.Contains(body, `class="flex flex-wrap items-center gap-2 mb-4"`) {
+			t.Error("toolbar outer container must use gap-2 to add horizontal gap between control groups")
+		}
+	})
+
+	t.Run("DiffViewerWithReview left group does not use min-w-0", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := DiffViewerWithReview(diff, "task123", nil).Render(context.Background(), &buf); err != nil {
+			t.Fatalf("render failed: %v", err)
+		}
+		body := buf.String()
+		// min-w-0 overrides the group's natural minimum content width to 0, which
+		// allows the browser to shrink the "files changed" group to 0 px. That in
+		// turn lets the right group start at x=0, visually overlapping.
+		if strings.Contains(body, `flex-1 min-w-0`) {
+			t.Error("toolbar left group must not use min-w-0: it allows the group to shrink to 0 px, causing all controls to stack at the left edge on narrow viewports")
+		}
+	})
+
+	t.Run("DiffViewerWithReview right group does not use flex-shrink-0 ml-auto", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := DiffViewerWithReview(diff, "task123", nil).Render(context.Background(), &buf); err != nil {
+			t.Fatalf("render failed: %v", err)
+		}
+		body := buf.String()
+		// flex-shrink-0 prevents the right group from shrinking. Combined with
+		// min-w-0 on the left, the right group overflows at x=0 when the container
+		// is narrower than the right group's natural width, causing all controls to
+		// appear at the same horizontal position (overlap).
+		if strings.Contains(body, `flex-shrink-0 ml-auto`) {
+			t.Error("toolbar right group must not use flex-shrink-0 ml-auto: causes overflow-at-x=0 overlap with the left group on narrow viewports")
+		}
+	})
+
+	t.Run("DiffViewer (no review) toolbar uses gap-2 not gap-y-2", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := DiffViewer(diff).Render(context.Background(), &buf); err != nil {
+			t.Fatalf("render failed: %v", err)
+		}
+		body := buf.String()
+		if strings.Contains(body, `class="flex flex-wrap items-center gap-y-2 mb-4"`) {
+			t.Error("toolbar outer container must not use gap-y-2; use gap-2 for horizontal and vertical gap")
+		}
+		if !strings.Contains(body, `class="flex flex-wrap items-center gap-2 mb-4"`) {
+			t.Error("toolbar outer container must use gap-2")
+		}
+	})
+
+	t.Run("DiffViewer (no review) left group does not use min-w-0", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := DiffViewer(diff).Render(context.Background(), &buf); err != nil {
+			t.Fatalf("render failed: %v", err)
+		}
+		body := buf.String()
+		if strings.Contains(body, `flex-1 min-w-0`) {
+			t.Error("toolbar left group must not use min-w-0: allows the group to shrink to 0 px causing overlap")
+		}
+	})
+
+	t.Run("DiffViewer (no review) join div does not use flex-shrink-0 ml-auto", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := DiffViewer(diff).Render(context.Background(), &buf); err != nil {
+			t.Fatalf("render failed: %v", err)
+		}
+		body := buf.String()
+		if strings.Contains(body, `flex-shrink-0 ml-auto`) {
+			t.Error("toolbar join div must not use flex-shrink-0 ml-auto: causes overlap on narrow viewports")
+		}
+	})
+}
