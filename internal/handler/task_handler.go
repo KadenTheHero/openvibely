@@ -54,7 +54,7 @@ func getSortPreferences(c echo.Context) taskSortPreferences {
 
 func isValidTaskSort(sortBy string) bool {
 	switch sortBy {
-	case "title_asc", "title_desc", "created_asc", "created_desc", "priority_asc", "priority_desc":
+	case "title_asc", "title_desc", "created_asc", "created_desc", "completed_asc", "completed_desc", "priority_asc", "priority_desc":
 		return true
 	default:
 		return false

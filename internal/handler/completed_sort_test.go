@@ -29,6 +29,8 @@ func TestSetCompletedSort(t *testing.T) {
 		{name: "title descending", sortBy: "title_desc", wantStatus: http.StatusOK, wantCookie: true, wantCookieVal: "title_desc"},
 		{name: "created ascending", sortBy: "created_asc", wantStatus: http.StatusOK, wantCookie: true, wantCookieVal: "created_asc"},
 		{name: "created descending", sortBy: "created_desc", wantStatus: http.StatusOK, wantCookie: true, wantCookieVal: "created_desc"},
+		{name: "completed ascending", sortBy: "completed_asc", wantStatus: http.StatusOK, wantCookie: true, wantCookieVal: "completed_asc"},
+		{name: "completed descending", sortBy: "completed_desc", wantStatus: http.StatusOK, wantCookie: true, wantCookieVal: "completed_desc"},
 		{name: "priority ascending", sortBy: "priority_asc", wantStatus: http.StatusOK, wantCookie: true, wantCookieVal: "priority_asc"},
 		{name: "priority descending", sortBy: "priority_desc", wantStatus: http.StatusOK, wantCookie: true, wantCookieVal: "priority_desc"},
 		{name: "invalid sort", sortBy: "invalid_sort", wantStatus: http.StatusBadRequest, wantCookie: false},
@@ -117,6 +119,74 @@ func TestSetCompletedSort_ActualSorting(t *testing.T) {
 	if !(alphaIdx < mikeIdx && mikeIdx < zuluIdx) {
 		t.Fatalf("completed tasks not sorted by title asc: alpha=%d mike=%d zulu=%d", alphaIdx, mikeIdx, zuluIdx)
 	}
+}
+
+func TestCompletedSort_SortsByCompletionDate(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+
+	// Create three tasks in the completed category.  They will all get the same
+	// created_at because SQLite datetime('now') has second precision in tests,
+	// but we will set distinct updated_at values to simulate different
+	// completion timestamps.
+	type taskSpec struct {
+		title     string
+		updatedAt string // explicit completion timestamp (oldest → newest)
+	}
+	specs := []taskSpec{
+		{"MiddleCompleted", "2024-01-02 10:00:00"},
+		{"OldestCompleted", "2024-01-01 10:00:00"},
+		{"NewestCompleted", "2024-01-03 10:00:00"},
+	}
+	for _, s := range specs {
+		task := &models.Task{
+			ProjectID: "default",
+			Title:     s.title,
+			Category:  models.CategoryCompleted,
+			Status:    models.StatusCompleted,
+			Prompt:    "test prompt",
+			Priority:  2,
+		}
+		if err := h.taskSvc.Create(ctx, task); err != nil {
+			t.Fatalf("Create task %s: %v", s.title, err)
+		}
+		if _, err := db.ExecContext(ctx,
+			`UPDATE tasks SET updated_at = ? WHERE id = ?`, s.updatedAt, task.ID); err != nil {
+			t.Fatalf("Set updated_at for %s: %v", s.title, err)
+		}
+	}
+
+	assertOrder := func(sortKey string, wantOrder []string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/tasks/completed/sort?project_id=default&sort="+sortKey, nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+
+		if err := h.SetCompletedSort(c); err != nil {
+			t.Fatalf("SetCompletedSort(%s) error = %v", sortKey, err)
+		}
+
+		body := completedDropZone(rec.Body.String())
+		positions := make([]int, len(wantOrder))
+		for i, name := range wantOrder {
+			positions[i] = strings.Index(body, name)
+			if positions[i] == -1 {
+				t.Fatalf("sort=%s: %q not found in completed dropzone", sortKey, name)
+			}
+		}
+		for i := 1; i < len(positions); i++ {
+			if positions[i-1] >= positions[i] {
+				t.Fatalf("sort=%s: want %q before %q, got positions %v",
+					sortKey, wantOrder[i-1], wantOrder[i], positions)
+			}
+		}
+	}
+
+	// completed_desc: newest completion first
+	assertOrder("completed_desc", []string{"NewestCompleted", "MiddleCompleted", "OldestCompleted"})
+	// completed_asc: oldest completion first
+	assertOrder("completed_asc", []string{"OldestCompleted", "MiddleCompleted", "NewestCompleted"})
 }
 
 func TestCompletedSort_UpdatesWhenTasksCompletedAndUncompleted(t *testing.T) {

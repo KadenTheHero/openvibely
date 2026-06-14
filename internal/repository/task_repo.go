@@ -141,6 +141,16 @@ func taskSortLess(a models.Task, b models.Task, sortBy string) bool {
 			return a.CreatedAt.After(b.CreatedAt)
 		}
 		return taskDisplayOrderDesc(a, b)
+	case "completed_asc":
+		if !a.UpdatedAt.Equal(b.UpdatedAt) {
+			return a.UpdatedAt.Before(b.UpdatedAt)
+		}
+		return taskDisplayOrderAsc(a, b)
+	case "completed_desc":
+		if !a.UpdatedAt.Equal(b.UpdatedAt) {
+			return a.UpdatedAt.After(b.UpdatedAt)
+		}
+		return taskDisplayOrderDesc(a, b)
 	case "priority_asc":
 		if a.Priority != b.Priority {
 			return a.Priority < b.Priority

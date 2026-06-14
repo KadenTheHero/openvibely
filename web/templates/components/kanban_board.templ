@@ -160,10 +160,10 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 						</li>
 						<li class="border-t border-base-300 mt-1 pt-1">
 							<a
-								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=created_desc", projectID) }
+								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=completed_desc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm min-h-11", isSortActive(completedSort, "created_desc") }
+								class={ "text-sm min-h-11", isSortActive(completedSort, "completed_desc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
@@ -173,10 +173,10 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 						</li>
 						<li>
 							<a
-								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=created_asc", projectID) }
+								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=completed_asc", projectID) }
 								hx-target="#kanban-board"
 								hx-swap="outerHTML"
-								class={ "text-sm min-h-11", isSortActive(completedSort, "created_asc") }
+								class={ "text-sm min-h-11", isSortActive(completedSort, "completed_asc") }
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
