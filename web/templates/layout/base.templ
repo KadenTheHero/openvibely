@@ -503,25 +503,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					#pending-thread-inputs:has([data-thread-input-id]) {
 						padding-bottom: 1rem;
 					}
-					/* Thin scrollbar for chat messages to minimize width impact on alignment */
+					/* Chat message scrollports: padding-right reserves space for right-side bubble
+					   shadows and ensures bubble right edge aligns with the composer (which uses
+					   margin-right: 6px). scrollbar-gutter: stable is intentionally omitted —
+					   macOS overlay scrollbars reserve 0px regardless of the declared gutter,
+					   making it unreliable for alignment. The ::webkit-scrollbar overrides are
+					   also omitted so the native overlay scrollbar is used on WebKit/Blink
+					   (visually inside the pane, zero track width). */
 					#chat-messages,
 					#task-thread-messages {
 						scrollbar-width: thin;
 						scrollbar-color: hsl(var(--bc) / 0.2) transparent;
-						scrollbar-gutter: stable;
-					}
-					#chat-messages::-webkit-scrollbar,
-					#task-thread-messages::-webkit-scrollbar {
-						width: 6px;
-					}
-					#chat-messages::-webkit-scrollbar-track,
-					#task-thread-messages::-webkit-scrollbar-track {
-						background: transparent;
-					}
-					#chat-messages::-webkit-scrollbar-thumb,
-					#task-thread-messages::-webkit-scrollbar-thumb {
-						background-color: hsl(var(--bc) / 0.2);
-						border-radius: 3px;
+						padding-right: 6px;
 					}
 					/* Remove outlines/borders from chat selectors */
 					.chat-model-select,

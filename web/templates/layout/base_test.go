@@ -268,15 +268,32 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 			t.Fatalf("chat bubble tail should be visible via left margin space; missing %q", expected)
 		}
 	}
-	// Scrollbar should be thin/stable so it renders visibly inside the chat window
-	// and both bubble and composer right edges align at the scrollbar-gutter boundary.
+	// Extract the #chat-messages / #task-thread-messages CSS block and verify:
+	// - scrollbar-width: thin (Firefox)
+	// - padding-right: 6px (aligns bubble right edge with composer margin-right: 6px;
+	//   also provides shadow breathing room inside the scrollport)
+	// - NO scrollbar-gutter: stable (unreliable on macOS overlay scrollbars — reserves
+	//   0px, making bubbles 6px wider than the composer)
+	chatScrollStart := strings.Index(html, "#chat-messages,")
+	if chatScrollStart == -1 {
+		t.Fatal("expected #chat-messages CSS block")
+	}
+	chatScrollEnd := strings.Index(html[chatScrollStart:], "/* Remove outlines/borders from chat selectors */")
+	if chatScrollEnd == -1 {
+		t.Fatal("expected end of #chat-messages CSS block")
+	}
+	chatScrollCSS := html[chatScrollStart : chatScrollStart+chatScrollEnd]
+
 	for _, expected := range []string{
 		"scrollbar-width: thin;",
-		"scrollbar-gutter: stable;",
+		"padding-right: 6px;",
 	} {
-		if !strings.Contains(html, expected) {
-			t.Fatalf("chat message scrollbars should use thin stable scrollbar so it renders visibly inside the chat window; missing %q", expected)
+		if !strings.Contains(chatScrollCSS, expected) {
+			t.Fatalf("chat message scrollport CSS should contain %q for alignment and shadow room", expected)
 		}
+	}
+	if strings.Contains(chatScrollCSS, "scrollbar-gutter: stable;") {
+		t.Fatal("chat message scrollport must NOT use scrollbar-gutter: stable; it reserves 0px on macOS overlay scrollbars, making bubbles wider than the composer")
 	}
 }
 
