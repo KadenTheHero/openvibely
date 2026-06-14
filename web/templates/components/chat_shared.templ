@@ -1014,144 +1014,146 @@ templ ChatEmptyState(message string) {
 
 // ChatInputForm renders a shared chat input form with attachment support.
 templ ChatInputForm(config ChatInputFormConfig) {
-	<form
-		id={ config.FormID }
-		method="post"
-		hx-post={ config.PostEndpoint }
-		hx-target={ "#" + config.TargetID }
-		hx-swap="beforeend"
-		data-input-id={ config.InputID }
-		data-clear-func-name={ config.FormID + "ClearAttachments" }
-		data-message-history-key={ chatMessageHistoryStorageKey(config) }
-		class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"
-	>
-		<!-- Drop zone overlay -->
-		<div id={ chatDropOverlayID(config.FormID) } class="hidden absolute inset-0 z-10 rounded-xl border-2 border-dashed border-primary bg-primary/10 flex items-center justify-center pointer-events-none">
-			<div class="flex flex-col items-center gap-2 text-primary">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-				</svg>
-				<span class="text-sm font-medium">Drop files here to attach</span>
+	<div class="chat-input-shadow-gutter min-w-0 max-w-full px-3 pt-2 pb-4">
+		<form
+			id={ config.FormID }
+			method="post"
+			hx-post={ config.PostEndpoint }
+			hx-target={ "#" + config.TargetID }
+			hx-swap="beforeend"
+			data-input-id={ config.InputID }
+			data-clear-func-name={ config.FormID + "ClearAttachments" }
+			data-message-history-key={ chatMessageHistoryStorageKey(config) }
+			class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"
+		>
+			<!-- Drop zone overlay -->
+			<div id={ chatDropOverlayID(config.FormID) } class="hidden absolute inset-0 z-10 rounded-xl border-2 border-dashed border-primary bg-primary/10 flex items-center justify-center pointer-events-none">
+				<div class="flex flex-col items-center gap-2 text-primary">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+					</svg>
+					<span class="text-sm font-medium">Drop files here to attach</span>
+				</div>
 			</div>
-		</div>
-		if config.ShowModelSelector {
-			<input type="hidden" id={ config.FormID + "-agent-id" } name="agent_id" value={ selectedAgentOrAuto(config.SelectedAgentID) }/>
-		}
-		if config.ShowModeSelector {
-			<input type="hidden" id={ config.FormID + "-chat-mode" } name="chat_mode" value={ chatModeOrDefault(config.ChatMode) }/>
-		}
-		if config.ProjectID != "" {
-			<input type="hidden" id={ config.FormID + "-project-id" } name="_project_id" value={ config.ProjectID }/>
-		}
-		<input type="hidden" id={ chatSessionInputID(config.FormID) } name="attachment_session_id" value=""/>
-		if config.ActiveTurnID != "" {
-			<input type="hidden" name="expected_turn_id" value={ config.ActiveTurnID }/>
-		}
-		<!-- File Attachments Preview -->
-		<div id={ chatAttachmentPreviewID(config.FormID) } class="hidden border-b border-base-content/[0.12] -mx-4 px-4 -mt-4 pt-2.5 pb-2.5 mb-3">
-			<div class="flex items-center justify-between mb-1.5">
-				<span class="text-xs font-medium opacity-70">Attached Files</span>
-				<button type="button" class="btn btn-ghost btn-xs text-xs" data-clear-func={ config.FormID + "ClearAttachments" }>Clear All</button>
+			if config.ShowModelSelector {
+				<input type="hidden" id={ config.FormID + "-agent-id" } name="agent_id" value={ selectedAgentOrAuto(config.SelectedAgentID) }/>
+			}
+			if config.ShowModeSelector {
+				<input type="hidden" id={ config.FormID + "-chat-mode" } name="chat_mode" value={ chatModeOrDefault(config.ChatMode) }/>
+			}
+			if config.ProjectID != "" {
+				<input type="hidden" id={ config.FormID + "-project-id" } name="_project_id" value={ config.ProjectID }/>
+			}
+			<input type="hidden" id={ chatSessionInputID(config.FormID) } name="attachment_session_id" value=""/>
+			if config.ActiveTurnID != "" {
+				<input type="hidden" name="expected_turn_id" value={ config.ActiveTurnID }/>
+			}
+			<!-- File Attachments Preview -->
+			<div id={ chatAttachmentPreviewID(config.FormID) } class="hidden border-b border-base-content/[0.12] -mx-4 px-4 -mt-4 pt-2.5 pb-2.5 mb-3">
+				<div class="flex items-center justify-between mb-1.5">
+					<span class="text-xs font-medium opacity-70">Attached Files</span>
+					<button type="button" class="btn btn-ghost btn-xs text-xs" data-clear-func={ config.FormID + "ClearAttachments" }>Clear All</button>
+				</div>
+				<div id={ chatAttachmentListID(config.FormID) } class="space-y-1"></div>
 			</div>
-			<div id={ chatAttachmentListID(config.FormID) } class="space-y-1"></div>
-		</div>
-		@ChatComposerQueuedInputRows(config.PendingInputs, config.QueuedSteerEndpointFor)
-		<!-- Textarea -->
-		<div>
-			<textarea
-				id={ config.InputID }
-				name="message"
-				class="w-full resize-none bg-transparent text-sm leading-relaxed focus:outline-none placeholder:opacity-40 p-0 text-left"
-				placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
-				rows="3"
-				enterkeyhint="send"
-				required
-			></textarea>
-		</div>
-		<!-- Bottom controls row -->
-		<div class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden">
-			<div class="flex items-center gap-1 -ml-2 min-w-0 flex-1 overflow-hidden">
-				if config.ShowModelSelector {
-					<select id={ config.FormID + "-agent-select" } class="chat-model-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[7.5rem] sm:max-w-[140px] rounded-lg" data-agent-input={ config.FormID + "-agent-id" }>
-						<option
-							value="auto"
-							if selectedAgentOrAuto(config.SelectedAgentID) == "auto" {
-								selected
-							}
-						>Auto</option>
-						<option
-							value="default"
-							if config.SelectedAgentID == "default" {
-								selected
-							}
-						>Default</option>
-						for _, agent := range config.Agents {
+			@ChatComposerQueuedInputRows(config.PendingInputs, config.QueuedSteerEndpointFor)
+			<!-- Textarea -->
+			<div>
+				<textarea
+					id={ config.InputID }
+					name="message"
+					class="w-full resize-none bg-transparent text-sm leading-relaxed focus:outline-none placeholder:opacity-40 p-0 text-left"
+					placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
+					rows="3"
+					enterkeyhint="send"
+					required
+				></textarea>
+			</div>
+			<!-- Bottom controls row -->
+			<div class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden">
+				<div class="flex items-center gap-1 -ml-2 min-w-0 flex-1 overflow-hidden">
+					if config.ShowModelSelector {
+						<select id={ config.FormID + "-agent-select" } class="chat-model-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[7.5rem] sm:max-w-[140px] rounded-lg" data-agent-input={ config.FormID + "-agent-id" }>
 							<option
-								value={ agent.ID }
-								if config.SelectedAgentID == agent.ID {
+								value="auto"
+								if selectedAgentOrAuto(config.SelectedAgentID) == "auto" {
 									selected
 								}
-							>
-								{ agent.Name } ({ agent.Model })
-							</option>
-						}
-					</select>
-				}
-				if config.ShowModeSelector {
-					<select id={ config.FormID + "-mode-select" } class="chat-mode-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[6rem] sm:max-w-[120px] rounded-lg" data-mode-input={ config.FormID + "-chat-mode" }>
-						<option value="orchestrate" selected>Orchestrate</option>
-						<option value="plan">Plan</option>
-					</select>
-				}
-				<!-- Cancel button for running tasks -->
-				if config.TaskID != "" && config.IsRunning {
-					<button
-						type="button"
-						class="btn btn-ghost btn-xs text-error rounded-lg"
-						hx-post={ fmt.Sprintf("/tasks/%s/cancel", config.TaskID) }
-						hx-swap="none"
-						hx-confirm="Cancel this running task?"
-						title="Cancel running task"
-					>
-						Cancel
+							>Auto</option>
+							<option
+								value="default"
+								if config.SelectedAgentID == "default" {
+									selected
+								}
+							>Default</option>
+							for _, agent := range config.Agents {
+								<option
+									value={ agent.ID }
+									if config.SelectedAgentID == agent.ID {
+										selected
+									}
+								>
+									{ agent.Name } ({ agent.Model })
+								</option>
+							}
+						</select>
+					}
+					if config.ShowModeSelector {
+						<select id={ config.FormID + "-mode-select" } class="chat-mode-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[6rem] sm:max-w-[120px] rounded-lg" data-mode-input={ config.FormID + "-chat-mode" }>
+							<option value="orchestrate" selected>Orchestrate</option>
+							<option value="plan">Plan</option>
+						</select>
+					}
+					<!-- Cancel button for running tasks -->
+					if config.TaskID != "" && config.IsRunning {
+						<button
+							type="button"
+							class="btn btn-ghost btn-xs text-error rounded-lg"
+							hx-post={ fmt.Sprintf("/tasks/%s/cancel", config.TaskID) }
+							hx-swap="none"
+							hx-confirm="Cancel this running task?"
+							title="Cancel running task"
+						>
+							Cancel
+						</button>
+					}
+				</div>
+				<div class="flex items-center gap-2 flex-shrink-0">
+					<!-- Attachment button -->
+					<label for={ chatFileInputID(config.FormID) } class="btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300" title="Attach files">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+						</svg>
+					</label>
+					<input type="file" id={ chatFileInputID(config.FormID) } multiple class="hidden"/>
+					<!-- Speech-to-text microphone button -->
+					<button type="button" id={ config.FormID + "-mic-btn" } class="btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300 stt-btn" title="Speech to text" aria-label="Start speech to text">
+						<!-- Mic icon (shown when not recording) -->
+						<svg class="stt-mic-icon h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
+						</svg>
+						<!-- Stop icon (shown when recording) -->
+						<svg class="stt-stop-icon h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+							<rect x="6" y="6" width="12" height="12" rx="2"></rect>
+						</svg>
 					</button>
-				}
+					<button type="submit" class="btn btn-primary btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0" title="Send message">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+							<path d="M2 3l20 9-20 9 5-9-5-9z"></path>
+						</svg>
+					</button>
+				</div>
 			</div>
-			<div class="flex items-center gap-2 flex-shrink-0">
-				<!-- Attachment button -->
-				<label for={ chatFileInputID(config.FormID) } class="btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300" title="Attach files">
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
-					</svg>
-				</label>
-				<input type="file" id={ chatFileInputID(config.FormID) } multiple class="hidden"/>
-				<!-- Speech-to-text microphone button -->
-				<button type="button" id={ config.FormID + "-mic-btn" } class="btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300 stt-btn" title="Speech to text" aria-label="Start speech to text">
-					<!-- Mic icon (shown when not recording) -->
-					<svg class="stt-mic-icon h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
-					</svg>
-					<!-- Stop icon (shown when recording) -->
-					<svg class="stt-stop-icon h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-						<rect x="6" y="6" width="12" height="12" rx="2"></rect>
-					</svg>
-				</button>
-				<button type="submit" class="btn btn-primary btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0" title="Send message">
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-						<path d="M2 3l20 9-20 9 5-9-5-9z"></path>
-					</svg>
-				</button>
-			</div>
-		</div>
-	</form>
+		</form>
+	</div>
 	<!-- Shared input form scripts: Enter key, file upload, drag-and-drop -->
 	<script type="text/javascript">
 		(function() {
 			// Find our form by walking up from the script tag
 			var script = document.currentScript;
-			var form = script.previousElementSibling;
+			var wrapper = script ? script.previousElementSibling : null;
+			var form = wrapper ? wrapper.querySelector('form.chat-input-container') : null;
 			if (!form || form.tagName !== 'FORM') return;
-
 			var formId = form.id;
 			var inputId = form.querySelector('textarea[name="message"]').id;
 			var messageInput = document.getElementById(inputId);
