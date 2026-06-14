@@ -432,28 +432,41 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						overflow-y: auto;
 					}
 				/* Chat bubble redesign - distinct card-style per message */
-				/* Scrollports and input gutter are shifted left by 16px so bubble bodies
-				   align with other page card left-edges (e.g. kanban columns / models cards).
-				   The shift lives here (not on #chat-page-root / #task-thread-view) so the
-				   roots stay full parent-content width with the correct right edge.
-				   width: calc(100% + 16px) is required because:
-				     - For flex-col children, cross-axis auto-size = container width (not
-				       expanded by negative margins), so we must set width explicitly.
-				     - For elements with Tailwind max-w-full / max-width:100%, the explicit
-				       width + max-width:none override any capping.
-				   padding-left: 16px offsets the -16px shift so bubble bodies / the composer
-				   land back at the parent content left edge.  The 9px tail arrow (left:-9px)
-				   sits 7px inside the scrollport border — fully visible in the padding zone.
-				   Right edge: (parent_content_left - 16px) + (parent_content_width + 16px)
-				             = parent_content_right  ✓ */
+				/* Scrollports and input gutter are shifted left 16px so bubble bodies
+				   align with other page card left-edges (kanban columns / models cards).
+
+				   SCROLLPORTS (#chat-messages, #task-thread-messages):
+				     margin-left: -16px  — shifts box 16px left of parent content edge
+				     width: calc(100% + 28px)  — 16px recovers the left shift so the right
+				       edge stays at parent_content_right; +12px extra extends into the 24px
+				       right padding of #main-content (which has overflow-x:hidden so it won't
+				       scroll, but the extra space IS painted).
+				     padding-left: 16px  — bubble bodies land at parent_content_left ✓
+				     padding-right: 12px — gives box-shadows room inside the scrollport so
+				       overflow-x:auto (forced by overflow-y:auto per CSS spec) does not clip
+				       them; bubble bodies still reach parent_content_right because
+				       box_right(+12px extra) - padding_right(12px) = parent_content_right ✓
+				     Tail arrow: left:-9px sits 7px inside left border — fully visible ✓
+
+				   INPUT GUTTER (.chat-input-shadow-gutter):
+				     Same -16px shift + width: calc(100% + 16px) (no extra right needed —
+				     the composer has its own border/shadow, no clip issue).
+				     Selector uses parent ID prefix (#chat-page-root / #task-thread-view)
+				     for specificity 1,1,0 — beats Tailwind CDN's .w-full (0,1,0) which
+				     injects after our <style> block and would otherwise override width. */
 				#chat-messages,
-				#task-thread-messages,
-				.chat-input-shadow-gutter {
+				#task-thread-messages {
+					margin-left: -16px;
+					width: calc(100% + 28px);
+					max-width: none;
+					padding-left: 16px;
+					padding-right: 12px;
+				}
+				#chat-page-root .chat-input-shadow-gutter,
+				#task-thread-view .chat-input-shadow-gutter {
 					margin-left: -16px;
 					width: calc(100% + 16px);
 					max-width: none;
-				}
-				.chat-input-shadow-gutter {
 					padding-left: 16px;
 				}
 				.chat-bubble-user-msg,
@@ -524,19 +537,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			}					#pending-thread-inputs:has([data-thread-input-id]) {
 						padding-bottom: 1rem;
 					}
-					/* Chat message scrollports: padding-left provides room for the 9px tail arrow
-					   (which renders at left: -9px relative to the bubble body) and aligns the
-					   bubble body with the parent's left content edge. No padding-right needed —
-					   the native overlay scrollbar on macOS paints over content without stealing
-					   width; on other platforms the browser's classic scrollbar naturally reduces
-					   the scrollport content width without any explicit reservation.
-					   scrollbar-gutter: stable is intentionally omitted — macOS overlay
-					   scrollbars reserve 0px regardless of the declared gutter. */
+				/* Chat message scrollports: scrollbar appearance only (geometry handled above). */
 				#chat-messages,
 				#task-thread-messages {
 					scrollbar-width: thin;
 					scrollbar-color: hsl(var(--bc) / 0.2) transparent;
-					padding-left: 16px;
 				}					/* Remove outlines/borders from chat selectors */
 					.chat-model-select,
 					.chat-mode-select {

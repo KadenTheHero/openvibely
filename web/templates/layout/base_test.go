@@ -275,21 +275,27 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 			t.Fatalf("chat bubble CSS block missing expected rule; missing %q", expected)
 		}
 	}
-	// Verify the scrollport/gutter shift rules exist:
-	//   - margin-left: -16px shifts the scrollport left so bubble bodies align with card edges
-	//   - width: calc(100% + 16px) explicitly compensates the cross-axis size for flex children
-	//     (negative margins don't auto-expand flex item width) and overrides any max-w-full cap
-	//   - max-width: none removes the Tailwind max-w-full cap that would otherwise clamp the right edge
-	//   - padding-left: 16px re-aligns bubble/composer body to the parent content left edge and
-	//     provides 7px of room for the 9px tail arrow (16-9=7px inside the scrollport border)
+	// Verify the scrollport/gutter shift rules exist.
+	// Scrollports (#chat-messages, #task-thread-messages) use:
+	//   - margin-left: -16px  — shifts box left of parent content edge
+	//   - width: calc(100% + 28px)  — 16px recovers left shift + 12px extra right for shadow room
+	//   - max-width: none  — overrides any Tailwind max-w-full cap
+	//   - padding-left: 16px  — bubble bodies land at parent content left edge; tail has 7px clearance
+	//   - padding-right: 12px  — gives box-shadows 12px room inside the scrollport so overflow-x:auto
+	//     (forced by overflow-y:auto per CSS spec) does not clip them
+	// Gutter (.chat-input-shadow-gutter) uses a compound selector (parent ID + class) so specificity
+	// 1,1,0 beats Tailwind CDN's .w-full (0,1,0) which injects after the <style> block:
+	//   - width: calc(100% + 16px)  — only needs to recover the left shift, no extra right
 	for _, expected := range []string{
 		"#chat-messages,",
-		"#task-thread-messages,",
-		".chat-input-shadow-gutter {",
+		"#task-thread-messages {",
+		".chat-input-shadow-gutter,",
 		"margin-left: -16px;",
+		"width: calc(100% + 28px);",
 		"width: calc(100% + 16px);",
 		"max-width: none;",
 		"padding-left: 16px;",
+		"padding-right: 12px;",
 	} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("chat left-alignment shift CSS missing %q", expected)
@@ -307,8 +313,11 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 	}
 	// Extract the #chat-messages / #task-thread-messages CSS block and verify:
 	// - scrollbar-width: thin (Firefox)
-	// - padding-left: 16px (tail arrow room)
-	// - NO padding-right: 6px (removed so bubbles reach the same right edge as cards)
+	// - padding-left: 16px (tail arrow room + left alignment)
+	// - padding-right: 12px (shadow room — overflow-y:auto forces overflow-x:auto per CSS
+	//   spec, which clips box-shadows at the scrollport right edge; 12px padding ensures the
+	//   12px dark-theme shadow fits within the box and is not clipped)
+	// - NO padding-right: 6px (old incorrect value)
 	// - NO scrollbar-gutter: stable (unreliable on macOS overlay scrollbars — reserves
 	//   0px, making bubbles 6px wider than the composer)
 	chatScrollStart := strings.Index(html, "#chat-messages,")
@@ -324,13 +333,14 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 	for _, expected := range []string{
 		"scrollbar-width: thin;",
 		"padding-left: 16px;",
+		"padding-right: 12px;",
 	} {
 		if !strings.Contains(chatScrollCSS, expected) {
 			t.Fatalf("chat message scrollport CSS should contain %q", expected)
 		}
 	}
 	if strings.Contains(chatScrollCSS, "padding-right: 6px;") {
-		t.Fatal("chat message scrollport must NOT use padding-right: 6px; it makes bubbles narrower than agents/models cards")
+		t.Fatal("chat message scrollport must NOT use padding-right: 6px")
 	}
 	if strings.Contains(chatScrollCSS, "scrollbar-gutter: stable;") {
 		t.Fatal("chat message scrollport must NOT use scrollbar-gutter: stable; it reserves 0px on macOS overlay scrollbars, making bubbles wider than the composer")
