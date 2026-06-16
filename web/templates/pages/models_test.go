@@ -90,10 +90,10 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 
 	// The first <option> in the model select must be claude-sonnet-4-6.
 	// We detect this by confirming claude-sonnet-4-6 appears before claude-fable-5 and claude-mythos-5.
-	sonetIdx := strings.Index(out, `value="claude-sonnet-4-6"`)
+	sonnetIdx := strings.Index(out, `value="claude-sonnet-4-6"`)
 	fableIdx := strings.Index(out, `value="claude-fable-5"`)
 	mythosIdx := strings.Index(out, `value="claude-mythos-5"`)
-	if sonetIdx < 0 {
+	if sonnetIdx < 0 {
 		t.Fatal("expected claude-sonnet-4-6 to be present as an HTML option")
 	}
 	if fableIdx < 0 {
@@ -102,10 +102,10 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 	if mythosIdx < 0 {
 		t.Fatal("expected claude-mythos-5 to be present as an HTML option")
 	}
-	if sonetIdx > fableIdx {
+	if sonnetIdx > fableIdx {
 		t.Errorf("expected claude-sonnet-4-6 to appear before claude-fable-5 in the HTML selector (fable-5 must not be the default)")
 	}
-	if sonetIdx > mythosIdx {
+	if sonnetIdx > mythosIdx {
 		t.Errorf("expected claude-sonnet-4-6 to appear before claude-mythos-5 in the HTML selector (mythos-5 must not be the default)")
 	}
 
@@ -114,8 +114,11 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 	if jsAnthropicIdx < 0 {
 		t.Fatal("expected JS anthropic catalog block to be present")
 	}
+	// Bound the slice to just the anthropic block (ends before the next provider key).
 	jsCatalog := out[jsAnthropicIdx:]
-	// Find end of the anthropic block (the next top-level array close before the next provider key).
+	if nextProvider := strings.Index(jsCatalog, "openai: ["); nextProvider > 0 {
+		jsCatalog = jsCatalog[:nextProvider]
+	}
 	jsSonnetIdx := strings.Index(jsCatalog, "'claude-sonnet-4-6'")
 	jsFableIdx := strings.Index(jsCatalog, "'claude-fable-5'")
 	jsMythosIdx := strings.Index(jsCatalog, "'claude-mythos-5'")
