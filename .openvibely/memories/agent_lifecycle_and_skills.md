@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-06-13
+updated: 2026-06-15
 source: consolidation
-source_id: memory_consolidation_2026_06_13
+source_id: memory_consolidation_2026_06_15
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -55,7 +55,7 @@ Goal and Loop Agent facts:
 - Goal Agent after-complete evaluation is detached from the user-visible task response and reloads/publishes current goal state after evaluation.
 - Goal Agent after-complete evaluation runs on normal lifecycle hook input and task-thread `conversation_transcript`; lifecycle hooks must stay generic because they support other agents.
 - Goal Agent must remain a generic model evaluator. Avoid goal-objective keyword parsing, audit-specific guard blocks, deterministic completion logic, prompt bias keyed to specific goal wording, Goal-Agent-specific lifecycle input fields, transcript patching, raw-output replacement, `diff_output` injection, or separate judgment-shaped facts such as `evaluated_execution` unless explicitly redesigned.
-- Task `67bf50006babb69cd61fec4d2e661108` resolved the reported Goal Agent audit/read-only misclassification with a prompt-only fix after the user clarified that task `e3b0d11c308471557b0bbf724aba47b6` already contained ordinary transcript evidence of edits such as “I’m changing…” and changed-file summaries. Earlier experiments that patched `conversation_transcript` with raw execution output or injected/preserved `diff_output` were reverted as unnecessary.
+- A Goal Agent audit/read-only misclassification was resolved with a prompt-only fix after confirming ordinary transcript evidence already contained edit/action statements and changed-file summaries. Earlier experiments that patched `conversation_transcript` with raw execution output or injected/preserved `diff_output` were reverted as unnecessary; preserve the generic transcript-evidence approach.
 - Goal Agent `evaluate_task_goal` prompt guidance now explicitly tells the model to read concrete transcript evidence rather than only the assistant's final completion claim. Explicit task-agent statements about actions taken, files changed, commands run, validation performed, or remaining issues are evidence to reconcile with the stored goal; if a goal requires that some action did not happen, assistant text saying the action happened is evidence that condition is not proven by that turn. Keep this guidance generic rather than audit/read-only keyword hardcoding.
 - Goal runtime tool IDs such as `get_task_goal`, `send_to_task`, `mark_task_goal_achieved`, and `report_task_goal_blocked` are part of the agent tool catalog/UI so grants survive saves.
 - Dynamic task-loop wakeups use the protected Loop Agent after-complete hook. Its `schedule_task_wakeup` runtime tool is lifecycle-only and should not be exposed to ordinary task agents by default.

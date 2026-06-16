@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-06-14
+updated: 2026-06-15
 source: consolidation
-source_id: memory_consolidation_2026_06_14
+source_id: memory_consolidation_2026_06_15
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -55,7 +55,6 @@ Shared conventions:
 - UI code uses existing components/partials and shared CSS tokens instead of duplicating styles.
 - Swagger/OpenAPI is generated with `swag init`; generated docs live under `docs/` and the UI is mounted at `/swagger/*`.
 - User-facing documentation also lives under `docs/`, generally as concise `*-user-guide.md` Markdown pages that match the existing guide structure. README/docs-site preferences live in `coding_agent_product_discipline.md`.
-- Task board completed-column date ordering uses a dedicated nullable `tasks.completed_at` timestamp, set when tasks enter the completed category and cleared when they leave; backlog date ordering continues to use task creation time, so backlog and completed sort keys/validation are column-specific.
 
 Local development workflow:
 - `make dev` currently delegates directly to `air`; without a repo `.air.toml`, it only provides backend rebuild/restart behavior for Go changes through Air defaults, not browser hot reload.

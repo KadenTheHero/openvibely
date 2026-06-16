@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-06-14
+updated: 2026-06-15
 source: consolidation
-source_id: memory_consolidation_2026_06_14
+source_id: memory_consolidation_2026_06_15
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -49,7 +49,7 @@ Responsive and shared UI contracts:
 - Task detail completion UI state is split across independently refreshed fragments: status/metrics polling updates the badge, while state-dependent action controls live in `#task-detail-actions` and are refreshed through `/tasks/:taskId/detail-actions`. Browser `sse-task-event` task status changes for the current task should trigger an immediate action refresh on terminal statuses.
 - Task Changes/diff surfaces must stay viewport-contained on 320px-class screens. The diff viewer toolbar uses wrapping flex rows with real two-axis gaps (`gap-2`) so the files-changed/expand-collapse group, Submit Review control, and Inline/Split toggle remain separated. Avoid the overlap-prone combination of a left group that can shrink to zero (`flex-1 min-w-0`) and a rigid right group (`flex-shrink-0 ml-auto`); keep control groups able to wrap or participate in flex sizing instead of collapsing into the same horizontal position. The Worktree Changes file-status list is a separate overflow surface: constrain the card/list/rows with `min-w-0`/`max-w-full`/`overflow-hidden`, keep status badges non-shrinking, and truncate long paths inside the row while preserving the full path via `title` or equivalent accessible detail. Current known gap from the 2026-06-14 Task Changes overflow audit: the diff viewer `Changed Files` badge list in both review and non-review render paths still needs its own `min-w-0`/`max-w-full`/`overflow-hidden`/truncation containment for long filenames, and the Worktree Changes header branch/target code labels can still overflow when branch names are long.
 - Tasks page uses server-rendered kanban board/task-card templ components. Responsive contract: one-column stacked board/cards on phones, two columns around tablet widths, three columns on desktop, no phantom fourth column, no global fixed one-third column width, independent mobile dropzone scrolling, no page-level horizontal overflow, mobile-safe wrapping, at least 44px touch targets, compact desktop card density, and the `+ Add Task` header action colocated beside the title like Models `+ Add Model`.
-- In the Completed column, Date newest/oldest sorting is completion-time sorting via `tasks.updated_at` and dedicated `completed_desc`/`completed_asc` sort keys; Backlog date sorting remains creation-time sorting via `created_desc`/`created_asc`. This is a current-state proxy, not a dedicated immutable `completed_at`: later task mutations that update `updated_at` can affect completed-date ordering until/unless a separate completion timestamp exists.
+- In the Completed column, Date newest/oldest sorting is completion-time sorting via the dedicated nullable `tasks.completed_at` timestamp and `completed_desc`/`completed_asc` sort keys; Backlog date sorting remains creation-time sorting via `created_desc`/`created_asc`. UI/tests should keep backlog and completed sort semantics distinct.
 - Responsive card pages such as Models, Agents, Alerts, Channels, and Personality should keep page roots, grids, cards, badges, and inner content shrink-safe with `max-w-full`/`min-w-0` containment. Long badge values such as model IDs need truncation within the badge row rather than expanding the card/grid.
 - Alerts page cards follow the same responsive card contract. Long alert titles/messages should break with real overflow-wrap behavior, and mark-read/delete controls should stay in a normal top flex row with shrink-safe text rather than absolute overlays or fixed padding.
 - Goal edit controls belong in the task edit dialog; verified-state Git worktree actions can remain on the details surface.
