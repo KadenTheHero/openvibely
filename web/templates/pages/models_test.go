@@ -286,8 +286,8 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"new URLSearchParams({base_url: baseURL})",
 		"X-OpenAI-Compatible-API-Key",
 		"data.resolved_id",
-		"setOpenAICompatibleModelValue(models[i].id, models[i].id + ' (discovered)', false)",
-		"setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id + ' (discovered)', true)",
+		"setOpenAICompatibleModelValue(models[i].id, models[i].id, false)",
+		"setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id, true)",
 		"if (!isDiscoverableOpenAICompatiblePreset())",
 		"document.getElementById('model_provider').value !== provider",
 	} {
@@ -309,6 +309,7 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"GitHub Copilot",
 		"Bedrock",
 		"Gemini native",
+		"' (discovered)'",
 	} {
 		if strings.Contains(out, forbidden) {
 			t.Fatalf("expected discovery UI not to contain %q", forbidden)

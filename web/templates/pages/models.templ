@@ -1102,9 +1102,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 								.then(function(data) {
 									if (document.getElementById('model_provider').value !== provider || document.getElementById('model_base_url').value.trim() !== baseURL || !isDiscoverableOpenAICompatiblePreset()) return;
 									var models = data.models || [];								for (var i = 0; i < models.length; i++) {
-									if (models[i].id) setOpenAICompatibleModelValue(models[i].id, models[i].id + ' (discovered)', false);
+									if (models[i].id) setOpenAICompatibleModelValue(models[i].id, models[i].id, false);
 								}
-								if (data.resolved_id) setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id + ' (discovered)', true);
+								if (data.resolved_id) setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id, true);
 								status.textContent = models.length ? ('Discovered ' + models.length + ' model' + (models.length === 1 ? ' and selected it.' : 's. Choose one or enter the model ID manually.')) : 'No models returned; enter the model ID manually.';
 							})
 								.catch(function(err) {
