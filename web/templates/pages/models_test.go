@@ -77,6 +77,65 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	}
 }
 
+func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
+	// Render the models page and verify:
+	// 1. The first Anthropic HTML <option> and JS catalog entry is a stable Sonnet model.
+	// 2. Claude Fable 5 and Claude Mythos 5 remain as selectable options.
+	// 3. Neither Fable 5 nor Mythos 5 is the first option (i.e., neither is auto-selected).
+	var buf bytes.Buffer
+	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+	out := buf.String()
+
+	// The first <option> in the model select must be claude-sonnet-4-6.
+	// We detect this by confirming claude-sonnet-4-6 appears before claude-fable-5 and claude-mythos-5.
+	sonetIdx := strings.Index(out, `value="claude-sonnet-4-6"`)
+	fableIdx := strings.Index(out, `value="claude-fable-5"`)
+	mythosIdx := strings.Index(out, `value="claude-mythos-5"`)
+	if sonetIdx < 0 {
+		t.Fatal("expected claude-sonnet-4-6 to be present as an HTML option")
+	}
+	if fableIdx < 0 {
+		t.Fatal("expected claude-fable-5 to be present as an HTML option")
+	}
+	if mythosIdx < 0 {
+		t.Fatal("expected claude-mythos-5 to be present as an HTML option")
+	}
+	if sonetIdx > fableIdx {
+		t.Errorf("expected claude-sonnet-4-6 to appear before claude-fable-5 in the HTML selector (fable-5 must not be the default)")
+	}
+	if sonetIdx > mythosIdx {
+		t.Errorf("expected claude-sonnet-4-6 to appear before claude-mythos-5 in the HTML selector (mythos-5 must not be the default)")
+	}
+
+	// The JS anthropic catalog must also list claude-sonnet-4-6 before claude-fable-5 and claude-mythos-5.
+	jsAnthropicIdx := strings.Index(out, "anthropic: [")
+	if jsAnthropicIdx < 0 {
+		t.Fatal("expected JS anthropic catalog block to be present")
+	}
+	jsCatalog := out[jsAnthropicIdx:]
+	// Find end of the anthropic block (the next top-level array close before the next provider key).
+	jsSonnetIdx := strings.Index(jsCatalog, "'claude-sonnet-4-6'")
+	jsFableIdx := strings.Index(jsCatalog, "'claude-fable-5'")
+	jsMythosIdx := strings.Index(jsCatalog, "'claude-mythos-5'")
+	if jsSonnetIdx < 0 {
+		t.Fatal("expected claude-sonnet-4-6 in JS anthropic catalog")
+	}
+	if jsFableIdx < 0 {
+		t.Fatal("expected claude-fable-5 in JS anthropic catalog")
+	}
+	if jsMythosIdx < 0 {
+		t.Fatal("expected claude-mythos-5 in JS anthropic catalog")
+	}
+	if jsSonnetIdx > jsFableIdx {
+		t.Errorf("expected claude-sonnet-4-6 to appear before claude-fable-5 in JS anthropic catalog (fable-5 must not be the first/default entry)")
+	}
+	if jsSonnetIdx > jsMythosIdx {
+		t.Errorf("expected claude-sonnet-4-6 to appear before claude-mythos-5 in JS anthropic catalog (mythos-5 must not be the first/default entry)")
+	}
+}
+
 func TestModelsContent_ModelFormUsesHTMXSubmit(t *testing.T) {
 	agents := []models.LLMConfig{}
 	var buf bytes.Buffer
