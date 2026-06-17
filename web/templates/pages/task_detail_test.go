@@ -494,6 +494,63 @@ func TestTaskDetailContent_ThreadAutoLoadsWhenChatTabInitiallyActive(t *testing.
 	}
 }
 
+func TestTaskDetailContent_ThreadReloadsForCurrentTaskLiveRunEvents(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-thread-run-race",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	output := buf.String()
+
+	required := []string{
+		"function _loadThreadContent(taskId, forceReload) {",
+		"if (!forceReload && threadContent.dataset.loaded === 'true') return Promise.resolve(true);",
+		"function _refreshActiveThreadContent(taskId, forceReload) {",
+		"_loadThreadContent(taskId, forceReload).then(function(loaded) {",
+		"if (data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied') {",
+		"_refreshActiveThreadContent(data.task_id, true);",
+		"if (data.type === 'task_status_changed') {",
+		"var activeStatuses = { pending: true, queued: true, running: true };",
+		"_refreshActiveThreadContent(data.task_id, true);",
+		"window.addEventListener('sse-live-connected', _taskDetailLiveConnectedHandler);",
+	}
+	for _, s := range required {
+		if !strings.Contains(output, s) {
+			t.Fatalf("expected task detail script to contain %q", s)
+		}
+	}
+}
+
+func TestTaskDetailActions_RunButtonLoadsThreadThroughRaceSafeLoader(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-run-button",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailActions(task).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	output := buf.String()
+
+	if !strings.Contains(output, "if(event.detail.successful) { window._openTaskThreadAfterRun && window._openTaskThreadAfterRun('task-run-button'); }") {
+		t.Fatalf("expected Run button to delegate to the race-safe thread opener, got: %s", output)
+	}
+	if strings.Contains(output, "htmx.ajax('GET', '/tasks/task-run-button?tab=chat'") {
+		t.Fatal("Run button should not bypass the race-safe thread loader with a raw detail-content refresh")
+	}
+}
+
 func TestTaskDetailContent_ThreadTabRestoresPerTaskScrollState(t *testing.T) {
 	task := &models.Task{
 		ID:        "task-thread-scroll-1",

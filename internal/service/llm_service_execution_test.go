@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
@@ -108,6 +109,64 @@ func (a *taskSteeringProviderAdapter) Call(req llmcontracts.AgentRequest) (llmco
 		TextOnlyOutput: "task output",
 		Usage:          llmcontracts.Usage{TotalTokens: 1},
 	}, nil
+}
+
+func TestLLMService_ExecuteTaskWithAgent_PublishesInitialThreadExecutionStarted(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	broadcaster := events.NewBroadcaster()
+	sub, err := broadcaster.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer broadcaster.Unsubscribe(sub)
+
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, broadcaster)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	project := &models.Project{Name: "Initial Thread Event Project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Initial thread event", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "initial prompt", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetBroadcaster(broadcaster)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	svc.SetLLMCaller(mock)
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil || exec.ID == "" {
+		t.Fatalf("expected execution with id, got %#v", exec)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-sub:
+			if ev.Type != events.TaskThreadExecutionStarted {
+				continue
+			}
+			if ev.TaskID != task.ID || ev.ProjectID != project.ID || ev.ExecID != exec.ID || ev.Message != task.Prompt {
+				t.Fatalf("unexpected start event: %#v", ev)
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for initial task thread execution started event")
+		}
+	}
 }
 
 func TestLLMService_ExecuteTaskWithAgent_PromotesQueuedTaskThreadInputAfterCompletion(t *testing.T) {

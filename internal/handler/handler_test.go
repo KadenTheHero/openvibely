@@ -502,7 +502,7 @@ func TestHandler_GetTask_RunningTask(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, `id="thread-content"`)
 	assertContains(t, rec, "Thread is loading...")
-	assertContains(t, rec, "function _loadThreadContent(taskId)")
+	assertContains(t, rec, "function _loadThreadContent(taskId, forceReload)")
 }
 
 func TestHandler_GetTask_CompletedTaskDefaultsToChat(t *testing.T) {
@@ -3959,13 +3959,33 @@ func TestHandler_GetTaskThread_HidesLifecycleAgentActivity(t *testing.T) {
 	assertNotContains(t, rec, "private context")
 }
 
-func TestHandler_GetTaskThread_DoesNotPollWhenPending(t *testing.T) {
+func TestHandler_GetTaskThread_PollsWhenActivePending(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	project := createProject(t, h, "Pending Thread Polling Project")
 	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Temperature = 1.0 })
 	task := createTask(t, h, project.ID, "Pending Task", func(tk *models.Task) {
 		tk.Status = models.StatusPending
 		tk.Category = models.CategoryActive
+		tk.Prompt = "Pending prompt"
+		tk.AgentID = &agent.ID
+	})
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, `id="task-thread-view"`)
+	assert.Contains(t, body, `hx-trigger="every 3s"`)
+	assert.Contains(t, body, `data-task-active="true"`)
+}
+
+func TestHandler_GetTaskThread_DoesNotPollWhenBacklogPending(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	project := createProject(t, h, "Backlog Pending Thread Polling Project")
+	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Temperature = 1.0 })
+	task := createTask(t, h, project.ID, "Backlog Pending Task", func(tk *models.Task) {
+		tk.Status = models.StatusPending
+		tk.Category = models.CategoryBacklog
 		tk.Prompt = "Pending prompt"
 		tk.AgentID = &agent.ID
 	})

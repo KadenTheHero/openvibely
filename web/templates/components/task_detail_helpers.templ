@@ -312,13 +312,13 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 	<div
 		id="task-thread-view"
 		class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full"
-		if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
+			if task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive) {
 			hx-get={ fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit) }
 			hx-trigger="every 3s"
 			hx-target="#task-thread-view"
 			hx-swap="morph:outerHTML"
 		}
-		data-task-active={ boolStr(task.Status == models.StatusRunning || task.Status == models.StatusQueued) }
+			data-task-active={ boolStr(task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive)) }
 		data-task-id={ task.ID }
 	>
 		<!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) -->

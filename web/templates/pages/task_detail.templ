@@ -634,14 +634,15 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 												>
 													Edit
 												</button>
-											<button
-												class="btn btn-xs btn-ghost text-error"
-												data-schedule-id={ s.ID }
-												data-schedule-title={ task.Title }
-												data-schedule-target="closest .card"
-												data-schedule-swap="outerHTML swap:1s"
-												onclick="openDeleteScheduleConfirm(this)"
-											>													Remove
+												<button
+													class="btn btn-xs btn-ghost text-error"
+													data-schedule-id={ s.ID }
+													data-schedule-title={ task.Title }
+													data-schedule-target="closest .card"
+													data-schedule-swap="outerHTML swap:1s"
+													onclick="openDeleteScheduleConfirm(this)"
+												>
+													Remove
 												</button>
 											</div>
 										</div>
@@ -985,21 +986,21 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 				</div>
 			</div>
 		</div>
-			<!-- End Tab: Thread -->
-			<dialog id="delete_schedule_confirm_modal" class="modal">
-				<div class="modal-box">
-					@ModalCloseButton("delete_schedule_confirm_modal", "Close delete schedule confirmation")
-					<h3 class="font-bold text-lg text-error pr-10">Delete Schedule</h3>
-					<p class="py-4">Are you sure you want to delete the schedule for <strong id="delete_schedule_confirm_name"></strong>? This action cannot be undone.</p>
-					<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">The task will remain, but it will no longer run on this schedule.</div>
-					<div class="modal-action">
-						<button type="button" class="btn" onclick="delete_schedule_confirm_modal.close()">Cancel</button>
-						<button type="button" class="btn btn-error" onclick="confirmDeleteSchedule()">Delete Permanently</button>
-					</div>
+		<!-- End Tab: Thread -->
+		<dialog id="delete_schedule_confirm_modal" class="modal">
+			<div class="modal-box">
+				@ModalCloseButton("delete_schedule_confirm_modal", "Close delete schedule confirmation")
+				<h3 class="font-bold text-lg text-error pr-10">Delete Schedule</h3>
+				<p class="py-4">Are you sure you want to delete the schedule for <strong id="delete_schedule_confirm_name"></strong>? This action cannot be undone.</p>
+				<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">The task will remain, but it will no longer run on this schedule.</div>
+				<div class="modal-action">
+					<button type="button" class="btn" onclick="delete_schedule_confirm_modal.close()">Cancel</button>
+					<button type="button" class="btn btn-error" onclick="confirmDeleteSchedule()">Delete Permanently</button>
 				</div>
-				<form method="dialog" class="modal-backdrop"><button>close</button></form>
-			</dialog>
-			<script>
+			</div>
+			<form method="dialog" class="modal-backdrop"><button>close</button></form>
+		</dialog>
+		<script>
 							var deleteScheduleID = '';
 							var deleteScheduleTarget = '#task-detail-content';
 							var deleteScheduleTargetElement = null;
@@ -1106,34 +1107,57 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 						});
 					}
 
-					function _loadThreadContent(taskId) {
-						var threadContent = document.getElementById('thread-content');
-						if (!threadContent || !taskId) return Promise.resolve(false);
-						if (threadContent.dataset.loaded === 'true') return Promise.resolve(true);
-						if (_threadContentLoading) return Promise.resolve(false);
-						if (typeof htmx === 'undefined') return Promise.resolve(false);
+						function _loadThreadContent(taskId, forceReload) {
+							var threadContent = document.getElementById('thread-content');
+							if (!threadContent || !taskId) return Promise.resolve(false);
+							if (!forceReload && threadContent.dataset.loaded === 'true') return Promise.resolve(true);
+							if (_threadContentLoading) return Promise.resolve(false);
+							if (typeof htmx === 'undefined') return Promise.resolve(false);
 
-						_threadContentLoading = true;
-						threadContent.dataset.loading = 'true';
-						return htmx.ajax('GET', '/tasks/' + taskId + '/thread', {
-							target: '#thread-content',
-							swap: 'innerHTML'
-						}).then(function() {
-							var updated = document.getElementById('thread-content');
-							if (updated) {
-								updated.dataset.loaded = 'true';
-								updated.dataset.loading = 'false';
+							_threadContentLoading = true;
+							threadContent.dataset.loading = 'true';
+							return htmx.ajax('GET', '/tasks/' + taskId + '/thread', {
+								target: '#thread-content',
+								swap: 'innerHTML'
+							}).then(function() {
+								var updated = document.getElementById('thread-content');
+								if (updated) {
+									updated.dataset.loaded = 'true';
+									updated.dataset.loading = 'false';
+								}
+								return true;
+							}).catch(function(err) {
+								console.error('Failed to load thread content:', err);
+								var updated = document.getElementById('thread-content');
+								if (updated) updated.dataset.loading = 'false';
+								return false;
+							}).finally(function() {
+								_threadContentLoading = false;
+							});
+						}
+
+						function _refreshActiveThreadContent(taskId, forceReload) {
+							if (!taskId || !_isChatTabActive()) return;
+							_loadThreadContent(taskId, forceReload).then(function(loaded) {
+								if (!loaded && forceReload) {
+									setTimeout(function() { _refreshActiveThreadContent(taskId, true); }, 250);
+									return;
+								}
+								_restoreThreadScrollOrBottom(taskId, false);
+								if (window._initThreadStreaming) window._initThreadStreaming();
+							});
+						}
+
+						window._openTaskThreadAfterRun = function(taskId) {
+							taskId = taskId || _currentTaskIdFromPath();
+							if (!taskId) return;
+							switchTaskTab('chat');
+							var nextURL = '/tasks/' + taskId + '?tab=chat';
+							if (window.location.pathname !== '/tasks/' + taskId || window.location.search !== '?tab=chat') {
+								history.pushState({}, '', nextURL);
 							}
-							return true;
-						}).catch(function(err) {
-							console.error('Failed to load thread content:', err);
-							var updated = document.getElementById('thread-content');
-							if (updated) updated.dataset.loading = 'false';
-							return false;
-						}).finally(function() {
-							_threadContentLoading = false;
-						});
-					}
+							_refreshActiveThreadContent(taskId, true);
+						};
 
 					function switchTaskTab(tabName) {
 					var container = document.getElementById('task-detail-content');
@@ -1158,16 +1182,16 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 					if (tab) tab.classList.add('tab-active');
 
 					// Auto-scroll thread to bottom when switching to thread tab
-					if (tabName === 'chat') {
-						var threadContent = document.getElementById('thread-content');
-						var taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();
-						if (taskId) {
-							_loadThreadContent(taskId).then(function() {
+						if (tabName === 'chat') {
+							var threadContent = document.getElementById('thread-content');
+							var taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();
+							if (taskId) {
+								_loadThreadContent(taskId).then(function() {
+										_restoreThreadScrollOrBottom(taskId, false);
+									});
+								} else {
 									_restoreThreadScrollOrBottom(taskId, false);
-								});
-							} else {
-								_restoreThreadScrollOrBottom(taskId, false);
-							}					}
+								}					}
 
 				// Reload changes content and start SSE when switching to changes tab
 				if (tabName === 'changes') {
@@ -1359,10 +1383,13 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 				}
 
 				var _prevTaskStatus = null;
-				if (window._taskDetailFileChangesHandlers) {
-					if (window._taskDetailFileChangesHandlers.beforeUnload) {
-						window.removeEventListener('beforeunload', window._taskDetailFileChangesHandlers.beforeUnload);
-					}
+					if (window._taskDetailFileChangesHandlers) {
+						if (window._taskDetailFileChangesHandlers.beforeUnload) {
+							window.removeEventListener('beforeunload', window._taskDetailFileChangesHandlers.beforeUnload);
+						}
+						if (window._taskDetailFileChangesHandlers.liveConnected) {
+							window.removeEventListener('sse-live-connected', window._taskDetailFileChangesHandlers.liveConnected);
+						}
 					if (window._taskDetailFileChangesHandlers.afterSettle) {
 						document.removeEventListener('htmx:afterSettle', window._taskDetailFileChangesHandlers.afterSettle);
 					}
@@ -1384,30 +1411,45 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 
 				// Listen for SSE task_status_changed events so action buttons refresh immediately
 				// on task completion — without waiting up to 3s for the next metrics poll cycle.
-				var _taskDetailTaskEventHandler = function(event) {
-					var data = event.detail || {};
-					if (data.type !== 'task_status_changed') return;
-					// Only react to this task's events
-					var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
-					if (!taskIdMatch || !taskIdMatch[1] || data.task_id !== taskIdMatch[1]) return;
-					var terminalStatuses = { completed: true, failed: true, cancelled: true };
-					if (terminalStatuses[data.status]) {
-						_refreshTaskDetailActions();
-					}
-				};
+					var _taskDetailTaskEventHandler = function(event) {
+						var data = event.detail || {};
+						// Only react to this task's events
+						var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
+						if (!taskIdMatch || !taskIdMatch[1] || data.task_id !== taskIdMatch[1]) return;
+						if (data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied') {
+							_refreshActiveThreadContent(data.task_id, true);
+							return;
+						}
+						if (data.type === 'task_status_changed') {
+							var activeStatuses = { pending: true, queued: true, running: true };
+							if (activeStatuses[data.status]) {
+								_refreshActiveThreadContent(data.task_id, true);
+							}
+							var terminalStatuses = { completed: true, failed: true, cancelled: true };
+							if (terminalStatuses[data.status]) {
+								_refreshTaskDetailActions();
+							}
+						}
+					};
 
-				var _taskDetailBeforeUnloadHandler = function() {
-					_stopFileChangesSSE();
-				};
+					var _taskDetailLiveConnectedHandler = function() {
+						var taskId = _currentTaskIdFromPath();
+						if (taskId) _refreshActiveThreadContent(taskId, true);
+					};
+
+					var _taskDetailBeforeUnloadHandler = function() {
+						_stopFileChangesSSE();
+					};
 
 				var _taskDetailBeforeSwapHandler = function(evt) {
 					var target = evt.detail && evt.detail.target;
 					if (!target) return;
-					if (target.id === 'main-content' || target.id === 'task-detail-content') {
-						_stopFileChangesSSE();
-						window.removeEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);
-						window.removeEventListener('sse-task-event', _taskDetailTaskEventHandler);
-					}
+						if (target.id === 'main-content' || target.id === 'task-detail-content') {
+							_stopFileChangesSSE();
+							window.removeEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);
+							window.removeEventListener('sse-task-event', _taskDetailTaskEventHandler);
+							window.removeEventListener('sse-live-connected', _taskDetailLiveConnectedHandler);
+						}
 				};
 
 				// Block event-triggered changes refreshes while Changes tab is not active.
@@ -1448,21 +1490,23 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 					}
 				};
 
-				window._taskDetailFileChangesHandlers = {
-					beforeUnload: _taskDetailBeforeUnloadHandler,
-					beforeSwap: _taskDetailBeforeSwapHandler,
-					beforeRequest: _taskDetailBeforeRequestHandler,
-					afterSettle: _taskDetailAfterSettleHandler,
-					fileChangeEvent: _taskDetailFileChangeEventHandler,
-					taskEvent: _taskDetailTaskEventHandler
-				};
+					window._taskDetailFileChangesHandlers = {
+						beforeUnload: _taskDetailBeforeUnloadHandler,
+						beforeSwap: _taskDetailBeforeSwapHandler,
+						beforeRequest: _taskDetailBeforeRequestHandler,
+						afterSettle: _taskDetailAfterSettleHandler,
+						fileChangeEvent: _taskDetailFileChangeEventHandler,
+						taskEvent: _taskDetailTaskEventHandler,
+						liveConnected: _taskDetailLiveConnectedHandler
+					};
 
-				window.addEventListener('beforeunload', _taskDetailBeforeUnloadHandler);
-				document.body.addEventListener('htmx:beforeSwap', _taskDetailBeforeSwapHandler);
-				document.body.addEventListener('htmx:beforeRequest', _taskDetailBeforeRequestHandler);
-				document.addEventListener('htmx:afterSettle', _taskDetailAfterSettleHandler);
-				window.addEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);
-				window.addEventListener('sse-task-event', _taskDetailTaskEventHandler);
+					window.addEventListener('beforeunload', _taskDetailBeforeUnloadHandler);
+					document.body.addEventListener('htmx:beforeSwap', _taskDetailBeforeSwapHandler);
+					document.body.addEventListener('htmx:beforeRequest', _taskDetailBeforeRequestHandler);
+					document.addEventListener('htmx:afterSettle', _taskDetailAfterSettleHandler);
+					window.addEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);
+					window.addEventListener('sse-task-event', _taskDetailTaskEventHandler);
+					window.addEventListener('sse-live-connected', _taskDetailLiveConnectedHandler);
 
 			function copyToClipboard(elementId, button) {
 				var element = document.getElementById(elementId);
@@ -1563,7 +1607,7 @@ templ TaskDetailActions(task *models.Task) {
 				class="btn btn-primary btn-sm"
 				hx-post={ fmt.Sprintf("/tasks/%s/run", task.ID) }
 				hx-swap="none"
-				hx-on::after-request={ templ.ComponentScript{Call: fmt.Sprintf("if(event.detail.successful) { htmx.ajax('GET', '/tasks/%s?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'}); }", task.ID)} }
+				hx-on::after-request={ templ.ComponentScript{Call: fmt.Sprintf("if(event.detail.successful) { window._openTaskThreadAfterRun && window._openTaskThreadAfterRun('%s'); }", task.ID)} }
 			>
 				Run Now
 			</button>
