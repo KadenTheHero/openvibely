@@ -15,6 +15,8 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+const lifecycleHookExecutionTimeout = 10 * time.Minute
+
 // LifecycleTurn is the result of preparing a model turn for lifecycle hooks.
 // It carries the prepared context (with runtime tools and prompt context
 // attached) and an AfterComplete closure the caller must invoke once the
@@ -285,7 +287,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 					applog.Infof("[lifecycle-turn] after_complete panic for task=%s: %v", t.ID, rec)
 				}
 			}()
-			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			bgCtx, cancel := context.WithTimeout(context.Background(), lifecycleHookExecutionTimeout)
 			defer cancel()
 			bgCtx = withLifecycleTurnContext(bgCtx, turn)
 			if rt != nil {

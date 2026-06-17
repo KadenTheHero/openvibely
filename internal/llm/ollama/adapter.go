@@ -28,8 +28,10 @@ type HTTPDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
+const defaultOllamaRequestTimeout = 10 * time.Minute
+
 // DefaultHTTPClient is the default HTTP client for Ollama requests.
-var DefaultHTTPClient HTTPDoer = &http.Client{Timeout: 5 * time.Minute}
+var DefaultHTTPClient HTTPDoer = &http.Client{Timeout: defaultOllamaRequestTimeout}
 
 // Adapter encapsulates Ollama provider logic.
 type Adapter struct {

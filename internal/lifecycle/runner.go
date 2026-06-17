@@ -49,6 +49,8 @@ type HookOutput struct {
 	ExecutionID string `json:"execution_id,omitempty"`
 }
 
+const lifecycleExecutionFinalStatusTimeout = 10 * time.Second
+
 // HookInvoker runs one agent skill and returns its raw output for validation.
 // Implementations typically dispatch to an LLM (for system agents) or to a
 // pre-registered Go executor (for tests and built-in skills).
@@ -388,7 +390,9 @@ func (r *Runner) finishHook(ctx context.Context, exec *models.LifecycleExecution
 		"duration_ms":  duration.Milliseconds(),
 		"completed_at": now,
 	})
-	if err := r.store.UpdateExecution(ctx, exec); err != nil {
+	updateCtx, cancel := context.WithTimeout(context.Background(), lifecycleExecutionFinalStatusTimeout)
+	defer cancel()
+	if err := r.store.UpdateExecution(updateCtx, exec); err != nil {
 		r.logger.Printf("[lifecycle] update execution failed task=%s when=%s hook=%s exec=%s: %v", exec.TaskID, hook.When, hook.ID, exec.ID, err)
 	}
 	if hookErr != nil {
@@ -538,7 +542,9 @@ func (r *Runner) RunTaskMode(ctx context.Context, runner TaskModeRunner, in Task
 		now := time.Now().UTC()
 		exec.CompletedAt = &now
 		exec.Status = models.LifecycleExecSkipped
-		if err := r.store.UpdateExecution(ctx, &exec); err != nil {
+		updateCtx, cancel := context.WithTimeout(context.Background(), lifecycleExecutionFinalStatusTimeout)
+		defer cancel()
+		if err := r.store.UpdateExecution(updateCtx, &exec); err != nil {
 			r.logger.Printf("[lifecycle] update task_mode execution failed: %v", err)
 		}
 		return TaskModeResult{}, nil
@@ -553,7 +559,9 @@ func (r *Runner) RunTaskMode(ctx context.Context, runner TaskModeRunner, in Task
 		exec.Status = models.LifecycleExecCompleted
 		exec.OutputJSON = result.OutputJSON
 	}
-	if err := r.store.UpdateExecution(ctx, &exec); err != nil {
+	updateCtx, cancel := context.WithTimeout(context.Background(), lifecycleExecutionFinalStatusTimeout)
+	defer cancel()
+	if err := r.store.UpdateExecution(updateCtx, &exec); err != nil {
 		r.logger.Printf("[lifecycle] update task_mode execution failed: %v", err)
 	}
 	return result, err

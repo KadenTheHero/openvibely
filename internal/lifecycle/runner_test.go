@@ -46,6 +46,9 @@ func (m *memStore) CreateExecution(ctx context.Context, e *models.LifecycleExecu
 }
 
 func (m *memStore) UpdateExecution(ctx context.Context, e *models.LifecycleExecution) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i := range m.executions {
@@ -278,6 +281,40 @@ func TestRunSlot_InvokerErrorRecordedAsFailedExecution(t *testing.T) {
 	}
 }
 
+func TestRunSlot_CancelledHookContextStillPersistsTerminalExecution(t *testing.T) {
+	store := &memStore{
+		hooks: []models.AgentLifecycleHook{
+			{ID: "timeout-hook", AgentID: "a", When: models.LifecycleAfterComplete, SkillKey: "x", Enabled: true},
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	inv := &fakeInvokerFunc{fn: func(ctx context.Context, _ models.AgentLifecycleHook, _ HookInput) (json.RawMessage, error) {
+		cancel()
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+	runner := NewRunner(store, inv, nil)
+	defer cancel()
+
+	res, err := runner.RunSlot(ctx, models.LifecycleAfterComplete, HookInput{TaskID: "t", TaskRunID: "r"})
+	if err != nil {
+		t.Fatalf("RunSlot err: %v", err)
+	}
+	if len(res.Outputs) != 1 || res.Outputs[0].Error == "" {
+		t.Fatalf("expected cancelled hook error in output, got %+v", res.Outputs)
+	}
+	exec, ok := store.recordedFor("timeout-hook")
+	if !ok {
+		t.Fatalf("expected execution recorded")
+	}
+	if exec.Status != models.LifecycleExecFailed {
+		t.Fatalf("expected terminal failed status despite cancelled hook context, got %s", exec.Status)
+	}
+	if exec.CompletedAt == nil {
+		t.Fatalf("expected completed_at to be persisted")
+	}
+}
+
 func TestRunSlot_IdempotentRetryReturnsRecordedOutput(t *testing.T) {
 	store := &memStore{
 		hooks: []models.AgentLifecycleHook{
@@ -400,6 +437,14 @@ func (f *fakeTaskMode) RunTaskMode(ctx context.Context, in TaskModeInput) (TaskM
 	return f.res, nil
 }
 
+type fakeTaskModeFunc struct {
+	fn func(context.Context, TaskModeInput) (TaskModeResult, error)
+}
+
+func (f fakeTaskModeFunc) RunTaskMode(ctx context.Context, in TaskModeInput) (TaskModeResult, error) {
+	return f.fn(ctx, in)
+}
+
 func TestRunTaskMode_RecordsExecutionRow(t *testing.T) {
 	store := &memStore{}
 	runner := NewRunner(store, nil, nil)
@@ -420,6 +465,35 @@ func TestRunTaskMode_RecordsExecutionRow(t *testing.T) {
 	e := store.executions[0]
 	if e.When != models.LifecycleTaskMode || e.Status != models.LifecycleExecCompleted || e.AgentID != "a-1" {
 		t.Fatalf("unexpected execution row: %+v", e)
+	}
+}
+
+func TestRunTaskMode_CancelledContextStillPersistsTerminalExecution(t *testing.T) {
+	store := &memStore{}
+	runner := NewRunner(store, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tm := fakeTaskModeFunc{fn: func(context.Context, TaskModeInput) (TaskModeResult, error) {
+		cancel()
+		return TaskModeResult{OutputJSON: `{"ok":true}`}, nil
+	}}
+
+	_, err := runner.RunTaskMode(ctx, tm, TaskModeInput{
+		TaskID: "t", TaskRunID: "r",
+		EffectiveMode: EffectiveMode{AgentID: "a-1", AgentKey: "backend"},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(store.executions) != 1 {
+		t.Fatalf("expected 1 execution recorded, got %d", len(store.executions))
+	}
+	exec := store.executions[0]
+	if exec.Status != models.LifecycleExecCompleted {
+		t.Fatalf("expected terminal completed status despite cancelled task-mode context, got %s", exec.Status)
+	}
+	if exec.CompletedAt == nil {
+		t.Fatalf("expected completed_at to be persisted")
 	}
 }
 

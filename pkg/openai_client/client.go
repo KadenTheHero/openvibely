@@ -27,6 +27,8 @@ const (
 	// DefaultModel is the fallback model when no model is provided.
 	DefaultModel = "gpt-5.5"
 
+	defaultModelRequestTimeout = 10 * time.Minute
+
 	openAIOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 	// ChatGPT Codex backend requires this query parameter.
 	openAIOAuthClientVersion = "0.0.0"
@@ -48,7 +50,7 @@ var OpenAIChatGPTAPIBaseURL = "https://chatgpt.com/backend-api/codex/"
 var OpenAIOAuthTokenURL = "https://auth.openai.com/oauth/token"
 
 var defaultHTTPClient = &http.Client{
-	Timeout: 5 * time.Minute,
+	Timeout: defaultModelRequestTimeout,
 	Transport: &loggingRoundTripper{
 		base: &http.Transport{
 			MaxIdleConns:        100,

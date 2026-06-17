@@ -37,9 +37,11 @@ type OllamaModelDetails struct {
 	QuantizationLevel string   `json:"quantization_level"`
 }
 
+const defaultOllamaRequestTimeout = 10 * time.Minute
+
 // OllamaHTTPClient is an interface for making HTTP requests to Ollama.
 // Can be overridden in tests.
-var OllamaHTTPClient HTTPDoer = &http.Client{Timeout: 5 * time.Minute}
+var OllamaHTTPClient HTTPDoer = &http.Client{Timeout: defaultOllamaRequestTimeout}
 
 // HTTPDoer is an interface for making HTTP requests.
 type HTTPDoer interface {

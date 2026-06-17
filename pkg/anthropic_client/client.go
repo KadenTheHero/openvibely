@@ -41,6 +41,8 @@ const (
 	OAuthBetaHeader     = "oauth-2025-04-20"
 	DefaultModel        = "claude-sonnet-4-20250514"
 
+	defaultModelRequestTimeout = 10 * time.Minute
+
 	oauthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 	oauthScope    = "user:profile user:inference user:sessions:claude_code user:mcp_servers"
 	tokenFileName = ".claude-max-client.json"
@@ -49,7 +51,7 @@ const (
 // defaultHTTPClient is a shared HTTP client with connection pooling.
 // Reusing a single client avoids repeated TCP/TLS handshakes across API calls.
 var defaultHTTPClient = &http.Client{
-	Timeout: 5 * time.Minute,
+	Timeout: defaultModelRequestTimeout,
 	Transport: &http.Transport{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 100,
