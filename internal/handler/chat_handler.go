@@ -376,6 +376,26 @@ func (h *Handler) ChatSteer(c echo.Context) error {
 	return render(c, http.StatusOK, components.ChatSteeringInputRow(input.ID, message))
 }
 
+// ChatPendingInputs returns the current pending-inputs composer fragment for the project.
+// Called by the chat page on SSE reconnect to reconcile any steering/queued rows missed
+// while the tab was hidden. The server-side query excludes prepared/in-flight steering rows
+// (expected_turn_id=NULL) so a stale "Steering pending" row is cleanly replaced.
+func (h *Handler) ChatPendingInputs(c echo.Context) error {
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil || projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id required")
+	}
+	pendingInputs := []models.ThreadInput{}
+	if h.threadInputRepo != nil {
+		if inputs, inputErr := h.threadInputRepo.ListPendingForChat(c.Request().Context(), projectID); inputErr == nil {
+			pendingInputs = inputs
+		}
+	}
+	return render(c, http.StatusOK, components.ChatComposerQueuedInputRows(pendingInputs, func(input models.ThreadInput) string {
+		return "/chat/queued/" + input.ID + "/steer"
+	}))
+}
+
 // isImageFile checks if a filename has a common image extension supported by Anthropic's API
 func isImageFile(filename string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))

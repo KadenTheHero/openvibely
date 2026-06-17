@@ -3549,7 +3549,9 @@ func TestHandler_Chat_ReconnectRefreshSkipsWhileActiveStream(t *testing.T) {
 
 	onConnectIdx := strings.Index(body, "var handleSharedLiveConnected = function(event) {")
 	require.NotEqual(t, -1, onConnectIdx, "visibility reconnect handler must exist")
-	onConnectBody := body[onConnectIdx : onConnectIdx+1400]
+	// Use a wide window: the reconnect handler includes pending-inputs refresh branches
+	// for both the active-stream and rendered-history paths in addition to the full refresh.
+	onConnectBody := body[onConnectIdx : onConnectIdx+2400]
 
 	assert.Contains(t, onConnectBody, "window._chatStreamInProgress && hasActiveChatStream()",
 		"reconnect handler must detect active stream before triggering refresh")
@@ -3559,6 +3561,8 @@ func TestHandler_Chat_ReconnectRefreshSkipsWhileActiveStream(t *testing.T) {
 		"reconnect handler must skip destructive chat root refresh when history is already rendered")
 	assert.Contains(t, onConnectBody, "return;",
 		"reconnect handler should early-return when active stream or rendered history is present")
+	assert.Contains(t, onConnectBody, "/chat/pending-inputs",
+		"reconnect handler must refresh pending-inputs to reconcile stale steering rows")
 
 	ajaxIdx := strings.Index(onConnectBody, "htmx.ajax('GET', '/chat?project_id=")
 	historyIdx := strings.Index(onConnectBody, "if (hasRenderedHistory)")

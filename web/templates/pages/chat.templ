@@ -1041,18 +1041,30 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						if (!chatContainer) return;
 						// Reconnection after tab was hidden — refresh chat to catch missed events,
 						// but avoid replacing an actively streaming bubble with stale partial state.
+						var pid = chatContainer.getAttribute('data-project-id');
 						if (window._chatStreamInProgress && hasActiveChatStream()) {
 							setTimeout(function() {
 								if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 							}, 0);
+							// Still reconcile pending inputs even when streaming is active —
+							// a steering row may have been consumed while the tab was hidden.
+							if (pid && document.getElementById('pending-thread-inputs')) {
+								htmx.ajax('GET', '/chat/pending-inputs?project_id=' + encodeURIComponent(pid), {target: '#pending-thread-inputs', swap: 'outerHTML'});
+							}
 							return;
 						}
 						var hasRenderedHistory = !!document.querySelector('#chat-messages .chat-bubble-user-msg, #chat-messages .chat-bubble-assistant-msg');
 						if (hasRenderedHistory) {
 							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+							// Refresh the pending-inputs container so any steering rows missed while
+							// the tab was hidden are reconciled. The server query excludes
+							// prepared/in-flight steering (expected_turn_id=NULL), so a stale
+							// "Steering pending" row will be correctly cleared.
+							if (pid && document.getElementById('pending-thread-inputs')) {
+								htmx.ajax('GET', '/chat/pending-inputs?project_id=' + encodeURIComponent(pid), {target: '#pending-thread-inputs', swap: 'outerHTML'});
+							}
 							return;
 						}
-						var pid = chatContainer.getAttribute('data-project-id');
 						if (pid) {
 							htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: chatContainer, swap: 'outerHTML'});
 						}

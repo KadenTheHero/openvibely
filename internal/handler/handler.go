@@ -432,6 +432,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/tasks/:taskId/thread/executions/:execId/fragment", h.GetTaskThreadExecutionFragment)
 	e.POST("/tasks/:taskId/thread", h.TaskThreadSend)
 	e.POST("/tasks/:taskId/thread/steer", h.TaskThreadSteer)
+	e.GET("/tasks/:taskId/thread/pending-inputs", h.TaskThreadPendingInputs)
 	e.POST("/thread-inputs/:inputId/cancel", h.CancelThreadInput)
 	e.POST("/tasks/:taskId/thread/queued/:inputId/steer", h.TaskThreadQueuedInputSteer)
 	e.GET("/tasks/:taskId/goal", h.GetTaskGoal)
@@ -602,6 +603,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/chat", h.Chat)
 	e.POST("/chat/send", h.ChatSend)
 	e.POST("/chat/steer", h.ChatSteer)
+	e.GET("/chat/pending-inputs", h.ChatPendingInputs)
 	e.POST("/chat/queued/:inputId/steer", h.ChatQueuedInputSteer)
 
 	// API endpoints (for Chrome extension)

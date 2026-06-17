@@ -2028,6 +2028,26 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 	return render(c, http.StatusOK, components.TaskThreadView(task, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit))
 }
 
+// TaskThreadPendingInputs returns the current pending-inputs composer fragment for a task.
+// Called by the task thread page on SSE reconnect to reconcile any steering/queued rows
+// missed while the tab was hidden. The server-side query excludes prepared/in-flight steering
+// rows (expected_turn_id=NULL) so a stale "Steering pending" row is cleanly replaced.
+func (h *Handler) TaskThreadPendingInputs(c echo.Context) error {
+	taskID := c.Param("taskId")
+	if taskID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "task id required")
+	}
+	pendingInputs := []models.ThreadInput{}
+	if h.threadInputRepo != nil {
+		if inputs, inputErr := h.threadInputRepo.ListPendingForTask(c.Request().Context(), taskID); inputErr == nil {
+			pendingInputs = inputs
+		}
+	}
+	return render(c, http.StatusOK, components.ChatComposerQueuedInputRows(pendingInputs, func(input models.ThreadInput) string {
+		return fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, input.ID)
+	}))
+}
+
 func (h *Handler) loadTaskThreadExecutionWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
 	queryLimit := limit + 1
 	var rows []models.Execution

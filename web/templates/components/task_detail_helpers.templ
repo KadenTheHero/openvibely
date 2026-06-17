@@ -820,11 +820,33 @@ templ TaskThreadLiveEventsScript(taskID string) {
 				};
 				window._taskThreadLiveHandlers[taskId] = handler;
 				window.addEventListener('sse-task-event', handler);
+
+				// On SSE reconnect (e.g. after tab blur/refocus), refresh the pending-inputs
+				// container so any steering rows missed while the tab was hidden are reconciled.
+				// The server query excludes prepared/in-flight steering (expected_turn_id=NULL),
+				// so stale "Steering pending" rows are cleanly replaced with current state.
+				var reconnectHandler = function(event) {
+					var detail = event.detail || {};
+					if (!detail.reconnected) return;
+					var pendingContainer = document.getElementById('pending-thread-inputs');
+					if (pendingContainer && typeof htmx !== 'undefined') {
+						htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: '#pending-thread-inputs', swap: 'outerHTML'});
+					}
+				};
+				window._taskThreadReconnectHandlers = window._taskThreadReconnectHandlers || {};
+				if (window._taskThreadReconnectHandlers[taskId]) {
+					window.removeEventListener('sse-live-connected', window._taskThreadReconnectHandlers[taskId]);
+				}
+				window._taskThreadReconnectHandlers[taskId] = reconnectHandler;
+				window.addEventListener('sse-live-connected', reconnectHandler);
+
 				document.body.addEventListener('htmx:beforeSwap', function(event) {
 					var target = event.detail && event.detail.target;
 					if (target && target.id === 'main-content') {
 						window.removeEventListener('sse-task-event', handler);
 						delete window._taskThreadLiveHandlers[taskId];
+						window.removeEventListener('sse-live-connected', reconnectHandler);
+						delete window._taskThreadReconnectHandlers[taskId];
 					}
 				}, { once: true });
 			})();
