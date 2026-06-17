@@ -56,17 +56,27 @@ func slugify(s string) string {
 
 // IsGitRepo checks if the given directory is inside a git repository.
 func IsGitRepo(dir string) bool {
+	return IsGitRepoContext(context.Background(), dir)
+}
+
+// IsGitRepoContext checks if the given directory is inside a git repository.
+func IsGitRepoContext(ctx context.Context, dir string) bool {
 	if dir == "" {
 		return false
 	}
-	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--is-inside-work-tree")
 	cmd.Dir = dir
 	return cmd.Run() == nil
 }
 
 // GetDefaultBranch returns the name of the default branch (main or master).
 func GetDefaultBranch(repoDir string) string {
-	cmd := exec.Command("git", "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
+	return GetDefaultBranchContext(context.Background(), repoDir)
+}
+
+// GetDefaultBranchContext returns the name of the default branch (main or master).
+func GetDefaultBranchContext(ctx context.Context, repoDir string) string {
+	cmd := exec.CommandContext(ctx, "git", "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err == nil {
@@ -80,7 +90,7 @@ func GetDefaultBranch(repoDir string) string {
 	}
 	// Fallback: check if main or master branch exists
 	for _, name := range []string{"main", "master"} {
-		checkCmd := exec.Command("git", "rev-parse", "--verify", name)
+		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", name)
 		checkCmd.Dir = repoDir
 		if checkCmd.Run() == nil {
 			return name
@@ -1057,34 +1067,46 @@ func (ws *WorktreeService) CleanupWorktree(ctx context.Context, task *models.Tas
 	if task.WorktreePath == "" {
 		return nil
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	// Check for uncommitted changes
-	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
 	statusCmd.Dir = task.WorktreePath
 	out, err := statusCmd.Output()
 	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
 		return fmt.Errorf("worktree has uncommitted changes; commit or discard them first")
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	// Remove worktree
-	removeCmd := exec.Command("git", "worktree", "remove", task.WorktreePath, "--force")
+	removeCmd := exec.CommandContext(ctx, "git", "worktree", "remove", task.WorktreePath, "--force")
 	removeCmd.Dir = repoDir
 	if out, err := removeCmd.CombinedOutput(); err != nil {
 		applog.Infof("[worktree] error removing worktree: %s", string(out))
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		// Try manual removal as fallback
 		os.RemoveAll(task.WorktreePath)
 		// Prune worktree list
-		pruneCmd := exec.Command("git", "worktree", "prune")
+		pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune")
 		pruneCmd.Dir = repoDir
 		pruneCmd.Run()
 	}
+
+	finalizeCtx, finalizeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer finalizeCancel()
 
 	// Delete branch if requested, but guard against active descendants
 	if deleteBranch && task.WorktreeBranch != "" {
 		// Check if any descendants depend on this branch (non-terminal children)
 		hasActiveDesc := false
 		if ws.taskRepo != nil {
-			active, descErr := ws.taskRepo.HasNonTerminalDescendants(ctx, task.ID)
+			active, descErr := ws.taskRepo.HasNonTerminalDescendants(finalizeCtx, task.ID)
 			if descErr != nil {
 				applog.Infof("[worktree] error checking descendants for task %s: %v", task.ID, descErr)
 			} else {
@@ -1094,7 +1116,7 @@ func (ws *WorktreeService) CleanupWorktree(ctx context.Context, task *models.Tas
 		if hasActiveDesc {
 			applog.Infof("[worktree] skipping branch deletion for task %s branch %s: has active descendants", task.ID, task.WorktreeBranch)
 		} else {
-			deleteCmd := exec.Command("git", "branch", "-D", task.WorktreeBranch)
+			deleteCmd := exec.CommandContext(finalizeCtx, "git", "branch", "-D", task.WorktreeBranch)
 			deleteCmd.Dir = repoDir
 			if out, err := deleteCmd.CombinedOutput(); err != nil {
 				applog.Infof("[worktree] error deleting branch %s: %s", task.WorktreeBranch, string(out))
@@ -1103,7 +1125,7 @@ func (ws *WorktreeService) CleanupWorktree(ctx context.Context, task *models.Tas
 	}
 
 	// Clear worktree info from task
-	if err := ws.taskRepo.ClearWorktreeInfo(ctx, task.ID); err != nil {
+	if err := ws.taskRepo.ClearWorktreeInfo(finalizeCtx, task.ID); err != nil {
 		applog.Infof("[worktree] error clearing worktree info: %v", err)
 	}
 
@@ -1380,23 +1402,33 @@ func (ws *WorktreeService) GetCleanupPolicy(ctx context.Context) string {
 // that need to distinguish "branch is provably merged in git right now" from
 // "branch is missing" should use IsBranchTipMergedInto instead.
 func IsBranchMerged(repoDir string, branchName string, targetBranch string) bool {
+	return IsBranchMergedContext(context.Background(), repoDir, branchName, targetBranch)
+}
+
+func IsBranchMergedContext(ctx context.Context, repoDir string, branchName string, targetBranch string) bool {
 	if branchName == "" || targetBranch == "" {
 		return false
 	}
 
 	// Check if branch exists
-	checkCmd := exec.Command("git", "rev-parse", "--verify", branchName)
+	checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", branchName)
 	checkCmd.Dir = repoDir
 	if err := checkCmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return false
+		}
 		// Branch doesn't exist (might have been manually deleted)
 		return true
 	}
 
 	// Use git merge-base --is-ancestor to check if branch is merged
 	// This checks if the branch tip is reachable from target branch
-	cmd := exec.Command("git", "merge-base", "--is-ancestor", branchName, targetBranch)
+	cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", branchName, targetBranch)
 	cmd.Dir = repoDir
 	err := cmd.Run()
+	if ctx.Err() != nil {
+		return false
+	}
 
 	// Exit code 0 means ancestor (merged), non-zero means not merged
 	return err == nil
@@ -1504,6 +1536,9 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 // whose branches have been merged to their target branches.
 // Called periodically by the scheduler to detect manual merges.
 func (ws *WorktreeService) CleanupMergedWorktrees(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Get cleanup policy
 	policy := ws.GetCleanupPolicy(ctx)
 	if policy != "after_merge" {
@@ -1525,6 +1560,9 @@ func (ws *WorktreeService) CleanupMergedWorktrees(ctx context.Context) error {
 
 	cleanedCount := 0
 	for _, task := range tasks {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		// Skip tasks that are currently running or pending — their worktrees are in use
 		if task.Status == models.StatusRunning || task.Status == models.StatusPending || task.Status == models.StatusQueued {
 			continue
@@ -1538,7 +1576,7 @@ func (ws *WorktreeService) CleanupMergedWorktrees(ctx context.Context) error {
 		}
 
 		repoDir := project.RepoPath
-		if repoDir == "" || !IsGitRepo(repoDir) {
+		if repoDir == "" || !IsGitRepoContext(ctx, repoDir) {
 			applog.Infof("[worktree] cleanup: skipping task %s (not a git repo)", task.ID)
 			continue
 		}
@@ -1548,11 +1586,14 @@ func (ws *WorktreeService) CleanupMergedWorktrees(ctx context.Context) error {
 			targetBranch = ws.getGlobalMergeTarget(ctx)
 		}
 		if targetBranch == "" {
-			targetBranch = GetDefaultBranch(repoDir)
+			targetBranch = GetDefaultBranchContext(ctx, repoDir)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
 		// Check if branch has been merged
-		if IsBranchMerged(repoDir, task.WorktreeBranch, targetBranch) {
+		if IsBranchMergedContext(ctx, repoDir, task.WorktreeBranch, targetBranch) {
 			applog.Infof("[worktree] cleanup: task %s branch %s is merged to %s, cleaning up",
 				task.ID, task.WorktreeBranch, targetBranch)
 
@@ -1575,6 +1616,9 @@ func (ws *WorktreeService) CleanupMergedWorktrees(ctx context.Context) error {
 	}
 
 	// Also cleanup orphaned worktrees (worktrees with no corresponding task)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	orphanedCount, err := ws.CleanupOrphanedWorktrees(ctx)
 	if err != nil {
 		applog.Infof("[worktree] cleanup: failed to cleanup orphaned worktrees: %v", err)
@@ -1589,6 +1633,9 @@ func (ws *WorktreeService) CleanupMergedWorktrees(ctx context.Context) error {
 // This can happen when tasks are deleted but their worktrees weren't cleaned up.
 // Returns the number of orphaned worktrees cleaned up.
 func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	// Get cleanup policy
 	policy := ws.GetCleanupPolicy(ctx)
 	if policy == "keep" {
@@ -1604,12 +1651,15 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 
 	cleanedCount := 0
 	for _, project := range projects {
-		if project.RepoPath == "" || !IsGitRepo(project.RepoPath) {
+		if err := ctx.Err(); err != nil {
+			return cleanedCount, err
+		}
+		if project.RepoPath == "" || !IsGitRepoContext(ctx, project.RepoPath) {
 			continue
 		}
 
 		// List all git worktrees for this repo
-		worktrees, err := ListGitWorktrees(project.RepoPath)
+		worktrees, err := ListGitWorktreesContext(ctx, project.RepoPath)
 		if err != nil {
 			applog.Infof("[worktree] cleanup: failed to list worktrees for project %s: %v", project.ID, err)
 			continue
@@ -1636,6 +1686,9 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 
 		// Check each worktree to see if it's orphaned
 		for _, worktree := range worktrees {
+			if err := ctx.Err(); err != nil {
+				return cleanedCount, err
+			}
 			// Skip the main worktree (the original repo)
 			if worktree.IsMain {
 				continue
@@ -1656,10 +1709,13 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 			applog.Infof("[worktree] cleanup: found orphaned worktree at %s (branch: %s)", worktree.Path, worktree.Branch)
 
 			// Try to remove the worktree using git first
-			cmd := exec.Command("git", "worktree", "remove", "--force", worktree.Path)
+			cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", worktree.Path)
 			cmd.Dir = project.RepoPath
 			if output, err := cmd.CombinedOutput(); err != nil {
 				outputText := string(output)
+				if err := ctx.Err(); err != nil {
+					return cleanedCount, err
+				}
 
 				// A locked worktree may still be actively initializing. Don't perform
 				// manual filesystem deletion in this case; retry on a future cleanup cycle.
@@ -1678,14 +1734,14 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 				}
 
 				// Prune stale worktree entries
-				pruneCmd := exec.Command("git", "worktree", "prune")
+				pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune")
 				pruneCmd.Dir = project.RepoPath
 				_ = pruneCmd.Run() // Ignore errors
 			}
 
 			// Delete the branch if it exists
 			if worktree.Branch != "" {
-				cmd = exec.Command("git", "branch", "-D", worktree.Branch)
+				cmd = exec.CommandContext(ctx, "git", "branch", "-D", worktree.Branch)
 				cmd.Dir = project.RepoPath
 				_ = cmd.Run() // Ignore errors - branch might already be deleted
 			}
@@ -1718,7 +1774,12 @@ type WorktreeInfo struct {
 
 // ListGitWorktrees lists all worktrees for a git repository.
 func ListGitWorktrees(repoDir string) ([]WorktreeInfo, error) {
-	cmd := exec.Command("git", "worktree", "list", "--porcelain")
+	return ListGitWorktreesContext(context.Background(), repoDir)
+}
+
+// ListGitWorktreesContext lists all worktrees for a git repository.
+func ListGitWorktreesContext(ctx context.Context, repoDir string) ([]WorktreeInfo, error) {
+	cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain")
 	cmd.Dir = repoDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {

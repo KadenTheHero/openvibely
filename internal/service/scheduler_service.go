@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -27,6 +28,7 @@ type SchedulerService struct {
 	worktreeSvc   *WorktreeService
 	interval      time.Duration
 	cancel        context.CancelFunc
+	wg            sync.WaitGroup
 	lastCleanupAt time.Time
 }
 
@@ -48,7 +50,11 @@ func (s *SchedulerService) Start(ctx context.Context) {
 	schedulerCtx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
 
-	go s.run(schedulerCtx)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.run(schedulerCtx)
+	}()
 	applog.Infof("[scheduler] started, checking every %s", s.interval)
 }
 
@@ -56,6 +62,7 @@ func (s *SchedulerService) Stop() {
 	if s.cancel != nil {
 		s.cancel()
 	}
+	s.wg.Wait()
 	applog.Infof("[scheduler] stopped")
 }
 

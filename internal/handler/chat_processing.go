@@ -121,6 +121,46 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		waitCtx, waitCancel = context.WithCancel(context.Background())
 		h.registerTaskCancellation(params.TaskID, waitCancel)
 	}
+	cleanupWaitCancellation := func() {
+		if waitCancel != nil {
+			h.deregisterTaskCancellation(params.TaskID)
+			waitCancel()
+			waitCancel = nil
+		}
+	}
+	cancelWaitOnly := func() {
+		if waitCancel != nil {
+			waitCancel()
+			waitCancel = nil
+		}
+	}
+	var ctx context.Context
+	var cancel context.CancelFunc
+	runtimeCancelRegistered := false
+	startRuntimeCancellation := func() {
+		if ctx != nil {
+			return
+		}
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+		h.registerTaskCancellation(params.TaskID, cancel)
+		runtimeCancelRegistered = true
+		cancelWaitOnly()
+	}
+	cleanupRuntimeCancellation := func() {
+		if runtimeCancelRegistered {
+			h.deregisterTaskCancellation(params.TaskID)
+			runtimeCancelRegistered = false
+		}
+		if cancel != nil {
+			cancel()
+			cancel = nil
+		}
+	}
+	completeCancelledBeforeModel := func() {
+		cleanupRuntimeCancellation()
+		h.completeWithCancellation(params.ExecID, params.TaskID, "", 0, 0, 0, params.ChannelReply)
+		h.finalizeStreamingTurn(params, "")
+	}
 
 	// Enforce per-project and per-model worker constraints for task follow-ups only.
 	// Interactive chat (IsTaskFollowup=false) bypasses worker limits so the chat
@@ -140,6 +180,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		if err := h.workerSvc.AcquireProjectSlot(waitCtx, params.ProjectID); err != nil {
 			applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled waiting for project slot %s: %v",
 				params.ExecID, params.TaskID, params.ProjectID, err)
+			cleanupWaitCancellation()
 			h.completeWithCancellation(params.ExecID, params.TaskID, "", 0, 0, 0, params.ChannelReply)
 			h.finalizeStreamingTurn(params, "")
 			return
@@ -150,31 +191,43 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		if err := h.workerSvc.AcquireModelSlot(waitCtx, agentConfigID); err != nil {
 			applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled waiting for model slot for %s: %v",
 				params.ExecID, params.TaskID, agentConfigID, err)
+			cleanupWaitCancellation()
 			h.completeWithCancellation(params.ExecID, params.TaskID, "", 0, 0, 0, params.ChannelReply)
 			h.finalizeStreamingTurn(params, "")
 			return
 		}
 		defer h.workerSvc.ReleaseModelSlot(agentConfigID)
 		applog.Infof("[handler] processStreamingResponse exec=%s acquired project + model slots for %s", params.ExecID, agentConfigID)
+		startRuntimeCancellation()
 
 		// Transition task from "queued" to "running" now that worker slots are acquired
-		if task, err := h.taskRepo.GetByID(context.Background(), params.TaskID); err == nil && task != nil && task.Status == models.StatusQueued {
-			applog.Infof("[handler] processStreamingResponse exec=%s task=%s transitioning from queued to running", params.ExecID, params.TaskID)
-			if err := h.taskRepo.UpdateStatus(context.Background(), params.TaskID, models.StatusRunning); err != nil {
-				applog.Infof("[handler] processStreamingResponse exec=%s task=%s failed to update status to running: %v", params.ExecID, params.TaskID, err)
+		if task, err := h.taskRepo.GetByID(ctx, params.TaskID); err == nil && task != nil {
+			if task.Status == models.StatusCancelled {
+				applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled while waiting for worker slots", params.ExecID, params.TaskID)
+				completeCancelledBeforeModel()
+				return
 			}
+			if task.Status == models.StatusQueued {
+				applog.Infof("[handler] processStreamingResponse exec=%s task=%s transitioning from queued to running", params.ExecID, params.TaskID)
+				if err := h.taskRepo.UpdateStatus(ctx, params.TaskID, models.StatusRunning); err != nil {
+					applog.Infof("[handler] processStreamingResponse exec=%s task=%s failed to update status to running: %v", params.ExecID, params.TaskID, err)
+				}
+			}
+		}
+		if ctx.Err() != nil {
+			applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled before model preparation: %v", params.ExecID, params.TaskID, ctx.Err())
+			completeCancelledBeforeModel()
+			return
 		}
 	}
 
-	if waitCancel != nil {
-		h.deregisterTaskCancellation(params.TaskID)
-		waitCancel()
+	startRuntimeCancellation()
+	defer cleanupRuntimeCancellation()
+	if ctx.Err() != nil {
+		applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled before model preparation: %v", params.ExecID, params.TaskID, ctx.Err())
+		completeCancelledBeforeModel()
+		return
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	h.registerTaskCancellation(params.TaskID, cancel)
-	defer h.deregisterTaskCancellation(params.TaskID)
 	if params.IsTaskFollowup {
 		h.resumeUserStoppedGoalForManualStart(ctx, params.TaskID, params.InputOrigin, params.InputOriginAgent)
 		h.reactivateAchievedGoalForManualFollowup(ctx, params.TaskID, params.InputOrigin, params.InputOriginAgent)
