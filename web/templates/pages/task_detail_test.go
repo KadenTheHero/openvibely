@@ -374,7 +374,7 @@ func TestTaskDetailContent_ThreadTabLazyLoadsOnDemand(t *testing.T) {
 	if strings.Contains(output, "id=\"task-thread-view\"") {
 		t.Fatal("did not expect eager thread view render for inactive thread tab")
 	}
-	if !strings.Contains(output, "function _loadThreadContent(taskId, forceReload) {") {
+	if !strings.Contains(output, "function _loadThreadContent(taskId, forceReload, expectedExecId) {") {
 		t.Fatal("expected on-demand thread loader helper")
 	}
 	if !strings.Contains(output, "htmx.ajax('GET', '/tasks/' + taskId + '/thread'") {
@@ -510,15 +510,20 @@ func TestTaskDetailContent_ThreadReloadsForCurrentTaskLiveRunEvents(t *testing.T
 	output := buf.String()
 
 	required := []string{
-		"function _loadThreadContent(taskId, forceReload) {",
-		"if (!forceReload && threadContent.dataset.loaded === 'true') return Promise.resolve(true);",
-		"function _refreshActiveThreadContent(taskId, forceReload) {",
-		"_loadThreadContent(taskId, forceReload).then(function(loaded) {",
+		"function _closeTaskThreadEventSourcesForRefresh() {",
+		"function _loadThreadContent(taskId, forceReload, expectedExecId) {",
+		"if (!forceReload && threadContent.dataset.loaded === 'true' && (!expectedExecId || _threadHasExecution(expectedExecId))) return Promise.resolve(true);",
+		"if (forceReload) _closeTaskThreadEventSourcesForRefresh();",
+		"if (window.htmx && typeof htmx.process === 'function') htmx.process(updated);",
+		"if (expectedExecId && !_threadHasExecution(expectedExecId)) return false;",
+		"function _refreshActiveThreadContent(taskId, forceReload, expectedExecId, attempt) {",
+		"_loadThreadContent(taskId, forceReload, expectedExecId).then(function(loaded) {",
+		"setTimeout(function() { _refreshActiveThreadContent(taskId, true, expectedExecId, attempt + 1); }, 150 * (attempt + 1));",
 		"if (data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied') {",
-		"_refreshActiveThreadContent(data.task_id, true);",
+		"_refreshActiveThreadContent(data.task_id, true, data.exec_id || '', 0);",
 		"if (data.type === 'task_status_changed') {",
 		"var activeStatuses = { pending: true, queued: true, running: true };",
-		"_refreshActiveThreadContent(data.task_id, true);",
+		"_refreshActiveThreadContent(data.task_id, true, data.exec_id || '', 0);",
 		"window.addEventListener('sse-live-connected', _taskDetailLiveConnectedHandler);",
 	}
 	for _, s := range required {

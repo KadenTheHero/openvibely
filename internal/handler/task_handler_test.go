@@ -488,7 +488,7 @@ func TestHandler_TaskThread_LightModeToolCallContrastStyles(t *testing.T) {
 	if !strings.Contains(body, `Thread is loading...`) {
 		t.Fatal("expected lazy thread loading placeholder when chat tab is active")
 	}
-	if !strings.Contains(body, `function _loadThreadContent(taskId, forceReload)`) {
+	if !strings.Contains(body, `function _loadThreadContent(taskId, forceReload, expectedExecId)`) {
 		t.Fatal("expected thread lazy-load helper in task detail response")
 	}
 	if !strings.Contains(body, `--ov-link-color: #7480ff;`) {

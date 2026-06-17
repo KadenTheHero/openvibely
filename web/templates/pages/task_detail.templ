@@ -1107,13 +1107,27 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 						});
 					}
 
-						function _loadThreadContent(taskId, forceReload) {
+						function _closeTaskThreadEventSourcesForRefresh() {
+							if (!window._threadEventSources) return;
+							window._threadEventSources.forEach(function(es) {
+								try { es.close(); } catch(e) {}
+							});
+							window._threadEventSources = [];
+							window._taskThreadStreamingActive = false;
+						}
+
+						function _threadHasExecution(execId) {
+							return !!(execId && document.querySelector('[data-exec-id="' + execId.replace(/"/g, '\\"') + '"]'));
+						}
+
+						function _loadThreadContent(taskId, forceReload, expectedExecId) {
 							var threadContent = document.getElementById('thread-content');
 							if (!threadContent || !taskId) return Promise.resolve(false);
-							if (!forceReload && threadContent.dataset.loaded === 'true') return Promise.resolve(true);
+							if (!forceReload && threadContent.dataset.loaded === 'true' && (!expectedExecId || _threadHasExecution(expectedExecId))) return Promise.resolve(true);
 							if (_threadContentLoading) return Promise.resolve(false);
 							if (typeof htmx === 'undefined') return Promise.resolve(false);
 
+							if (forceReload) _closeTaskThreadEventSourcesForRefresh();
 							_threadContentLoading = true;
 							threadContent.dataset.loading = 'true';
 							return htmx.ajax('GET', '/tasks/' + taskId + '/thread', {
@@ -1124,7 +1138,9 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 								if (updated) {
 									updated.dataset.loaded = 'true';
 									updated.dataset.loading = 'false';
+									if (window.htmx && typeof htmx.process === 'function') htmx.process(updated);
 								}
+								if (expectedExecId && !_threadHasExecution(expectedExecId)) return false;
 								return true;
 							}).catch(function(err) {
 								console.error('Failed to load thread content:', err);
@@ -1136,11 +1152,12 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 							});
 						}
 
-						function _refreshActiveThreadContent(taskId, forceReload) {
+						function _refreshActiveThreadContent(taskId, forceReload, expectedExecId, attempt) {
 							if (!taskId || !_isChatTabActive()) return;
-							_loadThreadContent(taskId, forceReload).then(function(loaded) {
-								if (!loaded && forceReload) {
-									setTimeout(function() { _refreshActiveThreadContent(taskId, true); }, 250);
+							attempt = attempt || 0;
+							_loadThreadContent(taskId, forceReload, expectedExecId).then(function(loaded) {
+								if (!loaded && forceReload && attempt < 8) {
+									setTimeout(function() { _refreshActiveThreadContent(taskId, true, expectedExecId, attempt + 1); }, 150 * (attempt + 1));
 									return;
 								}
 								_restoreThreadScrollOrBottom(taskId, false);
@@ -1156,7 +1173,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 							if (window.location.pathname !== '/tasks/' + taskId || window.location.search !== '?tab=chat') {
 								history.pushState({}, '', nextURL);
 							}
-							_refreshActiveThreadContent(taskId, true);
+							_refreshActiveThreadContent(taskId, true, '', 0);
 						};
 
 					function switchTaskTab(tabName) {
@@ -1417,13 +1434,13 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 						var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
 						if (!taskIdMatch || !taskIdMatch[1] || data.task_id !== taskIdMatch[1]) return;
 						if (data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied') {
-							_refreshActiveThreadContent(data.task_id, true);
+							_refreshActiveThreadContent(data.task_id, true, data.exec_id || '', 0);
 							return;
 						}
 						if (data.type === 'task_status_changed') {
 							var activeStatuses = { pending: true, queued: true, running: true };
 							if (activeStatuses[data.status]) {
-								_refreshActiveThreadContent(data.task_id, true);
+								_refreshActiveThreadContent(data.task_id, true, data.exec_id || '', 0);
 							}
 							var terminalStatuses = { completed: true, failed: true, cancelled: true };
 							if (terminalStatuses[data.status]) {

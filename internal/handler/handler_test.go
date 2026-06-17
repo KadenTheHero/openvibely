@@ -502,7 +502,33 @@ func TestHandler_GetTask_RunningTask(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, `id="thread-content"`)
 	assertContains(t, rec, "Thread is loading...")
-	assertContains(t, rec, "function _loadThreadContent(taskId, forceReload)")
+	assertContains(t, rec, "function _loadThreadContent(taskId, forceReload, expectedExecId)")
+}
+
+func TestHandler_GetTask_ThreadTabAliasActivatesThread(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Thread Alias Project")
+	task := createTask(t, h, project.ID, "Thread Alias Task", func(tk *models.Task) {
+		tk.Priority = 1
+		tk.Status = models.StatusPending
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"?tab=thread", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/tasks/:taskId")
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+
+	if err := h.GetTask(c); err != nil {
+		t.Fatalf("GetTask failed: %v", err)
+	}
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `data-tab="chat"`)
+	assertContains(t, rec, `id="tab-chat"`)
+	assertContains(t, rec, "tab-active")
+	assertContains(t, rec, "Thread is loading...")
 }
 
 func TestHandler_GetTask_CompletedTaskDefaultsToChat(t *testing.T) {

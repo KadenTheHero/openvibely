@@ -443,8 +443,8 @@ func (h *Handler) GetTask(c echo.Context) error {
 			defaultTab = "details"
 		}
 	}
-	// Migrate old "history" tab param to "chat"
-	if defaultTab == "history" {
+	// Migrate old/alternate thread tab params to the internal chat tab key.
+	if defaultTab == "history" || defaultTab == "thread" {
 		defaultTab = "chat"
 	}
 	applog.Infof("[handler] GetTask id=%s defaultTab=%s", taskID, defaultTab)

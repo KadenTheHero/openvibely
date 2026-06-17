@@ -769,12 +769,27 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						pendingContainer.appendChild(queuedRow);
 						if (window.htmx) htmx.process(queuedRow);
 					}
-					var pendingFragmentExecs = {};
-					function ensureStreamingFragment(data, attempt) {
-						attempt = attempt || 0;
-						var messages = document.getElementById('task-thread-messages');
-						if (!messages || !data || data.task_id !== taskId || !data.exec_id) return;
-						if (document.querySelector('[data-exec-id="' + data.exec_id + '"]')) {
+						var pendingFragmentExecs = {};
+						window._pendingTaskThreadLiveEvents = window._pendingTaskThreadLiveEvents || {};
+						function rememberPendingExecutionEvent(data) {
+							if (!data || data.task_id !== taskId || !data.exec_id) return;
+							window._pendingTaskThreadLiveEvents[taskId] = data;
+						}
+						function consumePendingExecutionEvent() {
+							var data = window._pendingTaskThreadLiveEvents && window._pendingTaskThreadLiveEvents[taskId];
+							if (!data) return;
+							delete window._pendingTaskThreadLiveEvents[taskId];
+							ensureStreamingFragment(data);
+						}
+						function ensureStreamingFragment(data, attempt) {
+							attempt = attempt || 0;
+							var messages = document.getElementById('task-thread-messages');
+							if (!data || data.task_id !== taskId || !data.exec_id) return;
+							if (!messages) {
+								rememberPendingExecutionEvent(data);
+								return;
+							}
+							if (document.querySelector('[data-exec-id="' + data.exec_id + '"]')) {
 							delete pendingFragmentExecs[data.exec_id];
 							if (window._initThreadStreaming) window._initThreadStreaming();
 							return;
@@ -824,10 +839,11 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							renderQueuedRow(data);
 						}
 				};
-				window._taskThreadLiveHandlers[taskId] = handler;
-				window.addEventListener('sse-task-event', handler);
+					window._taskThreadLiveHandlers[taskId] = handler;
+					window.addEventListener('sse-task-event', handler);
+					consumePendingExecutionEvent();
 
-				// On SSE reconnect (e.g. after tab blur/refocus), refresh the pending-inputs
+					// On SSE reconnect (e.g. after tab blur/refocus), refresh the pending-inputs
 				// container so any steering rows missed while the tab was hidden are reconciled.
 				// The server query excludes prepared/in-flight steering (expected_turn_id=NULL),
 				// so stale "Steering pending" rows are cleanly replaced with current state.

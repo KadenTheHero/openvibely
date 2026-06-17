@@ -1774,6 +1774,9 @@ func TestTaskThreadView_RunningThreadCanSteerFromPendingRowsOnly(t *testing.T) {
 	if !strings.Contains(content, "pendingFragmentExecs") || !strings.Contains(content, "setTimeout(function() { ensureStreamingFragment(data, attempt + 1); }") {
 		t.Fatal("task-thread UI must retry promoted execution fragment attachment to cover commit/event timing races")
 	}
+	if !strings.Contains(content, "window._pendingTaskThreadLiveEvents = window._pendingTaskThreadLiveEvents || {};") || !strings.Contains(content, "rememberPendingExecutionEvent(data)") || !strings.Contains(content, "consumePendingExecutionEvent();") {
+		t.Fatal("task-thread UI must remember execution-start events that arrive before lazy thread DOM exists")
+	}
 	if !strings.Contains(content, `data-task-id="task-steer-ui"`) || !strings.Contains(content, "getAttribute('data-task-id')") {
 		t.Fatal("task-thread live script must bind to the rendered task id, not a literal templ placeholder")
 	}
