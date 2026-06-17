@@ -2,7 +2,7 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-06-15
+updated: 2026-06-17
 source: consolidation
 source_id: memory_consolidation_2026_06_15
 confidence: high
@@ -49,6 +49,7 @@ Lifecycle facts:
 - Maintenance/system agents are excluded from auto-routing via `selectable_as_primary=false`.
 - Lifecycle visibility renders structured selected-skill and selected-memory route decisions as compact prompt-safe badges/pills; text summaries remain useful for non-route hook rows.
 - Lifecycle output contracts constrain final stored/validated results, not the agent's working notes or tool use.
+- Lifecycle hook and task-mode terminal execution status writes must not use the possibly cancelled operational hook/model context. After hook/model work returns, terminal `lifecycle_executions` updates use a fresh short-timeout finalization context so rows are not left `running` when LLM deadlines or cancellations fire.
 
 Goal and Loop Agent facts:
 - Goal Agent evaluation runs as a protected generic `after_complete` lifecycle evaluator, not a deterministic checkpoint. Its authority comes from protected `system_kind=goal` identity and explicit runtime tool grants.

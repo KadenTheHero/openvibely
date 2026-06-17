@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-06-14
-source: consolidation
-source_id: memory_consolidation_2026_06_14
+updated: 2026-06-17
+source: after_complete
+source_id: 2450470fd473c7e5d14c6095ebfe9a7d
 confidence: high
 title: Provider Architecture
 ---
@@ -38,6 +38,7 @@ Provider/model selection facts:
 - CLI-backed provider support for Anthropic and OpenAI/Codex remains a backend compatibility path, but CLI auth/options should not be exposed in the user-facing Models setup dialog.
 - Fine-grained mid-run steering is supported only where OpenVibely owns the provider/tool loop, including OpenAI Responses agentic and Anthropic API/OAuth agentic paths. CLI/fallback transports such as Anthropic CLI, Codex CLI, Ollama, and OpenAI fallback paths remain coarse-grained.
 - Provider adapter retries include a steering retry-reset hook so rows claimed during a failed retryable attempt are restored to guarded steering before the next attempt.
+- Default model request deadlines for the primary HTTP model clients are 10 minutes for Anthropic, OpenAI, and Ollama; lifecycle `after_complete` hook execution also uses a 10-minute deadline.
 - OpenAI and Anthropic task/chat requests use the shared base system prompt plus provider-neutral worktree/project/lifecycle instructions; removed OpenAI OAuth-specific `working_with_user` prompt files should not be reintroduced.
 
 OpenAI-compatible provider facts:
@@ -63,7 +64,7 @@ OAuth and model-specific facts:
 - Provider 401 recovery reloads the model config from DB and may refresh/persist rotated tokens; it does not reread OAuth token material from disk, keychain, or environment variables.
 - Anthropic refresh-token expiry should be treated as opaque/server-controlled, not a fixed duration.
 - Anthropic OAuth refresh failures with provider `invalid_grant` are permanent reauthorization failures: mark model config `oauth_needs_reauth`, surface `needs_reauth`/“Re-auth Required,” and clear the flag after successful refresh.
-- Claude Fable 5 (`claude-fable-5`) and Claude Mythos 5 (`claude-mythos-5`) are supported Anthropic model IDs. They default to a 1M context window, support up to 128k output tokens, require adaptive thinking without fixed `budget_tokens`, do not return raw thinking blocks, and can return HTTP 200 refusal responses that should surface as unsuccessful/refusal results.
+- Claude Fable 5 (`claude-fable-5`) and Claude Mythos 5 (`claude-mythos-5`) are supported Anthropic model IDs and should remain selectable where Anthropic model options are listed, including the Models create dialog. They should not be preselected, recommended, or first-position defaults for new Anthropic model configs; use a broadly stable Anthropic default such as the current Sonnet/Opus default instead. They default to a 1M context window, support up to 128k output tokens, require adaptive thinking without fixed `budget_tokens`, do not return raw thinking blocks, and can return HTTP 200 refusal responses that should surface as unsuccessful/refusal results.
 
 Provider-native tools and runtime tools:
 - Provider-native web search/fetch is executed by providers, not local web tooling.
