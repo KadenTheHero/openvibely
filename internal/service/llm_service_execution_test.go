@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,7 +20,9 @@ import (
 )
 
 type captureProviderAdapter struct {
-	lastReq llmcontracts.AgentRequest
+	mu       sync.Mutex
+	lastReq  llmcontracts.AgentRequest
+	requests []llmcontracts.AgentRequest
 }
 
 type taskSteeringProviderAdapter struct {
@@ -73,12 +76,23 @@ func (c *runtimeToolWritingLLMCaller) CallModel(ctx context.Context, prompt stri
 }
 
 func (c *captureProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	c.mu.Lock()
 	c.lastReq = req
+	c.requests = append(c.requests, req)
+	c.mu.Unlock()
 	return llmcontracts.AgentResult{
 		Output:         "ok",
 		TextOnlyOutput: "ok",
 		Usage:          llmcontracts.Usage{TotalTokens: 1},
 	}, nil
+}
+
+func (c *captureProviderAdapter) Requests() []llmcontracts.AgentRequest {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]llmcontracts.AgentRequest, len(c.requests))
+	copy(out, c.requests)
+	return out
 }
 
 func (a *taskSteeringProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
@@ -738,12 +752,21 @@ func TestLLMService_LifecycleAfterCompleteGenericAgentGetsScopedTools(t *testing
 	if err != nil {
 		t.Fatalf("RunSlot: %v", err)
 	}
-	rt := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx)
+	var scopedReq llmcontracts.AgentRequest
+	var rt *llmcontracts.RuntimeTools
+	for _, req := range capture.Requests() {
+		candidate := llmcontracts.RuntimeToolsFromContext(req.Ctx)
+		if candidate != nil && candidate.HasDefinition("write_file") {
+			scopedReq = req
+			rt = candidate
+			break
+		}
+	}
 	if rt == nil || !rt.HasDefinition("write_file") {
 		t.Fatalf("expected after_complete hook agent scoped file tools, got %#v", rt)
 	}
 	payload, _ := json.Marshal(map[string]string{"file_path": "after_complete_probe.md", "content": "durable hook memory"})
-	if _, handled, isErr, err := rt.Executor(capture.lastReq.Ctx, "write_file", payload); !handled || isErr || err != nil {
+	if _, handled, isErr, err := rt.Executor(scopedReq.Ctx, "write_file", payload); !handled || isErr || err != nil {
 		t.Fatalf("expected lifecycle hook scoped write to succeed handled=%v isErr=%v err=%v", handled, isErr, err)
 	}
 	if _, err := os.Stat(filepath.Join(repoPath, ".openvibely", "custom-memory", "after_complete_probe.md")); err != nil {
