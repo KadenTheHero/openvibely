@@ -374,7 +374,7 @@ func TestTaskDetailContent_ThreadTabLazyLoadsOnDemand(t *testing.T) {
 	if strings.Contains(output, "id=\"task-thread-view\"") {
 		t.Fatal("did not expect eager thread view render for inactive thread tab")
 	}
-	if !strings.Contains(output, "function _loadThreadContent(taskId) {") {
+	if !strings.Contains(output, "function _loadThreadContent(taskId, forceReload) {") {
 		t.Fatal("expected on-demand thread loader helper")
 	}
 	if !strings.Contains(output, "htmx.ajax('GET', '/tasks/' + taskId + '/thread'") {

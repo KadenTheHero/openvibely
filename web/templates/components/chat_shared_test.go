@@ -1821,6 +1821,30 @@ func TestTaskThreadView_SkipsExpensiveWorkDuringNavigation(t *testing.T) {
 	}
 }
 
+func TestTaskThreadView_ClosesStreamsBeforeThreadRefresh(t *testing.T) {
+	task := &models.Task{
+		ID:        "t-stream-cleanup",
+		ProjectID: "p1",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+	var buf bytes.Buffer
+	if err := TaskThreadView(task, nil, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render TaskThreadView: %v", err)
+	}
+	content := buf.String()
+
+	if !strings.Contains(content, "function _closeTaskThreadEventSources()") {
+		t.Fatal("expected shared thread EventSource cleanup helper")
+	}
+	if !strings.Contains(content, "target.id === 'thread-content' || target.id === 'task-thread-view' || target.id === 'task-detail-content' || target.id === 'main-content'") {
+		t.Fatal("expected thread refresh and navigation targets to close active stream EventSources before swap")
+	}
+	if !strings.Contains(content, "_closeTaskThreadEventSources();") {
+		t.Fatal("expected beforeSwap to close active thread EventSources")
+	}
+}
+
 func TestTaskThreadView_ClearsDraftBeforeSuccessfulThreadSwap(t *testing.T) {
 	task := &models.Task{
 		ID:        "thread-clear-1",

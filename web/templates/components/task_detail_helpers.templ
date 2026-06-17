@@ -536,11 +536,19 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 					if (key) delete window._taskThreadDrafts[key];
 				});
 
-				// Before swaps, capture scroll state and preserve textarea input
-				document.body.addEventListener('htmx:beforeSwap', function(event) {
-					var target = event.detail.target;
-					if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view')) {
-						var requestConfig = event.detail.requestConfig || {};
+					function _closeTaskThreadEventSources() {
+						if (!window._threadEventSources) return;
+						window._threadEventSources.forEach(function(es) {
+							try { es.close(); } catch(e) {}
+						});
+						window._threadEventSources = [];
+					}
+
+					// Before swaps, capture scroll state and preserve textarea input
+					document.body.addEventListener('htmx:beforeSwap', function(event) {
+						var target = event.detail.target;
+						if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view' || target.id === 'thread-content')) {
+							var requestConfig = event.detail.requestConfig || {};
 						var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
 						var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
 						var isPost = requestMethod === 'POST';
@@ -564,24 +572,22 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 						}
 						_saveTaskThreadScrollState();
 					}
-					// Clean up thread state when navigating away via sidebar
-					// (sidebar replaces main-content, removing the thread view)
-					if (target && target.id === 'main-content') {
-						_saveTaskThreadScrollState();
-						window._taskThreadStreamingActive = false;
-						window._taskThreadSavedInput = '';
-						if (window._taskThreadPageTracker) {
-							window._taskThreadPageTracker.destroy();
-							window._taskThreadPageTracker = null;
+						// Clean up thread EventSource connections before replacing active thread DOM.
+						if (target && (target.id === 'thread-content' || target.id === 'task-thread-view' || target.id === 'task-detail-content' || target.id === 'main-content')) {
+							_closeTaskThreadEventSources();
+							window._taskThreadStreamingActive = false;
 						}
-						// Close thread EventSource connections
-						if (window._threadEventSources) {
-							window._threadEventSources.forEach(function(es) {
-								try { es.close(); } catch(e) {}
-							});
-							window._threadEventSources = [];
+
+						// Clean up thread state when navigating away via sidebar
+						// (sidebar replaces main-content, removing the thread view)
+						if (target && target.id === 'main-content') {
+							_saveTaskThreadScrollState();
+							window._taskThreadSavedInput = '';
+							if (window._taskThreadPageTracker) {
+								window._taskThreadPageTracker.destroy();
+								window._taskThreadPageTracker = null;
+							}
 						}
-					}
 				});
 
 						document.body.addEventListener('htmx:afterSwap', function(event) {
