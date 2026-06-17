@@ -42,6 +42,7 @@ func IsRetryable(err error) bool {
 		"504",
 		"server error",
 		"unavailable",
+		"overloaded",
 	}
 	for _, hint := range transientHints {
 		if strings.Contains(msg, hint) {

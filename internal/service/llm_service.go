@@ -623,6 +623,32 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		return exec, result.ChatContext, fmt.Errorf("committing steering: %w", err)
 	}
 
+	if strings.TrimSpace(output) == "" && strings.TrimSpace(textOnlyOutput) == "" {
+		reason := "model returned empty response"
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent empty LLM response task=%s duration=%dms", task.ID, durationMs)
+		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", reason, tokensUsed, durationMs); completeErr != nil {
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing empty-response execution: %v", completeErr)
+		}
+		RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: reason, LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
+		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after empty response: %v", statusErr)
+		}
+		if task.Category == models.CategoryActive {
+			if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error moving empty-response task to completed category: %v", categoryErr)
+			}
+		}
+		if s.alertSvc != nil {
+			if alertErr := s.alertSvc.CreateTaskFailedAlert(finalizeCtx, task.ProjectID, task.ID, exec.ID, task.Title, reason); alertErr != nil {
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating empty-response alert: %v", alertErr)
+			}
+		}
+		exec.Status = models.ExecFailed
+		exec.ErrorMessage = reason
+		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
+		return exec, result.ChatContext, fmt.Errorf("calling LLM: %s", reason)
+	}
+
 	applog.Infof("[agent-svc] ExecuteTaskWithAgent LLM call SUCCESS task=%s tokens=%d duration=%dms output_len=%d",
 		task.ID, tokensUsed, durationMs, len(output))
 

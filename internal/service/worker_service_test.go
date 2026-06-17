@@ -1740,6 +1740,8 @@ func TestWorkerService_ReleasesSlotsAfterTaskPanic(t *testing.T) {
 
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, attachmentRepo)
 	mock := testutil.NewMockLLMCaller()
+	mock.Response = "next task completed"
+	mock.TextOnly = "next task completed"
 	panicOnce := true
 	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
 		if panicOnce {

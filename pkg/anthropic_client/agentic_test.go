@@ -176,12 +176,27 @@ func TestParseAgenticStream_ToolUseStartInputPreservedWithoutDelta(t *testing.T)
 
 func TestParseAgenticStream_EmptyStream(t *testing.T) {
 	client := &Client{}
-	result, err := client.parseAgenticStream(strings.NewReader(""), nil, nil)
-	if err != nil {
-		t.Fatal(err)
+	_, err := client.parseAgenticStream(strings.NewReader(""), nil, nil)
+	if err == nil {
+		t.Fatal("expected empty stream error")
 	}
-	if len(result.contentBlocks) != 0 {
-		t.Errorf("expected 0 blocks, got %d", len(result.contentBlocks))
+	if !strings.Contains(err.Error(), "empty anthropic stream") {
+		t.Fatalf("expected empty stream error, got %v", err)
+	}
+}
+
+func TestParseAgenticStream_ErrorEvent(t *testing.T) {
+	stream := buildSSE([]string{
+		`{"type":"error","error":{"details":null,"type":"overloaded_error","message":"Overloaded"},"request_id":"req_test"}`,
+	})
+
+	client := &Client{}
+	_, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err == nil {
+		t.Fatal("expected stream error")
+	}
+	if !strings.Contains(err.Error(), "anthropic stream error overloaded_error: Overloaded request_id=req_test") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

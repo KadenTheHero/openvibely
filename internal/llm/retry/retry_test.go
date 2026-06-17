@@ -14,6 +14,7 @@ func TestIsRetryable(t *testing.T) {
 		{errors.New("429 too many requests"), true},
 		{errors.New("connection reset by peer"), true},
 		{errors.New("503 unavailable"), true},
+		{errors.New("anthropic stream error overloaded_error: Overloaded request_id=req_test"), true},
 		{context.Canceled, false},
 		{errors.New("validation failed"), false},
 	}

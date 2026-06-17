@@ -1031,6 +1031,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 		compaction    strings.Builder // for compaction blocks
 	}
 	blocks := make(map[int]*blockState)
+	seenMeaningfulEvent := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -1049,13 +1050,37 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			Delta        json.RawMessage `json:"delta,omitempty"`
 			Message      json.RawMessage `json:"message,omitempty"`
 			Usage        json.RawMessage `json:"usage,omitempty"`
+			Error        json.RawMessage `json:"error,omitempty"`
+			RequestID    string          `json:"request_id,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
 			continue
 		}
 
 		switch event.Type {
+		case "error":
+			var streamErr struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			}
+			if event.Error != nil {
+				_ = json.Unmarshal(event.Error, &streamErr)
+			}
+			errType := strings.TrimSpace(streamErr.Type)
+			if errType == "" {
+				errType = "unknown_error"
+			}
+			errMsg := strings.TrimSpace(streamErr.Message)
+			if errMsg == "" {
+				errMsg = "stream error"
+			}
+			if event.RequestID != "" {
+				return result, fmt.Errorf("anthropic stream error %s: %s request_id=%s", errType, errMsg, event.RequestID)
+			}
+			return result, fmt.Errorf("anthropic stream error %s: %s", errType, errMsg)
+
 		case "message_start":
+			seenMeaningfulEvent = true
 			if event.Message != nil {
 				var msg struct {
 					Model string `json:"model"`
@@ -1070,6 +1095,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			}
 
 		case "content_block_start":
+			seenMeaningfulEvent = true
 			if event.ContentBlock != nil {
 				var cb struct {
 					Type      string          `json:"type"`
@@ -1107,6 +1133,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			}
 
 		case "content_block_delta":
+			seenMeaningfulEvent = true
 			if event.Delta == nil {
 				continue
 			}
@@ -1179,6 +1206,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			}
 
 		case "content_block_stop":
+			seenMeaningfulEvent = true
 			bs := blocks[event.Index]
 			if bs == nil {
 				continue
@@ -1326,6 +1354,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			}
 
 		case "message_delta":
+			seenMeaningfulEvent = true
 			if event.Delta != nil {
 				var delta struct {
 					StopReason string `json:"stop_reason"`
@@ -1345,7 +1374,13 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 		}
 	}
 
-	return result, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return result, err
+	}
+	if !seenMeaningfulEvent {
+		return result, fmt.Errorf("empty anthropic stream: no message events received")
+	}
+	return result, nil
 }
 
 func completedAnthropicToolInput(inputDeltas string, startInput json.RawMessage) json.RawMessage {

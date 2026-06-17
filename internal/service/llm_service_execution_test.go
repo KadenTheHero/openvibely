@@ -237,6 +237,54 @@ func TestLLMService_ExecuteTaskWithAgent_PreservesFailedTranscriptForTaskThreadF
 	}
 }
 
+func TestLLMService_ExecuteTaskWithAgent_FailsEmptySuccessfulResponse(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	project := &models.Project{Name: "Empty Provider Response", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Arithmetic", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "4+2?", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetLLMCaller(testutil.NewMockLLMCaller())
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err == nil {
+		t.Fatal("expected empty response error")
+	}
+	if exec == nil || exec.Status != models.ExecFailed {
+		t.Fatalf("expected failed execution, got %#v", exec)
+	}
+	if exec.ErrorMessage != "model returned empty response" {
+		t.Fatalf("unexpected error message: %q", exec.ErrorMessage)
+	}
+	stored, err := execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("GetByID execution: %v", err)
+	}
+	if stored.Status != models.ExecFailed || stored.Output != "" || stored.ErrorMessage != "model returned empty response" {
+		t.Fatalf("unexpected stored execution: status=%s output=%q error=%q", stored.Status, stored.Output, stored.ErrorMessage)
+	}
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID task: %v", err)
+	}
+	if updatedTask.Status != models.StatusFailed || updatedTask.Category != models.CategoryCompleted {
+		t.Fatalf("expected failed task in completed category, got status=%s category=%s", updatedTask.Status, updatedTask.Category)
+	}
+}
+
 func TestLLMService_ExecuteTaskWithAgent_IgnoresStatusMarkerMentionInProse(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

@@ -164,6 +164,8 @@ func TestLLMService_ExecuteTaskWithAgent_UsesProjectRepoPathAsWorkDir(t *testing
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(mock)
 
@@ -215,6 +217,8 @@ func TestLLMService_CallClaudeCLI_SetsWorkDir(t *testing.T) {
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(mock)
 
@@ -267,6 +271,8 @@ func TestLLMService_CallClaudeCLI_NoWorkDirWhenProjectHasNoRepoPath(t *testing.T
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(mock)
 
@@ -310,6 +316,8 @@ func TestLLMService_CallCodexCLI_SetsWorkDir(t *testing.T) {
 	ctx := context.Background()
 
 	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(mock)
 
