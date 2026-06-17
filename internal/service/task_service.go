@@ -373,10 +373,9 @@ func (s *TaskService) CancelTask(ctx context.Context, id string) error {
 	}
 	if err := s.repo.UpdateCategory(ctx, id, models.CategoryBacklog); err != nil {
 		applog.Infof("[task-svc] CancelTask error moving to backlog: %v", err)
-		// Non-fatal - the task is still cancelled
-	} else {
-		applog.Infof("[task-svc] CancelTask moved to backlog id=%s", id)
+		return fmt.Errorf("move cancelled task to backlog: %w", err)
 	}
+	applog.Infof("[task-svc] CancelTask moved to backlog id=%s", id)
 
 	applog.Infof("[task-svc] CancelTask success id=%s", id)
 	return nil

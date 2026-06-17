@@ -36,6 +36,35 @@ func TestKanbanBoardUsesResponsiveNonScrollingLayout(t *testing.T) {
 	}
 }
 
+func TestKanbanBoardRendersActiveCancelledTask(t *testing.T) {
+	tasks := []models.Task{
+		{
+			ID:        "task-active-cancelled",
+			ProjectID: "project-1",
+			Title:     "Visible cancelled active task",
+			Category:  models.CategoryActive,
+			Status:    models.StatusCancelled,
+			Priority:  2,
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := KanbanBoard(tasks, "project-1", "", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render kanban board: %v", err)
+	}
+
+	body := buf.String()
+	for _, want := range []string{
+		"Visible cancelled active task",
+		`data-task-status="cancelled"`,
+		`data-task-category="active"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected active cancelled task to remain visible in active column markup with %q, got %s", want, body)
+		}
+	}
+}
+
 func TestKanbanColumnHasMobileSafeWidthAndTouchMenu(t *testing.T) {
 	tasks := []models.Task{
 		{

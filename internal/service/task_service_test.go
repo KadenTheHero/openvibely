@@ -1044,6 +1044,44 @@ func TestTaskService_CancelTask_AllowsQueuedTask(t *testing.T) {
 	assert.Equal(t, models.CategoryBacklog, updated.Category)
 }
 
+func TestTaskService_CancelTask_ReturnsCategoryUpdateFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Category Failure Cancel Task",
+		Prompt:    "test",
+		Status:    models.StatusQueued,
+		Category:  models.CategoryActive,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DROP TRIGGER IF EXISTS fail_cancel_backlog_move`) })
+	_, err := db.ExecContext(ctx, `
+		CREATE TRIGGER fail_cancel_backlog_move
+		BEFORE UPDATE OF category ON tasks
+		WHEN NEW.title = 'Category Failure Cancel Task' AND NEW.category = 'backlog'
+		BEGIN
+			SELECT RAISE(FAIL, 'forced category update failure');
+		END;
+	`)
+	require.NoError(t, err)
+
+	err = svc.CancelTask(ctx, task.ID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "move cancelled task to backlog")
+
+	updated, getErr := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, getErr)
+	require.NotNil(t, updated)
+	assert.Equal(t, models.StatusCancelled, updated.Status)
+	assert.Equal(t, models.CategoryActive, updated.Category)
+}
+
 func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsRunning(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
