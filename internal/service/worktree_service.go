@@ -1674,14 +1674,28 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 			continue
 		}
 
-		// Build maps of known paths and known task IDs.
+		// Build maps of known paths, task IDs, and lineage branches. Cleanup is
+		// intentionally conservative: any worktree/branch still referenced by task
+		// metadata or chained-task lineage is treated as in-use.
 		knownPaths := make(map[string]bool)
 		knownTaskIDs := make(map[string]bool)
+		knownLineageBranches := make(map[string]string)
 		for _, task := range allTasks {
 			knownTaskIDs[task.ID] = true
 			if task.WorktreePath != "" {
 				knownPaths[task.WorktreePath] = true
 			}
+			if task.WorktreeBranch != "" {
+				knownLineageBranches[task.WorktreeBranch] = task.ID
+			}
+			if task.BaseBranch != "" {
+				knownLineageBranches[task.BaseBranch] = task.ID
+			}
+		}
+
+		targetBranch := ws.getGlobalMergeTarget(ctx)
+		if targetBranch == "" {
+			targetBranch = GetDefaultBranchContext(ctx, project.RepoPath)
 		}
 
 		// Check each worktree to see if it's orphaned
@@ -1699,11 +1713,33 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 				continue
 			}
 
-			// Worktree directories follow .worktrees/task_<taskID>. If the task still
-			// exists but worktree_path wasn't persisted yet, treat it as in-use.
+			// Worktree directories follow .worktrees/task_<taskID> and follow-up
+			// worktrees follow .worktrees/task_<taskID>_followup_<timestamp>. If
+			// the task still exists but metadata was stale or temporarily empty,
+			// treat the worktree as in-use.
 			if taskID, ok := taskIDFromWorktreePath(worktree.Path); ok && knownTaskIDs[taskID] {
 				applog.Infof("[worktree] cleanup: skipping worktree at %s because task %s still exists", worktree.Path, taskID)
 				continue
+			}
+
+			if ownerID, ok := knownLineageBranches[worktree.Branch]; ok {
+				applog.Infof("[worktree] cleanup: skipping worktree at %s because branch %s is referenced by task lineage %s", worktree.Path, worktree.Branch, ownerID)
+				continue
+			}
+
+			if dirty, ok := worktreeDirtyState(ctx, worktree.Path); !ok || dirty {
+				applog.Infof("[worktree] cleanup: skipping worktree at %s because dirty state is unsafe (dirty=%v ok=%v)", worktree.Path, dirty, ok)
+				continue
+			}
+
+			if !worktreeHeadMergedIntoTarget(ctx, worktree.Path, targetBranch) {
+				applog.Infof("[worktree] cleanup: skipping worktree at %s because HEAD is not merged into %s", worktree.Path, targetBranch)
+				continue
+			}
+
+			deleteBranch := worktreeBranchSafeToDelete(ctx, project.RepoPath, worktree.Branch, targetBranch, knownLineageBranches)
+			if worktree.Branch != "" && !deleteBranch {
+				applog.Infof("[worktree] cleanup: orphaned worktree at %s has branch %s that is not safe to delete; removing worktree only", worktree.Path, worktree.Branch)
 			}
 
 			applog.Infof("[worktree] cleanup: found orphaned worktree at %s (branch: %s)", worktree.Path, worktree.Branch)
@@ -1739,11 +1775,13 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 				_ = pruneCmd.Run() // Ignore errors
 			}
 
-			// Delete the branch if it exists
-			if worktree.Branch != "" {
+			// Delete the branch only when it is conclusively merged and unreferenced.
+			if deleteBranch {
 				cmd = exec.CommandContext(ctx, "git", "branch", "-D", worktree.Branch)
 				cmd.Dir = project.RepoPath
-				_ = cmd.Run() // Ignore errors - branch might already be deleted
+				if out, err := cmd.CombinedOutput(); err != nil {
+					applog.Infof("[worktree] cleanup: failed to delete orphaned branch %s: %s", worktree.Branch, string(out))
+				}
 			}
 
 			cleanedCount++
@@ -1759,10 +1797,57 @@ func taskIDFromWorktreePath(worktreePath string) (string, bool) {
 		return "", false
 	}
 	taskID := strings.TrimPrefix(base, "task_")
+	if idx := strings.Index(taskID, "_followup_"); idx >= 0 {
+		taskID = taskID[:idx]
+	}
 	if taskID == "" {
 		return "", false
 	}
 	return taskID, true
+}
+
+func worktreeDirtyState(ctx context.Context, worktreePath string) (dirty bool, ok bool) {
+	if worktreePath == "" {
+		return false, false
+	}
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=all")
+	cmd.Dir = worktreePath
+	out, err := cmd.Output()
+	if err != nil || ctx.Err() != nil {
+		return false, false
+	}
+	return strings.TrimSpace(string(out)) != "", true
+}
+
+func worktreeHeadMergedIntoTarget(ctx context.Context, worktreePath, targetBranch string) bool {
+	if worktreePath == "" || targetBranch == "" {
+		return false
+	}
+	cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", "HEAD", targetBranch)
+	cmd.Dir = worktreePath
+	return cmd.Run() == nil && ctx.Err() == nil
+}
+
+func worktreeBranchSafeToDelete(ctx context.Context, repoDir, branchName, targetBranch string, knownLineageBranches map[string]string) bool {
+	if branchName == "" || targetBranch == "" {
+		return false
+	}
+	if _, ok := knownLineageBranches[branchName]; ok {
+		return false
+	}
+	checkBranch := exec.CommandContext(ctx, "git", "rev-parse", "--verify", branchName)
+	checkBranch.Dir = repoDir
+	if err := checkBranch.Run(); err != nil || ctx.Err() != nil {
+		return false
+	}
+	checkTarget := exec.CommandContext(ctx, "git", "rev-parse", "--verify", targetBranch)
+	checkTarget.Dir = repoDir
+	if err := checkTarget.Run(); err != nil || ctx.Err() != nil {
+		return false
+	}
+	cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", branchName, targetBranch)
+	cmd.Dir = repoDir
+	return cmd.Run() == nil && ctx.Err() == nil
 }
 
 // WorktreeInfo represents information about a git worktree.

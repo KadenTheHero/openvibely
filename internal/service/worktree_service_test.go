@@ -2798,6 +2798,171 @@ func TestCleanupOrphanedWorktrees_SkipsWhenTaskStillExists(t *testing.T) {
 	}
 }
 
+func TestCleanupOrphanedWorktrees_SkipsFollowupWhenTaskStillExistsWithStaleMetadata(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	settingsRepo := repository.NewSettingsRepo(db)
+	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	if err := settingsRepo.Set(ctx, "worktree_cleanup", "after_merge"); err != nil {
+		t.Fatalf("failed to set cleanup policy: %v", err)
+	}
+
+	project := &models.Project{
+		ID:       "project-followup-existing-task",
+		Name:     "Followup Existing Task",
+		RepoPath: repoDir,
+	}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("failed to create project: %v", err)
+	}
+
+	task := &models.Task{
+		ID:                "followup-existing-task-id",
+		ProjectID:         project.ID,
+		Title:             "Existing Followup Task",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		MergeStatus:       models.MergeStatusMerged,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	worktreeDir, branch, skip, err := worktreeSvc.SetupFollowupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("failed to create follow-up worktree: %v", err)
+	}
+	if !skip {
+		t.Fatal("expected fresh follow-up worktree")
+	}
+	if !strings.Contains(filepath.Base(worktreeDir), "_followup_") || !strings.Contains(branch, "-followup-") {
+		t.Fatalf("expected actual follow-up naming, got path=%s branch=%s", worktreeDir, branch)
+	}
+
+	if err := os.WriteFile(filepath.Join(worktreeDir, "followup.txt"), []byte("follow-up work\n"), 0644); err != nil {
+		t.Fatalf("write follow-up file: %v", err)
+	}
+	if err := CommitWorktreeChanges(worktreeDir, "follow-up commit"); err != nil {
+		t.Fatalf("commit follow-up changes: %v", err)
+	}
+	followupCommit := gitRevParseTest(t, worktreeDir, "HEAD")
+
+	// Simulate stale metadata: the task still exists but no longer records the
+	// active follow-up worktree path/branch.
+	if err := taskRepo.ClearWorktreeInfo(ctx, task.ID); err != nil {
+		t.Fatalf("failed to clear worktree info: %v", err)
+	}
+
+	cleanedCount, err := worktreeSvc.CleanupOrphanedWorktrees(ctx)
+	if err != nil {
+		t.Fatalf("CleanupOrphanedWorktrees failed: %v", err)
+	}
+	if cleanedCount != 0 {
+		t.Fatalf("expected 0 orphaned worktrees cleaned, got %d", cleanedCount)
+	}
+	if _, err := os.Stat(worktreeDir); os.IsNotExist(err) {
+		t.Fatal("follow-up worktree should not be cleaned while task still exists")
+	}
+	if got := gitRevParseTest(t, repoDir, branch); got != followupCommit {
+		t.Fatalf("follow-up branch should still point at commit %s, got %s", followupCommit, got)
+	}
+	if err := exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", followupCommit, branch).Run(); err != nil {
+		t.Fatalf("follow-up commit should remain reachable from branch %s: %v", branch, err)
+	}
+}
+
+func TestCleanupOrphanedWorktrees_SkipsDirtyOrUnmergedOrphanedWorktrees(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	settingsRepo := repository.NewSettingsRepo(db)
+	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	repoDir := createTestGitRepo(t)
+	if err := settingsRepo.Set(ctx, "worktree_cleanup", "after_merge"); err != nil {
+		t.Fatalf("failed to set cleanup policy: %v", err)
+	}
+	project := &models.Project{ID: "project-orphan-safety", Name: "Orphan Safety", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("failed to create project: %v", err)
+	}
+
+	unmergedTask := &models.Task{
+		ID:        "unmerged-orphan-task-id",
+		ProjectID: project.ID,
+		Title:     "Unmerged Orphan",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+	}
+	if err := taskRepo.Create(ctx, unmergedTask); err != nil {
+		t.Fatalf("failed to create unmerged task: %v", err)
+	}
+	unmergedDir, unmergedBranch, err := worktreeSvc.SetupWorktree(ctx, unmergedTask, repoDir)
+	if err != nil {
+		t.Fatalf("failed to create unmerged worktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(unmergedDir, "unmerged.txt"), []byte("unmerged work\n"), 0644); err != nil {
+		t.Fatalf("write unmerged file: %v", err)
+	}
+	if err := CommitWorktreeChanges(unmergedDir, "unmerged commit"); err != nil {
+		t.Fatalf("commit unmerged work: %v", err)
+	}
+	unmergedCommit := gitRevParseTest(t, unmergedDir, "HEAD")
+	if err := taskRepo.Delete(ctx, unmergedTask.ID); err != nil {
+		t.Fatalf("delete unmerged task: %v", err)
+	}
+
+	dirtyTask := &models.Task{
+		ID:        "dirty-orphan-task-id",
+		ProjectID: project.ID,
+		Title:     "Dirty Orphan",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+	}
+	if err := taskRepo.Create(ctx, dirtyTask); err != nil {
+		t.Fatalf("failed to create dirty task: %v", err)
+	}
+	dirtyDir, dirtyBranch, err := worktreeSvc.SetupWorktree(ctx, dirtyTask, repoDir)
+	if err != nil {
+		t.Fatalf("failed to create dirty worktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dirtyDir, "dirty.txt"), []byte("dirty work\n"), 0644); err != nil {
+		t.Fatalf("write dirty file: %v", err)
+	}
+	if err := taskRepo.Delete(ctx, dirtyTask.ID); err != nil {
+		t.Fatalf("delete dirty task: %v", err)
+	}
+
+	cleanedCount, err := worktreeSvc.CleanupOrphanedWorktrees(ctx)
+	if err != nil {
+		t.Fatalf("CleanupOrphanedWorktrees failed: %v", err)
+	}
+	if cleanedCount != 0 {
+		t.Fatalf("expected 0 orphaned worktrees cleaned, got %d", cleanedCount)
+	}
+	if _, err := os.Stat(unmergedDir); os.IsNotExist(err) {
+		t.Fatal("unmerged orphaned worktree should not be removed")
+	}
+	if got := gitRevParseTest(t, repoDir, unmergedBranch); got != unmergedCommit {
+		t.Fatalf("unmerged branch should still point at commit %s, got %s", unmergedCommit, got)
+	}
+	if _, err := os.Stat(dirtyDir); os.IsNotExist(err) {
+		t.Fatal("dirty orphaned worktree should not be removed")
+	}
+	if got := gitRevParseTest(t, repoDir, dirtyBranch); got == "" {
+		t.Fatal("dirty orphaned branch should still exist")
+	}
+}
+
 func TestTaskIDFromWorktreePath(t *testing.T) {
 	tests := []struct {
 		name string
@@ -2806,8 +2971,11 @@ func TestTaskIDFromWorktreePath(t *testing.T) {
 		ok   bool
 	}{
 		{name: "valid", path: "/tmp/repo/.worktrees/task_abc123", id: "abc123", ok: true},
+		{name: "followup", path: "/tmp/repo/.worktrees/task_abc123_followup_1781070494882330000", id: "abc123", ok: true},
+		{name: "actual long followup", path: "/tmp/repo/.worktrees/task_c9e1a52b817437cef5c95387ccc011e1_followup_1781070494882330000", id: "c9e1a52b817437cef5c95387ccc011e1", ok: true},
 		{name: "missing prefix", path: "/tmp/repo/.worktrees/abc123", id: "", ok: false},
 		{name: "empty id", path: "/tmp/repo/.worktrees/task_", id: "", ok: false},
+		{name: "empty followup id", path: "/tmp/repo/.worktrees/task__followup_1781070494882330000", id: "", ok: false},
 	}
 
 	for _, tt := range tests {
