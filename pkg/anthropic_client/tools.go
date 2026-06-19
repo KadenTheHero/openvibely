@@ -103,12 +103,12 @@ func editFileTool() ToolDefinition {
 func bashTool() ToolDefinition {
 	return ToolDefinition{
 		Name:        "bash",
-		Description: "Execute a bash command and return its stdout and stderr. The command runs in the working directory. Use this for running tests, builds, git commands, and other shell operations. Commands have a default/minimum timeout of 600 seconds.",
+		Description: "Execute a bash command and return its stdout and stderr. The command runs in the working directory. Use this for running tests, builds, git commands, and other shell operations. Commands default to a 600-second timeout when no positive timeout is provided.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"command": {"type": "string", "description": "The bash command to execute."},
-				"timeout": {"type": "integer", "description": "Timeout in seconds. Default/minimum: 600. Larger explicit values are allowed."}
+				"timeout": {"type": "integer", "description": "Timeout in seconds. Default: 600. Positive explicit values are allowed without a minimum or maximum cap."}
 			},
 			"required": ["command"]
 		}`),
@@ -448,11 +448,11 @@ func normalizeLineForMatch(s string) string {
 	return b.String()
 }
 
-const minExecBashTimeoutSeconds = 600
+const defaultExecBashTimeoutSeconds = 600
 
 func normalizeExecBashTimeout(seconds int) int {
-	if seconds < minExecBashTimeoutSeconds {
-		return minExecBashTimeoutSeconds
+	if seconds <= 0 {
+		return defaultExecBashTimeoutSeconds
 	}
 	return seconds
 }

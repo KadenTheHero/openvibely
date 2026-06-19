@@ -245,11 +245,12 @@ func TestNormalizeExecBashTimeout(t *testing.T) {
 		in   int
 		want int
 	}{
-		{name: "default zero", in: 0, want: minExecBashTimeoutSeconds},
-		{name: "negative", in: -1, want: minExecBashTimeoutSeconds},
-		{name: "below minimum", in: minExecBashTimeoutSeconds - 1, want: minExecBashTimeoutSeconds},
-		{name: "exact minimum", in: minExecBashTimeoutSeconds, want: minExecBashTimeoutSeconds},
-		{name: "above minimum", in: minExecBashTimeoutSeconds + 1, want: minExecBashTimeoutSeconds + 1},
+		{name: "default zero", in: 0, want: defaultExecBashTimeoutSeconds},
+		{name: "negative", in: -1, want: defaultExecBashTimeoutSeconds},
+		{name: "below default positive", in: defaultExecBashTimeoutSeconds - 1, want: defaultExecBashTimeoutSeconds - 1},
+		{name: "short positive", in: 1, want: 1},
+		{name: "exact default", in: defaultExecBashTimeoutSeconds, want: defaultExecBashTimeoutSeconds},
+		{name: "above default", in: defaultExecBashTimeoutSeconds + 1, want: defaultExecBashTimeoutSeconds + 1},
 	}
 
 	for _, tt := range tests {
