@@ -729,6 +729,11 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						form.insertBefore(pendingContainer, textareaWrap || textarea);
 						return pendingContainer;
 					}
+					function refreshPendingInputsIfVisible() {
+						var pendingContainer = document.getElementById('pending-thread-inputs');
+						if (!pendingContainer || !pendingContainer.querySelector('[data-thread-input-id]') || typeof htmx === 'undefined') return;
+						htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: '#pending-thread-inputs', swap: 'outerHTML'});
+					}
 					function renderQueuedRow(data) {
 						if (!data || !data.pending_input_id) return;
 						if (document.querySelector('[data-thread-input-id="' + data.pending_input_id + '"]')) return;
@@ -823,12 +828,18 @@ templ TaskThreadLiveEventsScript(taskID string) {
 				var handler = function(event) {
 					var data = event.detail || {};
 					if (data.task_id !== taskId) return;
+					if (data.type === 'task_status_changed' || data.type === 'task_category_changed') {
+						refreshPendingInputsIfVisible();
+						return;
+					}
 					if (data.type === 'task_thread_execution_started') {
+						refreshPendingInputsIfVisible();
 						ensureStreamingFragment(data);
 						return;
 					}
 							if (data.type === 'task_thread_input_applied') {
 								removePendingRow(data.pending_input_id);
+								refreshPendingInputsIfVisible();
 								ensureStreamingFragment(data);
 								return;
 							}

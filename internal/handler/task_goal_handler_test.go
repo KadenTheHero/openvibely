@@ -246,7 +246,7 @@ func TestLifecycleSendToTaskRejectsStaleTaskRunContinuation(t *testing.T) {
 
 	params := streamingResponseParams{TaskID: task.ID, ProjectID: project.ID, IsTaskFollowup: true, AgentDefinition: &models.Agent{Tools: []string{"send_to_task"}}}
 	handlers := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, "web")
-	staleCtx := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "hook-agent", Tools: []string{"send_to_task"}, TaskRunID: "run-old"})
+	staleCtx := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "hook-agent", Tools: []string{"send_to_task"}, TaskID: task.ID, TaskRunID: "run-old"})
 	out, err := handlers["send_to_task"](staleCtx, []byte(`{"task_id":"current","message":"Duplicate continuation"}`))
 	if err == nil || !strings.Contains(err.Error(), "stale lifecycle task run") {
 		t.Fatalf("expected stale lifecycle continuation to be rejected, out=%q err=%v", out, err)
@@ -257,6 +257,61 @@ func TestLifecycleSendToTaskRejectsStaleTaskRunContinuation(t *testing.T) {
 	}
 	if len(pending) != 0 {
 		t.Fatalf("stale lifecycle continuation queued pending inputs: %+v", pending)
+	}
+}
+
+func TestLifecycleSendToTaskAllowsCrossTaskWhenDestinationHasNewerRuns(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	sourceTask := &models.Task{ProjectID: project.ID, Title: "Source lifecycle task", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "source", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, sourceTask); err != nil {
+		t.Fatalf("create source task: %v", err)
+	}
+	destinationTask := &models.Task{ProjectID: project.ID, Title: "Destination task", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "destination", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, destinationTask); err != nil {
+		t.Fatalf("create destination task: %v", err)
+	}
+	tc.handler.lifecycleRepo = repository.NewLifecycleRepo(tc.db)
+	lifecycleAgentRepo := repository.NewAgentRepo(tc.db)
+	lifecycleAgent := &models.Agent{Name: "Cross Task Lifecycle Agent", Model: "inherit", Enabled: true}
+	if err := lifecycleAgentRepo.Create(ctx, lifecycleAgent); err != nil {
+		t.Fatalf("create lifecycle agent: %v", err)
+	}
+	sourceRun := &models.LifecycleExecution{TaskID: sourceTask.ID, TaskRunID: "source-run-current", AgentID: lifecycleAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "coordinate", OutputContract: models.OutputContractActivitySummary, Status: models.LifecycleExecRunning}
+	if err := tc.handler.lifecycleRepo.CreateExecution(ctx, sourceRun); err != nil {
+		t.Fatalf("create source lifecycle execution: %v", err)
+	}
+	destinationOlder := &models.LifecycleExecution{TaskID: destinationTask.ID, TaskRunID: "destination-run-old", AgentID: lifecycleAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "observe", OutputContract: models.OutputContractActivitySummary, Status: models.LifecycleExecCompleted}
+	if err := tc.handler.lifecycleRepo.CreateExecution(ctx, destinationOlder); err != nil {
+		t.Fatalf("create destination older lifecycle execution: %v", err)
+	}
+	destinationNewer := &models.LifecycleExecution{TaskID: destinationTask.ID, TaskRunID: "destination-run-new", AgentID: lifecycleAgent.ID, When: models.LifecycleRouteTask, SkillKey: "route", OutputContract: models.OutputContractSelectedSkills, Status: models.LifecycleExecRunning}
+	if err := tc.handler.lifecycleRepo.CreateExecution(ctx, destinationNewer); err != nil {
+		t.Fatalf("create destination newer lifecycle execution: %v", err)
+	}
+
+	params := streamingResponseParams{TaskID: sourceTask.ID, ProjectID: project.ID, IsTaskFollowup: true, AgentDefinition: &models.Agent{Tools: []string{"send_to_task"}}}
+	handlers := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, "web")
+	hookCtx := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "hook-agent", Tools: []string{"send_to_task"}, TaskID: sourceTask.ID, TaskRunID: "source-run-current"})
+	out, err := handlers["send_to_task"](hookCtx, []byte(`{"task_id":"`+destinationTask.ID+`","message":"Coordinate with destination"}`))
+	if err != nil {
+		t.Fatalf("cross-task lifecycle send_to_task rejected: out=%q err=%v", out, err)
+	}
+	pending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, destinationTask.ID)
+	if err != nil {
+		t.Fatalf("list destination pending: %v", err)
+	}
+	if len(pending) != 1 || pending[0].Content != "Coordinate with destination" {
+		t.Fatalf("destination pending inputs = %+v", pending)
+	}
+	sourcePending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, sourceTask.ID)
+	if err != nil {
+		t.Fatalf("list source pending: %v", err)
+	}
+	if len(sourcePending) != 0 {
+		t.Fatalf("cross-task send queued on source task: %+v", sourcePending)
 	}
 }
 

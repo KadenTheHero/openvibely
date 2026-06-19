@@ -1768,6 +1768,9 @@ func TestTaskThreadView_RunningThreadCanSteerFromPendingRowsOnly(t *testing.T) {
 	if !strings.Contains(content, "if (data.type === 'task_thread_input_applied')") || !strings.Contains(content, "ensureStreamingFragment(data)") {
 		t.Fatal("task-thread UI must treat applied queued input events as a backup promotion signal")
 	}
+	if !strings.Contains(content, "function refreshPendingInputsIfVisible()") || !strings.Contains(content, "pendingContainer.querySelector('[data-thread-input-id]')") || !strings.Contains(content, "data.type === 'task_status_changed' || data.type === 'task_category_changed'") {
+		t.Fatal("task-thread UI must reconcile visible pending rows on live task state changes so applied queued rows cannot remain stale")
+	}
 	if !strings.Contains(content, "if (data.type === 'task_thread_input_cancelled')") || !strings.Contains(content, "removePendingRow(data.pending_input_id)") {
 		t.Fatal("task-thread UI must remove cancelled pending rows from live events")
 	}

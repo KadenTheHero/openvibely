@@ -825,7 +825,7 @@ func (h *Handler) executeSendToTaskTool(ctx context.Context, params streamingRes
 		return "", err
 	}
 	origin, originAgent := sanitizeSendToTaskLineage(ctx, req.Origin, req.OriginAgent, params)
-	if err := h.rejectStaleLifecycleSendToTask(ctx, taskID); err != nil {
+	if err := h.rejectStaleLifecycleSendToTask(ctx); err != nil {
 		return "", err
 	}
 	if origin == models.TaskOriginSystemAgent && originAgent == models.AgentSystemKindGoal && h.taskGoalSvc != nil {
@@ -850,12 +850,13 @@ func isGoalLifecycleHookAgent(ctx context.Context) bool {
 	return ok && agent.SystemKind == models.AgentSystemKindGoal
 }
 
-func (h *Handler) rejectStaleLifecycleSendToTask(ctx context.Context, taskID string) error {
+func (h *Handler) rejectStaleLifecycleSendToTask(ctx context.Context) error {
 	agent, ok := lifecycle.HookAgentFromContext(ctx)
-	if !ok || strings.TrimSpace(agent.TaskRunID) == "" || h.lifecycleRepo == nil {
+	sourceTaskID := strings.TrimSpace(agent.TaskID)
+	if !ok || sourceTaskID == "" || strings.TrimSpace(agent.TaskRunID) == "" || h.lifecycleRepo == nil {
 		return nil
 	}
-	newer, err := h.lifecycleRepo.HasNewerTaskRun(ctx, taskID, agent.TaskRunID)
+	newer, err := h.lifecycleRepo.HasNewerTaskRun(ctx, sourceTaskID, agent.TaskRunID)
 	if err != nil {
 		return err
 	}
