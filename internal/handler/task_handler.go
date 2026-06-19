@@ -1295,6 +1295,13 @@ func (h *Handler) CancelTask(c echo.Context) error {
 		applog.Infof("[handler] CancelTask error: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if h.execRepo != nil {
+		if cancelled, err := h.execRepo.CancelRunningByTask(c.Request().Context(), taskID); err != nil {
+			applog.Infof("[handler] CancelTask error cancelling running executions task=%s: %v", taskID, err)
+		} else if cancelled > 0 {
+			applog.Infof("[handler] CancelTask cancelled %d running executions task=%s", cancelled, taskID)
+		}
+	}
 	applog.Infof("[handler] CancelTask cancelled task=%s", taskID)
 
 	// Return the full kanban board for HTMX requests

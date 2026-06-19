@@ -194,6 +194,22 @@ func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.E
 	return nil
 }
 
+func (r *ExecutionRepo) CancelRunningByTask(ctx context.Context, taskID string) (int64, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE executions
+		 SET status = ?, error_message = 'cancelled', completed_at = datetime('now')
+		 WHERE task_id = ? AND status = ?`,
+		models.ExecCancelled, taskID, models.ExecRunning)
+	if err != nil {
+		return 0, fmt.Errorf("cancelling running task executions: %w", err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("cancelling running task executions rows affected: %w", err)
+	}
+	return changed, nil
+}
+
 type CompleteSuccessOutcome string
 
 const (
