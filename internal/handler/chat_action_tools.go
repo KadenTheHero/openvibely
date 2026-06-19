@@ -825,6 +825,9 @@ func (h *Handler) executeSendToTaskTool(ctx context.Context, params streamingRes
 		return "", err
 	}
 	origin, originAgent := sanitizeSendToTaskLineage(ctx, req.Origin, req.OriginAgent, params)
+	if err := h.rejectStaleLifecycleSendToTask(ctx, taskID); err != nil {
+		return "", err
+	}
 	if origin == models.TaskOriginSystemAgent && originAgent == models.AgentSystemKindGoal && h.taskGoalSvc != nil {
 		goal, goalErr := h.taskGoalSvc.GetEvaluableGoal(ctx, taskID)
 		if goalErr != nil {
@@ -845,6 +848,21 @@ func (h *Handler) executeSendToTaskTool(ctx context.Context, params streamingRes
 func isGoalLifecycleHookAgent(ctx context.Context) bool {
 	agent, ok := lifecycle.HookAgentFromContext(ctx)
 	return ok && agent.SystemKind == models.AgentSystemKindGoal
+}
+
+func (h *Handler) rejectStaleLifecycleSendToTask(ctx context.Context, taskID string) error {
+	agent, ok := lifecycle.HookAgentFromContext(ctx)
+	if !ok || strings.TrimSpace(agent.TaskRunID) == "" || h.lifecycleRepo == nil {
+		return nil
+	}
+	newer, err := h.lifecycleRepo.HasNewerTaskRun(ctx, taskID, agent.TaskRunID)
+	if err != nil {
+		return err
+	}
+	if newer {
+		return fmt.Errorf("stale lifecycle task run %s; continuation was not queued", agent.TaskRunID)
+	}
+	return nil
 }
 
 func agentTools(agentDef *models.Agent) []string {

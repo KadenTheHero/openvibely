@@ -448,6 +448,43 @@ func TestLifecycleRepo_IdempotencyAllowsRetryAfterFailure(t *testing.T) {
 	}
 }
 
+func TestLifecycleRepo_HasNewerTaskRunUsesCreationOrderForSameSecondRuns(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Run order", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	older := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: "run-old", AgentID: agent.ID, When: models.LifecycleAfterComplete, SkillKey: "x", Status: models.LifecycleExecRunning}
+	if err := repo.CreateExecution(ctx, older); err != nil {
+		t.Fatalf("create older: %v", err)
+	}
+	newer := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: "run-new", AgentID: agent.ID, When: models.LifecycleRouteTask, SkillKey: "y", Status: models.LifecycleExecRunning}
+	if err := repo.CreateExecution(ctx, newer); err != nil {
+		t.Fatalf("create newer: %v", err)
+	}
+
+	hasNewer, err := repo.HasNewerTaskRun(ctx, task.ID, "run-old")
+	if err != nil {
+		t.Fatalf("has newer old: %v", err)
+	}
+	if !hasNewer {
+		t.Fatalf("expected run-old to have newer run")
+	}
+	hasNewer, err = repo.HasNewerTaskRun(ctx, task.ID, "run-new")
+	if err != nil {
+		t.Fatalf("has newer new: %v", err)
+	}
+	if hasNewer {
+		t.Fatalf("did not expect run-new to have newer run")
+	}
+}
+
 func TestLifecycleRepo_PatchExecutionOutputSkills(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	agentRepo := NewAgentRepo(db)

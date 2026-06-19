@@ -290,10 +290,47 @@ func (r *LifecycleRepo) FindExecutionByIdempotencyKey(ctx context.Context, key s
 		return nil, sql.ErrNoRows
 	}
 	row := r.db.QueryRowContext(ctx, `
-        SELECT `+execCols+`
-        FROM lifecycle_executions
-        WHERE idempotency_key = ?`, key)
+	        SELECT `+execCols+`
+	        FROM lifecycle_executions
+	        WHERE idempotency_key = ?`, key)
 	return scanExecution(row)
+}
+
+func (r *LifecycleRepo) HasNewerTaskRun(ctx context.Context, taskID, taskRunID string) (bool, error) {
+	if taskID == "" || taskRunID == "" {
+		return false, nil
+	}
+	var newer int
+	if err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM lifecycle_executions newer
+			WHERE newer.task_id = ?
+			  AND newer.task_run_id != ''
+			  AND newer.task_run_id != ?
+			  AND (
+				newer.started_at > COALESCE((
+					SELECT MIN(current.started_at)
+					FROM lifecycle_executions current
+					WHERE current.task_id = ? AND current.task_run_id = ?
+				), '0001-01-01')
+				OR (
+					newer.started_at = COALESCE((
+						SELECT MIN(current.started_at)
+						FROM lifecycle_executions current
+						WHERE current.task_id = ? AND current.task_run_id = ?
+					), '0001-01-01')
+					AND newer.rowid > COALESCE((
+						SELECT MIN(current.rowid)
+						FROM lifecycle_executions current
+						WHERE current.task_id = ? AND current.task_run_id = ?
+					), 0)
+				)
+			  )
+		)`, taskID, taskRunID, taskID, taskRunID, taskID, taskRunID, taskID, taskRunID).Scan(&newer); err != nil {
+		return false, fmt.Errorf("checking newer lifecycle task run: %w", err)
+	}
+	return newer != 0, nil
 }
 
 // UpdateExecution applies the terminal status, output, and timing.

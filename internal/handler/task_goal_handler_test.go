@@ -9,6 +9,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -216,6 +217,46 @@ func TestGoalAgentSendToTaskQueuesWhenGoalStillActive(t *testing.T) {
 	}
 	if len(pending) != 1 || pending[0].Content != "Continue because goal remains unmet" || pending[0].Source != models.TaskOriginSystemAgent || pending[0].OriginAgent != models.AgentSystemKindGoal {
 		t.Fatalf("active goal continuation pending = %+v", pending)
+	}
+}
+
+func TestLifecycleSendToTaskRejectsStaleTaskRunContinuation(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := &models.Task{ProjectID: project.ID, Title: "Stale continuation", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "prompt", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	tc.handler.lifecycleRepo = repository.NewLifecycleRepo(tc.db)
+	lifecycleAgentRepo := repository.NewAgentRepo(tc.db)
+	lifecycleAgent := &models.Agent{Name: "Lifecycle Agent", Model: "inherit", Enabled: true}
+	if err := lifecycleAgentRepo.Create(ctx, lifecycleAgent); err != nil {
+		t.Fatalf("create lifecycle agent: %v", err)
+	}
+	older := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: "run-old", AgentID: lifecycleAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "manage_dynamic_loop", OutputContract: models.OutputContractActivitySummary, Status: models.LifecycleExecRunning}
+	if err := tc.handler.lifecycleRepo.CreateExecution(ctx, older); err != nil {
+		t.Fatalf("create older lifecycle execution: %v", err)
+	}
+	newer := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: "run-new", AgentID: lifecycleAgent.ID, When: models.LifecycleRouteTask, SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills, Status: models.LifecycleExecRunning}
+	if err := tc.handler.lifecycleRepo.CreateExecution(ctx, newer); err != nil {
+		t.Fatalf("create newer lifecycle execution: %v", err)
+	}
+
+	params := streamingResponseParams{TaskID: task.ID, ProjectID: project.ID, IsTaskFollowup: true, AgentDefinition: &models.Agent{Tools: []string{"send_to_task"}}}
+	handlers := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, "web")
+	staleCtx := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "hook-agent", Tools: []string{"send_to_task"}, TaskRunID: "run-old"})
+	out, err := handlers["send_to_task"](staleCtx, []byte(`{"task_id":"current","message":"Duplicate continuation"}`))
+	if err == nil || !strings.Contains(err.Error(), "stale lifecycle task run") {
+		t.Fatalf("expected stale lifecycle continuation to be rejected, out=%q err=%v", out, err)
+	}
+	pending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("stale lifecycle continuation queued pending inputs: %+v", pending)
 	}
 }
 
