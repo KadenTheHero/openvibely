@@ -157,7 +157,7 @@ func TestCreateTaskPullRequest_CommitsDirtyWorktreeWithDiffSummaryMessage(t *tes
 		t.Fatalf("expected clean repo after PR prep commit, got %q", status)
 	}
 	subject := runGit(t, repoDir, "log", "-1", "--pretty=%s")
-	if subject != "add analytics template" {
+	if subject != "Add analytics template" {
 		t.Fatalf("expected diff-derived PR prep commit subject, got %q", subject)
 	}
 	if strings.Contains(subject, "Task updates") || strings.Contains(subject, "Create PR") {

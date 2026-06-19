@@ -878,7 +878,7 @@ func TestBuildWorktreeCommitMessage_DiffSummaryBeatsUnrelatedContext(t *testing.
 		DiffSummary: "render model usage breakdown on analytics page",
 	})
 
-	if message != "render model usage breakdown on analytics page" {
+	if message != "Render model usage breakdown on analytics page" {
 		t.Fatalf("expected semantic diff summary, got: %q", message)
 	}
 	if strings.Contains(message, "worker") || strings.Contains(message, "follow") {
@@ -905,7 +905,7 @@ func TestBuildWorktreeCommitMessage_FallsBackToPathSummaryWithoutDiffSummary(t *
 		Summary:    "fix worker dispatch when queued runs are waiting",
 	})
 
-	if message != "add worker" {
+	if message != "Add worker" {
 		t.Fatalf("expected deterministic diff fallback instead of stored context, got: %q", message)
 	}
 	if strings.Contains(message, "queued") || strings.Contains(message, "Execution phase") || strings.Contains(message, "task turn") || strings.Contains(message, "Changed files") || strings.Contains(message, "fix(") || strings.HasPrefix(message, "chore:") || strings.HasPrefix(message, "docs:") || strings.Contains(message, "\n") {
@@ -928,7 +928,7 @@ func TestBuildWorktreeCommitMessage_LaterExecutionFromDiff(t *testing.T) {
 		TurnIntent: "Update analytics dashboard copy",
 	})
 
-	if message != "add worktree service tests" {
+	if message != "Add worktree service tests" {
 		t.Fatalf("expected later execution subject from changed test file, got: %q", message)
 	}
 	if strings.Contains(message, "analytics") || strings.Contains(message, "Execution phase") || strings.Contains(message, "task turn") || strings.Contains(message, "follow-up") || strings.Contains(message, "Followup") || strings.Contains(message, "\n") {
@@ -955,14 +955,14 @@ func TestSummarizeWorktreeCommitDiff_UsesActualDiffHunks(t *testing.T) {
 		TurnIntent: "Fix worker dispatch",
 	})
 
-	if summary != "document serve command usage" {
+	if summary != "Document serve command usage" {
 		t.Fatalf("expected cleaned LLM diff summary, got %q", summary)
 	}
 	if mock.CallCount() != 1 {
 		t.Fatalf("expected one LLM call, got %d", mock.CallCount())
 	}
 	prompt := mock.LastCall().Prompt
-	for _, want := range []string{"Actual diff facts and hunks:", "README.md", "+## Usage", "+Run `openvibely serve`.", "Supporting context, only if it agrees with the diff:"} {
+	for _, want := range []string{"Use an imperative, capitalized subject", "Actual diff facts and hunks:", "README.md", "+## Usage", "+Run `openvibely serve`.", "Supporting context, only if it agrees with the diff:"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("expected prompt to contain %q, got:\n%s", want, prompt)
 		}
@@ -986,13 +986,13 @@ func TestSummarizeWorktreeCommitDiff_DoesNotReadUntrackedSymlinkTargets(t *testi
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	svc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
-	mock := &testutil.MockLLMCaller{Response: "add safe symlink placeholder"}
+	mock := &testutil.MockLLMCaller{Response: "Add safe symlink placeholder"}
 	svc.SetLLMCaller(mock)
 	agent := models.LLMConfig{Provider: models.ProviderTest, Model: "test-model", Name: "Test Agent"}
 
 	summary := svc.SummarizeWorktreeCommitDiff(context.Background(), repoDir, agent, WorktreeCommitMessageContext{})
 
-	if summary != "add safe symlink placeholder" {
+	if summary != "Add safe symlink placeholder" {
 		t.Fatalf("expected cleaned model summary, got %q", summary)
 	}
 	if mock.CallCount() != 1 {
@@ -1038,7 +1038,7 @@ func TestSummarizeWorktreeCommitDiff_ReturnsEmptyWhenModelUnavailable(t *testing
 		t.Fatalf("expected empty summary when model call is unavailable, got %q", summary)
 	}
 	message := BuildWorktreeCommitMessage(repoDir, WorktreeCommitMessageContext{DiffSummary: summary})
-	if message != "update README.md" {
+	if message != "Update README.md" {
 		t.Fatalf("expected deterministic fallback after empty LLM summary, got %q", message)
 	}
 }
@@ -1054,7 +1054,7 @@ func TestBuildWorktreeCommitMessage_UntrackedNestedFileSummary(t *testing.T) {
 
 	message := BuildWorktreeCommitMessage(repoDir, WorktreeCommitMessageContext{})
 
-	if message != "add analytics template" {
+	if message != "Add analytics template" {
 		t.Fatalf("unexpected subject: %q", strings.Split(message, "\n")[0])
 	}
 	if strings.Contains(message, "Changed files") || strings.Contains(message, "\n") || strings.HasPrefix(message, "chore:") {
@@ -1072,7 +1072,7 @@ func TestBuildWorktreeCommitMessage_SkipsStatusMarkerSummary(t *testing.T) {
 		Summary: "[STATUS: SUCCESS]",
 	})
 
-	if message != "add app" {
+	if message != "Add app" {
 		t.Fatalf("unexpected subject: %q", strings.Split(message, "\n")[0])
 	}
 	if strings.Contains(message, "STATUS") {
@@ -1085,14 +1085,24 @@ func TestBuildWorktreeCommitMessage_StripsConventionalPrefixFromDiffSummary(t *t
 		DiffSummary: "fix(worktree): generate useful commit messages",
 	})
 
-	if message != "generate useful commit messages" {
+	if message != "Generate useful commit messages" {
 		t.Fatalf("unexpected subject: %q", message)
+	}
+}
+
+func TestBuildWorktreeCommitMessage_CapitalizesUnicodeDiffSummary(t *testing.T) {
+	message := BuildWorktreeCommitMessage("", WorktreeCommitMessageContext{
+		DiffSummary: "überarbeiten analytics usage",
+	})
+
+	if message != "Überarbeiten analytics usage" {
+		t.Fatalf("unexpected unicode-capitalized subject: %q", message)
 	}
 }
 
 func TestBuildWorktreeCommitMessage_EmptyNoSummaryFallback(t *testing.T) {
 	message := BuildWorktreeCommitMessage("", WorktreeCommitMessageContext{})
-	if message != "update changes" {
+	if message != "Update changes" {
 		t.Fatalf("unexpected fallback message: %q", message)
 	}
 	if strings.Contains(message, "Execution phase") || strings.Contains(message, "task turn") || strings.Contains(message, "follow-up") || strings.Contains(message, "Followup") {
@@ -1102,7 +1112,7 @@ func TestBuildWorktreeCommitMessage_EmptyNoSummaryFallback(t *testing.T) {
 
 func TestBuildWorktreeCommitMessage_LaterExecutionNoSummaryFallback(t *testing.T) {
 	message := BuildWorktreeCommitMessage("", WorktreeCommitMessageContext{Phase: WorktreeCommitPhaseFollowup})
-	if message != "refine changes" {
+	if message != "Refine changes" {
 		t.Fatalf("unexpected later-execution fallback message: %q", message)
 	}
 	if strings.Contains(message, "Execution phase") || strings.Contains(message, "task turn") || strings.Contains(message, "follow-up") || strings.Contains(message, "Followup") {

@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
@@ -754,7 +756,7 @@ func cleanCommitSubject(value string) string {
 	if value == "" {
 		return ""
 	}
-	return lowercaseInitial(value)
+	return uppercaseInitial(value)
 }
 
 func isCommitSubjectBoilerplate(value string) bool {
@@ -772,11 +774,15 @@ func isCommitSubjectBoilerplate(value string) bool {
 		strings.HasPrefix(lower, "status needs_followup")
 }
 
-func lowercaseInitial(value string) string {
+func uppercaseInitial(value string) string {
 	if value == "" {
 		return ""
 	}
-	return strings.ToLower(value[:1]) + value[1:]
+	first, size := utf8.DecodeRuneInString(value)
+	if first == utf8.RuneError && size == 0 {
+		return value
+	}
+	return string(unicode.ToUpper(first)) + value[size:]
 }
 
 func truncateCommitSubject(value string) string {
@@ -795,11 +801,11 @@ func truncateCommitSubject(value string) string {
 func fallbackCommitSummary(phase WorktreeCommitPhase) string {
 	switch phase {
 	case WorktreeCommitPhaseFollowup:
-		return "refine changes"
+		return "Refine changes"
 	case WorktreeCommitPhaseMerge:
-		return "prepare changes for merge"
+		return "Prepare changes for merge"
 	default:
-		return "update changes"
+		return "Update changes"
 	}
 }
 
@@ -827,13 +833,13 @@ func summarizeCommitChanges(changes []worktreeCommitChange, diffSummaries []stri
 }
 
 func commitChangeVerb(changes []worktreeCommitChange) string {
-	verb := "update"
+	verb := "Update"
 	for _, change := range changes {
 		if strings.HasPrefix(change.Status, "A") || strings.HasPrefix(change.Status, "??") {
-			return "add"
+			return "Add"
 		}
 		if strings.HasPrefix(change.Status, "D") {
-			verb = "remove"
+			verb = "Remove"
 		}
 	}
 	return verb

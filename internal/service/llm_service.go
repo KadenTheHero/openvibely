@@ -944,6 +944,7 @@ func buildWorktreeCommitSummaryPrompt(diffContext string, commitCtx WorktreeComm
 	b.WriteString("Write one concise git commit subject for these worktree changes.\n\n")
 	b.WriteString("Rules:\n")
 	b.WriteString("- Describe what actually changed in the diff, not which files were edited.\n")
+	b.WriteString("- Use an imperative, capitalized subject, for example: Add analytics chart.\n")
 	b.WriteString("- Use plain language with no conventional prefix such as feat:, fix:, chore:, docs:, or test:.\n")
 	b.WriteString("- Do not mention tasks, task turns, follow-ups, lifecycle phases, worktrees, or file lists unless that is literally the product code being changed.\n")
 	b.WriteString("- Return only the subject line, max 72 characters.\n")
