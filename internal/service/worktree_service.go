@@ -1635,47 +1635,57 @@ func GetWorktreeDiff(repoDir string, branchName string, targetBranch string) str
 	return string(out)
 }
 
-// GetWorktreeDiffWithUncommitted returns the combined diff of committed branch changes
-// plus any uncommitted changes in the worktree working directory. This provides a
-// real-time view of all changes without needing to auto-commit during execution.
+// GetWorktreeDiffWithUncommitted returns the current net diff between the target
+// branch and the worktree working tree. This includes committed branch changes,
+// staged changes, unstaged tracked changes, and synthetic diffs for untracked
+// files without rendering the same tracked path once for the committed branch
+// state and again for the uncommitted follow-up state.
 func GetWorktreeDiffWithUncommitted(repoDir string, branchName string, targetBranch string, worktreePath string) string {
-	// Get committed branch diff
 	committedDiff := GetWorktreeDiff(repoDir, branchName, targetBranch)
 
-	if worktreePath == "" {
+	if worktreePath == "" || targetBranch == "" {
 		return committedDiff
 	}
 
-	// Capture uncommitted changes in the worktree (staged + unstaged + untracked)
-	uncommittedDiff := captureWorktreeUncommitted(worktreePath)
+	trackedDiff, trackedDiffOK := captureWorktreeDiffAgainstTarget(worktreePath, targetBranch)
+	if !trackedDiffOK {
+		trackedDiff = committedDiff
+	}
+	untrackedDiff := captureWorktreeUntracked(worktreePath)
 
-	if uncommittedDiff == "" {
-		return committedDiff
+	if trackedDiff == "" {
+		return untrackedDiff
 	}
-	if committedDiff == "" {
-		return uncommittedDiff
+	if untrackedDiff == "" {
+		return trackedDiff
 	}
-	return committedDiff + "\n" + uncommittedDiff
+	return trackedDiff + "\n" + untrackedDiff
 }
 
-// captureWorktreeUncommitted captures all uncommitted changes (staged, unstaged,
-// and untracked files) in a worktree directory as a unified diff.
-func captureWorktreeUncommitted(worktreePath string) string {
-	if worktreePath == "" {
-		return ""
+// captureWorktreeDiffAgainstTarget captures the net tracked-file diff between a
+// target branch and a worktree's current working tree, including staged and
+// unstaged tracked changes.
+func captureWorktreeDiffAgainstTarget(worktreePath, targetBranch string) (string, bool) {
+	if worktreePath == "" || targetBranch == "" {
+		return "", false
 	}
-
-	// git diff HEAD captures staged + unstaged changes
-	cmd := exec.Command("git", "diff", "HEAD")
+	cmd := exec.Command("git", "diff", targetBranch)
 	cmd.Dir = worktreePath
 	out, err := cmd.Output()
 	if err != nil {
+		return "", false
+	}
+	return string(out), true
+}
+
+// captureWorktreeUntracked captures untracked files in a worktree directory as
+// synthetic unified diffs because git diff does not include them.
+func captureWorktreeUntracked(worktreePath string) string {
+	if worktreePath == "" {
 		return ""
 	}
 
-	result := string(out)
-
-	// Also capture untracked files
+	var result strings.Builder
 	untrackedCmd := exec.Command("git", "ls-files", "--others", "--exclude-standard")
 	untrackedCmd.Dir = worktreePath
 	untrackedOut, _ := untrackedCmd.Output()
@@ -1689,13 +1699,13 @@ func captureWorktreeUncommitted(worktreePath string) string {
 				}
 				fileDiff := generateNewFileDiffForWorktree(worktreePath, f)
 				if fileDiff != "" {
-					result += fileDiff
+					result.WriteString(fileDiff)
 				}
 			}
 		}
 	}
 
-	return result
+	return result.String()
 }
 
 // generateNewFileDiffForWorktree creates a unified diff for a new (untracked) file.

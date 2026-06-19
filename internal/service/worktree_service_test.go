@@ -3329,6 +3329,9 @@ func TestGetWorktreeDiffWithUncommitted(t *testing.T) {
 	}
 
 	// Test 2: Committed changes only
+	if err := os.WriteFile(filepath.Join(wtPath, "README.md"), []byte("committed update\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(wtPath, "committed.txt"), []byte("committed content\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -3354,7 +3357,8 @@ func TestGetWorktreeDiffWithUncommitted(t *testing.T) {
 		t.Error("expected uncommitted (untracked) file to appear in diff")
 	}
 
-	// Test 4: Modified tracked file (uncommitted) should appear
+	// Test 4: Modified tracked file (uncommitted) should appear as one net diff
+	// for the path, not one committed diff block plus one follow-up/uncommitted block.
 	if err := os.WriteFile(filepath.Join(wtPath, "committed.txt"), []byte("modified content\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -3363,8 +3367,24 @@ func TestGetWorktreeDiffWithUncommitted(t *testing.T) {
 	if !strings.Contains(diff, "modified content") {
 		t.Error("expected uncommitted modification to appear in diff")
 	}
+	if count := strings.Count(diff, "diff --git a/committed.txt b/committed.txt"); count != 1 {
+		t.Fatalf("expected one combined diff block for committed.txt, got %d:\n%s", count, diff)
+	}
+	if strings.Contains(diff, "+committed content\n") {
+		t.Errorf("expected stale intermediate committed content to be collapsed from combined diff, got:\n%s", diff)
+	}
 
-	// Test 5: Without worktree path, only committed changes shown
+	// Test 5: Reverting a committed tracked file back to the target tree should
+	// not fall back to the stale committed branch diff.
+	if err := os.WriteFile(filepath.Join(wtPath, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	diff = GetWorktreeDiffWithUncommitted(repoDir, branchName, mainBranch, wtPath)
+	if strings.Contains(diff, "README.md") {
+		t.Errorf("expected reverted tracked file to disappear from live net diff, got:\n%s", diff)
+	}
+
+	// Test 6: Without worktree path, only committed changes shown
 	diff = GetWorktreeDiffWithUncommitted(repoDir, branchName, mainBranch, "")
 	if !strings.Contains(diff, "committed.txt") {
 		t.Error("expected committed changes with empty worktree path")

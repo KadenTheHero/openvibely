@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -537,5 +540,107 @@ new file mode 100644
 	// Second response should contain the new file
 	if !strings.Contains(body2, "file2.go") {
 		t.Error("second response should contain file2.go")
+	}
+}
+
+func TestGetTaskChanges_WorktreeFollowupReeditingCommittedFileRendersSingleDiffEntry(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v in %s failed: %v\n%s", args, dir, err, out)
+		}
+	}
+
+	repoDir := t.TempDir()
+	runGit(repoDir, "init", "-b", "main")
+	runGit(repoDir, "config", "user.email", "test@example.com")
+	runGit(repoDir, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoDir, "shared.txt"), []byte("base\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(repoDir, "add", "shared.txt")
+	runGit(repoDir, "commit", "-m", "initial")
+
+	project := &models.Project{Name: "followup diff project", RepoPath: repoDir}
+	if err := h.projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	agents, err := llmConfigRepo.List(ctx)
+	if err != nil || len(agents) == 0 {
+		t.Fatalf("expected seeded agent config, got %d err=%v", len(agents), err)
+	}
+
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Follow-up re-edits file",
+		Prompt:            "initial edit",
+		Category:          models.CategoryActive,
+		Status:            models.StatusRunning,
+		Priority:          2,
+		WorktreeBranch:    "task/followup-reedit",
+		MergeTargetBranch: "main",
+		MergeStatus:       models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	wtPath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+	runGit(repoDir, "worktree", "add", "-b", task.WorktreeBranch, wtPath, "main")
+	runGit(wtPath, "config", "user.email", "test@example.com")
+	runGit(wtPath, "config", "user.name", "Test User")
+	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, wtPath, task.WorktreeBranch); err != nil {
+		t.Fatalf("update worktree info: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(wtPath, "shared.txt"), []byte("first run\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CommitWorktreeChanges(wtPath, "first run edit"); err != nil {
+		t.Fatalf("commit first run change: %v", err)
+	}
+
+	initialExec := &models.Execution{TaskID: task.ID, AgentConfigID: agents[0].ID, Status: models.ExecCompleted, PromptSent: task.Prompt}
+	if err := h.execRepo.Create(ctx, initialExec); err != nil {
+		t.Fatalf("create initial execution: %v", err)
+	}
+	followupExec := &models.Execution{TaskID: task.ID, AgentConfigID: agents[0].ID, Status: models.ExecRunning, PromptSent: "follow-up edit same file", IsFollowup: true}
+	if err := h.execRepo.Create(ctx, followupExec); err != nil {
+		t.Fatalf("create followup execution: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(wtPath, "shared.txt"), []byte("followup running\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+	if err := h.GetTaskChanges(c); err != nil {
+		t.Fatalf("GetTaskChanges: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `data-file-count="1"`) {
+		t.Fatalf("expected one rendered diff file in response, got:\n%s", body)
+	}
+	if !strings.Contains(body, "followup running") {
+		t.Fatalf("expected latest in-progress follow-up content in changes response")
+	}
+	if strings.Contains(body, "first run") {
+		t.Fatalf("expected intermediate first-run content to be collapsed from active net diff")
 	}
 }
