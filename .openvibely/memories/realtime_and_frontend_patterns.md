@@ -3,8 +3,8 @@ name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
 updated: 2026-06-17
-source: after_complete_task
-source_id: b648ce2d3cb23ea713498049cc242e40
+source: consolidation
+source_id: memory_consolidation_2026_06_17
 confidence: high
 title: Realtime and Frontend Patterns
 ---

@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-06-12
-source: consolidation
-source_id: memory_consolidation_2026_06_12
+updated: 2026-06-19
+source: after_complete
+source_id: c9e1a52b817437cef5c95387ccc011e1
 confidence: high
 title: Worktree and Lineage
 ---
@@ -52,8 +52,9 @@ Merge and metadata direction:
 
 Cleanup and descendant direction:
 - Cleanup/recovery preserves conventional task worktree metadata when an original `.worktrees/task_<id>` worktree/branch still exists and contains task-side commits beyond the target.
-- Orphan cleanup treats `.worktrees/task_<id>` paths as in-use when that task ID still exists, even if `worktree_path` metadata is temporarily empty.
-- Locked worktrees are skipped rather than removed manually.
-- Cleanup does not delete branches with non-terminal descendants.
+- Orphan cleanup treats `.worktrees/task_<id>` and `.worktrees/task_<id>_followup_<timestamp>` paths as in-use when that task ID still exists, even if `worktree_path` metadata is temporarily empty.
+- Follow-up worktree branches use `task/<id_prefix>-followup-*`; cleanup must preserve active follow-up lineage and not make follow-up commits unreachable.
+- Locked, dirty, unmerged, or task/follow-up-lineage-referenced worktrees are skipped rather than removed manually.
+- Cleanup does not delete branches with non-terminal descendants or branches that are not conclusively merged into the target.
 
 Operational guidance belongs in `openvibely_worktree_merge_lineage_workflow`; manual rebase-only work remains covered by `openvibely_git_worktree_rebase_workflow`.

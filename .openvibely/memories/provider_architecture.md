@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-06-17
-source: after_complete
-source_id: 2450470fd473c7e5d14c6095ebfe9a7d
+updated: 2026-06-19
+source: consolidation
+source_id: memory_consolidation_2026_06_17
 confidence: high
 title: Provider Architecture
 ---
@@ -74,6 +74,7 @@ Provider-native tools and runtime tools:
 - Anthropic `tool_use` and `server_tool_use` blocks must always carry object-valued `input`; missing/empty/invalid values serialize as `{}` and streaming history preserves start-block input when no JSON delta arrives.
 - OpenAI Responses `function_call.arguments` is a JSON string and is normalized to `"{}"` when missing/empty before local tool execution and replay.
 - Runtime tools are request-scoped, provider-generic, and carried through the LLM service/provider adapter path. Tool definitions carry read/write access classification.
+- Anthropic `execBash` runtime-tool calls use a 10-minute default timeout only when no positive timeout is provided. Zero and negative requests normalize to 600 seconds; any positive explicit timeout, shorter or longer than 10 minutes, is preserved without a minimum or maximum cap.
 - Memory tool exposure is a request/tool-profile decision, not a global provider-adapter default. Route-phase Memory Curator recall stays sanitized/no-tools, while update/consolidation hooks may receive scoped memory file tools.
 
 Operational guidance belongs in skills such as `openvibely_provider_adapter_workflow` and `openvibely_chat_provider_test_workflow`.

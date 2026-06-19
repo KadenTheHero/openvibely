@@ -69,6 +69,7 @@ Tool calls (`read_file`, `edit_file`, `write_file`, `bash`) resolve **relative p
 
 - Task-thread follow-ups to terminal merged/stale tasks should not blindly merge the current target into an old historical task branch/worktree.
 - Historical original task branches are read-only lineage when already merged, conflict-aborted, or stale after squash/duplicate acceptance. Follow-up execution should continue from the current merge target on fresh `task/<id>-followup-*` lineage and skip startup sync for that first current-target setup.
+- Follow-up worktree paths use `.worktrees/task_<fullID>_followup_<timestamp>`; any task ID extraction or cleanup logic must map that path back to the original full task ID, not `<id>_followup_<timestamp>`.
 - Preserve active follow-up worktrees as current lineage. Dirty/local follow-up work must be reused. Clean read-only follow-up branches may be reused when they have no commits beyond the target.
 - If startup auto-merge is aborted in a clean preserved worktree that still has real unmerged task commits, keep conflict metadata and allow the follow-up run to start there with explicit context that the worktree may be behind/diverged.
 
@@ -115,6 +116,9 @@ git log --oneline main..HEAD
 - Cleanup policy supports after-merge, keep, and manual. Periodic cleanup removes merged worktrees and detects orphaned worktrees with no corresponding task.
 - Cleanup/recovery must not blank conventional task worktree metadata when an original `.worktrees/task_<id>` worktree/branch still exists and contains task-side commits beyond the target.
 - Treat `.worktrees/task_<id>` paths as in-use when that task ID still exists, even if `worktree_path` metadata is temporarily empty.
+- Treat `.worktrees/task_<id>_followup_<timestamp>` paths and `task/<id_prefix>-followup-*` branches as in-use lineage for the original task when that task still exists, even if current task worktree metadata is stale or blank.
+- Orphan cleanup must preflight candidates before filesystem removal: skip locked worktrees, dirty worktrees, worktrees whose HEAD is not merged into the merge target, branches referenced by any existing task metadata, follow-up branches for existing tasks, and branches with valid/non-terminal descendant lineage.
+- Delete a branch only after it is conclusively safe: the associated worktree was safe to remove, the branch is merged/reachable from the target, and it is not the only reference to valid task or follow-up commits. On ambiguity, preserve the worktree and branch.
 - Skip locked worktrees rather than removing them manually.
 - Chained tasks carry lineage through `base_branch`, `base_commit_sha`, and `lineage_depth`. Child tasks should inherit parent changes from the parent worktree branch HEAD or merge target/default branch HEAD as appropriate.
 - Cleanup should not delete branches with non-terminal descendants.
@@ -125,3 +129,4 @@ git log --oneline main..HEAD
 - Cover direct `?tab=changes`, lazy `/tasks/:id/changes`, merge POST, worktree panel, and legacy fragments when stale metadata recovery changes.
 - Cover dirty-but-non-overlapping target changes, Git overwrite refusals, true conflicts, squash failure cleanup, checked-out target fast-forward merge, and ref-only target updates.
 - Cover follow-up lineage for terminal merged/stale tasks, dirty follow-up reuse, clean follow-up staleness, startup sync conflict fallback, cleanup preserving conventional worktrees, and chained-task descendants.
+- For orphan cleanup changes, add focused service regressions for base path extraction, `.worktrees/task_<id>_followup_<timestamp>` extraction, actual `SetupFollowupWorktree` naming, stale metadata with an existing task preserving the follow-up worktree and branch, dirty candidate preservation, unmerged candidate preservation, and reachability of follow-up commits after cleanup.

@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-06-13
+updated: 2026-06-18
 source: consolidation
-source_id: memory_consolidation_2026_06_13
+source_id: memory_consolidation_2026_06_18
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -19,7 +19,7 @@ User interaction preferences:
 - Summaries should be concrete: cite specific files, symbols, handlers, tests, behavior affected, and verification performed when that context is available.
 - Broad reviews should actively look for mistakes, unintended diff, dead code, and verification gaps.
 - If repeated reviews find one issue at a time, the user may request audit-only mode: return a consolidated ranked problem list before making fixes. Edits during audit-only review turn it into implementation/fix work.
-- For Goal Agent behavior, preserve the model as the goal-completion evaluator. Prefer exposing actual task-thread execution evidence, including tool-use/tool-result history, through normal context over goal-objective keyword parsing, audit-specific prompt guards, deterministic completion logic, or separate judgment-shaped fact injection; do not inject prompt bias for a specific goal wording unless the user explicitly approves that design.
+- For Goal Agent behavior, preserve the generic model-evaluator design and avoid deterministic or objective-keyword completion logic; detailed implementation boundaries live in `agent_lifecycle_and_skills.md`.
 - When multiple findings are variants of one bug class, fix or audit the whole analogous class instead of narrowly addressing one instance.
 - Draft reusable skills that the user has not approved for publication should stay local/ignored by default. If the user wants in-app testing before release, keep the skill indexed and ensure the package body exists in the checkout the app loads; do not remove the index as a hiding mechanism.
 

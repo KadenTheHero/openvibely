@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-06-17
+updated: 2026-06-18
 source: consolidation
-source_id: memory_consolidation_2026_06_15
+source_id: memory_consolidation_2026_06_18
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -55,9 +55,8 @@ Goal and Loop Agent facts:
 - Goal Agent evaluation runs as a protected generic `after_complete` lifecycle evaluator, not a deterministic checkpoint. Its authority comes from protected `system_kind=goal` identity and explicit runtime tool grants.
 - Goal Agent after-complete evaluation is detached from the user-visible task response and reloads/publishes current goal state after evaluation.
 - Goal Agent after-complete evaluation runs on normal lifecycle hook input and task-thread `conversation_transcript`; lifecycle hooks must stay generic because they support other agents.
-- Goal Agent must remain a generic model evaluator. Avoid goal-objective keyword parsing, audit-specific guard blocks, deterministic completion logic, prompt bias keyed to specific goal wording, Goal-Agent-specific lifecycle input fields, transcript patching, raw-output replacement, `diff_output` injection, or separate judgment-shaped facts such as `evaluated_execution` unless explicitly redesigned.
-- A Goal Agent audit/read-only misclassification was resolved with a prompt-only fix after confirming ordinary transcript evidence already contained edit/action statements and changed-file summaries. Earlier experiments that patched `conversation_transcript` with raw execution output or injected/preserved `diff_output` were reverted as unnecessary; preserve the generic transcript-evidence approach.
-- Goal Agent `evaluate_task_goal` prompt guidance now explicitly tells the model to read concrete transcript evidence rather than only the assistant's final completion claim. Explicit task-agent statements about actions taken, files changed, commands run, validation performed, or remaining issues are evidence to reconcile with the stored goal; if a goal requires that some action did not happen, assistant text saying the action happened is evidence that condition is not proven by that turn. Keep this guidance generic rather than audit/read-only keyword hardcoding.
+- Goal Agent must remain a generic model evaluator. Preserve the generic transcript-evidence approach rather than goal-objective keyword parsing, audit-specific prompt guards, deterministic completion logic, prompt bias for specific goal wording, Goal-Agent-specific lifecycle input fields, transcript patching, raw-output replacement, `diff_output` injection, or separate judgment-shaped facts such as `evaluated_execution` unless explicitly redesigned.
+- Goal Agent `evaluate_task_goal` prompt guidance should direct the model to reconcile concrete transcript evidence with the stored goal, not rely only on the assistant's final completion claim. Task-agent statements about actions taken, files changed, commands run, validation performed, or remaining issues are relevant evidence; keep this guidance generic rather than audit/read-only hardcoding.
 - Goal runtime tool IDs such as `get_task_goal`, `send_to_task`, `mark_task_goal_achieved`, and `report_task_goal_blocked` are part of the agent tool catalog/UI so grants survive saves.
 - Dynamic task-loop wakeups use the protected Loop Agent after-complete hook. Its `schedule_task_wakeup` runtime tool is lifecycle-only and should not be exposed to ordinary task agents by default.
 - Loop Agent wakeups are task-thread continuations enqueued through durable `thread_inputs`, not direct worker submissions or separate worker tasks.
