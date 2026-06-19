@@ -769,6 +769,9 @@ func isCommitSubjectBoilerplate(value string) bool {
 		strings.HasPrefix(lower, "using tool") ||
 		strings.HasPrefix(lower, "tool ") ||
 		strings.HasPrefix(lower, "create_task") ||
+		strings.HasPrefix(lower, "changed files:") ||
+		strings.HasPrefix(lower, "files changed:") ||
+		strings.HasPrefix(lower, "modified files:") ||
 		strings.HasPrefix(lower, "status failed") ||
 		strings.HasPrefix(lower, "status success") ||
 		strings.HasPrefix(lower, "status needs_followup")

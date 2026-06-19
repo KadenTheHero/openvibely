@@ -1100,6 +1100,19 @@ func TestBuildWorktreeCommitMessage_CapitalizesUnicodeDiffSummary(t *testing.T) 
 	}
 }
 
+func TestBuildWorktreeCommitMessage_SkipsLLMBodyAndFileListBoilerplate(t *testing.T) {
+	message := BuildWorktreeCommitMessage("", WorktreeCommitMessageContext{
+		DiffSummary: "docs: document analytics usage\n\nChanged files:\n- web/templates/pages/analytics.templ\n- internal/handler/analytics_handler.go",
+	})
+
+	if message != "Document analytics usage" {
+		t.Fatalf("expected capitalized subject without conventional prefix or body, got %q", message)
+	}
+	if strings.Contains(message, "docs:") || strings.Contains(message, "Changed files") || strings.Contains(message, "analytics.templ") || strings.Contains(message, "\n") {
+		t.Fatalf("did not expect conventional prefix, file list, or body in subject: %q", message)
+	}
+}
+
 func TestBuildWorktreeCommitMessage_EmptyNoSummaryFallback(t *testing.T) {
 	message := BuildWorktreeCommitMessage("", WorktreeCommitMessageContext{})
 	if message != "Update changes" {
