@@ -103,12 +103,12 @@ func editFileTool() ToolDefinition {
 func bashTool() ToolDefinition {
 	return ToolDefinition{
 		Name:        "bash",
-		Description: "Execute a bash command and return its stdout and stderr. The command runs in the working directory. Use this for running tests, builds, git commands, and other shell operations. Commands have a default timeout of 120 seconds.",
+		Description: "Execute a bash command and return its stdout and stderr. The command runs in the working directory. Use this for running tests, builds, git commands, and other shell operations. Commands have a default/minimum timeout of 600 seconds.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"command": {"type": "string", "description": "The bash command to execute."},
-				"timeout": {"type": "integer", "description": "Timeout in seconds. Default: 120, Max: 600"}
+				"timeout": {"type": "integer", "description": "Timeout in seconds. Default/minimum: 600. Larger explicit values are allowed."}
 			},
 			"required": ["command"]
 		}`),
@@ -448,6 +448,15 @@ func normalizeLineForMatch(s string) string {
 	return b.String()
 }
 
+const minExecBashTimeoutSeconds = 600
+
+func normalizeExecBashTimeout(seconds int) int {
+	if seconds < minExecBashTimeoutSeconds {
+		return minExecBashTimeoutSeconds
+	}
+	return seconds
+}
+
 func execBash(ctx context.Context, workDir string, input json.RawMessage) (string, error) {
 	var params struct {
 		Command string `json:"command"`
@@ -459,12 +468,7 @@ func execBash(ctx context.Context, workDir string, input json.RawMessage) (strin
 	if params.Command == "" {
 		return "", fmt.Errorf("command is required")
 	}
-	if params.Timeout <= 0 {
-		params.Timeout = 120
-	}
-	if params.Timeout > 600 {
-		params.Timeout = 600
-	}
+	params.Timeout = normalizeExecBashTimeout(params.Timeout)
 
 	timeout := time.Duration(params.Timeout) * time.Second
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)

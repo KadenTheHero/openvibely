@@ -239,6 +239,28 @@ func TestExecEditFile(t *testing.T) {
 	})
 }
 
+func TestNormalizeExecBashTimeout(t *testing.T) {
+	tests := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{name: "default zero", in: 0, want: minExecBashTimeoutSeconds},
+		{name: "negative", in: -1, want: minExecBashTimeoutSeconds},
+		{name: "below minimum", in: minExecBashTimeoutSeconds - 1, want: minExecBashTimeoutSeconds},
+		{name: "exact minimum", in: minExecBashTimeoutSeconds, want: minExecBashTimeoutSeconds},
+		{name: "above minimum", in: minExecBashTimeoutSeconds + 1, want: minExecBashTimeoutSeconds + 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeExecBashTimeout(tt.in); got != tt.want {
+				t.Fatalf("normalizeExecBashTimeout(%d) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExecBash(t *testing.T) {
 	dir := t.TempDir()
 
@@ -273,17 +295,6 @@ func TestExecBash(t *testing.T) {
 		}
 		if !strings.Contains(out, "exit") {
 			t.Errorf("expected exit code info, got: %s", out)
-		}
-	})
-
-	t.Run("timeout", func(t *testing.T) {
-		input, _ := json.Marshal(map[string]interface{}{
-			"command": "sleep 10",
-			"timeout": 1,
-		})
-		_, err := ExecuteTool(context.Background(), dir, "bash", input)
-		if err == nil {
-			t.Error("expected timeout error")
 		}
 	})
 
