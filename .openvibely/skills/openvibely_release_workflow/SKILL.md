@@ -321,7 +321,7 @@ Before publishing, verify the docs changes are included in the release branch/ta
 
 These are preserved from v0.1.0 and should appear in every release's notes unless resolved:
 
-1. **Linux desktop** — GTK/WebKit dependencies prevent cross-compilation from macOS. Linux server artifacts are included; desktop artifacts are not. Build natively on Linux with `libgtk-4-dev`, `libwebkitgtk-6.0-dev`, etc. (see `ci.yaml`).
+1. **Linux desktop** — GTK/WebKit dependencies prevent cross-compilation from macOS. Linux server artifacts are included; desktop artifacts are not. Build natively on Linux with `libgtk-4-dev`, `libwebkitgtk-6.0-dev`, etc.
 2. **Windows desktop-cli** — Artifact is an executable zip, not an installer. Requires `mingw-w64` cross-compiler for CGO-enabled Wails build; skipped if unavailable.
 3. **Docker / VPS storage** — Mount `/data` as a persistent volume; do not rely on the container filesystem for database or repos.
 
