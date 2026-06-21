@@ -442,6 +442,25 @@ func TestChannelsPagePasswordToggleButtonStaysFixedOnActive(t *testing.T) {
 		t.Fatal("expected password visibility toggle onclick handler")
 	}
 
+	for _, want := range []string{
+		`id="webhook_secret_display"`,
+		`type="password"`,
+		`readonly`,
+		`autocomplete="off"`,
+		`onclick="togglePasswordVisibility('webhook_secret_display', this)"`,
+		`aria-label="Toggle secret visibility"`,
+		`aria-pressed="false"`,
+		`button.setAttribute('aria-pressed', willReveal ? 'true' : 'false')`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected webhook secret input pattern to contain %q", want)
+		}
+	}
+
+	if strings.Contains(body, `onclick="togglePasswordVisibility('webhook_secret_display', this)" tabindex="-1"`) {
+		t.Fatal("expected webhook secret reveal toggle to remain keyboard reachable")
+	}
+
 	if !strings.Contains(body, `class="eye-open`) || !strings.Contains(body, `class="eye-closed`) {
 		t.Fatal("expected both eye icons for show/hide token toggle")
 	}

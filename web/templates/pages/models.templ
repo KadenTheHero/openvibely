@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -426,29 +427,23 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 									<span id="reasoning_effort_help" class="label-text-alt opacity-70">Controls provider reasoning/thinking effort for supported models.</span>
 								</label>
 							</div>
-						<div id="api_key_field" class="form-control mb-3">						<label class="label"><span class="label-text">API Key</span></label>
-						<div class="relative">
-							<input type="password" id="model_api_key" name="api_key" class="input input-bordered pr-10" placeholder="sk-ant-... (leave empty to keep existing)" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/>
-							<button
-								type="button"
-								class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2"
-								onclick="togglePasswordVisibility('model_api_key', this)"
-								tabindex="-1"
-								aria-label="Toggle API key visibility"
-							>
-								<svg class="eye-open h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-								</svg>
-								<svg class="eye-closed h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
-								</svg>
-							</button>
-						</div>
-					</div>
-					<!-- Connection method selector for Anthropic OAuth (CLI option removed) -->
-					<div id="auth_method_field" class="form-control mb-3 hidden">
-						<label class="label"><span class="label-text">Connection Method</span></label>
+						<div id="api_key_field" class="form-control mb-3">
+							<label class="label"><span class="label-text">API Key</span></label>
+							@components.SecretInput(components.SecretInputConfig{
+								ID:           "model_api_key",
+								Name:         "api_key",
+								Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+								Placeholder:  "sk-ant-...",
+								AutoComplete: "off",
+								OnInput:      "scheduleAutoDiscoverOpenAICompatibleModels()",
+								AriaLabel:    "Toggle API key visibility",
+							})
+							<label class="label">
+								<span id="model_api_key_help" class="label-text-alt opacity-70">API keys are hidden by default. When editing, leave empty to keep the saved key.</span>
+							</label>
+							</div>
+						<!-- Connection method selector for Anthropic OAuth (CLI option removed) -->
+						<div id="auth_method_field" class="form-control mb-3 hidden">						<label class="label"><span class="label-text">Connection Method</span></label>
 						<select name="auth_method" id="model_auth_method" class="select select-bordered" onchange="toggleSubscriptionMethodFields()">
 							<option value="oauth">API (OAuth via web)</option>
 						</select>
@@ -605,9 +600,11 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 		</dialog>
 
 		<style>
-			/* Prevent password toggle button from moving on click */
-			.password-toggle-btn:active {
-				transform: translate(0.25rem, -50%) !important;
+			/* Keep password toggle button fixed inside input across press/focus states */
+			.password-toggle-btn:active,
+			.password-toggle-btn:focus,
+			.password-toggle-btn:focus-visible {
+				transform: translate(0, -50%) !important;
 			}
 		</style>
 
@@ -639,18 +636,14 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 
 					function togglePasswordVisibility(inputId, button) {
 					const input = document.getElementById(inputId);
+					if (!input || !button) return;
 					const eyeOpen = button.querySelector('.eye-open');
 					const eyeClosed = button.querySelector('.eye-closed');
-					
-					if (input.type === 'password') {
-						input.type = 'text';
-						eyeOpen.classList.add('hidden');
-						eyeClosed.classList.remove('hidden');
-					} else {
-						input.type = 'password';
-						eyeOpen.classList.remove('hidden');
-						eyeClosed.classList.add('hidden');
-					}
+					const willReveal = input.type === 'password';
+					input.type = willReveal ? 'text' : 'password';
+					if (eyeOpen) eyeOpen.classList.toggle('hidden', willReveal);
+					if (eyeClosed) eyeClosed.classList.toggle('hidden', !willReveal);
+					button.setAttribute('aria-pressed', willReveal ? 'true' : 'false');
 				}
 
 				function submitOAuthManualComplete() {

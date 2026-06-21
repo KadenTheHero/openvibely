@@ -954,6 +954,44 @@ func TestHandler_ListModels_IncludesToastModalStackingHooks(t *testing.T) {
 	}
 }
 
+func TestHandler_ListModels_APIKeyUsesSecretInputPattern(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	req := httptest.NewRequest(http.MethodGet, "/models", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	for _, want := range []string{
+		`id="model_api_key"`,
+		`type="password"`,
+		`name="api_key"`,
+		`autocomplete="off"`,
+		`class="input input-bordered w-full pr-10 font-mono text-xs"`,
+		`onclick="togglePasswordVisibility('model_api_key', this)"`,
+		`aria-label="Toggle API key visibility"`,
+		`aria-pressed="false"`,
+		`id="model_api_key_help"`,
+		`When editing, leave empty to keep the saved key.`,
+		`document.getElementById('model_api_key').placeholder = '(leave empty to keep existing)'`,
+		`button.setAttribute('aria-pressed', willReveal ? 'true' : 'false')`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected models API key secret input markup/script to contain %q", want)
+		}
+	}
+	if strings.Contains(body, `id="model_api_key" name="api_key" class="input input-bordered"`) {
+		t.Fatal("expected models API key field to stop rendering as a plain text-style input")
+	}
+	if strings.Contains(body, `onclick="togglePasswordVisibility('model_api_key', this)" tabindex="-1"`) {
+		t.Fatal("expected API key reveal toggle to remain keyboard reachable")
+	}
+	if strings.Contains(body, `data-model-api-key`) || strings.Contains(body, `value={ agent.APIKey }`) {
+		t.Fatal("expected models dialog not to expose existing saved API key values")
+	}
+}
+
 func TestHandler_SetDefaultModel(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
