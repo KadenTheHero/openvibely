@@ -7,6 +7,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/agentskills"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -64,6 +65,23 @@ func recordSkillAnalyticsEvent(ctx context.Context, repo *repository.SkillAnalyt
 	if err := repo.RecordEvent(ctx, &event); err != nil {
 		applog.Infof("[skill-analytics] record event failed handle=%s type=%s: %v", event.SkillHandle, event.EventType, err)
 	}
+}
+
+func (w *WorkerService) recordLifecycleHookSkillSelected(ctx context.Context, hook models.AgentLifecycleHook, input lifecycle.HookInput, exec models.LifecycleExecution) {
+	if w == nil || w.skillAnalyticsRepo == nil || strings.TrimSpace(hook.SkillKey) == "" {
+		return
+	}
+	recordSkillAnalyticsEvent(ctx, w.skillAnalyticsRepo, models.SkillAnalyticsEvent{
+		ProjectID:   strings.TrimSpace(input.ProjectID),
+		TaskID:      strings.TrimSpace(input.TaskID),
+		ThreadID:    strings.TrimSpace(exec.ID),
+		AgentID:     strings.TrimSpace(hook.AgentID),
+		SkillScope:  models.SkillScopeAgentOwned,
+		SkillHandle: strings.TrimSpace(hook.SkillKey),
+		EventType:   models.SkillEventSelected,
+		Source:      models.SkillEventSourceLifecycleHook,
+		Surface:     models.SkillSurfaceLifecycleHook,
+	})
 }
 
 func (w *WorkerService) recordSelectedSkillEvents(ctx context.Context, task models.Task, catalog *agentskills.Catalog, handles []string, provenance agentskills.SkillSelectionProvenance, turn lifecycleTurnContext) {

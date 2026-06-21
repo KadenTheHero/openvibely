@@ -93,12 +93,15 @@ type EffectiveMode struct {
 // hook executions, which prevents recursion (see runbook).
 type HookInputCustomizer func(ctx context.Context, hook models.AgentLifecycleHook, input HookInput) HookInput
 
+type HookExecutionStartedObserver func(ctx context.Context, hook models.AgentLifecycleHook, input HookInput, exec models.LifecycleExecution)
+
 type Runner struct {
-	store           HookStore
-	invoker         HookInvoker
-	resolver        SkillResolver
-	logger          *log.Logger
-	inputCustomizer HookInputCustomizer
+	store                    HookStore
+	invoker                  HookInvoker
+	resolver                 SkillResolver
+	logger                   *log.Logger
+	inputCustomizer          HookInputCustomizer
+	executionStartedObserver HookExecutionStartedObserver
 }
 
 // NewRunner constructs a runner. invoker, resolver, and modes may be nil for
@@ -117,6 +120,13 @@ func (r *Runner) SetInputCustomizer(customizer HookInputCustomizer) {
 		return
 	}
 	r.inputCustomizer = customizer
+}
+
+func (r *Runner) SetExecutionStartedObserver(observer HookExecutionStartedObserver) {
+	if r == nil {
+		return
+	}
+	r.executionStartedObserver = observer
 }
 
 // SlotResult bundles every hook output produced inside one `when` slot.
@@ -295,6 +305,15 @@ func (r *Runner) runHook(ctx context.Context, hook models.AgentLifecycleHook, in
 	}
 	if err := r.store.CreateExecution(ctx, &exec); err != nil {
 		r.logger.Printf("[lifecycle] create execution failed: %v", err)
+	} else if r.executionStartedObserver != nil {
+		func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					r.logger.Printf("[lifecycle] execution observer panic: %v", rec)
+				}
+			}()
+			r.executionStartedObserver(ctx, hook, hookInput, exec)
+		}()
 	}
 	var traceRecorder *TraceRecorder
 	if eventStore, ok := r.store.(ExecutionEventAppender); ok {

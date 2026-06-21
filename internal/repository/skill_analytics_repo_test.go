@@ -159,6 +159,55 @@ func TestSkillAnalyticsRepo_UnderusedSkillsIncludesEnabledSkillsWithNoEvents(t *
 	}
 }
 
+func TestSkillAnalyticsRepo_UnderusedSkillsCountsLifecycleHookSelectionsByProject(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewSkillAnalyticsRepo(db)
+	ctx := context.Background()
+	projectRepo := NewProjectRepo(db)
+	projectA := &models.Project{Name: "Lifecycle Repo Analytics A"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Lifecycle Repo Analytics B"}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+	agentRepo := NewAgentRepo(db)
+	agentA := &models.Agent{Name: "Goal Agent A", Key: "goal_agent_a", Model: "inherit", Enabled: true}
+	if err := agentRepo.Create(ctx, agentA); err != nil {
+		t.Fatalf("create agent A: %v", err)
+	}
+	agentB := &models.Agent{Name: "Goal Agent B", Key: "goal_agent_b", Model: "inherit", Enabled: true}
+	if err := agentRepo.Create(ctx, agentB); err != nil {
+		t.Fatalf("create agent B: %v", err)
+	}
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	eventA := skillEvent(projectA.ID, "lifecycle-exec-a", agentA.ID, models.SkillScopeAgentOwned, "evaluate_task_goal", models.SkillEventSelected, models.SkillEventSourceLifecycleHook, now)
+	eventA.Surface = models.SkillSurfaceLifecycleHook
+	eventB := skillEvent(projectB.ID, "lifecycle-exec-b", agentB.ID, models.SkillScopeAgentOwned, "evaluate_task_goal", models.SkillEventSelected, models.SkillEventSourceLifecycleHook, now.Add(time.Minute))
+	eventB.Surface = models.SkillSurfaceLifecycleHook
+	recordSkillAnalyticsEvents(t, repo, eventA, eventB)
+	enabled := []EnabledSkillInfo{{Handle: "evaluate_task_goal", Scope: models.SkillScopeAgentOwned, Enabled: true}}
+
+	underusedA, err := repo.GetUnderusedSkills(ctx, SkillAnalyticsFilter{ProjectID: projectA.ID}, enabled)
+	if err != nil {
+		t.Fatalf("GetUnderusedSkills project A: %v", err)
+	}
+	metricA := findUnderusedSkill(underusedA, "evaluate_task_goal")
+	if metricA == nil || metricA.ActivityCount != 1 || metricA.SelectedCount != 1 || metricA.LastActivity == nil || !metricA.LastActivity.Equal(now) {
+		t.Fatalf("project A metric = %+v", metricA)
+	}
+
+	underusedB, err := repo.GetUnderusedSkills(ctx, SkillAnalyticsFilter{ProjectID: projectB.ID}, enabled)
+	if err != nil {
+		t.Fatalf("GetUnderusedSkills project B: %v", err)
+	}
+	metricB := findUnderusedSkill(underusedB, "evaluate_task_goal")
+	if metricB == nil || metricB.ActivityCount != 1 || metricB.SelectedCount != 1 || metricB.LastActivity == nil || !metricB.LastActivity.Equal(now.Add(time.Minute)) {
+		t.Fatalf("project B metric = %+v", metricB)
+	}
+}
+
 func defaultProjectID(t *testing.T, db interface {
 	QueryRow(query string, args ...any) *sql.Row
 }) string {

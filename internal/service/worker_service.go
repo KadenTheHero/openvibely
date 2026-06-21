@@ -76,6 +76,7 @@ func (w *WorkerService) SetLifecycleRunner(r *lifecycle.Runner) {
 	w.lifecycleRunner = r
 	if r != nil {
 		r.SetInputCustomizer(w.lifecycleHookInput)
+		r.SetExecutionStartedObserver(w.recordLifecycleHookSkillSelected)
 	}
 }
 

@@ -537,6 +537,149 @@ func TestPrepareLifecycleTurn_OrdinaryTaskWithActiveGoalRunsGoalAgentAfterComple
 	}
 }
 
+func TestPrepareLifecycleTurn_RecordsLifecycleHookSkillAnalyticsForRouteHooks(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	skillRepo := repository.NewSkillAnalyticsRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
+	skillCuratorAgent := &models.Agent{Name: "Skill Curator Test", Key: "skill_curator_test", Model: "inherit", Enabled: true}
+	if err := agentRepo.Create(ctx, skillCuratorAgent); err != nil {
+		t.Fatalf("create skill curator agent: %v", err)
+	}
+	memoryCuratorAgent := &models.Agent{Name: "Memory Curator Test", Key: "memory_curator_test", Model: "inherit", Enabled: true}
+	if err := agentRepo.Create(ctx, memoryCuratorAgent); err != nil {
+		t.Fatalf("create memory curator agent: %v", err)
+	}
+	projectA := &models.Project{Name: "Lifecycle Analytics A"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Lifecycle Analytics B"}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+	taskA := models.Task{ProjectID: projectA.ID, Title: "Route analytics A", Prompt: "work", Category: models.CategoryActive, Status: models.StatusPending}
+	if err := taskRepo.Create(ctx, &taskA); err != nil {
+		t.Fatalf("create task A: %v", err)
+	}
+	taskB := models.Task{ProjectID: projectB.ID, Title: "Route analytics B", Prompt: "work", Category: models.CategoryActive, Status: models.StatusPending}
+	if err := taskRepo.Create(ctx, &taskB); err != nil {
+		t.Fatalf("create task B: %v", err)
+	}
+
+	store := &routeHookStore{hooks: []models.AgentLifecycleHook{
+		{ID: "route", AgentID: skillCuratorAgent.ID, When: models.LifecycleRouteTask, SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills, Blocking: true, Enabled: true},
+		{ID: "recall", AgentID: memoryCuratorAgent.ID, When: models.LifecycleRouteTask, SkillKey: "recall_memory", OutputContract: models.OutputContractSelectedMemories, Blocking: true, Enabled: true},
+	}}
+	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(_ context.Context, hook models.AgentLifecycleHook, _ lifecycle.HookInput) (json.RawMessage, error) {
+		switch hook.SkillKey {
+		case "route_task":
+			return json.RawMessage(`{"skills":[],"confidence":0.1,"reason":"test"}`), nil
+		case "recall_memory":
+			return json.RawMessage(`{"memories":[],"confidence":0.1,"reason":"test"}`), nil
+		default:
+			return nil, fmt.Errorf("unexpected hook %s", hook.SkillKey)
+		}
+	}), nil)
+
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetSkillAnalyticsRepo(skillRepo)
+	worker.SetLifecycleRunner(runner)
+	worker.PrepareLifecycleTurn(ctx, taskA)
+	worker.PrepareLifecycleTurn(ctx, taskB)
+
+	var routeCount, recallCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM skill_analytics_events WHERE project_id = ? AND task_id = ? AND skill_handle = 'route_task' AND event_type = 'selected' AND source = 'lifecycle_hook' AND surface = 'lifecycle_hook' AND skill_scope = 'agent_owned' AND agent_id = ?`, projectA.ID, taskA.ID, skillCuratorAgent.ID).Scan(&routeCount); err != nil {
+		t.Fatalf("count route analytics: %v", err)
+	}
+	if routeCount != 1 {
+		t.Fatalf("project A route_task selected events = %d, want 1", routeCount)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM skill_analytics_events WHERE project_id = ? AND task_id = ? AND skill_handle = 'recall_memory' AND event_type = 'selected' AND source = 'lifecycle_hook' AND surface = 'lifecycle_hook' AND skill_scope = 'agent_owned' AND agent_id = ?`, projectA.ID, taskA.ID, memoryCuratorAgent.ID).Scan(&recallCount); err != nil {
+		t.Fatalf("count recall analytics: %v", err)
+	}
+	if recallCount != 1 {
+		t.Fatalf("project A recall_memory selected events = %d, want 1", recallCount)
+	}
+
+	underusedA, err := skillRepo.GetUnderusedSkills(ctx, repository.SkillAnalyticsFilter{ProjectID: projectA.ID}, []repository.EnabledSkillInfo{{Handle: "route_task", Scope: models.SkillScopeAgentOwned, Enabled: true}, {Handle: "recall_memory", Scope: models.SkillScopeAgentOwned, Enabled: true}})
+	if err != nil {
+		t.Fatalf("GetUnderusedSkills project A: %v", err)
+	}
+	for _, handle := range []string{"route_task", "recall_memory"} {
+		metric := findLifecycleTurnUnderusedSkill(underusedA, handle)
+		if metric == nil || metric.ActivityCount != 1 || metric.LastActivity == nil {
+			t.Fatalf("project A %s underused metric = %+v, want activity 1 with last activity", handle, metric)
+		}
+	}
+
+	underusedB, err := skillRepo.GetUnderusedSkills(ctx, repository.SkillAnalyticsFilter{ProjectID: projectB.ID}, []repository.EnabledSkillInfo{{Handle: "route_task", Scope: models.SkillScopeAgentOwned, Enabled: true}})
+	if err != nil {
+		t.Fatalf("GetUnderusedSkills project B: %v", err)
+	}
+	metricB := findLifecycleTurnUnderusedSkill(underusedB, "route_task")
+	if metricB == nil || metricB.ActivityCount != 1 || metricB.LastActivity == nil {
+		t.Fatalf("project B route_task metric = %+v, want only project B activity", metricB)
+	}
+}
+
+func TestPrepareLifecycleTurn_RecordsLifecycleHookSkillAnalyticsForAfterCompleteHooks(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	skillRepo := repository.NewSkillAnalyticsRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
+	skillCuratorAgent := &models.Agent{Name: "Skill Curator After Test", Key: "skill_curator_after_test", Model: "inherit", Enabled: true}
+	if err := agentRepo.Create(ctx, skillCuratorAgent); err != nil {
+		t.Fatalf("create skill curator agent: %v", err)
+	}
+	project := &models.Project{Name: "Lifecycle After Analytics"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := models.Task{ProjectID: project.ID, Title: "After analytics", Prompt: "work", Category: models.CategoryActive, Status: models.StatusPending}
+	if err := taskRepo.Create(ctx, &task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	done := make(chan struct{}, 1)
+	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{ID: "observe", AgentID: skillCuratorAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "observe_task_for_learning", OutputContract: models.OutputContractLearningSummary, Blocking: true, Enabled: true}}}
+	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(_ context.Context, hook models.AgentLifecycleHook, _ lifecycle.HookInput) (json.RawMessage, error) {
+		done <- struct{}{}
+		return json.RawMessage(`{"summary":"No durable learning to save.","nothing_to_save":true}`), nil
+	}), nil)
+
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetSkillAnalyticsRepo(skillRepo)
+	worker.SetLifecycleRunner(runner)
+	turn := worker.PrepareLifecycleTurn(ctx, task)
+	turn.AfterComplete(nil, llmcontracts.ChatContext{})
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for after_complete hook")
+	}
+
+	underused, err := skillRepo.GetUnderusedSkills(ctx, repository.SkillAnalyticsFilter{ProjectID: project.ID}, []repository.EnabledSkillInfo{{Handle: "observe_task_for_learning", Scope: models.SkillScopeAgentOwned, Enabled: true}})
+	if err != nil {
+		t.Fatalf("GetUnderusedSkills: %v", err)
+	}
+	metric := findLifecycleTurnUnderusedSkill(underused, "observe_task_for_learning")
+	if metric == nil || metric.ActivityCount != 1 || metric.SelectedCount != 1 || metric.LastActivity == nil {
+		t.Fatalf("observe_task_for_learning metric = %+v, want selected activity", metric)
+	}
+	var threadID string
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(thread_id, '') FROM skill_analytics_events WHERE project_id = ? AND task_id = ? AND skill_handle = 'observe_task_for_learning'`, project.ID, task.ID).Scan(&threadID); err != nil {
+		t.Fatalf("load analytics thread id: %v", err)
+	}
+	if threadID == "" || !strings.HasPrefix(threadID, "exec-observe") {
+		t.Fatalf("thread_id = %q, want lifecycle execution id", threadID)
+	}
+}
+
 func TestPrepareLifecycleTurn_TaskRuntimeToolsExposeOnlySelectedSkillView(t *testing.T) {
 	root := t.TempDir()
 	writeLifecycleStandaloneSkill(t, root, "task_skill", "task skill body")
@@ -1725,4 +1868,13 @@ func containsHandle(handles []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func findLifecycleTurnUnderusedSkill(rows []models.UnderusedSkillMetric, handle string) *models.UnderusedSkillMetric {
+	for i := range rows {
+		if rows[i].SkillHandle == handle {
+			return &rows[i]
+		}
+	}
+	return nil
 }
