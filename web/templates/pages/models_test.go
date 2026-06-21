@@ -320,7 +320,7 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 	for _, want := range []string{
 		`<input type="hidden" id="model_provider_value" name="provider" value="anthropic"`,
 		`<select id="model_provider"`,
-		`oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`,
+		`oninput="syncModelAPIKeySubmitValue(); scheduleAutoDiscoverOpenAICompatibleModels()"`,
 		`onsubmit="normalizeModelFormBeforeSubmit()"`,
 		`<input type="hidden" id="model_openai_compatible_preset" name="preset_slug" value="custom"`,
 		"OpenAI-compatible presets auto-load available models when selected; Custom stays manual.",

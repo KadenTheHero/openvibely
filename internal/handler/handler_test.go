@@ -973,19 +973,28 @@ func TestHandler_ListModels_APIKeyUsesSecretInputPattern(t *testing.T) {
 	for _, want := range []string{
 		`id="model_api_key"`,
 		`type="password"`,
-		`name="api_key"`,
+		`id="model_api_key_submit" name="api_key" value=""`,
 		`autocomplete="off"`,
 		`class="input input-bordered w-full pr-10 font-mono text-xs"`,
 		`onclick="togglePasswordVisibility('model_api_key', this)"`,
 		`aria-label="Toggle API key visibility"`,
 		`aria-pressed="false"`,
 		`id="model_api_key_help"`,
+		`data-model-api-key="test-secret-api-key"`,
 		`data-model-has-api-key="true"`,
-		`var hasAPIKey = button.dataset.modelHasApiKey === 'true';`,
+		`var apiKey = button.dataset.modelApiKey || '';`,
+		`var hasAPIKey = apiKey !== '';`,
+		`form.dataset.originalApiKey = apiKey;`,
+		`document.getElementById('model_api_key').value = apiKey;`,
+		`syncModelAPIKeySubmitValue();`,
 		`setModelAPIKeyEditHelp(hasAPIKey);`,
-		`A saved API key exists for this model. The saved key is not shown; leave this field empty to keep it, or type a replacement.`,
+		`Saved API key is hidden by default. Click the eye to reveal or edit it.`,
 		`No API key is currently saved for this model. Type a key to save one, or leave empty to keep it blank.`,
-		`input.placeholder = hasAPIKey ? 'Type a new API key to replace the saved key' : 'Type an API key to save for this model'`,
+		`input.placeholder = hasAPIKey ? 'Saved API key' : 'Type an API key to save for this model'`,
+		`function syncModelAPIKeySubmitValue()`,
+		`if (form.dataset.mode === 'edit' && input.value === original)`,
+		`submit.value = '';`,
+		`submit.value = input.value;`,
 		`button.setAttribute('aria-pressed', willReveal ? 'true' : 'false')`,
 		`function resetSecretInputVisibility(inputId)`,
 		`resetSecretInputVisibility('model_api_key')`,
@@ -1000,13 +1009,12 @@ func TestHandler_ListModels_APIKeyUsesSecretInputPattern(t *testing.T) {
 	if strings.Contains(body, `onclick="togglePasswordVisibility('model_api_key', this)" tabindex="-1"`) {
 		t.Fatal("expected API key reveal toggle to remain keyboard reachable")
 	}
-	if !strings.Contains(body, `data-model-id="`+cfg.ID+`"`) || !strings.Contains(body, `data-model-has-api-key="true"`) {
-		t.Fatal("expected model cards to expose only a non-secret saved API key presence flag")
-	}
-	if strings.Contains(body, `data-model-api-key`) || strings.Contains(body, `value={ agent.APIKey }`) || strings.Contains(body, cfg.APIKey) {
-		t.Fatal("expected models dialog not to expose existing saved API key values")
-	}
-}
+		if !strings.Contains(body, `data-model-id="`+cfg.ID+`"`) || !strings.Contains(body, `data-model-api-key="`+cfg.APIKey+`"`) {
+			t.Fatal("expected model cards to expose the saved API key for masked edit-dialog reveal parity with channel secrets")
+		}
+		if strings.Contains(body, `value="`+cfg.APIKey+`"`) {
+			t.Fatal("expected saved model API key to be loaded into the edit dialog by script, not prefilled in the create/edit input on initial render")
+		}}
 
 func TestHandler_SetDefaultModel(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)

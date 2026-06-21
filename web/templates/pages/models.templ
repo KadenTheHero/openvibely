@@ -153,10 +153,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						data-model-reasoning-effort={ agent.ReasoningEffort }
 						data-model-temperature={ fmt.Sprintf("%f", agent.Temperature) }
 						data-model-is-default={ fmt.Sprintf("%t", agent.IsDefault) }
-							data-model-auth-method={ string(agent.AuthMethod) }
-							data-model-has-api-key={ fmt.Sprintf("%t", agent.APIKey != "") }
-							data-model-max-workers={ fmt.Sprintf("%d", agent.MaxWorkers) }
-						data-model-worker-timeout={ fmt.Sprintf("%d", agent.WorkerTimeout) }
+								data-model-auth-method={ string(agent.AuthMethod) }
+								data-model-api-key={ agent.APIKey }
+								data-model-has-api-key={ fmt.Sprintf("%t", agent.APIKey != "") }
+								data-model-max-workers={ fmt.Sprintf("%d", agent.MaxWorkers) }						data-model-worker-timeout={ fmt.Sprintf("%d", agent.WorkerTimeout) }
 						data-model-oauth-client-id={ agent.OAuthClientID }
 						data-model-oauth-client-secret={ maskedSecret(agent.OAuthClientSecret) }
 						data-model-oauth-authorize-url={ agent.OAuthAuthorizeURL }
@@ -430,16 +430,15 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							</div>
 						<div id="api_key_field" class="form-control mb-3">
 							<label class="label"><span class="label-text">API Key</span></label>
-							@components.SecretInput(components.SecretInputConfig{
-								ID:           "model_api_key",
-								Name:         "api_key",
-								Class:        "input input-bordered w-full pr-10 font-mono text-xs",
-								Placeholder:  "sk-ant-...",
-								AutoComplete: "off",
-								OnInput:      "scheduleAutoDiscoverOpenAICompatibleModels()",
-								AriaLabel:    "Toggle API key visibility",
-							})
-							<label class="label">
+								@components.SecretInput(components.SecretInputConfig{
+									ID:           "model_api_key",
+									Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+									Placeholder:  "sk-ant-...",
+									AutoComplete: "off",
+									OnInput:      "syncModelAPIKeySubmitValue(); scheduleAutoDiscoverOpenAICompatibleModels()",
+									AriaLabel:    "Toggle API key visibility",
+								})
+								<input type="hidden" id="model_api_key_submit" name="api_key" value=""/>							<label class="label">
 								<span id="model_api_key_help" class="label-text-alt opacity-70">API keys are hidden by default. When editing, leave empty to keep the saved key.</span>
 							</label>
 							</div>
@@ -660,19 +659,31 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							button.setAttribute('aria-pressed', 'false');
 						}
 
-						function setModelAPIKeyEditHelp(hasAPIKey) {
+						function syncModelAPIKeySubmitValue() {
+							const form = document.getElementById('model_form');
 							const input = document.getElementById('model_api_key');
-							const help = document.getElementById('model_api_key_help');
-							if (input) {
-								input.placeholder = hasAPIKey ? 'Type a new API key to replace the saved key' : 'Type an API key to save for this model';
+							const submit = document.getElementById('model_api_key_submit');
+							if (!form || !input || !submit) return;
+							const original = form.dataset.originalApiKey || '';
+							if (form.dataset.mode === 'edit' && input.value === original) {
+								submit.value = '';
+								return;
 							}
-							if (help) {
-								help.textContent = hasAPIKey
-									? 'A saved API key exists for this model. The saved key is not shown; leave this field empty to keep it, or type a replacement.'
-									: 'No API key is currently saved for this model. Type a key to save one, or leave empty to keep it blank.';
-							}
+							submit.value = input.value;
 						}
 
+							function setModelAPIKeyEditHelp(hasAPIKey) {
+								const input = document.getElementById('model_api_key');
+								const help = document.getElementById('model_api_key_help');
+								if (input) {
+									input.placeholder = hasAPIKey ? 'Saved API key' : 'Type an API key to save for this model';
+								}
+								if (help) {
+									help.textContent = hasAPIKey
+										? 'Saved API key is hidden by default. Click the eye to reveal or edit it.'
+										: 'No API key is currently saved for this model. Type a key to save one, or leave empty to keep it blank.';
+								}
+							}
 					function submitOAuthManualComplete() {
 					var input = document.getElementById('oauth_manual_callback_url');
 					if (!input) return;
@@ -1059,6 +1070,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 								} else if (status) {								status.textContent = 'Enter the model ID manually for local or custom endpoints.';
 								}						}
 						function normalizeModelFormBeforeSubmit() {
+							syncModelAPIKeySubmitValue();
 							var provider = document.getElementById('model_provider').value;
 							var providerValue = document.getElementById('model_provider_value');
 							if (isOpenAICompatibleProvider(provider)) {
@@ -1208,14 +1220,14 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 			function editModelFromData(button) {
 				var id = button.dataset.modelId;
 				var name = button.dataset.modelName;
-				var dbProvider = button.dataset.modelProvider;
-				var model = button.dataset.modelModel;
-				var reasoningEffort = button.dataset.modelReasoningEffort || '';
-				var temperature = parseFloat(button.dataset.modelTemperature);
-					var isDefault = button.dataset.modelIsDefault === 'true';
-					var hasAPIKey = button.dataset.modelHasApiKey === 'true';
-						var authMethod = button.dataset.modelAuthMethod || 'cli';
-					var modelMaxWorkers = parseInt(button.dataset.modelMaxWorkers) || 0;
+					var dbProvider = button.dataset.modelProvider;
+					var model = button.dataset.modelModel;
+					var reasoningEffort = button.dataset.modelReasoningEffort || '';
+					var temperature = parseFloat(button.dataset.modelTemperature);
+						var isDefault = button.dataset.modelIsDefault === 'true';
+						var apiKey = button.dataset.modelApiKey || '';
+						var hasAPIKey = apiKey !== '';
+							var authMethod = button.dataset.modelAuthMethod || 'cli';					var modelMaxWorkers = parseInt(button.dataset.modelMaxWorkers) || 0;
 					var workerTimeout = parseInt(button.dataset.modelWorkerTimeout) || 0;
 					var ollamaBaseUrl = button.dataset.modelOllamaBaseUrl || '';
 					var baseUrl = button.dataset.modelBaseUrl || '';
@@ -1260,14 +1272,15 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					form.action = _editUrl;
 					form.setAttribute('hx-post', _editUrl);
 					form.method = 'post';
-					form.dataset.mode = 'edit';					document.getElementById('model_name').value = name;				document.getElementById('model_provider').value = uiProvider;
+					form.dataset.mode = 'edit';
+					form.dataset.originalApiKey = apiKey;					document.getElementById('model_name').value = name;				document.getElementById('model_provider').value = uiProvider;
 				document.getElementById('model_anthropic_auth_type').value = anthropicAuthType;
 				document.getElementById('model_openai_auth_type').value = openaiAuthType;
-				document.getElementById('model_openai_connection_method').value = openaiConnectionMethod;
-				document.getElementById('model_api_key').value = '';
-				setModelAPIKeyEditHelp(hasAPIKey);
-				document.getElementById('model_api_key').required = false;
-				document.getElementById('model_temperature').value = temperature.toString();
+					document.getElementById('model_openai_connection_method').value = openaiConnectionMethod;
+					document.getElementById('model_api_key').value = apiKey;
+					syncModelAPIKeySubmitValue();
+					setModelAPIKeyEditHelp(hasAPIKey);
+					document.getElementById('model_api_key').required = false;				document.getElementById('model_temperature').value = temperature.toString();
 				document.getElementById('model_is_default').checked = isDefault;
 					document.getElementById('model_auth_method').value = authMethod;
 					document.getElementById('model_max_workers').value = modelMaxWorkers.toString();
@@ -1438,11 +1451,13 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					form.setAttribute('hx-post', _createUrl);
 					form.method = 'post';
 					form.dataset.mode = 'create';
+					form.dataset.originalApiKey = '';
 					document.getElementById('model_name').value = '';				document.getElementById('model_provider').value = 'anthropic';
 				document.getElementById('model_anthropic_auth_type').value = 'api_key';
 				document.getElementById('model_openai_auth_type').value = 'api_key';
 				document.getElementById('model_openai_connection_method').value = 'oauth';
 				document.getElementById('model_api_key').value = '';
+				document.getElementById('model_api_key_submit').value = '';
 				document.getElementById('model_api_key').placeholder = 'sk-ant-...';
 				document.getElementById('model_api_key_help').textContent = 'API keys are hidden by default.';
 				document.getElementById('model_api_key').required = true;
