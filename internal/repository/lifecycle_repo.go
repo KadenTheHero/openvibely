@@ -296,41 +296,66 @@ func (r *LifecycleRepo) FindExecutionByIdempotencyKey(ctx context.Context, key s
 	return scanExecution(row)
 }
 
-func (r *LifecycleRepo) HasNewerTaskRun(ctx context.Context, taskID, taskRunID string) (bool, error) {
+type LifecycleTaskRunFreshness struct {
+	Stale           bool
+	TaskID          string
+	SourceRunID     string
+	SourceStartedAt string
+	SourceRowID     int64
+	LatestRunID     string
+	LatestStartedAt string
+	LatestRowID     int64
+}
+
+func (r *LifecycleRepo) TaskRunFreshness(ctx context.Context, taskID, taskRunID string) (LifecycleTaskRunFreshness, error) {
+	detail := LifecycleTaskRunFreshness{TaskID: taskID, SourceRunID: taskRunID}
 	if taskID == "" || taskRunID == "" {
-		return false, nil
+		return detail, nil
 	}
-	var newer int
+	stale := 0
 	if err := r.db.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM lifecycle_executions newer
-			WHERE newer.task_id = ?
-			  AND newer.task_run_id != ''
-			  AND newer.task_run_id != ?
-			  AND (
-				newer.started_at > COALESCE((
-					SELECT MIN(current.started_at)
-					FROM lifecycle_executions current
-					WHERE current.task_id = ? AND current.task_run_id = ?
-				), '0001-01-01')
-				OR (
-					newer.started_at = COALESCE((
-						SELECT MIN(current.started_at)
-						FROM lifecycle_executions current
-						WHERE current.task_id = ? AND current.task_run_id = ?
-					), '0001-01-01')
-					AND newer.rowid > COALESCE((
-						SELECT MIN(current.rowid)
-						FROM lifecycle_executions current
-						WHERE current.task_id = ? AND current.task_run_id = ?
-					), 0)
-				)
-			  )
-		)`, taskID, taskRunID, taskID, taskRunID, taskID, taskRunID, taskID, taskRunID).Scan(&newer); err != nil {
-		return false, fmt.Errorf("checking newer lifecycle task run: %w", err)
+		WITH run_heads AS (
+			SELECT task_run_id, MIN(rowid) AS head_rowid
+			FROM lifecycle_executions
+			WHERE task_id = ? AND task_run_id != ''
+			GROUP BY task_run_id
+		), ordered AS (
+			SELECT h.task_run_id, e.started_at, h.head_rowid
+			FROM run_heads h
+			JOIN lifecycle_executions e ON e.rowid = h.head_rowid
+			ORDER BY e.started_at DESC, h.head_rowid DESC
+		), source AS (
+			SELECT task_run_id, started_at, head_rowid
+			FROM ordered
+			WHERE task_run_id = ?
+		), latest AS (
+			SELECT task_run_id, started_at, head_rowid
+			FROM ordered
+			LIMIT 1
+		)
+		SELECT
+			COALESCE((SELECT started_at FROM source), ''),
+			COALESCE((SELECT head_rowid FROM source), 0),
+			COALESCE((SELECT task_run_id FROM latest), ''),
+			COALESCE((SELECT started_at FROM latest), ''),
+			COALESCE((SELECT head_rowid FROM latest), 0),
+			CASE
+				WHEN COALESCE((SELECT head_rowid FROM source), 0) = 0 THEN 1
+				WHEN COALESCE((SELECT task_run_id FROM latest), '') != ? THEN 1
+				ELSE 0
+			END`, taskID, taskRunID, taskRunID).Scan(&detail.SourceStartedAt, &detail.SourceRowID, &detail.LatestRunID, &detail.LatestStartedAt, &detail.LatestRowID, &stale); err != nil {
+		return detail, fmt.Errorf("checking lifecycle task run freshness: %w", err)
 	}
-	return newer != 0, nil
+	detail.Stale = stale != 0
+	return detail, nil
+}
+
+func (r *LifecycleRepo) HasNewerTaskRun(ctx context.Context, taskID, taskRunID string) (bool, error) {
+	detail, err := r.TaskRunFreshness(ctx, taskID, taskRunID)
+	if err != nil {
+		return false, err
+	}
+	return detail.Stale, nil
 }
 
 // UpdateExecution applies the terminal status, output, and timing.

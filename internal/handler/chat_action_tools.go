@@ -853,15 +853,19 @@ func isGoalLifecycleHookAgent(ctx context.Context) bool {
 func (h *Handler) rejectStaleLifecycleSendToTask(ctx context.Context) error {
 	agent, ok := lifecycle.HookAgentFromContext(ctx)
 	sourceTaskID := strings.TrimSpace(agent.TaskID)
-	if !ok || sourceTaskID == "" || strings.TrimSpace(agent.TaskRunID) == "" || h.lifecycleRepo == nil {
+	sourceRunID := strings.TrimSpace(agent.TaskRunID)
+	if !ok || sourceTaskID == "" || sourceRunID == "" || h.lifecycleRepo == nil {
 		return nil
 	}
-	newer, err := h.lifecycleRepo.HasNewerTaskRun(ctx, sourceTaskID, agent.TaskRunID)
+	detail, err := h.lifecycleRepo.TaskRunFreshness(ctx, sourceTaskID, sourceRunID)
 	if err != nil {
 		return err
 	}
-	if newer {
-		return fmt.Errorf("stale lifecycle task run %s; continuation was not queued", agent.TaskRunID)
+	if detail.Stale {
+		applog.Infof("[handler] rejected lifecycle send_to_task as stale source_task=%s source_run=%s source_started_at=%s source_rowid=%d latest_run=%s latest_started_at=%s latest_rowid=%d",
+			sourceTaskID, sourceRunID, detail.SourceStartedAt, detail.SourceRowID, detail.LatestRunID, detail.LatestStartedAt, detail.LatestRowID)
+		return fmt.Errorf("stale lifecycle task run source_task=%s source_run=%s source_started_at=%s source_rowid=%d latest_run=%s latest_started_at=%s latest_rowid=%d; continuation was not queued",
+			sourceTaskID, sourceRunID, detail.SourceStartedAt, detail.SourceRowID, detail.LatestRunID, detail.LatestStartedAt, detail.LatestRowID)
 	}
 	return nil
 }

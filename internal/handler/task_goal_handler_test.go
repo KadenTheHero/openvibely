@@ -220,6 +220,54 @@ func TestGoalAgentSendToTaskQueuesWhenGoalStillActive(t *testing.T) {
 	}
 }
 
+func TestGoalAgentSendToTaskQueuesCurrentRunWhenOlderAfterCompleteRowsAreLate(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := &models.Task{ProjectID: project.ID, Title: "Current goal continuation", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "prompt", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if _, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "Audit-only completion required", service.GoalOptions{}); err != nil {
+		t.Fatalf("set goal: %v", err)
+	}
+	tc.handler.lifecycleRepo = repository.NewLifecycleRepo(tc.db)
+	lifecycleAgentRepo := repository.NewAgentRepo(tc.db)
+	goalAgent := &models.Agent{Name: "Goal Agent", Model: "inherit", Enabled: true, SystemKind: models.AgentSystemKindGoal}
+	if err := lifecycleAgentRepo.Create(ctx, goalAgent); err != nil {
+		t.Fatalf("create goal agent: %v", err)
+	}
+	createLifecycleExec := func(runID string, when models.LifecycleWhen, skill string) {
+		t.Helper()
+		exec := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: runID, AgentID: goalAgent.ID, When: when, SkillKey: skill, OutputContract: models.OutputContractActivitySummary, Status: models.LifecycleExecCompleted}
+		if err := tc.handler.lifecycleRepo.CreateExecution(ctx, exec); err != nil {
+			t.Fatalf("create lifecycle execution %s/%s: %v", runID, skill, err)
+		}
+	}
+	createLifecycleExec("run-old", models.LifecycleRouteTask, "route_task")
+	createLifecycleExec("run-current", models.LifecycleRouteTask, "route_task")
+	createLifecycleExec("run-old", models.LifecycleAfterComplete, "observe_task_for_learning")
+
+	params := streamingResponseParams{TaskID: task.ID, ProjectID: project.ID, IsTaskFollowup: true, AgentDefinition: &models.Agent{Tools: []string{"send_to_task"}}}
+	handlers := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, "web")
+	goalCtx := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: goalAgent.ID, SystemKind: models.AgentSystemKindGoal, TaskID: task.ID, TaskRunID: "run-current"})
+	out, err := handlers["send_to_task"](goalCtx, []byte(`{"task_id":"current","message":"Continue because audit found a material issue"}`))
+	if err != nil {
+		t.Fatalf("current goal continuation rejected: out=%q err=%v", out, err)
+	}
+	pending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected one queued continuation, got %+v", pending)
+	}
+	if pending[0].Content != "Continue because audit found a material issue" || pending[0].Source != models.TaskOriginSystemAgent || pending[0].OriginAgent != models.AgentSystemKindGoal {
+		t.Fatalf("queued continuation details = %+v", pending[0])
+	}
+}
+
 func TestLifecycleSendToTaskRejectsStaleTaskRunContinuation(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
@@ -250,6 +298,9 @@ func TestLifecycleSendToTaskRejectsStaleTaskRunContinuation(t *testing.T) {
 	out, err := handlers["send_to_task"](staleCtx, []byte(`{"task_id":"current","message":"Duplicate continuation"}`))
 	if err == nil || !strings.Contains(err.Error(), "stale lifecycle task run") {
 		t.Fatalf("expected stale lifecycle continuation to be rejected, out=%q err=%v", out, err)
+	}
+	if !strings.Contains(err.Error(), "source_task=") || !strings.Contains(err.Error(), "source_run=run-old") || !strings.Contains(err.Error(), "latest_run=run-new") {
+		t.Fatalf("stale lifecycle rejection missing diagnostic comparison details: %v", err)
 	}
 	pending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, task.ID)
 	if err != nil {
@@ -312,6 +363,64 @@ func TestLifecycleSendToTaskAllowsCrossTaskWhenDestinationHasNewerRuns(t *testin
 	}
 	if len(sourcePending) != 0 {
 		t.Fatalf("cross-task send queued on source task: %+v", sourcePending)
+	}
+}
+
+func TestGoalAgentSendToTaskRejectsNonActiveGoalStates(t *testing.T) {
+	for _, status := range []models.TaskGoalStatus{models.TaskGoalStatusAchieved, models.TaskGoalStatusPaused, models.TaskGoalStatusBlocked, models.TaskGoalStatusCleared, models.TaskGoalStatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			tc := NewTestContext(t)
+			ctx := context.Background()
+			project := tc.CreateProject().Build()
+			agent := tc.CreateLLMConfig().Build()
+			task := &models.Task{ProjectID: project.ID, Title: "Protected goal " + string(status), Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "prompt", Priority: 2, AgentID: &agent.ID}
+			if err := tc.taskRepo.Create(ctx, task); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+			goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "Keep protected", service.GoalOptions{})
+			if err != nil {
+				t.Fatalf("set goal: %v", err)
+			}
+			switch status {
+			case models.TaskGoalStatusAchieved:
+				if _, err := tc.handler.taskGoalSvc.MarkAchieved(ctx, task.ID, goal.GoalID, "done"); err != nil {
+					t.Fatalf("mark achieved: %v", err)
+				}
+			case models.TaskGoalStatusPaused:
+				if err := tc.handler.taskGoalSvc.PauseGoal(ctx, task.ID, "test"); err != nil {
+					t.Fatalf("pause goal: %v", err)
+				}
+			case models.TaskGoalStatusBlocked:
+				for i := 0; i < 3; i++ {
+					if _, err := tc.handler.taskGoalSvc.RecordBlockedReport(ctx, task.ID, goal.GoalID, "material_issue", "needs edits"); err != nil {
+						t.Fatalf("record blocked report %d: %v", i, err)
+					}
+				}
+			case models.TaskGoalStatusCleared:
+				if err := tc.handler.taskGoalSvc.ClearGoal(ctx, task.ID, "test"); err != nil {
+					t.Fatalf("clear goal: %v", err)
+				}
+			case models.TaskGoalStatusFailed:
+				if _, err := repository.NewTaskGoalRepo(tc.db).UpdateStatus(ctx, task.ID, goal.GoalID, models.TaskGoalStatusFailed, "failed", false); err != nil {
+					t.Fatalf("mark failed: %v", err)
+				}
+			}
+
+			params := streamingResponseParams{TaskID: task.ID, ProjectID: project.ID, IsTaskFollowup: true, AgentDefinition: &models.Agent{Tools: []string{"send_to_task"}}}
+			handlers := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, "web")
+			goalCtx := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "goal-hook", SystemKind: models.AgentSystemKindGoal, TaskID: task.ID, TaskRunID: "run-current"})
+			out, err := handlers["send_to_task"](goalCtx, []byte(`{"task_id":"current","message":"Do not restart protected goal"}`))
+			if err == nil || !strings.Contains(err.Error(), "task goal is not active") {
+				t.Fatalf("expected %s goal continuation to be rejected, out=%q err=%v", status, out, err)
+			}
+			pending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("list pending: %v", err)
+			}
+			if len(pending) != 0 {
+				t.Fatalf("%s goal continuation queued pending inputs: %+v", status, pending)
+			}
+		})
 	}
 }
 

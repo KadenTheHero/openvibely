@@ -257,6 +257,51 @@ func TestLifecycleRepo_ExecutionLifecycle(t *testing.T) {
 	}
 }
 
+func TestLifecycleRepo_TaskRunFreshnessUsesRunHeadNotLateHookRows(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Lifecycle Freshness", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	createExec := func(runID string, when models.LifecycleWhen, skill string) *models.LifecycleExecution {
+		t.Helper()
+		exec := &models.LifecycleExecution{TaskID: task.ID, TaskRunID: runID, AgentID: agent.ID, When: when, SkillKey: skill, OutputContract: models.OutputContractActivitySummary, Status: models.LifecycleExecCompleted}
+		if err := repo.CreateExecution(ctx, exec); err != nil {
+			t.Fatalf("create lifecycle execution %s/%s: %v", runID, skill, err)
+		}
+		return exec
+	}
+
+	oldHead := createExec("run-old", models.LifecycleRouteTask, "route_task")
+	currentHead := createExec("run-current", models.LifecycleRouteTask, "route_task")
+	lateOld := createExec("run-old", models.LifecycleAfterComplete, "observe_task_for_learning")
+
+	current, err := repo.TaskRunFreshness(ctx, task.ID, "run-current")
+	if err != nil {
+		t.Fatalf("current freshness: %v", err)
+	}
+	if current.Stale {
+		t.Fatalf("current latest run should be fresh despite late old hook row: %+v oldHead=%s currentHead=%s lateOld=%s", current, oldHead.ID, currentHead.ID, lateOld.ID)
+	}
+	if current.LatestRunID != "run-current" || current.SourceRunID != "run-current" || current.SourceRowID == 0 || current.LatestRowID == 0 {
+		t.Fatalf("current freshness details not populated correctly: %+v", current)
+	}
+
+	old, err := repo.TaskRunFreshness(ctx, task.ID, "run-old")
+	if err != nil {
+		t.Fatalf("old freshness: %v", err)
+	}
+	if !old.Stale || old.LatestRunID != "run-current" {
+		t.Fatalf("old run should be stale against current latest run, got %+v", old)
+	}
+}
+
 func TestLifecycleRepo_IdempotencyKeyLookup(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	agentRepo := NewAgentRepo(db)
