@@ -974,7 +974,7 @@ func TestHandler_ListModels_APIKeyUsesSecretInputPattern(t *testing.T) {
 		`aria-pressed="false"`,
 		`id="model_api_key_help"`,
 		`When editing, leave empty to keep the saved key.`,
-		`document.getElementById('model_api_key').placeholder = '(leave empty to keep existing)'`,
+		`document.getElementById('model_api_key').placeholder = 'Enter a new API key to replace the saved key'`,
 		`button.setAttribute('aria-pressed', willReveal ? 'true' : 'false')`,
 		`function resetSecretInputVisibility(inputId)`,
 		`resetSecretInputVisibility('model_api_key')`,
