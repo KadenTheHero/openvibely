@@ -437,6 +437,9 @@ func TestChannelsPagePasswordToggleButtonStaysFixedOnActive(t *testing.T) {
 	if !strings.Contains(body, "translate(0, -50%) !important") {
 		t.Fatal("expected password toggle active/focus transform to keep fixed position")
 	}
+	if !strings.Contains(body, `.password-toggle-btn.top-2:focus-visible`) || !strings.Contains(body, "translate(0, 0) !important") {
+		t.Fatal("expected textarea secret toggle focus transform to keep top-aligned position")
+	}
 
 	if !strings.Contains(body, `onclick="togglePasswordVisibility('channel_telegram_token', this)"`) {
 		t.Fatal("expected password visibility toggle onclick handler")
@@ -451,6 +454,14 @@ func TestChannelsPagePasswordToggleButtonStaysFixedOnActive(t *testing.T) {
 		`aria-label="Toggle secret visibility"`,
 		`aria-pressed="false"`,
 		`button.setAttribute('aria-pressed', willReveal ? 'true' : 'false')`,
+		`function resetSecretInputVisibility(inputId)`,
+		`resetSecretInputVisibility('channel_telegram_token')`,
+		`resetSecretInputVisibility('github_pat')`,
+		`resetSecretTextareaVisibility('github_app_private_key')`,
+		`resetSecretInputVisibility('slack_client_secret')`,
+		`resetSecretInputVisibility('slack_app_token')`,
+		`resetSecretInputVisibility('slack_bot_token')`,
+		`resetSecretInputVisibility('webhook_secret_display')`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected webhook secret input pattern to contain %q", want)

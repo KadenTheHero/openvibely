@@ -635,16 +635,29 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					}
 
 					function togglePasswordVisibility(inputId, button) {
-					const input = document.getElementById(inputId);
-					if (!input || !button) return;
-					const eyeOpen = button.querySelector('.eye-open');
-					const eyeClosed = button.querySelector('.eye-closed');
-					const willReveal = input.type === 'password';
-					input.type = willReveal ? 'text' : 'password';
-					if (eyeOpen) eyeOpen.classList.toggle('hidden', willReveal);
-					if (eyeClosed) eyeClosed.classList.toggle('hidden', !willReveal);
-					button.setAttribute('aria-pressed', willReveal ? 'true' : 'false');
-				}
+						const input = document.getElementById(inputId);
+						if (!input || !button) return;
+						const eyeOpen = button.querySelector('.eye-open');
+						const eyeClosed = button.querySelector('.eye-closed');
+						const willReveal = input.type === 'password';
+						input.type = willReveal ? 'text' : 'password';
+						if (eyeOpen) eyeOpen.classList.toggle('hidden', willReveal);
+						if (eyeClosed) eyeClosed.classList.toggle('hidden', !willReveal);
+						button.setAttribute('aria-pressed', willReveal ? 'true' : 'false');
+					}
+
+					function resetSecretInputVisibility(inputId) {
+						const input = document.getElementById(inputId);
+						if (!input) return;
+						input.type = 'password';
+						const button = document.querySelector("button[onclick=\"togglePasswordVisibility('" + inputId + "', this)\"]");
+						if (!button) return;
+						const eyeOpen = button.querySelector('.eye-open');
+						const eyeClosed = button.querySelector('.eye-closed');
+						if (eyeOpen) eyeOpen.classList.remove('hidden');
+						if (eyeClosed) eyeClosed.classList.add('hidden');
+						button.setAttribute('aria-pressed', 'false');
+					}
 
 				function submitOAuthManualComplete() {
 					var input = document.getElementById('oauth_manual_callback_url');
@@ -1253,6 +1266,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					document.getElementById('model_auto_start_tasks').checked = autoStartTasks;
 				document.getElementById('model_submit_btn').textContent = 'Save';
 				toggleProviderFields(model, reasoningEffort);
+				resetSecretInputVisibility('model_api_key');
 				new_model_modal.showModal();
 			}
 
@@ -1430,6 +1444,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					document.getElementById('model_auto_start_tasks').checked = false;
 				document.getElementById('model_submit_btn').textContent = 'Create';
 				toggleProviderFields('', '');
+				resetSecretInputVisibility('model_api_key');
 				new_model_modal.showModal();
 			}
 		</script>

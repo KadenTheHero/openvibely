@@ -551,31 +551,15 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						<label class="label">
 							<span class="label-text">Bot Token</span>
 						</label>
-						<div class="relative">
-							<input
-								type="password"
-								id="channel_telegram_token"
-								name="token"
-								class="input input-bordered w-full pr-10"
-								placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
-								required
-							/>
-							<button
-								type="button"
-								class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2"
-								onclick="togglePasswordVisibility('channel_telegram_token', this)"
-								tabindex="-1"
-								aria-label="Toggle token visibility"
-							>
-								<svg class="eye-open h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-								</svg>
-								<svg class="eye-closed h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
-								</svg>
-							</button>
-						</div>
+							@components.SecretInput(components.SecretInputConfig{
+								ID:           "channel_telegram_token",
+								Name:         "token",
+								Class:        "input input-bordered w-full pr-10",
+								Placeholder:  "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+								AutoComplete: "off",
+								AriaLabel:    "Toggle token visibility",
+								Required:     true,
+							})
 						<label class="label">
 							<span class="label-text-alt opacity-70">
 								Get your bot token from <a href="https://t.me/BotFather" target="_blank" class="link">BotFather</a>
@@ -686,31 +670,15 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						</div>
 						<div class="form-control mb-3">
 							<label class="label"><span class="label-text">GitHub Personal Access Token</span></label>
-							<div class="relative">
-								<input
-									type="password"
-									id="github_pat"
-									name="github_pat"
-									class="input input-bordered w-full pr-10 font-mono text-xs"
-									value={ githubPATValue }
-									placeholder={ githubPATPlaceholder(githubHasPAT) }
-								/>
-								<button
-									type="button"
-									class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2"
-									onclick="togglePasswordVisibility('github_pat', this)"
-									tabindex="-1"
-									aria-label="Toggle token visibility"
-								>
-									<svg class="eye-open h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-									</svg>
-									<svg class="eye-closed h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
-									</svg>
-								</button>
-							</div>
+								@components.SecretInput(components.SecretInputConfig{
+									ID:           "github_pat",
+									Name:         "github_pat",
+									Value:        githubPATValue,
+									Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+									Placeholder:  githubPATPlaceholder(githubHasPAT),
+									AutoComplete: "off",
+									AriaLabel:    "Toggle token visibility",
+								})
 						</div>
 					</div>
 
@@ -738,9 +706,9 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 								<button
 									type="button"
 									class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-2 h-8 min-h-0 px-2"
-									onclick="toggleSecretTextareaVisibility('github_app_private_key', this)"
-									tabindex="-1"
-									aria-label="Toggle private key visibility"
+										onclick="toggleSecretTextareaVisibility('github_app_private_key', this)"
+										aria-label="Toggle private key visibility"
+										aria-pressed="false"
 								>
 									<svg class="eye-open h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
@@ -784,59 +752,27 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					</div>
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">Client Secret</span></label>
-						<div class="relative">
-							<input
-								type="password"
-								id="slack_client_secret"
-								name="slack_client_secret"
-								class="input input-bordered w-full pr-10 font-mono text-xs"
-								value={ slackClientSecret }
-								placeholder={ slackSecretPlaceholder(slackHasClientSecret, "Client Secret") }
-							/>
-							<button
-								type="button"
-								class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2"
-								onclick="togglePasswordVisibility('slack_client_secret', this)"
-								tabindex="-1"
-								aria-label="Toggle client secret visibility"
-							>
-								<svg class="eye-open h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-								</svg>
-								<svg class="eye-closed h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
-								</svg>
-							</button>
-						</div>
+						@components.SecretInput(components.SecretInputConfig{
+							ID:           "slack_client_secret",
+							Name:         "slack_client_secret",
+							Value:        slackClientSecret,
+							Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+							Placeholder:  slackSecretPlaceholder(slackHasClientSecret, "Client Secret"),
+							AutoComplete: "off",
+							AriaLabel:    "Toggle client secret visibility",
+						})
 					</div>
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">App-Level Token (xapp-...)</span></label>
-						<div class="relative">
-							<input
-								type="password"
-								id="slack_app_token"
-								name="slack_app_token"
-								class="input input-bordered w-full pr-10 font-mono text-xs"
-								value={ slackAppToken }
-								placeholder={ slackSecretPlaceholder(slackHasAppToken, "App-Level Token") }
-							/>
-							<button
-								type="button"
-								class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2"
-								onclick="togglePasswordVisibility('slack_app_token', this)"
-								tabindex="-1"
-								aria-label="Toggle app token visibility"
-							>
-								<svg class="eye-open h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-								</svg>
-								<svg class="eye-closed h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
-								</svg>
-							</button>
-						</div>
+						@components.SecretInput(components.SecretInputConfig{
+							ID:           "slack_app_token",
+							Name:         "slack_app_token",
+							Value:        slackAppToken,
+							Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+							Placeholder:  slackSecretPlaceholder(slackHasAppToken, "App-Level Token"),
+							AutoComplete: "off",
+							AriaLabel:    "Toggle app token visibility",
+						})
 					</div>
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">Bot Token Source</span></label>
@@ -861,31 +797,15 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					</div>
 					<div id="slack_bot_token_override_section" class="form-control mb-3">
 						<label class="label"><span class="label-text">Bot Token Override (xoxb-...)</span></label>
-						<div class="relative">
-							<input
-								type="password"
-								id="slack_bot_token"
-								name="slack_bot_token"
-								class="input input-bordered w-full pr-10 font-mono text-xs"
-								value={ slackBotToken }
-								placeholder={ slackSecretPlaceholder(slackHasBotToken, "Bot Token") }
-							/>
-							<button
-								type="button"
-								class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2"
-								onclick="togglePasswordVisibility('slack_bot_token', this)"
-								tabindex="-1"
-								aria-label="Toggle bot token visibility"
-							>
-								<svg class="eye-open h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-								</svg>
-								<svg class="eye-closed h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
-								</svg>
-							</button>
-						</div>
+						@components.SecretInput(components.SecretInputConfig{
+							ID:           "slack_bot_token",
+							Name:         "slack_bot_token",
+							Value:        slackBotToken,
+							Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+							Placeholder:  slackSecretPlaceholder(slackHasBotToken, "Bot Token"),
+							AutoComplete: "off",
+							AriaLabel:    "Toggle bot token visibility",
+						})
 					</div>
 					if currentProjectID != "" {
 						<div class="divider"></div>
@@ -1040,6 +960,11 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 			.password-toggle-btn:focus-visible {
 				transform: translate(0, -50%) !important;
 			}
+			.password-toggle-btn.top-2:active,
+			.password-toggle-btn.top-2:focus,
+			.password-toggle-btn.top-2:focus-visible {
+				transform: translate(0, 0) !important;
+			}
 			.secret-textarea-masked {
 				-webkit-text-security: disc;
 			}
@@ -1193,6 +1118,19 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				button.setAttribute('aria-pressed', willReveal ? 'true' : 'false');
 			}
 
+			function resetSecretInputVisibility(inputId) {
+				const input = document.getElementById(inputId);
+				if (!input) return;
+				input.type = 'password';
+				const button = document.querySelector("button[onclick=\"togglePasswordVisibility('" + inputId + "', this)\"]");
+				if (!button) return;
+				const eyeOpen = button.querySelector('.eye-open');
+				const eyeClosed = button.querySelector('.eye-closed');
+				if (eyeOpen) eyeOpen.classList.remove('hidden');
+				if (eyeClosed) eyeClosed.classList.add('hidden');
+				button.setAttribute('aria-pressed', 'false');
+			}
+
 			function handleDropdownToggle(event) {
 				event.stopPropagation();
 				const dropdown = event.currentTarget.parentElement;
@@ -1226,11 +1164,26 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					textarea.classList.remove('secret-textarea-masked');
 					if (eyeOpen) eyeOpen.classList.remove('hidden');
 					if (eyeClosed) eyeClosed.classList.add('hidden');
+					button.setAttribute('aria-pressed', 'true');
 				} else {
 					textarea.classList.add('secret-textarea-masked');
 					if (eyeOpen) eyeOpen.classList.add('hidden');
 					if (eyeClosed) eyeClosed.classList.remove('hidden');
+					button.setAttribute('aria-pressed', 'false');
 				}
+			}
+
+			function resetSecretTextareaVisibility(textareaId) {
+				const textarea = document.getElementById(textareaId);
+				if (!textarea) return;
+				textarea.classList.add('secret-textarea-masked');
+				const button = document.querySelector("button[onclick=\"toggleSecretTextareaVisibility('" + textareaId + "', this)\"]");
+				if (!button) return;
+				const eyeOpen = button.querySelector('.eye-open');
+				const eyeClosed = button.querySelector('.eye-closed');
+				if (eyeOpen) eyeOpen.classList.add('hidden');
+				if (eyeClosed) eyeClosed.classList.remove('hidden');
+				button.setAttribute('aria-pressed', 'false');
 			}
 
 				function openWebhookCreateModal(event) {
@@ -1249,6 +1202,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					document.getElementById('webhook_default_priority').value = '2';
 					document.getElementById('webhook_url_display').textContent = '(Save first to generate URL)';
 					document.getElementById('webhook_secret_display').value = '';
+					resetSecretInputVisibility('webhook_secret_display');
 					var secretRow = document.getElementById('webhook_secret_row');
 					if (secretRow) secretRow.style.display = 'none';
 					var urlRow = document.getElementById('webhook_url_row');
@@ -1279,6 +1233,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						document.getElementById('webhook_system_instructions').value = card.getAttribute('data-webhook-system') || '';
 						document.getElementById('webhook_default_priority').value = card.getAttribute('data-webhook-default-priority') || '2';
 						document.getElementById('webhook_secret_display').value = card.getAttribute('data-webhook-secret') || '';
+						resetSecretInputVisibility('webhook_secret_display');
 						var token = card.getAttribute('data-webhook-token') || '';
 						document.getElementById('webhook_url_display').textContent = token ? (window.location.origin + '/webhooks/inbound/' + token) : '(Not available)';
 						
@@ -1402,6 +1357,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					const token = card.dataset.channelToken || '';
 					document.getElementById('channel_telegram_token').value = token;
 					document.getElementById('channel_modal_title').textContent = 'Configure Telegram Bot';
+					resetSecretInputVisibility('channel_telegram_token');
 					channel_modal.showModal();
 				} else if (type === 'github') {
 					openGitHubConfigModal();
@@ -1419,6 +1375,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				closeAllDropdownMenus();
 				document.getElementById('channel_telegram_token').value = '';
 				document.getElementById('channel_modal_title').textContent = 'Add Telegram Bot';
+				resetSecretInputVisibility('channel_telegram_token');
 				channel_modal.showModal();
 			}
 
@@ -1442,10 +1399,12 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				const modal = document.getElementById('github_config_modal');
 				if (!modal) return;
 				const modeSelect = document.getElementById('github_auth_mode');
-				if (modeSelect) {
-					toggleGitHubAuthMode(modeSelect.value);
-				}
-				modal.showModal();
+					if (modeSelect) {
+						toggleGitHubAuthMode(modeSelect.value);
+					}
+					resetSecretInputVisibility('github_pat');
+					resetSecretTextareaVisibility('github_app_private_key');
+					modal.showModal();
 			}
 
 			function closeGitHubConfigModal() {
@@ -1457,10 +1416,13 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				const modal = document.getElementById('slack_config_modal');
 				if (!modal) return;
 				const modeSelect = document.getElementById('slack_bot_token_mode');
-				if (modeSelect) {
-					toggleSlackBotTokenMode(modeSelect.value);
-				}
-				modal.showModal();
+					if (modeSelect) {
+						toggleSlackBotTokenMode(modeSelect.value);
+					}
+					resetSecretInputVisibility('slack_client_secret');
+					resetSecretInputVisibility('slack_app_token');
+					resetSecretInputVisibility('slack_bot_token');
+					modal.showModal();
 			}
 
 			function closeSlackConfigModal() {

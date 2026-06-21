@@ -976,6 +976,8 @@ func TestHandler_ListModels_APIKeyUsesSecretInputPattern(t *testing.T) {
 		`When editing, leave empty to keep the saved key.`,
 		`document.getElementById('model_api_key').placeholder = '(leave empty to keep existing)'`,
 		`button.setAttribute('aria-pressed', willReveal ? 'true' : 'false')`,
+		`function resetSecretInputVisibility(inputId)`,
+		`resetSecretInputVisibility('model_api_key')`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected models API key secret input markup/script to contain %q", want)
