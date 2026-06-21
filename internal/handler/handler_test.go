@@ -955,7 +955,14 @@ func TestHandler_ListModels_IncludesToastModalStackingHooks(t *testing.T) {
 }
 
 func TestHandler_ListModels_APIKeyUsesSecretInputPattern(t *testing.T) {
-	_, e, _ := setupTestHandler(t)
+	_, e, llmConfigRepo := setupTestHandler(t)
+	cfg := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Saved Key Agent"
+		a.Provider = models.ProviderAnthropic
+		a.AuthMethod = models.AuthMethodAPIKey
+		a.APIKey = "test-secret-api-key"
+		a.IsDefault = false
+	})
 	req := httptest.NewRequest(http.MethodGet, "/models", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -973,8 +980,12 @@ func TestHandler_ListModels_APIKeyUsesSecretInputPattern(t *testing.T) {
 		`aria-label="Toggle API key visibility"`,
 		`aria-pressed="false"`,
 		`id="model_api_key_help"`,
-		`When editing, leave empty to keep the saved key.`,
-		`document.getElementById('model_api_key').placeholder = 'Enter a new API key to replace the saved key'`,
+		`data-model-has-api-key="true"`,
+		`var hasAPIKey = button.dataset.modelHasApiKey === 'true';`,
+		`setModelAPIKeyEditHelp(hasAPIKey);`,
+		`A saved API key exists for this model. The saved key is not shown; leave this field empty to keep it, or type a replacement.`,
+		`No API key is currently saved for this model. Type a key to save one, or leave empty to keep it blank.`,
+		`input.placeholder = hasAPIKey ? 'Type a new API key to replace the saved key' : 'Type an API key to save for this model'`,
 		`button.setAttribute('aria-pressed', willReveal ? 'true' : 'false')`,
 		`function resetSecretInputVisibility(inputId)`,
 		`resetSecretInputVisibility('model_api_key')`,
@@ -989,7 +1000,10 @@ func TestHandler_ListModels_APIKeyUsesSecretInputPattern(t *testing.T) {
 	if strings.Contains(body, `onclick="togglePasswordVisibility('model_api_key', this)" tabindex="-1"`) {
 		t.Fatal("expected API key reveal toggle to remain keyboard reachable")
 	}
-	if strings.Contains(body, `data-model-api-key`) || strings.Contains(body, `value={ agent.APIKey }`) {
+	if !strings.Contains(body, `data-model-id="`+cfg.ID+`"`) || !strings.Contains(body, `data-model-has-api-key="true"`) {
+		t.Fatal("expected model cards to expose only a non-secret saved API key presence flag")
+	}
+	if strings.Contains(body, `data-model-api-key`) || strings.Contains(body, `value={ agent.APIKey }`) || strings.Contains(body, cfg.APIKey) {
 		t.Fatal("expected models dialog not to expose existing saved API key values")
 	}
 }

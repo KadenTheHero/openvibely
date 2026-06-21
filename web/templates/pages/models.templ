@@ -153,8 +153,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						data-model-reasoning-effort={ agent.ReasoningEffort }
 						data-model-temperature={ fmt.Sprintf("%f", agent.Temperature) }
 						data-model-is-default={ fmt.Sprintf("%t", agent.IsDefault) }
-						data-model-auth-method={ string(agent.AuthMethod) }
-						data-model-max-workers={ fmt.Sprintf("%d", agent.MaxWorkers) }
+							data-model-auth-method={ string(agent.AuthMethod) }
+							data-model-has-api-key={ fmt.Sprintf("%t", agent.APIKey != "") }
+							data-model-max-workers={ fmt.Sprintf("%d", agent.MaxWorkers) }
 						data-model-worker-timeout={ fmt.Sprintf("%d", agent.WorkerTimeout) }
 						data-model-oauth-client-id={ agent.OAuthClientID }
 						data-model-oauth-client-secret={ maskedSecret(agent.OAuthClientSecret) }
@@ -646,20 +647,33 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						button.setAttribute('aria-pressed', willReveal ? 'true' : 'false');
 					}
 
-					function resetSecretInputVisibility(inputId) {
-						const input = document.getElementById(inputId);
-						if (!input) return;
-						input.type = 'password';
-						const button = document.querySelector("button[onclick=\"togglePasswordVisibility('" + inputId + "', this)\"]");
-						if (!button) return;
-						const eyeOpen = button.querySelector('.eye-open');
-						const eyeClosed = button.querySelector('.eye-closed');
-						if (eyeOpen) eyeOpen.classList.remove('hidden');
-						if (eyeClosed) eyeClosed.classList.add('hidden');
-						button.setAttribute('aria-pressed', 'false');
-					}
+						function resetSecretInputVisibility(inputId) {
+							const input = document.getElementById(inputId);
+							if (!input) return;
+							input.type = 'password';
+							const button = document.querySelector("button[onclick=\"togglePasswordVisibility('" + inputId + "', this)\"]");
+							if (!button) return;
+							const eyeOpen = button.querySelector('.eye-open');
+							const eyeClosed = button.querySelector('.eye-closed');
+							if (eyeOpen) eyeOpen.classList.remove('hidden');
+							if (eyeClosed) eyeClosed.classList.add('hidden');
+							button.setAttribute('aria-pressed', 'false');
+						}
 
-				function submitOAuthManualComplete() {
+						function setModelAPIKeyEditHelp(hasAPIKey) {
+							const input = document.getElementById('model_api_key');
+							const help = document.getElementById('model_api_key_help');
+							if (input) {
+								input.placeholder = hasAPIKey ? 'Type a new API key to replace the saved key' : 'Type an API key to save for this model';
+							}
+							if (help) {
+								help.textContent = hasAPIKey
+									? 'A saved API key exists for this model. The saved key is not shown; leave this field empty to keep it, or type a replacement.'
+									: 'No API key is currently saved for this model. Type a key to save one, or leave empty to keep it blank.';
+							}
+						}
+
+					function submitOAuthManualComplete() {
 					var input = document.getElementById('oauth_manual_callback_url');
 					if (!input) return;
 					var callbackUrl = (input.value || '').trim();
@@ -1198,8 +1212,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				var model = button.dataset.modelModel;
 				var reasoningEffort = button.dataset.modelReasoningEffort || '';
 				var temperature = parseFloat(button.dataset.modelTemperature);
-				var isDefault = button.dataset.modelIsDefault === 'true';
-					var authMethod = button.dataset.modelAuthMethod || 'cli';
+					var isDefault = button.dataset.modelIsDefault === 'true';
+					var hasAPIKey = button.dataset.modelHasApiKey === 'true';
+						var authMethod = button.dataset.modelAuthMethod || 'cli';
 					var modelMaxWorkers = parseInt(button.dataset.modelMaxWorkers) || 0;
 					var workerTimeout = parseInt(button.dataset.modelWorkerTimeout) || 0;
 					var ollamaBaseUrl = button.dataset.modelOllamaBaseUrl || '';
@@ -1250,7 +1265,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				document.getElementById('model_openai_auth_type').value = openaiAuthType;
 				document.getElementById('model_openai_connection_method').value = openaiConnectionMethod;
 				document.getElementById('model_api_key').value = '';
-				document.getElementById('model_api_key').placeholder = 'Enter a new API key to replace the saved key';
+				setModelAPIKeyEditHelp(hasAPIKey);
 				document.getElementById('model_api_key').required = false;
 				document.getElementById('model_temperature').value = temperature.toString();
 				document.getElementById('model_is_default').checked = isDefault;
@@ -1429,6 +1444,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				document.getElementById('model_openai_connection_method').value = 'oauth';
 				document.getElementById('model_api_key').value = '';
 				document.getElementById('model_api_key').placeholder = 'sk-ant-...';
+				document.getElementById('model_api_key_help').textContent = 'API keys are hidden by default.';
 				document.getElementById('model_api_key').required = true;
 				document.getElementById('model_temperature').value = '0';
 				document.getElementById('model_is_default').checked = false;
