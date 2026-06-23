@@ -96,7 +96,7 @@ Why task detail matters:
 
 Send follow-up messages from the `Thread` tab to continue a task after its initial run. Follow-ups queue when task capacity is full and dispatch when a slot frees.
 
-When a follow-up is queued and the task thread shows a pending input row, a **Steer** button appears on that row. Steering from a task thread redirects the active turn rather than queuing behind it — use this when you want to correct or narrow a follow-up before the worker picks it up. If the turn has already started, the steer may be rejected and you should send a new follow-up instead.
+When a follow-up is queued and the task thread shows a pending input row, a **Steer** button appears on that row. Steering from a task thread redirects the active turn rather than queuing behind it — use this when you want to correct or narrow a follow-up before the worker picks it up. You can also cancel a queued follow-up before it is applied. If the turn has already started, the steer may be rejected and you should send a new follow-up instead.
 
 ## Task Goals
 
@@ -117,9 +117,9 @@ Open the `Changes` tab on any task detail page to review generated code before m
 | File cards | Inspect each changed file with status, hunks, line numbers, and rename or binary metadata. |
 | Inline / split view | Toggle how textual diffs are displayed per file. |
 | Review comments | Attach line-level feedback and submit it back to the agent to trigger a revision follow-up. |
-| Worktree actions | Merge locally, resolve conflicts, clean up the worktree, or open a pull request when supported. |
+| Worktree actions | Rebase stale task branches, merge locally, resolve conflicts, clean up the worktree, or open a pull request when supported. |
 
-For worktree-backed tasks, the Changes tab shows the live worktree diff while work is running, then falls back to the preserved execution diff after merge or cleanup. Large files can be loaded on demand to keep the view responsive.
+For worktree-backed tasks, the Changes tab shows the live worktree diff while work is running, then falls back to the preserved execution diff after merge or cleanup. If the task branch is stale and the action is available, rebase onto the merge target before final review or merge. Large files can be loaded on demand to keep the view responsive.
 
 Use review comments when you want the agent to revise specific lines. Use a task follow-up when the feedback is broader or not tied to a particular file.
 

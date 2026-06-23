@@ -38,6 +38,18 @@ OAuth-connected provider accounts (Anthropic, OpenAI) show a usage snapshot card
 | Frequent task | Which task types recur most often. |
 | Failure trend | Whether task failure rate is increasing or stable. |
 
+### Skill Curation
+
+Analytics also shows whether Skill Curator is producing useful reusable guidance over time.
+
+| Chart / Table | What It Shows |
+|---|---|
+| Skill activity | When skills are selected, loaded, viewed, created, and edited. |
+| Top skills | The reusable guidance seeing the most activity. |
+| Follow-through | Whether selected skills later become used task context. |
+| Top agent/skill pairs | Which agents and skills work together most often. |
+| Least active enabled skills | Enabled skills that may need cleanup, consolidation, or clearer descriptions. |
+
 Analytics charts render in the browser timezone so time-axis labels match local working hours.
 
 ## How Insights Fit The Workflow

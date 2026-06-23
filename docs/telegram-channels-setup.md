@@ -65,6 +65,10 @@ Optional slash commands shown in UI:
 - `/projects`
 - `/switch <project_id>`
 
+## Task Follow-Ups
+
+Telegram-created work still belongs to the normal OpenVibely task flow. If an authorized user replies with clarification before the first execution has started, OpenVibely keeps that reply with the task so it can be applied as follow-up context when execution begins.
+
 ## Troubleshooting
 
 - `Connection failed: Bot is not running`: Save token again from the Telegram modal.

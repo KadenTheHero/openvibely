@@ -78,3 +78,7 @@ If you DM the bot or mention it and nothing happens:
 4. Reinstall app after any Slack scope/event changes
 
 Important: OpenVibely's `Test` button validates bot auth/token health. It does not fully prove Socket Mode event delivery by itself.
+
+## Task Follow-Ups
+
+Slack-created work still belongs to the normal OpenVibely task flow. If an approved user replies with clarification before the first execution has started, OpenVibely keeps that reply with the task so it can be applied as follow-up context when execution begins.
