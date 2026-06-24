@@ -465,6 +465,59 @@ func TestChatInputForm_AttachmentUploadsAppendToCurrentSession(t *testing.T) {
 	}
 }
 
+func TestChatInputForm_AttachmentUploadsSerializeInFlightDrops(t *testing.T) {
+	configs := []ChatInputFormConfig{
+		{
+			FormID:       "chat-form",
+			InputID:      "message-input",
+			PostEndpoint: "/chat/send",
+			TargetID:     "chat-messages",
+		},
+		{
+			FormID:       "task-thread-form",
+			InputID:      "task-message-input",
+			PostEndpoint: "/tasks/task-123/thread",
+			TargetID:     "task-thread-messages",
+			TaskID:       "task-123",
+		},
+	}
+	for _, config := range configs {
+		t.Run(config.FormID, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := ChatInputForm(config).Render(context.Background(), &buf); err != nil {
+				t.Fatalf("render ChatInputForm: %v", err)
+			}
+			content := buf.String()
+			required := []string{
+				"var attachmentUploadQueue = Promise.resolve();",
+				"var attachmentUploadGeneration = 0;",
+				"attachmentUploadGeneration++;",
+				"async function uploadFiles(files, uploadGeneration)",
+				"function handleFiles(files)",
+				"var uploadGeneration = attachmentUploadGeneration;",
+				"attachmentUploadQueue = attachmentUploadQueue.then(function()",
+				"if (uploadGeneration !== attachmentUploadGeneration) return;",
+				"return uploadFiles(filesToUpload, uploadGeneration);",
+			}
+			for _, r := range required {
+				if !strings.Contains(content, r) {
+					t.Fatalf("in-flight attachment upload serialization script missing %q", r)
+				}
+			}
+
+			handleFilesIndex := strings.Index(content, "function handleFiles(files)")
+			uploadFilesIndex := strings.Index(content, "async function uploadFiles(files, uploadGeneration)")
+			formDataIndex := strings.Index(content, "if (sessionInput && sessionInput.value) formData.append('attachment_session_id', sessionInput.value);")
+			if uploadFilesIndex == -1 || handleFilesIndex == -1 || formDataIndex == -1 {
+				t.Fatal("attachment upload functions missing from rendered composer")
+			}
+			if !(uploadFilesIndex < formDataIndex && formDataIndex < handleFilesIndex) {
+				t.Fatal("attachment session ID must be read inside the queued upload execution, not before earlier uploads complete")
+			}
+		})
+	}
+}
+
 func TestChatInputForm_MessageHistoryScopedPerTaskThread(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatInputForm(ChatInputFormConfig{

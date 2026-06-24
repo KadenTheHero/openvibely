@@ -1463,14 +1463,17 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					return true;
 				}
 
-				// Clear attachments function (registered on window for onclick handlers)
-				window[clearFuncName] = function() {
-					if (preview) preview.classList.add('hidden');
-					if (listContainer) listContainer.innerHTML = '';
-					if (sessionInput) sessionInput.value = '';
-					if (fileInput) fileInput.value = '';
-				};
+			var attachmentUploadQueue = Promise.resolve();
+			var attachmentUploadGeneration = 0;
 
+			// Clear attachments function (registered on window for onclick handlers)
+			window[clearFuncName] = function() {
+				attachmentUploadGeneration++;
+				if (preview) preview.classList.add('hidden');
+				if (listContainer) listContainer.innerHTML = '';
+				if (sessionInput) sessionInput.value = '';
+				if (fileInput) fileInput.value = '';
+			};
 			// Wire up the Clear All button
 			if (clearBtn) {
 				clearBtn.onclick = function() { window[clearFuncName](); };
@@ -1591,34 +1594,34 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i - 1];
 			}
 
-				async function handleFiles(files) {
-					if (files.length === 0) return;
+				async function uploadFiles(files, uploadGeneration) {
 					var existingAttachmentCount = listContainer ? listContainer.querySelectorAll('[data-pending-attachment]').length : 0;
 					if (existingAttachmentCount + files.length > 3) {
 						alert('Maximum 3 files allowed');
 						return;
 					}
-				var maxSize = 10 * 1024 * 1024;
-				for (var j = 0; j < files.length; j++) {
-					if (files[j].size > maxSize) {
-						alert('File "' + files[j].name + '" exceeds 10MB limit');
-						return;
+					var maxSize = 10 * 1024 * 1024;
+					for (var j = 0; j < files.length; j++) {
+						if (files[j].size > maxSize) {
+							alert('File "' + files[j].name + '" exceeds 10MB limit');
+							return;
+						}
 					}
-				}
 					var formData = new FormData();
 					if (sessionInput && sessionInput.value) formData.append('attachment_session_id', sessionInput.value);
 					files.forEach(function(file) { formData.append('files', file); });
-				try {
-					var response = await fetch('/chat/attachments', {
-						method: 'POST',
-						body: formData
-					});
-					if (!response.ok) {
-						var error = await response.text();
-						alert('Upload failed: ' + error);
-						return;
-					}
+					try {
+						var response = await fetch('/chat/attachments', {
+							method: 'POST',
+							body: formData
+						});
+						if (!response.ok) {
+							var error = await response.text();
+							alert('Upload failed: ' + error);
+							return;
+						}
 						var result = await response.json();
+						if (uploadGeneration !== attachmentUploadGeneration) return;
 						if (sessionInput) sessionInput.value = result.session_id;
 						if (preview) preview.classList.remove('hidden');
 						result.attachments.forEach(function(att) {
@@ -1628,19 +1631,29 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							div.innerHTML = '<svg class="w-4 h-4 text-base-content/70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg><span class="font-medium">' + att.filename + '</span><span class="text-xs opacity-60">' + formatBytes(att.size) + '</span>';
 							if (listContainer) listContainer.appendChild(div);
 						});
-					// Auto-scroll to show the attachment preview after upload
-					requestAnimationFrame(function() {
-						// Find the chat messages container (works for both /chat and task thread)
-						var chatMessages = document.getElementById('chat-messages') || document.getElementById('task-thread-messages');
-						if (chatMessages && window.chatAutoScroll) {
-							window.chatAutoScroll.scrollToBottom(chatMessages, true);
-						}
-					});
-				} catch (error) {
-					console.error('Upload error:', error);
-					alert('Upload failed: ' + error.message);
+						// Auto-scroll to show the attachment preview after upload
+						requestAnimationFrame(function() {
+							// Find the chat messages container (works for both /chat and task thread)
+							var chatMessages = document.getElementById('chat-messages') || document.getElementById('task-thread-messages');
+							if (chatMessages && window.chatAutoScroll) {
+								window.chatAutoScroll.scrollToBottom(chatMessages, true);
+							}
+						});
+					} catch (error) {
+						console.error('Upload error:', error);
+						alert('Upload failed: ' + error.message);
+					}
 				}
-			}
+
+				function handleFiles(files) {
+					if (files.length === 0) return;
+					var filesToUpload = files.slice();
+					var uploadGeneration = attachmentUploadGeneration;
+					attachmentUploadQueue = attachmentUploadQueue.then(function() {
+						if (uploadGeneration !== attachmentUploadGeneration) return;
+						return uploadFiles(filesToUpload, uploadGeneration);
+					});
+				}
 
 			// File input handler
 			if (fileInput) {
