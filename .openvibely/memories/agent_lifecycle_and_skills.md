@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-06-18
+updated: 2026-06-21
 source: consolidation
-source_id: memory_consolidation_2026_06_18
+source_id: memory_consolidation_2026_06_21
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -61,7 +61,7 @@ Goal and Loop Agent facts:
 - Dynamic task-loop wakeups use the protected Loop Agent after-complete hook. Its `schedule_task_wakeup` runtime tool is lifecycle-only and should not be exposed to ordinary task agents by default.
 - Loop Agent wakeups are task-thread continuations enqueued through durable `thread_inputs`, not direct worker submissions or separate worker tasks.
 - Loop Agent wakeup scheduling is server-side blocked when a task goal is achieved, paused, cleared, blocked, or failed.
-- Lifecycle-origin `send_to_task` continuations are rejected when the hook evaluated an older execution and a newer execution exists for the same task.
+- Lifecycle-origin `send_to_task` continuations are rejected when the hook evaluated an older execution and a newer execution exists for the same source task; freshness checks must compare against the hook source task/run, not the destination task, because `send_to_task` can legitimately target another task by ID or title. Freshness ordering should use each logical task run's head/first lifecycle row, not later detached hook-row timestamps, because old after-complete rows can be inserted after a newer run has started.
 
 Scheduled maintenance and UI facts:
 - Scheduled maintenance is modeled as normal scheduled tasks assigned to agents unless a future runbook explicitly requires invisible background hooks.

@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-06-15
+updated: 2026-06-21
 source: consolidation
-source_id: memory_consolidation_2026_06_15
+source_id: memory_consolidation_2026_06_21
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -18,7 +18,7 @@ Dual mode architecture:
 - Local web/server and desktop release-binary runs default DB/repos/uploads and related runtime state to the same user app-data directory, specifically `$HOME/.openvibely` unless an env override applies.
 - Hosted/Docker deployments use explicit env-driven storage such as mounted `/data` paths rather than local `$HOME/.openvibely` behavior.
 - Desktop mode (`cmd/desktop`) uses `config.LoadWithMode(ModeDesktop)`, ephemeral port `PORT=0`, local repo paths, and Wails WebView loading from the server base URL.
-- `make package-desktop-macos` builds a raw intermediate executable and packages it as `OpenVibely.app/Contents/MacOS/OpenVibely`; release builds should ship architecture-specific unsigned zips containing a Finder-recognized `OpenVibely.app` bundle. App bundle archives are name-sensitive and must preserve the directory name exactly as `OpenVibely.app`.
+- `make package-desktop-macos` builds a raw intermediate executable and packages it as `OpenVibely.app/Contents/MacOS/OpenVibely`; release packaging pitfalls belong with release-discipline memory.
 - `OPENVIBELY_APP_DATA_DIR` is the shared override for the local app-data root when users need web/server and desktop to point at the same runtime state; explicit overrides bypass legacy-path migration into another app-data default.
 - `OPENVIBELY_APP_DATA_DIR` is read as a literal path by config loading; shell `~` expansion is not performed, so quoted `~` assignments can point at an unintended relative directory.
 - Env vars override mode defaults. `DATABASE_PATH`, `PROJECT_REPO_ROOT`, and related storage env vars remain explicit paths; `DATABASE_PATH` overrides database location even when `OPENVIBELY_APP_DATA_DIR` is set.

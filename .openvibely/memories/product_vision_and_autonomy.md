@@ -2,9 +2,9 @@
 name: product_vision_and_autonomy
 type: project
 created: 2026-06-10
-updated: 2026-06-13
+updated: 2026-06-21
 source: consolidation
-source_id: memory_consolidation_2026_06_13
+source_id: memory_consolidation_2026_06_21
 confidence: high
 title: Product Vision and Reviewable Autonomy
 ---
@@ -31,8 +31,7 @@ Recursive bootstrap skill direction:
 - Source-of-truth file selection should be conservative: use explicit file paths or a single obvious canonical root file. If vision/spec/defect files are missing or ambiguous, ask the user which exact file(s) to use rather than broadly guessing or creating a generic discovery task.
 - Direct setup must run from project Chat in Orchestrate mode because task-thread follow-ups are intentionally constrained from creating, editing, or scheduling tasks.
 - Indexed standalone skills still do not automatically kick in from ordinary interactive Chat prompts: interactive Chat uses recall-only memory preparation and does not run Skill Curator selected-skill routing or expose `skill_view`. “Make this project autonomous” needs manual skill selection/invocation or a product change that adds Chat standalone-skill routing.
-- The tool contract should stay aligned with actual chat-control capabilities such as `get_current_project`, `project_info`, `list_capabilities`, `create_task`, `set_task_goal`, `edit_task`, `schedule_task`, `modify_schedule`, `send_to_task`, `execute_tasks`, `view_task_thread`, and `get_task_goal`.
-- Bootstrap-skill idempotency is limited by the current chat-control surface: there is no generic `list_tasks` or `list_schedules` action, and several goal/task actions require real task IDs rather than titles.
+- The tool contract should stay aligned with actual chat-control capabilities and avoid fictional orchestration APIs; current bootstrap idempotency is limited because there is no generic `list_tasks`/`list_schedules` action, and several goal/task actions require real task IDs rather than titles.
 - A successful bootstrap should produce visible OpenVibely objects, not just guidance: a User Priority Inbox, an Autonomous Project Driver, User Priority Triage, focused audit tasks, recurring schedules, safe initial executions when allowed, generated user-priority implementation tasks, and chained review/audit follow-ups.
 - The autonomous-loop skill should describe task coordination as mediated orchestration, not task-to-task communication.
 

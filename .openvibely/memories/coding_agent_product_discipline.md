@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-06-18
+updated: 2026-06-24
 source: consolidation
-source_id: memory_consolidation_2026_06_18
+source_id: memory_consolidation_2026_06_22
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -16,7 +16,8 @@ User interaction preferences:
 - If a prior response made an unsolicited code change, acknowledge it and revert or ask before proceeding.
 - Prefer plain, direct explanations over jargon-heavy phrasing.
 - Bug explanations should include the causal chain, concrete failure mode, and exact affected path when the user asks for detail.
-- Summaries should be concrete: cite specific files, symbols, handlers, tests, behavior affected, and verification performed when that context is available.
+- Summaries should be concrete: cite specific files, symbols, handlers, tests, behavior affected, verification performed, and whether a real git diff exists when that context is available.
+- If a user challenges why there is no diff after a claimed coding change, inspect branch pointers, status, reflog, and file contents, then plainly correct any prior summary that was based on non-persisted or stale execution output.
 - Broad reviews should actively look for mistakes, unintended diff, dead code, and verification gaps.
 - If repeated reviews find one issue at a time, the user may request audit-only mode: return a consolidated ranked problem list before making fixes. Edits during audit-only review turn it into implementation/fix work.
 - For Goal Agent behavior, preserve the generic model-evaluator design and avoid deterministic or objective-keyword completion logic; detailed implementation boundaries live in `agent_lifecycle_and_skills.md`.
@@ -39,7 +40,7 @@ Documentation, logging, and validation preferences:
 - Root README should stay succinct and high-level, point to `https://docs.openvibely.ai` plus the docs source repo at `/Users/dubee/go/src/github.com/openvibely/openvibely-doc`, and keep detailed environment-variable reference in `docs/environment.md`.
 - Published docs links in README/project-facing docs should use new-tab HTML anchors where supported; local relative links stay normal Markdown.
 - Very high-frequency or low-value debug traces should be commented `applog.Debugf` examples instead of active gated calls when method-call overhead could accumulate, especially per-LLM-chunk, per-SSE-delta, per-HTMX-poll, per-diff-broadcast-tick, or per-action-routing-check logs.
-- Full validation should prefer project Makefile targets or `go test ./... -count=1 -timeout 120s`; shorter 60s full-suite runs can time out in `internal/handler` under load.
+- Full validation should prefer project Makefile targets or `go test ./... -count=1 -timeout 120s`; detailed test-state and timeout caveats live in `testing_coverage_and_performance.md`.
 - Release workflow must include a documentation update pass for new or meaningfully changed features before publishing/tagging; keep in-repo `docs/*.md` and `/Users/dubee/go/src/github.com/openvibely/openvibely-doc` aligned when overlapping concepts change.
 - Release agents should install missing required local tools such as `gh` when feasible instead of treating them as immediate blockers; hand back only if installation/authentication fails or requires unavailable credentials/permissions.
 - Docker image publishing remains documented as a manual/pending release step unless explicit Docker credentials/tooling are present.
@@ -53,10 +54,14 @@ Release-note preferences:
 - High-level release notes should omit CI/test infrastructure, terminal log verbosity, low-level bug/reliability patches, and minor UI polish unless the audience explicitly needs those details or the fix affects a core workflow.
 
 Current release boundary:
-- Latest public release boundary is `v0.2.0`, published on 2026-06-07.
-- The canonical `v0.2.0` tag was force-moved to commit `13189db` after publication so the macOS app-bundle zip fix is included.
-- The GitHub release is `https://github.com/openvibely/openvibely/releases/tag/v0.2.0`; live macOS zips now extract to `OpenVibely.app/`.
-- Schema migrations added only after `v0.2.0` and not yet pushed publicly can be consolidated before release; this is distinct from runtime/local database-file moves such as `openvibely.db` storage migration.
-- Known release-build pitfalls: `release-build.sh` dry-run mode has historically leaked macOS bundle filesystem operations outside the dry-run wrapper; Windows desktop-cli release artifacts require `mingw-w64`/`x86_64-w64-mingw32-gcc`; macOS desktop release zips must preserve the app bundle directory name exactly as `OpenVibely.app`.
+- Latest public release boundary is `v0.3.0`, published on 2026-06-24 at `https://github.com/openvibely/openvibely/releases/tag/v0.3.0`.
+- The canonical `v0.3.0` annotated tag object is `0b46d34` and targets commit `bfcc37d` (`Document schedule pause and resume behavior`); `main`/`upstream/main` also pointed at `bfcc37d` after release.
+- The `v0.3.0` public range was `v0.2.0..bfcc37d` with 161 commits. Major release themes were OpenAI-compatible provider presets/discovery/usage, safer queued task follow-ups across web/Slack/Telegram and worker-capacity races, skill analytics, scheduled-task pause/resume/lifecycle controls, mobile/responsive task and chat UX, secret-key handling, and worktree/rebase workflow improvements.
+- The `v0.3.0` GitHub release published eight assets: two macOS desktop `.app.zip` bundles, four darwin/linux server tarballs, one Windows server zip, and `SHA256SUMS`. No Windows desktop-cli asset was published because `mingw-w64` / `x86_64-w64-mingw32-gcc` was unavailable on the release host.
+- Docker image `openvibely/openvibely:0.3.0` was not published during the GitHub release because Docker Hub credentials were unavailable; the release body marks Docker publishing as pending.
+- Release readiness for `v0.3.0` included a docs commit, `bfcc37d`, updating `docs/schedule-user-guide.md` to document schedule pause/resume behavior.
+- Previous release boundary `v0.2.0` was published on 2026-06-07. Its canonical tag was force-moved to commit `13189db` after publication so the macOS app-bundle zip fix was included; live `v0.2.0` macOS zips extract to `OpenVibely.app/`.
+- Known release-build pitfalls: `release-build.sh` dry-run mode can still leak macOS bundle filesystem operations outside the dry-run wrapper; Windows desktop-cli release artifacts require `mingw-w64`/`x86_64-w64-mingw32-gcc`; macOS desktop release zips must preserve the app bundle directory name exactly as `OpenVibely.app`; running release builds from git worktrees under or near OpenVibely-managed worktree cleanup paths can be unsafe because test/runtime cleanup may remove them, so use an isolated plain clone or otherwise protected checkout for real release builds.
+- When running `release-build.sh` step-by-step, prefer the script default or an absolute dist directory; a relative dist path can break packaging after the script changes into staging directories.
 
 Operational guidance belongs in project skills such as `openvibely_project_guidance`, `openvibely_validation_workflow`, `openvibely_release_workflow`, `openvibely_docs_editing_workflow`, `openvibely_go_maintenance_workflow`, and `openvibely_audit_review_workflow`.

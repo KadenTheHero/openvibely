@@ -2,9 +2,9 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-06-13
+updated: 2026-06-21
 source: consolidation
-source_id: memory_consolidation_2026_06_13
+source_id: memory_consolidation_2026_06_21
 confidence: high
 title: Usage Analytics
 ---
@@ -19,6 +19,8 @@ Durable analytics model:
 - OAuth account-limit snapshots are stored in `account_usage_snapshots`, with extra/model-specific account limits stored in `account_usage_extra_limits`.
 - Usage capture is one final row per completed provider model call at the owning execution/call-site boundary, not per streamed chunk.
 - Skill analytics event semantics distinguish selection, consumption, and skill changes: `selected` records routed/available skills, `loaded` records successful full-body `skill_view` loads, `viewed` records successful `skill_view` access, `created` records skill creation, and `edited` records app-managed skill updates/mutations.
+- Agent-owned lifecycle hook executions record real hook starts as `selected` skill analytics events with `source=lifecycle_hook`/`surface=lifecycle_hook`, `skill_scope=agent_owned`, and the owning project/task/agent metadata; hook body resolution does not synthesize `loaded` or `viewed` events.
+- Lifecycle hook analytics keep ordinary task-execution foreign keys intact by storing the lifecycle execution identifier in the analytics turn/thread field rather than `skill_analytics_events.execution_id`.
 - Skill create/edit telemetry is separated: create/import UI paths record `created` only for new skills, overwrites record `edited`, mutation tools record `created` for create actions, and other successful mutations record `edited`.
 - Provider cost fields are stored only when provider data exists; OpenVibely does not silently estimate provider costs.
 
@@ -34,7 +36,9 @@ Provider normalization facts:
 Analytics surface facts:
 - `/analytics` includes local task/execution/productivity analytics, LLM usage/account-limit views, and Skill Curator analytics.
 - `/api/analytics/usage` backs the Analytics page usage section; `/api/analytics/skills` backs Skill Curator Analytics.
-- The Analytics page usage fetch includes selected `project_id` so model usage charts/tables reflect the current project.
+- The Analytics page sends the selected/current project ID to every local analytics endpoint it fetches, and the visible project label is tied to that same project ID.
+- Local Analytics sections are project-scoped when labeled with the selected project: model usage filters `llm_usage_events.project_id`; Skill Curator analytics filters `skill_analytics_events.project_id`; task/execution/productivity analytics and failed-task patterns filter through `tasks.project_id`.
+- Provider account-limit cards are intentionally account/account-wide OAuth snapshots from `account_usage_snapshots` and related extra-limit rows, not project-scoped data. The UI labels them separately from project-scoped local usage.
 - Direct/background model calls infer `project_id` from workdir paths by matching exact project repo paths, paths inside repos, and conventional task worktrees under `.worktrees/task_*`; nested repos choose the most specific project match.
 - Task commit-summary LLM calls pass isolated task worktree paths as `workDir` and are expected to resolve back to the owning project.
 - Analytics date/hour buckets and the built-in `month` range use app/local timezone semantics matching Schedules.

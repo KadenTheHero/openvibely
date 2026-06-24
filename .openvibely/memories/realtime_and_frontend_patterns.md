@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-06-17
+updated: 2026-06-22
 source: consolidation
-source_id: memory_consolidation_2026_06_17
+source_id: memory_consolidation_2026_06_22
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -17,7 +17,7 @@ Realtime and diff facts:
 - `window._tabVisibility` owns broad realtime connection visibility behavior and pauses polling while hidden.
 - Per-execution `/events/chat/:exec_id` streams are the token-style output path for high-frequency execution output.
 - Streamed output is persistence-first so reconnect/refresh can resume from execution rows.
-- Real-time file changes stream to the Changes tab during task execution via SSE using worktree diff snapshots that include committed branch changes and uncommitted work. Live diff snapshot UI indicators are runtime feedback, not durable task artifacts.
+- Real-time file changes stream to the Changes tab during task execution via SSE, but the browser treats them as invalidation/snapshot signals and refreshes authoritative server-rendered Changes fragments rather than appending diff DOM directly. Detailed active-worktree diff semantics live in `worktree_and_lineage.md`.
 - Task detail lazily loads Changes tab content unless `tab=changes` is active. Direct `?tab=changes` renders remain equivalent to lazy route behavior for stateful Changes features such as worktree merge controls.
 - Diff viewer uses GitHub-style load envelopes and oversized-file placeholders rather than eagerly mounting all diff DOM.
 - Deleted files render as normal file cards with deletion summaries where needed.
@@ -57,6 +57,7 @@ Responsive and shared UI contracts:
 - Left sidebar navigation preserves hover-only highlight behavior unless the product intentionally redesigns selected nav state.
 - Mobile sidebar navigation uses DaisyUI drawer checkbox `#sidebar-toggle`; selecting a nav option should close the drawer only after HTMX has accepted/sent the request. The mobile drawer overlay and panel must layer above sticky page content, with the panel above the overlay.
 - `/models` uses `LLMConfig`/`agent_configs`; `/agents` is plugin-first and has no `color` field.
+- Models create/edit API key fields and channel secret/API key/token fields use a shared masked secret-input templ pattern with an eye/reveal toggle. Model edit mode intentionally matches channel secret parity: saved API keys may be rendered into card `data-model-api-key`, loaded into the masked visible edit field, and revealed with the eye control. Preserve model update semantics with a display/submit split: the visible field is not the submitted `api_key`; a hidden submit field stays blank when the saved key is unchanged so blank/unchanged edit saves preserve the existing key, while typed replacements submit the new key and provider/auth switches can still clear stale credentials. Reused modal/dialog DOM must reset revealed secrets back to masked state, including eye icon and `aria-pressed` state, before reopening Models, GitHub, Slack, Telegram, and inbound webhook secret dialogs. GitHub private-key textarea reveal controls need separate top-aligned focus/active transform handling from centered one-line input toggles.
 - Project-scoped settings pages preserve active project via the `project_id` URL query. Models create/edit forms should keep `project_id` on HTMX and native fallback submit URLs.
 - `Managed Memory` as a tool/profile is presented as a scoped memory-file capability, not broad repo read/write access.
 - Toast rendering accounts for native dialog top-layer behavior.

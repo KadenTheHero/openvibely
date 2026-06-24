@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-06-19
+updated: 2026-06-21
 source: consolidation
-source_id: memory_consolidation_2026_06_17
+source_id: memory_consolidation_2026_06_21
 confidence: high
 title: Provider Architecture
 ---

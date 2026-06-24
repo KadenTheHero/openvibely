@@ -65,7 +65,7 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 - For handlers with setter-injected optional dependencies, validate required dependencies at handler entry and return controlled HTTP errors instead of nil-pointer panics.
 - When introducing behavior modes, propagate mode through typed request contracts and enforce behavior in provider/tool policy layers, not only in prompt text.
 - For task-execution actions, prefer exact entity targeting by `task_id` or `title`; reserve tag/priority filters for explicit group execution requests.
-- If a user asks to create an OpenVibely task but not run it, create it as `category=backlog`; active-category task creation auto-submits to the worker. Prefer the real task creation API/handler over emitting a marker when the user wants an actual persisted task.
+- When the current prompt provides a `[CREATE_TASK]` block contract and the user asks to create a task, output the marker exactly as required; include `"category": "backlog"` when the user asks not to run/start it. If direct task APIs/handlers are actually available and the user explicitly wants a local persisted OpenVibely task, `category=backlog` keeps it non-running while active-category creation may auto-submit to the worker.
 - If tasks run in isolated worktrees, include explicit worktree orientation in the model prompt while keeping runtime workdir enforcement as the source of truth.
 
 

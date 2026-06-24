@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-06-19
-source: after_complete
-source_id: c9e1a52b817437cef5c95387ccc011e1
+updated: 2026-06-21
+source: consolidation
+source_id: memory_consolidation_2026_06_21
 confidence: high
 title: Worktree and Lineage
 ---
@@ -20,6 +20,7 @@ Durable worktree model:
 - `LLMService.ExecuteTaskWithAgent` creates the worktree before execution, runs startup sync from the latest target/default branch when the worktree is clean, and handles post-execution merge.
 - Startup sync uses the task's `MergeTargetBranch` when set, falling back to the default branch only when no target is stored.
 - Changes tab shows worktree branch diff vs target branch when available, falling back to execution diff.
+- Active worktree Changes diffs should represent one net diff from the task's target branch to the current worktree state, including committed, staged, and unstaged tracked changes as a single per-path diff. Untracked files are appended separately when Git cannot include them in that comparison; do not concatenate committed branch diff blocks with `git diff HEAD`, because follow-ups that re-edit an already-committed file can otherwise duplicate the same path in Task Changes while running.
 - Cleanup policy supports after-merge, keep, and manual.
 - Periodic cleanup removes merged worktrees and detects orphaned worktrees with no corresponding task.
 - Chained tasks carry git lineage through `base_branch`, `base_commit_sha`, and `lineage_depth`.
@@ -28,10 +29,10 @@ Commit-message direction:
 - Task execution auto-commits use generated descriptive commit messages driven by the actual worktree diff. Generation happens while changes are still in the worktree for initial execution diff capture, later task-thread completion, post-execution safety capture, merge-prep dirty-worktree commits, and manual GitHub PR-prep dirty-worktree commits.
 - Commit-message generation first collects compact diff facts/hunks from actual changes (`git status --porcelain --untracked-files=all`, unstaged/staged diffs, and snippets for untracked text files) and sends that to an LLM prompt requesting one plain subject.
 - Task title, prompt, and execution output are supporting context only and must be ignored when they conflict with the diff. Stored execution text must not become the subject by itself.
-- If no usable LLM summary is available, fall back deterministically from diff/path/status facts with plain subject-only summaries such as `add <label>`, `update <label>`, `remove <label>`, `update <area> files`, `update <n> files`, `update changes`, `refine changes`, or `prepare changes for merge`.
+- If no usable LLM summary is available, fall back deterministically from diff/path/status facts with plain subject-only summaries such as `Add <label>`, `Update <label>`, `Remove <label>`, `Update <area> files`, `Update <n> files`, `Update changes`, `Refine changes`, or `Prepare changes for merge`.
 - Commit-summary diff context must not follow untracked symlinks or read snippet content outside the worktree. Inspect untracked paths with `Lstat`-style behavior, skip symlinks before reading content, and verify resolved paths remain inside the resolved worktree.
-- Task-execution commit subjects should be concise, subject-only, and plain language. Strip provider/status/tool boilerplate and conventional commit prefixes from LLM-provided candidates when needed.
-- Do not add a `Changed files:` body; do not invent `task` scopes or mention task/worktree machinery unless it is the actual code scope; do not use generic `Task completed:`/`Followup:` subjects or lifecycle labels.
+- Task-execution commit subjects should be concise, subject-only, plain language, and follow Tim Pope-style git subject guidance: capitalized imperative mood such as `Fix bug`, not lowercase `fix bug` or conventional-prefix `fix: bug`. Strip provider/status/tool boilerplate, conventional commit prefixes, and common body/file-list boilerplate headings from LLM-provided candidates before accepting a subject.
+- Do not add or accept a `Changed files:`/file-list body; do not invent `task` scopes or mention task/worktree machinery unless it is the actual code scope; do not use generic `Task completed:`/`Followup:` subjects or lifecycle labels.
 - Existing historical commits keep their original subjects. Changes-tab integration commits remain static (`Merge task:`, `Squash merge task:`), and fast-forward creates no merge commit.
 
 Follow-up lineage direction:

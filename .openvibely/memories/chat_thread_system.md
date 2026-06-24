@@ -2,9 +2,9 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-06-13
+updated: 2026-06-21
 source: consolidation
-source_id: memory_consolidation_2026_06_13
+source_id: memory_consolidation_2026_06_21
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -20,6 +20,7 @@ Queueing and steering facts:
 - Steering rows target an active execution with an `expected_turn_id` guard and use two-phase consumption so failed/cancelled provider steps can recover input.
 - Current merged steering instruction formatting passes through the user's steering text trimmed, without wrapping it in additional “latest user instruction” wording.
 - Prepared/in-flight steering clears `expected_turn_id` while the row can still have `input_status='pending'`; pending-list queries and UI should exclude those rows until committed, restored, or requeued.
+- Task-thread pending composer rows are reconciled from the server-side pending-input fragment on relevant live task/execution/input events; the fragment uses the authoritative pending-input query, so applied rows should disappear instead of lingering as queued after promotion.
 - Provider failure requeues prepared steering; retry restore returns it to guarded steering. Durable cleanup/finalization writes use non-cancelled contexts where needed so pending steering and executions are not stranded after request cancellation.
 - Chat/task-thread success defers completion when pending steering exists; if follow-on steering preparation fails or finds no claimable steer, pending steering for that execution is requeued before terminal failure.
 - Thread history for future calls is rebuilt from `executions.PromptSent` and cleaned `executions.Output` as plain turns rather than provider-native tool-use messages.
@@ -35,7 +36,7 @@ Routes, modes, and runtime actions:
 - Status-marker parsing treats `[STATUS: FAILED | ...]`, `[STATUS: COMPLETE | ...]`, and related markers as terminal control markers only when they are the final standalone non-empty line. Literal marker text in prose, code spans, code fences, bullets, quotes, examples, or lines with trailing explanatory text must not classify an execution as failed/completed.
 - Chat output cleaning preserves status/tool marker text inside inline backtick code spans while stripping real standalone control markers outside inline code.
 - Failed-task history replay and terminal-marker fixes are provider-neutral shared-layer behavior, not Anthropic- or Codex-specific fixes.
-- Task creation can happen through marker compatibility, runtime action surfaces, or local app APIs depending on active runtime.
+- Task creation can happen through marker compatibility, runtime action surfaces, or local app APIs depending on active runtime. When `[CREATE_TASK]` block markers are the exposed creation path for a turn, task-management guidance should use that contract; non-running/backlog task creation should set `"category": "backlog"`.
 - Chat task creation distinguishes Agent definitions from model configs: `agent` names a selectable/enabled Agent, while `agent_id` is internal model-config selection.
 - Chat-control task/schedule automation should respect schema semantics: task `priority` uses `1=Low`, `2=Normal`, `3=High`, `4=Urgent`; scheduled task `days` values are short weekday keys; `edit_task` needs a real task ID; `schedule_task` moves the target task into `scheduled`, so bootstrap flows needing immediate work should schedule then explicitly execute when appropriate.
 

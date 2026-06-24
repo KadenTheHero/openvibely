@@ -2,9 +2,9 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-06-12
+updated: 2026-06-21
 source: consolidation
-source_id: memory_consolidation_2026_06_12
+source_id: memory_consolidation_2026_06_21
 confidence: high
 title: Integrations and Channels
 ---
@@ -14,7 +14,7 @@ OpenVibely has channel integrations for GitHub, Slack, Telegram, and generic inb
 Durable channel direction:
 - Supported channel integrations keep task-goal controls at parity with web/API chat.
 - Slack and Telegram runtime goal actions are wired through durable `TaskGoalService` behavior rather than surface-specific stubs.
-- Channel-origin Chat and task-thread behavior stays aligned with web/API queueing, steering, cancellation, task-goal, agent-resolution, and selected-memory behavior where the surface supports it.
+- Channel-origin Chat and task-thread behavior stays aligned with the shared chat/task-thread lifecycle, queueing, steering, cancellation, task-goal, agent-resolution, and selected-memory rules where each surface supports them; detailed shared semantics live in `chat_thread_system.md` and `managed_memory.md`.
 
 GitHub facts:
 - Default/recommended auth mode is PAT (`github_auth_mode=pat`) for local/self-hosted OSS installs.
