@@ -345,9 +345,9 @@ func (s *TaskService) CancelTask(ctx context.Context, id string) error {
 		applog.Infof("[task-svc] CancelTask not found id=%s", id)
 		return fmt.Errorf("task not found: %s", id)
 	}
-	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
-		applog.Infof("[task-svc] CancelTask task not cancellable id=%s status=%s", id, task.Status)
-		return fmt.Errorf("task is not running or queued")
+	if task.Status != models.StatusRunning && task.Status != models.StatusQueued && !(task.Status == models.StatusPending && task.Category == models.CategoryActive) {
+		applog.Infof("[task-svc] CancelTask task not cancellable id=%s status=%s category=%s", id, task.Status, task.Category)
+		return fmt.Errorf("task is not running, queued, or active pending")
 	}
 
 	if s.goalSvc != nil {

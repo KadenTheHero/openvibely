@@ -227,6 +227,17 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		applog.Infof("[handler] ChatSend error creating task: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create chat task")
 	}
+	claimed, err := h.taskRepo.ClaimTask(c.Request().Context(), task.ID)
+	if err != nil || !claimed {
+		if err == nil {
+			err = fmt.Errorf("chat task was not claimable")
+		}
+		applog.Infof("[handler] ChatSend error claiming chat task=%s: %v", task.ID, err)
+		if delErr := h.taskRepo.Delete(c.Request().Context(), task.ID); delErr != nil {
+			applog.Infof("[handler] ChatSend error cleaning up unclaimed chat task=%s: %v", task.ID, delErr)
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start chat task")
+	}
 
 	// Create execution record for immediate streaming delivery.
 	execStatus := models.ExecRunning
@@ -309,7 +320,67 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		ChatMode:         chatMode,
 		Surface:          chatcontrol.SurfaceWeb,
 	})
-	return render(c, http.StatusOK, templ.Join(userMsg, agentMsg))
+	return render(c, http.StatusOK, templ.Join(
+		userMsg,
+		agentMsg,
+		components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, true),
+	))
+}
+
+func (h *Handler) ChatStop(c echo.Context) error {
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil || projectID == "" {
+		applog.Infof("[handler] ChatStop error getting project: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "no project available")
+	}
+	activeChatExec, err := h.execRepo.FindLatestActiveChatExecution(c.Request().Context(), projectID)
+	if err != nil {
+		applog.Infof("[handler] ChatStop error checking active chat turn: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
+	}
+	if activeChatExec == nil {
+		if isHTMX(c) {
+			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, false))
+		}
+		return c.NoContent(http.StatusNoContent)
+	}
+	if err := h.taskSvc.CancelTask(c.Request().Context(), activeChatExec.TaskID); err != nil {
+		applog.Infof("[handler] ChatStop error cancelling chat task=%s: %v", activeChatExec.TaskID, err)
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	// TaskService.CancelTask moves normal tasks to Backlog for kanban visibility.
+	// Chat backing tasks are hidden from kanban and chat history is keyed by
+	// category=chat, so preserve the chat category after reusing the shared stop
+	// semantics for cancel callbacks and goal pausing.
+	if err := h.taskRepo.UpdateCategory(c.Request().Context(), activeChatExec.TaskID, models.CategoryChat); err != nil {
+		applog.Infof("[handler] ChatStop error preserving chat category task=%s: %v", activeChatExec.TaskID, err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to preserve chat history")
+	}
+	if h.execRepo != nil {
+		if cancelled, err := h.execRepo.CancelRunningByTask(c.Request().Context(), activeChatExec.TaskID); err != nil {
+			applog.Infof("[handler] ChatStop error cancelling running executions task=%s: %v", activeChatExec.TaskID, err)
+		} else if cancelled > 0 {
+			applog.Infof("[handler] ChatStop cancelled %d running executions task=%s", cancelled, activeChatExec.TaskID)
+		}
+	}
+	if isHTMX(c) {
+		return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, false))
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *Handler) ChatComposerAction(c echo.Context) error {
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil || projectID == "" {
+		applog.Infof("[handler] ChatComposerAction error getting project: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "no project available")
+	}
+	activeChatExec, err := h.execRepo.FindLatestActiveChatExecution(c.Request().Context(), projectID)
+	if err != nil {
+		applog.Infof("[handler] ChatComposerAction error checking active chat turn: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
+	}
+	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, activeChatExec != nil))
 }
 
 func (h *Handler) ChatSteer(c echo.Context) error {
@@ -805,6 +876,10 @@ func (h *Handler) ChatStreamSSE(c echo.Context) error {
 			if exec.Status == models.ExecCompleted {
 				// applog.Debugf("[handler] ChatStreamSSE exec=%s completed total_output_len=%d total_output=%q", execID, len(exec.Output), exec.Output)
 				fmt.Fprintf(c.Response(), "event: done\ndata: completed\n\n")
+				c.Response().Flush()
+				return nil
+			} else if exec.Status == models.ExecCancelled {
+				fmt.Fprintf(c.Response(), "event: done\ndata: cancelled\n\n")
 				c.Response().Flush()
 				return nil
 			} else if exec.Status == models.ExecFailed {

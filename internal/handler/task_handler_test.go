@@ -108,47 +108,111 @@ func TestHandler_CancelTask_PausesActiveGoalStoppedByUser(t *testing.T) {
 	}
 }
 
-func TestHandler_CancelTask_NotRunning(t *testing.T) {
+func TestHandler_TaskThreadComposerAction_RendersStopAndSendStates(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := tc.CreateTask(project.ID).
+		WithTitle("Composer action task").
+		WithStatus(models.StatusRunning).
+		WithCategory(models.CategoryActive).
+		Build()
+	task.AgentID = &agent.ID
+	if err := tc.handler.taskRepo.Update(ctx, task); err != nil {
+		t.Fatalf("update task agent: %v", err)
+	}
+	runningExec := tc.CreateExecution(task.ID, agent.ID).
+		WithStatus(models.ExecRunning).
+		WithPromptSent("active").
+		Build()
+
+	rec := tc.HTMX().Get("/tasks/" + task.ID + "/thread/composer-action").Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("active composer action status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="task-thread-form-primary-action" hx-swap-oob="outerHTML"`) {
+		t.Fatalf("expected OOB primary action fragment, got %s", body)
+	}
+	if !strings.Contains(body, `title="Stop response"`) || !strings.Contains(body, `/tasks/`+task.ID+`/cancel?composer_stop=1`) {
+		t.Fatalf("expected active task-thread action to render stop button, got %s", body)
+	}
+
+	if err := tc.handler.execRepo.Complete(ctx, runningExec.ID, models.ExecCancelled, "partial", "cancelled", 0, 1); err != nil {
+		t.Fatalf("complete execution: %v", err)
+	}
+	if err := tc.handler.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCancelled); err != nil {
+		t.Fatalf("update task status: %v", err)
+	}
+	if err := tc.handler.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryBacklog); err != nil {
+		t.Fatalf("update task category: %v", err)
+	}
+
+	rec = tc.HTMX().Get("/tasks/" + task.ID + "/thread/composer-action").Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("terminal composer action status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body = rec.Body.String()
+	if !strings.Contains(body, `title="Send message"`) || strings.Contains(body, `title="Stop response"`) {
+		t.Fatalf("expected terminal task-thread action to render send button, got %s", body)
+	}
+}
+
+func TestHandler_CancelTask_AllowsActivePendingTask(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
 
-	// Create a project
-	project := &models.Project{
-		Name:        "Test Project",
-		Description: "Test",
-		RepoPath:    "/tmp/test",
-		IsDefault:   true,
-	}
-	err := h.projectSvc.Create(ctx, project)
-	if err != nil {
+	project := &models.Project{Name: "Test Project", Description: "Test", RepoPath: "/tmp/test", IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
 	}
-
-	// Create a task in pending status (not running)
-	task := &models.Task{
-		ProjectID: project.ID,
-		Title:     "Test Pending Task",
-		Prompt:    "Test prompt",
-		Status:    models.StatusPending,
-		Category:  models.CategoryActive,
-	}
-	err = h.taskRepo.Create(ctx, task)
-	if err != nil {
+	task := &models.Task{ProjectID: project.ID, Title: "Test Pending Active Task", Prompt: "Test prompt", Status: models.StatusPending, Category: models.CategoryActive}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("failed to create task: %v", err)
 	}
 
-	// Try to cancel the non-running task
 	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/cancel", nil)
 	req.Header.Set("HX-Request", "true")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
 
-	// Should return bad request
+	updatedTask, err := h.taskSvc.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("failed to get updated task: %v", err)
+	}
+	if updatedTask.Status != models.StatusCancelled {
+		t.Errorf("expected task status to become %s, got %s", models.StatusCancelled, updatedTask.Status)
+	}
+	if updatedTask.Category != models.CategoryBacklog {
+		t.Errorf("expected task category to become %s, got %s", models.CategoryBacklog, updatedTask.Category)
+	}
+}
+
+func TestHandler_CancelTask_RejectsBacklogPendingTask(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Test Project", Description: "Test", RepoPath: "/tmp/test", IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("failed to create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Test Pending Backlog Task", Prompt: "Test prompt", Status: models.StatusPending, Category: models.CategoryBacklog}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/cancel", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected status 400, got %d", rec.Code)
 	}
 
-	// Verify the task status was NOT changed
 	updatedTask, err := h.taskSvc.GetByID(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("failed to get updated task: %v", err)
@@ -444,6 +508,56 @@ func TestHandler_GetTask_AfterCategoryChange(t *testing.T) {
 	if bytes.Contains([]byte(body), []byte("In Progress")) {
 		t.Error("dialog should not show 'In Progress' after completion")
 	}
+}
+
+func TestHandler_TaskThread_RendersStopButtonWhileActiveAndSendWhenTerminal(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := &models.Project{Name: "Thread Stop UI Project", Description: "Test", RepoPath: "/tmp/thread-stop-ui", IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("failed to create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Running thread", Prompt: "run", Status: models.StatusRunning, Category: models.CategoryActive, AgentID: &agent.ID}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "run"}
+	if err := h.execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("failed to create execution: %v", err)
+	}
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel?composer_stop=1"`)
+	assertContains(t, rec, `title="Stop response"`)
+	assertContains(t, rec, `<rect x="6" y="6" width="12" height="12" rx="2"></rect>`)
+	assertNotContains(t, rec, `title="Cancel running task"`)
+	assertNotContains(t, rec, `>Cancel</button>`)
+
+	if err := h.execRepo.Complete(ctx, exec.ID, models.ExecCancelled, "stopped", "cancelled", 0, 1); err != nil {
+		t.Fatalf("cancel exec: %v", err)
+	}
+	if err := h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued); err != nil {
+		t.Fatalf("queue task: %v", err)
+	}
+	rec = htmxGet(e, "/tasks/"+task.ID+"/thread")
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel?composer_stop=1"`)
+	assertContains(t, rec, `title="Stop response"`)
+
+	completedExec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "done", Output: "done"}
+	if err := h.execRepo.Create(ctx, completedExec); err != nil {
+		t.Fatalf("failed to create completed execution: %v", err)
+	}
+	if err := h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+	rec = htmxGet(e, "/tasks/"+task.ID+"/thread")
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `title="Send message"`)
+	assertContains(t, rec, `<path d="M2 3l20 9-20 9 5-9-5-9z"></path>`)
+	assertNotContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel"`)
 }
 
 func TestHandler_TaskThread_LightModeToolCallContrastStyles(t *testing.T) {

@@ -148,8 +148,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			ChatMode:               models.ChatModeOrchestrate,
 			ProjectID:              currentProjectID,
 			IsRunning:              chatHasActiveTurn(chatHistory),
-			ActiveTurnID:           chatActiveTurnID(chatHistory),
-			PendingInputs:          pendingInputs,
+				ActiveTurnID:           chatActiveTurnID(chatHistory),
+				StopEndpoint:           "/chat/stop?project_id=" + currentProjectID,
+				PendingInputs:          pendingInputs,
 			QueuedSteerEndpointFor: chatQueuedSteerEndpoint,
 		})
 		<!-- Shared auto-scroll and marker cleaning utilities -->
@@ -230,12 +231,12 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					}, 500);
 				});
 
-				chatForm.addEventListener('htmx:afterRequest', function(event) {
-					if (event.detail.successful) {
-						localStorage.removeItem(draftKey);
-					}
-				});
-			})();
+					chatForm.addEventListener('htmx:afterRequest', function(event) {
+						if (!event.detail || event.detail.elt !== chatForm) return;
+						if (event.detail.successful) {
+							localStorage.removeItem(draftKey);
+						}
+					});			})();
 
 			// Convert task creation markers to clickable links
 			window.convertTaskLinksInMessage = function(messageElement) {
@@ -665,29 +666,28 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				window._chatSwapHandlerAttached = true;
 
 				// Rule 1: Reset tracker when user sends a message (beforeRequest fires before swap)
-				document.body.addEventListener('htmx:beforeRequest', function(event) {
-					var triggerEl = event.detail.elt;
-					if (triggerEl && (triggerEl.id === 'chat-form' || triggerEl.closest('#chat-form'))) {
-						var tracker = window._chatPageTracker;
-						if (tracker) tracker.resetOnUserSend();
-						// Hide prompt immediately on new send — will re-evaluate
-						// only after the new response completes and passes plan detection
-						window._chatStreamInProgress = true;
-						if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
-						// Flag that a web send is in progress (prevents live SSE duplication)
-						window._chatWebSendInProgress = true;
-					}
-				});
+					document.body.addEventListener('htmx:beforeRequest', function(event) {
+						var triggerEl = event.detail.elt;
+						if (triggerEl && triggerEl.id === 'chat-form') {
+							var tracker = window._chatPageTracker;
+							if (tracker) tracker.resetOnUserSend();
+							// Hide prompt immediately on new send — will re-evaluate
+							// only after the new response completes and passes plan detection
+							window._chatStreamInProgress = true;
+							if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
+							// Flag that a web send is in progress (prevents live SSE duplication)
+							window._chatWebSendInProgress = true;
+						}
+					});
 
-				document.body.addEventListener('htmx:afterRequest', function(event) {
-					var triggerEl = event.detail.elt;
-					if (triggerEl && (triggerEl.id === 'chat-form' || triggerEl.closest('#chat-form'))) {
-						// Queued sends can return only out-of-band composer updates, so do
-						// not rely on a chat-messages swap to clear web-send suppression.
-						window._chatWebSendInProgress = false;
-					}
-				});
-
+					document.body.addEventListener('htmx:afterRequest', function(event) {
+						var triggerEl = event.detail.elt;
+						if (triggerEl && triggerEl.id === 'chat-form') {
+							// Queued sends can return only out-of-band composer updates, so do
+							// not rely on a chat-messages swap to clear web-send suppression.
+							window._chatWebSendInProgress = false;
+						}
+					});
 				document.body.addEventListener('htmx:afterSwap', function(event) {
 					var swapTarget = event.detail.target;
 					var isChatMessagesSwap = !!(swapTarget && swapTarget.id === 'chat-messages');
@@ -1249,12 +1249,17 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							syncCompletedOutputToBubble(data.exec_id, data.completed_output);
 						}
 
-						window._chatStreamInProgress = false;
-						if (window.evaluatePlanCompletionPrompt) {
-							window.evaluatePlanCompletionPrompt(data.completed_output);
-						}
-					}
-				};
+							window._chatStreamInProgress = false;
+							if (window.evaluatePlanCompletionPrompt) {
+								window.evaluatePlanCompletionPrompt(data.completed_output);
+							}
+							var actionTarget = document.getElementById('chat-form-primary-action');
+							var chatContainer = document.getElementById('chat-page-root');
+							var pid = chatContainer ? chatContainer.getAttribute('data-project-id') : projectId;
+							if (actionTarget && pid && typeof htmx !== 'undefined') {
+								htmx.ajax('GET', '/chat/composer-action?project_id=' + encodeURIComponent(pid), {target: '#chat-form-primary-action', swap: 'outerHTML'});
+							}
+						}				};
 
 				// Also mark exec IDs from HTMX swaps to avoid duplicates after page updates.
 				var handleChatAfterSwap = function(event) {

@@ -297,6 +297,15 @@ func TestHandler_ChatSend(t *testing.T) {
 	if !strings.Contains(body, "chat-bubble-user-msg") && !strings.Contains(body, "chat-bubble-assistant-msg") {
 		t.Error("expected chat bubbles in response")
 	}
+	if !strings.Contains(body, `id="chat-form-primary-action" hx-swap-oob="outerHTML"`) {
+		t.Error("expected composer primary action OOB replacement in response")
+	}
+	if strings.Contains(body, `id="chat-form-action-cluster" hx-swap-oob="outerHTML"`) {
+		t.Error("composer OOB response must not replace attachment/speech controls")
+	}
+	if !strings.Contains(body, `title="Stop response"`) || !strings.Contains(body, `/chat/stop?project_id=default`) {
+		t.Error("expected chat send response to turn composer action into stop")
+	}
 }
 
 func TestHandler_ChatSend_EmptyMessage(t *testing.T) {
@@ -480,6 +489,9 @@ func TestHandler_ChatSend_CreatesTaskWithChatCategory(t *testing.T) {
 
 	if chatTask.Category != models.CategoryChat {
 		t.Errorf("expected chat task category to be %s, got %s", models.CategoryChat, chatTask.Category)
+	}
+	if chatTask.Status != models.StatusRunning {
+		t.Errorf("expected active chat task status to be %s, got %s", models.StatusRunning, chatTask.Status)
 	}
 
 	// Verify that CategoryChat is not in AllCategories (so it won't appear in kanban board)
@@ -1096,6 +1108,8 @@ func TestHandler_ChatSend_QueuesBehindActiveChatTurn(t *testing.T) {
 	assertContains(t, rec, "queued chat")
 	assertContains(t, rec, `data-input-mode="queued"`)
 	assertContains(t, rec, `hx-swap-oob="beforeend"`)
+	assertNotContains(t, rec, `chat-form-action-cluster`)
+	assertNotContains(t, rec, `chat-form-primary-action`)
 	assertContains(t, rec, `queued-input-row`)
 	assertContains(t, rec, `bg-base-300/45`)
 	assertContains(t, rec, `flex-1`)
@@ -1122,6 +1136,110 @@ func TestHandler_ChatSend_QueuesBehindActiveChatTurn(t *testing.T) {
 	assert.Equal(t, models.ThreadInputPending, inputs[0].InputStatus)
 	assert.Equal(t, "queued chat", inputs[0].Content)
 	assert.Equal(t, models.ChatModePlan, inputs[0].ChatMode)
+}
+
+func TestHandler_Chat_RendersStopButtonWhileActive(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Chat Stop UI Project")
+	activeTask := createTask(t, h, project.ID, "Active Chat Stop UI", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active chat"
+	})
+
+	rec := htmxGet(e, "/chat?project_id="+project.ID)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `hx-post="/chat/stop?project_id=`+project.ID+`"`)
+	assertContains(t, rec, `title="Stop response"`)
+	assertContains(t, rec, `aria-label="Stop response"`)
+	assertContains(t, rec, `<rect x="6" y="6" width="12" height="12" rx="2"></rect>`)
+	assertNotContains(t, rec, `title="Send message"`)
+}
+
+func TestHandler_Chat_RendersSendButtonWhenNoActiveTurn(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	project := createProject(t, h, "Chat Send UI Project")
+	createAgent(t, llmConfigRepo)
+
+	rec := htmxGet(e, "/chat?project_id="+project.ID)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `title="Send message"`)
+	assertContains(t, rec, `<path d="M2 3l20 9-20 9 5-9-5-9z"></path>`)
+	assertNotContains(t, rec, `title="Stop response"`)
+	assertNotContains(t, rec, `/chat/stop`)
+}
+
+func TestHandler_ChatStreamSSE_EmitsDoneForCancelledExecution(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Cancelled SSE Project")
+	task := createTask(t, h, project.ID, "Cancelled Chat SSE", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusCancelled
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCancelled
+		ex.PromptSent = "stopped chat"
+	})
+	require.NoError(t, h.execRepo.UpdateOutput(ctx, exec.ID, "partial output"))
+
+	req := httptest.NewRequest(http.MethodGet, "/events/chat/"+exec.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "event: done")
+	assertContains(t, rec, "data: cancelled")
+}
+
+func TestHandler_ChatStop_CancelsActiveChatTurn(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Chat Stop Project")
+	activeTask := createTask(t, h, project.ID, "Active Chat Stop", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active chat"
+	})
+	require.NoError(t, h.execRepo.UpdateOutput(ctx, activeExec.ID, "partial output"))
+	cancelled := false
+	h.workerSvc.RegisterCancel(activeTask.ID, func() { cancelled = true })
+
+	rec := htmxPost(e, "/chat/stop?project_id="+project.ID, url.Values{})
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `id="chat-form-primary-action" hx-swap-oob="outerHTML"`)
+	assertNotContains(t, rec, `id="chat-form-action-cluster" hx-swap-oob="outerHTML"`)
+	assertContains(t, rec, `title="Send message"`)
+	assertNotContains(t, rec, `title="Stop response"`)
+	if !cancelled {
+		t.Fatal("expected ChatStop to invoke the active chat task cancellation callback")
+	}
+	updatedTask, err := h.taskRepo.GetByID(ctx, activeTask.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedTask)
+	assert.Equal(t, models.StatusCancelled, updatedTask.Status)
+	assert.Equal(t, models.CategoryChat, updatedTask.Category)
+	chatHistory, err := h.execRepo.ListChatHistory(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, chatHistory, 1)
+	assert.Equal(t, activeExec.ID, chatHistory[0].ID)
+	updatedExec, err := h.execRepo.GetByID(ctx, activeExec.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedExec)
+	assert.Equal(t, models.ExecCancelled, updatedExec.Status)
+	assert.Equal(t, "partial output", updatedExec.Output)
+	assert.Equal(t, "cancelled", updatedExec.ErrorMessage)
 }
 
 func TestHandler_Chat_HidesComposerSteeringAffordanceWhileActive(t *testing.T) {
@@ -2673,6 +2791,10 @@ func TestHandler_TaskThreadSend_QueuesWhenAtCapacity(t *testing.T) {
 	e.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code, "task follow-up should be accepted and queued")
+	assertContains(t, rec, `id="task-thread-form-primary-action" hx-swap-oob="outerHTML"`)
+	assertNotContains(t, rec, `id="task-thread-form-action-cluster" hx-swap-oob="outerHTML"`)
+	assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel?composer_stop=1"`)
+	assertContains(t, rec, `title="Stop response"`)
 
 	// Message should be saved in an execution record
 	execs, _ := h.execRepo.ListByTaskChronological(ctx, task.ID)
@@ -2826,11 +2948,15 @@ func TestHandler_TaskThreadSend_CancelQueuedCapacityWait(t *testing.T) {
 		return err == nil && updatedTask != nil && updatedTask.Status == models.StatusQueued
 	}, 2*time.Second, 50*time.Millisecond)
 
-	cancelReq := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/cancel", nil)
+	cancelReq := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/cancel?composer_stop=1", nil)
 	cancelReq.Header.Set("HX-Request", "true")
 	cancelRec := httptest.NewRecorder()
 	e.ServeHTTP(cancelRec, cancelReq)
 	require.Equal(t, http.StatusOK, cancelRec.Code, cancelRec.Body.String())
+	assertContains(t, cancelRec, `id="task-thread-form-primary-action" hx-swap-oob="outerHTML"`)
+	assertNotContains(t, cancelRec, `id="task-thread-form-action-cluster" hx-swap-oob="outerHTML"`)
+	assertContains(t, cancelRec, `title="Send message"`)
+	assertNotContains(t, cancelRec, `title="Stop response"`)
 
 	require.Eventually(t, func() bool {
 		execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)

@@ -1295,7 +1295,8 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	}
 	projectID := task.ProjectID
 
-	if h.threadInputRepo != nil {
+	composerStop := c.QueryParam("composer_stop") == "1"
+	if !composerStop && h.threadInputRepo != nil {
 		if err := h.threadInputRepo.CancelPendingForTask(c.Request().Context(), taskID); err != nil {
 			applog.Infof("[handler] CancelTask error cancelling pending thread inputs task=%s: %v", taskID, err)
 		}
@@ -1320,6 +1321,9 @@ func (h *Handler) CancelTask(c echo.Context) error {
 		if err != nil {
 			applog.Infof("[handler] CancelTask error listing tasks: %v", err)
 			return err
+		}
+		if composerStop {
+			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false))
 		}
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
@@ -1767,6 +1771,22 @@ func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
 }
 
+func (h *Handler) TaskThreadComposerAction(c echo.Context) error {
+	taskID := c.Param("taskId")
+	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	executions, err := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), components.TaskThreadHasActiveComposerStopState(task, executions)))
+}
+
 // TaskThreadSend handles sending a follow-up message in the task thread.
 // Uses shared agent selection and streaming response processing from chat_processing.go.
 func (h *Handler) TaskThreadSend(c echo.Context) error {
@@ -1938,7 +1958,10 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		InputOrigin:      models.TaskOriginWeb,
 	})
 
-	return render(c, http.StatusOK, components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments))
+	return render(c, http.StatusOK, templ.Join(
+		components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments),
+		components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), true),
+	))
 }
 
 func (h *Handler) TaskThreadSteer(c echo.Context) error {

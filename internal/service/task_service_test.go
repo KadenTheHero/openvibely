@@ -1009,6 +1009,32 @@ func TestTaskService_UpdateCategory_FromCompletedToActiveResetsStatus(t *testing
 	}
 }
 
+func TestTaskService_CancelTask_AllowsActivePendingTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Active Pending Task",
+		Prompt:    "test",
+		Status:    models.StatusPending,
+		Category:  models.CategoryActive,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	require.NoError(t, svc.CancelTask(ctx, task.ID))
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, models.StatusCancelled, updated.Status)
+	assert.Equal(t, models.CategoryBacklog, updated.Category)
+}
+
 func TestTaskService_CancelTask_AllowsQueuedTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

@@ -13,7 +13,10 @@ func derefString(v *string) string {
 	return *v
 }
 
-func taskThreadHasRunningExecution(executions []models.Execution) bool {
+func TaskThreadHasActiveComposerStopState(task *models.Task, executions []models.Execution) bool {
+	if task != nil && (task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive)) {
+		return true
+	}
 	return taskThreadActiveTurnID(executions) != ""
 }
 
@@ -344,9 +347,10 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 			Agents:                 agents,
 			ShowModelSelector:      true,
 			TaskID:                 task.ID,
-			IsRunning:              taskThreadHasRunningExecution(executions),
-			ActiveTurnID:           taskThreadActiveTurnID(executions),
-			SelectedAgentID:        derefString(task.AgentID),
+				IsRunning:              TaskThreadHasActiveComposerStopState(task, executions),
+				ActiveTurnID:           taskThreadActiveTurnID(executions),
+				StopEndpoint:           fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID),
+				SelectedAgentID:        derefString(task.AgentID),
 			PendingInputs:          pendingInputs,
 			QueuedSteerEndpointFor: taskQueuedSteerEndpoint,
 		})

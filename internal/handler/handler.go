@@ -429,6 +429,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/tasks/:taskId/changes/file", h.GetTaskChangesFile)
 	e.POST("/tasks/:taskId/changes/live", h.GetTaskChangesLive)
 	e.GET("/tasks/:taskId/thread", h.GetTaskThread)
+	e.GET("/tasks/:taskId/thread/composer-action", h.TaskThreadComposerAction)
 	e.GET("/tasks/:taskId/thread/executions/:execId/fragment", h.GetTaskThreadExecutionFragment)
 	e.POST("/tasks/:taskId/thread", h.TaskThreadSend)
 	e.POST("/tasks/:taskId/thread/steer", h.TaskThreadSteer)
@@ -602,6 +603,8 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Chat
 	e.GET("/chat", h.Chat)
 	e.POST("/chat/send", h.ChatSend)
+	e.POST("/chat/stop", h.ChatStop)
+	e.GET("/chat/composer-action", h.ChatComposerAction)
 	e.POST("/chat/steer", h.ChatSteer)
 	e.GET("/chat/pending-inputs", h.ChatPendingInputs)
 	e.POST("/chat/queued/:inputId/steer", h.ChatQueuedInputSteer)

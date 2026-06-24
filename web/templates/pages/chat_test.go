@@ -352,6 +352,39 @@ func TestChatContent_ClearsWebSendSuppressionOnRequestCompletion(t *testing.T) {
 	if !strings.Contains(branch, "window._chatWebSendInProgress = false") {
 		t.Fatal("web-send suppression must clear on request completion for OOB-only queued responses")
 	}
+	if strings.Contains(branch, "closest('#chat-form')") {
+		t.Fatal("chat request lifecycle handlers must ignore nested HTMX controls such as Stop")
+	}
+	if !strings.Contains(branch, "triggerEl && triggerEl.id === 'chat-form'") {
+		t.Fatal("chat request lifecycle handlers must only treat form-initiated HTMX requests as sends")
+	}
+}
+
+func TestChatContent_FormDraftClearingIgnoresNestedHTMXControls(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+	listener := "chatForm.addEventListener('htmx:afterRequest'"
+	idx := strings.Index(content, listener)
+	if idx == -1 {
+		t.Fatal("expected chat form draft-clearing HTMX listener")
+	}
+	branchEnd := strings.Index(content[idx:], "})();")
+	if branchEnd == -1 {
+		t.Fatal("expected end of chat draft persistence closure")
+	}
+	branch := content[idx : idx+branchEnd]
+	if !strings.Contains(branch, "event.detail.elt !== chatForm") {
+		t.Fatal("chat form draft clearing must ignore bubbled HTMX events from nested stop/queued controls")
+	}
+	if !strings.Contains(branch, "localStorage.removeItem(draftKey)") {
+		t.Fatal("chat form draft clearing should still remove the draft after a real send")
+	}
 }
 
 func TestChatContent_LiveQueuedRowsDedupeByPendingInputDOMID(t *testing.T) {
@@ -395,6 +428,26 @@ func TestChatContent_LiveQueuedRowsDedupeByPendingInputDOMID(t *testing.T) {
 	}
 	if strings.Contains(queuedBranch, "_chatKnownExecIds") {
 		t.Fatal("queued pending-input ids must not pollute the chat execution duplicate guard")
+	}
+}
+
+func TestChatContent_ResponseDoneRefreshesComposerAction(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, "if (eventType === 'chat_response_done')") {
+		t.Fatal("expected chat response done live branch")
+	}
+	if !strings.Contains(content, "/chat/composer-action?project_id=") {
+		t.Fatal("chat response done must refresh the primary composer action from the server")
+	}
+	if !strings.Contains(content, "target: '#chat-form-primary-action'") {
+		t.Fatal("chat response done composer refresh must target the primary action only")
 	}
 }
 

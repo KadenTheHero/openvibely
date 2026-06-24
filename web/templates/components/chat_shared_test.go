@@ -94,8 +94,11 @@ func TestChatBubbleStreaming_ThreadCompletionStaysSmooth(t *testing.T) {
 	if strings.Contains(content, "htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread'") {
 		t.Error("thread completion must not hard-refresh the task thread fragment")
 	}
-	if !strings.Contains(content, "showThreadTerminalStatus('completed')") {
-		t.Error("thread completion should show terminal status dynamically when no pending rows exist")
+	if !strings.Contains(content, "showThreadTerminalStatus(terminalStatus)") {
+		t.Error("thread completion should show terminal status dynamically with the SSE terminal status")
+	}
+	if !strings.Contains(content, "/thread/composer-action") {
+		t.Error("thread completion should refresh the primary composer action from the server")
 	}
 	if !strings.Contains(content, "stopThreadPolling()") {
 		t.Error("thread completion should stop thread polling dynamically when no pending rows exist")
@@ -158,8 +161,11 @@ func TestInitThreadStreamingScript_CompletionStaysSmooth(t *testing.T) {
 	if strings.Contains(content, "htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/thread'") {
 		t.Error("resume completion must not hard-refresh the task thread fragment")
 	}
-	if !strings.Contains(content, "showThreadTerminalStatus('completed')") {
-		t.Error("resume completion should show terminal status dynamically when no pending rows exist")
+	if !strings.Contains(content, "showThreadTerminalStatus(terminalStatus)") {
+		t.Error("resume completion should show terminal status dynamically with the SSE terminal status")
+	}
+	if !strings.Contains(content, "/thread/composer-action") {
+		t.Error("resume completion should refresh the primary composer action from the server")
 	}
 	if !strings.Contains(content, "restoreThreadPollingFallback()") {
 		t.Error("resume transport errors should restore polling as a fallback")
