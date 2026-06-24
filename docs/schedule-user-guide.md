@@ -71,7 +71,10 @@ From `/tasks/{id}` -> `Schedules` tab:
 
 - Add schedules
 - Edit existing schedules
+- Pause or resume schedules without deleting them
 - Remove schedules
+
+Pausing a schedule keeps its timing configuration and next-run value stored, but prevents it from starting new task runs until you resume it. Resuming reactivates the saved schedule so future runs can continue from the existing cadence.
 
 This is useful for precise per-task schedule maintenance.
 
