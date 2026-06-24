@@ -1084,7 +1084,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								data-current-value={ selectedAgentOrAuto(config.SelectedAgentID) }
 								aria-haspopup="listbox"
 								aria-expanded="false"
-							><span class="chat-custom-select-label truncate flex-1 min-w-0 pointer-events-none"></span><svg class="flex-shrink-0 pointer-events-none" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+							><span class="chat-custom-select-label truncate flex-1 min-w-0 pointer-events-none"></span><svg class="flex-shrink-0 pointer-events-none" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
 							<ul class="chat-custom-select-options" aria-hidden="true" style="display:none">
 								<li data-value="auto">Auto</li>
 								<li data-value="default">Default</li>
@@ -1106,7 +1106,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								data-current-value={ chatModeOrDefault(config.ChatMode) }
 								aria-haspopup="listbox"
 								aria-expanded="false"
-							><span class="chat-custom-select-label truncate flex-1 min-w-0 pointer-events-none"></span><svg class="flex-shrink-0 pointer-events-none" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+							><span class="chat-custom-select-label truncate flex-1 min-w-0 pointer-events-none"></span><svg class="flex-shrink-0 pointer-events-none" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
 							<ul class="chat-custom-select-options" aria-hidden="true" style="display:none">
 								<li data-value="orchestrate">Orchestrate</li>
 								<li data-value="plan">Plan</li>
@@ -1591,12 +1591,13 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i - 1];
 			}
 
-			async function handleFiles(files) {
-				if (files.length === 0) return;
-				if (files.length > 3) {
-					alert('Maximum 3 files allowed');
-					return;
-				}
+				async function handleFiles(files) {
+					if (files.length === 0) return;
+					var existingAttachmentCount = listContainer ? listContainer.querySelectorAll('[data-pending-attachment]').length : 0;
+					if (existingAttachmentCount + files.length > 3) {
+						alert('Maximum 3 files allowed');
+						return;
+					}
 				var maxSize = 10 * 1024 * 1024;
 				for (var j = 0; j < files.length; j++) {
 					if (files[j].size > maxSize) {
@@ -1604,8 +1605,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						return;
 					}
 				}
-				var formData = new FormData();
-				files.forEach(function(file) { formData.append('files', file); });
+					var formData = new FormData();
+					if (sessionInput && sessionInput.value) formData.append('attachment_session_id', sessionInput.value);
+					files.forEach(function(file) { formData.append('files', file); });
 				try {
 					var response = await fetch('/chat/attachments', {
 						method: 'POST',
@@ -1616,16 +1618,16 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						alert('Upload failed: ' + error);
 						return;
 					}
-					var result = await response.json();
-					sessionInput.value = result.session_id;
-					preview.classList.remove('hidden');
-					listContainer.innerHTML = '';
-					result.attachments.forEach(function(att) {
-						var div = document.createElement('div');
-						div.className = 'flex items-center gap-2 text-sm';
-						div.innerHTML = '<svg class="w-4 h-4 text-base-content/70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg><span class="font-medium">' + att.filename + '</span><span class="text-xs opacity-60">' + formatBytes(att.size) + '</span>';
-						listContainer.appendChild(div);
-					});
+						var result = await response.json();
+						if (sessionInput) sessionInput.value = result.session_id;
+						if (preview) preview.classList.remove('hidden');
+						result.attachments.forEach(function(att) {
+							var div = document.createElement('div');
+							div.className = 'flex items-center gap-2 text-sm';
+							div.setAttribute('data-pending-attachment', 'true');
+							div.innerHTML = '<svg class="w-4 h-4 text-base-content/70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg><span class="font-medium">' + att.filename + '</span><span class="text-xs opacity-60">' + formatBytes(att.size) + '</span>';
+							if (listContainer) listContainer.appendChild(div);
+						});
 					// Auto-scroll to show the attachment preview after upload
 					requestAnimationFrame(function() {
 						// Find the chat messages container (works for both /chat and task thread)

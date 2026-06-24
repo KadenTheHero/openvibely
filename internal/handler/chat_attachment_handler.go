@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
@@ -51,13 +52,25 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "maximum 3 files per upload")
 	}
 
-	// Create temporary directory for this upload session
-	// We'll associate these with an execution ID when the message is sent
-	sessionID := generateSessionID()
+	// Create or reuse a temporary directory for this upload session.
+	// We'll associate these with an execution ID when the message is sent.
+	sessionID := strings.TrimSpace(c.FormValue("attachment_session_id"))
+	if !isValidPendingAttachmentSessionID(sessionID) {
+		sessionID = generateSessionID()
+	}
 	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		applog.Infof("[handler] UploadChatAttachment error creating directory: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create directory")
+	}
+	existingCount, err := countPendingAttachmentFiles(sessionDir)
+	if err != nil {
+		applog.Infof("[handler] UploadChatAttachment error reading pending session: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to read pending attachments")
+	}
+	if existingCount+len(files) > maxFilesPerUpload {
+		applog.Infof("[handler] UploadChatAttachment too many files in session: existing=%d new=%d max=%d", existingCount, len(files), maxFilesPerUpload)
+		return echo.NewHTTPError(http.StatusBadRequest, "maximum 3 files per message")
 	}
 
 	// Process each file
@@ -77,10 +90,10 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 		}
 		defer src.Close()
 
-		// Save file
-		filename := filepath.Base(file.Filename)
+		// Save file without overwriting an earlier drop in the same pending session.
+		filename := uniquePendingAttachmentFilename(sessionDir, filepath.Base(file.Filename))
 		destPath := filepath.Join(sessionDir, filename)
-		dest, err := os.Create(destPath)
+		dest, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 		if err != nil {
 			applog.Infof("[handler] UploadChatAttachment error creating file %s: %v", filename, err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save file")
@@ -170,6 +183,50 @@ func (h *Handler) DeleteChatAttachment(c echo.Context) error {
 	// Return updated attachments list for this execution
 	attachments, _ := h.chatAttachmentRepo.ListByExecution(c.Request().Context(), executionID)
 	return render(c, http.StatusOK, components.ChatAttachmentListOnly(attachments))
+}
+
+func isValidPendingAttachmentSessionID(sessionID string) bool {
+	if len(sessionID) != 32 {
+		return false
+	}
+	for _, ch := range sessionID {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func uniquePendingAttachmentFilename(sessionDir, filename string) string {
+	if filename == "" || filename == "." || filename == string(filepath.Separator) {
+		filename = "attachment"
+	}
+	candidate := filename
+	ext := filepath.Ext(filename)
+	base := strings.TrimSuffix(filename, ext)
+	if base == "" {
+		base = "attachment"
+	}
+	for i := 1; ; i++ {
+		if _, err := os.Stat(filepath.Join(sessionDir, candidate)); os.IsNotExist(err) {
+			return candidate
+		}
+		candidate = fmt.Sprintf("%s-%d%s", base, i, ext)
+	}
+}
+
+func countPendingAttachmentFiles(sessionDir string) (int, error) {
+	entries, err := os.ReadDir(sessionDir)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // generateSessionID generates a session ID for temporary file storage

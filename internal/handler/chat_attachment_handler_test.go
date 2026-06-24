@@ -7,6 +7,9 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -23,6 +26,44 @@ func useTempUploadsDir(t *testing.T) {
 	t.Cleanup(func() {
 		uploadsDir = originalUploadsDir
 	})
+}
+
+func uploadChatAttachmentForTest(t *testing.T, e *echo.Echo, h *Handler, filename string, content []byte, contentType string, sessionID string) string {
+	t.Helper()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	partHeader := make(textproto.MIMEHeader)
+	partHeader.Set("Content-Disposition", `form-data; name="files"; filename="`+filename+`"`)
+	partHeader.Set("Content-Type", contentType)
+	part, err := writer.CreatePart(partHeader)
+	require.NoError(t, err)
+	_, err = io.Copy(part, bytes.NewReader(content))
+	require.NoError(t, err)
+	if sessionID != "" {
+		require.NoError(t, writer.WriteField("attachment_session_id", sessionID))
+	}
+	require.NoError(t, writer.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/attachments", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	require.NoError(t, h.UploadChatAttachment(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var response struct {
+		SessionID   string `json:"session_id"`
+		Attachments []struct {
+			Filename  string `json:"filename"`
+			MediaType string `json:"media_type"`
+		} `json:"attachments"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.NotEmpty(t, response.SessionID)
+	require.Len(t, response.Attachments, 1)
+	assert.Equal(t, contentType, response.Attachments[0].MediaType)
+	return response.SessionID
 }
 
 func TestUploadChatAttachment_AllFileTypes(t *testing.T) {
@@ -132,6 +173,75 @@ func TestUploadChatAttachment_AllFileTypes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUploadChatAttachment_AppendsToExistingPendingSession(t *testing.T) {
+	useTempUploadsDir(t)
+
+	db := testutil.NewTestDB(t)
+	h := &Handler{chatAttachmentRepo: repository.NewChatAttachmentRepo(db)}
+	e := echo.New()
+
+	firstSessionID := uploadChatAttachmentForTest(t, e, h, "screenshot.png", []byte("first"), "image/png", "")
+	secondSessionID := uploadChatAttachmentForTest(t, e, h, "second.png", []byte("second"), "image/png", firstSessionID)
+
+	require.Equal(t, firstSessionID, secondSessionID)
+	entries, err := os.ReadDir(filepath.Join(uploadsDir, "chat", "pending", firstSessionID))
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	assert.FileExists(t, filepath.Join(uploadsDir, "chat", "pending", firstSessionID, "screenshot.png"))
+	assert.FileExists(t, filepath.Join(uploadsDir, "chat", "pending", firstSessionID, "second.png"))
+}
+
+func TestUploadChatAttachment_AppendsDuplicateNamesWithoutOverwriting(t *testing.T) {
+	useTempUploadsDir(t)
+
+	db := testutil.NewTestDB(t)
+	h := &Handler{chatAttachmentRepo: repository.NewChatAttachmentRepo(db)}
+	e := echo.New()
+
+	firstSessionID := uploadChatAttachmentForTest(t, e, h, "screenshot.png", []byte("first"), "image/png", "")
+	secondSessionID := uploadChatAttachmentForTest(t, e, h, "screenshot.png", []byte("second"), "image/png", firstSessionID)
+
+	require.Equal(t, firstSessionID, secondSessionID)
+	pendingDir := filepath.Join(uploadsDir, "chat", "pending", firstSessionID)
+	firstContent, err := os.ReadFile(filepath.Join(pendingDir, "screenshot.png"))
+	require.NoError(t, err)
+	secondContent, err := os.ReadFile(filepath.Join(pendingDir, "screenshot-1.png"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("first"), firstContent)
+	assert.Equal(t, []byte("second"), secondContent)
+}
+
+func TestUploadChatAttachment_ExistingPendingSessionMaxFilesLimit(t *testing.T) {
+	useTempUploadsDir(t)
+
+	db := testutil.NewTestDB(t)
+	h := &Handler{chatAttachmentRepo: repository.NewChatAttachmentRepo(db)}
+	e := echo.New()
+
+	sessionID := uploadChatAttachmentForTest(t, e, h, "one.png", []byte("one"), "image/png", "")
+	uploadChatAttachmentForTest(t, e, h, "two.png", []byte("two"), "image/png", sessionID)
+	uploadChatAttachmentForTest(t, e, h, "three.png", []byte("three"), "image/png", sessionID)
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("files", "four.png")
+	require.NoError(t, err)
+	_, err = io.Copy(part, bytes.NewReader([]byte("four")))
+	require.NoError(t, err)
+	require.NoError(t, writer.WriteField("attachment_session_id", sessionID))
+	require.NoError(t, writer.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/attachments", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	err = h.UploadChatAttachment(e.NewContext(req, rec))
+
+	require.Error(t, err)
+	httpErr, ok := err.(*echo.HTTPError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusBadRequest, httpErr.Code)
 }
 
 func TestUploadChatAttachment_FileSizeLimit(t *testing.T) {

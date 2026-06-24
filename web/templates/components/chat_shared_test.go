@@ -422,6 +422,49 @@ func TestChatInputForm_MessageHistoryNavigationScript(t *testing.T) {
 	}
 }
 
+func TestChatInputForm_AttachmentUploadsAppendToCurrentSession(t *testing.T) {
+	configs := []ChatInputFormConfig{
+		{
+			FormID:       "chat-form",
+			InputID:      "message-input",
+			PostEndpoint: "/chat/send",
+			TargetID:     "chat-messages",
+		},
+		{
+			FormID:       "task-thread-form",
+			InputID:      "task-message-input",
+			PostEndpoint: "/tasks/task-123/thread",
+			TargetID:     "task-thread-messages",
+			TaskID:       "task-123",
+		},
+	}
+	for _, config := range configs {
+		t.Run(config.FormID, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := ChatInputForm(config).Render(context.Background(), &buf); err != nil {
+				t.Fatalf("render ChatInputForm: %v", err)
+			}
+			content := buf.String()
+			required := []string{
+				"var existingAttachmentCount = listContainer ? listContainer.querySelectorAll('[data-pending-attachment]').length : 0;",
+				"if (existingAttachmentCount + files.length > 3)",
+				"if (sessionInput && sessionInput.value) formData.append('attachment_session_id', sessionInput.value);",
+				"if (sessionInput) sessionInput.value = result.session_id;",
+				"div.setAttribute('data-pending-attachment', 'true');",
+				"if (listContainer) listContainer.appendChild(div);",
+			}
+			for _, r := range required {
+				if !strings.Contains(content, r) {
+					t.Fatalf("attachment upload script missing %q", r)
+				}
+			}
+			if count := strings.Count(content, "listContainer.innerHTML = '';"); count != 1 {
+				t.Fatalf("attachment upload script must not clear previews after upload, while Clear All should still clear intentionally; got %d clear calls", count)
+			}
+		})
+	}
+}
+
 func TestChatInputForm_MessageHistoryScopedPerTaskThread(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatInputForm(ChatInputFormConfig{
