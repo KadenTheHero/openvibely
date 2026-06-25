@@ -497,8 +497,7 @@ func (h *Handler) GetTaskChangesWorktree(c echo.Context) error {
 			// If live diff is empty because the branch was already merged, fall
 			// back to the preserved execution diff.
 			if branchAlreadyMerged && strings.TrimSpace(diffOutput) == "" {
-				executions, _ := h.execRepo.ListByTaskChronological(ctx, taskID)
-				if preservedDiff := latestNonEmptyDiff(executions); preservedDiff != "" {
+				if preservedDiff, _ := h.execRepo.GetLatestNonEmptyDiffOutput(ctx, taskID); preservedDiff != "" {
 					diffOutput = preservedDiff
 					fileStats = nil
 				}
@@ -520,12 +519,12 @@ func (h *Handler) GetTaskChangesWorktree(c echo.Context) error {
 	}
 
 	// Fallback to execution-based diff
-	executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
+	diffOutput, _ := h.execRepo.GetLatestNonEmptyDiffOutput(c.Request().Context(), taskID)
 	var reviewComments []models.ReviewComment
 	if h.reviewCommentRepo != nil {
 		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
 	}
-	return render(c, http.StatusOK, pages.TaskChangesContent(executions, task.ID, reviewComments))
+	return render(c, http.StatusOK, pages.TaskChangesContent(diffOutput, task.ID, reviewComments))
 }
 
 // UpdateWorktreeSettings updates global worktree settings.

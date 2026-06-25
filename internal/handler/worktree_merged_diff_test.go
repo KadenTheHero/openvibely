@@ -106,18 +106,15 @@ index abc123..def456 100644
 	t.Logf("Fetched task ID: %s, WorktreeBranch: %s, MergeStatus: %s", fetchedTask.ID, fetchedTask.WorktreeBranch, fetchedTask.MergeStatus)
 
 	// Verify execution was created with diff
-	fetchedExecs, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	latestDiff, err := execRepo.GetLatestNonEmptyDiffOutput(ctx, task.ID)
 	if err != nil {
-		t.Fatalf("failed to fetch executions: %v", err)
+		t.Fatalf("failed to fetch latest diff output: %v", err)
 	}
-	t.Logf("Fetched %d executions", len(fetchedExecs))
-	for i, e := range fetchedExecs {
-		t.Logf("  Execution %d: ID=%s, DiffOutput length=%d", i, e.ID, len(e.DiffOutput))
-		if len(e.DiffOutput) > 100 {
-			t.Logf("  DiffOutput (first 100 chars): %s", e.DiffOutput[:100])
-		} else if e.DiffOutput != "" {
-			t.Logf("  DiffOutput: %s", e.DiffOutput)
-		}
+	t.Logf("Latest non-empty diff output length=%d", len(latestDiff))
+	if len(latestDiff) > 100 {
+		t.Logf("DiffOutput (first 100 chars): %s", latestDiff[:100])
+	} else if latestDiff != "" {
+		t.Logf("DiffOutput: %s", latestDiff)
 	}
 
 	// Create a request to get the changes tab

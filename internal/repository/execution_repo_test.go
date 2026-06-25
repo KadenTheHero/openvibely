@@ -530,7 +530,8 @@ func TestExecutionRepo_DiffOutput(t *testing.T) {
 		t.Errorf("expected DiffOutput=%q, got %q", diffData, got.DiffOutput)
 	}
 
-	// Verify via ListByTask
+	// ListByTask and ListByTaskChronological use light column sets that omit diff_output to
+	// avoid loading large blobs on every list/pagination request. Verify they return empty DiffOutput.
 	execs, err := execRepo.ListByTask(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("ListByTask: %v", err)
@@ -538,11 +539,10 @@ func TestExecutionRepo_DiffOutput(t *testing.T) {
 	if len(execs) != 1 {
 		t.Fatalf("expected 1 execution, got %d", len(execs))
 	}
-	if execs[0].DiffOutput != diffData {
-		t.Errorf("ListByTask: expected DiffOutput=%q, got %q", diffData, execs[0].DiffOutput)
+	if execs[0].DiffOutput != "" {
+		t.Errorf("ListByTask: expected DiffOutput to be empty (light query), got %q", execs[0].DiffOutput)
 	}
 
-	// Verify via ListByTaskChronological
 	chronoExecs, err := execRepo.ListByTaskChronological(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("ListByTaskChronological: %v", err)
@@ -550,8 +550,28 @@ func TestExecutionRepo_DiffOutput(t *testing.T) {
 	if len(chronoExecs) != 1 {
 		t.Fatalf("expected 1 execution, got %d", len(chronoExecs))
 	}
-	if chronoExecs[0].DiffOutput != diffData {
-		t.Errorf("ListByTaskChronological: expected DiffOutput=%q, got %q", diffData, chronoExecs[0].DiffOutput)
+	if chronoExecs[0].DiffOutput != "" {
+		t.Errorf("ListByTaskChronological: expected DiffOutput to be empty (light query), got %q", chronoExecs[0].DiffOutput)
+	}
+
+	// Verify the targeted diff lookup returns the stored diff.
+	latestDiff, err := execRepo.GetLatestNonEmptyDiffOutput(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetLatestNonEmptyDiffOutput: %v", err)
+	}
+	if latestDiff != diffData {
+		t.Errorf("GetLatestNonEmptyDiffOutput: expected %q, got %q", diffData, latestDiff)
+	}
+
+	// A task with no non-empty diff output should return "".
+	emptyTask := &models.Task{ProjectID: "default", Title: "No Diff Task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "x"}
+	taskRepo.Create(ctx, emptyTask)
+	noDiff, err := execRepo.GetLatestNonEmptyDiffOutput(ctx, emptyTask.ID)
+	if err != nil {
+		t.Fatalf("GetLatestNonEmptyDiffOutput (no diff): %v", err)
+	}
+	if noDiff != "" {
+		t.Errorf("GetLatestNonEmptyDiffOutput: expected empty for task with no diff, got %q", noDiff)
 	}
 }
 

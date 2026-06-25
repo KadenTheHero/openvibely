@@ -28,8 +28,15 @@ func (r *ExecutionRepo) DB() *sql.DB {
 const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, error_message,
 	tokens_used, duration_ms, is_followup, diff_output, cli_session_id, started_at, completed_at`
 
-const executionSelectColumnsAlias = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.error_message,
-	e.tokens_used, e.duration_ms, e.is_followup, e.diff_output, e.cli_session_id, e.started_at, e.completed_at`
+// executionSelectColumnsLight omits diff_output (substituting an empty string) so that
+// list/pagination queries don't load the potentially very large diff blob on every request.
+// The scan shape matches executionSelectColumns, so scanExecutionRow still works; the
+// resulting Execution will have DiffOutput == "".
+const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, error_message,
+	tokens_used, duration_ms, is_followup, '' AS diff_output, cli_session_id, started_at, completed_at`
+
+const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.error_message,
+	e.tokens_used, e.duration_ms, e.is_followup, '' AS diff_output, e.cli_session_id, e.started_at, e.completed_at`
 
 func scanExecutionRow(scanner interface {
 	Scan(dest ...interface{}) error
@@ -43,7 +50,7 @@ func scanExecutionRow(scanner interface {
 
 func (r *ExecutionRepo) ListByTask(ctx context.Context, taskID string) ([]models.Execution, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+executionSelectColumns+` FROM executions WHERE task_id = ? ORDER BY started_at DESC`, taskID)
+		`SELECT `+executionSelectColumnsLight+` FROM executions WHERE task_id = ? ORDER BY started_at DESC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("listing executions: %w", err)
 	}
@@ -71,7 +78,7 @@ func (r *ExecutionRepo) ListByTaskIDs(ctx context.Context, taskIDs []string) (ma
 		args[i] = id
 	}
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+executionSelectColumns+` FROM executions WHERE task_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY started_at DESC`, args...)
+		`SELECT `+executionSelectColumnsLight+` FROM executions WHERE task_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY started_at DESC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("batch listing executions: %w", err)
 	}
@@ -90,7 +97,7 @@ func (r *ExecutionRepo) ListByTaskIDs(ctx context.Context, taskIDs []string) (ma
 
 func (r *ExecutionRepo) ListByProject(ctx context.Context, projectID string, limit int) ([]models.Execution, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+executionSelectColumnsAlias+`
+		`SELECT `+executionSelectColumnsAliasLight+`
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
 		 WHERE t.project_id = ?
@@ -118,7 +125,7 @@ func (r *ExecutionRepo) ListByProject(ctx context.Context, projectID string, lim
 // executions are still included.
 func (r *ExecutionRepo) ListByProjectExcludingChat(ctx context.Context, projectID string, limit int) ([]models.Execution, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+executionSelectColumnsAlias+`
+		`SELECT `+executionSelectColumnsAliasLight+`
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
 		 WHERE t.project_id = ? AND t.category != 'chat'
@@ -308,7 +315,7 @@ func (r *ExecutionRepo) FindActiveTaskExecution(ctx context.Context, taskID, exc
 		return nil, err
 	}
 	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
-		`SELECT `+executionSelectColumnsAlias+`
+		`SELECT `+executionSelectColumnsAliasLight+`
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
 		 WHERE e.task_id = ? AND e.id != ? AND e.status = 'running'
@@ -342,7 +349,7 @@ func (r *ExecutionRepo) HasActiveTaskExecution(ctx context.Context, taskID, excl
 
 func (r *ExecutionRepo) FindLatestActiveChatExecution(ctx context.Context, projectID string) (*models.Execution, error) {
 	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
-		`SELECT `+executionSelectColumnsAlias+`
+		`SELECT `+executionSelectColumnsAliasLight+`
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
 		 WHERE t.project_id = ? AND t.category = 'chat' AND e.status = 'running'
@@ -372,7 +379,7 @@ func (r *ExecutionRepo) listChatHistoryPage(ctx context.Context, projectID, befo
 	if limit <= 0 {
 		return []models.Execution{}, nil
 	}
-	query := `SELECT ` + executionSelectColumnsAlias + `
+	query := `SELECT ` + executionSelectColumnsAliasLight + `
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
 		 WHERE t.project_id = ? AND t.category = 'chat'`
@@ -397,7 +404,7 @@ func (r *ExecutionRepo) listChatHistoryPage(ctx context.Context, projectID, befo
 // ListByTaskChronological returns all executions for a task ordered chronologically (oldest first).
 func (r *ExecutionRepo) ListByTaskChronological(ctx context.Context, taskID string) ([]models.Execution, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+executionSelectColumns+` FROM executions WHERE task_id = ? ORDER BY started_at ASC, rowid ASC`, taskID)
+		`SELECT `+executionSelectColumnsLight+` FROM executions WHERE task_id = ? ORDER BY started_at ASC, rowid ASC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("listing executions chronological: %w", err)
 	}
@@ -440,7 +447,7 @@ func (r *ExecutionRepo) listTaskExecutionPage(ctx context.Context, taskID, befor
 	if limit <= 0 {
 		return []models.Execution{}, nil
 	}
-	query := `SELECT ` + executionSelectColumns + ` FROM executions WHERE task_id = ?`
+	query := `SELECT ` + executionSelectColumnsLight + ` FROM executions WHERE task_id = ?`
 	args := []interface{}{taskID}
 	if beforeExecID != "" {
 		query += ` AND (started_at < (SELECT started_at FROM executions WHERE id = ?)
@@ -489,6 +496,23 @@ func (r *ExecutionRepo) UpdateDiffOutput(ctx context.Context, id string, diffOut
 		return fmt.Errorf("updating execution diff output: %w", err)
 	}
 	return nil
+}
+
+// GetLatestNonEmptyDiffOutput returns the diff_output from the most recent execution for
+// the given task that has a non-empty diff_output. Returns "" with no error when none exist.
+// This avoids loading all execution rows just to find the preserved diff.
+func (r *ExecutionRepo) GetLatestNonEmptyDiffOutput(ctx context.Context, taskID string) (string, error) {
+	var diffOutput string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT diff_output FROM executions WHERE task_id = ? AND diff_output != '' ORDER BY started_at DESC, rowid DESC LIMIT 1`,
+		taskID).Scan(&diffOutput)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("getting latest non-empty diff output: %w", err)
+	}
+	return diffOutput, nil
 }
 
 func (r *ExecutionRepo) UpdateCliSessionID(ctx context.Context, id string, sessionID string) error {

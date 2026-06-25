@@ -389,8 +389,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 96 {
-		t.Fatalf("max goose version = %d, want 96", maxVersion)
+	if maxVersion != 97 {
+		t.Fatalf("max goose version = %d, want 97", maxVersion)
 	}
 }
 
@@ -741,8 +741,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 96 {
-		t.Fatalf("max goose version = %d, want 96", maxVersion)
+	if maxVersion != 97 {
+		t.Fatalf("max goose version = %d, want 97", maxVersion)
 	}
 }
 

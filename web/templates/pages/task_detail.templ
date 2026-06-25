@@ -9,24 +9,13 @@ import (
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
-// latestDiffOutput returns the diff output from the most recent completed execution
-func latestDiffOutput(executions []models.Execution) string {
-	// executions are in chronological order (oldest first), so iterate from the end
-	for i := len(executions) - 1; i >= 0; i-- {
-		if executions[i].DiffOutput != "" {
-			return executions[i].DiffOutput
-		}
-	}
-	return ""
-}
-
 // TaskChangesContent renders just the changes tab content (for HTMX partial updates)
-templ TaskChangesContent(executions []models.Execution, taskID string, reviewComments []models.ReviewComment) {
+templ TaskChangesContent(diffOutput string, taskID string, reviewComments []models.ReviewComment) {
 	<div class="card bg-base-100 shadow-sm border border-base-300">
 		<div class="card-body">
 			<h4 class="text-lg font-bold mb-3">File Changes</h4>
 			<div id="diff-viewer-container">
-				@components.DiffViewerWithReview(latestDiffOutput(executions), taskID, reviewComments)
+				@components.DiffViewerWithReview(diffOutput, taskID, reviewComments)
 			</div>
 		</div>
 	</div>

@@ -513,15 +513,6 @@ func (h *Handler) GetTaskDetailActions(c echo.Context) error {
 	return render(c, http.StatusOK, pages.TaskDetailActions(task))
 }
 
-func latestNonEmptyDiff(executions []models.Execution) string {
-	for i := len(executions) - 1; i >= 0; i-- {
-		if executions[i].DiffOutput != "" {
-			return executions[i].DiffOutput
-		}
-	}
-	return ""
-}
-
 func taskBranchSlug(title string) string {
 	slug := strings.ToLower(title)
 	slug = regexp.MustCompile(`[^a-z0-9-]+`).ReplaceAllString(slug, "-")
@@ -737,17 +728,28 @@ func (h *Handler) resolveTaskChangesDiffOutput(ctx context.Context, task *models
 		return ""
 	}
 
+	// preservedDiff fetches the most recent non-empty execution diff on first call.
+	var preservedDiffOnce struct {
+		val  string
+		done bool
+	}
+	preservedDiff := func() string {
+		if !preservedDiffOnce.done {
+			preservedDiffOnce.val, _ = h.execRepo.GetLatestNonEmptyDiffOutput(ctx, task.ID)
+			preservedDiffOnce.done = true
+		}
+		return preservedDiffOnce.val
+	}
+
 	// Worktree tasks can use live git diff or preserved execution diff.
 	if task.WorktreeBranch != "" {
-		executions, _ := h.execRepo.ListByTaskChronological(ctx, task.ID)
-
 		// Active tasks with an existing worktree should prefer live diff even if
 		// merge_status is stale from a previous run/follow-up.
 		isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
 
 		// For non-active merged tasks, only preserved execution diff is available.
 		if !isActive && task.MergeStatus == models.MergeStatusMerged {
-			return latestNonEmptyDiff(executions)
+			return preservedDiff()
 		}
 
 		// For active/unmerged tasks with an existing worktree, prefer live diff.
@@ -769,7 +771,7 @@ func (h *Handler) resolveTaskChangesDiffOutput(ctx context.Context, task *models
 						task.Status != models.StatusRunning &&
 						task.Status != models.StatusQueued &&
 						service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch) {
-						return latestNonEmptyDiff(executions)
+						return preservedDiff()
 					}
 					return diffOutput
 				}
@@ -777,12 +779,11 @@ func (h *Handler) resolveTaskChangesDiffOutput(ctx context.Context, task *models
 		}
 
 		// Worktree is gone/unavailable, fall back to preserved diff.
-		return latestNonEmptyDiff(executions)
+		return preservedDiff()
 	}
 
 	// Non-worktree tasks use execution-based diff.
-	executions, _ := h.execRepo.ListByTaskChronological(ctx, task.ID)
-	return latestNonEmptyDiff(executions)
+	return preservedDiff()
 }
 
 // GetTaskChanges returns just the changes tab content for fresh updates when switching tabs.
@@ -811,7 +812,6 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 		// in sync with reality.
 		branchAlreadyMerged := h.reconcileAlreadyMergedBranch(ctx, task)
 
-		executions, _ := h.execRepo.ListByTaskChronological(ctx, taskID)
 		var reviewComments []models.ReviewComment
 		if h.reviewCommentRepo != nil {
 			reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
@@ -823,15 +823,28 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 
 		rebaseAvailable := h.taskRebaseAvailable(task, project, branchAlreadyMerged)
 
+		// preservedDiff fetches the most recent non-empty execution diff on first call,
+		// avoiding loading all execution rows when only the diff blob is needed.
+		var preservedDiffOnce struct {
+			val  string
+			done bool
+		}
+		preservedDiff := func() string {
+			if !preservedDiffOnce.done {
+				preservedDiffOnce.val, _ = h.execRepo.GetLatestNonEmptyDiffOutput(ctx, taskID)
+				preservedDiffOnce.done = true
+			}
+			return preservedDiffOnce.val
+		}
+
 		// Active tasks with an existing worktree should prefer live diff even if
 		// merge_status is stale from a previous run/follow-up.
 		isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
 
 		// For non-active merged tasks, show the preserved execution diff.
 		if !isActive && task.MergeStatus == models.MergeStatusMerged {
-			diffOutput := latestNonEmptyDiff(executions)
 			return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-				diffOutput, task, nil, reviewComments, taskPR, branchAlreadyMerged, rebaseAvailable,
+				preservedDiff(), task, nil, reviewComments, taskPR, branchAlreadyMerged, rebaseAvailable,
 			))
 		}
 
@@ -858,8 +871,8 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 						task.Status != models.StatusRunning &&
 						task.Status != models.StatusQueued &&
 						(branchAlreadyMerged || service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch)) {
-						if preservedDiff := latestNonEmptyDiff(executions); preservedDiff != "" {
-							diffOutput = preservedDiff
+						if pd := preservedDiff(); pd != "" {
+							diffOutput = pd
 							fileStats = nil
 						}
 					}
@@ -872,23 +885,19 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 		}
 
 		// Fallback: worktree existed but is gone, show preserved diff
-		for i := len(executions) - 1; i >= 0; i-- {
-			if executions[i].DiffOutput != "" {
-				return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-					executions[i].DiffOutput, task, nil, reviewComments, taskPR, branchAlreadyMerged, rebaseAvailable,
-				))
-			}
-		}
+		return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
+			preservedDiff(), task, nil, reviewComments, taskPR, branchAlreadyMerged, rebaseAvailable,
+		))
 	}
 
 	// Fallback to execution-based diff (non-worktree tasks)
-	executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
+	diffOutput, _ := h.execRepo.GetLatestNonEmptyDiffOutput(c.Request().Context(), taskID)
 	var reviewComments []models.ReviewComment
 	if h.reviewCommentRepo != nil {
 		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
 	}
 
-	return render(c, http.StatusOK, pages.TaskChangesContent(executions, task.ID, reviewComments))
+	return render(c, http.StatusOK, pages.TaskChangesContent(diffOutput, task.ID, reviewComments))
 }
 
 // GetTaskChangesFile returns a single diff file card for per-file lazy loading.
