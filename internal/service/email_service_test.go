@@ -11,6 +11,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNormalizeEmailPasswordForProvider(t *testing.T) {
+	assert.Equal(t, "abcdefghijklmnop", NormalizeEmailPasswordForProvider(EmailProviderGmail, " abcd efgh ijkl mnop "))
+	assert.Equal(t, "abc def", NormalizeEmailPasswordForProvider(EmailProviderCustom, " abc def "))
+}
+
+func TestEmailService_LoadConfigNormalizesSavedProviderAppPassword(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingProvider, EmailProviderGmail))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingPassword, "abcd efgh ijkl mnop"))
+	svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+
+	cfg, err := svc.loadConfig(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "abcdefghijklmnop", cfg.Password)
+}
+
 func TestEmailService_IgnoresUnauthorizedAutomatedAndSelfSentMessages(t *testing.T) {
 	assert.True(t, isIgnoredEmail(EmailInboundMessage{FromAddress: "bot@example.com", Subject: "self", Body: "hello"}, "bot@example.com"))
 	assert.True(t, isIgnoredEmail(EmailInboundMessage{FromAddress: "noreply@example.com", Subject: "auto", Body: "hello"}, "bot@example.com"))

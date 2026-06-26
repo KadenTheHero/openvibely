@@ -109,6 +109,14 @@ func NormalizeEmailProvider(provider string) string {
 	return EmailProviderCustom
 }
 
+func NormalizeEmailPasswordForProvider(provider, password string) string {
+	password = strings.TrimSpace(password)
+	if NormalizeEmailProvider(provider) == EmailProviderCustom {
+		return password
+	}
+	return regexp.MustCompile(`\s+`).ReplaceAllString(password, "")
+}
+
 func ResolveEmailProviderSettings(provider, imapHost, imapPort, smtpHost, smtpPort string) (string, string, int, string, int, error) {
 	key := NormalizeEmailProvider(provider)
 	preset := emailProviderPresets[key]
@@ -337,7 +345,7 @@ func (s *EmailService) loadConfig(ctx context.Context) (EmailRuntimeConfig, erro
 	cfg := EmailRuntimeConfig{
 		Provider:                provider,
 		Address:                 repository.NormalizeEmailAddress(get(EmailSettingAddress)),
-		Password:                get(EmailSettingPassword),
+		Password:                NormalizeEmailPasswordForProvider(provider, get(EmailSettingPassword)),
 		IMAPHost:                get(EmailSettingIMAPHost),
 		IMAPPort:                imapPort,
 		SMTPHost:                get(EmailSettingSMTPHost),

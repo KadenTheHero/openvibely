@@ -109,6 +109,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	slackSendResponses := true
 	emailStatus := service.EmailConnectionStatus{Provider: service.EmailProviderCustom, IMAPPort: 993, SMTPPort: 587}
 	emailPasswordValue := ""
+	emailHasPassword := false
 	emailSendResponses := true
 	emailSkipAttachments := false
 	emailMarkExistingSeenOnStart := true
@@ -160,6 +161,8 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		emailProvider, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingProvider)
 		emailAddress, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingAddress)
 		emailPasswordValue, _ = h.settingsRepo.Get(c.Request().Context(), service.EmailSettingPassword)
+		emailHasPassword = strings.TrimSpace(emailPasswordValue) != ""
+		emailPasswordValue = ""
 		emailIMAPHost, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingIMAPHost)
 		emailIMAPPort, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingIMAPPort)
 		emailSMTPHost, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingSMTPHost)
@@ -202,7 +205,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		githubHasPrivateKey
 	hasSlackChannel := slackStatus.Configured || slackStatus.Connected ||
 		slackHasClientID || slackHasClientSecret || slackHasAppToken || slackHasBotToken || slackHasOAuthBotToken
-	hasEmailChannel := emailStatus.Configured || emailStatus.Running || strings.TrimSpace(emailStatus.Address) != "" || strings.TrimSpace(emailStatus.IMAPHost) != "" || strings.TrimSpace(emailStatus.SMTPHost) != "" || strings.TrimSpace(emailPasswordValue) != ""
+	hasEmailChannel := emailStatus.Configured || emailStatus.Running || strings.TrimSpace(emailStatus.Address) != "" || strings.TrimSpace(emailStatus.IMAPHost) != "" || strings.TrimSpace(emailStatus.SMTPHost) != "" || emailHasPassword
 
 	// Load webhooks for current project
 	var webhooks []models.WebhookEndpoint
@@ -681,7 +684,7 @@ func (h *Handler) handleEmailConfigure(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	emailAddress := repository.NormalizeEmailAddress(c.FormValue("email_address"))
-	password := strings.TrimSpace(c.FormValue("email_password"))
+	password := service.NormalizeEmailPasswordForProvider(provider, c.FormValue("email_password"))
 	if password == "" {
 		existing, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingPassword)
 		password = strings.TrimSpace(existing)

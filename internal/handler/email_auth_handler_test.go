@@ -59,7 +59,7 @@ func TestEmailAuthorizedSendersValidation(t *testing.T) {
 
 func TestEmailConfigurePresetsRemove(t *testing.T) {
 	h, e, _, _ := setupTestHandlerWithDB(t)
-	form := url.Values{"email_provider": {"gmail"}, "email_address": {"bot@example.com"}, "email_password": {"secret"}, "email_send_responses": {"true"}, "email_mark_existing_seen_on_start": {"true"}}
+	form := url.Values{"email_provider": {"gmail"}, "email_address": {"bot@example.com"}, "email_password": {"abcd efgh ijkl mnop"}, "email_send_responses": {"true"}, "email_mark_existing_seen_on_start": {"true"}}
 	req := httptest.NewRequest(http.MethodPost, "/channels/email/configure", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("HX-Request", "true")
@@ -72,6 +72,10 @@ func TestEmailConfigurePresetsRemove(t *testing.T) {
 	smtpHost, _ := h.settingsRepo.Get(req.Context(), "email_smtp_host")
 	if imapHost != "imap.gmail.com" || smtpHost != "smtp.gmail.com" {
 		t.Fatalf("expected gmail hosts, got %q %q", imapHost, smtpHost)
+	}
+	password, _ := h.settingsRepo.Get(req.Context(), "email_password")
+	if password != "abcdefghijklmnop" {
+		t.Fatalf("expected provider app password whitespace to be removed, got %q", password)
 	}
 
 	custom := url.Values{"email_provider": {"custom"}, "email_address": {"bot@example.com"}}
@@ -90,7 +94,7 @@ func TestEmailConfigurePresetsRemove(t *testing.T) {
 	if removeRec.Code != http.StatusOK {
 		t.Fatalf("expected remove 200, got %d", removeRec.Code)
 	}
-	password, _ := h.settingsRepo.Get(removeReq.Context(), "email_password")
+	password, _ = h.settingsRepo.Get(removeReq.Context(), "email_password")
 	if password != "" {
 		t.Fatal("expected email password cleared")
 	}
@@ -99,7 +103,7 @@ func TestEmailConfigurePresetsRemove(t *testing.T) {
 func TestChannelsPageEmailUI(t *testing.T) {
 	h, e, _, _ := setupTestHandlerWithDB(t)
 	_ = h.settingsRepo.Set(httptest.NewRequest(http.MethodGet, "/", nil).Context(), "email_address", "bot@example.com")
-	_ = h.settingsRepo.Set(httptest.NewRequest(http.MethodGet, "/", nil).Context(), "email_password", "secret")
+	_ = h.settingsRepo.Set(httptest.NewRequest(http.MethodGet, "/", nil).Context(), "email_password", "super-secret-app-password")
 	_ = h.emailAuthRepo.Create(httptest.NewRequest(http.MethodGet, "/", nil).Context(), &models.EmailAuthorizedSender{ProjectID: "default", EmailAddress: "alice@example.com", AddedBy: "test"})
 
 	req := httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
@@ -113,6 +117,9 @@ func TestChannelsPageEmailUI(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected email UI to contain %q", want)
 		}
+	}
+	if strings.Contains(body, "super-secret-app-password") {
+		t.Fatal("email UI should not render the saved app password")
 	}
 	if strings.Contains(body, "pairing") || strings.Contains(body, "PIN") {
 		t.Fatal("email UI should not include pairing/pin language")
