@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,14 +30,18 @@ var hexIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 const (
 	maxMessageLength         = 4096 // Telegram message length limit
-	telegramStreamInterval   = 2 * time.Second
 	telegramProcessTimeout   = 5 * time.Minute
 	telegramChatHistoryLimit = 50
 	telegramMaxFileSize      = 20 << 20   // 20 MB (Telegram Bot API limit)
 	telegramMaxTextFileSize  = 100 * 1024 // 100KB for text content injection
+
+	TelegramSettingBotToken       = "telegram_bot_token"
+	TelegramSettingSendResponses  = "telegram_send_responses"
+	TelegramSettingRichMessagesV2 = "telegram_rich_messages_v2"
 )
 
 var telegramUploadsDir = "uploads" // same as handler's uploadsDir
+var telegramStreamInterval = 2 * time.Second
 
 // TelegramService manages Telegram bot integration.
 // It acts as a proxy to the /chat page orchestrator — every message sent to the bot
@@ -67,6 +72,8 @@ type TelegramService struct {
 	channelTaskRunner        ChannelTaskRunner
 	sendMessageFunc          func(chatID int64, text string)
 	editMessageFunc          func(chatID int64, messageID int, text string)
+	sendConfigFunc           func(c tgbotapi.Chattable) (tgbotapi.Message, error)
+	makeRequestFunc          func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error)
 	userProjects             map[int64]string // Maps Telegram user ID to active project ID
 	ctx                      context.Context
 	cancel                   context.CancelFunc
@@ -308,7 +315,7 @@ func (s *TelegramService) run() {
 			if !s.checkAuthorization(userID, username, projectID) {
 				applog.Infof("[telegram] unauthorized access attempt from user %d (username: %s) for project %s",
 					userID, username, projectID)
-				s.sendMessage(chatID, "You are not authorized to use this bot. Contact the project owner to get access.")
+				s.sendMessage(s.ctx, chatID, "You are not authorized to use this bot. Contact the project owner to get access.")
 				continue
 			}
 
@@ -318,18 +325,18 @@ func (s *TelegramService) run() {
 				switch cmd {
 				case "start":
 					response := s.handleStart(update.Message.From.ID)
-					s.sendMessage(update.Message.Chat.ID, response)
+					s.sendMessage(s.ctx, update.Message.Chat.ID, response)
 					continue
 				case "project":
 					response := s.handleProject(update.Message.From.ID, update.Message.CommandArguments())
-					s.sendMessage(update.Message.Chat.ID, response)
+					s.sendMessage(s.ctx, update.Message.Chat.ID, response)
 					continue
 				}
 			}
 
 			// Check for natural language project commands before forwarding to LLM
 			if response, handled := s.handleNaturalLanguageProjectCommand(userID, update.Message.Text); handled {
-				s.sendMessage(chatID, response)
+				s.sendMessage(s.ctx, chatID, response)
 				continue
 			}
 
@@ -449,7 +456,7 @@ func (s *TelegramService) queueChatInput(ctx context.Context, projectID, activeE
 		attachmentSessionID, err = s.saveChatAttachmentsToPendingSession(chatAttachments)
 		if err != nil {
 			applog.Infof("[telegram] queue chat attachment staging failed: %v", err)
-			s.sendMessage(chatID, "Error queueing your attachment. Please try again.")
+			s.sendMessage(ctx, chatID, "Error queueing your attachment. Please try again.")
 			return true
 		}
 	}
@@ -468,7 +475,7 @@ func (s *TelegramService) queueChatInput(ctx context.Context, projectID, activeE
 	}
 	if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
 		applog.Infof("[telegram] queue chat input failed: %v", err)
-		s.sendMessage(chatID, "Error queueing your message. Please try again.")
+		s.sendMessage(ctx, chatID, "Error queueing your message. Please try again.")
 		return true
 	}
 	if s.chatBroadcaster != nil {
@@ -481,7 +488,7 @@ func (s *TelegramService) queueChatInput(ctx context.Context, projectID, activeE
 			Queued:    true,
 		})
 	}
-	s.sendMessage(chatID, "Queued. I'll send this after the current response finishes.")
+	s.sendMessage(ctx, chatID, "Queued. I'll send this after the current response finishes.")
 	return true
 }
 
@@ -500,7 +507,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 
 	// Require either text or an attachment
 	if text == "" && fileID == "" {
-		s.sendMessage(chatID, "Please send a text message or an attachment.")
+		s.sendMessage(context.Background(), chatID, "Please send a text message or an attachment.")
 		return
 	}
 
@@ -513,7 +520,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 
 	projectID := s.getActiveProject(userID)
 	if projectID == "" {
-		s.sendMessage(chatID, "No active project. Send /start to set up first.")
+		s.sendMessage(context.Background(), chatID, "No active project. Send /start to set up first.")
 		return
 	}
 
@@ -530,7 +537,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 		attCtx, imgAtts, chatAtts, err := s.downloadAndSaveTelegramAttachment(ctx, fileID, fileName, fileSize, mimeType)
 		if err != nil {
 			applog.Infof("[telegram] attachment download error: %v", err)
-			s.sendMessage(chatID, fmt.Sprintf("⚠️ Failed to process attachment: %v", err))
+			s.sendMessage(ctx, chatID, fmt.Sprintf("⚠️ Failed to process attachment: %v", err))
 			// Continue without the attachment
 		} else {
 			attachmentContext = attCtx
@@ -544,7 +551,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	agent, err := s.autoSelectAgent(ctx, text, hasImages)
 	if err != nil {
 		applog.Infof("[telegram] agent selection error: %v", err)
-		s.sendMessage(chatID, fmt.Sprintf("Error selecting model: %v", err))
+		s.sendMessage(ctx, chatID, fmt.Sprintf("Error selecting model: %v", err))
 		return
 	}
 
@@ -554,7 +561,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 
 	if activeChatExec, activeErr := s.execRepo.FindLatestActiveChatExecution(ctx, projectID); activeErr != nil {
 		applog.Infof("[telegram] error checking active chat turn: %v", activeErr)
-		s.sendMessage(chatID, "Error checking active chat response. Please try again.")
+		s.sendMessage(ctx, chatID, "Error checking active chat response. Please try again.")
 		return
 	} else if activeChatExec != nil {
 		if s.queueChatInput(ctx, projectID, activeChatExec.ID, agent.ID, text, chatID, chatAttachments) {
@@ -577,7 +584,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	}
 	if err := s.taskRepo.Create(ctx, task); err != nil {
 		applog.Infof("[telegram] error creating task: %v", err)
-		s.sendMessage(chatID, "Error processing your message. Please try again.")
+		s.sendMessage(ctx, chatID, "Error processing your message. Please try again.")
 		return
 	}
 
@@ -593,7 +600,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 		if delErr := s.taskRepo.Delete(ctx, task.ID); delErr != nil {
 			applog.Infof("[telegram] cleanup chat task failed task=%s after execution create failure: %v", task.ID, delErr)
 		}
-		s.sendMessage(chatID, "Error processing your message. Please try again.")
+		s.sendMessage(ctx, chatID, "Error processing your message. Please try again.")
 		return
 	}
 
@@ -633,10 +640,10 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 
 	// Send initial "thinking" message that we'll edit later when a real bot is configured.
 	var sentMsg tgbotapi.Message
-	if s.bot != nil {
+	if s.bot != nil || s.sendConfigFunc != nil {
 		thinkingMsg := tgbotapi.NewMessage(chatID, "⏳ Thinking...")
 		var err error
-		sentMsg, err = s.bot.Send(thinkingMsg)
+		sentMsg, err = s.sendConfig(thinkingMsg)
 		if err != nil {
 			applog.Infof("[telegram] error sending thinking message: %v", err)
 		}
@@ -662,22 +669,24 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	// Resolve work directory
 	workDir := s.resolveWorkDir(ctx, projectID)
 
-	// Start streaming updates to Telegram in background
-	streamDone := make(chan struct{})
+	// Start streaming updates to Telegram in background.
+	// The shared runner sends the final response through SendChatResponse, whose edit/send
+	// path stops the preview by replacing the placeholder with the final message.
 	if sentMsg.MessageID != 0 {
-		go s.streamUpdatesToTelegram(ctx, chatID, sentMsg.MessageID, exec.ID, streamDone)
+		go func() {
+			streamCtx, streamCancel := context.WithTimeout(context.Background(), telegramProcessTimeout)
+			defer streamCancel()
+			s.streamUpdatesToTelegram(streamCtx, chatID, sentMsg.MessageID, exec.ID, nil)
+		}()
 	}
 
-	if sentMsg.MessageID != 0 {
-		close(streamDone)
-	}
 	if s.channelChatRunner == nil {
 		msgText := "Telegram chat runner is unavailable. Please restart OpenVibely and try again."
 		s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, 0)
 		if sentMsg.MessageID != 0 {
-			s.editMessage(chatID, sentMsg.MessageID, "❌ "+msgText)
+			s.editMessage(ctx, chatID, sentMsg.MessageID, "❌ "+msgText)
 		} else {
-			s.sendMessage(chatID, "❌ "+msgText)
+			s.sendMessage(ctx, chatID, "❌ "+msgText)
 		}
 		return
 	}
@@ -983,9 +992,55 @@ func moveOrCopyFile(src, dst string) error {
 	return os.Remove(src)
 }
 
-// streamUpdatesToTelegram polls the execution output and edits the Telegram message
-// with incremental updates for a streaming feel
+// streamUpdatesToTelegram polls the execution output and previews incremental updates in Telegram.
 func (s *TelegramService) streamUpdatesToTelegram(ctx context.Context, chatID int64, messageID int, execID string, done <-chan struct{}) {
+	if s.IsRichMessagesV2Enabled(ctx) {
+		s.streamRichDraftUpdatesToTelegram(ctx, chatID, messageID, execID, done)
+		return
+	}
+	s.streamEditUpdatesToTelegram(ctx, chatID, messageID, execID, done)
+}
+
+func (s *TelegramService) streamEditUpdatesToTelegram(ctx context.Context, chatID int64, messageID int, execID string, done <-chan struct{}) {
+	s.streamTelegramExecutionOutput(ctx, execID, done, func(cleaned string) bool {
+		display := telegramStreamingDisplay(cleaned)
+		s.editMessage(ctx, chatID, messageID, display)
+		return true
+	})
+}
+
+func (s *TelegramService) streamRichDraftUpdatesToTelegram(ctx context.Context, chatID int64, messageID int, execID string, done <-chan struct{}) {
+	draftID := newTelegramRichDraftID()
+	fallbackToEdit := false
+	loggedFallback := false
+	s.streamTelegramExecutionOutput(ctx, execID, done, func(cleaned string) bool {
+		if fallbackToEdit {
+			display := telegramStreamingDisplay(cleaned)
+			s.editMessage(ctx, chatID, messageID, display)
+			return true
+		}
+		sent, err := s.sendRichMessageDraft(ctx, chatID, draftID, cleaned)
+		if sent {
+			return true
+		}
+		if err != nil && isTelegramRichFallbackError(err) {
+			if !loggedFallback {
+				applog.Infof("[telegram] rich draft streaming unavailable, falling back to edit previews: %v", err)
+				loggedFallback = true
+			}
+			fallbackToEdit = true
+			display := telegramStreamingDisplay(cleaned)
+			s.editMessage(ctx, chatID, messageID, display)
+			return true
+		}
+		if err != nil {
+			applog.Infof("[telegram] rich draft streaming error: %v", err)
+		}
+		return false
+	})
+}
+
+func (s *TelegramService) streamTelegramExecutionOutput(ctx context.Context, execID string, done <-chan struct{}, preview func(cleaned string) bool) {
 	ticker := time.NewTicker(telegramStreamInterval)
 	defer ticker.Stop()
 
@@ -993,7 +1048,7 @@ func (s *TelegramService) streamUpdatesToTelegram(ctx context.Context, chatID in
 
 	for {
 		select {
-		case <-done:
+		case <-doneChan(done):
 			return
 		case <-ctx.Done():
 			return
@@ -1003,35 +1058,49 @@ func (s *TelegramService) streamUpdatesToTelegram(ctx context.Context, chatID in
 				continue
 			}
 
-			// Only update if we have new content
 			currentOutput := exec.Output
 			if currentOutput == "" || currentOutput == lastContent {
+				if isTelegramTerminalExecution(exec.Status) {
+					return
+				}
 				continue
 			}
 
-			// Clean and truncate for Telegram display
 			cleaned := llmoutput.CleanChatOutput(currentOutput)
 			if cleaned == "" || cleaned == lastContent {
+				if isTelegramTerminalExecution(exec.Status) {
+					return
+				}
 				continue
 			}
 
-			// Truncate if needed (Telegram limit)
-			display := cleaned
-			if len(display) > maxMessageLength-50 {
-				display = display[:maxMessageLength-50] + "\n\n⏳ _Generating..._"
-			} else {
-				display += "\n\n⏳ _Generating..._"
+			if preview(cleaned) {
+				lastContent = cleaned
 			}
 
-			s.editMessage(chatID, messageID, display)
-			lastContent = cleaned
-
-			// Stop if execution is complete
-			if exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed {
+			if isTelegramTerminalExecution(exec.Status) {
 				return
 			}
 		}
 	}
+}
+
+func doneChan(done <-chan struct{}) <-chan struct{} {
+	if done == nil {
+		return nil
+	}
+	return done
+}
+
+func isTelegramTerminalExecution(status models.ExecutionStatus) bool {
+	return status == models.ExecCompleted || status == models.ExecFailed || status == models.ExecCancelled
+}
+
+func telegramStreamingDisplay(cleaned string) string {
+	if len(cleaned) > maxMessageLength-50 {
+		return cleaned[:maxMessageLength-50] + "\n\n⏳ _Generating..._"
+	}
+	return cleaned + "\n\n⏳ _Generating..._"
 }
 
 // autoSelectAgent picks an agent based on message complexity and whether images are present
@@ -3219,49 +3288,197 @@ func (s *TelegramService) getActiveProject(userID int64) string {
 	return projects[0].ID
 }
 
-// sendMessage sends a message to a chat, splitting if needed
-func (s *TelegramService) sendMessage(chatID int64, text string) {
+type telegramInputRichMessage struct {
+	Markdown            string `json:"markdown,omitempty"`
+	HTML                string `json:"html,omitempty"`
+	IsRTL               bool   `json:"is_rtl,omitempty"`
+	SkipEntityDetection bool   `json:"skip_entity_detection,omitempty"`
+}
+
+func telegramRichMarkdownPayload(text string) telegramInputRichMessage {
+	return telegramInputRichMessage{Markdown: normalizeTelegramRichMarkdown(text)}
+}
+
+func normalizeTelegramRichMarkdown(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	return strings.TrimSpace(text)
+}
+
+func escapeTelegramMarkdownV2(text string) string {
+	replacer := strings.NewReplacer(
+		"\\", "\\\\",
+		"_", "\\_",
+		"*", "\\*",
+		"[", "\\[",
+		"]", "\\]",
+		"(", "\\(",
+		")", "\\)",
+		"~", "\\~",
+		"`", "\\`",
+		">", "\\>",
+		"#", "\\#",
+		"+", "\\+",
+		"-", "\\-",
+		"=", "\\=",
+		"|", "\\|",
+		"{", "\\{",
+		"}", "\\}",
+		".", "\\.",
+		"!", "\\!",
+	)
+	return replacer.Replace(text)
+}
+
+func isTelegramRichFallbackError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "method") ||
+		strings.Contains(msg, "rich_message") ||
+		strings.Contains(msg, "can't parse") ||
+		strings.Contains(msg, "bad request")
+}
+
+func newTelegramRichDraftID() int {
+	id := int(time.Now().UnixNano() & 0x7fffffff)
+	if id == 0 {
+		return 1
+	}
+	return id
+}
+
+func (s *TelegramService) makeTelegramRequest(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+	if s.makeRequestFunc != nil {
+		return s.makeRequestFunc(endpoint, params)
+	}
+	if s.bot == nil {
+		return nil, fmt.Errorf("telegram bot is not configured")
+	}
+	return s.bot.MakeRequest(endpoint, params)
+}
+
+func (s *TelegramService) sendConfig(config tgbotapi.Chattable) (tgbotapi.Message, error) {
+	if s.sendConfigFunc != nil {
+		return s.sendConfigFunc(config)
+	}
+	if s.bot == nil {
+		return tgbotapi.Message{}, fmt.Errorf("telegram bot is not configured")
+	}
+	return s.bot.Send(config)
+}
+
+func (s *TelegramService) sendRichMessage(ctx context.Context, chatID int64, text string) (bool, error) {
+	if !s.IsRichMessagesV2Enabled(ctx) {
+		return false, nil
+	}
+	params := tgbotapi.Params{"chat_id": strconv.FormatInt(chatID, 10)}
+	if err := params.AddInterface("rich_message", telegramRichMarkdownPayload(text)); err != nil {
+		return false, err
+	}
+	if _, err := s.makeTelegramRequest("sendRichMessage", params); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *TelegramService) editRichMessage(ctx context.Context, chatID int64, messageID int, text string) (bool, error) {
+	if !s.IsRichMessagesV2Enabled(ctx) {
+		return false, nil
+	}
+	params := tgbotapi.Params{
+		"chat_id":    strconv.FormatInt(chatID, 10),
+		"message_id": strconv.Itoa(messageID),
+	}
+	if err := params.AddInterface("rich_message", telegramRichMarkdownPayload(text)); err != nil {
+		return false, err
+	}
+	if _, err := s.makeTelegramRequest("editMessageText", params); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *TelegramService) sendRichMessageDraft(ctx context.Context, chatID int64, draftID int, text string) (bool, error) {
+	if !s.IsRichMessagesV2Enabled(ctx) {
+		return false, nil
+	}
+	if draftID == 0 {
+		return false, fmt.Errorf("telegram rich draft id must be non-zero")
+	}
+	params := tgbotapi.Params{
+		"chat_id":  strconv.FormatInt(chatID, 10),
+		"draft_id": strconv.Itoa(draftID),
+	}
+	if err := params.AddInterface("rich_message", telegramRichMarkdownPayload(text)); err != nil {
+		return false, err
+	}
+	if _, err := s.makeTelegramRequest("sendRichMessageDraft", params); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// sendMessage sends a message to a chat, splitting if needed.
+func (s *TelegramService) sendMessage(ctx context.Context, chatID int64, text string) {
 	if s.sendMessageFunc != nil {
 		s.sendMessageFunc(chatID, text)
 		return
 	}
 
+	if sent, err := s.sendRichMessage(ctx, chatID, text); sent {
+		return
+	} else if err != nil {
+		if isTelegramRichFallbackError(err) {
+			applog.Infof("[telegram] rich message send unavailable, falling back: %v", err)
+		} else {
+			applog.Infof("[telegram] rich message send returned ambiguous error; not sending fallback to avoid duplicate output: %v", err)
+			return
+		}
+	}
+
 	messages := splitMessage(text, maxMessageLength)
-
 	for _, msg := range messages {
-		msgConfig := tgbotapi.NewMessage(chatID, msg)
-		msgConfig.ParseMode = "Markdown"
-
-		if _, err := s.bot.Send(msgConfig); err != nil {
-			// Retry without Markdown if parsing fails
-			applog.Infof("[telegram] error sending message with Markdown: %v, retrying without", err)
-			msgConfig.ParseMode = ""
-			if _, err := s.bot.Send(msgConfig); err != nil {
+		msgConfig := tgbotapi.NewMessage(chatID, escapeTelegramMarkdownV2(msg))
+		msgConfig.ParseMode = "MarkdownV2"
+		if _, err := s.sendConfig(msgConfig); err != nil {
+			applog.Infof("[telegram] error sending message with MarkdownV2: %v, retrying without formatting", err)
+			plainConfig := tgbotapi.NewMessage(chatID, msg)
+			if _, err := s.sendConfig(plainConfig); err != nil {
 				applog.Infof("[telegram] error sending message: %v", err)
 			}
 		}
 	}
 }
 
-// editMessage edits an existing Telegram message
-func (s *TelegramService) editMessage(chatID int64, messageID int, text string) {
+// editMessage edits an existing Telegram message.
+func (s *TelegramService) editMessage(ctx context.Context, chatID int64, messageID int, text string) {
 	if s.editMessageFunc != nil {
 		s.editMessageFunc(chatID, messageID, text)
 		return
 	}
-	if len(text) > maxMessageLength {
-		text = text[:maxMessageLength-3] + "..."
+	if sent, err := s.editRichMessage(ctx, chatID, messageID, text); sent {
+		return
+	} else if err != nil {
+		if isTelegramRichFallbackError(err) {
+			applog.Infof("[telegram] rich message edit unavailable, falling back: %v", err)
+		} else {
+			applog.Infof("[telegram] rich message edit error, falling back to legacy edit: %v", err)
+		}
 	}
 
-	edit := tgbotapi.NewEditMessageText(chatID, messageID, text)
-	edit.ParseMode = "Markdown"
-
-	if _, err := s.bot.Send(edit); err != nil {
-		// Retry without Markdown if parsing fails
-		edit.ParseMode = ""
-		if _, err := s.bot.Send(edit); err != nil {
-			// Ignore "message is not modified" errors (content unchanged)
-			if !strings.Contains(err.Error(), "message is not modified") {
+	legacyText := text
+	if len(legacyText) > maxMessageLength {
+		legacyText = legacyText[:maxMessageLength-3] + "..."
+	}
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, escapeTelegramMarkdownV2(legacyText))
+	edit.ParseMode = "MarkdownV2"
+	if _, err := s.sendConfig(edit); err != nil {
+		plainEdit := tgbotapi.NewEditMessageText(chatID, messageID, legacyText)
+		if _, err := s.sendConfig(plainEdit); err != nil {
+			if !strings.Contains(strings.ToLower(err.Error()), "message is not modified") {
 				applog.Infof("[telegram] error editing message: %v", err)
 			}
 		}
@@ -3357,17 +3574,34 @@ func FormatTaskID(taskID string) string {
 	return fmt.Sprintf("`%s`", taskID)
 }
 
-// IsSendResponsesEnabled checks the "telegram_send_responses" setting.
+// IsSendResponsesEnabled checks the Telegram send-responses setting.
 // Returns true (default) when the setting is not explicitly "false".
 func (s *TelegramService) IsSendResponsesEnabled(ctx context.Context) bool {
 	if s.settingsRepo == nil {
 		return true
 	}
-	val, err := s.settingsRepo.Get(ctx, "telegram_send_responses")
-	if err != nil || val == "" {
+	val, err := s.settingsRepo.Get(ctx, TelegramSettingSendResponses)
+	if err != nil || strings.TrimSpace(val) == "" {
 		return true // default: enabled
 	}
-	return val != "false"
+	return !strings.EqualFold(strings.TrimSpace(val), "false")
+}
+
+// IsRichMessagesV2Enabled checks the Telegram rich messaging setting.
+// Returns true by default; only an explicit saved "false" disables rich delivery.
+func (s *TelegramService) IsRichMessagesV2Enabled(ctx context.Context) bool {
+	if s.settingsRepo == nil {
+		return true
+	}
+	val, err := s.settingsRepo.Get(ctx, TelegramSettingRichMessagesV2)
+	if err != nil {
+		return true
+	}
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return true
+	}
+	return !strings.EqualFold(val, "false")
 }
 
 func (s *TelegramService) SendTaskCompletionToChat(ctx context.Context, chatID int64, taskTitle, output string, errMsg string) {
@@ -3387,7 +3621,7 @@ func (s *TelegramService) SendTaskCompletionToChat(ctx context.Context, chatID i
 		}
 		message = fmt.Sprintf("✅ *Task completed:* %s\n\n%s", taskTitle, util.Truncate(cleaned, 3500))
 	}
-	s.sendMessage(chatID, message)
+	s.sendMessage(ctx, chatID, message)
 	applog.Infof("[telegram] sent completion notification for task %q to chat %d", taskTitle, chatID)
 }
 
@@ -3444,7 +3678,7 @@ func (s *TelegramService) SendTaskCompletionNotification(ctx context.Context, ta
 		message = fmt.Sprintf("✅ *Task completed:* %s\n\n%s", task.Title, util.Truncate(cleaned, 3500))
 	}
 
-	s.sendMessage(task.TelegramChatID, message)
+	s.sendMessage(ctx, task.TelegramChatID, message)
 	applog.Infof("[telegram] sent completion notification for task %s to chat %d", task.ID, task.TelegramChatID)
 }
 
@@ -3468,22 +3702,45 @@ func (s *TelegramService) SendChatResponse(ctx context.Context, task models.Task
 	msgID := firstInt(messageID)
 	if errMsg != "" {
 		message := fmt.Sprintf("❌ Error: %s", util.Truncate(errMsg, 197))
-		if msgID != 0 {
-			s.editMessage(task.TelegramChatID, msgID, message)
-		} else {
-			s.sendMessage(task.TelegramChatID, message)
-		}
+		s.deliverTelegramChatFinal(ctx, task.TelegramChatID, msgID, message)
 		return
 	}
 	cleaned := llmoutput.CleanChatOutputForDisplay(output)
 	if cleaned == "" {
 		cleaned = "(No response)"
 	}
-	if msgID != 0 {
-		s.editMessage(task.TelegramChatID, msgID, cleaned)
-	} else {
-		s.sendMessage(task.TelegramChatID, cleaned)
+	s.deliverTelegramChatFinal(ctx, task.TelegramChatID, msgID, cleaned)
+}
+
+func (s *TelegramService) deliverTelegramChatFinal(ctx context.Context, chatID int64, messageID int, text string) {
+	if messageID == 0 {
+		s.sendMessage(ctx, chatID, text)
+		return
 	}
+	if s.editMessageFunc != nil {
+		s.editMessage(ctx, chatID, messageID, text)
+		return
+	}
+	if sent, err := s.editRichMessage(ctx, chatID, messageID, text); sent {
+		return
+	} else if err != nil {
+		if isTelegramRichFallbackError(err) {
+			applog.Infof("[telegram] rich final edit unavailable, trying rich send before legacy edit fallback: %v", err)
+		} else {
+			applog.Infof("[telegram] rich final edit error, trying rich send before legacy edit fallback: %v", err)
+		}
+		if sent, sendErr := s.sendRichMessage(ctx, chatID, text); sent {
+			return
+		} else if sendErr != nil {
+			if isTelegramRichFallbackError(sendErr) {
+				applog.Infof("[telegram] rich final send unavailable, falling back to legacy placeholder edit: %v", sendErr)
+			} else {
+				applog.Infof("[telegram] rich final send returned ambiguous error; not editing placeholder to avoid duplicate final output: %v", sendErr)
+				return
+			}
+		}
+	}
+	s.editMessage(ctx, chatID, messageID, text)
 }
 
 // executeChannelSetTaskGoal sets or replaces the goal for a task.

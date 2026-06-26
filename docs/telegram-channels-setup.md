@@ -49,11 +49,15 @@ Why this matters:
 
 Important behavior: if no authorized users are configured, bot requests are blocked until users are added.
 
-## Notification Setting
+## Message Settings
 
 `Send task responses to Telegram` controls whether Telegram-created tasks send completion/failure responses back to the creator.
 
 Turn it on when you want async feedback in Telegram. Turn it off if notifications are noisy.
+
+`Telegram Rich Messages V2` is enabled by default. When supported by Telegram Bot API 10.1, OpenVibely sends assistant responses and task notifications with richer Markdown rendering, including better handling for structured output such as tables and code blocks. If Telegram does not support rich messages or rejects the rich payload, OpenVibely falls back to Telegram MarkdownV2 and then plain text.
+
+Turn Rich Messages V2 off only if you need the legacy edit-based Telegram formatting path.
 
 ## How Users Interact With the Bot
 
@@ -74,3 +78,4 @@ Telegram-created work still belongs to the normal OpenVibely task flow. If an au
 - `Connection failed: Bot is not running`: Save token again from the Telegram modal.
 - Bot receives messages but does nothing: verify the sender is in `Authorized Users` for the selected project.
 - Wrong project context: use `/projects` and `/switch` from Telegram.
+- Rich formatting looks wrong or unsupported: edit the Telegram channel and turn off `Telegram Rich Messages V2` to use the legacy formatting fallback.

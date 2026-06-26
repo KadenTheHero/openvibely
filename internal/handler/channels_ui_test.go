@@ -36,6 +36,23 @@ func titleSection(cardBody string) string {
 	return cardBody[titleStart : titleStart+titleEnd+len(`</h3>`)]
 }
 
+func inputTagByID(body, id string) string {
+	marker := `id="` + id + `"`
+	idIdx := strings.Index(body, marker)
+	if idIdx == -1 {
+		return ""
+	}
+	start := strings.LastIndex(body[:idIdx], "<input")
+	if start == -1 {
+		return ""
+	}
+	endRel := strings.Index(body[idIdx:], ">")
+	if endRel == -1 {
+		return ""
+	}
+	return body[start : idIdx+endRel+1]
+}
+
 func assertIndexOrder(t *testing.T, body, first, second, message string) {
 	t.Helper()
 	firstIdx := strings.Index(body, first)
@@ -111,6 +128,55 @@ func TestChannelsPageRendersCardLayout(t *testing.T) {
 	// Verify add modal includes available channel options
 	if !strings.Contains(body, "GitHub") || !strings.Contains(body, "Telegram Bot") || !strings.Contains(body, "Slack") {
 		t.Error("expected add-channel options for GitHub, Slack, and Telegram")
+	}
+}
+
+func TestChannelsPageTelegramRichMessagesToggleDefaultsCheckedAndHonorsSavedFalse(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="channel_telegram_rich_messages_v2"`) {
+		t.Fatal("expected Telegram rich messages toggle in channel modal")
+	}
+	if !strings.Contains(body, "Telegram Rich Messages V2") {
+		t.Fatal("expected rich messages toggle label")
+	}
+	if !strings.Contains(body, "Use Telegram Bot API 10.1 rich formatting for assistant responses when supported.") {
+		t.Fatal("expected rich messages help copy")
+	}
+	if !strings.Contains(body, `name="telegram_rich_messages_v2"`) || !strings.Contains(body, `value="true"`) {
+		t.Fatal("expected rich messages setting to be posted with the Telegram form")
+	}
+	section := inputTagByID(body, "channel_telegram_rich_messages_v2")
+	if !strings.Contains(section, "checked") {
+		t.Fatal("expected rich messages toggle checked by default when setting is missing")
+	}
+
+	if err := h.settingsRepo.Set(context.Background(), service.TelegramSettingRichMessagesV2, "false"); err != nil {
+		t.Fatalf("failed to seed rich messages setting: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body = rec.Body.String()
+	section = inputTagByID(body, "channel_telegram_rich_messages_v2")
+	if strings.Contains(section, "checked") {
+		t.Fatal("expected rich messages toggle unchecked when setting is explicitly false")
+	}
+	if !strings.Contains(body, "if (richToggle) richToggle.checked = true;") {
+		t.Fatal("expected add Telegram flow to default rich messages toggle on")
+	}
+	if !strings.Contains(body, "if (richToggle) richToggle.checked = richToggle.defaultChecked;") {
+		t.Fatal("expected edit Telegram flow to restore saved rich messages preference")
 	}
 }
 

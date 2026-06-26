@@ -54,7 +54,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	// Get current Telegram bot token and status
 	var token string
 	if h.settingsRepo != nil {
-		token, _ = h.settingsRepo.Get(c.Request().Context(), "telegram_bot_token")
+		token, _ = h.settingsRepo.Get(c.Request().Context(), service.TelegramSettingBotToken)
 	}
 	isBotRunning := h.telegramService != nil && h.telegramService.IsRunning()
 	hasTelegramChannel := strings.TrimSpace(token) != "" || isBotRunning
@@ -77,12 +77,17 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		emailAuthorizedSenders, _ = h.emailAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
 	}
 
-	// Load send-responses setting (default: enabled)
+	// Load Telegram settings (default: enabled)
 	sendResponses := true
+	richMessagesV2 := true
 	if h.settingsRepo != nil {
-		val, _ := h.settingsRepo.Get(c.Request().Context(), "telegram_send_responses")
-		if val == "false" {
+		val, _ := h.settingsRepo.Get(c.Request().Context(), service.TelegramSettingSendResponses)
+		if strings.EqualFold(strings.TrimSpace(val), "false") {
 			sendResponses = false
+		}
+		val, _ = h.settingsRepo.Get(c.Request().Context(), service.TelegramSettingRichMessagesV2)
+		if strings.EqualFold(strings.TrimSpace(val), "false") {
+			richMessagesV2 = false
 		}
 	}
 
@@ -230,9 +235,9 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	}
 
 	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, resolvedProjectID, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents))
+		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, resolvedProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents))
 	}
-	return render(c, http.StatusOK, pages.SettingsPage(token, isBotRunning, projects, resolvedProjectID, authorizedUsers, slackAuthorizedUsers, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents))
+	return render(c, http.StatusOK, pages.SettingsPage(token, isBotRunning, projects, resolvedProjectID, authorizedUsers, slackAuthorizedUsers, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents))
 }
 
 // handleAppSettings renders the application settings page (personality, etc.)
@@ -269,8 +274,15 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 
 	// Save token to database
 	if h.settingsRepo != nil {
-		if err := h.settingsRepo.Set(c.Request().Context(), "telegram_bot_token", token); err != nil {
+		if err := h.settingsRepo.Set(c.Request().Context(), service.TelegramSettingBotToken, token); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save token")
+		}
+		richValue := "false"
+		if c.FormValue("telegram_rich_messages_v2") == "true" {
+			richValue = "true"
+		}
+		if err := h.settingsRepo.Set(c.Request().Context(), service.TelegramSettingRichMessagesV2, richValue); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save rich message setting")
 		}
 	}
 
@@ -363,7 +375,7 @@ func (h *Handler) handleTelegramSendResponses(c echo.Context) error {
 	}
 
 	if h.settingsRepo != nil {
-		if err := h.settingsRepo.Set(c.Request().Context(), "telegram_send_responses", value); err != nil {
+		if err := h.settingsRepo.Set(c.Request().Context(), service.TelegramSettingSendResponses, value); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save setting")
 		}
 	}
@@ -378,8 +390,9 @@ func (h *Handler) handleTelegramRemove(c echo.Context) error {
 	if h.telegramService != nil && h.telegramService.IsRunning() {
 		h.telegramService.Stop()
 	}
-	_ = h.settingsRepo.Set(c.Request().Context(), "telegram_bot_token", "")
-	_ = h.settingsRepo.Set(c.Request().Context(), "telegram_send_responses", "")
+	_ = h.settingsRepo.Set(c.Request().Context(), service.TelegramSettingBotToken, "")
+	_ = h.settingsRepo.Set(c.Request().Context(), service.TelegramSettingSendResponses, "")
+	_ = h.settingsRepo.Set(c.Request().Context(), service.TelegramSettingRichMessagesV2, "")
 
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Refresh", "true")

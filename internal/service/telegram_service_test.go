@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
@@ -2651,6 +2653,274 @@ func TestTelegramService_HandleChatMessage_UsesSharedChannelChatRunner(t *testin
 	require.Equal(t, models.ExecRunning, createdExec.Status)
 }
 
+func TestTelegramService_IsRichMessagesV2EnabledDefaultsTrueAndFalseOnlyExplicit(t *testing.T) {
+	ctx := context.Background()
+	svc := &TelegramService{}
+	require.True(t, svc.IsRichMessagesV2Enabled(ctx))
+
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	svc.settingsRepo = settingsRepo
+	require.True(t, svc.IsRichMessagesV2Enabled(ctx))
+
+	require.NoError(t, settingsRepo.Set(ctx, TelegramSettingRichMessagesV2, ""))
+	require.True(t, svc.IsRichMessagesV2Enabled(ctx))
+
+	require.NoError(t, settingsRepo.Set(ctx, TelegramSettingRichMessagesV2, "FALSE"))
+	require.False(t, svc.IsRichMessagesV2Enabled(ctx))
+
+	require.NoError(t, settingsRepo.Set(ctx, TelegramSettingRichMessagesV2, "true"))
+	require.True(t, svc.IsRichMessagesV2Enabled(ctx))
+}
+
+func TestTelegramService_RichMarkdownPayloadAndNormalization(t *testing.T) {
+	payload := telegramRichMarkdownPayload("\r\n## Heading\r\n\r\n| A | B |\r\n")
+	require.Equal(t, "## Heading\n\n| A | B |", payload.Markdown)
+	require.Empty(t, payload.HTML)
+}
+
+func TestTelegramService_EscapeTelegramMarkdownV2EscapesRequiredCharacters(t *testing.T) {
+	input := `\_*[]()~` + "`" + `>#+-=|{}.!`
+	want := "\\\\\\_\\*\\[\\]\\(\\)\\~\\`\\>\\#\\+\\-\\=\\|\\{\\}\\.\\!"
+	require.Equal(t, want, escapeTelegramMarkdownV2(input))
+}
+
+func TestTelegramService_SendMessageRichEnabledUsesSendRichMessage(t *testing.T) {
+	var endpoint string
+	var params tgbotapi.Params
+	svc := &TelegramService{
+		makeRequestFunc: func(gotEndpoint string, gotParams tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			endpoint = gotEndpoint
+			params = gotParams
+			return &tgbotapi.APIResponse{Ok: true}, nil
+		},
+	}
+
+	svc.sendMessage(context.Background(), 42, "## Rich\n\n| A | B |")
+
+	require.Equal(t, "sendRichMessage", endpoint)
+	require.Equal(t, "42", params["chat_id"])
+	require.Contains(t, params["rich_message"], `"markdown":"## Rich`)
+	require.NotContains(t, params["rich_message"], `"html"`)
+}
+
+func TestTelegramService_SendMessageRichDisabledUsesMarkdownV2Fallback(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	require.NoError(t, settingsRepo.Set(context.Background(), TelegramSettingRichMessagesV2, "false"))
+	var sent []tgbotapi.MessageConfig
+	svc := &TelegramService{
+		settingsRepo: settingsRepo,
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			msg, ok := c.(tgbotapi.MessageConfig)
+			require.True(t, ok)
+			sent = append(sent, msg)
+			return tgbotapi.Message{}, nil
+		},
+	}
+
+	svc.sendMessage(context.Background(), 42, "Hello *world*!")
+
+	require.Len(t, sent, 1)
+	require.Equal(t, "MarkdownV2", sent[0].ParseMode)
+	require.Equal(t, `Hello \*world\*\!`, sent[0].Text)
+}
+
+func TestTelegramService_SendMessageRichFallbackSendsMarkdownV2ThenPlain(t *testing.T) {
+	var sent []tgbotapi.MessageConfig
+	svc := &TelegramService{
+		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			require.Equal(t, "sendRichMessage", endpoint)
+			return nil, fmt.Errorf("Bad Request: method not found")
+		},
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			msg, ok := c.(tgbotapi.MessageConfig)
+			require.True(t, ok)
+			sent = append(sent, msg)
+			if len(sent) == 1 {
+				return tgbotapi.Message{}, fmt.Errorf("can't parse entities")
+			}
+			return tgbotapi.Message{}, nil
+		},
+	}
+
+	svc.sendMessage(context.Background(), 42, "Hello *world*!")
+
+	require.Len(t, sent, 2)
+	require.Equal(t, "MarkdownV2", sent[0].ParseMode)
+	require.Equal(t, "", sent[1].ParseMode)
+	require.Equal(t, "Hello *world*!", sent[1].Text)
+}
+
+func TestTelegramService_SendMessageRichAmbiguousErrorDoesNotFallback(t *testing.T) {
+	sendCalled := false
+	svc := &TelegramService{
+		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			require.Equal(t, "sendRichMessage", endpoint)
+			return nil, fmt.Errorf("Post \"https://api.telegram.org\": EOF")
+		},
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			sendCalled = true
+			return tgbotapi.Message{}, nil
+		},
+	}
+
+	svc.sendMessage(context.Background(), 42, "could have been delivered")
+
+	require.False(t, sendCalled, "ambiguous rich send errors should not fallback and risk duplicate output")
+}
+
+func TestTelegramService_EditMessageRichUsesEditMessageTextRichMessage(t *testing.T) {
+	var endpoint string
+	var params tgbotapi.Params
+	svc := &TelegramService{
+		makeRequestFunc: func(gotEndpoint string, gotParams tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			endpoint = gotEndpoint
+			params = gotParams
+			return &tgbotapi.APIResponse{Ok: true}, nil
+		},
+	}
+
+	svc.editMessage(context.Background(), 42, 99, "final **answer**")
+
+	require.Equal(t, "editMessageText", endpoint)
+	require.Equal(t, "42", params["chat_id"])
+	require.Equal(t, "99", params["message_id"])
+	require.Contains(t, params["rich_message"], `"markdown":"final **answer**"`)
+}
+
+func TestTelegramService_SendRichMessageDraftUsesNonZeroDraftID(t *testing.T) {
+	var endpoint string
+	var params tgbotapi.Params
+	svc := &TelegramService{
+		makeRequestFunc: func(gotEndpoint string, gotParams tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			endpoint = gotEndpoint
+			params = gotParams
+			return &tgbotapi.APIResponse{Ok: true}, nil
+		},
+	}
+
+	draftID := newTelegramRichDraftID()
+	sent, err := svc.sendRichMessageDraft(context.Background(), 42, draftID, "partial")
+
+	require.NoError(t, err)
+	require.True(t, sent)
+	require.Equal(t, "sendRichMessageDraft", endpoint)
+	require.NotEqual(t, "0", params["draft_id"])
+	require.Equal(t, strconv.Itoa(draftID), params["draft_id"])
+	require.Contains(t, params["rich_message"], `"markdown":"partial"`)
+}
+
+func TestTelegramService_StreamRichDraftFallbackUsesEditLoop(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	execRepo := repository.NewExecutionRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+	project := &models.Project{Name: "Rich Draft Fallback"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	task := &models.Task{ProjectID: project.ID, Title: "chat", Prompt: "hi", Category: models.CategoryChat, Status: models.StatusRunning, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "hi"}
+	require.NoError(t, execRepo.Create(ctx, exec))
+	require.NoError(t, execRepo.UpdateOutput(ctx, exec.ID, "partial output"))
+
+	var richDraftCalled bool
+	var edited []string
+	done := make(chan struct{})
+	svc := &TelegramService{
+		execRepo: execRepo,
+		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			require.Equal(t, "sendRichMessageDraft", endpoint)
+			richDraftCalled = true
+			return nil, fmt.Errorf("Bad Request: method not found")
+		},
+		editMessageFunc: func(chatID int64, messageID int, text string) {
+			edited = append(edited, text)
+			close(done)
+		},
+	}
+	oldInterval := telegramStreamInterval
+	telegramStreamInterval = time.Millisecond
+	t.Cleanup(func() { telegramStreamInterval = oldInterval })
+	svc.streamUpdatesToTelegram(ctx, 42, 99, exec.ID, done)
+
+	require.True(t, richDraftCalled)
+	require.NotEmpty(t, edited)
+	require.Contains(t, edited[0], "partial output")
+}
+
+func TestTelegramService_HandleChatMessage_StartsTelegramStreamWithBackgroundContext(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, attachmentRepo)
+	workerSvc := NewWorkerService(llmSvc, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	settingsRepo := repository.NewSettingsRepo(db)
+	require.NoError(t, settingsRepo.Set(ctx, TelegramSettingRichMessagesV2, "false"))
+
+	project := &models.Project{Name: "Telegram Stream Context Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, agent)
+
+	streamEdited := make(chan struct{}, 1)
+	svc := &TelegramService{
+		projectRepo:   projectRepo,
+		llmConfigRepo: llmConfigRepo,
+		taskSvc:       taskSvc,
+		taskRepo:      taskRepo,
+		execRepo:      execRepo,
+		settingsRepo:  settingsRepo,
+		userProjects:  map[int64]string{7: project.ID},
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			if _, ok := c.(tgbotapi.MessageConfig); ok {
+				return tgbotapi.Message{MessageID: 99}, nil
+			}
+			return tgbotapi.Message{}, nil
+		},
+		editMessageFunc: func(chatID int64, messageID int, text string) {
+			if strings.Contains(text, "streamed output") {
+				select {
+				case streamEdited <- struct{}{}:
+				default:
+				}
+			}
+		},
+	}
+	oldInterval := telegramStreamInterval
+	telegramStreamInterval = time.Millisecond
+	t.Cleanup(func() { telegramStreamInterval = oldInterval })
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) {
+		go func() {
+			require.Eventually(t, func() bool {
+				return execRepo.UpdateOutput(context.Background(), req.ExecID, "streamed output") == nil
+			}, time.Second, time.Millisecond)
+		}()
+	})
+
+	svc.handleChatMessage(&tgbotapi.Message{
+		From: &tgbotapi.User{ID: 7},
+		Chat: &tgbotapi.Chat{ID: 42},
+		Text: "start streaming context test",
+	})
+
+	select {
+	case <-streamEdited:
+	case <-time.After(time.Second):
+		t.Fatal("expected Telegram stream preview to continue after handleChatMessage returns")
+	}
+}
+
 func TestTelegramService_SendChatResponse_SendsChatTaskOutput(t *testing.T) {
 	var sent []string
 	svc := &TelegramService{sendMessageFunc: func(chatID int64, text string) { sent = append(sent, text) }}
@@ -2676,6 +2946,56 @@ func TestTelegramService_SendChatResponse_EditsInitialAckMessage(t *testing.T) {
 
 	require.Empty(t, sent)
 	require.Equal(t, []string{"42:99:hello from initial telegram chat"}, edited)
+}
+
+func TestTelegramService_SendChatResponse_RichEditFailureSendsFinalRichMessage(t *testing.T) {
+	var endpoints []string
+	svc := &TelegramService{
+		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			endpoints = append(endpoints, endpoint)
+			require.Equal(t, "42", params["chat_id"])
+			require.Contains(t, params["rich_message"], "hello from initial telegram chat")
+			if endpoint == "editMessageText" {
+				require.Equal(t, "99", params["message_id"])
+				return nil, fmt.Errorf("Bad Request: rich_message unsupported")
+			}
+			require.Equal(t, "sendRichMessage", endpoint)
+			return &tgbotapi.APIResponse{Ok: true}, nil
+		},
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			t.Fatalf("expected final rich send before legacy placeholder edit fallback")
+			return tgbotapi.Message{}, nil
+		},
+	}
+	task := models.Task{ID: "task-1", Category: models.CategoryChat, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+
+	svc.SendChatResponse(context.Background(), task, "hello from initial telegram chat", "", 99)
+
+	require.Equal(t, []string{"editMessageText", "sendRichMessage"}, endpoints)
+}
+
+func TestTelegramService_SendChatResponse_AmbiguousFinalRichSendErrorDoesNotEditFallback(t *testing.T) {
+	var endpoints []string
+	legacyEditCalled := false
+	svc := &TelegramService{
+		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			endpoints = append(endpoints, endpoint)
+			if endpoint == "editMessageText" {
+				return nil, fmt.Errorf("Bad Request: rich_message unsupported")
+			}
+			return nil, fmt.Errorf("Post \"https://api.telegram.org\": EOF")
+		},
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			legacyEditCalled = true
+			return tgbotapi.Message{}, nil
+		},
+	}
+	task := models.Task{ID: "task-1", Category: models.CategoryChat, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+
+	svc.SendChatResponse(context.Background(), task, "hello from initial telegram chat", "", 99)
+
+	require.Equal(t, []string{"editMessageText", "sendRichMessage"}, endpoints)
+	require.False(t, legacyEditCalled, "ambiguous final rich send errors should not edit fallback and risk duplicate final output")
 }
 
 // TestTelegramService_GoalTools_SetGetClearPauseResume verifies that the Telegram

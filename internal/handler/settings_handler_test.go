@@ -55,15 +55,37 @@ func TestHandleTelegramSaveHTMXRefreshesChannels(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("token", "test-token")
+	form.Set("telegram_rich_messages_v2", "true")
 
 	rec := htmxPost(e, "/channels/telegram", form)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "true", rec.Header().Get("HX-Refresh"))
 	assert.Empty(t, rec.Header().Get("Location"))
 
-	token, err := h.settingsRepo.Get(context.Background(), "telegram_bot_token")
+	token, err := h.settingsRepo.Get(context.Background(), service.TelegramSettingBotToken)
 	require.NoError(t, err)
 	assert.Equal(t, "test-token", token)
+	richMessages, err := h.settingsRepo.Get(context.Background(), service.TelegramSettingRichMessagesV2)
+	require.NoError(t, err)
+	assert.Equal(t, "true", richMessages)
+}
+
+func TestHandleTelegramSaveStoresRichMessagesFalseWhenUnchecked(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+
+	h.telegramService = &service.TelegramService{}
+	origUpdateTelegramServiceToken := updateTelegramServiceToken
+	t.Cleanup(func() { updateTelegramServiceToken = origUpdateTelegramServiceToken })
+	updateTelegramServiceToken = func(svc *service.TelegramService, token string) error { return nil }
+
+	form := url.Values{}
+	form.Set("token", "test-token")
+
+	rec := htmxPost(e, "/channels/telegram", form)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	richMessages, err := h.settingsRepo.Get(context.Background(), service.TelegramSettingRichMessagesV2)
+	require.NoError(t, err)
+	assert.Equal(t, "false", richMessages)
 }
 
 func TestHandleTelegramSaveErrorDoesNotRefreshOrRedirect(t *testing.T) {
@@ -84,7 +106,7 @@ func TestHandleTelegramSaveErrorDoesNotRefreshOrRedirect(t *testing.T) {
 	assert.Empty(t, rec.Header().Get("HX-Refresh"))
 	assert.Empty(t, rec.Header().Get("Location"))
 
-	token, err := h.settingsRepo.Get(context.Background(), "telegram_bot_token")
+	token, err := h.settingsRepo.Get(context.Background(), service.TelegramSettingBotToken)
 	require.NoError(t, err)
 	assert.Equal(t, "test-token", token)
 }
@@ -138,15 +160,16 @@ func TestHandleTelegramSaveNonHTMXRedirectsToChannels(t *testing.T) {
 	assert.Equal(t, http.StatusSeeOther, rec.Code)
 	assert.Equal(t, "/channels", rec.Header().Get("Location"))
 
-	token, err := h.settingsRepo.Get(context.Background(), "telegram_bot_token")
+	token, err := h.settingsRepo.Get(context.Background(), service.TelegramSettingBotToken)
 	require.NoError(t, err)
 	assert.Equal(t, "", token)
 }
 
 func TestHandleTelegramRemoveHTMXRefreshesChannelsAndClearsSettings(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
-	require.NoError(t, h.settingsRepo.Set(context.Background(), "telegram_bot_token", "test-token"))
-	require.NoError(t, h.settingsRepo.Set(context.Background(), "telegram_send_responses", "true"))
+	require.NoError(t, h.settingsRepo.Set(context.Background(), service.TelegramSettingBotToken, "test-token"))
+	require.NoError(t, h.settingsRepo.Set(context.Background(), service.TelegramSettingSendResponses, "true"))
+	require.NoError(t, h.settingsRepo.Set(context.Background(), service.TelegramSettingRichMessagesV2, "false"))
 
 	h.telegramService = &service.TelegramService{}
 
@@ -159,18 +182,22 @@ func TestHandleTelegramRemoveHTMXRefreshesChannelsAndClearsSettings(t *testing.T
 	assert.Equal(t, "true", rec.Header().Get("HX-Refresh"))
 	assert.Empty(t, rec.Header().Get("Location"))
 
-	token, err := h.settingsRepo.Get(context.Background(), "telegram_bot_token")
+	token, err := h.settingsRepo.Get(context.Background(), service.TelegramSettingBotToken)
 	require.NoError(t, err)
 	assert.Equal(t, "", token)
-	sendResponses, err := h.settingsRepo.Get(context.Background(), "telegram_send_responses")
+	sendResponses, err := h.settingsRepo.Get(context.Background(), service.TelegramSettingSendResponses)
 	require.NoError(t, err)
 	assert.Equal(t, "", sendResponses)
+	richMessages, err := h.settingsRepo.Get(context.Background(), service.TelegramSettingRichMessagesV2)
+	require.NoError(t, err)
+	assert.Equal(t, "", richMessages)
 }
 
 func TestHandleTelegramRemoveNonHTMXRedirectsToChannelsAndClearsSettings(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
-	require.NoError(t, h.settingsRepo.Set(context.Background(), "telegram_bot_token", "test-token"))
-	require.NoError(t, h.settingsRepo.Set(context.Background(), "telegram_send_responses", "true"))
+	require.NoError(t, h.settingsRepo.Set(context.Background(), service.TelegramSettingBotToken, "test-token"))
+	require.NoError(t, h.settingsRepo.Set(context.Background(), service.TelegramSettingSendResponses, "true"))
+	require.NoError(t, h.settingsRepo.Set(context.Background(), service.TelegramSettingRichMessagesV2, "false"))
 
 	h.telegramService = &service.TelegramService{}
 
@@ -181,12 +208,15 @@ func TestHandleTelegramRemoveNonHTMXRedirectsToChannelsAndClearsSettings(t *test
 	assert.Equal(t, http.StatusSeeOther, rec.Code)
 	assert.Equal(t, "/channels", rec.Header().Get("Location"))
 
-	token, err := h.settingsRepo.Get(context.Background(), "telegram_bot_token")
+	token, err := h.settingsRepo.Get(context.Background(), service.TelegramSettingBotToken)
 	require.NoError(t, err)
 	assert.Equal(t, "", token)
-	sendResponses, err := h.settingsRepo.Get(context.Background(), "telegram_send_responses")
+	sendResponses, err := h.settingsRepo.Get(context.Background(), service.TelegramSettingSendResponses)
 	require.NoError(t, err)
 	assert.Equal(t, "", sendResponses)
+	richMessages, err := h.settingsRepo.Get(context.Background(), service.TelegramSettingRichMessagesV2)
+	require.NoError(t, err)
+	assert.Equal(t, "", richMessages)
 }
 
 func TestHandleTelegramRemoveMissingSettingsRepoReturnsError(t *testing.T) {

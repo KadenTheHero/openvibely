@@ -603,7 +603,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	telegramToken := cfg.TelegramToken
 	if telegramToken == "" {
 		// Fall back to token saved via Settings page
-		if dbToken, getErr := settingsRepo.Get(context.Background(), "telegram_bot_token"); getErr == nil && dbToken != "" {
+		if dbToken, getErr := settingsRepo.Get(context.Background(), service.TelegramSettingBotToken); getErr == nil && dbToken != "" {
 			telegramToken = dbToken
 		}
 	}

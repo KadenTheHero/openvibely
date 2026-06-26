@@ -18,6 +18,7 @@ func TestSettingsContent_RendersSlackMenuCardAndModal(t *testing.T) {
 		nil,
 		"default",
 		true,
+		true,
 		service.GitHubConnectionStatus{},
 		service.GitHubAuthModePAT,
 		"",
