@@ -2974,6 +2974,28 @@ func TestTelegramService_SendChatResponse_RichEditFailureSendsFinalRichMessage(t
 	require.Equal(t, []string{"editMessageText", "sendRichMessage"}, endpoints)
 }
 
+func TestTelegramService_SendChatResponse_AmbiguousFinalRichEditErrorDoesNotSendOrEditFallback(t *testing.T) {
+	var endpoints []string
+	legacyEditCalled := false
+	svc := &TelegramService{
+		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			endpoints = append(endpoints, endpoint)
+			require.Equal(t, "editMessageText", endpoint)
+			return nil, fmt.Errorf("Post \"https://api.telegram.org\": EOF")
+		},
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			legacyEditCalled = true
+			return tgbotapi.Message{}, nil
+		},
+	}
+	task := models.Task{ID: "task-1", Category: models.CategoryChat, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+
+	svc.SendChatResponse(context.Background(), task, "hello from initial telegram chat", "", 99)
+
+	require.Equal(t, []string{"editMessageText"}, endpoints)
+	require.False(t, legacyEditCalled, "ambiguous final rich edit errors should not send or edit fallback and risk duplicate final output")
+}
+
 func TestTelegramService_SendChatResponse_AmbiguousFinalRichSendErrorDoesNotEditFallback(t *testing.T) {
 	var endpoints []string
 	legacyEditCalled := false

@@ -3724,11 +3724,11 @@ func (s *TelegramService) deliverTelegramChatFinal(ctx context.Context, chatID i
 	if sent, err := s.editRichMessage(ctx, chatID, messageID, text); sent {
 		return
 	} else if err != nil {
-		if isTelegramRichFallbackError(err) {
-			applog.Infof("[telegram] rich final edit unavailable, trying rich send before legacy edit fallback: %v", err)
-		} else {
-			applog.Infof("[telegram] rich final edit error, trying rich send before legacy edit fallback: %v", err)
+		if !isTelegramRichFallbackError(err) {
+			applog.Infof("[telegram] rich final edit returned ambiguous error; not sending fallback to avoid duplicate final output: %v", err)
+			return
 		}
+		applog.Infof("[telegram] rich final edit unavailable, trying rich send before legacy edit fallback: %v", err)
 		if sent, sendErr := s.sendRichMessage(ctx, chatID, text); sent {
 			return
 		} else if sendErr != nil {
