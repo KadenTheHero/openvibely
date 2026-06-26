@@ -48,6 +48,52 @@ func TestEmailAuthorizedSendersHandlers(t *testing.T) {
 	}
 }
 
+func TestEmailConfigureSavesTypedAuthorizedSender(t *testing.T) {
+	h, e, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Email Configure Sender")
+
+	form := url.Values{
+		"project_id":                        {project.ID},
+		"email_provider":                    {"gmail"},
+		"email_address":                     {"bot@example.com"},
+		"email_password":                    {"abcd efgh ijkl mnop"},
+		"authorized_email_address":          {"Alice@Example.COM"},
+		"display_name":                      {"Alice"},
+		"email_send_responses":              {"true"},
+		"email_mark_existing_seen_on_start": {"true"},
+	}
+	rec := postForm(e, "/channels/email/configure", form)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected configure redirect, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	senders, err := h.emailAuthRepo.ListByProject(httptest.NewRequest(http.MethodGet, "/", nil).Context(), project.ID)
+	if err != nil || len(senders) != 1 {
+		t.Fatalf("expected saved authorized sender, got %d err=%v", len(senders), err)
+	}
+	if senders[0].EmailAddress != "alice@example.com" {
+		t.Fatalf("expected typed authorized sender to be saved, got %q", senders[0].EmailAddress)
+	}
+
+	rec = htmxGet(e, "/channels?project_id="+project.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected channels render 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "alice@example.com") || !strings.Contains(body, "1 sender(s)") {
+		t.Fatalf("expected reopened email dialog to include authorized sender, body=%s", body)
+	}
+
+	rec = postForm(e, "/channels/email/configure", form)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected duplicate configure redirect, got %d %s", rec.Code, rec.Body.String())
+	}
+	senders, err = h.emailAuthRepo.ListByProject(httptest.NewRequest(http.MethodGet, "/", nil).Context(), project.ID)
+	if err != nil || len(senders) != 1 {
+		t.Fatalf("expected duplicate save to remain idempotent, got %d err=%v", len(senders), err)
+	}
+}
+
 func TestEmailAuthorizedSendersValidation(t *testing.T) {
 	_, e, _, _ := setupTestHandlerWithDB(t)
 	rec := postForm(e, "/channels/email/authorized-senders", url.Values{"email_address": {"a@example.com"}})
