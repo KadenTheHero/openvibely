@@ -346,11 +346,14 @@ func TestChatInputForm_SubmitButtonUsesRequestSubmit(t *testing.T) {
 	}
 
 	content := buf.String()
-	if !strings.Contains(content, "var submitBtn = form.querySelector('button[type=\"submit\"]');") {
-		t.Fatal("chat input script must bind the submit button for click-path parity")
+	if !strings.Contains(content, "function currentSubmitButton()") {
+		t.Fatal("chat input script must resolve the current submit button for click-path parity")
 	}
-	if !strings.Contains(content, "submitBtn.addEventListener('click', function(e)") {
-		t.Fatal("chat input script must normalize submit button clicks")
+	if !strings.Contains(content, "form.addEventListener('click', function(e)") {
+		t.Fatal("chat input script must delegate submit button clicks after OOB action swaps")
+	}
+	if !strings.Contains(content, "e.target.closest('button[type=\"submit\"]')") {
+		t.Fatal("chat input script must detect the current submit button from delegated clicks")
 	}
 	if !strings.Contains(content, "if (typeof form.requestSubmit === 'function')") {
 		t.Fatal("chat input script must feature-detect requestSubmit")
@@ -384,6 +387,18 @@ func TestChatInputForm_EnterKeyHasRequestSubmitFallback(t *testing.T) {
 	}
 	if !strings.Contains(content, "form.dispatchEvent(submitEvent);") {
 		t.Fatal("enter key path must dispatch submit fallback")
+	}
+	if !strings.Contains(content, "function currentSubmitButton()") {
+		t.Fatal("enter key path must resolve the current submit button after OOB action swaps")
+	}
+	if strings.Contains(content, "var submitBtn = form.querySelector('button[type=\"submit\"]');") {
+		t.Fatal("enter key path must not capture the original submit button before OOB action swaps")
+	}
+	safeSubmitIdx := strings.Index(content, "function safeSubmit()")
+	currentBtnIdx := strings.Index(content, "var submitBtn = currentSubmitButton();")
+	requestSubmitIdx := strings.Index(content, "form.requestSubmit(submitBtn || undefined);")
+	if safeSubmitIdx == -1 || currentBtnIdx == -1 || requestSubmitIdx == -1 || !(safeSubmitIdx < currentBtnIdx && currentBtnIdx < requestSubmitIdx) {
+		t.Fatal("safeSubmit must resolve the current submit button immediately before requestSubmit")
 	}
 }
 

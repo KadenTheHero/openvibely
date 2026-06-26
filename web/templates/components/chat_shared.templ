@@ -1384,16 +1384,19 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				var agentInput = agentSelect ? document.getElementById(agentSelect.getAttribute('data-agent-input')) : null;
 					var modeSelect = form.querySelector('[id$="-mode-select"]');
 					var modeInput = modeSelect ? document.getElementById(modeSelect.getAttribute('data-mode-input')) : null;
-						var submitBtn = form.querySelector('button[type="submit"]');
-						var normalPostEndpoint = form.getAttribute('hx-post') || form.getAttribute('action') || '';
-							function markSendScrollIntent() {
+							var normalPostEndpoint = form.getAttribute('hx-post') || form.getAttribute('action') || '';
+							function currentSubmitButton() {
+								return form.querySelector('button[type="submit"]');
+							}
+								function markSendScrollIntent() {
 							if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
 						}
-							function safeSubmit() {
-								if (typeof form.requestSubmit === 'function') {
-									form.requestSubmit(submitBtn || undefined);
-									return;
-								}
+								function safeSubmit() {
+									var submitBtn = currentSubmitButton();
+									if (typeof form.requestSubmit === 'function') {
+										form.requestSubmit(submitBtn || undefined);
+										return;
+									}
 								var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
 								form.dispatchEvent(submitEvent);
 							}
@@ -1527,14 +1530,15 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							});
 						}
 
-					// Normalize send-button clicks to the same submit path as Enter.
-						if (submitBtn) {
-							submitBtn.addEventListener('click', function(e) {
+					// Normalize send-button clicks to the same submit path as Enter, even after
+					// the primary action button is replaced out-of-band between Send and Stop.
+							form.addEventListener('click', function(e) {
+								var clickedSubmit = e.target && e.target.closest ? e.target.closest('button[type="submit"]') : null;
+								if (!clickedSubmit || !form.contains(clickedSubmit)) return;
 								e.preventDefault();
 								form.setAttribute('hx-post', normalPostEndpoint);
 								safeSubmit();
 							});
-						}
 			// Model selector -> hidden input sync + localStorage persistence
 			var projectIdInput = form.querySelector('input[name="_project_id"]');
 			var projectId = projectIdInput ? projectIdInput.value : '';
