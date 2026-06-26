@@ -133,6 +133,50 @@ func TestChatContent_PlanPromptButtonsUseDelegatedHandlers(t *testing.T) {
 	}
 }
 
+func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testing.T) {
+	// Channel-origin live Chat appends an outer execution pair and an inner streaming
+	// node that both carry data-exec-id. Completion reconciliation must update the
+	// inner assistant stream node only; targeting the outer pair renders assistant
+	// content outside the bubble until refresh.
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+
+	syncStart := strings.Index(content, "function syncCompletedOutputToBubble(execId, completedOutput)")
+	if syncStart == -1 {
+		t.Fatal("expected syncCompletedOutputToBubble helper")
+	}
+	syncEnd := strings.Index(content[syncStart:], "function hasActiveChatStream()")
+	if syncEnd == -1 {
+		t.Fatal("expected syncCompletedOutputToBubble section terminator")
+	}
+	syncSection := content[syncStart : syncStart+syncEnd]
+	if !strings.Contains(syncSection, "document.getElementById('streaming-message-' + execId)") {
+		t.Fatal("completed output sync must target the assistant streaming content node")
+	}
+	if strings.Contains(syncSection, "document.querySelector('[data-exec-id=\"' + execId + '\"]')") {
+		t.Fatal("completed output sync must not target the outer execution pair by broad data-exec-id selector")
+	}
+
+	bubbleStart := strings.Index(content, "function createStreamingBubble(execId)")
+	if bubbleStart == -1 {
+		t.Fatal("expected createStreamingBubble function")
+	}
+	bubbleEnd := strings.Index(content[bubbleStart:], "if (window._chatLiveEventHandlers)")
+	if bubbleEnd == -1 {
+		t.Fatal("expected createStreamingBubble section terminator")
+	}
+	bubbleSection := content[bubbleStart : bubbleStart+bubbleEnd]
+	if !strings.Contains(bubbleSection, "contentDiv.id = 'streaming-message-' + execId;") {
+		t.Fatal("live-created assistant stream node must use the same stable id as server-rendered streaming bubbles")
+	}
+}
+
 func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	// The createStreamingBubble error/onerror handlers in chat.templ must
 	// clear _chatStreamInProgress and re-evaluate plan prompt so the flag

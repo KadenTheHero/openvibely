@@ -1969,8 +1969,11 @@ func TestTaskThreadView_RunningThreadCanSteerFromPendingRowsOnly(t *testing.T) {
 	if strings.Contains(content, "Send now") || strings.Contains(content, "btn-warning") || strings.Contains(content, "bg-warning") || strings.Contains(queuedMarkup, ">Cancel</button>") || strings.Contains(queuedMarkup, ">×</button>") {
 		t.Fatal("task-thread queued rows should not use warning styling, Send now copy, or text/× cancel")
 	}
-	if !strings.Contains(content, "task_thread_execution_started") || !strings.Contains(content, "/thread/executions/") {
-		t.Fatal("task-thread UI must append promoted queued executions smoothly via live event fragments")
+	if !strings.Contains(content, "task_thread_execution_started") || !strings.Contains(content, "/thread/executions/") || !strings.Contains(content, "'/fragment'") || !strings.Contains(content, "target: '#task-thread-messages'") || !strings.Contains(content, "swap: 'beforeend'") {
+		t.Fatal("task-thread UI must append promoted queued executions smoothly via authoritative live event fragments")
+	}
+	if strings.Contains(content, "function createStreamingBubble(execId)") || strings.Contains(content, "document.createElement('div');\n\t\t\t\t\t\t\t\t\tbubble.className = 'chat-bubble-assistant-msg") {
+		t.Fatal("task-thread live execution starts must not hand-build assistant bubbles outside shared fragments")
 	}
 	if !strings.Contains(content, "if (data.type === 'task_thread_input_applied')") || !strings.Contains(content, "ensureStreamingFragment(data)") {
 		t.Fatal("task-thread UI must treat applied queued input events as a backup promotion signal")

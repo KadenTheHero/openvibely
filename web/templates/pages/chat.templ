@@ -806,12 +806,12 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					return bubble;
 				}
 
-				function syncCompletedOutputToBubble(execId, completedOutput) {
-						if (!execId || typeof completedOutput !== 'string' || completedOutput === '') return;
-						var streamContainer = document.querySelector('[data-exec-id="' + execId + '"]');
-						if (!streamContainer) return;
-						streamContainer.setAttribute('data-raw-content', completedOutput);
-						if (window.renderStreamingContent) {
+					function syncCompletedOutputToBubble(execId, completedOutput) {
+							if (!execId || typeof completedOutput !== 'string' || completedOutput === '') return;
+							var streamContainer = document.getElementById('streaming-message-' + execId);
+							if (!streamContainer) return;
+							streamContainer.setAttribute('data-raw-content', completedOutput);
+							if (window.renderStreamingContent) {
 							window.renderStreamingContent(streamContainer, completedOutput);
 						} else {
 							streamContainer.textContent = completedOutput;
@@ -858,11 +858,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					thinking.className = 'flex flex-col items-start gap-1';
 					thinking.innerHTML = '<span class="block h-5" aria-hidden="true"></span><span class="ov-loading-dots ov-loading-dots-sm" aria-hidden="true"><span class="ov-loading-dot"></span><span class="ov-loading-dot"></span><span class="ov-loading-dot"></span></span>';
 
-					var contentDiv = document.createElement('div');
-					contentDiv.className = 'whitespace-pre-wrap leading-relaxed text-sm hidden';
-					contentDiv.style.wordWrap = 'break-word';
-					contentDiv.setAttribute('data-exec-id', execId);
-
+						var contentDiv = document.createElement('div');
+						contentDiv.id = 'streaming-message-' + execId;
+						contentDiv.className = 'whitespace-pre-wrap leading-relaxed text-sm hidden';
+						contentDiv.style.wordWrap = 'break-word';
+						contentDiv.setAttribute('data-exec-id', execId);
 					var dots = document.createElement('div');
 					dots.className = 'hidden flex items-center gap-1 mt-2 opacity-40';
 					dots.innerHTML = '<span class="loading loading-dots loading-xs"></span>';
