@@ -3911,11 +3911,10 @@ func TestHandler_TaskThreadSend_SkipsCheckWhenAlreadyRunning(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 }
 
-// TestHandler_TaskThreadSend_DeferredHistoryLoad_PassesHistoryToModel verifies
-// that the deferred-history-load path correctly fetches and passes all prior
-// executions to the model even though the history scan runs in the goroutine
-// after the HTTP handler has already returned.
-func TestHandler_TaskThreadSend_DeferredHistoryLoad_PassesHistoryToModel(t *testing.T) {
+// TestHandler_TaskThreadSend_DeferredHistoryLoad_PassesBoundedHistoryToModel verifies
+// that the deferred-history-load path fetches only the bounded model replay window
+// instead of scanning a whole large task thread before provider normalization.
+func TestHandler_TaskThreadSend_DeferredHistoryLoad_PassesBoundedHistoryToModel(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil // skip slot acquisition so goroutine runs immediately
 	agent := createAgent(t, llmConfigRepo)
@@ -3926,8 +3925,9 @@ func TestHandler_TaskThreadSend_DeferredHistoryLoad_PassesHistoryToModel(t *test
 		tk.AgentID = &agent.ID
 	})
 
-	// Create several completed executions to simulate a long task thread.
-	const priorCount = 10
+	// Create enough completed executions to exceed the LLM replay window.
+	const priorCount = 128
+	const expectedHistoryCount = 20
 	for i := 0; i < priorCount; i++ {
 		createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
 			ex.Status = models.ExecCompleted
@@ -3953,8 +3953,10 @@ func TestHandler_TaskThreadSend_DeferredHistoryLoad_PassesHistoryToModel(t *test
 		"model was not called within timeout")
 
 	req := mock.LastAgentRequest()
-	assert.Len(t, req.ChatHistory, priorCount,
-		"deferred load must pass all %d prior executions to the model as history", priorCount)
+	assert.Len(t, req.ChatHistory, expectedHistoryCount,
+		"deferred load should pass only the bounded provider replay window")
+	assert.Equal(t, "prior turn 108", req.ChatHistory[0].PromptSent)
+	assert.Equal(t, "prior turn 127", req.ChatHistory[expectedHistoryCount-1].PromptSent)
 	assert.Equal(t, "follow-up after many prior turns", req.Message)
 }
 

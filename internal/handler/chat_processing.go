@@ -24,6 +24,7 @@ import (
 const (
 	chatProcessingTimeout     = 30 * time.Minute // Timeout for LLM processing in background goroutines
 	chatHistoryLimit          = 50               // Number of recent chat messages to load for conversation context
+	taskThreadHistoryLimit    = 21               // Load at most 20 prior turns plus the current execution for filtering
 	maxFileSize               = 10 << 20         // 10 MB per file
 	maxFilesPerReq            = 10               // Max 10 files per request
 	finalSteeringGracePeriod  = 150 * time.Millisecond
@@ -317,7 +318,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// execution-history scan; the expensive DB/FS work runs here, after worker
 	// slots are acquired and lifecycle hooks have run.
 	if params.DeferHistoryLoad && params.IsTaskFollowup && params.Task != nil {
-		priorExecs, _ := h.execRepo.ListByTaskChronological(ctx, params.TaskID)
+		priorExecs, _ := h.execRepo.ListByTaskChronologicalLimit(ctx, params.TaskID, taskThreadHistoryLimit)
 		params.ChatHistory = filterChatHistory(priorExecs, params.ExecID)
 		agentDefForSys := params.AgentDefinition // already resolved above
 		sysCtx := combineContexts(
@@ -332,6 +333,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			if lifecycleAfter != nil {
 				lifecycleAfter(workDirErr, llmcontracts.ChatContext{})
 			}
+			h.finalizeStreamingTurn(params, "")
 			return
 		}
 		params.SystemContext = combineContexts(combineContexts(sysCtx, worktreeCtx), personalityCtx)
@@ -1171,7 +1173,7 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 	}
 	h.resumeUserStoppedGoalForManualStart(ctx, taskID, models.TaskOriginWeb, "")
 	h.reactivateAchievedGoalForManualFollowup(ctx, taskID, models.TaskOriginWeb, "")
-	priorExecs, _ := h.execRepo.ListByTaskChronological(ctx, taskID)
+	priorExecs, _ := h.execRepo.ListByTaskChronologicalLimit(ctx, taskID, taskThreadHistoryLimit)
 	priorHistory := filterChatHistory(priorExecs, exec.ID)
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && h.agentRepo != nil {
@@ -1274,7 +1276,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 	}
 	h.resumeUserStoppedGoalForManualStart(ctx, input.TaskID, string(input.Source), input.OriginAgent)
 	h.reactivateAchievedGoalForManualFollowup(ctx, input.TaskID, string(input.Source), input.OriginAgent)
-	priorExecs, _ := h.execRepo.ListByTaskChronological(ctx, exec.TaskID)
+	priorExecs, _ := h.execRepo.ListByTaskChronologicalLimit(ctx, exec.TaskID, taskThreadHistoryLimit)
 	priorHistory := filterChatHistory(priorExecs, exec.ID)
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && h.agentRepo != nil {
