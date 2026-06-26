@@ -171,8 +171,8 @@ func TestChannelsPageEmailUI(t *testing.T) {
 			t.Fatalf("expected email UI to contain %q", want)
 		}
 	}
-	if strings.Contains(body, "super-secret-app-password") {
-		t.Fatal("email UI should not render the saved app password")
+	if !strings.Contains(body, "super-secret-app-password") {
+		t.Fatal("email UI should render the saved app password in the masked secret input")
 	}
 	if strings.Contains(body, "pairing") || strings.Contains(body, "PIN") {
 		t.Fatal("email UI should not include pairing/pin language")

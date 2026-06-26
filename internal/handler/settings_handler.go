@@ -162,7 +162,6 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		emailAddress, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingAddress)
 		emailPasswordValue, _ = h.settingsRepo.Get(c.Request().Context(), service.EmailSettingPassword)
 		emailHasPassword = strings.TrimSpace(emailPasswordValue) != ""
-		emailPasswordValue = ""
 		emailIMAPHost, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingIMAPHost)
 		emailIMAPPort, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingIMAPPort)
 		emailSMTPHost, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingSMTPHost)
