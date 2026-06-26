@@ -420,13 +420,13 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					var textBuffer = '';
 					var renderScheduled = false;
 					var lastRenderedLength = 0;
-					function renderBufferedOutput(force) {
-						if (!window.renderStreamingContent) {
-							container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
-							return;
-						}
-						if (!force && renderScheduled) return;
-					var runRender = function() {
+						function renderBufferedOutput(force) {
+							if (!window.renderStreamingContent) {
+								container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
+								return;
+							}
+							if (!force && renderScheduled) return;
+							var runRender = function() {
 						renderScheduled = false;
 						var renderText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
 						if (!force && renderText.length === lastRenderedLength) return;
@@ -451,18 +451,27 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								}
 							});
 						}
-					};						if (force) {
+						};
+						if (force) {
 							runRender();
 							return;
 						}
 						renderScheduled = true;
 						requestAnimationFrame(runRender);
 					}
+						function finalizeEmptyTerminalBubble(status) {
+							if (textBuffer !== '') return;
+							if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
+							container.classList.remove('hidden');
+							if (status === 'cancelled') {
+								container.textContent = 'Error: Cancelled';
+								container.setAttribute('data-raw-content', 'Error: Cancelled');
+							}
+						}
 
-					var streamRetryCount = 0;
-					var eventSource = null;
-					function connectExecutionStream() {
-						eventSource = new EventSource('/events/chat/' + execId);
+						var streamRetryCount = 0;
+						var eventSource = null;
+						function connectExecutionStream() {						eventSource = new EventSource('/events/chat/' + execId);
 						if (!isThread && window.registerChatStreamEventSource) {
 							window.registerChatStreamEventSource(execId, eventSource);
 						}
@@ -499,9 +508,10 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						eventSource.addEventListener('done', function(event) {
 							var terminalStatus = event && event.data ? event.data : 'completed';
 							renderBufferedOutput(true);
-						// Hide streaming dots
-						if (streamingDots) streamingDots.classList.add('hidden');
-						eventSource.close();
+							finalizeEmptyTerminalBubble(terminalStatus);
+							// Hide streaming dots
+							if (streamingDots) streamingDots.classList.add('hidden');
+							eventSource.close();
 						removeThreadEventSource(eventSource);
 						removeChatEventSource(execId, eventSource);
 						window._taskThreadStreamingActive = false;
@@ -809,13 +819,21 @@ templ _initThreadStreamingScript() {
 					renderScheduled = true;
 					requestAnimationFrame(runRender);
 				}
-				function removeThreadEventSource(es) {
-					if (!window._threadEventSources || !es) return;
-					var idx = window._threadEventSources.indexOf(es);
-					if (idx >= 0) window._threadEventSources.splice(idx, 1);
-				}
-				function connectResumeExecutionStream() {
-					eventSource = new EventSource('/events/chat/' + execId);
+					function finalizeEmptyTerminalBubble(status) {
+						if (cumulativeContent !== '') return;
+						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
+						container.classList.remove('hidden');
+						if (status === 'cancelled') {
+							container.textContent = 'Error: Cancelled';
+							container.setAttribute('data-raw-content', 'Error: Cancelled');
+						}
+					}
+					function removeThreadEventSource(es) {
+						if (!window._threadEventSources || !es) return;
+						var idx = window._threadEventSources.indexOf(es);
+						if (idx >= 0) window._threadEventSources.splice(idx, 1);
+					}
+					function connectResumeExecutionStream() {					eventSource = new EventSource('/events/chat/' + execId);
 					// Track EventSource globally so sidebar navigation can close it
 					if (!window._threadEventSources) window._threadEventSources = [];
 					window._threadEventSources.push(eventSource);
@@ -835,6 +853,7 @@ templ _initThreadStreamingScript() {
 					eventSource.addEventListener('done', function(event) {
 						var terminalStatus = event && event.data ? event.data : 'completed';
 						renderCumulativeContent(true);
+						finalizeEmptyTerminalBubble(terminalStatus);
 					if (streamingDots) streamingDots.classList.add('hidden');
 					eventSource.close();
 					removeThreadEventSource(eventSource);

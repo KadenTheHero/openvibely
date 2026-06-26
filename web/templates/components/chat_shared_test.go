@@ -112,6 +112,60 @@ func TestChatBubbleStreaming_ThreadCompletionStaysSmooth(t *testing.T) {
 // bubble (thread or non-thread) issues a post-stream HTMX swap targeting
 // #task-detail-content. That swap was the source of the perceived hard refresh
 // after task completion.
+func TestChatBubbleStreaming_CancelledDoneWithoutOutputClearsThinkingIndicator(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatBubbleStreaming("assistant", "exec-id", "chat-messages", "", false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("Failed to render ChatBubbleStreaming: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, "function finalizeEmptyTerminalBubble(status)") {
+		t.Fatal("stream done handler must finalize empty terminal bubbles")
+	}
+	if !strings.Contains(content, "if (textBuffer !== '') return;") {
+		t.Fatal("fresh stream terminal helper should only synthesize content for zero-output runs")
+	}
+	if !strings.Contains(content, "if (thinkingIndicator) thinkingIndicator.classList.add('hidden');") {
+		t.Fatal("cancelled zero-output stream must hide the thinking/loading indicator")
+	}
+	if !strings.Contains(content, "container.classList.remove('hidden');") {
+		t.Fatal("cancelled zero-output stream must reveal the terminal assistant bubble")
+	}
+	if !strings.Contains(content, "container.textContent = 'Error: Cancelled';") {
+		t.Fatal("cancelled zero-output stream must show the same terminal text as refresh")
+	}
+	if !strings.Contains(content, "finalizeEmptyTerminalBubble(terminalStatus);") {
+		t.Fatal("done handler must run empty-terminal finalization")
+	}
+}
+
+func TestInitThreadStreamingScript_CancelledDoneWithoutOutputClearsThinkingIndicator(t *testing.T) {
+	var buf bytes.Buffer
+	err := _initThreadStreamingScript().Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("Failed to render _initThreadStreamingScript: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, "function finalizeEmptyTerminalBubble(status)") {
+		t.Fatal("resume stream done handler must finalize empty terminal bubbles")
+	}
+	if !strings.Contains(content, "if (cumulativeContent !== '') return;") {
+		t.Fatal("resume terminal helper should only synthesize content for zero-output runs")
+	}
+	if !strings.Contains(content, "if (thinkingIndicator) thinkingIndicator.classList.add('hidden');") {
+		t.Fatal("resume cancelled zero-output stream must hide the thinking/loading indicator")
+	}
+	if !strings.Contains(content, "container.classList.remove('hidden');") {
+		t.Fatal("resume cancelled zero-output stream must reveal the terminal assistant bubble")
+	}
+	if !strings.Contains(content, "container.textContent = 'Error: Cancelled';") {
+		t.Fatal("resume cancelled zero-output stream must show the same terminal text as refresh")
+	}
+	if !strings.Contains(content, "finalizeEmptyTerminalBubble(terminalStatus);") {
+		t.Fatal("resume done handler must run empty-terminal finalization")
+	}
+}
+
 func TestChatBubbleStreaming_NeverTargetsTaskDetailContent(t *testing.T) {
 	cases := []struct {
 		name          string
