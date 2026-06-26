@@ -2,7 +2,7 @@
 //
 // Every chat-controllable action is defined here exactly once. Tool definitions,
 // mode gating, surface availability, and domain classification are all derived
-// from this single source of truth so web/API/Telegram/Slack never drift.
+// from this single source of truth so web/API/Telegram/Slack/Discord never drift.
 //
 // # API-domain mapping policy
 //
@@ -53,10 +53,11 @@ const (
 	SurfaceTelegram Surface = "telegram"
 	SurfaceSlack    Surface = "slack"
 	SurfaceEmail    Surface = "email"
+	SurfaceDiscord  Surface = "discord"
 )
 
 // AllSurfaces is the full set of supported surfaces.
-var AllSurfaces = []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail}
+var AllSurfaces = []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord}
 
 // AccessLevel classifies read vs write.
 type AccessLevel string
@@ -537,7 +538,7 @@ var registry = []ActionDef{
 // helpers
 
 func allSurfaces() []Surface {
-	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail}
+	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord}
 }
 
 func bothModes() []models.ChatMode {

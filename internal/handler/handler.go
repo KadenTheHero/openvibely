@@ -54,8 +54,10 @@ type Handler struct {
 	telegramAuthRepo           *repository.TelegramAuthRepo
 	slackAuthRepo              *repository.SlackAuthRepo
 	emailAuthRepo              *repository.EmailAuthRepo
+	discordAuthRepo            *repository.DiscordAuthRepo
 	emailTaskContextRepo       *repository.EmailTaskContextRepo
 	slackTaskContextRepo       *repository.SlackTaskContextRepo
+	discordTaskContextRepo     *repository.DiscordTaskContextRepo
 	reviewCommentRepo          *repository.ReviewCommentRepo
 	customPersonalityRepo      *repository.CustomPersonalityRepo
 	agentRepo                  *repository.AgentRepo
@@ -64,6 +66,7 @@ type Handler struct {
 	taskPullRequestRepo        *repository.TaskPullRequestRepo
 	githubSvc                  GitHubServiceProvider
 	slackSvc                   SlackServiceProvider
+	discordSvc                 DiscordServiceProvider
 	channelMessageRouter       *service.ChannelMessageRouter
 	localRepoPathEnabled       *bool
 	projectFolderPicker        ProjectFolderPicker
@@ -114,6 +117,13 @@ type EmailServiceProvider interface {
 	SendTaskCompletionToThread(ctx context.Context, to, inboundMessageID, references, subject, taskTitle, output, errMsg string)
 	SendChatResponse(ctx context.Context, task models.Task, output, errMsg string)
 	SendTaskCompletionNotification(ctx context.Context, task models.Task, output, errMsg string)
+}
+
+type DiscordServiceProvider interface {
+	GetConnectionStatus(ctx context.Context) (service.DiscordConnectionStatus, error)
+	ReloadFromSettings(ctx context.Context) error
+	Disconnect(ctx context.Context) error
+	TestConnection(ctx context.Context) error
 }
 
 func New(
@@ -266,8 +276,17 @@ func (h *Handler) SetEmailAuthRepo(repo *repository.EmailAuthRepo) {
 	h.emailAuthRepo = repo
 }
 
+// SetDiscordAuthRepo sets the Discord authorization repo for managing authorized users.
+func (h *Handler) SetDiscordAuthRepo(repo *repository.DiscordAuthRepo) {
+	h.discordAuthRepo = repo
+}
+
 func (h *Handler) SetEmailTaskContextRepo(repo *repository.EmailTaskContextRepo) {
 	h.emailTaskContextRepo = repo
+}
+
+func (h *Handler) SetDiscordTaskContextRepo(repo *repository.DiscordTaskContextRepo) {
+	h.discordTaskContextRepo = repo
 }
 
 func (h *Handler) SetEmailService(svc EmailServiceProvider) {
@@ -319,6 +338,10 @@ func (h *Handler) SetGitHubService(svc GitHubServiceProvider) {
 
 func (h *Handler) SetSlackService(svc SlackServiceProvider) {
 	h.slackSvc = svc
+}
+
+func (h *Handler) SetDiscordService(svc DiscordServiceProvider) {
+	h.discordSvc = svc
 }
 
 func (h *Handler) SetChannelMessageRouter(router *service.ChannelMessageRouter) {
@@ -589,14 +612,17 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/channels/slack/disconnect", h.handleSlackDisconnect)
 	e.POST("/channels/slack/remove", h.handleSlackRemove)
 	e.POST("/channels/slack/test", h.handleSlackTest)
+	e.POST("/channels/discord/configure", h.handleDiscordConfigure)
+	e.POST("/channels/discord/remove", h.handleDiscordRemove)
+	e.POST("/channels/discord/test", h.handleDiscordTest)
 	e.POST("/channels/email/configure", h.handleEmailConfigure)
 	e.POST("/channels/email/remove", h.handleEmailRemove)
 	e.POST("/channels/email/test", h.handleEmailTest)
-		e.GET("/channels/outbound-targets", h.handleOutboundTargetsFragment)
-		e.GET("/channels/outbound-targets/card", h.handleOutboundTargetsCardFragment)
-		e.POST("/channels/outbound-targets/test-draft", h.handleOutboundTargetDraftTest)
-		e.POST("/channels/outbound-targets/:id/test", h.handleOutboundTargetTest)
-		e.POST("/channels/send-message-explicit-targets", h.handleSendMessageExplicitTargets)
+	e.GET("/channels/outbound-targets", h.handleOutboundTargetsFragment)
+	e.GET("/channels/outbound-targets/card", h.handleOutboundTargetsCardFragment)
+	e.POST("/channels/outbound-targets/test-draft", h.handleOutboundTargetDraftTest)
+	e.POST("/channels/outbound-targets/:id/test", h.handleOutboundTargetTest)
+	e.POST("/channels/send-message-explicit-targets", h.handleSendMessageExplicitTargets)
 
 	// Personality
 	e.GET("/personality", h.handleAppSettings)
@@ -622,6 +648,11 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/channels/email/authorized-senders", h.ListEmailAuthorizedSenders)
 	e.POST("/channels/email/authorized-senders", h.AddEmailAuthorizedSender)
 	e.DELETE("/channels/email/authorized-senders/:id", h.RemoveEmailAuthorizedSender)
+
+	// Discord authorized users
+	e.GET("/channels/discord/authorized-users", h.ListDiscordAuthorizedUsers)
+	e.POST("/channels/discord/authorized-users", h.AddDiscordAuthorizedUser)
+	e.DELETE("/channels/discord/authorized-users/:id", h.RemoveDiscordAuthorizedUser)
 
 	// Webhooks
 	e.POST("/channels/webhooks", h.HandleWebhookCreate)

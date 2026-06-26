@@ -912,7 +912,7 @@ func sanitizeSendToTaskLineage(ctx context.Context, requestedOrigin, requestedOr
 		origin = strings.TrimSpace(params.ChannelReply.Source)
 	}
 	switch origin {
-	case models.TaskOriginSlack, models.TaskOriginTelegram, models.TaskOriginEmail:
+	case models.TaskOriginSlack, models.TaskOriginTelegram, models.TaskOriginEmail, models.TaskOriginDiscord:
 		return origin, ""
 	default:
 		return models.TaskOriginWeb, ""

@@ -127,8 +127,14 @@ func TestChannelsPageRendersCardLayout(t *testing.T) {
 	}
 
 	// Verify add modal includes available channel options
-	if !strings.Contains(body, "GitHub") || !strings.Contains(body, "Telegram Bot") || !strings.Contains(body, "Slack") {
-		t.Error("expected add-channel options for GitHub, Slack, and Telegram")
+	if !strings.Contains(body, "GitHub") || !strings.Contains(body, "Telegram Bot") || !strings.Contains(body, "Slack") || !strings.Contains(body, "Discord") {
+		t.Error("expected add-channel options for GitHub, Slack, Discord, and Telegram")
+	}
+	if strings.Contains(body, "Discord Bot") || strings.Contains(body, "Discord Bot Coming Soon") {
+		t.Error("did not expect Discord to render as coming soon")
+	}
+	if !strings.Contains(body, `id="discord_config_modal"`) || !strings.Contains(body, `hx-post="/channels/discord/configure"`) {
+		t.Error("expected Discord configuration modal")
 	}
 }
 
@@ -421,6 +427,9 @@ func TestChannelsPageConnectedCardsHideTokenSpecificTextAndActions(t *testing.T)
 	if strings.Contains(body, `data-channel-type="slack"`) {
 		t.Fatal("did not expect Slack card when not configured")
 	}
+	if strings.Contains(body, `data-channel-type="discord"`) {
+		t.Fatal("did not expect Discord card when not configured")
+	}
 	if strings.Contains(body, "Clear Token") {
 		t.Fatal("did not expect Clear Token action on connected GitHub card")
 	}
@@ -464,6 +473,11 @@ func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
 			return service.SlackConnectionStatus{Configured: true, Connected: true, TeamName: "OpenVibely"}, nil
 		},
 	})
+	h.SetDiscordService(&fakeDiscordService{
+		statusFn: func(ctx context.Context) (service.DiscordConnectionStatus, error) {
+			return service.DiscordConnectionStatus{Configured: true, Connected: true, Running: true, BotUserID: "bot-1"}, nil
+		},
+	})
 
 	if err := h.settingsRepo.Set(context.Background(), "telegram_bot_token", "test-token"); err != nil {
 		t.Fatalf("failed to seed telegram token: %v", err)
@@ -491,6 +505,17 @@ func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("failed to seed telegram authorized user: %v", err)
 	}
+	if h.discordAuthRepo == nil {
+		h.SetDiscordAuthRepo(repository.NewDiscordAuthRepo(db))
+	}
+	if err := h.discordAuthRepo.Create(context.Background(), &models.DiscordAuthorizedUser{
+		ProjectID:     "default",
+		DiscordUserID: "1002",
+		DisplayName:   "Discord User",
+		AddedBy:       "test",
+	}); err != nil {
+		t.Fatalf("failed to seed discord authorized user: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
 	rec := httptest.NewRecorder()
@@ -501,7 +526,7 @@ func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	for _, channelType := range []string{"github", "slack", "telegram"} {
+	for _, channelType := range []string{"github", "slack", "discord", "telegram"} {
 		card := cardSectionByType(body, channelType)
 		if card == "" {
 			t.Fatalf("expected %s card to render", channelType)
@@ -534,6 +559,18 @@ func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
 		`Authorized users:</span>`,
 		`<span class="badge badge-sm badge-success">Connected</span>`,
 		"expected slack status badge below authorized users",
+	)
+
+	discordCard := cardSectionByType(body, "discord")
+	if !strings.Contains(discordCard, `<span class="badge badge-sm badge-success">Connected</span>`) {
+		t.Fatal("expected discord connected badge in details section")
+	}
+	assertIndexOrder(
+		t,
+		discordCard,
+		`Authorized users:</span>`,
+		`<span class="badge badge-sm badge-success">Connected</span>`,
+		"expected discord status badge below authorized users",
 	)
 
 	telegramCard := cardSectionByType(body, "telegram")
@@ -573,6 +610,11 @@ func TestChannelsPageTelegramMenuShowsDeleteAndNoChannelMenuUsesRemove(t *testin
 			return service.SlackConnectionStatus{Configured: true, Connected: true}, nil
 		},
 	})
+	h.SetDiscordService(&fakeDiscordService{
+		statusFn: func(ctx context.Context) (service.DiscordConnectionStatus, error) {
+			return service.DiscordConnectionStatus{Configured: true, Connected: true, Running: true}, nil
+		},
+	})
 	if err := h.settingsRepo.Set(context.Background(), "telegram_bot_token", "test-token"); err != nil {
 		t.Fatalf("failed to seed telegram token: %v", err)
 	}
@@ -586,7 +628,7 @@ func TestChannelsPageTelegramMenuShowsDeleteAndNoChannelMenuUsesRemove(t *testin
 	}
 
 	body := rec.Body.String()
-	for _, channelType := range []string{"github", "slack", "telegram"} {
+	for _, channelType := range []string{"github", "slack", "discord", "telegram"} {
 		card := cardSectionByType(body, channelType)
 		if card == "" {
 			t.Fatalf("expected %s card to render", channelType)
@@ -616,6 +658,11 @@ func TestChannelsPageDeleteActionsUseConfirmationDialog(t *testing.T) {
 	h.SetSlackService(&fakeSlackService{
 		statusFn: func(ctx context.Context) (service.SlackConnectionStatus, error) {
 			return service.SlackConnectionStatus{Configured: true, Connected: true}, nil
+		},
+	})
+	h.SetDiscordService(&fakeDiscordService{
+		statusFn: func(ctx context.Context) (service.DiscordConnectionStatus, error) {
+			return service.DiscordConnectionStatus{Configured: true, Connected: true, Running: true}, nil
 		},
 	})
 	if err := h.settingsRepo.Set(context.Background(), "telegram_bot_token", "test-token"); err != nil {
@@ -657,6 +704,7 @@ func TestChannelsPageDeleteActionsUseConfirmationDialog(t *testing.T) {
 	}{
 		{channelType: "github", name: "GitHub", url: "/channels/github/remove", method: "POST"},
 		{channelType: "slack", name: "Slack", url: "/channels/slack/remove", method: "POST"},
+		{channelType: "discord", name: "Discord", url: "/channels/discord/remove", method: "POST"},
 		{channelType: "telegram", name: "Telegram Bot", url: "/channels/telegram/remove", method: "POST"},
 		{channelType: "webhook", name: "Deploy Alerts", url: "/channels/webhooks/" + webhook.ID, method: "DELETE"},
 	} {
@@ -683,6 +731,7 @@ func TestChannelsPageDeleteActionsUseConfirmationDialog(t *testing.T) {
 
 	if strings.Contains(body, `hx-confirm="Delete this GitHub channel configuration?"`) ||
 		strings.Contains(body, `hx-confirm="Delete this Slack channel configuration?"`) ||
+		strings.Contains(body, `hx-confirm="Delete this Discord channel configuration?"`) ||
 		strings.Contains(body, `hx-confirm="Delete this Telegram channel configuration?"`) ||
 		strings.Contains(body, `hx-confirm="Delete this webhook configuration?"`) {
 		t.Fatal("did not expect channel delete actions to use immediate hx-confirm")

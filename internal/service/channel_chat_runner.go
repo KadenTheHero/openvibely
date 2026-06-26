@@ -41,17 +41,21 @@ type ChannelTaskRunRequest struct {
 }
 
 type ChannelReplyContext struct {
-	Source          string
-	TelegramChatID  int64
-	SlackTeamID     string
-	SlackChannelID  string
-	SlackThreadTS   string
-	SlackUserID     string
-	EmailFrom       string
-	EmailMessageID  string
-	EmailReferences string
-	EmailSubject    string
-	EmailSessionKey string
+	Source           string
+	TelegramChatID   int64
+	SlackTeamID      string
+	SlackChannelID   string
+	SlackThreadTS    string
+	SlackUserID      string
+	EmailFrom        string
+	EmailMessageID   string
+	EmailReferences  string
+	EmailSubject     string
+	EmailSessionKey  string
+	DiscordChannelID string
+	DiscordThreadID  string
+	DiscordMessageID string
+	DiscordUserID    string
 }
 
 type ChannelTaskRunner func(context.Context, ChannelTaskRunRequest)

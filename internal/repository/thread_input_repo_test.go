@@ -127,7 +127,7 @@ func TestThreadInputRepo_ClaimQueuedValidatesPendingSurface(t *testing.T) {
 	}
 	chatTask := &models.Task{ProjectID: project.ID, Title: "Queued Chat", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: taskInput.Content}
 	chatExec := &models.Execution{AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: taskInput.Content}
-	if err := repo.ClaimQueuedForChatExecution(ctx, taskInput.ID, chatTask, chatExec, nil); !errors.Is(err, ErrInputNotPending) {
+	if err := repo.ClaimQueuedForChatExecution(ctx, taskInput.ID, chatTask, chatExec, nil, nil, nil); !errors.Is(err, ErrInputNotPending) {
 		t.Fatalf("expected wrong-surface chat claim conflict, got %v", err)
 	}
 	if chatTask.ID != "" {
@@ -273,7 +273,7 @@ func TestThreadInputRepo_ClaimQueuedForChatExecutionRetargetsRemainingQueuedGuar
 
 	chatTask := &models.Task{ProjectID: project.ID, Title: "Queued Chat", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: first.Content}
 	promoted := &models.Execution{AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: first.Content}
-	if err := repo.ClaimQueuedForChatExecution(ctx, first.ID, chatTask, promoted, nil); err != nil {
+	if err := repo.ClaimQueuedForChatExecution(ctx, first.ID, chatTask, promoted, nil, nil, nil); err != nil {
 		t.Fatalf("ClaimQueuedForChatExecution: %v", err)
 	}
 	storedSecond, err := repo.GetByID(ctx, second.ID)
@@ -319,7 +319,7 @@ func TestThreadInputRepo_ClaimQueuedChatPersistsSlackContextWithClaim(t *testing
 		SlackChannelID: "C1",
 		SlackThreadTS:  "1710000000.100000",
 		SlackUserID:    "U1",
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("ClaimQueuedForChatExecution: %v", err)
 	}
 
@@ -329,6 +329,57 @@ func TestThreadInputRepo_ClaimQueuedChatPersistsSlackContextWithClaim(t *testing
 	}
 	if stc == nil || stc.SlackChannelID != "C1" || stc.SlackThreadTS != "1710000000.100000" {
 		t.Fatalf("slack context not persisted with queued claim: %#v", stc)
+	}
+	stored, err := repo.GetByID(ctx, input.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored == nil || stored.InputStatus != models.ThreadInputApplied || stored.RunExecutionID != exec.ID {
+		t.Fatalf("queued input should be applied to created execution, got %#v", stored)
+	}
+}
+
+func TestThreadInputRepo_ClaimQueuedChatPersistsDiscordContextWithClaim(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+
+	input := &models.ThreadInput{
+		Scope:            models.ThreadInputScopeChat,
+		ProjectID:        project.ID,
+		AgentConfigID:    agent.ID,
+		InputMode:        models.ThreadInputModeQueued,
+		Content:          "queued discord",
+		ChatMode:         models.ChatModeOrchestrate,
+		Source:           models.TaskOriginDiscord,
+		DiscordChannelID: "chan-1",
+		DiscordThreadID:  "thread-1",
+		DiscordMessageID: "msg-1",
+		DiscordUserID:    "user-1",
+	}
+	if err := repo.CreateQueued(ctx, input); err != nil {
+		t.Fatalf("CreateQueued: %v", err)
+	}
+
+	task := &models.Task{ProjectID: project.ID, Title: "Queued Discord", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: input.Content, CreatedVia: models.TaskOriginDiscord}
+	exec := &models.Execution{AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: input.Content}
+	if err := repo.ClaimQueuedForChatExecution(ctx, input.ID, task, exec, nil, nil, &models.DiscordTaskContext{
+		DiscordChannelID: "chan-1",
+		DiscordThreadID:  "thread-1",
+		DiscordMessageID: "msg-1",
+		DiscordUserID:    "user-1",
+	}); err != nil {
+		t.Fatalf("ClaimQueuedForChatExecution: %v", err)
+	}
+
+	dtc, err := NewDiscordTaskContextRepo(db).GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByTaskID: %v", err)
+	}
+	if dtc == nil || dtc.DiscordChannelID != "chan-1" || dtc.DiscordThreadID != "thread-1" || dtc.DiscordMessageID != "msg-1" || dtc.DiscordUserID != "user-1" {
+		t.Fatalf("discord context not persisted with queued claim: %#v", dtc)
 	}
 	stored, err := repo.GetByID(ctx, input.ID)
 	if err != nil {

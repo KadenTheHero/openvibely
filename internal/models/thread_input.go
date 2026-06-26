@@ -51,6 +51,10 @@ type ThreadInput struct {
 	EmailReferences     string            `json:"email_references"`
 	EmailSubject        string            `json:"email_subject"`
 	EmailSessionKey     string            `json:"email_session_key"`
+	DiscordChannelID    string            `json:"discord_channel_id"`
+	DiscordThreadID     string            `json:"discord_thread_id"`
+	DiscordMessageID    string            `json:"discord_message_id"`
+	DiscordUserID       string            `json:"discord_user_id"`
 	CreatedAt           time.Time         `json:"created_at"`
 	UpdatedAt           time.Time         `json:"updated_at"`
 	AppliedAt           *time.Time        `json:"applied_at"`

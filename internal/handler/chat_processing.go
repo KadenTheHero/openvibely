@@ -986,6 +986,8 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		task.CreatedVia = models.TaskOriginSlack
 	} else if input.Source == models.TaskOriginEmail {
 		task.CreatedVia = models.TaskOriginEmail
+	} else if input.Source == models.TaskOriginDiscord {
+		task.CreatedVia = models.TaskOriginDiscord
 	}
 	exec := &models.Execution{
 		AgentConfigID: agent.ID,
@@ -1011,7 +1013,16 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 			EmailSessionKey: input.EmailSessionKey,
 		}
 	}
-	if err := h.threadInputRepo.ClaimQueuedForChatExecution(ctx, input.ID, task, exec, slackContext, emailContext); err != nil {
+	var discordContext *models.DiscordTaskContext
+	if input.Source == models.TaskOriginDiscord {
+		discordContext = &models.DiscordTaskContext{
+			DiscordChannelID: input.DiscordChannelID,
+			DiscordThreadID:  input.DiscordThreadID,
+			DiscordMessageID: input.DiscordMessageID,
+			DiscordUserID:    input.DiscordUserID,
+		}
+	}
+	if err := h.threadInputRepo.ClaimQueuedForChatExecution(ctx, input.ID, task, exec, slackContext, emailContext, discordContext); err != nil {
 		if err != repository.ErrInputNotPending {
 			applog.Infof("[handler] startQueuedChatInput input=%s claim error: %v", input.ID, err)
 		}
@@ -1088,6 +1099,8 @@ func surfaceForThreadInput(input models.ThreadInput) chatcontrol.Surface {
 		return chatcontrol.SurfaceSlack
 	case models.TaskOriginEmail:
 		return chatcontrol.SurfaceEmail
+	case models.TaskOriginDiscord:
+		return chatcontrol.SurfaceDiscord
 	default:
 		return chatcontrol.SurfaceWeb
 	}
@@ -1121,17 +1134,21 @@ func (h *Handler) cancelUnstartableQueuedInput(ctx context.Context, input models
 
 func channelReplyFromThreadInput(input models.ThreadInput) service.ChannelReplyContext {
 	return service.ChannelReplyContext{
-		Source:          input.Source,
-		TelegramChatID:  input.TelegramChatID,
-		SlackTeamID:     input.SlackTeamID,
-		SlackChannelID:  input.SlackChannelID,
-		SlackThreadTS:   input.SlackThreadTS,
-		SlackUserID:     input.SlackUserID,
-		EmailFrom:       input.EmailFrom,
-		EmailMessageID:  input.EmailMessageID,
-		EmailReferences: input.EmailReferences,
-		EmailSubject:    input.EmailSubject,
-		EmailSessionKey: input.EmailSessionKey,
+		Source:           input.Source,
+		TelegramChatID:   input.TelegramChatID,
+		SlackTeamID:      input.SlackTeamID,
+		SlackChannelID:   input.SlackChannelID,
+		SlackThreadTS:    input.SlackThreadTS,
+		SlackUserID:      input.SlackUserID,
+		EmailFrom:        input.EmailFrom,
+		EmailMessageID:   input.EmailMessageID,
+		EmailReferences:  input.EmailReferences,
+		EmailSubject:     input.EmailSubject,
+		EmailSessionKey:  input.EmailSessionKey,
+		DiscordChannelID: input.DiscordChannelID,
+		DiscordThreadID:  input.DiscordThreadID,
+		DiscordMessageID: input.DiscordMessageID,
+		DiscordUserID:    input.DiscordUserID,
 	}
 }
 
@@ -1543,6 +1560,14 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 		}
 		return
 	}
+	if reply.Source == models.TaskOriginDiscord && task.Category != models.CategoryChat && reply.DiscordChannelID != "" {
+		if svc, ok := h.discordSvc.(interface {
+			SendTaskCompletionToThread(context.Context, string, string, string, string, string, string, string)
+		}); ok {
+			svc.SendTaskCompletionToThread(ctx, reply.DiscordChannelID, reply.DiscordThreadID, reply.DiscordMessageID, task.Title, output, errMsg, reply.DiscordUserID)
+		}
+		return
+	}
 	switch task.CreatedVia {
 	case models.TaskOriginTelegram:
 		if h.telegramService == nil {
@@ -1573,6 +1598,18 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 			h.emailService.SendChatResponse(ctx, *task, output, errMsg)
 		} else {
 			h.emailService.SendTaskCompletionNotification(ctx, *task, output, errMsg)
+		}
+	case models.TaskOriginDiscord:
+		if task.Category == models.CategoryChat {
+			if svc, ok := h.discordSvc.(interface {
+				SendChatResponse(context.Context, models.Task, string, string)
+			}); ok {
+				svc.SendChatResponse(ctx, *task, output, errMsg)
+			}
+		} else if svc, ok := h.discordSvc.(interface {
+			SendTaskCompletionNotification(context.Context, models.Task, string, string)
+		}); ok {
+			svc.SendTaskCompletionNotification(ctx, *task, output, errMsg)
 		}
 	}
 }

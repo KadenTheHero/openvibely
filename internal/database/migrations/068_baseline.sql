@@ -848,6 +848,27 @@ CREATE TABLE email_task_context (
 );
 CREATE INDEX idx_email_task_context_from ON email_task_context(email_from);
 CREATE INDEX idx_email_task_context_session ON email_task_context(email_session_key);
+CREATE TABLE discord_authorized_users (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    discord_user_id TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    added_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    added_by TEXT NOT NULL DEFAULT 'web'
+);
+CREATE UNIQUE INDEX idx_discord_auth_unique_user_id ON discord_authorized_users(project_id, discord_user_id);
+CREATE INDEX idx_discord_auth_project ON discord_authorized_users(project_id);
+CREATE INDEX idx_discord_auth_user ON discord_authorized_users(discord_user_id);
+CREATE TABLE discord_task_context (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    discord_channel_id TEXT NOT NULL,
+    discord_thread_id TEXT NOT NULL DEFAULT '',
+    discord_message_id TEXT NOT NULL DEFAULT '',
+    discord_user_id TEXT NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_discord_task_context_channel ON discord_task_context(discord_channel_id, discord_thread_id);
 
 INSERT INTO app_settings (key, value) VALUES ('worktree_auto_merge', 'false');
 INSERT INTO app_settings (key, value) VALUES ('worktree_merge_target', 'main');
@@ -1021,6 +1042,8 @@ INSERT INTO workflow_templates (id, name, description, category, definition, is_
 
 -- +goose Down
 
+DROP TABLE IF EXISTS discord_task_context;
+DROP TABLE IF EXISTS discord_authorized_users;
 DROP TABLE IF EXISTS email_task_context;
 DROP TABLE IF EXISTS email_authorized_senders;
 DROP TABLE IF EXISTS slack_authorized_users;

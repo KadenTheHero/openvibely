@@ -440,6 +440,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackAuthRepo := repository.NewSlackAuthRepo(db)
 	emailAuthRepo := repository.NewEmailAuthRepo(db)
 	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	discordAuthRepo := repository.NewDiscordAuthRepo(db)
+	discordTaskContextRepo := repository.NewDiscordTaskContextRepo(db)
 	channelTargetRepo := repository.NewChannelTargetRepo(db)
 
 	// Custom personalities
@@ -468,6 +470,15 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	}
 	if val, _ := settingsRepo.Get(context.Background(), service.SlackSettingSendResponses); val == "" {
 		_ = settingsRepo.Set(context.Background(), service.SlackSettingSendResponses, "true")
+	}
+	if cfg.DiscordToken != "" {
+		_ = settingsRepo.Set(context.Background(), service.DiscordSettingBotToken, cfg.DiscordToken)
+	}
+	if val, _ := settingsRepo.Get(context.Background(), service.DiscordSettingSendResponses); val == "" {
+		_ = settingsRepo.Set(context.Background(), service.DiscordSettingSendResponses, "true")
+	}
+	if val, _ := settingsRepo.Get(context.Background(), service.DiscordSettingRequireMention); val == "" {
+		_ = settingsRepo.Set(context.Background(), service.DiscordSettingRequireMention, "true")
 	}
 
 	githubSvc := service.NewGitHubService(
@@ -509,6 +520,25 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	emailSvc.SetChatBroadcaster(chatBroadcaster)
 	emailSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 	emailSvc.SetAgentRepo(agentRepo)
+	discordSvc := service.NewDiscordService(
+		settingsRepo,
+		projectRepo,
+		llmConfigRepo,
+		taskRepo,
+		execRepo,
+		scheduleRepo,
+		taskSvc,
+		llmSvc,
+		workerSvc,
+		discordAuthRepo,
+		discordTaskContextRepo,
+	)
+	discordSvc.SetCustomPersonalityRepo(customPersonalityRepo)
+	discordSvc.SetChatBroadcaster(chatBroadcaster)
+	discordSvc.SetAlertService(alertSvc)
+	discordSvc.SetTaskGoalService(taskGoalSvc)
+	discordSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	discordSvc.SetAgentRepo(agentRepo)
 
 	// Git worktree service for task isolation
 	worktreeSvc := service.NewWorktreeService(taskRepo, projectRepo, settingsRepo)
@@ -748,6 +778,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetEmailTaskContextRepo(emailTaskContextRepo)
 	h.SetEmailService(emailSvc)
 	h.SetSlackTaskContextRepo(slackTaskContextRepo)
+	h.SetDiscordAuthRepo(discordAuthRepo)
+	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
 	h.SetReviewCommentRepo(reviewCommentRepo)
 	h.SetCustomPersonalityRepo(customPersonalityRepo)
 	h.SetWorktreeService(worktreeSvc)
@@ -758,6 +790,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetTaskPullRequestRepo(taskPullRequestRepo)
 	h.SetGitHubService(githubSvc)
 	h.SetSlackService(slackSvc)
+	h.SetDiscordService(discordSvc)
 	h.SetChannelMessageRouter(channelMessageRouter)
 	h.SetChannelTargetRepo(channelTargetRepo)
 	slackSvc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
@@ -766,6 +799,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
 	emailSvc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
 	emailSvc.SetChannelChatRunner(h.StartChannelChatRun)
+	discordSvc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
+	discordSvc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
+	discordSvc.SetChannelChatRunner(h.StartChannelChatRun)
+	discordSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
 	if telegramSvc != nil {
 		telegramSvc.SetChannelMessageRouter(channelMessageRouter)
 		channelMessageRouter.SetTelegramService(telegramSvc)
@@ -782,6 +819,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	if err := emailSvc.Start(); err != nil {
 		applog.Infof("warning: failed to start email polling: %v", err)
 	}
+	if err := discordSvc.Start(); err != nil {
+		applog.Infof("warning: failed to start discord gateway: %v", err)
+	}
 	// Start Telegram bot if configured after the shared channel runner is wired.
 	if telegramSvc != nil {
 		telegramSvc.Start()
@@ -797,6 +837,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	llmSvc.SetAgentRepo(agentRepo)
 	llmSvc.SetFileChangeBroadcaster(fileChangeBroadcaster)
 	llmSvc.SetSlackService(slackSvc)
+	llmSvc.SetDiscordService(discordSvc)
 	if telegramSvc != nil {
 		llmSvc.SetTelegramService(telegramSvc)
 	}
@@ -845,6 +886,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		}
 		if emailSvc != nil {
 			emailSvc.Stop()
+		}
+		if discordSvc != nil {
+			discordSvc.Stop()
 		}
 		e.Close()
 		db.Close()

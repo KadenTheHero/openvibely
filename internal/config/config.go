@@ -28,6 +28,7 @@ type Config struct {
 	DatabaseURL         string
 	AnthropicKey        string
 	TelegramToken       string
+	DiscordToken        string
 	Environment         string
 	GitHubAppID         string
 	GitHubAppSlug       string
@@ -73,6 +74,7 @@ func LoadWithMode(mode RuntimeMode) *Config {
 		DatabaseURL:         getEnv("DATABASE_URL", ""),
 		AnthropicKey:        getEnv("ANTHROPIC_API_KEY", ""),
 		TelegramToken:       getEnv("TELEGRAM_BOT_TOKEN", ""),
+		DiscordToken:        getEnv("DISCORD_BOT_TOKEN", ""),
 		Environment:         getEnv("ENVIRONMENT", "development"),
 		GitHubAppID:         getEnv("GITHUB_APP_ID", ""),
 		GitHubAppSlug:       getEnv("GITHUB_APP_SLUG", ""),

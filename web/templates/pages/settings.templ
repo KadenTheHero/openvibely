@@ -71,6 +71,26 @@ func slackSecretPlaceholder(hasSecret bool, label string) string {
 	return "Enter " + label + "."
 }
 
+func discordConnectionBadgeClass(status service.DiscordConnectionStatus) string {
+	if !status.Configured {
+		return "badge-ghost"
+	}
+	if status.Connected {
+		return "badge-success"
+	}
+	return "badge-warning"
+}
+
+func discordConnectionLabel(status service.DiscordConnectionStatus) string {
+	if !status.Configured {
+		return "Not Configured"
+	}
+	if status.Connected {
+		return "Connected"
+	}
+	return "Not Connected"
+}
+
 func telegramChannelStatusText(isBotRunning bool) string {
 	if isBotRunning {
 		return "Running"
@@ -126,18 +146,18 @@ func outboundTargetSummary(targets []models.ChannelTarget) string {
 	return strings.Join(parts, " • ")
 }
 
-templ SettingsPage(telegramToken string, isBotRunning bool, projects []models.Project, currentProjectID string, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) {
+templ SettingsPage(telegramToken string, isBotRunning bool, projects []models.Project, currentProjectID string, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordDefaultChannelID string, discordFreeResponseChannels string, discordSendResponses bool, discordRequireMention bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) {
 	@layout.Base("Channels", projects, currentProjectID) {
-		@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets)
+		@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordDefaultChannelID, discordFreeResponseChannels, discordSendResponses, discordRequireMention, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets)
 	}
 }
 
 // SettingsContent renders just the settings content for HTMX requests
-templ SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) {
-	@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets)
+templ SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordDefaultChannelID string, discordFreeResponseChannels string, discordSendResponses bool, discordRequireMention bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) {
+	@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordDefaultChannelID, discordFreeResponseChannels, discordSendResponses, discordRequireMention, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets)
 }
 
-templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) {
+templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordDefaultChannelID string, discordFreeResponseChannels string, discordSendResponses bool, discordRequireMention bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) {
 	<div id="channels-container" data-search-container>
 		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Channels</h2>
@@ -167,6 +187,13 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							</button>
 						</li>
 					}
+					if !hasDiscordChannel {
+						<li>
+							<button type="button" onclick="openDiscordChannelFromMenu(event)">
+								Discord
+							</button>
+						</li>
+					}
 					if !hasEmailChannel {
 						<li>
 							<button type="button" onclick="openEmailChannelFromMenu(event)">
@@ -179,7 +206,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							Webhook
 						</button>
 					</li>
-					if hasGitHubChannel && hasTelegramChannel && hasSlackChannel && hasEmailChannel {
+					if hasGitHubChannel && hasTelegramChannel && hasSlackChannel && hasDiscordChannel && hasEmailChannel {
 						<li class="hidden"></li>
 					}
 				</ul>
@@ -421,6 +448,48 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				</div>
 				}
 
+				if hasDiscordChannel {
+					<div
+						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+						data-channel-type="discord"
+						data-search-card
+						data-search-text={ "Discord " + discordConnectionLabel(discordStatus) }
+						onclick="editChannelFromData(this)"
+					>
+						<div class="card-body relative">
+							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+								<div class="dropdown dropdown-end">
+									<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01"></path></svg>
+									</label>
+									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+										<li><button type="button" onclick="openDiscordConfigModal()">Edit</button></li>
+										<li><button type="button" hx-post="/channels/discord/test" hx-target="#test-result-discord" hx-swap="innerHTML">Test Connection</button></li>
+										<li><button type="button" class="text-error" onclick="openDeleteChannelConfirm('Discord', '/channels/discord/remove', 'POST')">Delete</button></li>
+									</ul>
+								</div>
+							</div>
+							<div class="pr-12">
+								<h3 class="font-bold flex items-center gap-2">Discord</h3>
+								<p class="text-sm opacity-60">Chat with OpenVibely from Discord DMs, mentioned server channels, or configured free-response channels.</p>
+								if len(discordAuthorizedUsers) > 0 {
+									<div class="mt-2 flex items-center gap-2">
+										<span class="text-sm opacity-60">Authorized users:</span>
+										<span class="badge badge-sm badge-ghost">{ fmt.Sprintf("%d user(s)", len(discordAuthorizedUsers)) }</span>
+									</div>
+								}
+								<div class="mt-3 flex items-center gap-2">
+									<span class={ "badge badge-sm", discordConnectionBadgeClass(discordStatus) }>{ discordConnectionLabel(discordStatus) }</span>
+									if discordStatus.Running {
+										<span class="badge badge-sm badge-success">Gateway running</span>
+									}
+								</div>
+								<div id="test-result-discord" class="mt-2"></div>
+							</div>
+						</div>
+					</div>
+				}
+
 				if hasEmailChannel {
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
@@ -551,38 +620,16 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					</div>
 				</div>
 			}
-				if !hasGitHubChannel && !hasTelegramChannel && !hasSlackChannel && !hasEmailChannel && len(webhooks) == 0 {
+				if !hasGitHubChannel && !hasTelegramChannel && !hasSlackChannel && !hasDiscordChannel && !hasEmailChannel && len(webhooks) == 0 {
 					<div class="card bg-base-100 shadow-sm border border-dashed border-base-300" data-search-card data-search-text="No channels added yet">
 						<div class="card-body">
 							<h3 class="font-semibold">No channels added yet</h3>
-							<p class="text-sm opacity-70">Use `Add Channel` to configure GitHub, Slack, Telegram Bot, Email, or Webhooks.</p>
+							<p class="text-sm opacity-70">Use `Add Channel` to configure GitHub, Slack, Discord, Telegram Bot, Email, or Webhooks.</p>
 						</div>
 					</div>
 				}		</div>
 
-				@OutboundTargetsModal(currentProjectID, channelTargets, sendMessageExplicitTargets)
-			<!-- Coming Soon Section -->
-		<div class="mb-8">
-			<h3 class="text-lg font-semibold mb-4 opacity-70">Coming Soon</h3>
-			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-				<!-- Discord Placeholder -->
-				<div class="card bg-base-100 shadow-sm border border-base-300 opacity-50 cursor-not-allowed" data-search-card data-search-text="Discord Bot Coming Soon">
-					<div class="card-body">
-						<h3 class="card-title">
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"></path>
-							</svg>
-							Discord Bot
-							<span class="badge badge-ghost badge-sm">Coming Soon</span>
-						</h3>
-						<p class="text-sm opacity-70">
-							Connect your Discord server for task management.
-						</p>
-					</div>
-				</div>
-			</div>
-		</div>
-
+					@OutboundTargetsModal(currentProjectID, channelTargets, sendMessageExplicitTargets)
 			<dialog id="delete_channel_confirm_modal" class="modal">
 				<div class="modal-box">
 					<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeDeleteChannelConfirm()" aria-label="Close delete confirmation" title="Close delete confirmation">
@@ -925,6 +972,63 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				<button>close</button>
 			</form>
 			</dialog>
+
+		<dialog id="discord_config_modal" class="modal">
+			<div class="modal-box max-w-2xl">
+				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeDiscordConfigModal()" aria-label="Close Discord configuration" title="Close Discord configuration">×</button>
+				<h3 class="font-bold text-lg mb-4 pr-10">Configure Discord</h3>
+				<form id="discord_config_form" method="post" action="/channels/discord/configure" hx-post="/channels/discord/configure" hx-swap="none">
+					<div class="alert alert-info mb-4 text-sm">
+						<div>
+							<p class="font-semibold">Use a Discord bot token</p>
+							<p class="mt-1 opacity-80">Create a Discord application bot, enable message content intent, invite it to your server, then add its token here.</p>
+							<p class="mt-1 opacity-80">DMs are supported. In guild channels, users must mention the bot unless the channel is listed as a free-response channel.</p>
+						</div>
+					</div>
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">Bot Token</span></label>
+						@components.SecretInput(components.SecretInputConfig{
+							ID: "discord_bot_token",
+							Name: "discord_bot_token",
+							Value: discordBotToken,
+							Class: "input input-bordered w-full pr-10 font-mono text-xs",
+							Placeholder: "Leave blank to keep existing token, or paste a new token to rotate.",
+							AutoComplete: "off",
+							AriaLabel: "Toggle bot token visibility",
+						})
+					</div>
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">Default Channel ID</span></label>
+						<input type="text" name="discord_default_channel_id" class="input input-bordered font-mono text-xs" value={ discordDefaultChannelID } placeholder="Optional channel ID for default posting"/>
+					</div>
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">Free-Response Channel IDs</span></label>
+						<textarea name="discord_free_response_channels" class="textarea textarea-bordered h-20 font-mono text-xs" placeholder="One channel ID per line, or comma-separated">{ discordFreeResponseChannels }</textarea>
+						<label class="label"><span class="label-text-alt opacity-70">In these channels, OpenVibely responds without requiring a mention.</span></label>
+					</div>
+					if currentProjectID != "" {
+						<div class="divider"></div>
+						<h4 class="font-semibold text-sm mb-2">Authorized Users</h4>
+						<p class="text-xs opacity-50 mb-3">Restrict Discord access to specific users for this project. If no users are configured, access is denied until authorized users are added.</p>
+						@components.DiscordAuthorizedUsersList(discordAuthorizedUsers, currentProjectID)
+					}
+					<div class="divider"></div>
+					<label class="label cursor-pointer justify-start gap-3">
+						<input type="checkbox" class="checkbox checkbox-primary" name="discord_send_responses" value="true" if discordSendResponses { checked }/>
+						<span class="label-text">Send task completion/failure notifications for Discord-created tasks</span>
+					</label>
+					<label class="label cursor-pointer justify-start gap-3">
+						<input type="checkbox" class="checkbox checkbox-primary" name="discord_require_mention" value="true" if discordRequireMention { checked }/>
+						<span class="label-text">Require bot mention in non-DM channels unless free-response is configured</span>
+					</label>
+					<div class="modal-action">
+						<button type="button" class="btn btn-ghost" onclick="closeDiscordConfigModal()">Cancel</button>
+						<button type="submit" class="btn btn-primary">Save Discord</button>
+					</div>
+				</form>
+			</div>
+			<form method="dialog" class="modal-backdrop"><button onclick="closeDiscordConfigModal()">close</button></form>
+		</dialog>
 
 			<dialog id="email_config_modal" class="modal">
 				<div class="modal-box max-w-2xl">
@@ -1528,12 +1632,14 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						channel_modal.showModal();
 				} else if (type === 'github') {
 					openGitHubConfigModal();
-					} else if (type === 'slack') {
-						openSlackConfigModal();
-					} else if (type === 'email') {
-						openEmailConfigModal();
-					}
+				} else if (type === 'slack') {
+					openSlackConfigModal();
+				} else if (type === 'discord') {
+					openDiscordConfigModal();
+				} else if (type === 'email') {
+					openEmailConfigModal();
 				}
+			}
 			function closeAllDropdownMenus() {
 				document.querySelectorAll('.dropdown ul').forEach(m => m.classList.remove('show'));
 			}
@@ -1559,6 +1665,12 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					if (event) event.stopPropagation();
 					closeAllDropdownMenus();
 					openSlackConfigModal();
+				}
+
+				function openDiscordChannelFromMenu(event) {
+					if (event) event.stopPropagation();
+					closeAllDropdownMenus();
+					openDiscordConfigModal();
 				}
 
 				function openEmailChannelFromMenu(event) {
@@ -1602,6 +1714,16 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 
 				function closeSlackConfigModal() {
 					const modal = document.getElementById('slack_config_modal');
+					if (modal) modal.close();
+				}
+
+				function openDiscordConfigModal() {
+					const modal = document.getElementById('discord_config_modal');
+					if (modal) modal.showModal();
+				}
+
+				function closeDiscordConfigModal() {
+					const modal = document.getElementById('discord_config_modal');
 					if (modal) modal.close();
 				}
 
