@@ -715,40 +715,51 @@ templ TaskThreadLiveEventsScript(taskID string) {
 				if (window._taskThreadLiveHandlers[taskId]) {
 					window.removeEventListener('sse-task-event', window._taskThreadLiveHandlers[taskId]);
 				}
-					function removePendingRow(inputId) {
-						if (!inputId) return;
-						var row = document.getElementById('thread-input-' + inputId);
-						if (row) row.remove();
-					}
-					function ensureComposerPendingContainer() {
-						var pendingContainer = document.getElementById('pending-thread-inputs');
-						if (pendingContainer) return pendingContainer;
-						var form = document.getElementById('task-thread-form');
-						var textarea = document.getElementById('task-thread-message');
-						if (!form || !textarea) return null;
-						pendingContainer = document.createElement('div');
-						pendingContainer.id = 'pending-thread-inputs';
-						pendingContainer.className = 'space-y-1.5';
-						var textareaWrap = textarea.parentElement;
-						form.insertBefore(pendingContainer, textareaWrap || textarea);
-						return pendingContainer;
-					}
-					function refreshPendingInputsIfVisible() {
-						var pendingContainer = document.getElementById('pending-thread-inputs');
-						if (!pendingContainer || !pendingContainer.querySelector('[data-thread-input-id]') || typeof htmx === 'undefined') return;
-						htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: '#pending-thread-inputs', swap: 'outerHTML'});
-					}
-					function renderQueuedRow(data) {
-						if (!data || !data.pending_input_id) return;
-						if (document.querySelector('[data-thread-input-id="' + data.pending_input_id + '"]')) return;
-						var pendingContainer = ensureComposerPendingContainer();
-						if (!pendingContainer) return;
-						var queuedRow = document.createElement('div');
-						queuedRow.id = 'thread-input-' + data.pending_input_id;
-						queuedRow.className = 'queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';
-						queuedRow.setAttribute('data-thread-input-id', data.pending_input_id);
-						queuedRow.setAttribute('data-input-mode', 'queued');
-						queuedRow.title = 'Queued follow-up will run after the active response finishes';
+						function currentTaskThreadView() {
+							var view = document.getElementById('task-thread-view');
+							return view && view.getAttribute('data-task-id') === taskId ? view : null;
+						}
+						function scopedPendingContainerSelector() {
+							return '#pending-thread-inputs[data-task-id="' + taskId.replace(/"/g, '\\"') + '"]';
+						}
+						function currentPendingContainer() {
+							return currentTaskThreadView() ? document.querySelector(scopedPendingContainerSelector()) : null;
+						}
+						function removePendingRow(inputId) {
+							if (!inputId || !currentTaskThreadView()) return;
+							var row = document.querySelector('[data-thread-input-id="' + inputId.replace(/"/g, '\\"') + '"][data-task-id="' + taskId.replace(/"/g, '\\"') + '"]');
+							if (row) row.remove();
+						}
+						function ensureComposerPendingContainer() {
+							if (!currentTaskThreadView()) return null;
+							var pendingContainer = currentPendingContainer();
+							if (pendingContainer) return pendingContainer;
+							var form = document.getElementById('task-thread-form');
+							var textarea = document.getElementById('task-message-input');
+							if (!form || !textarea) return null;
+							pendingContainer = document.createElement('div');
+							pendingContainer.id = 'pending-thread-inputs';
+							pendingContainer.className = 'space-y-1.5';
+							pendingContainer.setAttribute('data-task-id', taskId);
+							var textareaWrap = textarea.parentElement;
+							form.insertBefore(pendingContainer, textareaWrap || textarea);
+							return pendingContainer;
+						}
+						function refreshPendingInputsIfVisible() {
+							var pendingContainer = currentPendingContainer();
+							if (!pendingContainer || !pendingContainer.querySelector('[data-thread-input-id]') || typeof htmx === 'undefined') return;
+							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: scopedPendingContainerSelector(), swap: 'outerHTML'});
+						}
+						function renderQueuedRow(data) {
+							if (!data || data.task_id !== taskId || !data.pending_input_id || !currentTaskThreadView()) return;
+							if (document.querySelector('[data-thread-input-id="' + data.pending_input_id + '"][data-task-id="' + taskId + '"]')) return;
+							var pendingContainer = ensureComposerPendingContainer();						if (!pendingContainer) return;
+							var queuedRow = document.createElement('div');
+							queuedRow.id = 'thread-input-' + data.pending_input_id;
+							queuedRow.className = 'queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';
+							queuedRow.setAttribute('data-thread-input-id', data.pending_input_id);
+							queuedRow.setAttribute('data-task-id', taskId);
+							queuedRow.setAttribute('data-input-mode', 'queued');						queuedRow.title = 'Queued follow-up will run after the active response finishes';
 						var preview = document.createElement('div');
 						preview.className = 'min-w-0 flex-1 truncate';
 						preview.textContent = data.message || '';
@@ -790,11 +801,11 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							delete window._pendingTaskThreadLiveEvents[taskId];
 							ensureStreamingFragment(data);
 						}
-						function ensureStreamingFragment(data, attempt) {
-							attempt = attempt || 0;
-							var messages = document.getElementById('task-thread-messages');
-							if (!data || data.task_id !== taskId || !data.exec_id) return;
-							if (!messages) {
+							function ensureStreamingFragment(data, attempt) {
+								attempt = attempt || 0;
+								if (!currentTaskThreadView()) return;
+								var messages = document.getElementById('task-thread-messages');
+								if (!data || data.task_id !== taskId || !data.exec_id) return;							if (!messages) {
 								rememberPendingExecutionEvent(data);
 								return;
 							}
@@ -862,31 +873,29 @@ templ TaskThreadLiveEventsScript(taskID string) {
 				// container so any steering rows missed while the tab was hidden are reconciled.
 				// The server query excludes prepared/in-flight steering (expected_turn_id=NULL),
 				// so stale "Steering pending" rows are cleanly replaced with current state.
-				var reconnectHandler = function(event) {
-					var detail = event.detail || {};
-					if (!detail.reconnected) return;
-					var pendingContainer = document.getElementById('pending-thread-inputs');
-					if (pendingContainer && typeof htmx !== 'undefined') {
-						htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: '#pending-thread-inputs', swap: 'outerHTML'});
-					}
-				};
-				window._taskThreadReconnectHandlers = window._taskThreadReconnectHandlers || {};
+					var reconnectHandler = function(event) {
+						var detail = event.detail || {};
+						if (!detail.reconnected || !currentTaskThreadView()) return;
+						var pendingContainer = currentPendingContainer();
+						if (pendingContainer && typeof htmx !== 'undefined') {
+							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: scopedPendingContainerSelector(), swap: 'outerHTML'});
+						}
+					};				window._taskThreadReconnectHandlers = window._taskThreadReconnectHandlers || {};
 				if (window._taskThreadReconnectHandlers[taskId]) {
 					window.removeEventListener('sse-live-connected', window._taskThreadReconnectHandlers[taskId]);
 				}
 				window._taskThreadReconnectHandlers[taskId] = reconnectHandler;
 				window.addEventListener('sse-live-connected', reconnectHandler);
 
-				document.body.addEventListener('htmx:beforeSwap', function(event) {
-					var target = event.detail && event.detail.target;
-					if (target && target.id === 'main-content') {
-						window.removeEventListener('sse-task-event', handler);
-						delete window._taskThreadLiveHandlers[taskId];
-						window.removeEventListener('sse-live-connected', reconnectHandler);
-						delete window._taskThreadReconnectHandlers[taskId];
-					}
-				}, { once: true });
-			})();
+					document.body.addEventListener('htmx:beforeSwap', function(event) {
+						var target = event.detail && event.detail.target;
+						if (target && (target.id === 'main-content' || target.id === 'task-detail-content' || target.id === 'thread-content' || target.id === 'task-thread-view')) {
+							window.removeEventListener('sse-task-event', handler);
+							delete window._taskThreadLiveHandlers[taskId];
+							window.removeEventListener('sse-live-connected', reconnectHandler);
+							delete window._taskThreadReconnectHandlers[taskId];
+						}
+					}, { once: true });			})();
 		</script>
 }
 

@@ -1874,7 +1874,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		} else if shouldPromote {
 			go h.PromoteQueuedTaskThreadInput(taskID)
 		}
-		return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID), queued.AttachmentSessionID != ""))
+		return render(c, http.StatusOK, components.ChatQueuedInputRowOOBForTask(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID), queued.AttachmentSessionID != "", taskID))
 	}
 	exec := &models.Execution{
 		TaskID:        taskID,
@@ -1931,18 +1931,18 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	// HTTP handler and into the background goroutine, eliminating the per-execution O(N) block
 	// that caused visible UI hangs on tasks with many prior executions.
 	go h.processStreamingResponse(streamingResponseParams{
-		ExecID:           exec.ID,
-		TaskID:           taskID,
-		Message:          message,
-		Agent:            *agent,
-		ProjectID:        task.ProjectID,
-		ImageAttachments: imageAttachments,
-		IsTaskFollowup:   true,
-		ProcessMarkers:   false,
-		InputOrigin:      models.TaskOriginWeb,
-		DeferHistoryLoad: true,
+		ExecID:            exec.ID,
+		TaskID:            taskID,
+		Message:           message,
+		Agent:             *agent,
+		ProjectID:         task.ProjectID,
+		ImageAttachments:  imageAttachments,
+		IsTaskFollowup:    true,
+		ProcessMarkers:    false,
+		InputOrigin:       models.TaskOriginWeb,
+		DeferHistoryLoad:  true,
 		AttachmentContext: attachmentContext,
-		Task:             task,
+		Task:              task,
 	})
 
 	return render(c, http.StatusOK, templ.Join(
@@ -2004,7 +2004,7 @@ func (h *Handler) TaskThreadSteer(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save steering input")
 	}
-	return render(c, http.StatusOK, components.ChatSteeringInputRow(input.ID, message))
+	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(input.ID, message, taskID))
 }
 
 // GetTaskThread returns the task thread view (for polling updates)
@@ -2069,9 +2069,9 @@ func (h *Handler) TaskThreadPendingInputs(c echo.Context) error {
 			pendingInputs = inputs
 		}
 	}
-	return render(c, http.StatusOK, components.ChatComposerQueuedInputRows(pendingInputs, func(input models.ThreadInput) string {
+	return render(c, http.StatusOK, components.ChatComposerQueuedInputRowsForTask(pendingInputs, func(input models.ThreadInput) string {
 		return fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, input.ID)
-	}))
+	}, taskID))
 }
 
 func (h *Handler) loadTaskThreadExecutionWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {

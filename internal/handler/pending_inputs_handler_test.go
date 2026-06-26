@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -290,6 +291,40 @@ func TestTaskThreadPendingInputs_IncludesQueuedInput(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "queued-task-msg") {
 		t.Errorf("queued input must appear in task pending-inputs fragment, got: %q", body)
+	}
+	if !strings.Contains(body, `data-task-id="`+task.ID+`"`) {
+		t.Errorf("task pending-inputs fragment must carry task id on container and rows, got: %q", body)
+	}
+}
+
+func TestTaskThreadQueuedInputSteer_ResponseCarriesTaskID(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	p := tc.CreateProject().Build()
+	task := tc.CreateTask(p.ID).WithStatus(models.StatusRunning).Build()
+	agent, _ := tc.llmConfigRepo.GetDefault(ctx)
+	if agent == nil {
+		t.Skip("no default agent configured")
+	}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, tc.execRepo.Create(ctx, exec))
+	queued := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      p.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		ExpectedTurnID: exec.ID,
+		Content:        "convert me",
+	}
+	require.NoError(t, tc.handler.threadInputRepo.CreateQueued(ctx, queued))
+
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/thread/queued/" + queued.ID + "/steer").Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	body := rec.Body.String()
+	if !strings.Contains(body, `data-task-id="`+task.ID+`"`) || !strings.Contains(body, `data-thread-input-id="`+queued.ID+`"`) {
+		t.Fatalf("task queued-to-steering response must carry task/input identity, got: %q", body)
 	}
 }
 

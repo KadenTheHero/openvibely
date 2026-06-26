@@ -79,6 +79,13 @@ func hasPendingComposerInputs(inputs []models.ThreadInput) bool {
 	return false
 }
 
+func pendingInputsOOBTarget(taskID string) string {
+	if taskID == "" {
+		return "beforeend"
+	}
+	return "beforeend:#pending-thread-inputs[data-task-id=\"" + taskID + "\"]"
+}
+
 templ ChatLoadingDots(size string) {
 	<span
 		class={
@@ -893,7 +900,11 @@ templ _initThreadStreamingScript() {
 }
 
 templ ChatQueuedInputRow(inputID, message, steerEndpoint string, hasAttachments bool) {
-	<div id={ "thread-input-" + inputID } class="queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-input-mode="queued" title="Queued follow-up will run after the active response finishes">
+	@ChatQueuedInputRowForTask(inputID, message, steerEndpoint, hasAttachments, "")
+}
+
+templ ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttachments bool, taskID string) {
+	<div id={ "thread-input-" + inputID } class="queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="queued" title="Queued follow-up will run after the active response finishes">
 		<div class="min-w-0 flex-1 truncate">{ message }</div>
 		if hasAttachments {
 			<div class="badge badge-ghost badge-sm shrink-0 gap-1 text-xs" title="Attachments queued with this follow-up" aria-label="Attachments queued with this follow-up">
@@ -915,13 +926,21 @@ templ ChatQueuedInputRow(inputID, message, steerEndpoint string, hasAttachments 
 }
 
 templ ChatQueuedInputRowOOB(inputID, message, steerEndpoint string, hasAttachments bool) {
-	<div id="pending-thread-inputs" hx-swap-oob="beforeend">
-		@ChatQueuedInputRow(inputID, message, steerEndpoint, hasAttachments)
+	@ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint, hasAttachments, "")
+}
+
+templ ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint string, hasAttachments bool, taskID string) {
+	<div id="pending-thread-inputs" data-task-id={ taskID } hx-swap-oob={ pendingInputsOOBTarget(taskID) }>
+		@ChatQueuedInputRowForTask(inputID, message, steerEndpoint, hasAttachments, taskID)
 	</div>
 }
 
 templ ChatSteeringInputRow(inputID, message string) {
-	<div id={ "thread-input-" + inputID } class="steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-input-mode="steering" title="Steering instruction will be applied before the active run's next model step">
+	@ChatSteeringInputRowForTask(inputID, message, "")
+}
+
+templ ChatSteeringInputRowForTask(inputID, message, taskID string) {
+	<div id={ "thread-input-" + inputID } class="steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="steering" title="Steering instruction will be applied before the active run's next model step">
 		<div class="min-w-0 flex-1">
 			<div class="text-xs font-semibold opacity-70">Steering pending</div>
 			<div class="truncate">{ message }</div>
@@ -938,12 +957,16 @@ templ ChatSteeringInputRow(inputID, message string) {
 }
 
 templ ChatComposerQueuedInputRows(inputs []models.ThreadInput, steerEndpointFor func(models.ThreadInput) string) {
-	<div id="pending-thread-inputs" class="space-y-1.5">
+	@ChatComposerQueuedInputRowsForTask(inputs, steerEndpointFor, "")
+}
+
+templ ChatComposerQueuedInputRowsForTask(inputs []models.ThreadInput, steerEndpointFor func(models.ThreadInput) string, taskID string) {
+	<div id="pending-thread-inputs" class="space-y-1.5" data-task-id={ taskID }>
 		for _, input := range inputs {
 			if input.InputMode == models.ThreadInputModeQueued && steerEndpointFor != nil {
-				@ChatQueuedInputRow(input.ID, input.Content, steerEndpointFor(input), input.AttachmentSessionID != "")
+				@ChatQueuedInputRowForTask(input.ID, input.Content, steerEndpointFor(input), input.AttachmentSessionID != "", taskID)
 			} else if input.InputMode == models.ThreadInputModeSteering {
-				@ChatSteeringInputRow(input.ID, input.Content)
+				@ChatSteeringInputRowForTask(input.ID, input.Content, taskID)
 			}
 		}
 	</div>
@@ -1105,7 +1128,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				</div>
 				<div id={ chatAttachmentListID(config.FormID) } class="space-y-1"></div>
 			</div>
-			@ChatComposerQueuedInputRows(config.PendingInputs, config.QueuedSteerEndpointFor)
+			@ChatComposerQueuedInputRowsForTask(config.PendingInputs, config.QueuedSteerEndpointFor, config.TaskID)
 			<!-- Textarea -->
 			<div>
 				<textarea

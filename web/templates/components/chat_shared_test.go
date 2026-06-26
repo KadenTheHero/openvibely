@@ -725,6 +725,9 @@ func TestChatComposerQueuedInputRows_RenderInsideInputBoxStyle(t *testing.T) {
 	if !strings.Contains(content, `id="pending-thread-inputs"`) || !strings.Contains(content, `space-y-1.5`) {
 		t.Fatal("pending rows should render in a composer queue container")
 	}
+	if !strings.Contains(content, `data-task-id=""`) {
+		t.Fatal("global chat pending container should explicitly render an empty task scope")
+	}
 	if strings.Contains(content, `id="pending-thread-inputs" class="space-y-1.5 mb-3`) || strings.Contains(content, `id="pending-thread-inputs" class="space-y-1.5 pb-4`) {
 		t.Fatal("pending row spacing should be controlled by shared CSS, not per-render classes")
 	}
@@ -760,6 +763,24 @@ func TestChatQueuedInputRowOOB_WithAttachmentsShowsQueuedAttachmentIndicator(t *
 	}
 	if !strings.Contains(content, "Attachments queued") || !strings.Contains(content, `aria-label="Attachments queued with this follow-up"`) {
 		t.Fatal("OOB queued row should indicate when attachments are queued with the message")
+	}
+}
+
+func TestTaskQueuedInputRowOOB_TargetsOnlyMatchingTaskPendingContainer(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatQueuedInputRowOOBForTask("queued-task-1", "queue this", "/tasks/task-a/thread/queued/queued-task-1/steer", false, "task-a").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task ChatQueuedInputRowOOB: %v", err)
+	}
+
+	content := buf.String()
+	if !strings.Contains(content, `data-task-id="task-a"`) || !strings.Contains(content, `data-thread-input-id="queued-task-1"`) {
+		t.Fatalf("task queued OOB row must carry task/input identity, got: %s", content)
+	}
+	if !strings.Contains(content, `hx-swap-oob="beforeend:#pending-thread-inputs[data-task-id=&#34;task-a&#34;]"`) {
+		t.Fatalf("task queued OOB row must append only to the matching task pending container, got: %s", content)
+	}
+	if strings.Contains(content, `hx-swap-oob="beforeend"`) {
+		t.Fatal("task queued OOB row must not use the global pending container target")
 	}
 }
 
@@ -1859,6 +1880,9 @@ func TestTaskThreadView_RunningThreadCanSteerFromPendingRowsOnly(t *testing.T) {
 	if !strings.Contains(content, `id="pending-thread-inputs"`) || !strings.Contains(content, `hx-post="/tasks/task-steer-ui/thread/queued/queued-task/steer"`) || !strings.Contains(content, "Steer") {
 		t.Fatal("task-thread composer queued row must expose Steer action")
 	}
+	if !strings.Contains(content, `id="pending-thread-inputs" class="space-y-1.5" data-task-id="task-steer-ui"`) || !strings.Contains(content, `data-thread-input-id="queued-task" data-task-id="task-steer-ui"`) {
+		t.Fatal("task-thread pending container and rows must carry task id so queued rows cannot leak across task tabs")
+	}
 	messagesStart := strings.Index(content, `id="task-thread-messages"`)
 	formStart := strings.Index(content, `id="task-thread-form"`)
 	if messagesStart < 0 || formStart < 0 || strings.Contains(content[messagesStart:formStart], `thread-input-queued-task`) {
@@ -1888,6 +1912,12 @@ func TestTaskThreadView_RunningThreadCanSteerFromPendingRowsOnly(t *testing.T) {
 	if !strings.Contains(content, "function refreshPendingInputsIfVisible()") || !strings.Contains(content, "pendingContainer.querySelector('[data-thread-input-id]')") || !strings.Contains(content, "data.type === 'task_status_changed' || data.type === 'task_category_changed'") {
 		t.Fatal("task-thread UI must reconcile visible pending rows on live task state changes so applied queued rows cannot remain stale")
 	}
+	if !strings.Contains(content, "function currentTaskThreadView()") || !strings.Contains(content, `return view && view.getAttribute('data-task-id') === taskId ? view : null;`) || !strings.Contains(content, "function scopedPendingContainerSelector()") || !strings.Contains(content, `#pending-thread-inputs[data-task-id=`) || !strings.Contains(content, "taskId.replace") {
+		t.Fatal("task-thread live pending reconciliation must be scoped to the current task view")
+	}
+	if !strings.Contains(content, "pendingContainer.setAttribute('data-task-id', taskId)") || !strings.Contains(content, "queuedRow.setAttribute('data-task-id', taskId)") {
+		t.Fatal("live-created pending containers and rows must carry task id")
+	}
 	if !strings.Contains(content, "if (data.type === 'task_thread_input_cancelled')") || !strings.Contains(content, "removePendingRow(data.pending_input_id)") {
 		t.Fatal("task-thread UI must remove cancelled pending rows from live events")
 	}
@@ -1896,6 +1926,9 @@ func TestTaskThreadView_RunningThreadCanSteerFromPendingRowsOnly(t *testing.T) {
 	}
 	if !strings.Contains(content, "window._pendingTaskThreadLiveEvents = window._pendingTaskThreadLiveEvents || {};") || !strings.Contains(content, "rememberPendingExecutionEvent(data)") || !strings.Contains(content, "consumePendingExecutionEvent();") {
 		t.Fatal("task-thread UI must remember execution-start events that arrive before lazy thread DOM exists")
+	}
+	if !strings.Contains(content, "if (!currentTaskThreadView()) return;") {
+		t.Fatal("promoted execution fragments must not append after the visible task thread has changed")
 	}
 	if !strings.Contains(content, `data-task-id="task-steer-ui"`) || !strings.Contains(content, "getAttribute('data-task-id')") {
 		t.Fatal("task-thread live script must bind to the rendered task id, not a literal templ placeholder")
@@ -1960,7 +1993,7 @@ func TestTaskThreadView_ClosesStreamsBeforeThreadRefresh(t *testing.T) {
 	if !strings.Contains(content, "function _closeTaskThreadEventSources()") {
 		t.Fatal("expected shared thread EventSource cleanup helper")
 	}
-	if !strings.Contains(content, "target.id === 'thread-content' || target.id === 'task-thread-view' || target.id === 'task-detail-content' || target.id === 'main-content'") {
+	if !strings.Contains(content, "target.id === 'main-content' || target.id === 'task-detail-content' || target.id === 'thread-content' || target.id === 'task-thread-view'") {
 		t.Fatal("expected thread refresh and navigation targets to close active stream EventSources before swap")
 	}
 	if !strings.Contains(content, "_closeTaskThreadEventSources();") {

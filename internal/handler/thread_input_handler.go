@@ -140,5 +140,5 @@ func (h *Handler) TaskThreadQueuedInputSteer(c echo.Context) error {
 	if steering == nil {
 		return echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
 	}
-	return render(c, http.StatusOK, components.ChatSteeringInputRow(steering.ID, steering.Content))
+	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(steering.ID, steering.Content, taskID))
 }

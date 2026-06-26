@@ -1111,7 +1111,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 
 						function _loadThreadContent(taskId, forceReload, expectedExecId) {
 							var threadContent = document.getElementById('thread-content');
-							if (!threadContent || !taskId) return Promise.resolve(false);
+							if (!threadContent || !taskId || threadContent.dataset.taskId !== taskId) return Promise.resolve(false);
 							if (!forceReload && threadContent.dataset.loaded === 'true' && (!expectedExecId || _threadHasExecution(expectedExecId))) return Promise.resolve(true);
 							if (_threadContentLoading) return Promise.resolve(false);
 							if (typeof htmx === 'undefined') return Promise.resolve(false);
@@ -1120,15 +1120,14 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 							_threadContentLoading = true;
 							threadContent.dataset.loading = 'true';
 							return htmx.ajax('GET', '/tasks/' + taskId + '/thread', {
-								target: '#thread-content',
+								target: '#thread-content[data-task-id="' + taskId.replace(/"/g, '\\"') + '"]',
 								swap: 'innerHTML'
 							}).then(function() {
 								var updated = document.getElementById('thread-content');
-								if (updated) {
-									updated.dataset.loaded = 'true';
-									updated.dataset.loading = 'false';
-									if (window.htmx && typeof htmx.process === 'function') htmx.process(updated);
-								}
+								if (!updated || updated.dataset.taskId !== taskId) return false;
+								updated.dataset.loaded = 'true';
+								updated.dataset.loading = 'false';
+								if (window.htmx && typeof htmx.process === 'function') htmx.process(updated);
 								if (expectedExecId && !_threadHasExecution(expectedExecId)) return false;
 								return true;
 							}).catch(function(err) {
@@ -1142,9 +1141,12 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 						}
 
 						function _refreshActiveThreadContent(taskId, forceReload, expectedExecId, attempt) {
-							if (!taskId || !_isChatTabActive()) return;
+							var threadContent = document.getElementById('thread-content');
+							if (!taskId || !_isChatTabActive() || !threadContent || threadContent.dataset.taskId !== taskId) return;
 							attempt = attempt || 0;
 							_loadThreadContent(taskId, forceReload, expectedExecId).then(function(loaded) {
+								var currentThreadContent = document.getElementById('thread-content');
+								if (!currentThreadContent || currentThreadContent.dataset.taskId !== taskId) return;
 								if (!loaded && forceReload && attempt < 8) {
 									setTimeout(function() { _refreshActiveThreadContent(taskId, true, expectedExecId, attempt + 1); }, 150 * (attempt + 1));
 									return;

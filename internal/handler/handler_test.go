@@ -1009,12 +1009,13 @@ func TestHandler_ListModels_APIKeyUsesSecretInputPattern(t *testing.T) {
 	if strings.Contains(body, `onclick="togglePasswordVisibility('model_api_key', this)" tabindex="-1"`) {
 		t.Fatal("expected API key reveal toggle to remain keyboard reachable")
 	}
-		if !strings.Contains(body, `data-model-id="`+cfg.ID+`"`) || !strings.Contains(body, `data-model-api-key="`+cfg.APIKey+`"`) {
-			t.Fatal("expected model cards to expose the saved API key for masked edit-dialog reveal parity with channel secrets")
-		}
-		if strings.Contains(body, `value="`+cfg.APIKey+`"`) {
-			t.Fatal("expected saved model API key to be loaded into the edit dialog by script, not prefilled in the create/edit input on initial render")
-		}}
+	if !strings.Contains(body, `data-model-id="`+cfg.ID+`"`) || !strings.Contains(body, `data-model-api-key="`+cfg.APIKey+`"`) {
+		t.Fatal("expected model cards to expose the saved API key for masked edit-dialog reveal parity with channel secrets")
+	}
+	if strings.Contains(body, `value="`+cfg.APIKey+`"`) {
+		t.Fatal("expected saved model API key to be loaded into the edit dialog by script, not prefilled in the create/edit input on initial render")
+	}
+}
 
 func TestHandler_SetDefaultModel(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
@@ -3521,7 +3522,7 @@ func TestHandler_TaskThreadSend_QueuesDuringStartingFirstTurnBeforeExecutionExis
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, "1+1=?")
 	assertContains(t, rec, `data-input-mode="queued"`)
-	assertContains(t, rec, `hx-swap-oob="beforeend"`)
+	assertContains(t, rec, `hx-swap-oob="beforeend:#pending-thread-inputs[data-task-id=&#34;`+task.ID+`&#34;]"`)
 
 	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
 	require.NoError(t, err)
@@ -3556,7 +3557,7 @@ func TestHandler_TaskThreadSend_QueuesBehindActiveTurn(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, "queued follow up")
 	assertContains(t, rec, `data-input-mode="queued"`)
-	assertContains(t, rec, `hx-swap-oob="beforeend"`)
+	assertContains(t, rec, `hx-swap-oob="beforeend:#pending-thread-inputs[data-task-id=&#34;`+task.ID+`&#34;]"`)
 	assertContains(t, rec, `queued-input-row`)
 	assertContains(t, rec, `bg-base-300/45`)
 	assertContains(t, rec, `flex-1`)
