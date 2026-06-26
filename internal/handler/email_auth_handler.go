@@ -36,9 +36,6 @@ func (h *Handler) AddEmailAuthorizedSender(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
 	}
 	emailAddress := repository.NormalizeEmailAddress(c.FormValue("authorized_email_address"))
-	if emailAddress == "" {
-		emailAddress = repository.NormalizeEmailAddress(c.FormValue("email_address"))
-	}
 	displayName := strings.TrimSpace(c.FormValue("display_name"))
 	if emailAddress == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Email address is required")

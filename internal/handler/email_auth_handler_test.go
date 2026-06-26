@@ -58,6 +58,10 @@ func TestEmailAuthorizedSendersValidation(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected missing address 400, got %d", rec.Code)
 	}
+	rec = postForm(e, "/channels/email/authorized-senders", url.Values{"project_id": {"default"}, "email_address": {"a@example.com"}})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected ambiguous email_address-only sender request 400, got %d", rec.Code)
+	}
 }
 
 func TestEmailConfigurePresetsRemove(t *testing.T) {
