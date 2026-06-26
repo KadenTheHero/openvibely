@@ -434,6 +434,54 @@ func TestFilterChatHistory_ExcludesMultipleRunning(t *testing.T) {
 	}
 }
 
+func TestProcessStreamingResponse_InteractiveChatAlreadyCancelledBeforeCallbackDoesNotCallModel(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "should not be called"
+	mock.TextOnly = mock.Response
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Chat Early Stop Project")
+	chatTask := createTask(t, h, project.ID, "Stopped Chat", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusCancelled
+		tk.AgentID = &agent.ID
+		tk.Prompt = "Stop before callback registration reaches the runner"
+	})
+	exec := createExec(t, h, chatTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = chatTask.Prompt
+	})
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         chatTask.ID,
+		Message:        chatTask.Prompt,
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		SystemContext:  "task list context",
+		IsTaskFollowup: false,
+		ProcessMarkers: false,
+		ChatMode:       models.ChatModeOrchestrate,
+	})
+
+	if mock.CallCount() != 0 {
+		t.Fatalf("expected early-cancelled chat to skip model call, got %d calls", mock.CallCount())
+	}
+	updatedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedExec)
+	require.Equal(t, models.ExecCancelled, updatedExec.Status)
+	updatedTask, err := h.taskRepo.GetByID(ctx, chatTask.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedTask)
+	require.Equal(t, models.StatusCancelled, updatedTask.Status)
+	require.Equal(t, models.CategoryChat, updatedTask.Category)
+}
+
 func TestProcessStreamingResponse_InteractiveChatRunsMemoryRecallOnly(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

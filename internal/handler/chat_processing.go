@@ -174,6 +174,25 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		h.completeWithCancellation(params.ExecID, params.TaskID, "", 0, 0, 0, params.ChannelReply)
 		h.finalizeStreamingTurn(params, "")
 	}
+	alreadyCancelledBeforeModel := func() bool {
+		if params.TaskID != "" {
+			if task, err := h.taskRepo.GetByID(ctx, params.TaskID); err == nil && task != nil && task.Status == models.StatusCancelled {
+				applog.Infof("[handler] processStreamingResponse exec=%s task=%s observed cancelled task before model preparation", params.ExecID, params.TaskID)
+				return true
+			} else if err != nil {
+				applog.Infof("[handler] processStreamingResponse exec=%s task=%s error checking task cancellation before model preparation: %v", params.ExecID, params.TaskID, err)
+			}
+		}
+		if params.ExecID != "" {
+			if exec, err := h.execRepo.GetByID(ctx, params.ExecID); err == nil && exec != nil && exec.Status == models.ExecCancelled {
+				applog.Infof("[handler] processStreamingResponse exec=%s task=%s observed cancelled execution before model preparation", params.ExecID, params.TaskID)
+				return true
+			} else if err != nil {
+				applog.Infof("[handler] processStreamingResponse exec=%s task=%s error checking execution cancellation before model preparation: %v", params.ExecID, params.TaskID, err)
+			}
+		}
+		return false
+	}
 
 	// Enforce per-project and per-model worker constraints for task follow-ups only.
 	// Interactive chat (IsTaskFollowup=false) bypasses worker limits so the chat
@@ -238,6 +257,10 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	defer cleanupRuntimeCancellation()
 	if ctx.Err() != nil {
 		applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled before model preparation: %v", params.ExecID, params.TaskID, ctx.Err())
+		completeCancelledBeforeModel()
+		return
+	}
+	if alreadyCancelledBeforeModel() {
 		completeCancelledBeforeModel()
 		return
 	}
@@ -404,6 +427,14 @@ modelLoop:
 			attemptSteering = preparedSteeringBatch{}
 			return nil
 		})
+		if ctx.Err() != nil {
+			h.requeuePendingSteeringForExecution(ctx, params.ExecID)
+			pendingSteering = preparedSteeringBatch{}
+			steeringCallbackParams = nil
+			attemptSteering = preparedSteeringBatch{}
+			err = ctx.Err()
+			break
+		}
 		result, err = h.llmSvc.CallAgentDirectStreamingDetailed(
 			ctx, params.Message, requestImageAttachments, params.Agent,
 			params.ExecID, params.ChatHistory, params.SystemContext,
