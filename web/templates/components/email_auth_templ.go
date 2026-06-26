@@ -112,7 +112,7 @@ func EmailAuthorizedSendersList(senders []models.EmailAuthorizedSender, projectI
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\"> <input type=\"email\" name=\"email_address\" placeholder=\"person@example.com\" class=\"input input-bordered input-sm flex-1\"> <input type=\"text\" name=\"display_name\" placeholder=\"Display name (optional)\" class=\"input input-bordered input-sm w-40\"> <button type=\"button\" class=\"btn btn-primary btn-sm\" hx-post=\"/channels/email/authorized-senders\" hx-target=\"#email-authorized-senders\" hx-swap=\"outerHTML\" hx-include=\"#email-authorized-senders-add-controls\">Add</button></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\"> <input type=\"email\" name=\"authorized_email_address\" placeholder=\"person@example.com\" class=\"input input-bordered input-sm flex-1\"> <input type=\"text\" name=\"display_name\" placeholder=\"Display name (optional)\" class=\"input input-bordered input-sm w-40\"> <button type=\"button\" class=\"btn btn-primary btn-sm\" hx-post=\"/channels/email/authorized-senders\" hx-target=\"#email-authorized-senders\" hx-swap=\"outerHTML\" hx-include=\"#email-authorized-senders-add-controls\">Add</button></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

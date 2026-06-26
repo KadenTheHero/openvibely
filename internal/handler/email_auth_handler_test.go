@@ -24,7 +24,7 @@ func TestEmailAuthorizedSendersHandlers(t *testing.T) {
 		t.Fatal("expected deny empty state")
 	}
 
-	form := url.Values{"project_id": {project.ID}, "email_address": {"Alice@Example.COM"}, "display_name": {"Alice"}}
+	form := url.Values{"project_id": {project.ID}, "email_address": {"bot@example.com"}, "authorized_email_address": {"Alice@Example.COM"}, "display_name": {"Alice"}}
 	rec = postForm(e, "/channels/email/authorized-senders", form)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected add 200, got %d", rec.Code)
@@ -36,6 +36,9 @@ func TestEmailAuthorizedSendersHandlers(t *testing.T) {
 	senders, err := h.emailAuthRepo.ListByProject(httptest.NewRequest(http.MethodGet, "/", nil).Context(), project.ID)
 	if err != nil || len(senders) != 1 {
 		t.Fatalf("expected one sender, got %d err=%v", len(senders), err)
+	}
+	if senders[0].EmailAddress != "alice@example.com" {
+		t.Fatalf("expected authorized sender address, got %q", senders[0].EmailAddress)
 	}
 	req := httptest.NewRequest(http.MethodDelete, "/channels/email/authorized-senders/"+senders[0].ID+"?project_id="+project.ID, nil)
 	rec = httptest.NewRecorder()
@@ -113,7 +116,7 @@ func TestChannelsPageEmailUI(t *testing.T) {
 		t.Fatalf("expected channels 200, got %d", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"data-channel-type=\"email\"", "Configure Email", "Gmail", "Outlook / Microsoft 365", "Use a Google app password", "Authorized Senders", "1 sender(s)", "person@example.com"} {
+	for _, want := range []string{"data-channel-type=\"email\"", "Configure Email", "Gmail", "Outlook / Microsoft 365", "Use a Google app password", "Authorized Senders", "1 sender(s)", "person@example.com", "name=\"authorized_email_address\""} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected email UI to contain %q", want)
 		}
