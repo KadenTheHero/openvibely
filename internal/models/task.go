@@ -80,6 +80,7 @@ const (
 	TaskOriginWeb         = "web"
 	TaskOriginTelegram    = "telegram"
 	TaskOriginSlack       = "slack"
+	TaskOriginEmail       = "email"
 	TaskOriginSystemAgent = "system_agent"
 )
 

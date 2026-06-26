@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -70,6 +71,12 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		slackAuthorizedUsers, _ = h.slackAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
 	}
 
+	// Load authorized Email senders for the current project
+	var emailAuthorizedSenders []models.EmailAuthorizedSender
+	if resolvedProjectID != "" && h.emailAuthRepo != nil {
+		emailAuthorizedSenders, _ = h.emailAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
+	}
+
 	// Load send-responses setting (default: enabled)
 	sendResponses := true
 	if h.settingsRepo != nil {
@@ -100,6 +107,12 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	slackHasBotToken := false
 	slackHasOAuthBotToken := false
 	slackSendResponses := true
+	emailStatus := service.EmailConnectionStatus{Provider: service.EmailProviderCustom, IMAPPort: 993, SMTPPort: 587}
+	emailPasswordValue := ""
+	emailSendResponses := true
+	emailSkipAttachments := false
+	emailMarkExistingSeenOnStart := true
+	emailPollIntervalSeconds := "15"
 	if h.githubSvc != nil {
 		githubStatus, _ = h.githubSvc.GetConnectionStatus(c.Request().Context())
 		if githubStatus.AuthMode != "" {
@@ -143,6 +156,43 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		slackHasClientSecret = strings.TrimSpace(slackClientSecret) != ""
 		slackHasAppToken = strings.TrimSpace(slackAppToken) != ""
 		slackHasBotToken = strings.TrimSpace(slackBotToken) != ""
+
+		emailProvider, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingProvider)
+		emailAddress, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingAddress)
+		emailPasswordValue, _ = h.settingsRepo.Get(c.Request().Context(), service.EmailSettingPassword)
+		emailIMAPHost, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingIMAPHost)
+		emailIMAPPort, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingIMAPPort)
+		emailSMTPHost, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingSMTPHost)
+		emailSMTPPort, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingSMTPPort)
+		emailPollIntervalSeconds, _ = h.settingsRepo.Get(c.Request().Context(), service.EmailSettingPollIntervalSeconds)
+		if strings.TrimSpace(emailPollIntervalSeconds) == "" {
+			emailPollIntervalSeconds = "15"
+		}
+		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingSendResponses); strings.TrimSpace(strings.ToLower(val)) == "false" {
+			emailSendResponses = false
+		}
+		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingSkipAttachments); strings.TrimSpace(strings.ToLower(val)) == "true" {
+			emailSkipAttachments = true
+		}
+		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingMarkExistingSeenOnStart); strings.TrimSpace(strings.ToLower(val)) == "false" {
+			emailMarkExistingSeenOnStart = false
+		}
+		emailStatus.Provider = service.NormalizeEmailProvider(emailProvider)
+		emailStatus.Address = strings.TrimSpace(emailAddress)
+		emailStatus.IMAPHost = strings.TrimSpace(emailIMAPHost)
+		emailStatus.SMTPHost = strings.TrimSpace(emailSMTPHost)
+		if port, err := strconv.Atoi(strings.TrimSpace(emailIMAPPort)); err == nil && port > 0 {
+			emailStatus.IMAPPort = port
+		}
+		if port, err := strconv.Atoi(strings.TrimSpace(emailSMTPPort)); err == nil && port > 0 {
+			emailStatus.SMTPPort = port
+		}
+	}
+	if h.emailService != nil {
+		runtimeStatus := h.emailService.GetConnectionStatus(c.Request().Context())
+		if runtimeStatus.Address != "" || runtimeStatus.Configured || runtimeStatus.Running {
+			emailStatus = runtimeStatus
+		}
 	}
 	hasGitHubChannel := githubStatus.Configured || githubStatus.Connected ||
 		strings.TrimSpace(githubModeSetting) != "" ||
@@ -152,6 +202,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		githubHasPrivateKey
 	hasSlackChannel := slackStatus.Configured || slackStatus.Connected ||
 		slackHasClientID || slackHasClientSecret || slackHasAppToken || slackHasBotToken || slackHasOAuthBotToken
+	hasEmailChannel := emailStatus.Configured || emailStatus.Running || strings.TrimSpace(emailStatus.Address) != "" || strings.TrimSpace(emailStatus.IMAPHost) != "" || strings.TrimSpace(emailStatus.SMTPHost) != "" || strings.TrimSpace(emailPasswordValue) != ""
 
 	// Load webhooks for current project
 	var webhooks []models.WebhookEndpoint
@@ -177,9 +228,9 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	}
 
 	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, resolvedProjectID, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, webhooks, agents, webhookAgents))
+		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, resolvedProjectID, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents))
 	}
-	return render(c, http.StatusOK, pages.SettingsPage(token, isBotRunning, projects, resolvedProjectID, authorizedUsers, slackAuthorizedUsers, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, webhooks, agents, webhookAgents))
+	return render(c, http.StatusOK, pages.SettingsPage(token, isBotRunning, projects, resolvedProjectID, authorizedUsers, slackAuthorizedUsers, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents))
 }
 
 // handleAppSettings renders the application settings page (personality, etc.)
@@ -613,6 +664,106 @@ func (h *Handler) handleSlackTest(c echo.Context) error {
 		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Connection failed: `+templateEscape(err.Error())+`</span></div>`)
 	}
 	return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-success"><span>Connection successful!</span></div>`)
+}
+
+func (h *Handler) handleEmailConfigure(c echo.Context) error {
+	if h.settingsRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
+	}
+	provider, imapHost, imapPort, smtpHost, smtpPort, err := service.ResolveEmailProviderSettings(
+		c.FormValue("email_provider"),
+		c.FormValue("email_imap_host"),
+		c.FormValue("email_imap_port"),
+		c.FormValue("email_smtp_host"),
+		c.FormValue("email_smtp_port"),
+	)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	emailAddress := repository.NormalizeEmailAddress(c.FormValue("email_address"))
+	password := strings.TrimSpace(c.FormValue("email_password"))
+	if password == "" {
+		existing, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingPassword)
+		password = strings.TrimSpace(existing)
+	}
+	if emailAddress == "" || password == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Email address and app password are required")
+	}
+	settings := map[string]string{
+		service.EmailSettingProvider:                provider,
+		service.EmailSettingAddress:                 emailAddress,
+		service.EmailSettingPassword:                password,
+		service.EmailSettingIMAPHost:                imapHost,
+		service.EmailSettingIMAPPort:                strconv.Itoa(imapPort),
+		service.EmailSettingSMTPHost:                smtpHost,
+		service.EmailSettingSMTPPort:                strconv.Itoa(smtpPort),
+		service.EmailSettingPollIntervalSeconds:     defaultIfBlank(c.FormValue("email_poll_interval_seconds"), "15"),
+		service.EmailSettingSendResponses:           boolFormValue(c.FormValue("email_send_responses"), true),
+		service.EmailSettingSkipAttachments:         boolFormValue(c.FormValue("email_skip_attachments"), false),
+		service.EmailSettingMarkExistingSeenOnStart: boolFormValue(c.FormValue("email_mark_existing_seen_on_start"), true),
+	}
+	for key, value := range settings {
+		if err := h.settingsRepo.Set(c.Request().Context(), key, value); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save email settings")
+		}
+	}
+	if h.emailService != nil {
+		_ = h.emailService.ReloadFromSettings(c.Request().Context())
+	}
+	if isHTMX(c) {
+		c.Response().Header().Set("HX-Refresh", "true")
+		return c.NoContent(http.StatusOK)
+	}
+	return c.Redirect(http.StatusSeeOther, "/channels")
+}
+
+func (h *Handler) handleEmailRemove(c echo.Context) error {
+	if h.settingsRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
+	}
+	if h.emailService != nil {
+		h.emailService.Stop()
+	}
+	for _, key := range []string{service.EmailSettingProvider, service.EmailSettingAddress, service.EmailSettingPassword, service.EmailSettingIMAPHost, service.EmailSettingIMAPPort, service.EmailSettingSMTPHost, service.EmailSettingSMTPPort, service.EmailSettingPollIntervalSeconds, service.EmailSettingSendResponses, service.EmailSettingSkipAttachments, service.EmailSettingMarkExistingSeenOnStart} {
+		_ = h.settingsRepo.Set(c.Request().Context(), key, "")
+	}
+	if isHTMX(c) {
+		c.Response().Header().Set("HX-Refresh", "true")
+		return c.NoContent(http.StatusOK)
+	}
+	return c.Redirect(http.StatusSeeOther, "/channels")
+}
+
+func (h *Handler) handleEmailTest(c echo.Context) error {
+	if h.emailService == nil {
+		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Email service not configured</span></div>`)
+	}
+	if err := h.emailService.TestConnection(c.Request().Context()); err != nil {
+		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Connection failed: `+templateEscape(err.Error())+`</span></div>`)
+	}
+	return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-success"><span>Connection successful!</span></div>`)
+}
+
+func defaultIfBlank(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func boolFormValue(value string, fallback bool) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "true" || value == "on" || value == "1" {
+		return "true"
+	}
+	if value == "false" || value == "0" {
+		return "false"
+	}
+	if fallback {
+		return "true"
+	}
+	return "false"
 }
 
 func buildAbsoluteURL(c echo.Context, path string) string {

@@ -24,7 +24,7 @@ func NewThreadInputRepo(db *sql.DB) *ThreadInputRepo {
 	return &ThreadInputRepo{db: db}
 }
 
-const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), created_at, updated_at, applied_at`
+const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), COALESCE(email_from, ''), COALESCE(email_message_id, ''), COALESCE(email_references, ''), COALESCE(email_subject, ''), created_at, updated_at, applied_at`
 
 func scanThreadInput(scanner interface {
 	Scan(dest ...interface{}) error
@@ -47,12 +47,16 @@ func scanThreadInput(scanner interface {
 		&input.ChatMode,
 		&input.Source,
 		&input.OriginAgent,
-		&input.TelegramChatID, &input.SlackTeamID,
+		&input.TelegramChatID,
+		&input.SlackTeamID,
 		&input.SlackChannelID,
 		&input.SlackThreadTS,
 		&input.SlackUserID,
-		&input.CreatedAt,
-		&input.UpdatedAt,
+		&input.EmailFrom,
+		&input.EmailMessageID,
+		&input.EmailReferences,
+		&input.EmailSubject,
+		&input.CreatedAt, &input.UpdatedAt,
 		&input.AppliedAt,
 	)
 	return input, err
@@ -94,11 +98,11 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 		row := tx.QueryRowContext(ctx, `
 				INSERT INTO thread_inputs (
 					id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
-					turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
-					source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id
-				)
-				SELECT lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?
-				WHERE EXISTS (
+						turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
+						source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
+						email_from, email_message_id, email_references, email_subject
+					)
+					SELECT lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?				WHERE EXISTS (
 					SELECT 1 FROM executions e JOIN tasks t ON t.id = e.task_id
 					WHERE e.id = ? AND e.status = 'running'
 					  AND (
@@ -127,8 +131,11 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 			input.SlackChannelID,
 			input.SlackThreadTS,
 			input.SlackUserID,
-			activeExecutionID,
-			input.Scope,
+			input.EmailFrom,
+			input.EmailMessageID,
+			input.EmailReferences,
+			input.EmailSubject,
+			activeExecutionID, input.Scope,
 			models.ThreadInputScopeTask,
 			input.TaskID,
 			input.Scope,
@@ -160,10 +167,10 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 	row := exec.QueryRowContext(ctx, `
 			INSERT INTO thread_inputs (
 				id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
-				turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
-				source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id
-			) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?)
-			RETURNING `+threadInputSelectColumns,
+					turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
+					source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
+					email_from, email_message_id, email_references, email_subject
+				) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)			RETURNING `+threadInputSelectColumns,
 		input.Scope,
 		input.ProjectID,
 		input.TaskID,
@@ -184,6 +191,10 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 		input.SlackChannelID,
 		input.SlackThreadTS,
 		input.SlackUserID,
+		input.EmailFrom,
+		input.EmailMessageID,
+		input.EmailReferences,
+		input.EmailSubject,
 	)
 	created, err := scanThreadInput(row)
 	if err != nil {
@@ -633,7 +644,7 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 		return retargetRemainingQueuedInputGuards(ctx, dbexec, promoted, exec.ID)
 	})
 }
-func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, inputID string, task *models.Task, exec *models.Execution, slackContext *models.SlackTaskContext) error {
+func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, inputID string, task *models.Task, exec *models.Execution, slackContext *models.SlackTaskContext, emailContext ...*models.EmailTaskContext) error {
 	if task == nil || exec == nil {
 		return fmt.Errorf("task and execution are required")
 	}
@@ -668,15 +679,31 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 			slackContext.TaskID = task.ID
 			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO slack_task_context (task_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id, updated_at)
-					 VALUES (?, ?, ?, ?, ?, datetime('now'))
-					 ON CONFLICT(task_id) DO UPDATE SET
-					 slack_team_id = excluded.slack_team_id,
-					 slack_channel_id = excluded.slack_channel_id,
-					 slack_thread_ts = excluded.slack_thread_ts,
-					 slack_user_id = excluded.slack_user_id,
-					 updated_at = datetime('now')`,
+						 VALUES (?, ?, ?, ?, ?, datetime('now'))
+						 ON CONFLICT(task_id) DO UPDATE SET
+						 slack_team_id = excluded.slack_team_id,
+						 slack_channel_id = excluded.slack_channel_id,
+						 slack_thread_ts = excluded.slack_thread_ts,
+						 slack_user_id = excluded.slack_user_id,
+						 updated_at = datetime('now')`,
 				slackContext.TaskID, slackContext.SlackTeamID, slackContext.SlackChannelID, slackContext.SlackThreadTS, slackContext.SlackUserID); err != nil {
 				return fmt.Errorf("creating queued slack context: %w", err)
+			}
+		}
+		if len(emailContext) > 0 && emailContext[0] != nil {
+			ectx := emailContext[0]
+			ectx.TaskID = task.ID
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO email_task_context (task_id, email_from, email_message_id, email_references, email_subject, updated_at)
+						 VALUES (?, ?, ?, ?, ?, datetime('now'))
+						 ON CONFLICT(task_id) DO UPDATE SET
+						 email_from = excluded.email_from,
+						 email_message_id = excluded.email_message_id,
+						 email_references = excluded.email_references,
+						 email_subject = excluded.email_subject,
+						 updated_at = datetime('now')`,
+				ectx.TaskID, ectx.EmailFrom, ectx.EmailMessageID, ectx.EmailReferences, ectx.EmailSubject); err != nil {
+				return fmt.Errorf("creating queued email context: %w", err)
 			}
 		}
 
@@ -708,8 +735,7 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 }
 
 func (r *ThreadInputRepo) CancelPending(ctx context.Context, id string) (*models.ThreadInput, error) {
-	var cancelled models.ThreadInput
-	err := r.db.QueryRowContext(ctx, `
+	cancelled, err := scanThreadInput(r.db.QueryRowContext(ctx, `
 		UPDATE thread_inputs
 		SET input_status = 'cancelled', updated_at = datetime('now')
 		WHERE id = ? AND input_status = 'pending'
@@ -719,31 +745,7 @@ func (r *ThreadInputRepo) CancelPending(ctx context.Context, id string) (*models
 			    AND COALESCE(run_execution_id, '') != ''
 			    AND EXISTS (SELECT 1 FROM executions WHERE id = thread_inputs.run_execution_id AND status = 'running')
 			  )
-		RETURNING `+threadInputSelectColumns, id).Scan(
-		&cancelled.ID,
-		&cancelled.Scope,
-		&cancelled.ProjectID,
-		&cancelled.TaskID,
-		&cancelled.RunExecutionID,
-		&cancelled.AgentConfigID,
-		&cancelled.InputMode,
-		&cancelled.InputStatus,
-		&cancelled.TurnID,
-		&cancelled.ExpectedTurnID,
-		&cancelled.Content,
-		&cancelled.AttachmentSessionID,
-		&cancelled.QueuePosition,
-		&cancelled.ChatMode,
-		&cancelled.Source,
-		&cancelled.OriginAgent,
-		&cancelled.TelegramChatID, &cancelled.SlackTeamID,
-		&cancelled.SlackChannelID,
-		&cancelled.SlackThreadTS,
-		&cancelled.SlackUserID,
-		&cancelled.CreatedAt,
-		&cancelled.UpdatedAt,
-		&cancelled.AppliedAt,
-	)
+		RETURNING `+threadInputSelectColumns, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrInputNotPending
 	}

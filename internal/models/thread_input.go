@@ -46,6 +46,10 @@ type ThreadInput struct {
 	SlackChannelID      string            `json:"slack_channel_id"`
 	SlackThreadTS       string            `json:"slack_thread_ts"`
 	SlackUserID         string            `json:"slack_user_id"`
+	EmailFrom           string            `json:"email_from"`
+	EmailMessageID      string            `json:"email_message_id"`
+	EmailReferences     string            `json:"email_references"`
+	EmailSubject        string            `json:"email_subject"`
 	CreatedAt           time.Time         `json:"created_at"`
 	UpdatedAt           time.Time         `json:"updated_at"`
 	AppliedAt           *time.Time        `json:"applied_at"`

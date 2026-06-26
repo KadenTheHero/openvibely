@@ -63,9 +63,11 @@ func setupTestHandlerWithDB(t *testing.T) (*Handler, *echo.Echo, *repository.LLM
 
 	settingsRepo := repository.NewSettingsRepo(db)
 	slackAuthRepo := repository.NewSlackAuthRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
 
 	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
 	h.SetSlackAuthRepo(slackAuthRepo)
+	h.SetEmailAuthRepo(emailAuthRepo)
 	h.SetLocalRepoPathEnabled(true)
 
 	e := echo.New()

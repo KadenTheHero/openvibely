@@ -984,6 +984,8 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		task.TelegramChatID = input.TelegramChatID
 	} else if input.Source == models.TaskOriginSlack {
 		task.CreatedVia = models.TaskOriginSlack
+	} else if input.Source == models.TaskOriginEmail {
+		task.CreatedVia = models.TaskOriginEmail
 	}
 	exec := &models.Execution{
 		AgentConfigID: agent.ID,
@@ -999,7 +1001,16 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 			SlackUserID:    input.SlackUserID,
 		}
 	}
-	if err := h.threadInputRepo.ClaimQueuedForChatExecution(ctx, input.ID, task, exec, slackContext); err != nil {
+	var emailContext *models.EmailTaskContext
+	if input.Source == models.TaskOriginEmail {
+		emailContext = &models.EmailTaskContext{
+			EmailFrom:       input.EmailFrom,
+			EmailMessageID:  input.EmailMessageID,
+			EmailReferences: input.EmailReferences,
+			EmailSubject:    input.EmailSubject,
+		}
+	}
+	if err := h.threadInputRepo.ClaimQueuedForChatExecution(ctx, input.ID, task, exec, slackContext, emailContext); err != nil {
 		if err != repository.ErrInputNotPending {
 			applog.Infof("[handler] startQueuedChatInput input=%s claim error: %v", input.ID, err)
 		}
@@ -1065,6 +1076,8 @@ func surfaceForThreadInput(input models.ThreadInput) chatcontrol.Surface {
 		return chatcontrol.SurfaceTelegram
 	case models.TaskOriginSlack:
 		return chatcontrol.SurfaceSlack
+	case models.TaskOriginEmail:
+		return chatcontrol.SurfaceEmail
 	default:
 		return chatcontrol.SurfaceWeb
 	}
@@ -1098,12 +1111,16 @@ func (h *Handler) cancelUnstartableQueuedInput(ctx context.Context, input models
 
 func channelReplyFromThreadInput(input models.ThreadInput) service.ChannelReplyContext {
 	return service.ChannelReplyContext{
-		Source:         input.Source,
-		TelegramChatID: input.TelegramChatID,
-		SlackTeamID:    input.SlackTeamID,
-		SlackChannelID: input.SlackChannelID,
-		SlackThreadTS:  input.SlackThreadTS,
-		SlackUserID:    input.SlackUserID,
+		Source:          input.Source,
+		TelegramChatID:  input.TelegramChatID,
+		SlackTeamID:     input.SlackTeamID,
+		SlackChannelID:  input.SlackChannelID,
+		SlackThreadTS:   input.SlackThreadTS,
+		SlackUserID:     input.SlackUserID,
+		EmailFrom:       input.EmailFrom,
+		EmailMessageID:  input.EmailMessageID,
+		EmailReferences: input.EmailReferences,
+		EmailSubject:    input.EmailSubject,
 	}
 }
 
@@ -1501,6 +1518,12 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 		}
 		return
 	}
+	if reply.Source == models.TaskOriginEmail && task.Category != models.CategoryChat && reply.EmailFrom != "" {
+		if h.emailService != nil {
+			h.emailService.SendTaskCompletionToThread(ctx, reply.EmailFrom, reply.EmailMessageID, reply.EmailReferences, reply.EmailSubject, task.Title, output, errMsg)
+		}
+		return
+	}
 	switch task.CreatedVia {
 	case models.TaskOriginTelegram:
 		if h.telegramService == nil {
@@ -1522,6 +1545,15 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 			SendTaskCompletionNotification(context.Context, models.Task, string, string)
 		}); ok {
 			svc.SendTaskCompletionNotification(ctx, *task, output, errMsg)
+		}
+	case models.TaskOriginEmail:
+		if h.emailService == nil {
+			return
+		}
+		if task.Category == models.CategoryChat {
+			h.emailService.SendChatResponse(ctx, *task, output, errMsg)
+		} else {
+			h.emailService.SendTaskCompletionNotification(ctx, *task, output, errMsg)
 		}
 	}
 }

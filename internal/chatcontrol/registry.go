@@ -51,10 +51,11 @@ const (
 	SurfaceAPI      Surface = "api"
 	SurfaceTelegram Surface = "telegram"
 	SurfaceSlack    Surface = "slack"
+	SurfaceEmail    Surface = "email"
 )
 
 // AllSurfaces is the full set of supported surfaces.
-var AllSurfaces = []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack}
+var AllSurfaces = []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail}
 
 // AccessLevel classifies read vs write.
 type AccessLevel string
@@ -520,7 +521,7 @@ var registry = []ActionDef{
 // helpers
 
 func allSurfaces() []Surface {
-	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack}
+	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail}
 }
 
 func bothModes() []models.ChatMode {

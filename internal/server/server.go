@@ -438,6 +438,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackUserProjectRepo := repository.NewSlackUserProjectRepo(db)
 	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
 	slackAuthRepo := repository.NewSlackAuthRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
 
 	// Custom personalities
 	customPersonalityRepo := repository.NewCustomPersonalityRepo(db)
@@ -494,6 +496,11 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackSvc.SetTaskGoalService(taskGoalSvc)
 	slackSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 	slackSvc.SetAgentRepo(agentRepo)
+	emailSvc := service.NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	emailSvc.SetCustomPersonalityRepo(customPersonalityRepo)
+	emailSvc.SetChatBroadcaster(chatBroadcaster)
+	emailSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	emailSvc.SetAgentRepo(agentRepo)
 
 	// Git worktree service for task isolation
 	worktreeSvc := service.NewWorktreeService(taskRepo, projectRepo, settingsRepo)
@@ -727,6 +734,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetFileChangeBroadcaster(fileChangeBroadcaster)
 	h.SetTelegramAuthRepo(telegramAuthRepo)
 	h.SetSlackAuthRepo(slackAuthRepo)
+	h.SetEmailAuthRepo(emailAuthRepo)
+	h.SetEmailService(emailSvc)
 	h.SetSlackTaskContextRepo(slackTaskContextRepo)
 	h.SetReviewCommentRepo(reviewCommentRepo)
 	h.SetCustomPersonalityRepo(customPersonalityRepo)
@@ -742,6 +751,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackSvc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 	slackSvc.SetChannelChatRunner(h.StartChannelChatRun)
 	slackSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
+	emailSvc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
+	emailSvc.SetChannelChatRunner(h.StartChannelChatRun)
 	if telegramSvc != nil {
 		telegramSvc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
 		telegramSvc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
@@ -752,6 +763,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	}
 	if err := slackSvc.Start(); err != nil {
 		applog.Infof("warning: failed to start slack socket mode: %v", err)
+	}
+	if err := emailSvc.Start(); err != nil {
+		applog.Infof("warning: failed to start email polling: %v", err)
 	}
 	// Start Telegram bot if configured after the shared channel runner is wired.
 	if telegramSvc != nil {
@@ -813,6 +827,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		}
 		if slackSvc != nil {
 			slackSvc.Stop()
+		}
+		if emailSvc != nil {
+			emailSvc.Stop()
 		}
 		e.Close()
 		db.Close()

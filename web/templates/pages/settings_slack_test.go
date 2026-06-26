@@ -36,14 +36,22 @@ func TestSettingsContent_RendersSlackMenuCardAndModal(t *testing.T) {
 		true,
 		true,
 		true,
-			true,
-			false,
-			false,
-			true,
-			nil,
-			nil,
-			nil,
-		).Render(context.Background(), &buf)
+		true,
+		service.EmailConnectionStatus{},
+		nil,
+		"",
+		true,
+		true,
+		false,
+		"60",
+		false,
+		false,
+		true,
+		false,
+		nil,
+		nil,
+		nil,
+	).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}

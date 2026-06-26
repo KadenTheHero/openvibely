@@ -1,0 +1,61 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+// EmailTaskContextRepo persists Email thread metadata for Email-origin task notifications.
+type EmailTaskContextRepo struct {
+	db *sql.DB
+}
+
+func NewEmailTaskContextRepo(db *sql.DB) *EmailTaskContextRepo {
+	return &EmailTaskContextRepo{db: db}
+}
+
+func (r *EmailTaskContextRepo) Upsert(ctx context.Context, etc *models.EmailTaskContext) error {
+	if etc == nil {
+		return fmt.Errorf("email task context is nil")
+	}
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO email_task_context (task_id, email_from, email_message_id, email_references, email_subject, updated_at)
+		 VALUES (?, ?, ?, ?, ?, datetime('now'))
+		 ON CONFLICT(task_id) DO UPDATE SET
+		 email_from = excluded.email_from,
+		 email_message_id = excluded.email_message_id,
+		 email_references = excluded.email_references,
+		 email_subject = excluded.email_subject,
+		 updated_at = datetime('now')`,
+		etc.TaskID, etc.EmailFrom, etc.EmailMessageID, etc.EmailReferences, etc.EmailSubject)
+	if err != nil {
+		return fmt.Errorf("upsert email task context: %w", err)
+	}
+	return nil
+}
+
+func (r *EmailTaskContextRepo) GetByTaskID(ctx context.Context, taskID string) (*models.EmailTaskContext, error) {
+	var etc models.EmailTaskContext
+	err := r.db.QueryRowContext(ctx,
+		`SELECT task_id, email_from, email_message_id, email_references, email_subject, created_at, updated_at
+		 FROM email_task_context WHERE task_id = ?`, taskID).
+		Scan(&etc.TaskID, &etc.EmailFrom, &etc.EmailMessageID, &etc.EmailReferences, &etc.EmailSubject, &etc.CreatedAt, &etc.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get email task context: %w", err)
+	}
+	return &etc, nil
+}
+
+func (r *EmailTaskContextRepo) DeleteByTaskID(ctx context.Context, taskID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM email_task_context WHERE task_id = ?`, taskID)
+	if err != nil {
+		return fmt.Errorf("delete email task context: %w", err)
+	}
+	return nil
+}

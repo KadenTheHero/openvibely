@@ -1,0 +1,86 @@
+package service
+
+import (
+	"context"
+	"testing"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestEmailService_IgnoresUnauthorizedAutomatedAndSelfSentMessages(t *testing.T) {
+	assert.True(t, isIgnoredEmail(EmailInboundMessage{FromAddress: "bot@example.com", Subject: "self", Body: "hello"}, "bot@example.com"))
+	assert.True(t, isIgnoredEmail(EmailInboundMessage{FromAddress: "noreply@example.com", Subject: "auto", Body: "hello"}, "bot@example.com"))
+	assert.True(t, isIgnoredEmail(EmailInboundMessage{FromAddress: "user@example.com", Subject: "list", Body: "hello", ListUnsub: "<mailto:unsubscribe@example.com>"}, "bot@example.com"))
+	assert.True(t, isIgnoredEmail(EmailInboundMessage{FromAddress: "user@example.com", Subject: "bulk", Body: "hello", Precedence: "bulk"}, "bot@example.com"))
+	assert.False(t, isIgnoredEmail(EmailInboundMessage{FromAddress: "alice@example.com", Subject: "ok", Body: "hello"}, "bot@example.com"))
+}
+
+func TestEmailService_AuthorizationRequiresConfiguredSender(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	project := &models.Project{Name: "Email Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	svc := NewEmailService(settingsRepo, projectRepo, repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, emailAuthRepo, repository.NewEmailTaskContextRepo(db))
+
+	assert.Empty(t, svc.resolveAuthorizedProject(ctx, "alice@example.com"))
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "Alice@Example.com", AddedBy: "test"}))
+	assert.Equal(t, project.ID, svc.resolveAuthorizedProject(ctx, "alice@example.com"))
+	assert.Empty(t, svc.resolveAuthorizedProject(ctx, "bob@example.com"))
+}
+
+func TestEmailThreadingHelpers(t *testing.T) {
+	msg := EmailInboundMessage{FromName: "Alice", FromAddress: "alice@example.com", Subject: "Deploy question", Body: "What now?", MessageID: "<m2@example.com>", References: "<root@example.com> <m1@example.com>"}
+	assert.Equal(t, "[Email from: Alice <alice@example.com>]\n[Subject: Deploy question]\n\nWhat now?", BuildEmailPrompt(msg))
+	assert.Equal(t, "email:alice@example.com:<root@example.com>", EmailSessionKey("Alice@Example.com", msg.MessageID, msg.References, msg.Subject))
+	assert.Equal(t, "Re: Deploy question", replySubject("Deploy question"))
+	assert.Equal(t, "Re: Deploy question", replySubject("Re: Deploy question"))
+	assert.Equal(t, "<root@example.com> <m1@example.com> <m2@example.com>", appendEmailReference(msg.References, msg.MessageID))
+	assert.NotEqual(t, EmailSessionKey("alice@example.com", "", "", "Subject A"), EmailSessionKey("alice@example.com", "", "", "Subject B"))
+}
+
+func TestEmailService_SendResponsesDisabledSkipsReplies(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingPassword, "secret"))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingIMAPHost, "imap.example.com"))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingSMTPHost, "smtp.example.com"))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingSendResponses, "false"))
+	svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	called := false
+	svc.sendMail = func(context.Context, EmailRuntimeConfig, string, string, string, string, string) error {
+		called = true
+		return nil
+	}
+	svc.SendTaskCompletionToThread(ctx, "alice@example.com", "<m@example.com>", "", "Question", "Task", "ok", "")
+	assert.False(t, called)
+}
+
+func TestEmailService_SendTaskCompletionPreservesThreading(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	for k, v := range map[string]string{EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret", EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true"} {
+		require.NoError(t, settingsRepo.Set(ctx, k, v))
+	}
+	svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	var gotTo, gotSubject, gotInReplyTo, gotRefs string
+	svc.sendMail = func(_ context.Context, _ EmailRuntimeConfig, to, subject, body, inReplyTo, references string) error {
+		gotTo, gotSubject, gotInReplyTo, gotRefs = to, subject, inReplyTo, references
+		assert.Contains(t, body, "Task completed")
+		return nil
+	}
+	svc.SendTaskCompletionToThread(ctx, "alice@example.com", "<m@example.com>", "<root@example.com>", "Question", "Task", "done", "")
+	assert.Equal(t, "alice@example.com", gotTo)
+	assert.Equal(t, "Re: Question", gotSubject)
+	assert.Equal(t, "<m@example.com>", gotInReplyTo)
+	assert.Equal(t, "<root@example.com> <m@example.com>", gotRefs)
+}

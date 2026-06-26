@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	echoSwagger "github.com/swaggo/echo-swagger"
@@ -49,8 +50,10 @@ type Handler struct {
 	chatBroadcaster            *events.ChatBroadcaster
 	fileChangeBroadcaster      *events.FileChangeBroadcaster
 	telegramService            *service.TelegramService
+	emailService               EmailServiceProvider
 	telegramAuthRepo           *repository.TelegramAuthRepo
 	slackAuthRepo              *repository.SlackAuthRepo
+	emailAuthRepo              *repository.EmailAuthRepo
 	slackTaskContextRepo       *repository.SlackTaskContextRepo
 	reviewCommentRepo          *repository.ReviewCommentRepo
 	customPersonalityRepo      *repository.CustomPersonalityRepo
@@ -96,6 +99,18 @@ type SlackServiceProvider interface {
 	Disconnect(ctx context.Context) error
 	ReloadFromSettings(ctx context.Context) error
 	TestConnection(ctx context.Context) error
+}
+
+type EmailServiceProvider interface {
+	Start() error
+	Stop()
+	IsRunning() bool
+	ReloadFromSettings(ctx context.Context) error
+	TestConnection(ctx context.Context) error
+	GetConnectionStatus(ctx context.Context) service.EmailConnectionStatus
+	SendTaskCompletionToThread(ctx context.Context, to, inboundMessageID, references, subject, taskTitle, output, errMsg string)
+	SendChatResponse(ctx context.Context, task models.Task, output, errMsg string)
+	SendTaskCompletionNotification(ctx context.Context, task models.Task, output, errMsg string)
 }
 
 func New(
@@ -241,6 +256,15 @@ func (h *Handler) SetTelegramAuthRepo(repo *repository.TelegramAuthRepo) {
 // SetSlackAuthRepo sets the Slack authorization repo for managing authorized users.
 func (h *Handler) SetSlackAuthRepo(repo *repository.SlackAuthRepo) {
 	h.slackAuthRepo = repo
+}
+
+// SetEmailAuthRepo sets the Email authorization repo for managing authorized senders.
+func (h *Handler) SetEmailAuthRepo(repo *repository.EmailAuthRepo) {
+	h.emailAuthRepo = repo
+}
+
+func (h *Handler) SetEmailService(svc EmailServiceProvider) {
+	h.emailService = svc
 }
 
 func (h *Handler) SetSlackTaskContextRepo(repo *repository.SlackTaskContextRepo) {
@@ -550,6 +574,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/channels/slack/disconnect", h.handleSlackDisconnect)
 	e.POST("/channels/slack/remove", h.handleSlackRemove)
 	e.POST("/channels/slack/test", h.handleSlackTest)
+	e.POST("/channels/email/configure", h.handleEmailConfigure)
+	e.POST("/channels/email/remove", h.handleEmailRemove)
+	e.POST("/channels/email/test", h.handleEmailTest)
 
 	// Personality
 	e.GET("/personality", h.handleAppSettings)
@@ -570,6 +597,11 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/channels/slack/authorized-users", h.ListSlackAuthorizedUsers)
 	e.POST("/channels/slack/authorized-users", h.AddSlackAuthorizedUser)
 	e.DELETE("/channels/slack/authorized-users/:id", h.RemoveSlackAuthorizedUser)
+
+	// Email authorized senders
+	e.GET("/channels/email/authorized-senders", h.ListEmailAuthorizedSenders)
+	e.POST("/channels/email/authorized-senders", h.AddEmailAuthorizedSender)
+	e.DELETE("/channels/email/authorized-senders/:id", h.RemoveEmailAuthorizedSender)
 
 	// Webhooks
 	e.POST("/channels/webhooks", h.HandleWebhookCreate)

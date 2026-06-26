@@ -825,6 +825,27 @@ CREATE TABLE slack_authorized_users (
 CREATE UNIQUE INDEX idx_slack_auth_unique_user_id ON slack_authorized_users(project_id, slack_user_id);
 CREATE INDEX idx_slack_auth_project ON slack_authorized_users(project_id);
 CREATE INDEX idx_slack_auth_user ON slack_authorized_users(slack_user_id);
+CREATE TABLE email_authorized_senders (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    email_address TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    added_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    added_by TEXT NOT NULL DEFAULT 'web'
+);
+CREATE UNIQUE INDEX idx_email_auth_unique_address ON email_authorized_senders(project_id, lower(email_address));
+CREATE INDEX idx_email_auth_project ON email_authorized_senders(project_id);
+CREATE INDEX idx_email_auth_address ON email_authorized_senders(lower(email_address));
+CREATE TABLE email_task_context (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    email_from TEXT NOT NULL,
+    email_message_id TEXT NOT NULL,
+    email_references TEXT NOT NULL DEFAULT '',
+    email_subject TEXT NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_email_task_context_from ON email_task_context(email_from);
 
 INSERT INTO app_settings (key, value) VALUES ('worktree_auto_merge', 'false');
 INSERT INTO app_settings (key, value) VALUES ('worktree_merge_target', 'main');
@@ -998,6 +1019,8 @@ INSERT INTO workflow_templates (id, name, description, category, definition, is_
 
 -- +goose Down
 
+DROP TABLE IF EXISTS email_task_context;
+DROP TABLE IF EXISTS email_authorized_senders;
 DROP TABLE IF EXISTS slack_authorized_users;
 DROP TABLE IF EXISTS slack_channels;
 DROP TABLE IF EXISTS task_pull_requests;
