@@ -48,7 +48,7 @@ func TestEmailAuthorizedSendersHandlers(t *testing.T) {
 	}
 }
 
-func TestEmailConfigureSavesTypedAuthorizedSender(t *testing.T) {
+func TestEmailConfigureDoesNotSaveTypedAuthorizedSenderWithoutAdd(t *testing.T) {
 	h, e, _, _ := setupTestHandlerWithDB(t)
 	project := createProject(t, h, "Email Configure Sender")
 
@@ -68,11 +68,17 @@ func TestEmailConfigureSavesTypedAuthorizedSender(t *testing.T) {
 	}
 
 	senders, err := h.emailAuthRepo.ListByProject(httptest.NewRequest(http.MethodGet, "/", nil).Context(), project.ID)
-	if err != nil || len(senders) != 1 {
-		t.Fatalf("expected saved authorized sender, got %d err=%v", len(senders), err)
+	if err != nil {
+		t.Fatalf("list authorized senders: %v", err)
 	}
-	if senders[0].EmailAddress != "alice@example.com" {
-		t.Fatalf("expected typed authorized sender to be saved, got %q", senders[0].EmailAddress)
+	if len(senders) != 0 {
+		t.Fatalf("expected Save Email Settings not to add typed authorized sender, got %d", len(senders))
+	}
+
+	addForm := url.Values{"project_id": {project.ID}, "authorized_email_address": {"Alice@Example.COM"}, "display_name": {"Alice"}}
+	rec = postForm(e, "/channels/email/authorized-senders", addForm)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected explicit add 200, got %d %s", rec.Code, rec.Body.String())
 	}
 
 	rec = htmxGet(e, "/channels?project_id="+project.ID)
@@ -81,16 +87,7 @@ func TestEmailConfigureSavesTypedAuthorizedSender(t *testing.T) {
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, "alice@example.com") || !strings.Contains(body, "1 sender(s)") {
-		t.Fatalf("expected reopened email dialog to include authorized sender, body=%s", body)
-	}
-
-	rec = postForm(e, "/channels/email/configure", form)
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("expected duplicate configure redirect, got %d %s", rec.Code, rec.Body.String())
-	}
-	senders, err = h.emailAuthRepo.ListByProject(httptest.NewRequest(http.MethodGet, "/", nil).Context(), project.ID)
-	if err != nil || len(senders) != 1 {
-		t.Fatalf("expected duplicate save to remain idempotent, got %d err=%v", len(senders), err)
+		t.Fatalf("expected explicitly added sender to appear on reopen, body=%s", body)
 	}
 }
 

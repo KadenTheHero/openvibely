@@ -722,33 +722,6 @@ func (h *Handler) handleEmailConfigure(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save email settings")
 		}
 	}
-	if h.emailAuthRepo != nil {
-		projectID := c.FormValue("project_id")
-		if projectID == "" {
-			projectID = c.QueryParam("project_id")
-		}
-		authorizedAddress := repository.NormalizeEmailAddress(c.FormValue("authorized_email_address"))
-		if projectID != "" && authorizedAddress != "" {
-			exists, err := h.emailAuthRepo.IsAuthorized(c.Request().Context(), projectID, authorizedAddress)
-			if err != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to check authorized sender")
-			}
-			if !exists {
-				displayName := strings.TrimSpace(c.FormValue("display_name"))
-				if displayName == "" {
-					displayName = authorizedAddress
-				}
-				if err := h.emailAuthRepo.Create(c.Request().Context(), &models.EmailAuthorizedSender{
-					ProjectID:    projectID,
-					EmailAddress: authorizedAddress,
-					DisplayName:  displayName,
-					AddedBy:      "web",
-				}); err != nil {
-					return echo.NewHTTPError(http.StatusInternalServerError, "failed to save authorized sender")
-				}
-			}
-		}
-	}
 	if h.emailService != nil {
 		_ = h.emailService.ReloadFromSettings(c.Request().Context())
 	}
