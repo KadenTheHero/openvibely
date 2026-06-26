@@ -133,6 +133,75 @@ func TestDiscordSendToTaskUsesConfiguredChannelTaskRunner(t *testing.T) {
 	}
 }
 
+func TestDiscordProcessIncomingMessagePassesReplyContextToSharedChatRunner(t *testing.T) {
+	svc, db, settingsRepo, projectRepo, taskRepo, authRepo, discordTaskContextRepo := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Discord Chat", IsDefault: true}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "user-1", DisplayName: "User", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize user: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
+		t.Fatalf("set responses: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	svc.llmConfigRepo = agentRepo
+	svc.execRepo = execRepo
+	svc.scheduleRepo = scheduleRepo
+	svc.taskSvc = NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, repository.NewAttachmentRepo(db))
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
+	var got ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) {
+		got = req
+	})
+
+	svc.processIncomingMessage(discordIncomingMessage{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1", Username: "User", Text: "hello", Source: "discord"})
+
+	if got.Surface != chatcontrol.SurfaceDiscord {
+		t.Fatalf("expected Discord surface, got %q", got.Surface)
+	}
+	if got.ReplyContext.Source != models.TaskOriginDiscord {
+		t.Fatalf("expected Discord reply source, got %#v", got.ReplyContext)
+	}
+	if got.ReplyContext.DiscordChannelID != "thread-1" || got.ReplyContext.DiscordThreadID != "thread-1" || got.ReplyContext.DiscordMessageID != "msg-1" || got.ReplyContext.DiscordUserID != "user-1" {
+		t.Fatalf("unexpected Discord reply context: %#v", got.ReplyContext)
+	}
+	stored, err := discordTaskContextRepo.GetByTaskID(ctx, got.TaskID)
+	if err != nil {
+		t.Fatalf("load stored context: %v", err)
+	}
+	if stored == nil || stored.DiscordChannelID != "thread-1" || stored.DiscordMessageID != "ack-1" {
+		t.Fatalf("unexpected stored context: %#v", stored)
+	}
+	if task, err := taskRepo.GetByID(ctx, got.TaskID); err != nil || task == nil || task.CreatedVia != models.TaskOriginDiscord {
+		t.Fatalf("expected Discord chat task, task=%#v err=%v", task, err)
+	}
+}
+
+func TestDiscordRequiresMentionAllowsParentFreeResponseThread(t *testing.T) {
+	svc, _, settingsRepo, _, _, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, DiscordSettingRequireMention, "true"); err != nil {
+		t.Fatalf("set require mention: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingFreeResponseChannels, "parent-1"); err != nil {
+		t.Fatalf("set free channels: %v", err)
+	}
+
+	if svc.requiresMentionForMessage(ctx, discordIncomingMessage{ChannelID: "thread-1", ParentChannelID: "parent-1"}) {
+		t.Fatalf("expected parent free-response thread to not require a mention")
+	}
+}
+
 func TestDiscordSendTaskCompletionNotificationRoutesToContext(t *testing.T) {
 	svc, _, _, projectRepo, taskRepo, _, discordTaskContextRepo := newDiscordServiceForTest(t)
 	ctx := context.Background()

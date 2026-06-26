@@ -263,15 +263,16 @@ func (s *DiscordService) handleMessageCreate(ctx context.Context, sess *discordg
 		return
 	}
 	incoming := discordIncomingMessage{
-		ChannelID: msg.ChannelID,
-		ThreadID:  discordThreadID(msg.Message),
-		MessageID: msg.ID,
-		GuildID:   msg.GuildID,
-		UserID:    msg.Author.ID,
-		Username:  discordDisplayName(msg.Author),
-		Text:      strings.TrimSpace(msg.Content),
-		IsDM:      discordIsDM(sess, msg.ChannelID, msg.GuildID),
-		Source:    "discord",
+		ChannelID:       msg.ChannelID,
+		ThreadID:        discordThreadID(msg.Message),
+		ParentChannelID: discordParentChannelID(sess, msg.ChannelID),
+		MessageID:       msg.ID,
+		GuildID:         msg.GuildID,
+		UserID:          msg.Author.ID,
+		Username:        discordDisplayName(msg.Author),
+		Text:            strings.TrimSpace(msg.Content),
+		IsDM:            discordIsDM(sess, msg.ChannelID, msg.GuildID),
+		Source:          "discord",
 	}
 	if strings.TrimSpace(incoming.Text) == "" && len(msg.Attachments) > 0 {
 		incoming.Text = discordAttachmentPrompt(msg.Attachments)
@@ -294,15 +295,16 @@ func (s *DiscordService) handleMessageCreate(ctx context.Context, sess *discordg
 }
 
 type discordIncomingMessage struct {
-	ChannelID string
-	ThreadID  string
-	MessageID string
-	GuildID   string
-	UserID    string
-	Username  string
-	Text      string
-	IsDM      bool
-	Source    string
+	ChannelID       string
+	ThreadID        string
+	ParentChannelID string
+	MessageID       string
+	GuildID         string
+	UserID          string
+	Username        string
+	Text            string
+	IsDM            bool
+	Source          string
 }
 
 func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
@@ -385,6 +387,17 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 		s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, ExecID: exec.ID, TaskID: task.ID, Message: msg.Text, Source: msg.Source, AgentName: agent.Name})
 	}
 	ackID, _ := s.sendDiscordMessageWithID(msg.replyChannelID(), msg.MessageID, "Thinking...")
+	if ackID != "" && s.discordTaskContextRepo != nil {
+		if err := s.discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{
+			TaskID:           task.ID,
+			DiscordChannelID: msg.replyChannelID(),
+			DiscordThreadID:  msg.ThreadID,
+			DiscordMessageID: ackID,
+			DiscordUserID:    msg.UserID,
+		}); err != nil {
+			applog.Infof("[discord] update chat ack context failed task=%s: %v", task.ID, err)
+		}
+	}
 	history, err := s.execRepo.ListChatHistory(ctx, projectID, discordChatHistoryLimit)
 	if err != nil {
 		history = []models.Execution{}
@@ -409,6 +422,13 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 		SystemContext: systemContext,
 		WorkDir:       s.resolveWorkDir(ctx, projectID),
 		Surface:       chatcontrol.SurfaceDiscord,
+		ReplyContext: ChannelReplyContext{
+			Source:           models.TaskOriginDiscord,
+			DiscordChannelID: msg.replyChannelID(),
+			DiscordThreadID:  msg.ThreadID,
+			DiscordMessageID: msg.MessageID,
+			DiscordUserID:    msg.UserID,
+		},
 	})
 }
 
@@ -1283,12 +1303,25 @@ func discordIsDM(sess *discordgo.Session, channelID, guildID string) bool {
 	}
 	return ch != nil && ch.Type == discordgo.ChannelTypeDM
 }
+func discordParentChannelID(sess *discordgo.Session, channelID string) string {
+	if sess == nil || strings.TrimSpace(channelID) == "" {
+		return ""
+	}
+	ch, err := sess.State.Channel(channelID)
+	if err != nil || ch == nil {
+		ch, _ = sess.Channel(channelID)
+	}
+	if ch == nil {
+		return ""
+	}
+	return strings.TrimSpace(ch.ParentID)
+}
 func (s *DiscordService) requiresMentionForMessage(ctx context.Context, msg discordIncomingMessage) bool {
 	if msg.IsDM {
 		return false
 	}
 	free := parseDiscordChannelList(s.getSetting(ctx, DiscordSettingFreeResponseChannels))
-	if free[msg.ChannelID] || (msg.ThreadID != "" && free[msg.ThreadID]) {
+	if free[msg.ChannelID] || (msg.ThreadID != "" && free[msg.ThreadID]) || (msg.ParentChannelID != "" && free[msg.ParentChannelID]) {
 		return false
 	}
 	return s.IsRequireMentionEnabled(ctx)
