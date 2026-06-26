@@ -422,6 +422,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					var lastRenderedLength = 0;
 						function renderBufferedOutput(force) {
 							if (!window.renderStreamingContent) {
+								container.classList.remove('text-error/80', 'font-medium');
 								container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
 								return;
 							}
@@ -439,6 +440,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							tracker = window.resolveScrollTracker(trackerKey, liveMessages);
 						}
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
+						container.classList.remove('text-error/80', 'font-medium');
 						container.setAttribute('data-raw-content', renderText);
 						window.renderStreamingContent(container, renderText);
 						lastRenderedLength = renderText.length;
@@ -464,6 +466,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 							container.classList.remove('hidden');
 							if (status === 'cancelled') {
+								container.classList.add('text-error/80', 'font-medium');
 								container.textContent = 'Error: Cancelled';
 								container.setAttribute('data-raw-content', 'Error: Cancelled');
 							}
@@ -787,6 +790,7 @@ templ _initThreadStreamingScript() {
 				var lastRenderedLength = 0;
 				function renderCumulativeContent(force) {
 					if (!window.renderStreamingContent) {
+						container.classList.remove('text-error/80', 'font-medium');
 						container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(cumulativeContent) : cumulativeContent;
 						return;
 					}
@@ -802,6 +806,7 @@ templ _initThreadStreamingScript() {
 							tracker = window.resolveScrollTracker(trackerKey, liveMessages);
 						}
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
+						container.classList.remove('text-error/80', 'font-medium');
 						container.setAttribute('data-raw-content', renderText);
 						window.renderStreamingContent(container, renderText);
 						lastRenderedLength = renderText.length;
@@ -824,6 +829,7 @@ templ _initThreadStreamingScript() {
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 						container.classList.remove('hidden');
 						if (status === 'cancelled') {
+							container.classList.add('text-error/80', 'font-medium');
 							container.textContent = 'Error: Cancelled';
 							container.setAttribute('data-raw-content', 'Error: Cancelled');
 						}

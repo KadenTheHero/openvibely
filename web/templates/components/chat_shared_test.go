@@ -131,6 +131,12 @@ func TestChatBubbleStreaming_CancelledDoneWithoutOutputClearsThinkingIndicator(t
 	if !strings.Contains(content, "container.classList.remove('hidden');") {
 		t.Fatal("cancelled zero-output stream must reveal the terminal assistant bubble")
 	}
+	if !strings.Contains(content, "container.classList.add('text-error/80', 'font-medium');") {
+		t.Fatal("cancelled zero-output stream must use the same error styling as refresh")
+	}
+	if !strings.Contains(content, "container.classList.remove('text-error/80', 'font-medium');") {
+		t.Fatal("normal stream rendering must clear synthetic cancellation error styling")
+	}
 	if !strings.Contains(content, "container.textContent = 'Error: Cancelled';") {
 		t.Fatal("cancelled zero-output stream must show the same terminal text as refresh")
 	}
@@ -157,6 +163,12 @@ func TestInitThreadStreamingScript_CancelledDoneWithoutOutputClearsThinkingIndic
 	}
 	if !strings.Contains(content, "container.classList.remove('hidden');") {
 		t.Fatal("resume cancelled zero-output stream must reveal the terminal assistant bubble")
+	}
+	if !strings.Contains(content, "container.classList.add('text-error/80', 'font-medium');") {
+		t.Fatal("resume cancelled zero-output stream must use the same error styling as refresh")
+	}
+	if !strings.Contains(content, "container.classList.remove('text-error/80', 'font-medium');") {
+		t.Fatal("resume normal stream rendering must clear synthetic cancellation error styling")
 	}
 	if !strings.Contains(content, "container.textContent = 'Error: Cancelled';") {
 		t.Fatal("resume cancelled zero-output stream must show the same terminal text as refresh")
