@@ -2512,6 +2512,80 @@ func TestStartQueuedTaskThreadInputUsesQueuedChannelReplyContext(t *testing.T) {
 	require.NotEqual(t, models.TaskOriginSlack, updatedTask.CreatedVia)
 }
 
+func TestEmailChannelChatCreateTaskPersistsReplyContext(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Email Create Task Project")
+	execTask := createTask(t, h, project.ID, "Email Chat Task", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+		tk.CreatedVia = models.TaskOriginEmail
+	})
+	exec := createExec(t, h, execTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "email chat"
+	})
+	output := `[CREATE_TASK]
+{"title":"Email Follow-up Task","prompt":"Investigate the email request","category":"backlog"}
+[/CREATE_TASK]`
+	reply := service.ChannelReplyContext{Source: models.TaskOriginEmail, EmailFrom: "alice@example.com", EmailMessageID: "<msg-1@example.com>", EmailReferences: "<root@example.com>", EmailSubject: "Deploy question", EmailSessionKey: "email:alice@example.com:<root@example.com>"}
+
+	newOutput, _ := h.processChatTaskCreations(ctx, exec.ID, project.ID, output, []models.LLMConfig{*agent}, reply)
+	createdIDs := extractTaskIDsFromOutput(newOutput)
+	require.Len(t, createdIDs, 1)
+	created, err := h.taskRepo.GetByID(ctx, createdIDs[0])
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.Equal(t, models.TaskOriginEmail, created.CreatedVia)
+	etc, err := h.emailTaskContextRepo.GetByTaskID(ctx, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, etc)
+	require.Equal(t, "alice@example.com", etc.EmailFrom)
+	require.Equal(t, "<msg-1@example.com>", etc.EmailMessageID)
+	require.Equal(t, "<root@example.com>", etc.EmailReferences)
+	require.Equal(t, "Deploy question", etc.EmailSubject)
+	require.Equal(t, "email:alice@example.com:<root@example.com>", etc.EmailSessionKey)
+}
+
+func TestEmailChannelSendToTaskQueuesReplyContext(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Email Send To Task Project")
+	task := createTask(t, h, project.ID, "Existing Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	params := streamingResponseParams{
+		ProjectID: project.ID,
+		TaskID:    task.ID,
+		Surface:   chatcontrol.SurfaceEmail,
+		ChannelReply: service.ChannelReplyContext{
+			Source:          models.TaskOriginEmail,
+			EmailFrom:       "alice@example.com",
+			EmailMessageID:  "<msg-2@example.com>",
+			EmailReferences: "<root@example.com>",
+			EmailSubject:    "Follow-up",
+			EmailSessionKey: "email:alice@example.com:<root@example.com>",
+		},
+	}
+
+	out, err := h.executeSendToTaskTool(ctx, params, []byte(`{"task_id":"`+task.ID+`","message":"Continue from email","origin":"email"}`))
+	require.NoError(t, err, out)
+	pending, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, models.TaskOriginEmail, pending[0].Source)
+	require.Equal(t, "alice@example.com", pending[0].EmailFrom)
+	require.Equal(t, "<msg-2@example.com>", pending[0].EmailMessageID)
+	require.Equal(t, "<root@example.com>", pending[0].EmailReferences)
+	require.Equal(t, "Follow-up", pending[0].EmailSubject)
+	require.Equal(t, "email:alice@example.com:<root@example.com>", pending[0].EmailSessionKey)
+}
+
 func TestStartQueuedTaskThreadInputMovesCompletedTaskBackToActive(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil

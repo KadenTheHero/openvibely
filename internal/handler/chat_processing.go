@@ -517,7 +517,7 @@ modelLoop:
 			// Continue without marker processing rather than failing the entire response
 			agents = []models.LLMConfig{}
 		}
-		output = h.processChatResponse(ctx, params.ExecID, params.ProjectID, output, agents)
+		output = h.processChatResponse(ctx, params.ExecID, params.ProjectID, output, agents, params.ChannelReply)
 	}
 
 	if params.IsTaskFollowup {
@@ -1008,6 +1008,7 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 			EmailMessageID:  input.EmailMessageID,
 			EmailReferences: input.EmailReferences,
 			EmailSubject:    input.EmailSubject,
+			EmailSessionKey: input.EmailSessionKey,
 		}
 	}
 	if err := h.threadInputRepo.ClaimQueuedForChatExecution(ctx, input.ID, task, exec, slackContext, emailContext); err != nil {
@@ -1121,6 +1122,7 @@ func channelReplyFromThreadInput(input models.ThreadInput) service.ChannelReplyC
 		EmailMessageID:  input.EmailMessageID,
 		EmailReferences: input.EmailReferences,
 		EmailSubject:    input.EmailSubject,
+		EmailSessionKey: input.EmailSessionKey,
 	}
 }
 
@@ -1938,7 +1940,7 @@ func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task)
 // It parses [CREATE_TASK] markers, creates tasks, copies attachments, and handles
 // deferred activation (when attachments need to be copied before auto-submission).
 // Returns the updated output with creation summaries and the count of attachments copied.
-func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectID, output string, agents []models.LLMConfig) (string, int) {
+func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectID, output string, agents []models.LLMConfig, channelReply ...service.ChannelReplyContext) (string, int) {
 	taskRequests := parseChatTaskCreations(output)
 	if len(taskRequests) == 0 {
 		return output, 0
@@ -1950,6 +1952,7 @@ func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectI
 	deferredActiveTitles := h.deferActiveTasksWithAttachments(taskRequests, chatAtts)
 
 	createdTasks, summary := h.executeChatTaskCreationsWithAttachments(ctx, taskRequests, projectID, execID, agents)
+	h.applyChannelOriginToCreatedTasks(ctx, createdTasks, firstChannelReply(channelReply))
 
 	totalAttachmentsCopied := h.copyAttachmentsToTasks(ctx, execID, createdTasks, chatAtts)
 	h.activateDeferredTasks(ctx, createdTasks, deferredActiveTitles)
@@ -1959,6 +1962,38 @@ func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectI
 
 // deferActiveTasksWithAttachments defers activation of "active" tasks when attachments exist.
 // Returns a map of task titles that should be activated after attachment copying.
+func firstChannelReply(replies []service.ChannelReplyContext) service.ChannelReplyContext {
+	if len(replies) == 0 {
+		return service.ChannelReplyContext{}
+	}
+	return replies[0]
+}
+
+func (h *Handler) applyChannelOriginToCreatedTasks(ctx context.Context, tasks []models.Task, reply service.ChannelReplyContext) {
+	if len(tasks) == 0 || reply.Source != models.TaskOriginEmail || strings.TrimSpace(reply.EmailFrom) == "" {
+		return
+	}
+	for _, task := range tasks {
+		if h.taskRepo != nil {
+			if err := h.taskRepo.UpdateEmailOrigin(ctx, task.ID); err != nil {
+				applog.Infof("[handler] applyChannelOriginToCreatedTasks task=%s email origin update failed: %v", task.ID, err)
+			}
+		}
+		if h.emailTaskContextRepo != nil {
+			if err := h.emailTaskContextRepo.Upsert(ctx, &models.EmailTaskContext{
+				TaskID:          task.ID,
+				EmailFrom:       reply.EmailFrom,
+				EmailMessageID:  reply.EmailMessageID,
+				EmailReferences: reply.EmailReferences,
+				EmailSubject:    reply.EmailSubject,
+				EmailSessionKey: reply.EmailSessionKey,
+			}); err != nil {
+				applog.Infof("[handler] applyChannelOriginToCreatedTasks task=%s email context update failed: %v", task.ID, err)
+			}
+		}
+	}
+}
+
 func (h *Handler) deferActiveTasksWithAttachments(taskRequests []service.TaskCreationRequest, chatAtts []models.ChatAttachment) map[string]bool {
 	if len(chatAtts) == 0 {
 		return nil
@@ -3234,7 +3269,7 @@ func (h *Handler) processChatToggleAlert(ctx context.Context, execID, projectID,
 // will still proceed but without auto-assignment of agents.
 //
 // Early return: If output is empty, returns immediately without processing (no markers to parse).
-func (h *Handler) processChatResponse(ctx context.Context, execID, projectID, output string, agents []models.LLMConfig) string {
+func (h *Handler) processChatResponse(ctx context.Context, execID, projectID, output string, agents []models.LLMConfig, channelReply ...service.ChannelReplyContext) string {
 	if output == "" {
 		return output // No content to process
 	}
@@ -3242,7 +3277,7 @@ func (h *Handler) processChatResponse(ctx context.Context, execID, projectID, ou
 	originalOutput := output
 
 	// Process task creation markers
-	if newOutput, attachmentCount := h.processChatTaskCreations(ctx, execID, projectID, output, agents); newOutput != output {
+	if newOutput, attachmentCount := h.processChatTaskCreations(ctx, execID, projectID, output, agents, channelReply...); newOutput != output {
 		output = newOutput
 		if attachmentCount > 0 {
 			applog.Infof("[handler] processChatResponse exec=%s copied %d attachments to created tasks", execID, attachmentCount)
@@ -3539,7 +3574,7 @@ func (h *Handler) shouldPromotePreExecutionQueuedInput(ctx context.Context, task
 	return true, nil
 }
 
-func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, origin, originAgent string) (*models.ThreadInput, error) {
+func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, origin, originAgent string, channelReply ...service.ChannelReplyContext) (*models.ThreadInput, error) {
 	if h.threadInputRepo == nil {
 		return nil, fmt.Errorf("thread input queue is unavailable")
 	}
@@ -3577,6 +3612,7 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 	if err != nil {
 		return nil, err
 	}
+	reply := firstChannelReply(channelReply)
 	queued := &models.ThreadInput{
 		Scope:          models.ThreadInputScopeTask,
 		ProjectID:      task.ProjectID,
@@ -3588,6 +3624,13 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 		Content:        message,
 		Source:         origin,
 		OriginAgent:    originAgent,
+	}
+	if origin == models.TaskOriginEmail && strings.TrimSpace(reply.EmailFrom) != "" {
+		queued.EmailFrom = reply.EmailFrom
+		queued.EmailMessageID = reply.EmailMessageID
+		queued.EmailReferences = reply.EmailReferences
+		queued.EmailSubject = reply.EmailSubject
+		queued.EmailSessionKey = reply.EmailSessionKey
 	}
 	if err := h.threadInputRepo.CreateQueued(ctx, queued); err != nil {
 		return nil, err

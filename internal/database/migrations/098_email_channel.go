@@ -26,18 +26,30 @@ func upEmailChannel098(ctx context.Context, tx *sql.Tx) error {
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_email_auth_unique_address ON email_authorized_senders(project_id, lower(email_address));
 		CREATE INDEX IF NOT EXISTS idx_email_auth_project ON email_authorized_senders(project_id);
 		CREATE INDEX IF NOT EXISTS idx_email_auth_address ON email_authorized_senders(lower(email_address));
-		CREATE TABLE IF NOT EXISTS email_task_context (
-			task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
-			email_from TEXT NOT NULL,
-			email_message_id TEXT NOT NULL,
-			email_references TEXT NOT NULL DEFAULT '',
-			email_subject TEXT NOT NULL DEFAULT '',
-			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-			updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
-		);
-		CREATE INDEX IF NOT EXISTS idx_email_task_context_from ON email_task_context(email_from);
+			CREATE TABLE IF NOT EXISTS email_task_context (
+				task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+				email_from TEXT NOT NULL,
+				email_message_id TEXT NOT NULL,
+				email_references TEXT NOT NULL DEFAULT '',
+				email_subject TEXT NOT NULL DEFAULT '',
+				email_session_key TEXT NOT NULL DEFAULT '',
+				created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+				updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+			);
+			CREATE INDEX IF NOT EXISTS idx_email_task_context_from ON email_task_context(email_from);
+			CREATE INDEX IF NOT EXISTS idx_email_task_context_session ON email_task_context(email_session_key);
 	`); err != nil {
 		return fmt.Errorf("creating email channel tables: %w", err)
+	}
+
+	contextColumns, err := tableColumns098(ctx, tx, "email_task_context")
+	if err != nil {
+		return err
+	}
+	if !contextColumns["email_session_key"] {
+		if _, err := tx.ExecContext(ctx, "ALTER TABLE email_task_context ADD COLUMN email_session_key TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("adding email_task_context.email_session_key: %w", err)
+		}
 	}
 
 	columns, err := tableColumns098(ctx, tx, "thread_inputs")
@@ -52,6 +64,7 @@ func upEmailChannel098(ctx context.Context, tx *sql.Tx) error {
 		{"email_message_id", "TEXT NOT NULL DEFAULT ''"},
 		{"email_references", "TEXT NOT NULL DEFAULT ''"},
 		{"email_subject", "TEXT NOT NULL DEFAULT ''"},
+		{"email_session_key", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if !columns[column.name] {
 			if _, err := tx.ExecContext(ctx, fmt.Sprintf("ALTER TABLE thread_inputs ADD COLUMN %s %s", column.name, column.def)); err != nil {
@@ -64,8 +77,9 @@ func upEmailChannel098(ctx context.Context, tx *sql.Tx) error {
 
 func downEmailChannel098(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `
-		DROP INDEX IF EXISTS idx_email_task_context_from;
-		DROP TABLE IF EXISTS email_task_context;
+			DROP INDEX IF EXISTS idx_email_task_context_session;
+			DROP INDEX IF EXISTS idx_email_task_context_from;
+			DROP TABLE IF EXISTS email_task_context;
 		DROP INDEX IF EXISTS idx_email_auth_address;
 		DROP INDEX IF EXISTS idx_email_auth_project;
 		DROP INDEX IF EXISTS idx_email_auth_unique_address;

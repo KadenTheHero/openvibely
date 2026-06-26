@@ -1174,6 +1174,17 @@ func (r *TaskRepo) UpdateSlackOrigin(ctx context.Context, id string) error {
 	return nil
 }
 
+// UpdateEmailOrigin marks a task as created via Email.
+func (r *TaskRepo) UpdateEmailOrigin(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE tasks SET created_via = 'email', updated_at = datetime('now') WHERE id = ?`,
+		id)
+	if err != nil {
+		return fmt.Errorf("updating email origin: %w", err)
+	}
+	return nil
+}
+
 func (r *TaskRepo) CountRunningByProject(ctx context.Context, projectID string) (int, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx,

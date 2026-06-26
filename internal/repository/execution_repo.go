@@ -363,6 +363,23 @@ func (r *ExecutionRepo) FindLatestActiveChatExecution(ctx context.Context, proje
 	return &e, nil
 }
 
+func (r *ExecutionRepo) FindLatestActiveEmailChatExecution(ctx context.Context, projectID, sessionKey string) (*models.Execution, error) {
+	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
+		`SELECT `+executionSelectColumnsAliasLight+`
+		 FROM executions e
+		 JOIN tasks t ON t.id = e.task_id
+		 JOIN email_task_context etc ON etc.task_id = t.id
+		 WHERE t.project_id = ? AND t.category = 'chat' AND e.status = 'running' AND etc.email_session_key = ?
+		 ORDER BY e.started_at DESC, e.rowid DESC LIMIT 1`, projectID, sessionKey))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("finding active email chat execution: %w", err)
+	}
+	return &e, nil
+}
+
 // ListChatHistory returns the latest chat executions (CategoryChat tasks) for a project,
 // ordered chronologically for prompt/UI consumption.
 func (r *ExecutionRepo) ListChatHistory(ctx context.Context, projectID string, limit int) ([]models.Execution, error) {
@@ -373,6 +390,23 @@ func (r *ExecutionRepo) ListChatHistory(ctx context.Context, projectID string, l
 // ordered chronologically for prepending into a visible transcript window.
 func (r *ExecutionRepo) ListChatHistoryBefore(ctx context.Context, projectID, beforeExecID string, limit int) ([]models.Execution, error) {
 	return r.listChatHistoryPage(ctx, projectID, beforeExecID, limit)
+}
+
+func (r *ExecutionRepo) ListEmailChatHistory(ctx context.Context, projectID, sessionKey string, limit int) ([]models.Execution, error) {
+	if limit <= 0 {
+		return []models.Execution{}, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT `+executionSelectColumnsAliasLight+`
+		 FROM executions e
+		 JOIN tasks t ON t.id = e.task_id
+		 JOIN email_task_context etc ON etc.task_id = t.id
+		 WHERE t.project_id = ? AND t.category = 'chat' AND etc.email_session_key = ?
+		 ORDER BY e.started_at DESC, e.rowid DESC LIMIT ?`, projectID, sessionKey, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing email chat history: %w", err)
+	}
+	defer rows.Close()
+	return scanExecutionsNewestFirstAsChronological(rows)
 }
 
 func (r *ExecutionRepo) listChatHistoryPage(ctx context.Context, projectID, beforeExecID string, limit int) ([]models.Execution, error) {

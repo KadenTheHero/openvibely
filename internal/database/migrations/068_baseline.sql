@@ -842,10 +842,12 @@ CREATE TABLE email_task_context (
     email_message_id TEXT NOT NULL,
     email_references TEXT NOT NULL DEFAULT '',
     email_subject TEXT NOT NULL DEFAULT '',
+    email_session_key TEXT NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_email_task_context_from ON email_task_context(email_from);
+CREATE INDEX idx_email_task_context_session ON email_task_context(email_session_key);
 
 INSERT INTO app_settings (key, value) VALUES ('worktree_auto_merge', 'false');
 INSERT INTO app_settings (key, value) VALUES ('worktree_merge_target', 'main');

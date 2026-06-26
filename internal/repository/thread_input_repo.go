@@ -24,7 +24,7 @@ func NewThreadInputRepo(db *sql.DB) *ThreadInputRepo {
 	return &ThreadInputRepo{db: db}
 }
 
-const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), COALESCE(email_from, ''), COALESCE(email_message_id, ''), COALESCE(email_references, ''), COALESCE(email_subject, ''), created_at, updated_at, applied_at`
+const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), COALESCE(email_from, ''), COALESCE(email_message_id, ''), COALESCE(email_references, ''), COALESCE(email_subject, ''), COALESCE(email_session_key, ''), created_at, updated_at, applied_at`
 
 func scanThreadInput(scanner interface {
 	Scan(dest ...interface{}) error
@@ -56,6 +56,7 @@ func scanThreadInput(scanner interface {
 		&input.EmailMessageID,
 		&input.EmailReferences,
 		&input.EmailSubject,
+		&input.EmailSessionKey,
 		&input.CreatedAt, &input.UpdatedAt,
 		&input.AppliedAt,
 	)
@@ -99,10 +100,10 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 				INSERT INTO thread_inputs (
 					id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
 						turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
-						source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
-						email_from, email_message_id, email_references, email_subject
-					)
-					SELECT lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?				WHERE EXISTS (
+							source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
+							email_from, email_message_id, email_references, email_subject, email_session_key
+						)
+						SELECT lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?				WHERE EXISTS (
 					SELECT 1 FROM executions e JOIN tasks t ON t.id = e.task_id
 					WHERE e.id = ? AND e.status = 'running'
 					  AND (
@@ -135,6 +136,7 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 			input.EmailMessageID,
 			input.EmailReferences,
 			input.EmailSubject,
+			input.EmailSessionKey,
 			activeExecutionID, input.Scope,
 			models.ThreadInputScopeTask,
 			input.TaskID,
@@ -168,9 +170,9 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 			INSERT INTO thread_inputs (
 				id, scope, project_id, task_id, run_execution_id, agent_config_id, input_mode, input_status,
 					turn_id, expected_turn_id, content, attachment_session_id, queue_position, chat_mode,
-					source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
-					email_from, email_message_id, email_references, email_subject
-				) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)			RETURNING `+threadInputSelectColumns,
+						source, origin_agent, telegram_chat_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id,
+						email_from, email_message_id, email_references, email_subject, email_session_key
+					) VALUES (lower(hex(randomblob(16))), ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)			RETURNING `+threadInputSelectColumns,
 		input.Scope,
 		input.ProjectID,
 		input.TaskID,
@@ -195,6 +197,7 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 		input.EmailMessageID,
 		input.EmailReferences,
 		input.EmailSubject,
+		input.EmailSessionKey,
 	)
 	created, err := scanThreadInput(row)
 	if err != nil {
@@ -694,15 +697,16 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 			ectx := emailContext[0]
 			ectx.TaskID = task.ID
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO email_task_context (task_id, email_from, email_message_id, email_references, email_subject, updated_at)
-						 VALUES (?, ?, ?, ?, ?, datetime('now'))
-						 ON CONFLICT(task_id) DO UPDATE SET
-						 email_from = excluded.email_from,
-						 email_message_id = excluded.email_message_id,
-						 email_references = excluded.email_references,
-						 email_subject = excluded.email_subject,
-						 updated_at = datetime('now')`,
-				ectx.TaskID, ectx.EmailFrom, ectx.EmailMessageID, ectx.EmailReferences, ectx.EmailSubject); err != nil {
+				`INSERT INTO email_task_context (task_id, email_from, email_message_id, email_references, email_subject, email_session_key, updated_at)
+							 VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+							 ON CONFLICT(task_id) DO UPDATE SET
+							 email_from = excluded.email_from,
+							 email_message_id = excluded.email_message_id,
+							 email_references = excluded.email_references,
+							 email_subject = excluded.email_subject,
+							 email_session_key = excluded.email_session_key,
+							 updated_at = datetime('now')`,
+				ectx.TaskID, ectx.EmailFrom, ectx.EmailMessageID, ectx.EmailReferences, ectx.EmailSubject, ectx.EmailSessionKey); err != nil {
 				return fmt.Errorf("creating queued email context: %w", err)
 			}
 		}

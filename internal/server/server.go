@@ -735,6 +735,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetTelegramAuthRepo(telegramAuthRepo)
 	h.SetSlackAuthRepo(slackAuthRepo)
 	h.SetEmailAuthRepo(emailAuthRepo)
+	h.SetEmailTaskContextRepo(emailTaskContextRepo)
 	h.SetEmailService(emailSvc)
 	h.SetSlackTaskContextRepo(slackTaskContextRepo)
 	h.SetReviewCommentRepo(reviewCommentRepo)

@@ -22,15 +22,16 @@ func (r *EmailTaskContextRepo) Upsert(ctx context.Context, etc *models.EmailTask
 		return fmt.Errorf("email task context is nil")
 	}
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO email_task_context (task_id, email_from, email_message_id, email_references, email_subject, updated_at)
-		 VALUES (?, ?, ?, ?, ?, datetime('now'))
-		 ON CONFLICT(task_id) DO UPDATE SET
-		 email_from = excluded.email_from,
-		 email_message_id = excluded.email_message_id,
-		 email_references = excluded.email_references,
-		 email_subject = excluded.email_subject,
-		 updated_at = datetime('now')`,
-		etc.TaskID, etc.EmailFrom, etc.EmailMessageID, etc.EmailReferences, etc.EmailSubject)
+		`INSERT INTO email_task_context (task_id, email_from, email_message_id, email_references, email_subject, email_session_key, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+			 ON CONFLICT(task_id) DO UPDATE SET
+			 email_from = excluded.email_from,
+			 email_message_id = excluded.email_message_id,
+			 email_references = excluded.email_references,
+			 email_subject = excluded.email_subject,
+			 email_session_key = excluded.email_session_key,
+			 updated_at = datetime('now')`,
+		etc.TaskID, etc.EmailFrom, etc.EmailMessageID, etc.EmailReferences, etc.EmailSubject, etc.EmailSessionKey)
 	if err != nil {
 		return fmt.Errorf("upsert email task context: %w", err)
 	}
@@ -40,9 +41,9 @@ func (r *EmailTaskContextRepo) Upsert(ctx context.Context, etc *models.EmailTask
 func (r *EmailTaskContextRepo) GetByTaskID(ctx context.Context, taskID string) (*models.EmailTaskContext, error) {
 	var etc models.EmailTaskContext
 	err := r.db.QueryRowContext(ctx,
-		`SELECT task_id, email_from, email_message_id, email_references, email_subject, created_at, updated_at
+		`SELECT task_id, email_from, email_message_id, email_references, email_subject, COALESCE(email_session_key, ''), created_at, updated_at
 		 FROM email_task_context WHERE task_id = ?`, taskID).
-		Scan(&etc.TaskID, &etc.EmailFrom, &etc.EmailMessageID, &etc.EmailReferences, &etc.EmailSubject, &etc.CreatedAt, &etc.UpdatedAt)
+		Scan(&etc.TaskID, &etc.EmailFrom, &etc.EmailMessageID, &etc.EmailReferences, &etc.EmailSubject, &etc.EmailSessionKey, &etc.CreatedAt, &etc.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

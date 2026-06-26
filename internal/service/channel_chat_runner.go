@@ -22,6 +22,7 @@ type ChannelChatRunRequest struct {
 	ImageAttachments    []models.Attachment
 	Surface             chatcontrol.Surface
 	InitialAckMessageID int
+	ReplyContext        ChannelReplyContext
 }
 
 type ChannelChatRunner func(context.Context, ChannelChatRunRequest)
@@ -50,6 +51,7 @@ type ChannelReplyContext struct {
 	EmailMessageID  string
 	EmailReferences string
 	EmailSubject    string
+	EmailSessionKey string
 }
 
 type ChannelTaskRunner func(context.Context, ChannelTaskRunRequest)

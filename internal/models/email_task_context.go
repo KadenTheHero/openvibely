@@ -9,6 +9,7 @@ type EmailTaskContext struct {
 	EmailMessageID  string    `json:"email_message_id"`
 	EmailReferences string    `json:"email_references"`
 	EmailSubject    string    `json:"email_subject"`
+	EmailSessionKey string    `json:"email_session_key"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }

@@ -162,7 +162,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			if err != nil {
 				agents = nil
 			}
-			updated, _ := h.processChatTaskCreations(ctx, params.ExecID, params.ProjectID, marker, agents)
+			updated, _ := h.processChatTaskCreations(ctx, params.ExecID, params.ProjectID, marker, agents, params.ChannelReply)
 			summary := toolSummaryFromMarker(marker, updated)
 			// Verify the summary actually contains at least one [TASK_ID:...]
 			// marker AND that each referenced task exists in the current project.
@@ -837,7 +837,7 @@ func (h *Handler) executeSendToTaskTool(ctx context.Context, params streamingRes
 			return "", fmt.Errorf("task goal is not active; continuation was not queued")
 		}
 	}
-	queued, err := h.enqueueTaskThreadInput(ctx, taskID, req.Message, origin, originAgent)
+	queued, err := h.enqueueTaskThreadInput(ctx, taskID, req.Message, origin, originAgent, params.ChannelReply)
 	if err != nil {
 		return "", err
 	}
@@ -903,7 +903,7 @@ func sanitizeSendToTaskLineage(ctx context.Context, requestedOrigin, requestedOr
 	}
 	origin := strings.TrimSpace(requestedOrigin)
 	switch origin {
-	case models.TaskOriginSlack, models.TaskOriginTelegram:
+	case models.TaskOriginSlack, models.TaskOriginTelegram, models.TaskOriginEmail:
 		return origin, ""
 	default:
 		return models.TaskOriginWeb, ""

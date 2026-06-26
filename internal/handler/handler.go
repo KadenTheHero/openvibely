@@ -54,6 +54,7 @@ type Handler struct {
 	telegramAuthRepo           *repository.TelegramAuthRepo
 	slackAuthRepo              *repository.SlackAuthRepo
 	emailAuthRepo              *repository.EmailAuthRepo
+	emailTaskContextRepo       *repository.EmailTaskContextRepo
 	slackTaskContextRepo       *repository.SlackTaskContextRepo
 	reviewCommentRepo          *repository.ReviewCommentRepo
 	customPersonalityRepo      *repository.CustomPersonalityRepo
@@ -261,6 +262,10 @@ func (h *Handler) SetSlackAuthRepo(repo *repository.SlackAuthRepo) {
 // SetEmailAuthRepo sets the Email authorization repo for managing authorized senders.
 func (h *Handler) SetEmailAuthRepo(repo *repository.EmailAuthRepo) {
 	h.emailAuthRepo = repo
+}
+
+func (h *Handler) SetEmailTaskContextRepo(repo *repository.EmailTaskContextRepo) {
+	h.emailTaskContextRepo = repo
 }
 
 func (h *Handler) SetEmailService(svc EmailServiceProvider) {

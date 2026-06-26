@@ -45,6 +45,52 @@ func TestEmailThreadingHelpers(t *testing.T) {
 	assert.NotEqual(t, EmailSessionKey("alice@example.com", "", "", "Subject A"), EmailSessionKey("alice@example.com", "", "", "Subject B"))
 }
 
+func TestEmailService_UsesThreadScopedSessionForActiveChatAndHistory(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	project := &models.Project{Name: "Email Session Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
+	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	activeTask := &models.Task{ProjectID: project.ID, Title: "Root Thread", Prompt: "root", Category: models.CategoryChat, Status: models.StatusRunning, CreatedVia: models.TaskOriginEmail, AgentID: &agent.ID}
+	require.NoError(t, taskRepo.Create(ctx, activeTask))
+	require.NoError(t, emailTaskContextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: activeTask.ID, EmailFrom: "alice@example.com", EmailMessageID: "<root@example.com>", EmailSubject: "Root", EmailSessionKey: "email:alice@example.com:<root@example.com>"}))
+	activeExec := &models.Execution{TaskID: activeTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "root active"}
+	require.NoError(t, execRepo.Create(ctx, activeExec))
+	completedTask := &models.Task{ProjectID: project.ID, Title: "Other Completed", Prompt: "other", Category: models.CategoryChat, Status: models.StatusCompleted, CreatedVia: models.TaskOriginEmail, AgentID: &agent.ID}
+	require.NoError(t, taskRepo.Create(ctx, completedTask))
+	require.NoError(t, emailTaskContextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: completedTask.ID, EmailFrom: "alice@example.com", EmailMessageID: "<other@example.com>", EmailSubject: "Other", EmailSessionKey: "email:alice@example.com:<other@example.com>"}))
+	completedExec := &models.Execution{TaskID: completedTask.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "other prior"}
+	require.NoError(t, execRepo.Create(ctx, completedExec))
+
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	workerSvc := NewWorkerService(llmSvc, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	var runReq ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runReq = req })
+	svc.ProcessIncoming(ctx, EmailInboundMessage{FromAddress: "alice@example.com", Subject: "Other", Body: "continue other", MessageID: "<other-2@example.com>", References: "<other@example.com>"})
+
+	require.NotEmpty(t, runReq.ExecID)
+	require.Equal(t, "email:alice@example.com:<other@example.com>", runReq.ReplyContext.EmailSessionKey)
+	require.Len(t, runReq.ChatHistory, 1)
+	require.Equal(t, completedExec.ID, runReq.ChatHistory[0].ID)
+	pending, err := repository.NewThreadInputRepo(db).ListPendingForChat(ctx, project.ID)
+	require.NoError(t, err)
+	require.Empty(t, pending)
+}
+
 func TestEmailService_SendResponsesDisabledSkipsReplies(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
