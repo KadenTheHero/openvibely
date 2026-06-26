@@ -520,7 +520,15 @@ func TestChannelsUI_WebhookCardsRender(t *testing.T) {
 	if strings.Contains(activeCard, "Inbound webhook endpoint") || strings.Contains(disabledCard, "Inbound webhook endpoint") {
 		t.Error("did not expect legacy inbound webhook endpoint text on webhook cards")
 	}
-	if strings.Contains(activeCard, "/webhooks/inbound/") || strings.Contains(disabledCard, "/webhooks/inbound/") {
+	activeVisibleCard := activeCard
+	if end := strings.Index(activeVisibleCard, ">"); end != -1 {
+		activeVisibleCard = activeVisibleCard[end+1:]
+	}
+	disabledVisibleCard := disabledCard
+	if end := strings.Index(disabledVisibleCard, ">"); end != -1 {
+		disabledVisibleCard = disabledVisibleCard[end+1:]
+	}
+	if strings.Contains(activeVisibleCard, "/webhooks/inbound/") || strings.Contains(disabledVisibleCard, "/webhooks/inbound/") {
 		t.Error("did not expect raw webhook endpoint URL text rendered on webhook cards")
 	}
 	if !strings.Contains(activeCard, ">Copy URL<") || !strings.Contains(disabledCard, ">Copy URL<") {
@@ -602,13 +610,12 @@ func webhookCardSectionByName(body, webhookName string) string {
 	}
 
 	end := len(body)
-	if next := strings.Index(body[start+len(marker):], `data-webhook-name="`); next >= 0 {
+	if next := strings.Index(body[start+len(marker):], `data-channel-type="`); next >= 0 {
 		end = start + len(marker) + next
 	}
-	if sectionBoundary := strings.Index(body[start:], "<!-- Coming Soon Section -->"); sectionBoundary >= 0 {
-		boundary := start + sectionBoundary
-		if boundary < end {
-			end = boundary
+	for _, boundaryMarker := range []string{`<dialog id="delete_channel_confirm_modal"`, `<!-- Channel Configuration Modal -->`, `<script>`} {
+		if boundary := strings.Index(body[start:], boundaryMarker); boundary >= 0 && start+boundary < end {
+			end = start + boundary
 		}
 	}
 	if end <= start {

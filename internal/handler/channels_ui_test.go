@@ -121,9 +121,9 @@ func TestChannelsPageRendersCardLayout(t *testing.T) {
 		t.Error("expected Add Channel button")
 	}
 
-	// Verify Coming Soon section
-	if !strings.Contains(body, "Coming Soon") {
-		t.Error("expected Coming Soon section")
+	// Verify all first-class channel integrations are available instead of placeholder cards.
+	if strings.Contains(body, "Coming Soon") {
+		t.Error("did not expect Coming Soon section for first-class channels")
 	}
 
 	// Verify add modal includes available channel options
