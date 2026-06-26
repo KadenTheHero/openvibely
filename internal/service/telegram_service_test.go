@@ -2948,8 +2948,9 @@ func TestTelegramService_SendChatResponse_EditsInitialAckMessage(t *testing.T) {
 	require.Equal(t, []string{"42:99:hello from initial telegram chat"}, edited)
 }
 
-func TestTelegramService_SendChatResponse_RichEditFailureSendsFinalRichMessage(t *testing.T) {
+func TestTelegramService_SendChatResponse_RichEditFailureSendsFinalRichMessageAndClearsPlaceholder(t *testing.T) {
 	var endpoints []string
+	var clearedPlaceholder string
 	svc := &TelegramService{
 		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
 			endpoints = append(endpoints, endpoint)
@@ -2963,8 +2964,12 @@ func TestTelegramService_SendChatResponse_RichEditFailureSendsFinalRichMessage(t
 			return &tgbotapi.APIResponse{Ok: true}, nil
 		},
 		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-			t.Fatalf("expected final rich send before legacy placeholder edit fallback")
-			return tgbotapi.Message{}, nil
+			edit, ok := c.(tgbotapi.EditMessageTextConfig)
+			require.True(t, ok, "expected placeholder cleanup edit after final rich send")
+			require.Equal(t, int64(42), edit.ChatID)
+			require.Equal(t, 99, edit.MessageID)
+			clearedPlaceholder = edit.Text
+			return tgbotapi.Message{MessageID: 99}, nil
 		},
 	}
 	task := models.Task{ID: "task-1", Category: models.CategoryChat, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
@@ -2972,6 +2977,7 @@ func TestTelegramService_SendChatResponse_RichEditFailureSendsFinalRichMessage(t
 	svc.SendChatResponse(context.Background(), task, "hello from initial telegram chat", "", 99)
 
 	require.Equal(t, []string{"editMessageText", "sendRichMessage"}, endpoints)
+	require.Equal(t, "✅ Response sent.", clearedPlaceholder)
 }
 
 func TestTelegramService_SendChatResponse_AmbiguousFinalRichEditErrorDoesNotSendOrEditFallback(t *testing.T) {

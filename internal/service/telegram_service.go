@@ -3730,6 +3730,7 @@ func (s *TelegramService) deliverTelegramChatFinal(ctx context.Context, chatID i
 		}
 		applog.Infof("[telegram] rich final edit unavailable, trying rich send before legacy edit fallback: %v", err)
 		if sent, sendErr := s.sendRichMessage(ctx, chatID, text); sent {
+			s.clearTelegramChatPlaceholderAfterRichFinalSend(chatID, messageID)
 			return
 		} else if sendErr != nil {
 			if isTelegramRichFallbackError(sendErr) {
@@ -3741,6 +3742,18 @@ func (s *TelegramService) deliverTelegramChatFinal(ctx context.Context, chatID i
 		}
 	}
 	s.editMessage(ctx, chatID, messageID, text)
+}
+
+func (s *TelegramService) clearTelegramChatPlaceholderAfterRichFinalSend(chatID int64, messageID int) {
+	const clearedPlaceholderText = "✅ Response sent."
+	if s.editMessageFunc != nil {
+		s.editMessageFunc(chatID, messageID, clearedPlaceholderText)
+		return
+	}
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, clearedPlaceholderText)
+	if _, err := s.sendConfig(edit); err != nil {
+		applog.Infof("[telegram] error clearing placeholder after rich final send: %v", err)
+	}
 }
 
 // executeChannelSetTaskGoal sets or replaces the goal for a task.
