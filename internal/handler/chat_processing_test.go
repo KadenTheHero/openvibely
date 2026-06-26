@@ -2234,6 +2234,153 @@ func TestStartQueuedChatInputProcessesSavedAttachmentSession(t *testing.T) {
 	require.Len(t, attachments[request.ExecID], 2)
 }
 
+func TestStartQueuedEmailChatInputPropagatesReplyContextToCreatedTasks(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Queued Email Chat Reply Context Project")
+	activeTask := createTask(t, h, project.ID, "Active Email Chat", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+		tk.CreatedVia = models.TaskOriginEmail
+	})
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active email chat"
+	})
+	input := &models.ThreadInput{
+		Scope:           models.ThreadInputScopeChat,
+		ProjectID:       project.ID,
+		RunExecutionID:  activeExec.ID,
+		AgentConfigID:   agent.ID,
+		InputMode:       models.ThreadInputModeQueued,
+		InputStatus:     models.ThreadInputPending,
+		Content:         "queued email follow-up",
+		ChatMode:        models.ChatModeOrchestrate,
+		Source:          models.TaskOriginEmail,
+		EmailFrom:       "alice@example.com",
+		EmailMessageID:  "<msg-queued@example.com>",
+		EmailReferences: "<root@example.com>",
+		EmailSubject:    "Queued email",
+		EmailSessionKey: "email:alice@example.com:<root@example.com>",
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = `[CREATE_TASK]
+{"title":"Task From Queued Email","prompt":"Handle queued email task","category":"backlog"}
+[/CREATE_TASK]`
+	mock.TextOnly = mock.Response
+	h.llmSvc.SetLLMCaller(mock)
+	require.NoError(t, h.execRepo.Complete(ctx, activeExec.ID, models.ExecCompleted, "active done", "", 0, 0))
+
+	h.startQueuedChatInput(ctx, *input)
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
+
+	var createdTask *models.Task
+	require.Eventually(t, func() bool {
+		tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+		if err != nil {
+			return false
+		}
+		for i := range tasks {
+			if tasks[i].Title == "Task From Queued Email" {
+				createdTask = &tasks[i]
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 25*time.Millisecond)
+	require.NotNil(t, createdTask)
+	require.Equal(t, models.TaskOriginEmail, createdTask.CreatedVia)
+	etc, err := h.emailTaskContextRepo.GetByTaskID(ctx, createdTask.ID)
+	require.NoError(t, err)
+	require.NotNil(t, etc)
+	require.Equal(t, "alice@example.com", etc.EmailFrom)
+	require.Equal(t, "<msg-queued@example.com>", etc.EmailMessageID)
+	require.Equal(t, "<root@example.com>", etc.EmailReferences)
+	require.Equal(t, "Queued email", etc.EmailSubject)
+	require.Equal(t, "email:alice@example.com:<root@example.com>", etc.EmailSessionKey)
+}
+
+func TestStartQueuedEmailChatInputUsesSessionScopedHistory(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Queued Email Chat History Project")
+
+	otherTask := createTask(t, h, project.ID, "Other Email Chat", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+		tk.CreatedVia = models.TaskOriginEmail
+	})
+	otherExec := createExec(t, h, otherTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "other thread prompt"
+		ex.Output = "other thread output"
+	})
+	require.NotEmpty(t, otherExec.ID)
+	require.NoError(t, h.emailTaskContextRepo.Upsert(ctx, &models.EmailTaskContext{
+		TaskID:          otherTask.ID,
+		EmailFrom:       "alice@example.com",
+		EmailMessageID:  "<other@example.com>",
+		EmailSubject:    "Other thread",
+		EmailSessionKey: "email:alice@example.com:<other@example.com>",
+	}))
+
+	activeTask := createTask(t, h, project.ID, "Active Email Chat History", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+		tk.CreatedVia = models.TaskOriginEmail
+	})
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "same thread prompt"
+		ex.Output = "same thread output"
+	})
+	require.NoError(t, h.emailTaskContextRepo.Upsert(ctx, &models.EmailTaskContext{
+		TaskID:          activeTask.ID,
+		EmailFrom:       "alice@example.com",
+		EmailMessageID:  "<root@example.com>",
+		EmailSubject:    "Same thread",
+		EmailSessionKey: "email:alice@example.com:<root@example.com>",
+	}))
+	input := &models.ThreadInput{
+		Scope:           models.ThreadInputScopeChat,
+		ProjectID:       project.ID,
+		RunExecutionID:  activeExec.ID,
+		AgentConfigID:   agent.ID,
+		InputMode:       models.ThreadInputModeQueued,
+		InputStatus:     models.ThreadInputPending,
+		Content:         "queued same thread",
+		ChatMode:        models.ChatModeOrchestrate,
+		Source:          models.TaskOriginEmail,
+		EmailFrom:       "alice@example.com",
+		EmailMessageID:  "<reply@example.com>",
+		EmailReferences: "<root@example.com>",
+		EmailSubject:    "Same thread",
+		EmailSessionKey: "email:alice@example.com:<root@example.com>",
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "done"
+	mock.TextOnly = "done"
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.startQueuedChatInput(ctx, *input)
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
+	history := mock.LastAgentRequest().ChatHistory
+	require.Len(t, history, 1)
+	require.Equal(t, "same thread prompt", history[0].PromptSent)
+	require.NotContains(t, history[0].PromptSent, "other thread")
+}
+
 func TestStartQueuedChatInputFallsBackWhenQueuedAgentDeleted(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
@@ -2583,6 +2730,43 @@ func TestEmailChannelSendToTaskQueuesReplyContext(t *testing.T) {
 	require.Equal(t, "<msg-2@example.com>", pending[0].EmailMessageID)
 	require.Equal(t, "<root@example.com>", pending[0].EmailReferences)
 	require.Equal(t, "Follow-up", pending[0].EmailSubject)
+	require.Equal(t, "email:alice@example.com:<root@example.com>", pending[0].EmailSessionKey)
+}
+
+func TestEmailChannelSendToTaskDefaultsToReplyContextOrigin(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Email Send To Task Default Origin Project")
+	task := createTask(t, h, project.ID, "Existing Default Origin Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	params := streamingResponseParams{
+		ProjectID: project.ID,
+		TaskID:    task.ID,
+		Surface:   chatcontrol.SurfaceEmail,
+		ChannelReply: service.ChannelReplyContext{
+			Source:          models.TaskOriginEmail,
+			EmailFrom:       "alice@example.com",
+			EmailMessageID:  "<msg-default@example.com>",
+			EmailReferences: "<root@example.com>",
+			EmailSubject:    "Default origin",
+			EmailSessionKey: "email:alice@example.com:<root@example.com>",
+		},
+	}
+
+	out, err := h.executeSendToTaskTool(ctx, params, []byte(`{"task_id":"`+task.ID+`","message":"Continue from implicit email origin"}`))
+	require.NoError(t, err, out)
+	pending, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, models.TaskOriginEmail, pending[0].Source)
+	require.Equal(t, "alice@example.com", pending[0].EmailFrom)
+	require.Equal(t, "<msg-default@example.com>", pending[0].EmailMessageID)
+	require.Equal(t, "<root@example.com>", pending[0].EmailReferences)
+	require.Equal(t, "Default origin", pending[0].EmailSubject)
 	require.Equal(t, "email:alice@example.com:<root@example.com>", pending[0].EmailSessionKey)
 }
 

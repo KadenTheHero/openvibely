@@ -1028,7 +1028,7 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 			attachmentContext = fmt.Sprintf("⚠️ Attachment processing error: %v", attErr)
 		}
 	}
-	history, err := h.execRepo.ListChatHistory(ctx, input.ProjectID, chatHistoryLimit)
+	history, err := h.queuedChatHistory(ctx, input, exec.ID)
 	if err != nil {
 		applog.Infof("[handler] startQueuedChatInput exec=%s history error: %v", exec.ID, err)
 		history = []models.Execution{}
@@ -1055,12 +1055,11 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 	}
 
 	go h.processStreamingResponse(streamingResponseParams{
-		ExecID:           exec.ID,
-		TaskID:           task.ID,
-		Message:          input.Content,
-		Agent:            *agent,
-		ChatHistory:      filterChatHistory(history, exec.ID),
-		ProjectID:        input.ProjectID,
+		ExecID:      exec.ID,
+		TaskID:      task.ID,
+		Message:     input.Content,
+		Agent:       *agent,
+		ChatHistory: history, ProjectID: input.ProjectID,
 		SystemContext:    combineContexts(combineContexts(taskContext, attachmentContext), personalityContext),
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,
@@ -1068,7 +1067,17 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		ProcessMarkers:   false,
 		ChatMode:         chatMode,
 		Surface:          surfaceForThreadInput(input),
+		ChannelReply:     channelReplyFromThreadInput(input),
 	})
+}
+
+func (h *Handler) queuedChatHistory(ctx context.Context, input models.ThreadInput, currentExecID string) ([]models.Execution, error) {
+	if input.Source == models.TaskOriginEmail && strings.TrimSpace(input.EmailSessionKey) != "" {
+		history, err := h.execRepo.ListEmailChatHistory(ctx, input.ProjectID, input.EmailSessionKey, chatHistoryLimit)
+		return filterChatHistory(history, currentExecID), err
+	}
+	history, err := h.execRepo.ListChatHistory(ctx, input.ProjectID, chatHistoryLimit)
+	return filterChatHistory(history, currentExecID), err
 }
 
 func surfaceForThreadInput(input models.ThreadInput) chatcontrol.Surface {

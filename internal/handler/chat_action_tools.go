@@ -902,6 +902,9 @@ func sanitizeSendToTaskLineage(ctx context.Context, requestedOrigin, requestedOr
 		return origin, strings.TrimSpace(params.RuntimeOriginAgent)
 	}
 	origin := strings.TrimSpace(requestedOrigin)
+	if origin == "" {
+		origin = strings.TrimSpace(params.ChannelReply.Source)
+	}
 	switch origin {
 	case models.TaskOriginSlack, models.TaskOriginTelegram, models.TaskOriginEmail:
 		return origin, ""
