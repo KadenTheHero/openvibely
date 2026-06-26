@@ -64,9 +64,11 @@ type Handler struct {
 	taskPullRequestRepo        *repository.TaskPullRequestRepo
 	githubSvc                  GitHubServiceProvider
 	slackSvc                   SlackServiceProvider
+	channelMessageRouter       *service.ChannelMessageRouter
 	localRepoPathEnabled       *bool
 	projectFolderPicker        ProjectFolderPicker
 	webhookRepo                *repository.WebhookRepo
+	channelTargetRepo          *repository.ChannelTargetRepo
 	memorySvc                  *service.MemoryService
 	agentLibraryMaintenanceSvc *service.AgentLibraryMaintenanceService
 	agentSkillRoot             string
@@ -317,6 +319,14 @@ func (h *Handler) SetGitHubService(svc GitHubServiceProvider) {
 
 func (h *Handler) SetSlackService(svc SlackServiceProvider) {
 	h.slackSvc = svc
+}
+
+func (h *Handler) SetChannelMessageRouter(router *service.ChannelMessageRouter) {
+	h.channelMessageRouter = router
+}
+
+func (h *Handler) SetChannelTargetRepo(repo *repository.ChannelTargetRepo) {
+	h.channelTargetRepo = repo
 }
 
 func (h *Handler) SetLocalRepoPathEnabled(enabled bool) {
@@ -582,6 +592,11 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/channels/email/configure", h.handleEmailConfigure)
 	e.POST("/channels/email/remove", h.handleEmailRemove)
 	e.POST("/channels/email/test", h.handleEmailTest)
+	e.GET("/channels/outbound-targets", h.handleOutboundTargetsFragment)
+	e.POST("/channels/outbound-targets", h.handleOutboundTargetSave)
+	e.POST("/channels/outbound-targets/:id/test", h.handleOutboundTargetTest)
+	e.DELETE("/channels/outbound-targets/:id", h.handleOutboundTargetDelete)
+	e.POST("/channels/send-message-explicit-targets", h.handleSendMessageExplicitTargets)
 
 	// Personality
 	e.GET("/personality", h.handleAppSettings)

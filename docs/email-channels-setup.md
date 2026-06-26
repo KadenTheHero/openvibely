@@ -12,6 +12,10 @@ OpenVibely can poll a dedicated email inbox with IMAP and reply by SMTP. Email m
 
 If no authorized senders are configured, access is denied until senders are added. There is no pairing code or PIN exchange flow.
 
+## Outbound Targets
+
+The Email channel also supports prompt-initiated outbound messages from Chat through the `send_message` tool. Use `Channels` -> `Outbound Message Targets` to save recipient addresses, friendly names such as `client`, an optional home recipient, and an optional default subject. These sends reuse the Email channel's existing SMTP settings; there is no separate outbound SMTP configuration.
+
 ## Behavior
 
 OpenVibely polls unread inbox messages, ignores self-sent messages, and skips common automated/list messages. Authorized messages become Email-origin Chat turns, and task completion or failure replies are sent back to the original email thread when `Send task completion/failure replies by email` is enabled.

@@ -62,6 +62,7 @@ type TelegramService struct {
 	customPersonalityRepo    *repository.CustomPersonalityRepo
 	agentRepo                *repository.AgentRepo
 	alertSvc                 *AlertService
+	channelMessageRouter     *ChannelMessageRouter
 	taskGoalSvc              *TaskGoalService
 	llmSvc                   *LLMService
 	workerSvc                *WorkerService
@@ -190,6 +191,10 @@ func (s *TelegramService) SetAgentRepo(repo *repository.AgentRepo) {
 // SetAlertService sets the alert service for managing alerts from Telegram chat.
 func (s *TelegramService) SetAlertService(svc *AlertService) {
 	s.alertSvc = svc
+}
+
+func (s *TelegramService) SetChannelMessageRouter(router *ChannelMessageRouter) {
+	s.channelMessageRouter = router
 }
 
 // SetTaskGoalService injects the task goal service so Telegram can execute
@@ -1262,6 +1267,12 @@ func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64,
 				return "", err
 			}
 			return s.executeSendToTask(ctx, projectID, req, chatID)
+		},
+		"send_message": func(ctx context.Context, input json.RawMessage) (string, error) {
+			if s.channelMessageRouter == nil {
+				return "", fmt.Errorf("channel message router unavailable")
+			}
+			return ExecuteSendMessageTool(ctx, s.channelMessageRouter.WithAuditContext(string(chatcontrol.SurfaceTelegram), fmt.Sprintf("%d", userID)), projectID, input)
 		},
 		"set_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return s.executeChannelSetTaskGoal(ctx, projectID, input)
@@ -3423,34 +3434,96 @@ func (s *TelegramService) sendRichMessageDraft(ctx context.Context, chatID int64
 
 // sendMessage sends a message to a chat, splitting if needed.
 func (s *TelegramService) sendMessage(ctx context.Context, chatID int64, text string) {
-	if s.sendMessageFunc != nil {
+	if err := s.sendMessageToTarget(ctx, chatID, 0, text); err != nil {
+		applog.Infof("[telegram] error sending message: %v", err)
+	}
+}
+
+func (s *TelegramService) sendMessageToTarget(ctx context.Context, chatID int64, threadID int, text string) error {
+	if s.sendMessageFunc != nil && threadID == 0 {
 		s.sendMessageFunc(chatID, text)
-		return
+		return nil
 	}
 
-	if sent, err := s.sendRichMessage(ctx, chatID, text); sent {
-		return
-	} else if err != nil {
-		if isTelegramRichFallbackError(err) {
-			applog.Infof("[telegram] rich message send unavailable, falling back: %v", err)
-		} else {
-			applog.Infof("[telegram] rich message send returned ambiguous error; not sending fallback to avoid duplicate output: %v", err)
-			return
+	if threadID == 0 {
+		if sent, err := s.sendRichMessage(ctx, chatID, text); sent {
+			return nil
+		} else if err != nil {
+			if isTelegramRichFallbackError(err) {
+				applog.Infof("[telegram] rich message send unavailable, falling back: %v", err)
+			} else {
+				applog.Infof("[telegram] rich message send returned ambiguous error; not sending fallback to avoid duplicate output: %v", err)
+				return err
+			}
 		}
 	}
 
+	var firstErr error
 	messages := splitMessage(text, maxMessageLength)
 	for _, msg := range messages {
+		if threadID > 0 {
+			params := tgbotapi.Params{
+				"chat_id":           strconv.FormatInt(chatID, 10),
+				"text":              escapeTelegramMarkdownV2(msg),
+				"parse_mode":        "MarkdownV2",
+				"message_thread_id": strconv.Itoa(threadID),
+			}
+			if _, err := s.makeTelegramRequest("sendMessage", params); err != nil {
+				applog.Infof("[telegram] error sending threaded message with MarkdownV2: %v, retrying without formatting", err)
+				if firstErr == nil {
+					firstErr = err
+				}
+				plainParams := tgbotapi.Params{
+					"chat_id":           strconv.FormatInt(chatID, 10),
+					"text":              msg,
+					"message_thread_id": strconv.Itoa(threadID),
+				}
+				if _, err := s.makeTelegramRequest("sendMessage", plainParams); err != nil {
+					applog.Infof("[telegram] error sending threaded message: %v", err)
+					if firstErr == nil {
+						firstErr = err
+					}
+				}
+			}
+			continue
+		}
 		msgConfig := tgbotapi.NewMessage(chatID, escapeTelegramMarkdownV2(msg))
 		msgConfig.ParseMode = "MarkdownV2"
 		if _, err := s.sendConfig(msgConfig); err != nil {
 			applog.Infof("[telegram] error sending message with MarkdownV2: %v, retrying without formatting", err)
+			if firstErr == nil {
+				firstErr = err
+			}
 			plainConfig := tgbotapi.NewMessage(chatID, msg)
 			if _, err := s.sendConfig(plainConfig); err != nil {
 				applog.Infof("[telegram] error sending message: %v", err)
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 	}
+	return firstErr
+}
+
+func (s *TelegramService) SendOutboundMessage(ctx context.Context, chatID int64, threadID int, text string) SendMessageResult {
+	if chatID == 0 {
+		return SendMessageResult{OK: false, Platform: "telegram", Error: "telegram chat id is required"}
+	}
+	if strings.TrimSpace(text) == "" {
+		return SendMessageResult{OK: false, Platform: "telegram", Target: formatResolvedMessageTarget("telegram", fmt.Sprintf("%d", chatID), threadIDString(threadID)), Error: "message is required"}
+	}
+	if err := s.sendMessageToTarget(ctx, chatID, threadID, text); err != nil {
+		return SendMessageResult{OK: false, Platform: "telegram", Target: formatResolvedMessageTarget("telegram", fmt.Sprintf("%d", chatID), threadIDString(threadID)), Error: err.Error()}
+	}
+	return SendMessageResult{OK: true, Platform: "telegram", Target: formatResolvedMessageTarget("telegram", fmt.Sprintf("%d", chatID), threadIDString(threadID))}
+}
+
+func threadIDString(threadID int) string {
+	if threadID <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d", threadID)
 }
 
 // editMessage edits an existing Telegram message.

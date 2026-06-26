@@ -3173,3 +3173,20 @@ func TestTelegramService_GoalTools_MarkAchievedReportBlocked(t *testing.T) {
 	require.NoError(t, err, "mark_task_goal_achieved must work on Telegram when goal service is wired")
 	require.Contains(t, out, "achieved")
 }
+
+func TestTelegramService_SendOutboundMessage_AppliesThreadIDAndSplits(t *testing.T) {
+	svc := &TelegramService{}
+	var sent []tgbotapi.Params
+	svc.makeRequestFunc = func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+		require.Equal(t, "sendMessage", endpoint)
+		sent = append(sent, params)
+		return &tgbotapi.APIResponse{Ok: true}, nil
+	}
+	res := svc.SendOutboundMessage(context.Background(), -100123, 42, strings.Repeat("a", maxMessageLength+10))
+	require.True(t, res.OK)
+	require.Len(t, sent, 2)
+	for _, params := range sent {
+		require.Equal(t, "42", params["message_thread_id"])
+		require.Equal(t, "-100123", params["chat_id"])
+	}
+}

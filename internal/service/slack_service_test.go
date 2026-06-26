@@ -372,9 +372,9 @@ func TestSlackService_ProcessIncomingMessage_AuthorizationEnforced(t *testing.T)
 	}))
 
 	var responses []string
-	svc.postMessageFn = func(channelID, threadTS, text string) error {
+	svc.postMessageFn = func(channelID, threadTS, text string) (string, error) {
 		responses = append(responses, text)
-		return nil
+		return "", nil
 	}
 
 	svc.processIncomingMessage(slackIncomingMessage{
@@ -468,12 +468,12 @@ func TestSlackService_SendTaskCompletionNotification(t *testing.T) {
 	require.NoError(t, settingsRepo.Set(ctx, SlackSettingSendResponses, "true"))
 
 	called := false
-	svc.postMessageFn = func(channelID, threadTS, text string) error {
+	svc.postMessageFn = func(channelID, threadTS, text string) (string, error) {
 		called = true
 		require.Equal(t, "C1", channelID)
 		require.Equal(t, "1710000000.100000", threadTS)
 		require.True(t, strings.Contains(text, "Task completed") || strings.Contains(text, "Task failed"))
-		return nil
+		return "", nil
 	}
 
 	svc.SendTaskCompletionNotification(ctx, *task, "completed output", "")
@@ -519,9 +519,9 @@ func TestSlackService_ProcessIncomingMessage_QueuesWhenChatActive(t *testing.T) 
 	svc.setActiveProject(ctx, "T1", "U1", project.ID)
 
 	var sent []string
-	svc.postMessageFn = func(channelID, threadTS, text string) error {
+	svc.postMessageFn = func(channelID, threadTS, text string) (string, error) {
 		sent = append(sent, text)
-		return nil
+		return "", nil
 	}
 
 	svc.processIncomingMessage(slackIncomingMessage{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1", Text: "follow up from slack", Source: "slack"})
@@ -752,9 +752,9 @@ func TestSlackService_SendChatResponse_SendsChatTaskOutput(t *testing.T) {
 
 	svc := NewSlackService(settingsRepo, projectRepo, nil, taskRepo, nil, nil, nil, nil, nil, nil, slackTaskContextRepo, nil)
 	var sent []string
-	svc.postMessageFn = func(channelID, threadTS, text string) error {
+	svc.postMessageFn = func(channelID, threadTS, text string) (string, error) {
 		sent = append(sent, channelID+"|"+threadTS+"|"+text)
-		return nil
+		return "", nil
 	}
 
 	svc.SendChatResponse(ctx, *task, "hello from queued slack", "")
@@ -901,4 +901,26 @@ func TestSlackService_GoalTools_MarkAchievedReportBlocked(t *testing.T) {
 	out, err := handlers["mark_task_goal_achieved"](ctx, achievedInput)
 	require.NoError(t, err, "mark_task_goal_achieved must work on Slack when goal service is wired")
 	require.Contains(t, out, "achieved")
+}
+
+func TestSlackService_SendOutboundMessage_PostsChannelAndThread(t *testing.T) {
+	svc := NewSlackService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	var gotChannel, gotThread, gotText string
+	svc.postMessageFn = func(channelID, threadTS, text string) (string, error) {
+		gotChannel, gotThread, gotText = channelID, threadTS, text
+		return "1710000000.000001", nil
+	}
+	res := svc.SendOutboundMessage(context.Background(), "C123", "1690000000.000000", "hello")
+	require.True(t, res.OK)
+	require.Equal(t, "C123", gotChannel)
+	require.Equal(t, "1690000000.000000", gotThread)
+	require.Equal(t, "hello", gotText)
+	require.Equal(t, "1710000000.000001", res.MessageID)
+}
+
+func TestSlackService_SendOutboundMessage_MissingTokenReturnsCleanError(t *testing.T) {
+	svc := NewSlackService(repository.NewSettingsRepo(testutil.NewTestDB(t)), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	res := svc.SendOutboundMessage(context.Background(), "C123", "", "hello")
+	require.False(t, res.OK)
+	require.Contains(t, res.Error, "slack bot token is not configured")
 }

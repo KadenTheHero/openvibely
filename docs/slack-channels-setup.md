@@ -79,6 +79,10 @@ If you DM the bot or mention it and nothing happens:
 
 Important: OpenVibely's `Test` button validates bot auth/token health. It does not fully prove Socket Mode event delivery by itself.
 
+## Outbound Targets
+
+Chat can send outbound Slack messages through the `send_message` tool when you save Slack destinations in `Channels` -> `Outbound Message Targets`. Paste the Slack channel ID, optionally add a thread timestamp, and give it a friendly name such as `ops` so Chat can target `slack:#ops`. These sends reuse the configured Slack bot token and permissions.
+
 ## Task Follow-Ups
 
 Slack-created work still belongs to the normal OpenVibely task flow. If an approved user replies with clarification before the first execution has started, OpenVibely keeps that reply with the task so it can be applied as follow-up context when execution begins.

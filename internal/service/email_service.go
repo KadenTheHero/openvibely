@@ -189,6 +189,7 @@ type EmailService struct {
 	chatBroadcaster       *events.ChatBroadcaster
 	queuedTurnPromoter    func(projectID string)
 	channelChatRunner     ChannelChatRunner
+	channelMessageRouter  *ChannelMessageRouter
 
 	mu                       sync.RWMutex
 	running                  bool
@@ -254,6 +255,9 @@ func (s *EmailService) SetQueuedTurnPromoter(promoter func(projectID string)) {
 	s.queuedTurnPromoter = promoter
 }
 func (s *EmailService) SetChannelChatRunner(runner ChannelChatRunner) { s.channelChatRunner = runner }
+func (s *EmailService) SetChannelMessageRouter(router *ChannelMessageRouter) {
+	s.channelMessageRouter = router
+}
 
 func (s *EmailService) IsRunning() bool {
 	s.mu.RLock()
@@ -900,6 +904,32 @@ func (s *EmailService) sendReply(ctx context.Context, to, subject, body, inReply
 	return s.sendMail(ctx, cfg, to, replySubject(subject), body, inReplyTo, references)
 }
 
+func (s *EmailService) sendNewEmail(ctx context.Context, to, subject, body string) error {
+	cfg, err := s.loadConfig(ctx)
+	if err != nil {
+		return err
+	}
+	if !cfg.Configured() {
+		return fmt.Errorf("email channel is not fully configured")
+	}
+	return s.sendMail(ctx, cfg, to, defaultOutboundEmailSubject(subject), body, "", "")
+}
+
+func (s *EmailService) SendOutboundMessage(ctx context.Context, to, subject, body string) SendMessageResult {
+	addr, err := netmail.ParseAddress(strings.TrimSpace(to))
+	if err != nil || addr == nil || strings.TrimSpace(addr.Address) == "" {
+		return SendMessageResult{OK: false, Platform: "email", Error: "invalid email recipient"}
+	}
+	to = repository.NormalizeEmailAddress(addr.Address)
+	if strings.TrimSpace(body) == "" {
+		return SendMessageResult{OK: false, Platform: "email", Target: "email:" + to, Error: "message is required"}
+	}
+	if err := s.sendNewEmail(ctx, to, subject, body); err != nil {
+		return SendMessageResult{OK: false, Platform: "email", Target: "email:" + to, Error: err.Error()}
+	}
+	return SendMessageResult{OK: true, Platform: "email", Target: "email:" + to}
+}
+
 func buildEmailCompletionBody(taskTitle, output, errMsg string) string {
 	if errMsg != "" {
 		return fmt.Sprintf("Task failed: %s\n\n%s", taskTitle, util.Truncate(errMsg, 1000))
@@ -920,6 +950,14 @@ func buildEmailChatBody(output, errMsg string) string {
 		return "(No output)"
 	}
 	return util.Truncate(cleaned, 8000)
+}
+
+func defaultOutboundEmailSubject(subject string) string {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return "OpenVibely"
+	}
+	return subject
 }
 
 func replySubject(subject string) string {

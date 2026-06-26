@@ -93,6 +93,7 @@ type SlackService struct {
 	channelChatRunner        ChannelChatRunner
 	channelTaskRunner        ChannelTaskRunner
 	alertSvc                 *AlertService
+	channelMessageRouter     *ChannelMessageRouter
 
 	httpClient   *http.Client
 	oauthBaseURL string
@@ -104,7 +105,7 @@ type SlackService struct {
 	ctx                      context.Context
 	cancel                   context.CancelFunc
 	userProjects             map[string]string
-	postMessageFn            func(channelID, threadTS, text string) error
+	postMessageFn            func(channelID, threadTS, text string) (string, error)
 	processIncomingMessageFn func(msg slackIncomingMessage)
 }
 
@@ -177,6 +178,10 @@ func (s *SlackService) SetChannelTaskRunner(runner ChannelTaskRunner) {
 
 func (s *SlackService) SetAlertService(svc *AlertService) {
 	s.alertSvc = svc
+}
+
+func (s *SlackService) SetChannelMessageRouter(router *ChannelMessageRouter) {
+	s.channelMessageRouter = router
 }
 
 // SetTaskGoalService injects the task goal service so Slack can execute
@@ -963,6 +968,12 @@ func (s *SlackService) slackActionHandlers(projectID string, markerCtx slackMark
 		},
 		"send_to_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return s.slackSendToTask(ctx, projectID, input, markerCtx), nil
+		},
+		"send_message": func(ctx context.Context, input json.RawMessage) (string, error) {
+			if s.channelMessageRouter == nil {
+				return "", fmt.Errorf("channel message router unavailable")
+			}
+			return ExecuteSendMessageTool(ctx, s.channelMessageRouter.WithAuditContext(string(chatcontrol.SurfaceSlack), markerCtx.UserID), projectID, input)
 		},
 		"set_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return s.executeChannelSetTaskGoal(ctx, projectID, input)
@@ -2233,8 +2244,13 @@ func filterSlackChatHistory(executions []models.Execution, currentExecID string)
 }
 
 func (s *SlackService) sendSlackMessage(channelID, threadTS, text string) error {
+	_, err := s.postSlackMessage(channelID, threadTS, text)
+	return err
+}
+
+func (s *SlackService) postSlackMessage(channelID, threadTS, text string) (string, error) {
 	if strings.TrimSpace(channelID) == "" || strings.TrimSpace(text) == "" {
-		return nil
+		return "", nil
 	}
 	if s.postMessageFn != nil {
 		return s.postMessageFn(channelID, threadTS, text)
@@ -2246,7 +2262,7 @@ func (s *SlackService) sendSlackMessage(channelID, threadTS, text string) error 
 	if client == nil {
 		botToken := strings.TrimSpace(s.resolveBotToken(context.Background()))
 		if botToken == "" {
-			return fmt.Errorf("slack bot token is not configured")
+			return "", fmt.Errorf("slack bot token is not configured")
 		}
 		client = slack.New(botToken)
 	}
@@ -2255,14 +2271,29 @@ func (s *SlackService) sendSlackMessage(channelID, threadTS, text string) error 
 	if strings.TrimSpace(threadTS) != "" {
 		params.ThreadTimestamp = threadTS
 	}
-	_, _, err := client.PostMessage(channelID,
+	_, ts, err := client.PostMessage(channelID,
 		slack.MsgOptionPostMessageParameters(params),
 		slack.MsgOptionText(text, false),
 	)
 	if err != nil {
-		return fmt.Errorf("post slack message: %w", err)
+		return "", fmt.Errorf("post slack message: %w", err)
 	}
-	return nil
+	return ts, nil
+}
+
+func (s *SlackService) SendOutboundMessage(ctx context.Context, channelID, threadTS, text string) SendMessageResult {
+	_ = ctx
+	if strings.TrimSpace(channelID) == "" {
+		return SendMessageResult{OK: false, Platform: "slack", Error: "slack channel id is required"}
+	}
+	if strings.TrimSpace(text) == "" {
+		return SendMessageResult{OK: false, Platform: "slack", Target: formatResolvedMessageTarget("slack", channelID, threadTS), Error: "message is required"}
+	}
+	messageID, err := s.postSlackMessage(channelID, threadTS, text)
+	if err != nil {
+		return SendMessageResult{OK: false, Platform: "slack", Target: formatResolvedMessageTarget("slack", channelID, threadTS), Error: err.Error()}
+	}
+	return SendMessageResult{OK: true, Platform: "slack", Target: formatResolvedMessageTarget("slack", channelID, threadTS), MessageID: messageID}
 }
 
 func generateOAuthState() (string, error) {

@@ -22,6 +22,7 @@ Chat embeds clickable task links inline as it creates work, so you can jump to a
 - Send follow-up instructions into individual task threads
 - Inspect task state, changes, agent output, and lifecycle events
 - Schedule work, manage alerts, and coordinate across the whole project
+- Send outbound messages through saved Slack, Telegram, or Email channel targets
 - Accept steering or queue new prompts while a response is already in progress
 
 ## How Chat Writes Task Prompts
@@ -79,6 +80,20 @@ In `Orchestrate` mode, Chat creates multiple task cards and can execute them imm
 - Chat history keeps the original goal, plan, and follow-up decisions together in one place.
 - Task links produced by Chat open the relevant task detail without leaving the project workflow.
 - Running chat turns can accept steering or queue follow-up prompts instead of forcing a new session.
+
+## Sending Messages Through Channels
+
+In `Orchestrate` mode, Chat can use the `send_message` tool to send text through configured Slack, Telegram, or Email channels. Configure allowed destinations in `Channels` under `Outbound Message Targets` before asking Chat to send.
+
+Examples:
+
+```text
+Email alice@example.com saying the deploy finished cleanly.
+Send "standup moved to 10" to slack:#ops.
+Message telegram:#alerts that the backup completed.
+```
+
+By default, Chat may send only to saved outbound targets or each platform's saved home target. If you enable `Allow explicit unsaved targets`, Chat may send to direct platform IDs such as `slack:C123`, `telegram:-100123`, or `email:person@example.com` when the channel itself is configured. If the destination is ambiguous, Chat should list available targets first.
 
 ## Chat History
 

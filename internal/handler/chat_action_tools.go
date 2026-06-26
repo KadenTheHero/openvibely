@@ -221,6 +221,12 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"send_to_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeSendToTaskTool(ctx, params, input)
 		},
+		"send_message": func(ctx context.Context, input json.RawMessage) (string, error) {
+			if h.channelMessageRouter == nil {
+				return "", fmt.Errorf("channel message router unavailable")
+			}
+			return service.ExecuteSendMessageTool(ctx, h.channelMessageRouter.WithAuditContext(string(surface), params.RuntimeOriginAgent), params.ProjectID, input)
+		},
 		"set_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeSetTaskGoalTool(ctx, params, input)
 		},

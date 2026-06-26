@@ -211,6 +211,17 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		slackHasClientID || slackHasClientSecret || slackHasAppToken || slackHasBotToken || slackHasOAuthBotToken
 	hasEmailChannel := emailStatus.Configured || emailStatus.Running || strings.TrimSpace(emailStatus.Address) != "" || strings.TrimSpace(emailStatus.IMAPHost) != "" || strings.TrimSpace(emailStatus.SMTPHost) != "" || emailHasPassword
 
+	var channelTargets []models.ChannelTarget
+	sendMessageExplicitTargets := false
+	if resolvedProjectID != "" && h.channelTargetRepo != nil {
+		channelTargets, _ = h.channelTargetRepo.ListByProject(c.Request().Context(), resolvedProjectID)
+	}
+	if resolvedProjectID != "" && h.settingsRepo != nil {
+		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.SendMessageAllowExplicitTargetsSetting+":"+resolvedProjectID); strings.TrimSpace(val) != "" {
+			sendMessageExplicitTargets = strings.EqualFold(strings.TrimSpace(val), "true")
+		}
+	}
+
 	// Load webhooks for current project
 	var webhooks []models.WebhookEndpoint
 	if resolvedProjectID != "" && h.webhookRepo != nil {
@@ -235,9 +246,9 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	}
 
 	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, resolvedProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents))
+		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, resolvedProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))
 	}
-	return render(c, http.StatusOK, pages.SettingsPage(token, isBotRunning, projects, resolvedProjectID, authorizedUsers, slackAuthorizedUsers, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents))
+	return render(c, http.StatusOK, pages.SettingsPage(token, isBotRunning, projects, resolvedProjectID, authorizedUsers, slackAuthorizedUsers, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))
 }
 
 // handleAppSettings renders the application settings page (personality, etc.)
@@ -317,6 +328,10 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 		svc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 		svc.SetChannelChatRunner(h.StartChannelChatRun)
 		svc.SetChannelTaskRunner(h.StartChannelTaskRun)
+		if h.channelMessageRouter != nil {
+			svc.SetChannelMessageRouter(h.channelMessageRouter)
+			h.channelMessageRouter.SetTelegramService(svc)
+		}
 		svc.Start()
 		h.telegramService = svc
 	}

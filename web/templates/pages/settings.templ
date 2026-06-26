@@ -106,18 +106,18 @@ func agentsJSON(agents []models.Agent) string {
 	return string(b)
 }
 
-templ SettingsPage(telegramToken string, isBotRunning bool, projects []models.Project, currentProjectID string, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent) {
+templ SettingsPage(telegramToken string, isBotRunning bool, projects []models.Project, currentProjectID string, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) {
 	@layout.Base("Channels", projects, currentProjectID) {
-		@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents)
+		@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets)
 	}
 }
 
 // SettingsContent renders just the settings content for HTMX requests
-templ SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent) {
-	@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents)
+templ SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) {
+	@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets)
 }
 
-templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent) {
+templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) {
 	<div id="channels-container" data-search-container>
 		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Channels</h2>
@@ -538,7 +538,9 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					</div>
 				}		</div>
 
-		<!-- Coming Soon Section -->
+			@OutboundTargetsSection(currentProjectID, channelTargets, sendMessageExplicitTargets, "")
+
+			<!-- Coming Soon Section -->
 		<div class="mb-8">
 			<h3 class="text-lg font-semibold mb-4 opacity-70">Coming Soon</h3>
 			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1695,5 +1697,88 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						setEmailProviderPreset(emailProviderSelect.value, true);
 					}
 				}, 0);		</script>
+	</div>
+}
+
+templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool, notice string) {
+	<div id="outbound-targets-section" class="card bg-base-100 shadow-sm border border-base-300 mb-8" data-search-card data-search-text="Outbound message targets send_message Slack Telegram Email">
+		<div class="card-body">
+			<div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+				<div>
+					<h3 class="card-title">Outbound Message Targets</h3>
+					<p class="text-sm opacity-70">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, or `email:#client`.</p>
+				</div>
+				<form method="post" hx-post="/channels/send-message-explicit-targets" hx-target="#outbound-targets-section" hx-swap="outerHTML" class="form-control" onclick="event.stopPropagation()">
+					<input type="hidden" name="project_id" value={ currentProjectID }/>
+					<label class="label cursor-pointer gap-3 justify-start">
+						<span class="label-text text-sm">Allow explicit unsaved targets</span>
+						<input type="checkbox" name="enabled" value="true" class="toggle toggle-sm" if explicitAllowed { checked } onchange="this.form.requestSubmit()"/>
+					</label>
+				</form>
+			</div>
+			if notice != "" {
+				<div class="alert alert-success py-2 text-sm mt-3">{ notice }</div>
+			}
+			<form method="post" hx-post="/channels/outbound-targets" hx-target="#outbound-targets-section" hx-swap="outerHTML" class="grid gap-3 md:grid-cols-6 mt-4" onclick="event.stopPropagation()">
+				<input type="hidden" name="project_id" value={ currentProjectID }/>
+				<select name="platform" class="select select-bordered select-sm" required>
+					<option value="slack">Slack</option>
+					<option value="telegram">Telegram</option>
+					<option value="email">Email</option>
+				</select>
+				<input name="name" class="input input-bordered input-sm" placeholder="name, e.g. ops"/>
+				<input name="target_id" class="input input-bordered input-sm md:col-span-2" placeholder="channel/chat ID or email" required/>
+				<input name="thread_id" class="input input-bordered input-sm" placeholder="thread/topic ID"/>
+				<label class="label cursor-pointer justify-start gap-2 py-0">
+					<input type="checkbox" name="is_home" value="true" class="checkbox checkbox-sm"/>
+					<span class="label-text text-sm">Home</span>
+				</label>
+				<input name="default_subject" class="input input-bordered input-sm md:col-span-5" placeholder="default email subject (optional)"/>
+				<button type="submit" class="btn btn-primary btn-sm">Save Target</button>
+			</form>
+			<div class="overflow-x-auto mt-4">
+				<table class="table table-sm">
+					<thead>
+						<tr>
+							<th>Platform</th>
+							<th>Name</th>
+							<th>Target</th>
+							<th>Thread/Topic</th>
+							<th>Home</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						if len(targets) == 0 {
+							<tr><td colspan="6" class="opacity-60">No outbound targets saved yet.</td></tr>
+						}
+						for _, target := range targets {
+							<tr>
+								<td>{ target.Platform }</td>
+									<td>
+										if target.Name != "" {
+											<span>#{ target.Name }</span>
+										} else {
+											<span class="opacity-50">unnamed</span>
+										}
+									</td>
+								<td class="font-mono text-xs break-all">{ target.TargetID }</td>
+								<td class="font-mono text-xs">{ target.ThreadID }</td>
+									<td>
+										if target.Home {
+											<span class="badge badge-sm badge-primary">Home</span>
+										}
+									</td>
+								<td class="text-right">
+									<div id={ "outbound-target-test-" + target.ID } class="mb-1"></div>
+									<button type="button" class="btn btn-xs" hx-post={ "/channels/outbound-targets/" + target.ID + "/test" } hx-target={ "#outbound-target-test-" + target.ID } hx-swap="innerHTML">Test</button>
+									<button type="button" class="btn btn-xs btn-error" hx-delete={ "/channels/outbound-targets/" + target.ID + "?project_id=" + currentProjectID } hx-target="#outbound-targets-section" hx-swap="outerHTML">Delete</button>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		</div>
 	</div>
 }

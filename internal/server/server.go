@@ -440,6 +440,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackAuthRepo := repository.NewSlackAuthRepo(db)
 	emailAuthRepo := repository.NewEmailAuthRepo(db)
 	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	channelTargetRepo := repository.NewChannelTargetRepo(db)
 
 	// Custom personalities
 	customPersonalityRepo := repository.NewCustomPersonalityRepo(db)
@@ -497,6 +498,11 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 	slackSvc.SetAgentRepo(agentRepo)
 	emailSvc := service.NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	channelMessageRouter := service.NewChannelMessageRouter(channelTargetRepo, settingsRepo)
+	channelMessageRouter.SetSlackService(slackSvc)
+	channelMessageRouter.SetEmailService(emailSvc)
+	slackSvc.SetChannelMessageRouter(channelMessageRouter)
+	emailSvc.SetChannelMessageRouter(channelMessageRouter)
 	emailSvc.SetCustomPersonalityRepo(customPersonalityRepo)
 	emailSvc.SetChatBroadcaster(chatBroadcaster)
 	emailSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
@@ -632,6 +638,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 			telegramSvc.SetAlertService(alertSvc)
 			telegramSvc.SetTaskGoalService(taskGoalSvc)
 			telegramSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+			telegramSvc.SetChannelMessageRouter(channelMessageRouter)
+			channelMessageRouter.SetTelegramService(telegramSvc)
 			applog.Infof("telegram bot initialized")
 		}
 	} else {
@@ -748,6 +756,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetTaskPullRequestRepo(taskPullRequestRepo)
 	h.SetGitHubService(githubSvc)
 	h.SetSlackService(slackSvc)
+	h.SetChannelMessageRouter(channelMessageRouter)
+	h.SetChannelTargetRepo(channelTargetRepo)
 	slackSvc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
 	slackSvc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 	slackSvc.SetChannelChatRunner(h.StartChannelChatRun)
@@ -755,6 +765,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	emailSvc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
 	emailSvc.SetChannelChatRunner(h.StartChannelChatRun)
 	if telegramSvc != nil {
+		telegramSvc.SetChannelMessageRouter(channelMessageRouter)
+		channelMessageRouter.SetTelegramService(telegramSvc)
 		telegramSvc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
 		telegramSvc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 		telegramSvc.SetChannelChatRunner(h.StartChannelChatRun)

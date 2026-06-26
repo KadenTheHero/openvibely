@@ -51,7 +51,7 @@ func TestRegistry_AllActionsHaveDomain(t *testing.T) {
 	validDomains := map[Domain]bool{
 		DomainTasks: true, DomainSchedules: true, DomainAlerts: true,
 		DomainPersonality: true, DomainModels: true, DomainAgents: true,
-		DomainProjects: true, DomainSettings: true, DomainMemory: true, DomainChat: true,
+		DomainProjects: true, DomainSettings: true, DomainMessaging: true, DomainMemory: true, DomainChat: true,
 	}
 	for _, a := range Registry() {
 		if !validDomains[a.Domain] {
@@ -117,7 +117,7 @@ func TestToolDefsForContext_OrchestrateWeb(t *testing.T) {
 	names := toolDefNames(defs)
 
 	// Must have core write actions
-	mustContain(t, names, "create_task", "edit_task", "execute_tasks", "send_to_task")
+	mustContain(t, names, "create_task", "edit_task", "execute_tasks", "send_to_task", "send_message")
 	// Must have new actions
 	mustContain(t, names, "switch_project", "get_chat_mode", "set_chat_mode", "list_capabilities")
 	// Must have new read actions
@@ -144,7 +144,7 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 	mustNotContain(t, names, "create_task", "edit_task", "execute_tasks",
 		"set_personality", "schedule_task", "delete_schedule", "modify_schedule",
 		"create_alert", "delete_alert", "toggle_alert", "switch_project",
-		"set_chat_mode", "send_to_task")
+		"set_chat_mode", "send_to_task", "send_message")
 
 	// Must have read actions
 	mustContain(t, names, "list_projects", "list_models", "list_alerts",
@@ -156,14 +156,14 @@ func TestToolDefsForContext_Telegram(t *testing.T) {
 	defs := ToolDefsForContext(models.ChatModeOrchestrate, SurfaceTelegram, true)
 	names := toolDefNames(defs)
 	mustContain(t, names, "create_task", "switch_project", "list_projects",
-		"view_task_thread", "send_to_task", "get_chat_mode", "list_capabilities")
+		"view_task_thread", "send_to_task", "send_message", "get_chat_mode", "list_capabilities")
 }
 
 func TestToolDefsForContext_Slack(t *testing.T) {
 	defs := ToolDefsForContext(models.ChatModeOrchestrate, SurfaceSlack, false)
 	names := toolDefNames(defs)
 	mustContain(t, names, "create_task", "switch_project", "list_projects",
-		"get_chat_mode", "list_capabilities")
+		"send_message", "get_chat_mode", "list_capabilities")
 	// Slack without thread tools
 	mustNotContain(t, names, "view_task_thread", "send_to_task")
 }
@@ -171,7 +171,7 @@ func TestToolDefsForContext_Slack(t *testing.T) {
 func TestToolDefsForContext_API(t *testing.T) {
 	defs := ToolDefsForContext(models.ChatModeOrchestrate, SurfaceAPI, true)
 	names := toolDefNames(defs)
-	mustContain(t, names, "create_task", "switch_project", "get_chat_mode", "set_chat_mode")
+	mustContain(t, names, "create_task", "switch_project", "send_message", "get_chat_mode", "set_chat_mode")
 }
 
 // ---- IsAllowed tests ----
@@ -274,7 +274,7 @@ func TestRegistry_CoversCoreActions(t *testing.T) {
 		// new actions
 		"get_chat_mode", "set_chat_mode", "list_capabilities",
 		"get_alert", "get_model", "get_personality", "get_current_project",
-		"memory_view",
+		"memory_view", "send_message",
 	}
 	names := map[string]bool{}
 	for _, a := range Registry() {

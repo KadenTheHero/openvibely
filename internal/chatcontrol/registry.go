@@ -24,6 +24,7 @@
 //   - settings: view_settings
 //   - memory: memory_view (only when selected-memory runtime tools authorize a handle)
 //   - chat: get_chat_mode, list_capabilities
+//   - messaging: send_message
 //
 // NOT chat-controllable (excluded by design):
 //   - OAuth callbacks, credential/token entry endpoints (security boundary)
@@ -86,6 +87,7 @@ const (
 	DomainAgents      Domain = "agents"
 	DomainProjects    Domain = "projects"
 	DomainSettings    Domain = "settings"
+	DomainMessaging   Domain = "messaging"
 	DomainMemory      Domain = "memory"
 	DomainChat        Domain = "chat"
 )
@@ -130,6 +132,8 @@ const createTaskParams = `{"type":"object","properties":{"title":{"type":"string
 
 // editTaskParams is the full JSON Schema for the edit_task tool.
 const editTaskParams = `{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog","scheduled"]},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string"},"agent_id":{"type":"string"},"agent_config_id":{"type":"string"},"chain":` + chainSchemaProperties + `,"attachments":{"type":"array","items":{"type":"string"}}},"required":["id"],"additionalProperties":false}`
+
+const sendMessageParams = `{"type":"object","properties":{"action":{"type":"string","enum":["send","list"],"description":"send delivers a message. list returns configured outbound targets."},"target":{"type":"string","description":"Delivery target. Format: platform, platform:target_id, platform:#target-name, or platform:target_id:thread_id."},"message":{"type":"string","description":"Text to send."},"subject":{"type":"string","description":"Optional subject for email targets. Ignored by chat platforms."}},"additionalProperties":false}`
 
 // registry is the canonical list of all chat-controllable actions.
 // Order matters for prompt/documentation consistency.
@@ -266,6 +270,18 @@ var registry = []ActionDef{
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: true,
 		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"goal_id":{"type":"string"},"blocker_key":{"type":"string"},"reason":{"type":"string"}},"required":["task_id","goal_id","blocker_key","reason"],"additionalProperties":false}`),
+	},
+
+	// --- Messaging domain (RW in orchestrate) ---
+	{
+		Name:         "send_message",
+		Description:  "Send a message to a configured channel target, or list available outbound targets. If the user names a destination and the exact target is unclear, call send_message with action=list before sending.",
+		Domain:       DomainMessaging,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(sendMessageParams),
 	},
 	// --- Schedules domain (RW in orchestrate) ---
 	{

@@ -149,3 +149,36 @@ func TestEmailService_SendTaskCompletionPreservesThreading(t *testing.T) {
 	assert.Equal(t, "<m@example.com>", gotInReplyTo)
 	assert.Equal(t, "<root@example.com> <m@example.com>", gotRefs)
 }
+
+func TestEmailService_SendOutboundMessage_NewEmailUsesSMTPWithoutReplyHeaders(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	for k, v := range map[string]string{EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret", EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com"} {
+		require.NoError(t, settingsRepo.Set(ctx, k, v))
+	}
+	svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	var gotTo, gotSubject, gotBody, gotInReplyTo, gotRefs string
+	svc.sendMail = func(_ context.Context, _ EmailRuntimeConfig, to, subject, body, inReplyTo, references string) error {
+		gotTo, gotSubject, gotBody, gotInReplyTo, gotRefs = to, subject, body, inReplyTo, references
+		return nil
+	}
+	res := svc.SendOutboundMessage(ctx, "Person <Person@Example.com>", "", "hello")
+	require.True(t, res.OK)
+	require.Equal(t, "person@example.com", gotTo)
+	require.Equal(t, "OpenVibely", gotSubject)
+	require.Equal(t, "hello", gotBody)
+	require.Empty(t, gotInReplyTo)
+	require.Empty(t, gotRefs)
+}
+
+func TestEmailService_SendOutboundMessage_ValidationAndMissingConfig(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	svc := NewEmailService(repository.NewSettingsRepo(db), repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	invalid := svc.SendOutboundMessage(context.Background(), "not-an-email", "Subject", "body")
+	require.False(t, invalid.OK)
+	require.Contains(t, invalid.Error, "invalid email recipient")
+	missing := svc.SendOutboundMessage(context.Background(), "person@example.com", "Subject", "body")
+	require.False(t, missing.OK)
+	require.Contains(t, missing.Error, "email channel is not fully configured")
+}

@@ -69,6 +69,10 @@ Optional slash commands shown in UI:
 - `/projects`
 - `/switch <project_id>`
 
+## Outbound Targets
+
+Chat can send outbound Telegram messages through the `send_message` tool when you save Telegram destinations in `Channels` -> `Outbound Message Targets`. Save the chat ID, optionally add a topic/thread ID, and give it a friendly name such as `alerts` so Chat can target `telegram:#alerts`. These sends reuse the configured Telegram bot.
+
 ## Task Follow-Ups
 
 Telegram-created work still belongs to the normal OpenVibely task flow. If an authorized user replies with clarification before the first execution has started, OpenVibely keeps that reply with the task so it can be applied as follow-up context when execution begins.
