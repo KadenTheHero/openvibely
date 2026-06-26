@@ -75,6 +75,18 @@ type streamingResponseParams struct {
 	InputOrigin        string
 	InputOriginAgent   string
 
+	// DeferHistoryLoad signals processStreamingResponse to load ChatHistory,
+	// SystemContext, and WorkDir lazily after acquiring worker slots. Set by
+	// TaskThreadSend so the HTTP handler can return immediately without blocking
+	// on a full execution-history scan when a task has many prior executions.
+	DeferHistoryLoad bool
+	// AttachmentContext is the pre-computed attachment description text to inject
+	// into the system context when DeferHistoryLoad is true.
+	AttachmentContext string
+	// Task is the task record supplied for deferred context loading when
+	// DeferHistoryLoad is true.
+	Task *models.Task
+
 	steeringHistoryStarted bool
 	steeringOutputCursor   string
 }
@@ -297,6 +309,33 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		params.ProcessMarkers = true
 		applog.Infof("[handler] processStreamingResponse exec=%s no runtime tools (provider=%s auth=%s followup=%v); enabling marker processing fallback",
 			params.ExecID, params.Agent.Provider, params.Agent.AuthMethod, params.IsTaskFollowup)
+	}
+
+	// Lazy-load chat history, system context, and work dir for task-thread
+	// follow-ups that set DeferHistoryLoad. TaskThreadSend sets this flag so
+	// the HTTP handler can return immediately without blocking on a full
+	// execution-history scan; the expensive DB/FS work runs here, after worker
+	// slots are acquired and lifecycle hooks have run.
+	if params.DeferHistoryLoad && params.IsTaskFollowup && params.Task != nil {
+		priorExecs, _ := h.execRepo.ListByTaskChronological(ctx, params.TaskID)
+		params.ChatHistory = filterChatHistory(priorExecs, params.ExecID)
+		agentDefForSys := params.AgentDefinition // already resolved above
+		sysCtx := combineContexts(
+			buildThreadSystemContext(params.Task.Title, len(params.ChatHistory) > 0, params.AttachmentContext),
+			h.taskGoalContext(ctx, params.Task.ID, agentDefForSys),
+		)
+		personalityCtx := h.getPersonalityContext(ctx, params.ProjectID)
+		workDir, worktreeCtx, workDirErr := h.resolveWorktreeWorkDir(ctx, params.Task)
+		if workDirErr != nil {
+			applog.Infof("[handler] processStreamingResponse exec=%s deferred worktree error: %v", params.ExecID, workDirErr)
+			h.completeWithFailure(ctx, params.ExecID, params.TaskID, workDirErr.Error(), 0)
+			if lifecycleAfter != nil {
+				lifecycleAfter(workDirErr, llmcontracts.ChatContext{})
+			}
+			return
+		}
+		params.SystemContext = combineContexts(combineContexts(sysCtx, worktreeCtx), personalityCtx)
+		params.WorkDir = workDir
 	}
 
 	applog.Infof("[handler] processStreamingResponse exec=%s task=%s agent=%s model=%s followup=%v markers=%v history=%d",

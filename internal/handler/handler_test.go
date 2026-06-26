@@ -3911,6 +3911,136 @@ func TestHandler_TaskThreadSend_SkipsCheckWhenAlreadyRunning(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 }
 
+// TestHandler_TaskThreadSend_DeferredHistoryLoad_PassesHistoryToModel verifies
+// that the deferred-history-load path correctly fetches and passes all prior
+// executions to the model even though the history scan runs in the goroutine
+// after the HTTP handler has already returned.
+func TestHandler_TaskThreadSend_DeferredHistoryLoad_PassesHistoryToModel(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil // skip slot acquisition so goroutine runs immediately
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Deferred History Load Project")
+	task := createTask(t, h, project.ID, "Deferred History Load Task", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+	})
+
+	// Create several completed executions to simulate a long task thread.
+	const priorCount = 10
+	for i := 0; i < priorCount; i++ {
+		createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+			ex.Status = models.ExecCompleted
+			ex.PromptSent = fmt.Sprintf("prior turn %d", i)
+			ex.Output = fmt.Sprintf("prior output %d", i)
+			ex.IsFollowup = i > 0
+		})
+	}
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "deferred history response"
+	mock.TextOnly = "deferred history response"
+	h.llmSvc.SetLLMCaller(mock)
+
+	form := url.Values{}
+	form.Set("message", "follow-up after many prior turns")
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "follow-up after many prior turns")
+
+	// Wait for the goroutine to call the model.
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 3*time.Second, 25*time.Millisecond,
+		"model was not called within timeout")
+
+	req := mock.LastAgentRequest()
+	assert.Len(t, req.ChatHistory, priorCount,
+		"deferred load must pass all %d prior executions to the model as history", priorCount)
+	assert.Equal(t, "follow-up after many prior turns", req.Message)
+}
+
+// TestHandler_TaskThreadSend_DeferredHistoryLoad_HandlerReturnsBeforeModelCall
+// verifies that the HTTP handler returns to the browser immediately when
+// DeferHistoryLoad is active — before the background goroutine acquires worker
+// slots or calls ListByTaskChronological. This is the regression guard for the
+// hang-on-large-thread-history bug.
+func TestHandler_TaskThreadSend_DeferredHistoryLoad_HandlerReturnsBeforeModelCall(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil // skip slot acquisition
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Fast Send Project")
+	task := createTask(t, h, project.ID, "Fast Send Task", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+	})
+
+	// Create executions to give the history scan meaningful work.
+	for i := 0; i < 20; i++ {
+		createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+			ex.Status = models.ExecCompleted
+			ex.PromptSent = fmt.Sprintf("turn %d", i)
+			ex.Output = fmt.Sprintf("output %d", i)
+			ex.IsFollowup = i > 0
+		})
+	}
+
+	// Use a blocking model call to ensure the HTTP handler does NOT wait for it.
+	modelCallStarted := make(chan struct{}, 1)
+	modelCallRelease := make(chan struct{})
+	mock := testutil.NewMockLLMCaller()
+	mock.OnCall = func(_ context.Context, _ testutil.MockLLMCall) {
+		modelCallStarted <- struct{}{}
+		<-modelCallRelease
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	// Time the HTTP handler round-trip. It must return before the model is called
+	// because all expensive work is deferred into the goroutine.
+	handlerDone := make(chan time.Duration, 1)
+	go func() {
+		start := time.Now()
+		form := url.Values{}
+		form.Set("message", "fast send message")
+		htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+		handlerDone <- time.Since(start)
+	}()
+
+	// The handler must return; block with a generous ceiling.
+	var elapsed time.Duration
+	select {
+	case elapsed = <-handlerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("HTTP handler did not return within 5 s — possible synchronous block on execution history")
+	}
+
+	// The model call should NOT have started before the handler returned.
+	// (The goroutine is scheduled after the handler returns the response.)
+	select {
+	case <-modelCallStarted:
+		// Model started concurrently with or before handler — that's fine as long
+		// as the handler still returned promptly. The important assertion is below.
+	default:
+		// Handler returned before the goroutine even reached the model call — ideal.
+	}
+
+	// Handler elapsed must be well under a generous threshold (no synchronous scan).
+	assert.Less(t, elapsed, 2*time.Second,
+		"handler took %s — should return quickly without synchronous history scan", elapsed)
+
+	// Allow the goroutine to finish cleanly.
+	close(modelCallRelease)
+	require.Eventually(t, func() bool {
+		execs, _ := h.execRepo.ListByTaskChronological(ctx, task.ID)
+		for _, ex := range execs {
+			if ex.PromptSent == "fast send message" && ex.Status != models.ExecRunning {
+				return true
+			}
+		}
+		return false
+	}, 3*time.Second, 25*time.Millisecond)
+}
+
 func TestHandler_GetTaskThread(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

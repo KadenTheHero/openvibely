@@ -1906,26 +1906,10 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	h.resumeUserStoppedGoalForManualStart(c.Request().Context(), taskID, models.TaskOriginWeb, "")
 	h.reactivateAchievedGoalForManualFollowup(c.Request().Context(), taskID, models.TaskOriginWeb, "")
 
-	// Load conversation history and build system context
-	priorExecs, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
-	priorHistory := filterChatHistory(priorExecs, exec.ID)
-	var agentDef *models.Agent
-	if task.AgentDefinitionID != nil && h.agentRepo != nil {
-		if ad, adErr := h.agentRepo.GetByID(c.Request().Context(), *task.AgentDefinitionID); adErr == nil && ad != nil {
-			agentDef = ad
-		}
-	}
-	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, attachmentContext), h.taskGoalContext(c.Request().Context(), task.ID, agentDef))
-	personalityContext := h.getPersonalityContext(c.Request().Context(), task.ProjectID)
-	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(c.Request().Context(), task)
-	if workDirErr != nil {
-		h.completeWithFailure(c.Request().Context(), exec.ID, taskID, workDirErr.Error(), 0)
-		setHTMXToast(c, workDirErr.Error(), "failed")
-		return render(c, http.StatusOK, components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments))
-	}
-	// Set status only after active-turn checks, execution creation, attachments,
-	// and worktree setup have succeeded. This avoids leaving a task queued/active
-	// without a corresponding execution when setup fails.
+	// Set task status/category now that execution creation and attachment
+	// processing have succeeded. Worktree resolution and full execution-history
+	// loading are deferred into the goroutine (DeferHistoryLoad) so this handler
+	// can return to the browser immediately regardless of execution count.
 	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
 		applog.Infof("[handler] TaskThreadSend setting task=%s status=queued (was %s)", taskID, task.Status)
 		if err := h.taskRepo.UpdateStatus(c.Request().Context(), taskID, models.StatusQueued); err != nil {
@@ -1941,21 +1925,24 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		}
 	}
 
-	// Spawn LLM processing goroutine (acquires per-model worker slot in processStreamingResponse)
+	// Spawn LLM processing goroutine (acquires per-model worker slot in processStreamingResponse).
+	// DeferHistoryLoad=true moves the full ListByTaskChronological scan, agent-definition
+	// loading, system/goal/personality context building, and worktree resolution out of the
+	// HTTP handler and into the background goroutine, eliminating the per-execution O(N) block
+	// that caused visible UI hangs on tasks with many prior executions.
 	go h.processStreamingResponse(streamingResponseParams{
 		ExecID:           exec.ID,
 		TaskID:           taskID,
 		Message:          message,
 		Agent:            *agent,
-		AgentDefinition:  agentDef,
-		ChatHistory:      priorHistory,
 		ProjectID:        task.ProjectID,
-		SystemContext:    combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
-		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   true,
 		ProcessMarkers:   false,
 		InputOrigin:      models.TaskOriginWeb,
+		DeferHistoryLoad: true,
+		AttachmentContext: attachmentContext,
+		Task:             task,
 	})
 
 	return render(c, http.StatusOK, templ.Join(
