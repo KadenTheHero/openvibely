@@ -965,9 +965,18 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						}
 						<div class="divider"></div>
 						<div class="space-y-2 mb-4">
-							<label class="label cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox checkbox-primary" name="email_send_responses" value="true" if emailSendResponses { checked }/><span class="label-text">Send task completion/failure replies by email</span></label>
-							<label class="label cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox checkbox-primary" name="email_skip_attachments" value="true" if emailSkipAttachments { checked }/><span class="label-text">Skip incoming attachments</span></label>
-							<label class="label cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox checkbox-primary" name="email_mark_existing_seen_on_start" value="true" if emailMarkExistingSeenOnStart { checked }/><span class="label-text">Mark existing unread messages seen on start</span></label>
+							<label class="label cursor-pointer justify-start gap-3">
+								<input type="checkbox" class="toggle toggle-primary" name="email_send_responses" value="true" if emailSendResponses { checked }/>
+								<span class="label-text">Send task completion/failure replies by email</span>
+							</label>
+							<label class="label cursor-pointer justify-start gap-3">
+								<input type="checkbox" class="toggle toggle-primary" name="email_skip_attachments" value="true" if emailSkipAttachments { checked }/>
+								<span class="label-text">Skip incoming attachments</span>
+							</label>
+							<label class="label cursor-pointer justify-start gap-3">
+								<input type="checkbox" class="toggle toggle-primary" name="email_mark_existing_seen_on_start" value="true" if emailMarkExistingSeenOnStart { checked }/>
+								<span class="label-text">Mark existing unread messages seen on start</span>
+							</label>
 						</div>
 						<div class="modal-action">
 							<button type="button" class="btn" onclick="closeEmailConfigModal()">Cancel</button>

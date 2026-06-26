@@ -168,6 +168,14 @@ func TestChannelsPageEmailUI(t *testing.T) {
 			t.Fatalf("expected email UI to contain %q", want)
 		}
 	}
+	for _, name := range []string{"email_send_responses", "email_skip_attachments", "email_mark_existing_seen_on_start"} {
+		if !strings.Contains(body, `class="toggle toggle-primary" name="`+name+`"`) {
+			t.Fatalf("expected %s to use toggle styling", name)
+		}
+		if strings.Contains(body, `class="checkbox checkbox-primary" name="`+name+`"`) {
+			t.Fatalf("expected %s not to use checkbox styling", name)
+		}
+	}
 	if !strings.Contains(body, "super-secret-app-password") {
 		t.Fatal("email UI should render the saved app password in the masked secret input")
 	}
