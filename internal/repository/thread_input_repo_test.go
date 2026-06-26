@@ -319,7 +319,7 @@ func TestThreadInputRepo_ClaimQueuedChatPersistsSlackContextWithClaim(t *testing
 		SlackChannelID: "C1",
 		SlackThreadTS:  "1710000000.100000",
 		SlackUserID:    "U1",
-	}, nil); err != nil {
+	}, nil, nil); err != nil {
 		t.Fatalf("ClaimQueuedForChatExecution: %v", err)
 	}
 
