@@ -14,6 +14,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmnormalize "github.com/openvibely/openvibely/internal/llm/normalize"
@@ -63,6 +64,7 @@ type LLMService struct {
 	skillAnalyticsRepo       *repository.SkillAnalyticsRepo
 	broadcaster              *events.Broadcaster
 	queuedTaskThreadPromoter func(taskID string)
+	channelMessageRouter     *ChannelMessageRouter
 	// globalSkillRoot is the parent directory holding <root>/agents for global
 	// agents/skills. It is used for catalog construction and bounded skill
 	// mutation writes; agents themselves remain user-managed.
@@ -146,6 +148,35 @@ func (s *LLMService) SetBroadcaster(b *events.Broadcaster) {
 
 func (s *LLMService) SetQueuedTaskThreadPromoter(promoter func(taskID string)) {
 	s.queuedTaskThreadPromoter = promoter
+}
+
+func (s *LLMService) SetChannelMessageRouter(router *ChannelMessageRouter) {
+	s.channelMessageRouter = router
+}
+
+func (s *LLMService) taskSendMessageRuntimeTools(task models.Task) *llmcontracts.RuntimeTools {
+	if s == nil || s.channelMessageRouter == nil || strings.TrimSpace(task.ProjectID) == "" {
+		return nil
+	}
+	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, false)
+	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, 1)
+	for _, def := range defs {
+		if def.Name == "send_message" {
+			filtered = append(filtered, def)
+			break
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return &llmcontracts.RuntimeTools{
+		Definitions: filtered,
+		Executor: chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, map[string]chatcontrol.RuntimeActionHandler{
+			"send_message": func(ctx context.Context, input json.RawMessage) (string, error) {
+				return ExecuteSendMessageTool(ctx, s.channelMessageRouter.WithAuditContext(string(chatcontrol.SurfaceWeb), "task"), task.ProjectID, input)
+			},
+		}),
+	}
 }
 
 func (s *LLMService) promoteQueuedTaskThreadAfterCompletion(taskID string) {
@@ -537,8 +568,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			return nil
 		})
 	}
-	if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil {
-		mergedTools := llmcontracts.CompositeRuntimeTools(runtimeTools, ctxTools)
+	taskActionTools := s.taskSendMessageRuntimeTools(task)
+	if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil || taskActionTools != nil {
+		mergedTools := llmcontracts.CompositeRuntimeTools(runtimeTools, ctxTools, taskActionTools)
 		callCtx = llmcontracts.WithRuntimeTools(callCtx, mergedTools)
 		if mergedTools != nil && mergedTools.SkipDefaultTools {
 			projectInstructions = ""

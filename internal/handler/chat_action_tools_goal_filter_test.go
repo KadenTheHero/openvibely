@@ -8,37 +8,27 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func TestFilterAssignedAgentRuntimeToolDefs_SendMessageRequiresExplicitGrant(t *testing.T) {
+func TestFilterAssignedAgentRuntimeToolDefs_IncludesSendMessageByDefault(t *testing.T) {
 	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
 
-	ungranted := toolDefNameSet(filterAssignedAgentRuntimeToolDefs(defs, &models.Agent{Tools: []string{"Read"}}))
-	if ungranted["send_message"] {
-		t.Fatalf("ungranted assigned agent got send_message runtime tool: %+v", ungranted)
+	filtered := toolDefNameSet(filterAssignedAgentRuntimeToolDefs(defs, &models.Agent{Tools: []string{"Read"}}))
+	if !filtered["send_message"] {
+		t.Fatalf("assigned task agents should get send_message by default, got %+v", filtered)
 	}
-	if !ungranted["create_task"] {
-		t.Fatalf("assigned-agent filter should preserve unrelated chat tools, got %+v", ungranted)
-	}
-
-	granted := toolDefNameSet(filterAssignedAgentRuntimeToolDefs(defs, &models.Agent{Tools: []string{"send_message"}}))
-	if !granted["send_message"] {
-		t.Fatalf("send_message grant did not expose runtime tool: %+v", granted)
+	if !filtered["create_task"] {
+		t.Fatalf("assigned-agent filter should preserve unrelated chat tools, got %+v", filtered)
 	}
 }
 
-func TestFilterAssignedAgentCapabilitySummaries_SendMessageRequiresExplicitGrant(t *testing.T) {
+func TestFilterAssignedAgentCapabilitySummaries_IncludesSendMessageByDefault(t *testing.T) {
 	summaries := chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 
-	ungranted := capabilityNameSet(filterAssignedAgentCapabilitySummaries(summaries, &models.Agent{Tools: []string{"Read"}}))
-	if ungranted["send_message"] {
-		t.Fatalf("ungranted assigned agent advertised send_message capability: %+v", ungranted)
+	filtered := capabilityNameSet(filterAssignedAgentCapabilitySummaries(summaries, &models.Agent{Tools: []string{"Read"}}))
+	if !filtered["send_message"] {
+		t.Fatalf("assigned task agents should advertise send_message by default, got %+v", filtered)
 	}
-	if !ungranted["create_task"] {
-		t.Fatalf("assigned-agent capability filter should preserve unrelated capabilities, got %+v", ungranted)
-	}
-
-	granted := capabilityNameSet(filterAssignedAgentCapabilitySummaries(summaries, &models.Agent{Tools: []string{"send_message"}}))
-	if !granted["send_message"] {
-		t.Fatalf("send_message grant did not advertise capability: %+v", granted)
+	if !filtered["create_task"] {
+		t.Fatalf("assigned-agent capability filter should preserve unrelated capabilities, got %+v", filtered)
 	}
 }
 
@@ -52,8 +42,8 @@ func TestFilterTaskThreadRuntimeToolDefs_GoalStatusToolsRequireExplicitGrant(t *
 	if !ungranted["get_task_goal"] || !ungranted["send_to_task"] {
 		t.Fatalf("base task goal tools missing for ungranted agent: %+v", ungranted)
 	}
-	if ungranted["send_message"] {
-		t.Fatalf("ungranted send_message runtime tool was exposed: %+v", ungranted)
+	if !ungranted["send_message"] {
+		t.Fatalf("task agents should get send_message by default: %+v", ungranted)
 	}
 	if ungranted["memory_view"] {
 		t.Fatalf("unselected memory_view runtime tool was exposed: %+v", ungranted)
@@ -89,8 +79,8 @@ func TestFilterTaskThreadCapabilitySummaries_GoalStatusToolsRequireExplicitGrant
 	if !ungranted["get_task_goal"] || !ungranted["send_to_task"] || !ungranted["list_capabilities"] {
 		t.Fatalf("base task-thread capabilities missing for ungranted agent: %+v", ungranted)
 	}
-	if ungranted["send_message"] {
-		t.Fatalf("ungranted send_message capability was advertised: %+v", ungranted)
+	if !ungranted["send_message"] {
+		t.Fatalf("task agents should advertise send_message by default: %+v", ungranted)
 	}
 
 	withMemory := capabilityNameSet(filterTaskThreadCapabilitySummaries(summaries, nil, true))

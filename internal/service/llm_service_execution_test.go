@@ -1593,6 +1593,45 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsExplicitNonSelectableAgentForNorm
 	}
 }
 
+func TestLLMService_ExecuteTaskWithAgent_IncludesSendMessageRuntimeTool(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc.SetChannelMessageRouter(NewChannelMessageRouter(repository.NewChannelTargetRepo(db), repository.NewSettingsRepo(db)))
+	capture := &captureProviderAdapter{}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
+
+	agent := &models.LLMConfig{Name: "OpenAI", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key", Model: "gpt-test", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create model agent: %v", err)
+	}
+	task := &models.Task{ProjectID: "default", Title: "Write and email a story", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "Write a story then email me when done"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil {
+		t.Fatal("expected execution")
+	}
+	rt := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx)
+	if rt == nil || !rt.HasDefinition("send_message") {
+		t.Fatalf("initial task provider request missing send_message runtime tool: %#v", rt)
+	}
+	out, handled, isErr, err := rt.Executor(context.Background(), "send_message", json.RawMessage(`{"action":"list"}`))
+	if !handled || err != nil || isErr || !strings.Contains(out, `"targets"`) {
+		t.Fatalf("send_message list should execute through task runtime handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+}
+
 func TestLLMService_ExecuteTaskWithAgent_CustomAgentSkillLibraryToolsUseRoutedSelection(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)

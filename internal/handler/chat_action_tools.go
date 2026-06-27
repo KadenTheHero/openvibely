@@ -966,13 +966,14 @@ func filterAssignedAgentCapabilitySummaries(summaries []chatcontrol.ActionSummar
 }
 
 func assignedAgentToolDenied(toolName string, agentDef *models.Agent) bool {
-	return toolName == "send_message" && !hasToolGrant(agentTools(agentDef), "send_message")
+	return false
 }
 
 func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 	allowed := map[string]bool{
 		"view_task_thread":  true,
 		"send_to_task":      true,
+		"send_message":      true,
 		"set_task_goal":     true,
 		"clear_task_goal":   true,
 		"get_task_goal":     true,
