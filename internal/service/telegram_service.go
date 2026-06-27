@@ -1057,6 +1057,9 @@ func (s *TelegramService) clearTelegramPreview(chatID int64, messageID int, done
 	if state == nil || state.done != done {
 		return
 	}
+	if state.richDraftVisible {
+		return
+	}
 	delete(s.activePreviews, key)
 }
 

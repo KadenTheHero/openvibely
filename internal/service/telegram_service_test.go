@@ -3028,6 +3028,70 @@ func TestTelegramService_SendChatResponse_RichEditFailureSendsFinalRichMessageAn
 	require.Equal(t, "✅ Response sent.", clearedPlaceholder)
 }
 
+func TestTelegramService_SendChatResponse_RichDraftStateSurvivesTerminalStreamUntilFinalDelivery(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	execRepo := repository.NewExecutionRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+	project := &models.Project{Name: "Rich Draft Terminal Preview"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	taskModel := &models.Task{ProjectID: project.ID, Title: "chat", Prompt: "hi", Category: models.CategoryChat, Status: models.StatusRunning, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, taskModel))
+	exec := &models.Execution{TaskID: taskModel.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "hi"}
+	require.NoError(t, execRepo.Create(ctx, exec))
+	require.NoError(t, execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "final rich response", "", 0, 0))
+
+	streamExited := make(chan struct{})
+	var endpoints []string
+	var clearedPlaceholder string
+	svc := &TelegramService{
+		execRepo: execRepo,
+		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			endpoints = append(endpoints, endpoint)
+			require.Equal(t, "42", params["chat_id"])
+			require.Contains(t, params["rich_message"], "final rich response")
+			switch endpoint {
+			case "sendRichMessageDraft", "sendRichMessage":
+				return &tgbotapi.APIResponse{Ok: true}, nil
+			case "editMessageText":
+				t.Fatal("final delivery must remember the visible draft and avoid editing the placeholder with final content")
+			}
+			return nil, fmt.Errorf("unexpected endpoint %s", endpoint)
+		},
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			edit, ok := c.(tgbotapi.EditMessageTextConfig)
+			require.True(t, ok, "expected placeholder cleanup edit after final rich send")
+			require.Equal(t, int64(42), edit.ChatID)
+			require.Equal(t, 99, edit.MessageID)
+			clearedPlaceholder = edit.Text
+			return tgbotapi.Message{MessageID: 99}, nil
+		},
+	}
+	done := svc.beginTelegramPreview(42, 99)
+	oldInterval := telegramStreamInterval
+	telegramStreamInterval = time.Millisecond
+	t.Cleanup(func() { telegramStreamInterval = oldInterval })
+	go func() {
+		svc.streamUpdatesToTelegram(ctx, 42, 99, exec.ID, done)
+		close(streamExited)
+	}()
+	select {
+	case <-streamExited:
+	case <-time.After(time.Second):
+		t.Fatal("expected rich draft stream to exit after terminal execution")
+	}
+
+	task := models.Task{ID: "task-1", Category: models.CategoryChat, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+	svc.SendChatResponse(context.Background(), task, "final rich response", "", 99)
+
+	require.Equal(t, []string{"sendRichMessageDraft", "sendRichMessage"}, endpoints)
+	require.Equal(t, "✅ Response sent.", clearedPlaceholder)
+}
+
 func TestTelegramService_SendChatResponse_RichDraftPersistsFinalRichMessageBeforeClearingPlaceholder(t *testing.T) {
 	var endpoints []string
 	var clearedPlaceholder string
