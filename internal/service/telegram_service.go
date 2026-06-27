@@ -3556,6 +3556,24 @@ func (s *TelegramService) sendMessage(ctx context.Context, chatID int64, text st
 	}
 }
 
+func (s *TelegramService) sendLegacyMessage(ctx context.Context, chatID int64, text string) bool {
+	delivered := false
+	for _, msg := range splitMessage(text, maxMessageLength) {
+		msgConfig := tgbotapi.NewMessage(chatID, escapeTelegramMarkdownV2(msg))
+		msgConfig.ParseMode = "MarkdownV2"
+		if _, err := s.sendConfig(msgConfig); err != nil {
+			applog.Infof("[telegram] error sending message with MarkdownV2: %v, retrying without formatting", err)
+			plainConfig := tgbotapi.NewMessage(chatID, msg)
+			if _, err := s.sendConfig(plainConfig); err != nil {
+				applog.Infof("[telegram] error sending message: %v", err)
+				continue
+			}
+		}
+		delivered = true
+	}
+	return delivered
+}
+
 func (s *TelegramService) sendMessageToTarget(ctx context.Context, chatID int64, threadID int, text string) error {
 	if s.sendMessageFunc != nil && threadID == 0 {
 		s.sendMessageFunc(chatID, text)
@@ -3917,7 +3935,10 @@ func (s *TelegramService) deliverTelegramChatFinal(ctx context.Context, chatID i
 				applog.Infof("[telegram] rich final send after visible draft returned ambiguous error; not editing placeholder to avoid duplicate final output: %v", sendErr)
 				return
 			}
-			applog.Infof("[telegram] rich final send unavailable after a visible draft; not editing placeholder to avoid duplicate final output: %v", sendErr)
+			applog.Infof("[telegram] rich final send unavailable after a visible draft; falling back to legacy final send: %v", sendErr)
+			if s.sendLegacyMessage(ctx, chatID, text) {
+				s.clearTelegramChatPlaceholderAfterRichFinalSend(chatID, messageID)
+			}
 			return
 		}
 		return

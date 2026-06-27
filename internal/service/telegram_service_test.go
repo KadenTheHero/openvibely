@@ -3188,9 +3188,10 @@ func TestTelegramService_SendChatResponse_RichDraftSendsFinalRichMessageInsteadO
 	require.Equal(t, "✅ Response sent.", clearedPlaceholder)
 }
 
-func TestTelegramService_SendChatResponse_RichDraftFinalSendRejectionDoesNotEditDuplicateFallback(t *testing.T) {
+func TestTelegramService_SendChatResponse_RichDraftFinalSendRejectionSendsLegacyFallbackAndClearsPlaceholder(t *testing.T) {
 	var endpoints []string
-	legacyEdited := false
+	var fallbackMessage string
+	var clearedPlaceholder string
 	svc := &TelegramService{
 		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
 			endpoints = append(endpoints, endpoint)
@@ -3207,7 +3208,18 @@ func TestTelegramService_SendChatResponse_RichDraftFinalSendRejectionDoesNotEdit
 			return nil, fmt.Errorf("unexpected endpoint %s", endpoint)
 		},
 		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
-			legacyEdited = true
+			switch msg := c.(type) {
+			case tgbotapi.MessageConfig:
+				require.Equal(t, int64(42), msg.ChatID)
+				require.Equal(t, "MarkdownV2", msg.ParseMode)
+				fallbackMessage = msg.Text
+			case tgbotapi.EditMessageTextConfig:
+				require.Equal(t, int64(42), msg.ChatID)
+				require.Equal(t, 99, msg.MessageID)
+				clearedPlaceholder = msg.Text
+			default:
+				t.Fatalf("unexpected Telegram config type %T", c)
+			}
 			return tgbotapi.Message{}, nil
 		},
 	}
@@ -3229,7 +3241,8 @@ func TestTelegramService_SendChatResponse_RichDraftFinalSendRejectionDoesNotEdit
 	svc.SendChatResponse(context.Background(), task, "final rich response", "", 99)
 
 	require.Equal(t, []string{"sendRichMessage"}, endpoints)
-	require.False(t, legacyEdited, "after a visible rich draft, final delivery must not edit the placeholder with duplicate final content")
+	require.Equal(t, `final rich response`, fallbackMessage)
+	require.Equal(t, "✅ Response sent.", clearedPlaceholder)
 }
 
 func TestTelegramService_SendChatResponse_AmbiguousFinalRichEditErrorDoesNotSendOrEditFallback(t *testing.T) {
