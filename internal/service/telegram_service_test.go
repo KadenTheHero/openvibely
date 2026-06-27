@@ -2811,6 +2811,44 @@ func TestTelegramService_SendRichMessageDraftUsesNonZeroDraftID(t *testing.T) {
 	require.Contains(t, params["rich_message"], `"markdown":"partial"`)
 }
 
+func TestTelegramService_StreamEditTerminalOutputDoesNotAppendGenerating(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	execRepo := repository.NewExecutionRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+	project := &models.Project{Name: "Legacy Terminal Stream"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	task := &models.Task{ProjectID: project.ID, Title: "chat", Prompt: "hi", Category: models.CategoryChat, Status: models.StatusRunning, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "hi"}
+	require.NoError(t, execRepo.Create(ctx, exec))
+	require.NoError(t, execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "final answer", "", 0, 0))
+
+	edited := make(chan string, 1)
+	svc := &TelegramService{
+		execRepo: execRepo,
+		editMessageFunc: func(chatID int64, messageID int, text string) {
+			edited <- text
+		},
+	}
+	oldInterval := telegramStreamInterval
+	telegramStreamInterval = time.Millisecond
+	t.Cleanup(func() { telegramStreamInterval = oldInterval })
+	svc.streamEditUpdatesToTelegram(ctx, 42, 99, exec.ID, nil)
+
+	select {
+	case text := <-edited:
+		require.Equal(t, "final answer", text)
+		require.NotContains(t, text, "Generating")
+	case <-time.After(time.Second):
+		t.Fatal("expected terminal stream edit")
+	}
+}
+
 func TestTelegramService_StreamRichDraftFallbackUsesEditLoop(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	execRepo := repository.NewExecutionRepo(db)
@@ -2830,7 +2868,7 @@ func TestTelegramService_StreamRichDraftFallbackUsesEditLoop(t *testing.T) {
 
 	var richDraftCalled bool
 	var edited []string
-	done := make(chan struct{})
+	editObserved := make(chan struct{})
 	svc := &TelegramService{
 		execRepo: execRepo,
 		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
@@ -2840,13 +2878,23 @@ func TestTelegramService_StreamRichDraftFallbackUsesEditLoop(t *testing.T) {
 		},
 		editMessageFunc: func(chatID int64, messageID int, text string) {
 			edited = append(edited, text)
-			close(done)
+			select {
+			case editObserved <- struct{}{}:
+			default:
+			}
 		},
 	}
+	done := svc.beginTelegramPreview(42, 99)
 	oldInterval := telegramStreamInterval
 	telegramStreamInterval = time.Millisecond
 	t.Cleanup(func() { telegramStreamInterval = oldInterval })
-	svc.streamUpdatesToTelegram(ctx, 42, 99, exec.ID, done)
+	go svc.streamUpdatesToTelegram(ctx, 42, 99, exec.ID, done)
+	select {
+	case <-editObserved:
+		svc.finishTelegramPreview(42, 99)
+	case <-time.After(time.Second):
+		t.Fatal("expected rich draft fallback edit")
+	}
 
 	require.True(t, richDraftCalled)
 	require.NotEmpty(t, edited)
@@ -2978,6 +3026,148 @@ func TestTelegramService_SendChatResponse_RichEditFailureSendsFinalRichMessageAn
 
 	require.Equal(t, []string{"editMessageText", "sendRichMessage"}, endpoints)
 	require.Equal(t, "✅ Response sent.", clearedPlaceholder)
+}
+
+func TestTelegramService_SendChatResponse_RichDraftFinalizesDraftBeforeEditingPlaceholder(t *testing.T) {
+	var endpoints []string
+	var clearedPlaceholder string
+	svc := &TelegramService{
+		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			endpoints = append(endpoints, endpoint)
+			require.Equal(t, "42", params["chat_id"])
+			require.Contains(t, params["rich_message"], "final rich response")
+			switch endpoint {
+			case "sendRichMessageDraft":
+				require.Equal(t, "123", params["draft_id"])
+				return &tgbotapi.APIResponse{Ok: true}, nil
+			case "editMessageText":
+				t.Fatal("final delivery must not edit the placeholder with final content when a rich draft is already visible")
+			case "sendRichMessage":
+				t.Fatal("final delivery must not send a duplicate rich message when a rich draft is already visible")
+			}
+			return nil, fmt.Errorf("unexpected endpoint %s", endpoint)
+		},
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			edit, ok := c.(tgbotapi.EditMessageTextConfig)
+			require.True(t, ok, "expected placeholder cleanup edit after final rich draft update")
+			require.Equal(t, int64(42), edit.ChatID)
+			require.Equal(t, 99, edit.MessageID)
+			clearedPlaceholder = edit.Text
+			return tgbotapi.Message{MessageID: 99}, nil
+		},
+	}
+	done := svc.beginTelegramPreview(42, 99)
+	require.True(t, svc.withActiveTelegramPreview(42, 99, done, func(state *telegramPreviewState) bool {
+		state.richDraftID = 123
+		state.richDraftVisible = true
+		return true
+	}))
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		default:
+			svc.finishTelegramPreview(42, 99)
+		}
+	})
+	task := models.Task{ID: "task-1", Category: models.CategoryChat, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+
+	svc.SendChatResponse(context.Background(), task, "final rich response", "", 99)
+
+	require.Equal(t, []string{"sendRichMessageDraft"}, endpoints)
+	require.Equal(t, "✅ Response sent.", clearedPlaceholder)
+}
+
+func TestTelegramService_SendChatResponse_RichDraftFinalizesVisibleDraftInsteadOfSendingDuplicate(t *testing.T) {
+	var endpoints []string
+	var clearedPlaceholder string
+	svc := &TelegramService{
+		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			endpoints = append(endpoints, endpoint)
+			require.Equal(t, "42", params["chat_id"])
+			require.Contains(t, params["rich_message"], "final rich response")
+			switch endpoint {
+			case "editMessageText":
+				t.Fatal("final delivery must not edit the placeholder with final content when a rich draft is already visible")
+			case "sendRichMessageDraft":
+				require.Equal(t, "123", params["draft_id"])
+				return &tgbotapi.APIResponse{Ok: true}, nil
+			case "sendRichMessage":
+				t.Fatal("final delivery must not send a duplicate rich message when a rich draft is already visible")
+			}
+			return nil, fmt.Errorf("unexpected endpoint %s", endpoint)
+		},
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			edit, ok := c.(tgbotapi.EditMessageTextConfig)
+			require.True(t, ok, "expected placeholder cleanup edit after final rich draft update")
+			require.Equal(t, int64(42), edit.ChatID)
+			require.Equal(t, 99, edit.MessageID)
+			clearedPlaceholder = edit.Text
+			return tgbotapi.Message{MessageID: 99}, nil
+		},
+	}
+	done := svc.beginTelegramPreview(42, 99)
+	require.True(t, svc.withActiveTelegramPreview(42, 99, done, func(state *telegramPreviewState) bool {
+		state.richDraftID = 123
+		state.richDraftVisible = true
+		return true
+	}))
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		default:
+			svc.finishTelegramPreview(42, 99)
+		}
+	})
+	task := models.Task{ID: "task-1", Category: models.CategoryChat, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+
+	svc.SendChatResponse(context.Background(), task, "final rich response", "", 99)
+
+	require.Equal(t, []string{"sendRichMessageDraft"}, endpoints)
+	require.Equal(t, "✅ Response sent.", clearedPlaceholder)
+}
+
+func TestTelegramService_SendChatResponse_RichDraftFinalizationRejectionDoesNotEditDuplicateFallback(t *testing.T) {
+	var endpoints []string
+	legacyEdited := false
+	svc := &TelegramService{
+		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			endpoints = append(endpoints, endpoint)
+			require.Equal(t, "42", params["chat_id"])
+			require.Contains(t, params["rich_message"], "final rich response")
+			switch endpoint {
+			case "editMessageText":
+				require.Equal(t, "99", params["message_id"])
+			case "sendRichMessageDraft":
+				require.Equal(t, "123", params["draft_id"])
+			case "sendRichMessage":
+				t.Fatal("final delivery must not send a duplicate rich message when a rich draft is already visible")
+			}
+			return nil, fmt.Errorf("Bad Request: rich_message unsupported")
+		},
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			legacyEdited = true
+			return tgbotapi.Message{}, nil
+		},
+	}
+	done := svc.beginTelegramPreview(42, 99)
+	require.True(t, svc.withActiveTelegramPreview(42, 99, done, func(state *telegramPreviewState) bool {
+		state.richDraftID = 123
+		state.richDraftVisible = true
+		return true
+	}))
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		default:
+			svc.finishTelegramPreview(42, 99)
+		}
+	})
+	task := models.Task{ID: "task-1", Category: models.CategoryChat, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+
+	svc.SendChatResponse(context.Background(), task, "final rich response", "", 99)
+
+	require.Equal(t, []string{"sendRichMessageDraft"}, endpoints)
+	require.False(t, legacyEdited, "after a visible rich draft, final delivery must not edit the placeholder with duplicate final content")
 }
 
 func TestTelegramService_SendChatResponse_AmbiguousFinalRichEditErrorDoesNotSendOrEditFallback(t *testing.T) {

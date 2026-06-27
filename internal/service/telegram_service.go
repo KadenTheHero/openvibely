@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -42,6 +43,17 @@ const (
 
 var telegramUploadsDir = "uploads" // same as handler's uploadsDir
 var telegramStreamInterval = 2 * time.Second
+
+type telegramPreviewKey struct {
+	chatID    int64
+	messageID int
+}
+
+type telegramPreviewState struct {
+	done             chan struct{}
+	richDraftID      int
+	richDraftVisible bool
+}
 
 // TelegramService manages Telegram bot integration.
 // It acts as a proxy to the /chat page orchestrator — every message sent to the bot
@@ -75,6 +87,8 @@ type TelegramService struct {
 	editMessageFunc          func(chatID int64, messageID int, text string)
 	sendConfigFunc           func(c tgbotapi.Chattable) (tgbotapi.Message, error)
 	makeRequestFunc          func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error)
+	previewMu                sync.Mutex
+	activePreviews           map[telegramPreviewKey]*telegramPreviewState
 	userProjects             map[int64]string // Maps Telegram user ID to active project ID
 	ctx                      context.Context
 	cancel                   context.CancelFunc
@@ -674,15 +688,16 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	// Resolve work directory
 	workDir := s.resolveWorkDir(ctx, projectID)
 
-	// Start streaming updates to Telegram in background.
-	// The shared runner sends the final response through SendChatResponse, whose edit/send
-	// path stops the preview by replacing the placeholder with the final message.
+	// Start streaming updates to Telegram in background. Final response delivery
+	// stops this preview before editing/sending the completed response.
 	if sentMsg.MessageID != 0 {
-		go func() {
+		previewDone := s.beginTelegramPreview(chatID, sentMsg.MessageID)
+		go func(done <-chan struct{}) {
 			streamCtx, streamCancel := context.WithTimeout(context.Background(), telegramProcessTimeout)
 			defer streamCancel()
-			s.streamUpdatesToTelegram(streamCtx, chatID, sentMsg.MessageID, exec.ID, nil)
-		}()
+			defer s.clearTelegramPreview(chatID, sentMsg.MessageID, done)
+			s.streamUpdatesToTelegram(streamCtx, chatID, sentMsg.MessageID, exec.ID, done)
+		}(previewDone)
 	}
 
 	if s.channelChatRunner == nil {
@@ -997,6 +1012,68 @@ func moveOrCopyFile(src, dst string) error {
 	return os.Remove(src)
 }
 
+func (s *TelegramService) beginTelegramPreview(chatID int64, messageID int) <-chan struct{} {
+	if messageID == 0 {
+		return nil
+	}
+	s.previewMu.Lock()
+	defer s.previewMu.Unlock()
+	if s.activePreviews == nil {
+		s.activePreviews = make(map[telegramPreviewKey]*telegramPreviewState)
+	}
+	key := telegramPreviewKey{chatID: chatID, messageID: messageID}
+	if existing := s.activePreviews[key]; existing != nil {
+		close(existing.done)
+	}
+	done := make(chan struct{})
+	s.activePreviews[key] = &telegramPreviewState{done: done}
+	return done
+}
+
+func (s *TelegramService) finishTelegramPreview(chatID int64, messageID int) *telegramPreviewState {
+	if messageID == 0 {
+		return nil
+	}
+	s.previewMu.Lock()
+	defer s.previewMu.Unlock()
+	key := telegramPreviewKey{chatID: chatID, messageID: messageID}
+	state := s.activePreviews[key]
+	if state == nil {
+		return nil
+	}
+	delete(s.activePreviews, key)
+	close(state.done)
+	return state
+}
+
+func (s *TelegramService) clearTelegramPreview(chatID int64, messageID int, done <-chan struct{}) {
+	if messageID == 0 {
+		return
+	}
+	s.previewMu.Lock()
+	defer s.previewMu.Unlock()
+	key := telegramPreviewKey{chatID: chatID, messageID: messageID}
+	state := s.activePreviews[key]
+	if state == nil || state.done != done {
+		return
+	}
+	delete(s.activePreviews, key)
+}
+
+func (s *TelegramService) withActiveTelegramPreview(chatID int64, messageID int, done <-chan struct{}, deliver func(state *telegramPreviewState) bool) bool {
+	if done == nil {
+		return deliver(nil)
+	}
+	s.previewMu.Lock()
+	defer s.previewMu.Unlock()
+	key := telegramPreviewKey{chatID: chatID, messageID: messageID}
+	state := s.activePreviews[key]
+	if state == nil || state.done != done {
+		return false
+	}
+	return deliver(state)
+}
+
 // streamUpdatesToTelegram polls the execution output and previews incremental updates in Telegram.
 func (s *TelegramService) streamUpdatesToTelegram(ctx context.Context, chatID int64, messageID int, execID string, done <-chan struct{}) {
 	if s.IsRichMessagesV2Enabled(ctx) {
@@ -1007,10 +1084,12 @@ func (s *TelegramService) streamUpdatesToTelegram(ctx context.Context, chatID in
 }
 
 func (s *TelegramService) streamEditUpdatesToTelegram(ctx context.Context, chatID int64, messageID int, execID string, done <-chan struct{}) {
-	s.streamTelegramExecutionOutput(ctx, execID, done, func(cleaned string) bool {
-		display := telegramStreamingDisplay(cleaned)
-		s.editMessage(ctx, chatID, messageID, display)
-		return true
+	s.streamTelegramExecutionOutput(ctx, execID, done, func(cleaned string, terminal bool) bool {
+		display := telegramStreamingDisplay(cleaned, terminal)
+		return s.withActiveTelegramPreview(chatID, messageID, done, func(_ *telegramPreviewState) bool {
+			s.editMessage(ctx, chatID, messageID, display)
+			return true
+		})
 	})
 }
 
@@ -1018,14 +1097,25 @@ func (s *TelegramService) streamRichDraftUpdatesToTelegram(ctx context.Context, 
 	draftID := newTelegramRichDraftID()
 	fallbackToEdit := false
 	loggedFallback := false
-	s.streamTelegramExecutionOutput(ctx, execID, done, func(cleaned string) bool {
+	s.streamTelegramExecutionOutput(ctx, execID, done, func(cleaned string, terminal bool) bool {
 		if fallbackToEdit {
-			display := telegramStreamingDisplay(cleaned)
-			s.editMessage(ctx, chatID, messageID, display)
-			return true
+			display := telegramStreamingDisplay(cleaned, terminal)
+			return s.withActiveTelegramPreview(chatID, messageID, done, func(_ *telegramPreviewState) bool {
+				s.editMessage(ctx, chatID, messageID, display)
+				return true
+			})
 		}
-		sent, err := s.sendRichMessageDraft(ctx, chatID, draftID, cleaned)
-		if sent {
+		var sent bool
+		var err error
+		delivered := s.withActiveTelegramPreview(chatID, messageID, done, func(state *telegramPreviewState) bool {
+			sent, err = s.sendRichMessageDraft(ctx, chatID, draftID, cleaned)
+			if sent && state != nil {
+				state.richDraftID = draftID
+				state.richDraftVisible = true
+			}
+			return sent
+		})
+		if delivered {
 			return true
 		}
 		if err != nil && isTelegramRichFallbackError(err) {
@@ -1034,9 +1124,11 @@ func (s *TelegramService) streamRichDraftUpdatesToTelegram(ctx context.Context, 
 				loggedFallback = true
 			}
 			fallbackToEdit = true
-			display := telegramStreamingDisplay(cleaned)
-			s.editMessage(ctx, chatID, messageID, display)
-			return true
+			display := telegramStreamingDisplay(cleaned, terminal)
+			return s.withActiveTelegramPreview(chatID, messageID, done, func(_ *telegramPreviewState) bool {
+				s.editMessage(ctx, chatID, messageID, display)
+				return true
+			})
 		}
 		if err != nil {
 			applog.Infof("[telegram] rich draft streaming error: %v", err)
@@ -1045,13 +1137,16 @@ func (s *TelegramService) streamRichDraftUpdatesToTelegram(ctx context.Context, 
 	})
 }
 
-func (s *TelegramService) streamTelegramExecutionOutput(ctx context.Context, execID string, done <-chan struct{}, preview func(cleaned string) bool) {
+func (s *TelegramService) streamTelegramExecutionOutput(ctx context.Context, execID string, done <-chan struct{}, preview func(cleaned string, terminal bool) bool) {
 	ticker := time.NewTicker(telegramStreamInterval)
 	defer ticker.Stop()
 
 	lastContent := ""
 
 	for {
+		if isTelegramPreviewDone(done) {
+			return
+		}
 		select {
 		case <-doneChan(done):
 			return
@@ -1062,10 +1157,11 @@ func (s *TelegramService) streamTelegramExecutionOutput(ctx context.Context, exe
 			if err != nil || exec == nil {
 				continue
 			}
+			terminal := isTelegramTerminalExecution(exec.Status)
 
 			currentOutput := exec.Output
 			if currentOutput == "" || currentOutput == lastContent {
-				if isTelegramTerminalExecution(exec.Status) {
+				if terminal {
 					return
 				}
 				continue
@@ -1073,17 +1169,20 @@ func (s *TelegramService) streamTelegramExecutionOutput(ctx context.Context, exe
 
 			cleaned := llmoutput.CleanChatOutput(currentOutput)
 			if cleaned == "" || cleaned == lastContent {
-				if isTelegramTerminalExecution(exec.Status) {
+				if terminal {
 					return
 				}
 				continue
 			}
 
-			if preview(cleaned) {
+			if isTelegramPreviewDone(done) {
+				return
+			}
+			if preview(cleaned, terminal) {
 				lastContent = cleaned
 			}
 
-			if isTelegramTerminalExecution(exec.Status) {
+			if terminal {
 				return
 			}
 		}
@@ -1097,11 +1196,26 @@ func doneChan(done <-chan struct{}) <-chan struct{} {
 	return done
 }
 
+func isTelegramPreviewDone(done <-chan struct{}) bool {
+	if done == nil {
+		return false
+	}
+	select {
+	case <-done:
+		return true
+	default:
+		return false
+	}
+}
+
 func isTelegramTerminalExecution(status models.ExecutionStatus) bool {
 	return status == models.ExecCompleted || status == models.ExecFailed || status == models.ExecCancelled
 }
 
-func telegramStreamingDisplay(cleaned string) string {
+func telegramStreamingDisplay(cleaned string, terminal bool) string {
+	if terminal {
+		return cleaned
+	}
 	if len(cleaned) > maxMessageLength-50 {
 		return cleaned[:maxMessageLength-50] + "\n\n⏳ _Generating..._"
 	}
@@ -3788,6 +3902,21 @@ func (s *TelegramService) SendChatResponse(ctx context.Context, task models.Task
 func (s *TelegramService) deliverTelegramChatFinal(ctx context.Context, chatID int64, messageID int, text string) {
 	if messageID == 0 {
 		s.sendMessage(ctx, chatID, text)
+		return
+	}
+	previewState := s.finishTelegramPreview(chatID, messageID)
+	if previewState != nil && previewState.richDraftVisible && previewState.richDraftID != 0 {
+		if sent, draftErr := s.sendRichMessageDraft(ctx, chatID, previewState.richDraftID, text); sent {
+			s.clearTelegramChatPlaceholderAfterRichFinalSend(chatID, messageID)
+			return
+		} else if draftErr != nil {
+			if !isTelegramRichFallbackError(draftErr) {
+				applog.Infof("[telegram] rich final draft update returned ambiguous error; not editing placeholder to avoid duplicate final output: %v", draftErr)
+				return
+			}
+			applog.Infof("[telegram] rich final draft update unavailable after a visible draft; not editing placeholder to avoid duplicate final output: %v", draftErr)
+			return
+		}
 		return
 	}
 	if s.editMessageFunc != nil {
