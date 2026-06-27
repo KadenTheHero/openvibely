@@ -593,6 +593,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/channels/email/remove", h.handleEmailRemove)
 	e.POST("/channels/email/test", h.handleEmailTest)
 	e.GET("/channels/outbound-targets", h.handleOutboundTargetsFragment)
+	e.GET("/channels/outbound-targets/card", h.handleOutboundTargetsCardFragment)
 	e.POST("/channels/outbound-targets", h.handleOutboundTargetSave)
 	e.POST("/channels/outbound-targets/:id/test", h.handleOutboundTargetTest)
 	e.DELETE("/channels/outbound-targets/:id", h.handleOutboundTargetDelete)

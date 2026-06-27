@@ -190,7 +190,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 
 			<!-- Active Channels -->
 			<div class="grid gap-4 mb-8">
-				@OutboundTargetsCard(channelTargets, sendMessageExplicitTargets, false)
+				@OutboundTargetsCard(currentProjectID, channelTargets, sendMessageExplicitTargets)
 
 				if hasGitHubChannel {
 				<!-- GitHub Card -->
@@ -1745,14 +1745,17 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 	</div>
 }
 
-templ OutboundTargetsCard(targets []models.ChannelTarget, explicitAllowed bool, oob bool) {
+templ OutboundTargetsCard(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool) {
 	<div
 		id="outbound-targets-card"
 		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 		data-channel-type="outbound-targets"
 		data-search-card
 		data-search-text="Outbound Message Targets send_message Slack Telegram Email"
-		hx-swap-oob?={ oob }
+		hx-get={ "/channels/outbound-targets/card?project_id=" + currentProjectID }
+		hx-trigger="outbound-targets-card-refresh from:body"
+		hx-target="this"
+		hx-swap="outerHTML"
 		onclick="openOutboundTargetsModal()"
 	>
 		<div class="card-body relative">
@@ -1805,6 +1808,10 @@ templ OutboundTargetsModal(currentProjectID string, targets []models.ChannelTarg
 
 templ OutboundTargetsFragment(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool, notice string) {
 	@OutboundTargetsSection(currentProjectID, targets, explicitAllowed, notice)
+}
+
+templ OutboundTargetsCardFragment(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool) {
+	@OutboundTargetsCard(currentProjectID, targets, explicitAllowed)
 }
 
 templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool, notice string) {

@@ -40,8 +40,17 @@ func (h *Handler) handleOutboundTargetsFragment(c echo.Context) error {
 	if projectID == "" {
 		projectID, _ = h.getCurrentProjectID(c)
 	}
-	targets, explicitAllowed := h.outboundTargetsData(c)
+	targets, explicitAllowed := h.outboundTargetsDataForProject(c, projectID)
 	return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, ""))
+}
+
+func (h *Handler) handleOutboundTargetsCardFragment(c echo.Context) error {
+	projectID := c.QueryParam("project_id")
+	if projectID == "" {
+		projectID, _ = h.getCurrentProjectID(c)
+	}
+	targets, explicitAllowed := h.outboundTargetsDataForProject(c, projectID)
+	return render(c, http.StatusOK, pages.OutboundTargetsCardFragment(projectID, targets, explicitAllowed))
 }
 
 func (h *Handler) handleOutboundTargetSave(c echo.Context) error {
@@ -78,6 +87,7 @@ func (h *Handler) handleOutboundTargetSave(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save outbound target")
 	}
 	targets, explicitAllowed := h.outboundTargetsDataForProject(c, projectID)
+	c.Response().Header().Set("HX-Trigger", "outbound-targets-card-refresh")
 	return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, "Added outbound target."))
 }
 
@@ -93,6 +103,7 @@ func (h *Handler) handleOutboundTargetDelete(c echo.Context) error {
 		projectID, _ = h.getCurrentProjectID(c)
 	}
 	targets, explicitAllowed := h.outboundTargetsDataForProject(c, projectID)
+	c.Response().Header().Set("HX-Trigger", "outbound-targets-card-refresh")
 	return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, "Deleted outbound target."))
 }
 
@@ -132,5 +143,6 @@ func (h *Handler) handleSendMessageExplicitTargets(c echo.Context) error {
 		}
 	}
 	targets, explicitAllowed := h.outboundTargetsDataForProject(c, projectID)
+	c.Response().Header().Set("HX-Trigger", "outbound-targets-card-refresh")
 	return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, "Saved send_message target policy."))
 }

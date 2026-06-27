@@ -222,6 +222,9 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if !strings.Contains(outboundCard, "openOutboundTargetsModal()") {
 		t.Fatal("expected outbound card to open edit modal")
 	}
+	if !strings.Contains(outboundCard, `hx-get="/channels/outbound-targets/card?project_id=default"`) || !strings.Contains(outboundCard, `hx-trigger="outbound-targets-card-refresh from:body"`) {
+		t.Fatalf("expected outbound card to self-refresh on target mutations, got %q", outboundCard)
+	}
 	if strings.Contains(outboundCard, "Delete") || strings.Contains(outboundCard, "openDeleteChannelConfirm") {
 		t.Fatal("outbound safety card must not expose a delete action")
 	}
@@ -278,6 +281,48 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	postBody := postRec.Body.String()
 	if !strings.Contains(postBody, "Added outbound target.") || !strings.Contains(postBody, "billing@example.com") {
 		t.Fatalf("expected added target to appear in refreshed modal fragment, got %q", postBody)
+	}
+	if postRec.Header().Get("HX-Trigger") != "outbound-targets-card-refresh" {
+		t.Fatalf("expected add-target response to refresh summary card, got HX-Trigger %q", postRec.Header().Get("HX-Trigger"))
+	}
+	if strings.Contains(postBody, `data-channel-type="outbound-targets"`) || strings.Contains(postBody, `hx-swap-oob`) {
+		t.Fatal("add-target modal response must not include card markup or OOB swaps")
+	}
+
+	cardReq := httptest.NewRequest(http.MethodGet, "/channels/outbound-targets/card?project_id=default", nil)
+	cardRec := httptest.NewRecorder()
+	e.ServeHTTP(cardRec, cardReq)
+	if cardRec.Code != http.StatusOK {
+		t.Fatalf("expected card fragment status 200, got %d", cardRec.Code)
+	}
+	cardBody := cardRec.Body.String()
+	if strings.Count(cardBody, `data-channel-type="outbound-targets"`) != 1 || !strings.Contains(cardBody, "email: 2") {
+		t.Fatalf("expected refreshed card fragment to show updated target count, got %q", cardBody)
+	}
+
+	policyForm := url.Values{}
+	policyForm.Set("project_id", "default")
+	policyForm.Set("enabled", "true")
+	policyReq := httptest.NewRequest(http.MethodPost, "/channels/send-message-explicit-targets", strings.NewReader(policyForm.Encode()))
+	policyReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	policyRec := httptest.NewRecorder()
+	e.ServeHTTP(policyRec, policyReq)
+	if policyRec.Code != http.StatusOK {
+		t.Fatalf("expected policy status 200, got %d", policyRec.Code)
+	}
+	if policyRec.Header().Get("HX-Trigger") != "outbound-targets-card-refresh" {
+		t.Fatalf("expected policy response to refresh summary card, got HX-Trigger %q", policyRec.Header().Get("HX-Trigger"))
+	}
+
+	cardReq = httptest.NewRequest(http.MethodGet, "/channels/outbound-targets/card?project_id=default", nil)
+	cardRec = httptest.NewRecorder()
+	e.ServeHTTP(cardRec, cardReq)
+	if cardRec.Code != http.StatusOK {
+		t.Fatalf("expected card fragment status 200 after policy save, got %d", cardRec.Code)
+	}
+	cardBody = cardRec.Body.String()
+	if !strings.Contains(cardBody, "Explicit targets allowed") {
+		t.Fatalf("expected refreshed card fragment to show updated policy badge, got %q", cardBody)
 	}
 }
 
