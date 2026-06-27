@@ -16,12 +16,13 @@ func TestDefaultAgentToolsIncludesSelectedMemoryView(t *testing.T) {
 	}
 }
 
-func TestNormalizeAgentToolsKeepsTaskGoalRuntimeTools(t *testing.T) {
+func TestNormalizeAgentToolsKeepsRuntimeMessagingAndTaskGoalTools(t *testing.T) {
 	input := []string{
 		"get_task_goal",
 		"mark_task_goal_achieved",
 		"report_task_goal_blocked",
 		"send_to_task",
+		"send_message",
 	}
 
 	tools := normalizeAgentTools(input)

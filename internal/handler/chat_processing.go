@@ -314,6 +314,9 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			defs = filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, surface, true), agentDef, includeMemoryView)
 		} else {
 			defs = chatcontrol.ToolDefsForContext(chatMode, surface, chatMode == models.ChatModeOrchestrate)
+			if agentDef != nil {
+				defs = filterAssignedAgentRuntimeToolDefs(defs, agentDef)
+			}
 		}
 		if len(defs) > 0 {
 			rt := h.buildChatActionToolRuntimeFromDefs(params, nil, defs, chatMode, surface)

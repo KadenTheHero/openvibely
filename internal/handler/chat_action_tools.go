@@ -396,6 +396,8 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			selectedMemoryHandles := service.SelectedMemoryHandlesFromContext(ctx)
 			if params.IsTaskFollowup {
 				summaries = filterTaskThreadCapabilitySummaries(summaries, params.AgentDefinition, len(selectedMemoryHandles) > 0)
+			} else if params.AgentDefinition != nil {
+				summaries = filterAssignedAgentCapabilitySummaries(summaries, params.AgentDefinition)
 			}
 			return formatCapabilities(summaries, selectedMemoryHandles), nil
 		}}
@@ -941,6 +943,32 @@ func filterTaskThreadCapabilitySummaries(summaries []chatcontrol.ActionSummary, 
 	return out
 }
 
+func filterAssignedAgentRuntimeToolDefs(defs []llmcontracts.RuntimeToolDefinition, agentDef *models.Agent) []llmcontracts.RuntimeToolDefinition {
+	out := make([]llmcontracts.RuntimeToolDefinition, 0, len(defs))
+	for _, def := range defs {
+		if assignedAgentToolDenied(def.Name, agentDef) {
+			continue
+		}
+		out = append(out, def)
+	}
+	return out
+}
+
+func filterAssignedAgentCapabilitySummaries(summaries []chatcontrol.ActionSummary, agentDef *models.Agent) []chatcontrol.ActionSummary {
+	out := make([]chatcontrol.ActionSummary, 0, len(summaries))
+	for _, summary := range summaries {
+		if assignedAgentToolDenied(summary.Name, agentDef) {
+			continue
+		}
+		out = append(out, summary)
+	}
+	return out
+}
+
+func assignedAgentToolDenied(toolName string, agentDef *models.Agent) bool {
+	return toolName == "send_message" && !hasToolGrant(agentTools(agentDef), "send_message")
+}
+
 func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 	allowed := map[string]bool{
 		"view_task_thread":  true,
@@ -952,10 +980,25 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"resume_task_goal":  true,
 		"list_capabilities": true,
 	}
-	for _, tool := range explicitlyGrantedGoalStatusTools(agentDef) {
+	for _, tool := range explicitlyGrantedTaskThreadRuntimeTools(agentDef) {
 		allowed[tool] = true
 	}
 	return allowed
+}
+
+func explicitlyGrantedTaskThreadRuntimeTools(agentDef *models.Agent) []string {
+	if agentDef == nil || len(agentDef.Tools) == 0 {
+		return nil
+	}
+	granted := []string{}
+	for _, tool := range agentDef.Tools {
+		switch strings.ToLower(strings.TrimSpace(tool)) {
+		case "send_message":
+			granted = append(granted, "send_message")
+		}
+	}
+	granted = append(granted, explicitlyGrantedGoalStatusTools(agentDef)...)
+	return granted
 }
 
 func explicitlyGrantedGoalStatusTools(agentDef *models.Agent) []string {

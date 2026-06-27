@@ -426,6 +426,9 @@ func TestHandler_AgentsPage_IncludesRealtimeScopedDirectoryValidation(t *testing
 	}
 
 	body := rec.Body.String()
+	if !strings.Contains(body, `value="send_message"`) {
+		t.Fatalf("expected agent tools dialog to include send_message checkbox")
+	}
 	if !strings.Contains(body, "id=\"scoped_files_directory_error\"") {
 		t.Fatalf("expected scoped directory inline error element")
 	}
@@ -1301,6 +1304,46 @@ func TestHandler_CreateAgent_DefaultsPluginsOffWhenNotSelected(t *testing.T) {
 	if len(user[0].Plugins) != 0 {
 		t.Fatalf("expected no default plugins enabled, got %v", user[0].Plugins)
 	}
+}
+
+func TestHandler_CreateAgent_PersistsSendMessageToolGrant(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	form := url.Values{}
+	form.Set("name", "channel-agent")
+	form.Set("description", "send outbound updates")
+	form.Set("system_prompt", "send updates when asked")
+	form.Set("model", "inherit")
+	form.Set("tools_json", `["send_message"]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+
+	req := httptest.NewRequest(http.MethodPost, "/agents", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	agents, err := agentRepo.List(context.Background())
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	for _, agent := range agents {
+		if agent.SystemKind == "" && agent.Name == "channel-agent" {
+			if !agentToolsInclude(agent.Tools, "send_message") {
+				t.Fatalf("stored agent tools = %#v, missing send_message", agent.Tools)
+			}
+			return
+		}
+	}
+	t.Fatalf("created channel-agent not found in %#v", agents)
 }
 
 func TestHandler_CreateAgent_RejectsUninstalledPluginSelection(t *testing.T) {
