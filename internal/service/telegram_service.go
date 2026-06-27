@@ -3905,16 +3905,16 @@ func (s *TelegramService) deliverTelegramChatFinal(ctx context.Context, chatID i
 		return
 	}
 	previewState := s.finishTelegramPreview(chatID, messageID)
-	if previewState != nil && previewState.richDraftVisible && previewState.richDraftID != 0 {
-		if sent, draftErr := s.sendRichMessageDraft(ctx, chatID, previewState.richDraftID, text); sent {
+	if previewState != nil && previewState.richDraftVisible {
+		if sent, sendErr := s.sendRichMessage(ctx, chatID, text); sent {
 			s.clearTelegramChatPlaceholderAfterRichFinalSend(chatID, messageID)
 			return
-		} else if draftErr != nil {
-			if !isTelegramRichFallbackError(draftErr) {
-				applog.Infof("[telegram] rich final draft update returned ambiguous error; not editing placeholder to avoid duplicate final output: %v", draftErr)
+		} else if sendErr != nil {
+			if !isTelegramRichFallbackError(sendErr) {
+				applog.Infof("[telegram] rich final send after visible draft returned ambiguous error; not editing placeholder to avoid duplicate final output: %v", sendErr)
 				return
 			}
-			applog.Infof("[telegram] rich final draft update unavailable after a visible draft; not editing placeholder to avoid duplicate final output: %v", draftErr)
+			applog.Infof("[telegram] rich final send unavailable after a visible draft; not editing placeholder to avoid duplicate final output: %v", sendErr)
 			return
 		}
 		return
