@@ -257,8 +257,33 @@ func TestOutboundTargetDraftTestSendsWithoutPersisting(t *testing.T) {
 		t.Fatalf("draft test must not persist targets, targets=%+v err=%v", targets, err)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "Test sent:") || !strings.Contains(body, "&#34;ok&#34;:true") {
-		t.Fatalf("expected escaped success result, got %q", body)
+	if !strings.Contains(body, "Test sent.") || strings.Contains(body, "&#34;ok&#34;") || strings.Contains(body, `{"ok"`) {
+		t.Fatalf("expected polished success result without raw JSON, got %q", body)
+	}
+}
+
+func TestOutboundTargetDraftTestRendersCleanFailure(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Outbound Draft Failure Project").Build()
+	targetRepo := repository.NewChannelTargetRepo(tc.db)
+	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
+	tc.handler.SetChannelTargetRepo(targetRepo)
+	tc.handler.SetChannelMessageRouter(router)
+
+	form := url.Values{}
+	form.Set("project_id", project.ID)
+	form.Set("target_platform", "email")
+	form.Set("target_target_id", "draft@example.com")
+	req := httptest.NewRequest(http.MethodPost, "/channels/outbound-targets/test-draft", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	tc.echo.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Test failed:") || strings.Contains(body, `{"ok"`) || strings.Contains(body, "&#34;ok&#34;") {
+		t.Fatalf("expected polished failure result without raw JSON, got %q", body)
 	}
 }
 
@@ -297,13 +322,10 @@ func TestOutboundTargetTestPreservesThreadIDAndEscapesResult(t *testing.T) {
 		t.Fatalf("unexpected message %q", slack.text)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "Test sent:") || !strings.Contains(body, "slack:C123:1690000000.000000") {
+	if !strings.Contains(body, "Test sent.") {
 		t.Fatalf("unexpected body %q", body)
 	}
-	if strings.Contains(body, `{"ok":true`) {
-		t.Fatalf("expected JSON to be HTML-escaped, got %q", body)
-	}
-	if !strings.Contains(body, "&#34;ok&#34;:true") {
-		t.Fatalf("expected escaped JSON, got %q", body)
+	if strings.Contains(body, "slack:C123:1690000000.000000") || strings.Contains(body, `{"ok":true`) || strings.Contains(body, "&#34;ok&#34;") {
+		t.Fatalf("expected polished success result without transport JSON, got %q", body)
 	}
 }

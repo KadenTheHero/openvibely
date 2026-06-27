@@ -1714,7 +1714,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							'<td class="font-mono text-xs break-all">' + outboundTargetsEscape(targetID) + '</td>' +
 							'<td class="font-mono text-xs">' + outboundTargetsEscape(threadID) + '</td>' +
 							'<td class="outbound-target-home-cell">' + (isHome ? '<span class="badge badge-sm badge-primary">Home</span>' : '') + '</td>' +
-							'<td class="text-right"><div id="outbound-target-test-' + rowKey + '" class="mb-1"></div><span class="badge badge-sm badge-ghost mr-2">Unsaved</span><button type="button" class="btn btn-xs mr-1" hx-post="/channels/outbound-targets/test-draft" hx-include="#outbound-target-draft-fields-' + rowKey + ', #outbound-targets-policy-form input[name=project_id]" hx-target="#outbound-target-test-' + rowKey + '" hx-swap="innerHTML">Test</button><button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button></td>';
+							'<td class="text-right"><div id="outbound-target-test-' + rowKey + '" class="mb-1"></div><span class="badge badge-sm badge-ghost mr-2">Unsaved</span><button type="button" class="btn btn-xs mr-1" hx-post="/channels/outbound-targets/test-draft" hx-include="#outbound-target-draft-fields-' + rowKey + ', #outbound-targets-policy-form input[name=project_id]" hx-target="#outbound-target-test-' + rowKey + '" hx-swap="innerHTML" hx-indicator="#outbound-target-test-indicator-' + rowKey + '">Test</button><span id="outbound-target-test-indicator-' + rowKey + '" class="htmx-indicator text-xs opacity-70 mr-2">Testing...</span><button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button></td>';
 						tbody.appendChild(row);
 						outboundTargetsAppendDraftFields(rowKey, '', platform, name, targetID, threadID, isHome, defaultSubject);
 						if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(row);
@@ -1987,7 +1987,8 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 										</td>
 										<td class="text-right">
 											<div id={ "outbound-target-test-" + target.ID } class="mb-1"></div>
-											<button type="button" class="btn btn-xs" hx-post={ "/channels/outbound-targets/" + target.ID + "/test?project_id=" + currentProjectID } hx-target={ "#outbound-target-test-" + target.ID } hx-swap="innerHTML">Test</button>
+											<button type="button" class="btn btn-xs" hx-post={ "/channels/outbound-targets/" + target.ID + "/test?project_id=" + currentProjectID } hx-target={ "#outbound-target-test-" + target.ID } hx-swap="innerHTML" hx-indicator={ "#outbound-target-test-indicator-" + target.ID }>Test</button>
+											<span id={ "outbound-target-test-indicator-" + target.ID } class="htmx-indicator text-xs opacity-70 mr-2">Testing...</span>
 											<button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button>
 										</td>
 								</tr>

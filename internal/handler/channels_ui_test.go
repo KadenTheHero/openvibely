@@ -262,6 +262,9 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if !strings.Contains(body, `/channels/outbound-targets/test-draft`) || !strings.Contains(body, `window.htmx.process(row)`) {
 		t.Fatal("expected draft-added target rows to include an immediately usable Test button")
 	}
+	if !strings.Contains(body, `hx-indicator="#outbound-target-test-indicator-`) || !strings.Contains(body, `Testing...`) {
+		t.Fatal("expected draft target Test buttons to show a loading indicator")
+	}
 	if !strings.Contains(body, "resetOutboundTargetAddForm") || !strings.Contains(body, "reloadOutboundTargetsModalDraft") || !strings.Contains(body, "rp === '/channels/send-message-explicit-targets'") {
 		t.Fatal("expected outbound modal close/reset/reload hooks")
 	}
@@ -314,6 +317,9 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	policyBody := policyRec.Body.String()
 	if !strings.Contains(policyBody, "Saved outbound message targets.") || !strings.Contains(policyBody, "billing@example.com") {
 		t.Fatalf("expected saved draft target to appear in refreshed modal fragment, got %q", policyBody)
+	}
+	if !strings.Contains(policyBody, `hx-indicator="#outbound-target-test-indicator-`) || !strings.Contains(policyBody, `Testing...`) {
+		t.Fatalf("expected saved target Test buttons to show a loading indicator, got %q", policyBody)
 	}
 	if strings.Contains(policyBody, `data-channel-type="outbound-targets"`) || strings.Contains(policyBody, `hx-swap-oob`) {
 		t.Fatal("save response must not include card markup or OOB swaps")

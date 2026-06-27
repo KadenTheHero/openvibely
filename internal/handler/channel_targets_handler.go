@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"fmt"
 	"html"
 	"net/http"
@@ -92,12 +91,14 @@ func (h *Handler) handleOutboundTargetDraftTest(c echo.Context) error {
 }
 
 func outboundTargetTestResultHTML(c echo.Context, result service.SendMessageResult) error {
-	b, _ := json.Marshal(result)
-	escaped := html.EscapeString(string(b))
 	if result.OK {
-		return c.HTML(http.StatusOK, `<div class="text-success text-sm">Test sent: `+escaped+`</div>`)
+		return c.HTML(http.StatusOK, `<div class="alert alert-success py-1 px-2 text-xs justify-end inline-flex">Test sent.</div>`)
 	}
-	return c.HTML(http.StatusOK, `<div class="text-error text-sm">Test failed: `+escaped+`</div>`)
+	message := strings.TrimSpace(result.Error)
+	if message == "" {
+		message = "Provider did not accept the test message"
+	}
+	return c.HTML(http.StatusOK, `<div class="alert alert-error py-1 px-2 text-xs justify-end inline-flex">Test failed: `+html.EscapeString(message)+`</div>`)
 }
 
 func (h *Handler) outboundTargetForRequestProject(c echo.Context) (string, *models.ChannelTarget, error) {
