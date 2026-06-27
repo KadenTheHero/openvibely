@@ -103,6 +103,22 @@ func TestChannelMessageRouter_ResolvesNamedAndThreadTargets(t *testing.T) {
 	require.Equal(t, "Subject", email.subject)
 }
 
+func TestChannelMessageRouter_SendDirectTargetDoesNotRequireSavedOrExplicitPolicy(t *testing.T) {
+	ctx, targetRepo, _, project, router, _, _, email := setupChannelMessageRouterTest(t)
+	res := router.SendDirectTarget(ctx, project.ID, ChannelTarget{Platform: "email", TargetID: "Draft@Example.com", DefaultSubject: "Draft Subject"}, SendMessageRequest{Message: "draft test"})
+	require.True(t, res.OK)
+	require.Equal(t, "draft@example.com", email.to)
+	require.Equal(t, "Draft Subject", email.subject)
+
+	targets, err := targetRepo.ListByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Empty(t, targets, "draft test must not save outbound targets")
+	sends, err := targetRepo.ListSendsByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, sends, 1)
+	require.True(t, sends[0].Success)
+}
+
 func TestChannelMessageRouter_ExplicitTargetsRequireSetting(t *testing.T) {
 	ctx, targetRepo, settingsRepo, project, router, _, _, email := setupChannelMessageRouterTest(t)
 	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "email:Person@Example.com", Message: "body"})

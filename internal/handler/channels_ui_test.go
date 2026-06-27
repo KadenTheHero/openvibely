@@ -259,6 +259,9 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if !strings.Contains(body, `id="outbound-target-add-form"`) || !strings.Contains(body, `>Add Target</button>`) {
 		t.Fatal("expected add-target form and Add Target button label")
 	}
+	if !strings.Contains(body, `/channels/outbound-targets/test-draft`) || !strings.Contains(body, `window.htmx.process(row)`) {
+		t.Fatal("expected draft-added target rows to include an immediately usable Test button")
+	}
 	if !strings.Contains(body, "resetOutboundTargetAddForm") || !strings.Contains(body, "reloadOutboundTargetsModalDraft") || !strings.Contains(body, "rp === '/channels/send-message-explicit-targets'") {
 		t.Fatal("expected outbound modal close/reset/reload hooks")
 	}

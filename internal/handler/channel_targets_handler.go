@@ -66,6 +66,32 @@ func (h *Handler) handleOutboundTargetTest(c echo.Context) error {
 		targetRef += ":" + strings.TrimSpace(target.ThreadID)
 	}
 	result := h.channelMessageRouter.WithAuditContext("web", "test_button").Send(c.Request().Context(), projectID, service.SendMessageRequest{Target: targetRef, Message: "Test message from OpenVibely", Subject: target.DefaultSubject})
+	return outboundTargetTestResultHTML(c, result)
+}
+
+func (h *Handler) handleOutboundTargetDraftTest(c echo.Context) error {
+	if h.channelMessageRouter == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Outbound messaging is unavailable")
+	}
+	projectID := strings.TrimSpace(c.FormValue("project_id"))
+	if projectID == "" {
+		projectID, _ = h.getCurrentProjectID(c)
+	}
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Project is required")
+	}
+	target := service.ChannelTarget{
+		ProjectID:      projectID,
+		Platform:       strings.TrimSpace(c.FormValue("target_platform")),
+		TargetID:       strings.TrimSpace(c.FormValue("target_target_id")),
+		ThreadID:       strings.TrimSpace(c.FormValue("target_thread_id")),
+		DefaultSubject: strings.TrimSpace(c.FormValue("target_default_subject")),
+	}
+	result := h.channelMessageRouter.WithAuditContext("web", "test_button").SendDirectTarget(c.Request().Context(), projectID, target, service.SendMessageRequest{Message: "Test message from OpenVibely", Subject: target.DefaultSubject})
+	return outboundTargetTestResultHTML(c, result)
+}
+
+func outboundTargetTestResultHTML(c echo.Context, result service.SendMessageResult) error {
 	b, _ := json.Marshal(result)
 	escaped := html.EscapeString(string(b))
 	if result.OK {

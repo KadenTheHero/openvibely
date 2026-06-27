@@ -592,10 +592,11 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/channels/email/configure", h.handleEmailConfigure)
 	e.POST("/channels/email/remove", h.handleEmailRemove)
 	e.POST("/channels/email/test", h.handleEmailTest)
-	e.GET("/channels/outbound-targets", h.handleOutboundTargetsFragment)
-	e.GET("/channels/outbound-targets/card", h.handleOutboundTargetsCardFragment)
-	e.POST("/channels/outbound-targets/:id/test", h.handleOutboundTargetTest)
-	e.POST("/channels/send-message-explicit-targets", h.handleSendMessageExplicitTargets)
+		e.GET("/channels/outbound-targets", h.handleOutboundTargetsFragment)
+		e.GET("/channels/outbound-targets/card", h.handleOutboundTargetsCardFragment)
+		e.POST("/channels/outbound-targets/test-draft", h.handleOutboundTargetDraftTest)
+		e.POST("/channels/outbound-targets/:id/test", h.handleOutboundTargetTest)
+		e.POST("/channels/send-message-explicit-targets", h.handleSendMessageExplicitTargets)
 
 	// Personality
 	e.GET("/personality", h.handleAppSettings)

@@ -144,6 +144,46 @@ func (r *ChannelMessageRouter) Send(ctx context.Context, projectID string, req S
 	return r.auditAndReturn(ctx, projectID, resolved.Platform, resolved.TargetID, resolved.ThreadID, req.Message, result)
 }
 
+func (r *ChannelMessageRouter) SendDirectTarget(ctx context.Context, projectID string, target ChannelTarget, req SendMessageRequest) SendMessageResult {
+	if r == nil {
+		return sendMessageError("channel message router is not configured")
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return sendMessageError("project id is required")
+	}
+	if strings.TrimSpace(req.Message) == "" {
+		return r.auditAndReturn(ctx, projectID, "", "", "", req.Message, sendMessageError("send_message requires message"))
+	}
+	platform := strings.ToLower(strings.TrimSpace(target.Platform))
+	targetID := strings.TrimSpace(target.TargetID)
+	threadID := strings.TrimSpace(target.ThreadID)
+	if platform != "slack" && platform != "telegram" && platform != "email" {
+		return r.auditAndReturn(ctx, projectID, "", "", "", req.Message, sendMessageError("Unsupported platform"))
+	}
+	if targetID == "" {
+		return r.auditAndReturn(ctx, projectID, platform, "", "", req.Message, sendMessageError("Target ID is required"))
+	}
+	if platform == "email" {
+		normalized, err := NormalizeOutboundEmailForTarget(targetID)
+		if err != nil {
+			return r.auditAndReturn(ctx, projectID, platform, targetID, threadID, req.Message, sendMessageError(err.Error()))
+		}
+		targetID = normalized
+	}
+	if !isNativeTarget(platform, targetID) {
+		return r.auditAndReturn(ctx, projectID, platform, targetID, threadID, req.Message, sendMessageError(fmt.Sprintf("Invalid %s target %q", platform, targetID)))
+	}
+	if platform == "telegram" && threadID != "" {
+		if _, err := strconv.Atoi(threadID); err != nil {
+			return r.auditAndReturn(ctx, projectID, platform, targetID, threadID, req.Message, sendMessageError("telegram thread id must be an integer"))
+		}
+	}
+	resolved := resolvedMessageTarget{Platform: platform, TargetID: targetID, ThreadID: threadID, DefaultSubject: strings.TrimSpace(target.DefaultSubject)}
+	result := r.dispatch(ctx, req, resolved)
+	return r.auditAndReturn(ctx, projectID, resolved.Platform, resolved.TargetID, resolved.ThreadID, req.Message, result)
+}
+
 func ExecuteSendMessageTool(ctx context.Context, router *ChannelMessageRouter, projectID string, input json.RawMessage) (string, error) {
 	var req SendMessageRequest
 	if err := decodeRuntimeToolInput(input, &req); err != nil {

@@ -226,6 +226,42 @@ func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 	}
 }
 
+func TestOutboundTargetDraftTestSendsWithoutPersisting(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Outbound Draft Test Project").Build()
+	targetRepo := repository.NewChannelTargetRepo(tc.db)
+	slack := &outboundTargetTestSlack{}
+	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
+	router.SetSlackService(slack)
+	tc.handler.SetChannelTargetRepo(targetRepo)
+	tc.handler.SetChannelMessageRouter(router)
+
+	form := url.Values{}
+	form.Set("project_id", project.ID)
+	form.Set("target_platform", "slack")
+	form.Set("target_target_id", "CDRAFT")
+	form.Set("target_thread_id", "1690000000.000000")
+	form.Set("target_default_subject", "")
+	req := httptest.NewRequest(http.MethodPost, "/channels/outbound-targets/test-draft", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	tc.echo.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if slack.channelID != "CDRAFT" || slack.threadTS != "1690000000.000000" || slack.text != "Test message from OpenVibely" {
+		t.Fatalf("unexpected draft test send channel=%q thread=%q text=%q", slack.channelID, slack.threadTS, slack.text)
+	}
+	targets, err := targetRepo.ListByProject(context.Background(), project.ID)
+	if err != nil || len(targets) != 0 {
+		t.Fatalf("draft test must not persist targets, targets=%+v err=%v", targets, err)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Test sent:") || !strings.Contains(body, "&#34;ok&#34;:true") {
+		t.Fatalf("expected escaped success result, got %q", body)
+	}
+}
+
 func TestOutboundTargetTestPreservesThreadIDAndEscapesResult(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Outbound Target Project").Build()

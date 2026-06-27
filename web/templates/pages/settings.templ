@@ -1663,6 +1663,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						const fields = document.getElementById('outbound-targets-draft-fields');
 						if (!fields) return;
 						const group = document.createElement('div');
+						group.id = 'outbound-target-draft-fields-' + rowKey;
 						group.setAttribute('data-outbound-target-draft-key', rowKey);
 						group.appendChild(outboundTargetsDraftInput('target_row_id', id));
 						group.appendChild(outboundTargetsDraftInput('target_platform', platform));
@@ -1713,9 +1714,10 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							'<td class="font-mono text-xs break-all">' + outboundTargetsEscape(targetID) + '</td>' +
 							'<td class="font-mono text-xs">' + outboundTargetsEscape(threadID) + '</td>' +
 							'<td class="outbound-target-home-cell">' + (isHome ? '<span class="badge badge-sm badge-primary">Home</span>' : '') + '</td>' +
-							'<td class="text-right"><span class="badge badge-sm badge-ghost mr-2">Unsaved</span><button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button></td>';
+							'<td class="text-right"><div id="outbound-target-test-' + rowKey + '" class="mb-1"></div><span class="badge badge-sm badge-ghost mr-2">Unsaved</span><button type="button" class="btn btn-xs mr-1" hx-post="/channels/outbound-targets/test-draft" hx-include="#outbound-target-draft-fields-' + rowKey + ', #outbound-targets-policy-form input[name=project_id]" hx-target="#outbound-target-test-' + rowKey + '" hx-swap="innerHTML">Test</button><button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button></td>';
 						tbody.appendChild(row);
 						outboundTargetsAppendDraftFields(rowKey, '', platform, name, targetID, threadID, isHome, defaultSubject);
+						if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(row);
 						resetOutboundTargetAddForm();
 						return false;
 					}
@@ -1996,8 +1998,8 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 					<form id="outbound-targets-policy-form" method="post" hx-post="/channels/send-message-explicit-targets" hx-target="#outbound-targets-section" hx-swap="outerHTML" class="modal-action" onclick="event.stopPropagation()">
 						<input type="hidden" name="project_id" value={ currentProjectID }/>
 						<div id="outbound-targets-draft-fields">
-							for _, target := range targets {
-								<div data-outbound-target-draft-key={ target.ID }>
+								for _, target := range targets {
+									<div id={ "outbound-target-draft-fields-" + target.ID } data-outbound-target-draft-key={ target.ID }>
 									<input type="hidden" name="target_row_id" value={ target.ID }/>
 									<input type="hidden" name="target_platform" value={ target.Platform }/>
 									<input type="hidden" name="target_name" value={ target.Name }/>
