@@ -106,6 +106,26 @@ func agentsJSON(agents []models.Agent) string {
 	return string(b)
 }
 
+func outboundTargetSummary(targets []models.ChannelTarget) string {
+	if len(targets) == 0 {
+		return "No saved outbound targets"
+	}
+	counts := map[string]int{}
+	for _, target := range targets {
+		counts[strings.ToLower(target.Platform)]++
+	}
+	parts := []string{}
+	for _, platform := range []string{"email", "slack", "telegram"} {
+		if counts[platform] > 0 {
+			parts = append(parts, fmt.Sprintf("%s: %d", platform, counts[platform]))
+		}
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("%d saved outbound target(s)", len(targets))
+	}
+	return strings.Join(parts, " • ")
+}
+
 templ SettingsPage(telegramToken string, isBotRunning bool, projects []models.Project, currentProjectID string, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) {
 	@layout.Base("Channels", projects, currentProjectID) {
 		@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets)
@@ -168,9 +188,11 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 
 		@CardSearchInput("channels", "Search channels...")
 
-		<!-- Active Channels -->
-		<div class="grid gap-4 mb-8">
-			if hasGitHubChannel {
+			<!-- Active Channels -->
+			<div class="grid gap-4 mb-8">
+				@OutboundTargetsCard(channelTargets, sendMessageExplicitTargets, false)
+
+				if hasGitHubChannel {
 				<!-- GitHub Card -->
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
@@ -538,8 +560,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					</div>
 				}		</div>
 
-			@OutboundTargetsSection(currentProjectID, channelTargets, sendMessageExplicitTargets, "")
-
+				@OutboundTargetsModal(currentProjectID, channelTargets, sendMessageExplicitTargets)
 			<!-- Coming Soon Section -->
 		<div class="mb-8">
 			<h3 class="text-lg font-semibold mb-4 opacity-70">Coming Soon</h3>
@@ -1598,6 +1619,16 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					if (modal) modal.close();
 				}
 
+				function openOutboundTargetsModal() {
+					const modal = document.getElementById('outbound_targets_modal');
+					if (modal) modal.showModal();
+				}
+
+				function closeOutboundTargetsModal() {
+					const modal = document.getElementById('outbound_targets_modal');
+					if (modal) modal.close();
+				}
+
 				function setEmailProviderPreset(providerKey, preserveValues) {
 					const provider = document.getElementById('email_provider');
 					if (!provider) return;
@@ -1700,10 +1731,73 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 	</div>
 }
 
+templ OutboundTargetsCard(targets []models.ChannelTarget, explicitAllowed bool, oob bool) {
+	<div
+		id="outbound-targets-card"
+		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+		data-channel-type="outbound-targets"
+		data-search-card
+		data-search-text="Outbound Message Targets send_message Slack Telegram Email"
+		hx-swap-oob?={ oob }
+		onclick="openOutboundTargetsModal()"
+	>
+		<div class="card-body relative">
+			<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+				<div class="dropdown dropdown-end">
+					<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+						</svg>
+					</label>
+					<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+						<li><button type="button" onclick="openOutboundTargetsModal()">Edit</button></li>
+					</ul>
+				</div>
+			</div>
+			<div class="pr-12">
+				<h3 class="font-bold flex items-center gap-2">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.031 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+					</svg>
+					Outbound Message Targets
+				</h3>
+				<p class="text-sm opacity-60">Safety controls for where the `send_message` chat tool can send.</p>
+				<div class="mt-2 flex flex-wrap items-center gap-2">
+					<span class="badge badge-sm badge-ghost">{ outboundTargetSummary(targets) }</span>
+					if explicitAllowed {
+						<span class="badge badge-sm badge-warning">Explicit targets allowed</span>
+					} else {
+						<span class="badge badge-sm badge-success">Saved targets only</span>
+					}
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+templ OutboundTargetsModal(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool) {
+	<dialog id="outbound_targets_modal" class="modal">
+		<div class="modal-box max-w-5xl">
+			<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeOutboundTargetsModal()" aria-label="Close outbound message targets" title="Close outbound message targets">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+			</button>
+			@OutboundTargetsSection(currentProjectID, targets, explicitAllowed, "")
+		</div>
+		<form method="dialog" class="modal-backdrop">
+			<button>close</button>
+		</form>
+	</dialog>
+}
+
+templ OutboundTargetsFragment(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool, notice string) {
+	@OutboundTargetsSection(currentProjectID, targets, explicitAllowed, notice)
+	@OutboundTargetsCard(targets, explicitAllowed, true)
+}
+
 templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool, notice string) {
-	<div id="outbound-targets-section" class="card bg-base-100 shadow-sm border border-base-300 mb-8" data-search-card data-search-text="Outbound message targets send_message Slack Telegram Email">
-		<div class="card-body">
-			<div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+	<div id="outbound-targets-section">
+		<div>
+			<div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between pr-10">
 				<div>
 					<h3 class="card-title">Outbound Message Targets</h3>
 					<p class="text-sm opacity-70">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, or `email:#client`.</p>

@@ -37,7 +37,7 @@ func (h *Handler) handleOutboundTargetsFragment(c echo.Context) error {
 		projectID, _ = h.getCurrentProjectID(c)
 	}
 	targets, explicitAllowed := h.outboundTargetsData(c)
-	return render(c, http.StatusOK, pages.OutboundTargetsSection(projectID, targets, explicitAllowed, ""))
+	return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, ""))
 }
 
 func (h *Handler) handleOutboundTargetSave(c echo.Context) error {
@@ -74,7 +74,7 @@ func (h *Handler) handleOutboundTargetSave(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save outbound target")
 	}
 	targets, explicitAllowed := h.outboundTargetsData(c)
-	return render(c, http.StatusOK, pages.OutboundTargetsSection(projectID, targets, explicitAllowed, "Saved outbound target."))
+	return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, "Saved outbound target."))
 }
 
 func (h *Handler) handleOutboundTargetDelete(c echo.Context) error {
@@ -89,7 +89,7 @@ func (h *Handler) handleOutboundTargetDelete(c echo.Context) error {
 	if projectID == "" {
 		projectID, _ = h.getCurrentProjectID(c)
 	}
-	return render(c, http.StatusOK, pages.OutboundTargetsSection(projectID, targets, explicitAllowed, "Deleted outbound target."))
+	return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, "Deleted outbound target."))
 }
 
 func (h *Handler) handleOutboundTargetTest(c echo.Context) error {
@@ -128,5 +128,5 @@ func (h *Handler) handleSendMessageExplicitTargets(c echo.Context) error {
 		}
 	}
 	targets, explicitAllowed := h.outboundTargetsData(c)
-	return render(c, http.StatusOK, pages.OutboundTargetsSection(projectID, targets, explicitAllowed, "Saved send_message target policy."))
+	return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, "Saved send_message target policy."))
 }

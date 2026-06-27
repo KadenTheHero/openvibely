@@ -180,6 +180,59 @@ func TestChannelsPageTelegramRichMessagesToggleDefaultsCheckedAndHonorsSavedFals
 	}
 }
 
+func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	targetRepo := repository.NewChannelTargetRepo(db)
+	h.SetChannelTargetRepo(targetRepo)
+	if err := targetRepo.Upsert(context.Background(), models.ChannelTarget{
+		ID:        repository.NewID(),
+		ProjectID: "default",
+		Platform:  "email",
+		Name:      "client",
+		TargetID:  "client@example.com",
+		Home:      true,
+	}); err != nil {
+		t.Fatalf("failed to seed outbound target: %v", err)
+	}
+	h.SetSlackService(&fakeSlackService{
+		statusFn: func(ctx context.Context) (service.SlackConnectionStatus, error) {
+			return service.SlackConnectionStatus{Configured: true, Connected: true}, nil
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	outboundCard := cardSectionByType(body, "outbound-targets")
+	if outboundCard == "" {
+		t.Fatal("expected permanent outbound message targets card")
+	}
+	if !strings.Contains(outboundCard, "Outbound Message Targets") || !strings.Contains(outboundCard, "Safety controls") {
+		t.Fatalf("expected outbound card summary, got %q", outboundCard)
+	}
+	if !strings.Contains(outboundCard, "email: 1") || !strings.Contains(outboundCard, "Saved targets only") {
+		t.Fatalf("expected outbound card count and policy badges, got %q", outboundCard)
+	}
+	if !strings.Contains(outboundCard, "openOutboundTargetsModal()") {
+		t.Fatal("expected outbound card to open edit modal")
+	}
+	if strings.Contains(outboundCard, "Delete") || strings.Contains(outboundCard, "openDeleteChannelConfirm") {
+		t.Fatal("outbound safety card must not expose a delete action")
+	}
+	assertIndexOrder(t, body, `data-channel-type="outbound-targets"`, `data-channel-type="slack"`, "expected outbound targets card before channel cards")
+	if !strings.Contains(body, `id="outbound_targets_modal"`) {
+		t.Fatal("expected outbound targets edit modal")
+	}
+	if !strings.Contains(body, `hx-post="/channels/outbound-targets"`) || !strings.Contains(body, `client@example.com`) {
+		t.Fatal("expected existing outbound target controls inside modal")
+	}
+}
+
 func TestChannelsPageConnectedCardsHideTokenSpecificTextAndActions(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 

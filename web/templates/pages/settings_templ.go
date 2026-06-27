@@ -114,6 +114,26 @@ func agentsJSON(agents []models.Agent) string {
 	return string(b)
 }
 
+func outboundTargetSummary(targets []models.ChannelTarget) string {
+	if len(targets) == 0 {
+		return "No saved outbound targets"
+	}
+	counts := map[string]int{}
+	for _, target := range targets {
+		counts[strings.ToLower(target.Platform)]++
+	}
+	parts := []string{}
+	for _, platform := range []string{"email", "slack", "telegram"} {
+		if counts[platform] > 0 {
+			parts = append(parts, fmt.Sprintf("%s: %d", platform, counts[platform]))
+		}
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("%d saved outbound target(s)", len(targets))
+	}
+	return strings.Join(parts, " • ")
+}
+
 func SettingsPage(telegramToken string, isBotRunning bool, projects []models.Project, currentProjectID string, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -262,6 +282,10 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
+		templ_7745c5c3_Err = OutboundTargetsCard(channelTargets, sendMessageExplicitTargets, false).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		if hasGitHubChannel {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<!-- GitHub Card --> <div class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-channel-type=\"github\" data-search-card data-search-text=\"")
 			if templ_7745c5c3_Err != nil {
@@ -270,7 +294,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue("GitHub " + githubConnectionLabel(githubStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 179, Col: 71}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 201, Col: 71}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 			if templ_7745c5c3_Err != nil {
@@ -301,7 +325,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 					var templ_7745c5c3_Var6 string
 					templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(githubStatus.InstallationID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 218, Col: 98}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 240, Col: 98}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 					if templ_7745c5c3_Err != nil {
@@ -326,7 +350,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(githubStatus.AccountLogin)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 224, Col: 74}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 246, Col: 74}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
@@ -366,7 +390,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(githubConnectionLabel(githubStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 227, Col: 120}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 249, Col: 120}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {
@@ -410,7 +434,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var11 string
 			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue("Slack " + slackConnectionLabel(slackStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 253, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 275, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 			if templ_7745c5c3_Err != nil {
@@ -439,7 +463,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				var templ_7745c5c3_Var12 string
 				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(slackStatus.TeamName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 300, Col: 71}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 322, Col: 71}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 				if templ_7745c5c3_Err != nil {
@@ -458,7 +482,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				var templ_7745c5c3_Var13 string
 				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d user(s)", len(slackAuthorizedUsers)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 306, Col: 64}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 328, Col: 64}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 				if templ_7745c5c3_Err != nil {
@@ -498,7 +522,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(slackConnectionLabel(slackStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 311, Col: 116}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 333, Col: 116}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
@@ -527,7 +551,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var17 string
 			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(telegramToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 329, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 351, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 			if templ_7745c5c3_Err != nil {
@@ -540,7 +564,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var18 string
 			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.JSONString(isBotRunning))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 330, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 352, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 			if templ_7745c5c3_Err != nil {
@@ -553,7 +577,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var19 string
 			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue("Telegram Bot " + telegramChannelStatusText(isBotRunning))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 332, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 354, Col: 81}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 			if templ_7745c5c3_Err != nil {
@@ -571,7 +595,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				var templ_7745c5c3_Var20 string
 				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d user(s)", len(authorizedUsers)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 385, Col: 59}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 407, Col: 59}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 				if templ_7745c5c3_Err != nil {
@@ -610,7 +634,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var21 string
 			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue("Email " + emailStatus.Address)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 407, Col: 55}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 429, Col: 55}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 			if templ_7745c5c3_Err != nil {
@@ -628,7 +652,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				var templ_7745c5c3_Var22 string
 				templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(emailStatus.Address)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 430, Col: 67}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 452, Col: 67}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 				if templ_7745c5c3_Err != nil {
@@ -646,7 +670,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d sender(s)", len(emailAuthorizedSenders)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 434, Col: 108}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 456, Col: 108}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 			if templ_7745c5c3_Err != nil {
@@ -693,7 +717,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var24 string
 			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue("Webhook " + wh.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 456, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 478, Col: 45}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
 			if templ_7745c5c3_Err != nil {
@@ -706,7 +730,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var25 string
 			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(wh.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 457, Col: 29}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 479, Col: 29}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 			if templ_7745c5c3_Err != nil {
@@ -719,7 +743,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var26 string
 			templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(wh.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 458, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 480, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 			if templ_7745c5c3_Err != nil {
@@ -732,7 +756,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var27 string
 			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%t", wh.Enabled))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 459, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 481, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
 			if templ_7745c5c3_Err != nil {
@@ -745,7 +769,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var28 string
 			templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(wh.PathToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 460, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 482, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
 			if templ_7745c5c3_Err != nil {
@@ -758,7 +782,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var29 string
 			templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue(wh.Secret)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 461, Col: 37}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 483, Col: 37}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 			if templ_7745c5c3_Err != nil {
@@ -771,7 +795,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var30 string
 			templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.ResolveAttributeValue(wh.SystemInstructions)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 462, Col: 49}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 484, Col: 49}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 			if templ_7745c5c3_Err != nil {
@@ -784,7 +808,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var31 string
 			templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", wh.DefaultPriority))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 463, Col: 75}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 485, Col: 75}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 			if templ_7745c5c3_Err != nil {
@@ -797,7 +821,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var32 string
 			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(selectedWebhookAgentIDs(webhooks, webhookAgents, wh.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 464, Col: 86}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 486, Col: 86}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 			if templ_7745c5c3_Err != nil {
@@ -836,7 +860,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks/" + wh.ID + "/rotate-secret")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 479, Col: 69}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 501, Col: 69}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 			if templ_7745c5c3_Err != nil {
@@ -849,7 +873,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var36 string
 			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks/" + wh.ID + "/test")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 489, Col: 60}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 511, Col: 60}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 			if templ_7745c5c3_Err != nil {
@@ -862,7 +886,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var37 string
 			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue("#webhook-test-" + wh.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 490, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 512, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 			if templ_7745c5c3_Err != nil {
@@ -875,7 +899,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var38 string
 			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.ResolveAttributeValue(wh.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 500, Col: 46}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 522, Col: 46}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 			if templ_7745c5c3_Err != nil {
@@ -888,7 +912,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var39 string
 			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks/" + wh.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 501, Col: 67}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 523, Col: 67}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 			if templ_7745c5c3_Err != nil {
@@ -901,7 +925,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var40 string
 			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(wh.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 515, Col: 17}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 537, Col: 17}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 			if templ_7745c5c3_Err != nil {
@@ -946,7 +970,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var42 string
 			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue("webhook-test-" + wh.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 527, Col: 40}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 549, Col: 40}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
 			if templ_7745c5c3_Err != nil {
@@ -967,7 +991,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = OutboundTargetsSection(currentProjectID, channelTargets, sendMessageExplicitTargets, "").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = OutboundTargetsModal(currentProjectID, channelTargets, sendMessageExplicitTargets).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1028,7 +1052,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var43 string
 		templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.GitHubAuthModePAT)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 720, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 741, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 		if templ_7745c5c3_Err != nil {
@@ -1051,7 +1075,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var44 string
 		templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.GitHubAuthModeApp)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 721, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 742, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
 		if templ_7745c5c3_Err != nil {
@@ -1090,7 +1114,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var45 string
 		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubAppID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 752, Col: 94}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 773, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 		if templ_7745c5c3_Err != nil {
@@ -1103,7 +1127,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var46 string
 		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubAppSlug)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 756, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 777, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var46)
 		if templ_7745c5c3_Err != nil {
@@ -1116,7 +1140,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var47 string
 		templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubPrivateKeyPlaceholder(githubHasPrivateKey))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 765, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 786, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var47)
 		if templ_7745c5c3_Err != nil {
@@ -1129,7 +1153,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var48 string
 		templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(githubPrivateKeyValue)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 766, Col: 32}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 787, Col: 32}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
 		if templ_7745c5c3_Err != nil {
@@ -1142,7 +1166,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var49 string
 		templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackClientID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 812, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 833, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var49)
 		if templ_7745c5c3_Err != nil {
@@ -1155,7 +1179,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var50 string
 		templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(slackHasClientID, "Client ID"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 812, Col: 168}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 833, Col: 168}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
 		if templ_7745c5c3_Err != nil {
@@ -1200,7 +1224,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var51 string
 		templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.SlackBotTokenSourceOAuth)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 846, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 867, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
 		if templ_7745c5c3_Err != nil {
@@ -1223,7 +1247,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var52 string
 		templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.ResolveAttributeValue(service.SlackBotTokenSourceManual)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 849, Col: 56}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 870, Col: 56}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var52)
 		if templ_7745c5c3_Err != nil {
@@ -1291,7 +1315,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var53 string
 			templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.ResolveAttributeValue(preset.Key)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 925, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 946, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var53)
 			if templ_7745c5c3_Err != nil {
@@ -1304,7 +1328,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var54 string
 			templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.ResolveAttributeValue(preset.IMAPHost)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 925, Col: 70}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 946, Col: 70}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
 			if templ_7745c5c3_Err != nil {
@@ -1317,7 +1341,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var55 string
 			templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", preset.IMAPPort))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 925, Col: 124}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 946, Col: 124}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var55)
 			if templ_7745c5c3_Err != nil {
@@ -1330,7 +1354,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var56 string
 			templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.ResolveAttributeValue(preset.SMTPHost)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 925, Col: 159}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 946, Col: 159}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var56)
 			if templ_7745c5c3_Err != nil {
@@ -1343,7 +1367,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var57 string
 			templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", preset.SMTPPort))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 925, Col: 213}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 946, Col: 213}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
 			if templ_7745c5c3_Err != nil {
@@ -1356,7 +1380,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var58 string
 			templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.ResolveAttributeValue(preset.HelpText)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 925, Col: 243}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 946, Col: 243}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var58)
 			if templ_7745c5c3_Err != nil {
@@ -1379,7 +1403,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var59 string
 			templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(preset.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 925, Col: 311}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 946, Col: 311}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 			if templ_7745c5c3_Err != nil {
@@ -1397,7 +1421,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var60 string
 		templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailStatus.Address)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 931, Col: 104}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 952, Col: 104}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var60)
 		if templ_7745c5c3_Err != nil {
@@ -1428,7 +1452,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var61 string
 		templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailStatus.IMAPHost)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 942, Col: 129}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 963, Col: 129}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var61)
 		if templ_7745c5c3_Err != nil {
@@ -1441,7 +1465,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var62 string
 		templ_7745c5c3_Var62, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", emailStatus.IMAPPort))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 946, Col: 150}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 967, Col: 150}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var62)
 		if templ_7745c5c3_Err != nil {
@@ -1454,7 +1478,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var63 string
 		templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailStatus.SMTPHost)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 950, Col: 129}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 971, Col: 129}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var63)
 		if templ_7745c5c3_Err != nil {
@@ -1467,7 +1491,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var64 string
 		templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", emailStatus.SMTPPort))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 954, Col: 150}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 975, Col: 150}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var64)
 		if templ_7745c5c3_Err != nil {
@@ -1480,7 +1504,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var65 string
 		templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailPollIntervalSeconds)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 960, Col: 132}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 981, Col: 132}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var65)
 		if templ_7745c5c3_Err != nil {
@@ -1537,7 +1561,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var66 string
 		templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks?project_id=" + currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1000, Col: 89}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1021, Col: 89}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var66)
 		if templ_7745c5c3_Err != nil {
@@ -1550,7 +1574,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var67 string
 		templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1000, Col: 141}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1021, Col: 141}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var67)
 		if templ_7745c5c3_Err != nil {
@@ -1563,7 +1587,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var68 string
 		templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1001, Col: 68}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1022, Col: 68}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var68)
 		if templ_7745c5c3_Err != nil {
@@ -1591,13 +1615,150 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		var templ_7745c5c3_Var69 string
 		templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.ResolveAttributeValue(agentsJSON(agents))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1093, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1114, Col: 63}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var69)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 156, "\" style=\"display:none\"></div><style>\n\t\t.dropdown-content {\n\t\t\tdisplay: none;\n\t\t}\t\t\t.dropdown-content.show {\n\t\t\t\tdisplay: block;\n\t\t\t}\n\t\t\t/* Keep password toggle button fixed inside input across press/focus states */\n\t\t\t.password-toggle-btn:active,\n\t\t\t.password-toggle-btn:focus,\n\t\t\t.password-toggle-btn:focus-visible {\n\t\t\t\ttransform: translate(0, -50%) !important;\n\t\t\t}\n\t\t\t.password-toggle-btn.top-2:active,\n\t\t\t.password-toggle-btn.top-2:focus,\n\t\t\t.password-toggle-btn.top-2:focus-visible {\n\t\t\t\ttransform: translate(0, 0) !important;\n\t\t\t}\n\t\t\t.secret-textarea-masked {\n\t\t\t\t-webkit-text-security: disc;\n\t\t\t}\n\t\t</style><script>\n\t\t\t\tvar pendingDeleteChannelURL = '';\n\t\t\t\tvar pendingDeleteChannelMethod = 'POST';\n\n\t\t\t\tfunction openDeleteChannelConfirm(name, url, method) {\n\t\t\t\t\tpendingDeleteChannelURL = url || '';\n\t\t\t\t\tpendingDeleteChannelMethod = method || 'POST';\n\t\t\t\t\tvar nameEl = document.getElementById('delete_channel_name');\n\t\t\t\t\tif (nameEl) nameEl.textContent = name || 'this channel';\n\t\t\t\t\tdocument.getElementById('delete_channel_confirm_modal')?.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openDeleteChannelConfirmFromButton(button) {\n\t\t\t\t\tif (!button) return;\n\t\t\t\t\topenDeleteChannelConfirm(button.dataset.channelDeleteName, button.dataset.channelDeleteUrl, button.dataset.channelDeleteMethod);\n\t\t\t\t}\n\n\t\t\t\tfunction closeDeleteChannelConfirm() {\n\t\t\t\t\tdocument.getElementById('delete_channel_confirm_modal')?.close();\n\t\t\t\t}\n\n\t\t\t\tfunction confirmDeleteChannel() {\n\t\t\t\t\tif (!pendingDeleteChannelURL) return;\n\t\t\t\t\thtmx.ajax(pendingDeleteChannelMethod, pendingDeleteChannelURL, { swap: 'none' });\n\t\t\t\t\tcloseDeleteChannelConfirm();\n\t\t\t\t}\n\n\t\t\t\t// Webhook agent state\n\t\t\t\tlet webhookAvailableAgents = [];\n\t\t\t\tlet selectedWebhookAgentIDs = [];\n\t\t\t\tlet activeWebhookSection = 'config';\n\t\t\tfunction setWebhookSection(sectionName) {\n\t\t\t\tconst sectionNameMap = {\n\t\t\t\t\tconfig: 'config',\n\t\t\t\t\tagents: 'agents'\n\t\t\t\t};\n\t\t\t\tconst nextSection = sectionNameMap[sectionName] || 'config';\n\t\t\t\tactiveWebhookSection = nextSection;\n\t\t\t\tdocument.querySelectorAll('[data-webhook-section-tab]').forEach(tab => {\n\t\t\t\t\tconst isActive = tab.dataset.webhookSectionTab === nextSection;\n\t\t\t\t\ttab.classList.toggle('tab-active', isActive);\n\t\t\t\t\ttab.setAttribute('aria-selected', isActive ? 'true' : 'false');\n\t\t\t\t});\n\t\t\t\tdocument.querySelectorAll('[data-webhook-section-panel]').forEach(panel => {\n\t\t\t\t\tpanel.classList.toggle('hidden', panel.dataset.webhookSectionPanel !== nextSection);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction renderWebhookAgentList() {\n\t\t\t\tconst root = document.getElementById('webhook_agent_list');\n\t\t\t\tif (!root) return;\n\n\t\t\t\tconst searchTerm = (document.getElementById('webhook_agent_search_input')?.value || '').toLowerCase();\n\t\t\t\tconst filteredAgents = webhookAvailableAgents.filter(agent => {\n\t\t\t\t\tif (!searchTerm) return true;\n\t\t\t\t\treturn (agent.name || '').toLowerCase().includes(searchTerm) ||\n\t\t\t\t\t\t(agent.id || '').toLowerCase().includes(searchTerm);\n\t\t\t\t});\n\n\t\t\t\tlet html = '';\n\t\t\t\tif (filteredAgents.length === 0) {\n\t\t\t\t\thtml = '<p class=\"text-xs opacity-60 py-2\">No agents found.</p>';\n\t\t\t\t} else {\n\t\t\t\t\thtml = filteredAgents.map(agent => {\n\t\t\t\t\t\tconst checked = selectedWebhookAgentIDs.includes(agent.id) ? 'checked' : '';\n\t\t\t\t\t\treturn `\n\t\t\t\t\t\t\t<div class=\"border border-base-300 rounded-lg px-3 py-2 mb-2\">\n\t\t\t\t\t\t\t\t<div class=\"flex items-center justify-between gap-3\">\n\t\t\t\t\t\t\t\t\t<div class=\"flex items-center gap-2 min-w-0 flex-1\">\n\t\t\t\t\t\t\t\t\t\t<span class=\"font-medium text-sm truncate\" title=\"${escapeHtml(agent.id)}\">${escapeHtml(agent.name)}</span>\n\t\t\t\t\t\t\t\t\t\t<span class=\"text-[11px] opacity-60 truncate\">${escapeHtml(agent.id)}</span>\n\t\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t\t<input\n\t\t\t\t\t\t\t\t\t\ttype=\"checkbox\"\n\t\t\t\t\t\t\t\t\t\tclass=\"toggle toggle-sm toggle-primary webhook-agent-checkbox\"\n\t\t\t\t\t\t\t\t\t\tvalue=\"${escapeHtml(agent.id)}\"\n\t\t\t\t\t\t\t\t\t\taria-label=\"Enable ${escapeHtml(agent.name)}\"\n\t\t\t\t\t\t\t\t\t\t${checked}\n\t\t\t\t\t\t\t\t\t\tonchange=\"refreshSelectedWebhookAgentsFromDOM()\"\n\t\t\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t</div>`;\n\t\t\t\t\t}).join('');\n\t\t\t\t}\n\n\t\t\t\troot.innerHTML = html;\n\t\t\t\trenderWebhookSelectedAgentCount();\n\t\t\t}\n\n\t\t\tfunction refreshSelectedWebhookAgentsFromDOM() {\n\t\t\t\tconst checkboxes = document.querySelectorAll('.webhook-agent-checkbox');\n\t\t\t\tselectedWebhookAgentIDs = Array.from(checkboxes)\n\t\t\t\t\t.filter(cb => cb.checked)\n\t\t\t\t\t.map(cb => cb.value);\n\t\t\t\trenderWebhookSelectedAgentCount();\n\t\t\t}\n\n\t\t\tfunction renderWebhookSelectedAgentCount() {\n\t\t\t\tconst countEl = document.getElementById('webhook_agent_selected_count');\n\t\t\t\tif (!countEl) return;\n\t\t\t\tconst count = selectedWebhookAgentIDs.length;\n\t\t\t\tif (count === 0) {\n\t\t\t\t\tcountEl.textContent = 'No agents selected';\n\t\t\t\t} else if (count === 1) {\n\t\t\t\t\tcountEl.textContent = '1 agent selected';\n\t\t\t\t} else {\n\t\t\t\t\tcountEl.textContent = count + ' agents selected';\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction serializeWebhookAgentData() {\n\t\t\t\t// Collect selected agent IDs from toggles and put into hidden field\n\t\t\t\tconst hiddenField = document.getElementById('webhook_agent_ids_hidden');\n\t\t\t\tif (hiddenField) {\n\t\t\t\t\thiddenField.value = selectedWebhookAgentIDs.join(',');\n\t\t\t\t}\n\t\t\t}\n\n\t\tfunction escapeHtml(text) {\n\t\t\tconst div = document.createElement('div');\n\t\t\tdiv.textContent = text || '';\n\t\t\treturn div.innerHTML;\n\t\t}\n\n\t\tfunction initializeWebhookAgents() {\n\t\t\tif (webhookAvailableAgents.length > 0) return; // Already initialized\n\t\t\tconst dataEl = document.getElementById('webhook_agents_data');\n\t\t\tif (!dataEl) return;\n\t\t\ttry {\n\t\t\t\tconst agentsJSON = dataEl.getAttribute('data-agents');\n\t\t\t\twebhookAvailableAgents = JSON.parse(agentsJSON || '[]');\n\t\t\t} catch (e) {\n\t\t\t\tconsole.error('Failed to parse webhook agents data:', e);\n\t\t\t\twebhookAvailableAgents = [];\n\t\t\t}\n\t\t}\n\t\t\tfunction togglePasswordVisibility(inputId, button) {\n\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\tif (!input || !button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tconst willReveal = input.type === 'password';\n\t\t\t\tinput.type = willReveal ? 'text' : 'password';\n\t\t\t\tif (eyeOpen) eyeOpen.classList.toggle('hidden', willReveal);\n\t\t\t\tif (eyeClosed) eyeClosed.classList.toggle('hidden', !willReveal);\n\t\t\t\tbutton.setAttribute('aria-pressed', willReveal ? 'true' : 'false');\n\t\t\t}\n\n\t\t\tfunction resetSecretInputVisibility(inputId) {\n\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\tif (!input) return;\n\t\t\t\tinput.type = 'password';\n\t\t\t\tconst button = document.querySelector(\"button[onclick=\\\"togglePasswordVisibility('\" + inputId + \"', this)\\\"]\");\n\t\t\t\tif (!button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tif (eyeOpen) eyeOpen.classList.remove('hidden');\n\t\t\t\tif (eyeClosed) eyeClosed.classList.add('hidden');\n\t\t\t\tbutton.setAttribute('aria-pressed', 'false');\n\t\t\t}\n\n\t\t\tfunction handleDropdownToggle(event) {\n\t\t\t\tevent.stopPropagation();\n\t\t\t\tconst dropdown = event.currentTarget.parentElement;\n\t\t\t\tconst menu = dropdown.querySelector('ul');\n\t\t\t\tconst wasOpen = menu.classList.contains('show');\n\t\t\t\t\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\n\t\t\t\t// Toggle this dropdown\n\t\t\t\tif (!wasOpen) {\n\t\t\t\t\tmenu.classList.add('show');\n\t\t\t\t\t// Close when clicking outside\n\t\t\t\t\tsetTimeout(() => {\n\t\t\t\t\t\tdocument.addEventListener('click', function closeDropdown(e) {\n\t\t\t\t\t\t\tif (!dropdown.contains(e.target)) {\n\t\t\t\t\t\t\t\tmenu.classList.remove('show');\n\t\t\t\t\t\t\t\tdocument.removeEventListener('click', closeDropdown);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\t\t\t\t\t}, 0);\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction toggleSecretTextareaVisibility(textareaId, button) {\n\t\t\t\tconst textarea = document.getElementById(textareaId);\n\t\t\t\tif (!textarea) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tconst isMasked = textarea.classList.contains('secret-textarea-masked');\n\t\t\t\tif (isMasked) {\n\t\t\t\t\ttextarea.classList.remove('secret-textarea-masked');\n\t\t\t\t\tif (eyeOpen) eyeOpen.classList.remove('hidden');\n\t\t\t\t\tif (eyeClosed) eyeClosed.classList.add('hidden');\n\t\t\t\t\tbutton.setAttribute('aria-pressed', 'true');\n\t\t\t\t} else {\n\t\t\t\t\ttextarea.classList.add('secret-textarea-masked');\n\t\t\t\t\tif (eyeOpen) eyeOpen.classList.add('hidden');\n\t\t\t\t\tif (eyeClosed) eyeClosed.classList.remove('hidden');\n\t\t\t\t\tbutton.setAttribute('aria-pressed', 'false');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction resetSecretTextareaVisibility(textareaId) {\n\t\t\t\tconst textarea = document.getElementById(textareaId);\n\t\t\t\tif (!textarea) return;\n\t\t\t\ttextarea.classList.add('secret-textarea-masked');\n\t\t\t\tconst button = document.querySelector(\"button[onclick=\\\"toggleSecretTextareaVisibility('\" + textareaId + \"', this)\\\"]\");\n\t\t\t\tif (!button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tif (eyeOpen) eyeOpen.classList.add('hidden');\n\t\t\t\tif (eyeClosed) eyeClosed.classList.remove('hidden');\n\t\t\t\tbutton.setAttribute('aria-pressed', 'false');\n\t\t\t}\n\n\t\t\t\tfunction openWebhookCreateModal(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tdocument.getElementById('webhook_modal_title').textContent = 'Add Webhook';\n\t\t\t\t\tvar form = document.getElementById('webhook_form');\n\t\t\t\t\tvar pid = form.getAttribute('data-project-id') || '';\n\t\t\t\t\tform.setAttribute('hx-post', '/channels/webhooks?project_id=' + encodeURIComponent(pid));\n\t\t\t\t\tform.removeAttribute('hx-put');\n\t\t\t\t\tdocument.getElementById('webhook_name').value = '';\n\t\t\t\t\tdocument.getElementById('webhook_enabled').checked = true;\n\t\t\t\t\tdocument.getElementById('webhook_system_instructions').value = '';\n\t\t\t\t\tdocument.getElementById('webhook_default_priority').value = '2';\n\t\t\t\t\tdocument.getElementById('webhook_url_display').textContent = '(Save first to generate URL)';\n\t\t\t\t\tdocument.getElementById('webhook_secret_display').value = '';\n\t\t\t\t\tresetSecretInputVisibility('webhook_secret_display');\n\t\t\t\t\tvar secretRow = document.getElementById('webhook_secret_row');\n\t\t\t\t\tif (secretRow) secretRow.style.display = 'none';\n\t\t\t\t\tvar urlRow = document.getElementById('webhook_url_row');\n\t\t\t\t\tif (urlRow) urlRow.style.display = 'none';\n\t\t\t\t\t\n\t\t\t\t\t// Initialize webhook agents from page data\n\t\t\t\t\tinitializeWebhookAgents();\n\t\t\t\t\tselectedWebhookAgentIDs = [];\n\t\t\t\t\trenderWebhookAgentList();\n\t\t\t\t\tsetWebhookSection('config');\n\t\t\t\t\t\n\t\t\t\t\thtmx.process(form);\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openWebhookEditModal(id) {\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tdocument.getElementById('webhook_modal_title').textContent = 'Edit Webhook';\n\t\t\t\t\tvar form = document.getElementById('webhook_form');\n\t\t\t\t\tvar pid = form.getAttribute('data-project-id') || '';\n\t\t\t\t\tform.removeAttribute('hx-post');\n\t\t\t\t\tform.setAttribute('hx-put', '/channels/webhooks/' + id + '?project_id=' + encodeURIComponent(pid));\n\t\t\t\t\tvar card = document.querySelector('[data-webhook-id=\"' + id + '\"]');\n\t\t\t\t\tif (card) {\n\t\t\t\t\t\tdocument.getElementById('webhook_name').value = card.getAttribute('data-webhook-name') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_enabled').checked = (card.getAttribute('data-webhook-enabled') || '') === 'true';\n\t\t\t\t\t\tdocument.getElementById('webhook_system_instructions').value = card.getAttribute('data-webhook-system') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_default_priority').value = card.getAttribute('data-webhook-default-priority') || '2';\n\t\t\t\t\t\tdocument.getElementById('webhook_secret_display').value = card.getAttribute('data-webhook-secret') || '';\n\t\t\t\t\t\tresetSecretInputVisibility('webhook_secret_display');\n\t\t\t\t\t\tvar token = card.getAttribute('data-webhook-token') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_url_display').textContent = token ? (window.location.origin + '/webhooks/inbound/' + token) : '(Not available)';\n\t\t\t\t\t\t\n\t\t\t\t\t\t// Load selected agents from card data\n\t\t\t\t\t\tvar agentIDsCSV = card.getAttribute('data-webhook-agent-ids') || '';\n\t\t\t\t\t\tselectedWebhookAgentIDs = agentIDsCSV.split(',').map(id => id.trim()).filter(id => id !== '');\n\t\t\t\t\t}\n\t\t\t\t\tvar secretRow = document.getElementById('webhook_secret_row');\n\t\t\t\t\tif (secretRow) secretRow.style.display = '';\n\t\t\t\t\tvar urlRow = document.getElementById('webhook_url_row');\n\t\t\t\t\tif (urlRow) urlRow.style.display = '';\n\t\t\t\t\t\n\t\t\t\t\t// Initialize webhook agents and render\n\t\t\t\t\tinitializeWebhookAgents();\n\t\t\t\t\trenderWebhookAgentList();\n\t\t\t\t\tsetWebhookSection('config');\n\t\t\t\t\t\n\t\t\t\t\thtmx.process(form);\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction writeToClipboardWithFeedback(text, button, successMessage, failureMessage) {\n\t\t\t\t\t\tif (!text) {\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(failureMessage || 'Nothing to copy', 'failed');\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction onCopySuccess() {\n\t\t\t\t\t\t\tif (button) {\n\t\t\t\t\t\t\t\tvar original = button.textContent;\n\t\t\t\t\t\t\t\tbutton.textContent = 'Copied';\n\t\t\t\t\t\t\t\tsetTimeout(function() { button.textContent = original; }, 1000);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(successMessage || 'Copied to clipboard', 'completed');\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction onCopyFailure() {\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(failureMessage || 'Failed to copy to clipboard', 'failed');\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tif (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {\n\t\t\t\t\t\t\tnavigator.clipboard.writeText(text).then(onCopySuccess).catch(function() {\n\t\t\t\t\t\t\t\tvar textarea = document.createElement('textarea');\n\t\t\t\t\t\t\t\ttextarea.value = text;\n\t\t\t\t\t\t\t\ttextarea.setAttribute('readonly', '');\n\t\t\t\t\t\t\t\ttextarea.style.position = 'fixed';\n\t\t\t\t\t\t\t\ttextarea.style.opacity = '0';\n\t\t\t\t\t\t\t\tdocument.body.appendChild(textarea);\n\t\t\t\t\t\t\t\ttextarea.select();\n\t\t\t\t\t\t\t\ttextarea.setSelectionRange(0, textarea.value.length);\n\t\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\t\tif (document.execCommand('copy')) {\n\t\t\t\t\t\t\t\t\t\tonCopySuccess();\n\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\t\t\tdocument.body.removeChild(textarea);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tvar fallbackTextarea = document.createElement('textarea');\n\t\t\t\t\t\tfallbackTextarea.value = text;\n\t\t\t\t\t\tfallbackTextarea.setAttribute('readonly', '');\n\t\t\t\t\t\tfallbackTextarea.style.position = 'fixed';\n\t\t\t\t\t\tfallbackTextarea.style.opacity = '0';\n\t\t\t\t\t\tdocument.body.appendChild(fallbackTextarea);\n\t\t\t\t\t\tfallbackTextarea.select();\n\t\t\t\t\t\tfallbackTextarea.setSelectionRange(0, fallbackTextarea.value.length);\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tif (document.execCommand('copy')) {\n\t\t\t\t\t\t\t\tonCopySuccess();\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\tdocument.body.removeChild(fallbackTextarea);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\tfunction copyWebhookEndpointUrl(webhookID, button) {\n\t\t\t\t\tvar card = document.querySelector('[data-webhook-id=\"' + webhookID + '\"]');\n\t\t\t\t\tif (!card) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar token = (card.getAttribute('data-webhook-token') || '').trim();\n\t\t\t\t\tif (!token) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar url = window.location.origin + '/webhooks/inbound/' + token;\n\t\t\t\t\twriteToClipboardWithFeedback(url, button, 'Webhook URL copied', 'Failed to copy webhook URL');\n\t\t\t\t}\n\n\t\t\t\tfunction copyWebhookAbsoluteUrl(elementId, button) {\n\t\t\t\t\tvar el = document.getElementById(elementId);\n\t\t\t\t\tif (!el) return;\n\t\t\t\t\tvar val = (el.textContent || '').trim();\n\t\t\t\t\tif (!val || val.indexOf('(Save first') === 0 || val.indexOf('(Not available') === 0) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\twriteToClipboardWithFeedback(val, button, 'Webhook URL copied', 'Failed to copy webhook URL');\n\t\t\t\t}\n\n\t\t\t\tfunction closeWebhookModal() {\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\tfunction editChannelFromData(card) {\n\t\t\t\t\tconst type = card.dataset.channelType;\n\t\t\t\t\tif (type === 'telegram') {\n\t\t\t\t\t\tconst token = card.dataset.channelToken || '';\n\t\t\t\t\t\tdocument.getElementById('channel_telegram_token').value = token;\n\t\t\t\t\t\tvar richToggle = document.getElementById('channel_telegram_rich_messages_v2');\n\t\t\t\t\t\tif (richToggle) richToggle.checked = richToggle.defaultChecked;\n\t\t\t\t\t\tdocument.getElementById('channel_modal_title').textContent = 'Configure Telegram Bot';\n\t\t\t\t\t\tresetSecretInputVisibility('channel_telegram_token');\n\t\t\t\t\t\tchannel_modal.showModal();\n\t\t\t\t} else if (type === 'github') {\n\t\t\t\t\topenGitHubConfigModal();\n\t\t\t\t\t} else if (type === 'slack') {\n\t\t\t\t\t\topenSlackConfigModal();\n\t\t\t\t\t} else if (type === 'email') {\n\t\t\t\t\t\topenEmailConfigModal();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\tfunction closeAllDropdownMenus() {\n\t\t\t\tdocument.querySelectorAll('.dropdown ul').forEach(m => m.classList.remove('show'));\n\t\t\t}\n\n\t\t\tfunction openTelegramChannelFromMenu(event) {\n\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\tdocument.getElementById('channel_telegram_token').value = '';\n\t\t\t\tvar richToggle = document.getElementById('channel_telegram_rich_messages_v2');\n\t\t\t\tif (richToggle) richToggle.checked = true;\n\t\t\t\tdocument.getElementById('channel_modal_title').textContent = 'Add Telegram Bot';\n\t\t\t\tresetSecretInputVisibility('channel_telegram_token');\n\t\t\t\tchannel_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction openGitHubChannelFromMenu(event) {\n\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\topenGitHubConfigModal();\n\t\t\t}\n\n\t\t\t\tfunction openSlackChannelFromMenu(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\topenSlackConfigModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openEmailChannelFromMenu(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\topenEmailConfigModal();\n\t\t\t\t}\n\n\t\t\t\tfunction closeChannelModal() {\t\t\t\tchannel_modal.close();\n\t\t\t}\n\n\t\t\tfunction openGitHubConfigModal() {\n\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\tif (!modal) return;\n\t\t\t\tconst modeSelect = document.getElementById('github_auth_mode');\n\t\t\t\t\tif (modeSelect) {\n\t\t\t\t\t\ttoggleGitHubAuthMode(modeSelect.value);\n\t\t\t\t\t}\n\t\t\t\t\tresetSecretInputVisibility('github_pat');\n\t\t\t\t\tresetSecretTextareaVisibility('github_app_private_key');\n\t\t\t\t\tmodal.showModal();\n\t\t\t}\n\n\t\t\tfunction closeGitHubConfigModal() {\n\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\tif (modal) modal.close();\n\t\t\t}\n\n\t\t\tfunction openSlackConfigModal() {\n\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\tif (!modal) return;\n\t\t\t\tconst modeSelect = document.getElementById('slack_bot_token_mode');\n\t\t\t\t\tif (modeSelect) {\n\t\t\t\t\t\ttoggleSlackBotTokenMode(modeSelect.value);\n\t\t\t\t\t}\n\t\t\t\t\tresetSecretInputVisibility('slack_client_secret');\n\t\t\t\t\tresetSecretInputVisibility('slack_app_token');\n\t\t\t\t\tresetSecretInputVisibility('slack_bot_token');\n\t\t\t\t\tmodal.showModal();\n\t\t\t}\n\n\t\t\t\tfunction closeSlackConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\tfunction openEmailConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('email_config_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tconst provider = document.getElementById('email_provider');\n\t\t\t\t\tif (provider) setEmailProviderPreset(provider.value, true);\n\t\t\t\t\tresetSecretInputVisibility('email_password');\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction closeEmailConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('email_config_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\tfunction setEmailProviderPreset(providerKey, preserveValues) {\n\t\t\t\t\tconst provider = document.getElementById('email_provider');\n\t\t\t\t\tif (!provider) return;\n\t\t\t\t\tconst option = provider.options[provider.selectedIndex];\n\t\t\t\t\tconst isCustom = (providerKey || '').toLowerCase() === 'custom';\n\t\t\t\t\tconst advanced = document.getElementById('email_advanced_details');\n\t\t\t\t\tif (advanced) advanced.open = isCustom;\n\t\t\t\t\tconst help = document.getElementById('email_provider_help');\n\t\t\t\t\tif (help && option) help.textContent = option.getAttribute('data-help') || help.textContent;\n\t\t\t\t\tif (!isCustom && option && !preserveValues) {\n\t\t\t\t\t\tdocument.getElementById('email_imap_host').value = option.getAttribute('data-imap-host') || '';\n\t\t\t\t\t\tdocument.getElementById('email_imap_port').value = option.getAttribute('data-imap-port') || '993';\n\t\t\t\t\t\tdocument.getElementById('email_smtp_host').value = option.getAttribute('data-smtp-host') || '';\n\t\t\t\t\t\tdocument.getElementById('email_smtp_port').value = option.getAttribute('data-smtp-port') || '587';\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction markEmailProviderCustom() {\n\t\t\t\t\tconst provider = document.getElementById('email_provider');\n\t\t\t\t\tif (provider) provider.value = 'custom';\n\t\t\t\t}\n\n\t\t\t\t\tfunction toggleSlackBotTokenMode(mode) {\n\t\t\t\t\t\tconst section = document.getElementById('slack_bot_token_override_section');\t\t\t\tif (!section) {\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tconst normalized = (mode || '').toLowerCase();\n\t\t\t\tsection.style.display = normalized === 'manual' ? '' : 'none';\n\t\t\t}\n\n\t\t\tfunction toggleGitHubAuthMode(mode) {\n\t\t\t\tconst normalized = (mode || '').toLowerCase();\n\t\t\t\tconst patSection = document.getElementById('github_pat_section');\n\t\t\t\tconst appSection = document.getElementById('github_app_section');\n\t\t\t\tif (!patSection || !appSection) {\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tconst isAppMode = normalized === 'app';\n\t\t\t\tpatSection.style.display = isAppMode ? 'none' : '';\n\t\t\t\tappSection.style.display = isAppMode ? '' : 'none';\n\t\t\t}\n\n\t\t\t// Close modal and refresh after successful save\n\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\tif (event.detail.pathInfo.requestPath === '/channels/telegram' && event.detail.successful) {\n\t\t\t\t\tconst modal = document.getElementById('channel_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (event.detail.pathInfo.requestPath === '/channels/github/configure' && event.detail.successful) {\n\t\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\t\tif (event.detail.pathInfo.requestPath === '/channels/slack/configure' && event.detail.successful) {\n\t\t\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif (event.detail.pathInfo.requestPath === '/channels/email/configure' && event.detail.successful) {\n\t\t\t\t\t\tconst modal = document.getElementById('email_config_modal');\n\t\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t// Close webhook modal after successful save\t\t\t\t\tvar rp = event.detail.pathInfo.requestPath || '';\n\t\t\t\t\tif (rp.startsWith('/channels/webhooks') && event.detail.successful) {\n\t\t\t\t\t\tvar whModal = document.getElementById('webhook_modal');\n\t\t\t\t\t\tif (whModal && whModal.open) {\n\t\t\t\t\t\t\twhModal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t});\n\n\t\t\t\tdocument.body.addEventListener('htmx:configRequest', function(event) {\n\t\t\t\t\tif (!event || !event.detail || !event.detail.path) return;\n\t\t\t\t\tif (event.detail.path.indexOf('/channels/webhooks') !== 0) return;\n\t\t\t\t\tvar params = event.detail.parameters || {};\n\t\t\t\t\tparams.agent_ids = selectedWebhookAgentIDsCSV('webhook_agent_ids');\n\t\t\t\t\tevent.detail.parameters = params;\n\t\t\t\t});\n\n\t\t\tsetTimeout(function() {\n\t\t\t\tconst modeSelect = document.getElementById('github_auth_mode');\n\t\t\t\tif (modeSelect) {\n\t\t\t\t\ttoggleGitHubAuthMode(modeSelect.value);\n\t\t\t\t}\n\t\t\t\t\tconst slackModeSelect = document.getElementById('slack_bot_token_mode');\n\t\t\t\t\tif (slackModeSelect) {\n\t\t\t\t\t\ttoggleSlackBotTokenMode(slackModeSelect.value);\n\t\t\t\t\t}\n\t\t\t\t\tconst emailProviderSelect = document.getElementById('email_provider');\n\t\t\t\t\tif (emailProviderSelect) {\n\t\t\t\t\t\tsetEmailProviderPreset(emailProviderSelect.value, true);\n\t\t\t\t\t}\n\t\t\t\t}, 0);\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 156, "\" style=\"display:none\"></div><style>\n\t\t.dropdown-content {\n\t\t\tdisplay: none;\n\t\t}\t\t\t.dropdown-content.show {\n\t\t\t\tdisplay: block;\n\t\t\t}\n\t\t\t/* Keep password toggle button fixed inside input across press/focus states */\n\t\t\t.password-toggle-btn:active,\n\t\t\t.password-toggle-btn:focus,\n\t\t\t.password-toggle-btn:focus-visible {\n\t\t\t\ttransform: translate(0, -50%) !important;\n\t\t\t}\n\t\t\t.password-toggle-btn.top-2:active,\n\t\t\t.password-toggle-btn.top-2:focus,\n\t\t\t.password-toggle-btn.top-2:focus-visible {\n\t\t\t\ttransform: translate(0, 0) !important;\n\t\t\t}\n\t\t\t.secret-textarea-masked {\n\t\t\t\t-webkit-text-security: disc;\n\t\t\t}\n\t\t</style><script>\n\t\t\t\tvar pendingDeleteChannelURL = '';\n\t\t\t\tvar pendingDeleteChannelMethod = 'POST';\n\n\t\t\t\tfunction openDeleteChannelConfirm(name, url, method) {\n\t\t\t\t\tpendingDeleteChannelURL = url || '';\n\t\t\t\t\tpendingDeleteChannelMethod = method || 'POST';\n\t\t\t\t\tvar nameEl = document.getElementById('delete_channel_name');\n\t\t\t\t\tif (nameEl) nameEl.textContent = name || 'this channel';\n\t\t\t\t\tdocument.getElementById('delete_channel_confirm_modal')?.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openDeleteChannelConfirmFromButton(button) {\n\t\t\t\t\tif (!button) return;\n\t\t\t\t\topenDeleteChannelConfirm(button.dataset.channelDeleteName, button.dataset.channelDeleteUrl, button.dataset.channelDeleteMethod);\n\t\t\t\t}\n\n\t\t\t\tfunction closeDeleteChannelConfirm() {\n\t\t\t\t\tdocument.getElementById('delete_channel_confirm_modal')?.close();\n\t\t\t\t}\n\n\t\t\t\tfunction confirmDeleteChannel() {\n\t\t\t\t\tif (!pendingDeleteChannelURL) return;\n\t\t\t\t\thtmx.ajax(pendingDeleteChannelMethod, pendingDeleteChannelURL, { swap: 'none' });\n\t\t\t\t\tcloseDeleteChannelConfirm();\n\t\t\t\t}\n\n\t\t\t\t// Webhook agent state\n\t\t\t\tlet webhookAvailableAgents = [];\n\t\t\t\tlet selectedWebhookAgentIDs = [];\n\t\t\t\tlet activeWebhookSection = 'config';\n\t\t\tfunction setWebhookSection(sectionName) {\n\t\t\t\tconst sectionNameMap = {\n\t\t\t\t\tconfig: 'config',\n\t\t\t\t\tagents: 'agents'\n\t\t\t\t};\n\t\t\t\tconst nextSection = sectionNameMap[sectionName] || 'config';\n\t\t\t\tactiveWebhookSection = nextSection;\n\t\t\t\tdocument.querySelectorAll('[data-webhook-section-tab]').forEach(tab => {\n\t\t\t\t\tconst isActive = tab.dataset.webhookSectionTab === nextSection;\n\t\t\t\t\ttab.classList.toggle('tab-active', isActive);\n\t\t\t\t\ttab.setAttribute('aria-selected', isActive ? 'true' : 'false');\n\t\t\t\t});\n\t\t\t\tdocument.querySelectorAll('[data-webhook-section-panel]').forEach(panel => {\n\t\t\t\t\tpanel.classList.toggle('hidden', panel.dataset.webhookSectionPanel !== nextSection);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction renderWebhookAgentList() {\n\t\t\t\tconst root = document.getElementById('webhook_agent_list');\n\t\t\t\tif (!root) return;\n\n\t\t\t\tconst searchTerm = (document.getElementById('webhook_agent_search_input')?.value || '').toLowerCase();\n\t\t\t\tconst filteredAgents = webhookAvailableAgents.filter(agent => {\n\t\t\t\t\tif (!searchTerm) return true;\n\t\t\t\t\treturn (agent.name || '').toLowerCase().includes(searchTerm) ||\n\t\t\t\t\t\t(agent.id || '').toLowerCase().includes(searchTerm);\n\t\t\t\t});\n\n\t\t\t\tlet html = '';\n\t\t\t\tif (filteredAgents.length === 0) {\n\t\t\t\t\thtml = '<p class=\"text-xs opacity-60 py-2\">No agents found.</p>';\n\t\t\t\t} else {\n\t\t\t\t\thtml = filteredAgents.map(agent => {\n\t\t\t\t\t\tconst checked = selectedWebhookAgentIDs.includes(agent.id) ? 'checked' : '';\n\t\t\t\t\t\treturn `\n\t\t\t\t\t\t\t<div class=\"border border-base-300 rounded-lg px-3 py-2 mb-2\">\n\t\t\t\t\t\t\t\t<div class=\"flex items-center justify-between gap-3\">\n\t\t\t\t\t\t\t\t\t<div class=\"flex items-center gap-2 min-w-0 flex-1\">\n\t\t\t\t\t\t\t\t\t\t<span class=\"font-medium text-sm truncate\" title=\"${escapeHtml(agent.id)}\">${escapeHtml(agent.name)}</span>\n\t\t\t\t\t\t\t\t\t\t<span class=\"text-[11px] opacity-60 truncate\">${escapeHtml(agent.id)}</span>\n\t\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t\t<input\n\t\t\t\t\t\t\t\t\t\ttype=\"checkbox\"\n\t\t\t\t\t\t\t\t\t\tclass=\"toggle toggle-sm toggle-primary webhook-agent-checkbox\"\n\t\t\t\t\t\t\t\t\t\tvalue=\"${escapeHtml(agent.id)}\"\n\t\t\t\t\t\t\t\t\t\taria-label=\"Enable ${escapeHtml(agent.name)}\"\n\t\t\t\t\t\t\t\t\t\t${checked}\n\t\t\t\t\t\t\t\t\t\tonchange=\"refreshSelectedWebhookAgentsFromDOM()\"\n\t\t\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t</div>`;\n\t\t\t\t\t}).join('');\n\t\t\t\t}\n\n\t\t\t\troot.innerHTML = html;\n\t\t\t\trenderWebhookSelectedAgentCount();\n\t\t\t}\n\n\t\t\tfunction refreshSelectedWebhookAgentsFromDOM() {\n\t\t\t\tconst checkboxes = document.querySelectorAll('.webhook-agent-checkbox');\n\t\t\t\tselectedWebhookAgentIDs = Array.from(checkboxes)\n\t\t\t\t\t.filter(cb => cb.checked)\n\t\t\t\t\t.map(cb => cb.value);\n\t\t\t\trenderWebhookSelectedAgentCount();\n\t\t\t}\n\n\t\t\tfunction renderWebhookSelectedAgentCount() {\n\t\t\t\tconst countEl = document.getElementById('webhook_agent_selected_count');\n\t\t\t\tif (!countEl) return;\n\t\t\t\tconst count = selectedWebhookAgentIDs.length;\n\t\t\t\tif (count === 0) {\n\t\t\t\t\tcountEl.textContent = 'No agents selected';\n\t\t\t\t} else if (count === 1) {\n\t\t\t\t\tcountEl.textContent = '1 agent selected';\n\t\t\t\t} else {\n\t\t\t\t\tcountEl.textContent = count + ' agents selected';\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction serializeWebhookAgentData() {\n\t\t\t\t// Collect selected agent IDs from toggles and put into hidden field\n\t\t\t\tconst hiddenField = document.getElementById('webhook_agent_ids_hidden');\n\t\t\t\tif (hiddenField) {\n\t\t\t\t\thiddenField.value = selectedWebhookAgentIDs.join(',');\n\t\t\t\t}\n\t\t\t}\n\n\t\tfunction escapeHtml(text) {\n\t\t\tconst div = document.createElement('div');\n\t\t\tdiv.textContent = text || '';\n\t\t\treturn div.innerHTML;\n\t\t}\n\n\t\tfunction initializeWebhookAgents() {\n\t\t\tif (webhookAvailableAgents.length > 0) return; // Already initialized\n\t\t\tconst dataEl = document.getElementById('webhook_agents_data');\n\t\t\tif (!dataEl) return;\n\t\t\ttry {\n\t\t\t\tconst agentsJSON = dataEl.getAttribute('data-agents');\n\t\t\t\twebhookAvailableAgents = JSON.parse(agentsJSON || '[]');\n\t\t\t} catch (e) {\n\t\t\t\tconsole.error('Failed to parse webhook agents data:', e);\n\t\t\t\twebhookAvailableAgents = [];\n\t\t\t}\n\t\t}\n\t\t\tfunction togglePasswordVisibility(inputId, button) {\n\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\tif (!input || !button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tconst willReveal = input.type === 'password';\n\t\t\t\tinput.type = willReveal ? 'text' : 'password';\n\t\t\t\tif (eyeOpen) eyeOpen.classList.toggle('hidden', willReveal);\n\t\t\t\tif (eyeClosed) eyeClosed.classList.toggle('hidden', !willReveal);\n\t\t\t\tbutton.setAttribute('aria-pressed', willReveal ? 'true' : 'false');\n\t\t\t}\n\n\t\t\tfunction resetSecretInputVisibility(inputId) {\n\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\tif (!input) return;\n\t\t\t\tinput.type = 'password';\n\t\t\t\tconst button = document.querySelector(\"button[onclick=\\\"togglePasswordVisibility('\" + inputId + \"', this)\\\"]\");\n\t\t\t\tif (!button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tif (eyeOpen) eyeOpen.classList.remove('hidden');\n\t\t\t\tif (eyeClosed) eyeClosed.classList.add('hidden');\n\t\t\t\tbutton.setAttribute('aria-pressed', 'false');\n\t\t\t}\n\n\t\t\tfunction handleDropdownToggle(event) {\n\t\t\t\tevent.stopPropagation();\n\t\t\t\tconst dropdown = event.currentTarget.parentElement;\n\t\t\t\tconst menu = dropdown.querySelector('ul');\n\t\t\t\tconst wasOpen = menu.classList.contains('show');\n\t\t\t\t\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\n\t\t\t\t// Toggle this dropdown\n\t\t\t\tif (!wasOpen) {\n\t\t\t\t\tmenu.classList.add('show');\n\t\t\t\t\t// Close when clicking outside\n\t\t\t\t\tsetTimeout(() => {\n\t\t\t\t\t\tdocument.addEventListener('click', function closeDropdown(e) {\n\t\t\t\t\t\t\tif (!dropdown.contains(e.target)) {\n\t\t\t\t\t\t\t\tmenu.classList.remove('show');\n\t\t\t\t\t\t\t\tdocument.removeEventListener('click', closeDropdown);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\t\t\t\t\t}, 0);\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction toggleSecretTextareaVisibility(textareaId, button) {\n\t\t\t\tconst textarea = document.getElementById(textareaId);\n\t\t\t\tif (!textarea) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tconst isMasked = textarea.classList.contains('secret-textarea-masked');\n\t\t\t\tif (isMasked) {\n\t\t\t\t\ttextarea.classList.remove('secret-textarea-masked');\n\t\t\t\t\tif (eyeOpen) eyeOpen.classList.remove('hidden');\n\t\t\t\t\tif (eyeClosed) eyeClosed.classList.add('hidden');\n\t\t\t\t\tbutton.setAttribute('aria-pressed', 'true');\n\t\t\t\t} else {\n\t\t\t\t\ttextarea.classList.add('secret-textarea-masked');\n\t\t\t\t\tif (eyeOpen) eyeOpen.classList.add('hidden');\n\t\t\t\t\tif (eyeClosed) eyeClosed.classList.remove('hidden');\n\t\t\t\t\tbutton.setAttribute('aria-pressed', 'false');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction resetSecretTextareaVisibility(textareaId) {\n\t\t\t\tconst textarea = document.getElementById(textareaId);\n\t\t\t\tif (!textarea) return;\n\t\t\t\ttextarea.classList.add('secret-textarea-masked');\n\t\t\t\tconst button = document.querySelector(\"button[onclick=\\\"toggleSecretTextareaVisibility('\" + textareaId + \"', this)\\\"]\");\n\t\t\t\tif (!button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tif (eyeOpen) eyeOpen.classList.add('hidden');\n\t\t\t\tif (eyeClosed) eyeClosed.classList.remove('hidden');\n\t\t\t\tbutton.setAttribute('aria-pressed', 'false');\n\t\t\t}\n\n\t\t\t\tfunction openWebhookCreateModal(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tdocument.getElementById('webhook_modal_title').textContent = 'Add Webhook';\n\t\t\t\t\tvar form = document.getElementById('webhook_form');\n\t\t\t\t\tvar pid = form.getAttribute('data-project-id') || '';\n\t\t\t\t\tform.setAttribute('hx-post', '/channels/webhooks?project_id=' + encodeURIComponent(pid));\n\t\t\t\t\tform.removeAttribute('hx-put');\n\t\t\t\t\tdocument.getElementById('webhook_name').value = '';\n\t\t\t\t\tdocument.getElementById('webhook_enabled').checked = true;\n\t\t\t\t\tdocument.getElementById('webhook_system_instructions').value = '';\n\t\t\t\t\tdocument.getElementById('webhook_default_priority').value = '2';\n\t\t\t\t\tdocument.getElementById('webhook_url_display').textContent = '(Save first to generate URL)';\n\t\t\t\t\tdocument.getElementById('webhook_secret_display').value = '';\n\t\t\t\t\tresetSecretInputVisibility('webhook_secret_display');\n\t\t\t\t\tvar secretRow = document.getElementById('webhook_secret_row');\n\t\t\t\t\tif (secretRow) secretRow.style.display = 'none';\n\t\t\t\t\tvar urlRow = document.getElementById('webhook_url_row');\n\t\t\t\t\tif (urlRow) urlRow.style.display = 'none';\n\t\t\t\t\t\n\t\t\t\t\t// Initialize webhook agents from page data\n\t\t\t\t\tinitializeWebhookAgents();\n\t\t\t\t\tselectedWebhookAgentIDs = [];\n\t\t\t\t\trenderWebhookAgentList();\n\t\t\t\t\tsetWebhookSection('config');\n\t\t\t\t\t\n\t\t\t\t\thtmx.process(form);\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openWebhookEditModal(id) {\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tdocument.getElementById('webhook_modal_title').textContent = 'Edit Webhook';\n\t\t\t\t\tvar form = document.getElementById('webhook_form');\n\t\t\t\t\tvar pid = form.getAttribute('data-project-id') || '';\n\t\t\t\t\tform.removeAttribute('hx-post');\n\t\t\t\t\tform.setAttribute('hx-put', '/channels/webhooks/' + id + '?project_id=' + encodeURIComponent(pid));\n\t\t\t\t\tvar card = document.querySelector('[data-webhook-id=\"' + id + '\"]');\n\t\t\t\t\tif (card) {\n\t\t\t\t\t\tdocument.getElementById('webhook_name').value = card.getAttribute('data-webhook-name') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_enabled').checked = (card.getAttribute('data-webhook-enabled') || '') === 'true';\n\t\t\t\t\t\tdocument.getElementById('webhook_system_instructions').value = card.getAttribute('data-webhook-system') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_default_priority').value = card.getAttribute('data-webhook-default-priority') || '2';\n\t\t\t\t\t\tdocument.getElementById('webhook_secret_display').value = card.getAttribute('data-webhook-secret') || '';\n\t\t\t\t\t\tresetSecretInputVisibility('webhook_secret_display');\n\t\t\t\t\t\tvar token = card.getAttribute('data-webhook-token') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_url_display').textContent = token ? (window.location.origin + '/webhooks/inbound/' + token) : '(Not available)';\n\t\t\t\t\t\t\n\t\t\t\t\t\t// Load selected agents from card data\n\t\t\t\t\t\tvar agentIDsCSV = card.getAttribute('data-webhook-agent-ids') || '';\n\t\t\t\t\t\tselectedWebhookAgentIDs = agentIDsCSV.split(',').map(id => id.trim()).filter(id => id !== '');\n\t\t\t\t\t}\n\t\t\t\t\tvar secretRow = document.getElementById('webhook_secret_row');\n\t\t\t\t\tif (secretRow) secretRow.style.display = '';\n\t\t\t\t\tvar urlRow = document.getElementById('webhook_url_row');\n\t\t\t\t\tif (urlRow) urlRow.style.display = '';\n\t\t\t\t\t\n\t\t\t\t\t// Initialize webhook agents and render\n\t\t\t\t\tinitializeWebhookAgents();\n\t\t\t\t\trenderWebhookAgentList();\n\t\t\t\t\tsetWebhookSection('config');\n\t\t\t\t\t\n\t\t\t\t\thtmx.process(form);\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction writeToClipboardWithFeedback(text, button, successMessage, failureMessage) {\n\t\t\t\t\t\tif (!text) {\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(failureMessage || 'Nothing to copy', 'failed');\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction onCopySuccess() {\n\t\t\t\t\t\t\tif (button) {\n\t\t\t\t\t\t\t\tvar original = button.textContent;\n\t\t\t\t\t\t\t\tbutton.textContent = 'Copied';\n\t\t\t\t\t\t\t\tsetTimeout(function() { button.textContent = original; }, 1000);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(successMessage || 'Copied to clipboard', 'completed');\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction onCopyFailure() {\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(failureMessage || 'Failed to copy to clipboard', 'failed');\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tif (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {\n\t\t\t\t\t\t\tnavigator.clipboard.writeText(text).then(onCopySuccess).catch(function() {\n\t\t\t\t\t\t\t\tvar textarea = document.createElement('textarea');\n\t\t\t\t\t\t\t\ttextarea.value = text;\n\t\t\t\t\t\t\t\ttextarea.setAttribute('readonly', '');\n\t\t\t\t\t\t\t\ttextarea.style.position = 'fixed';\n\t\t\t\t\t\t\t\ttextarea.style.opacity = '0';\n\t\t\t\t\t\t\t\tdocument.body.appendChild(textarea);\n\t\t\t\t\t\t\t\ttextarea.select();\n\t\t\t\t\t\t\t\ttextarea.setSelectionRange(0, textarea.value.length);\n\t\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\t\tif (document.execCommand('copy')) {\n\t\t\t\t\t\t\t\t\t\tonCopySuccess();\n\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\t\t\tdocument.body.removeChild(textarea);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tvar fallbackTextarea = document.createElement('textarea');\n\t\t\t\t\t\tfallbackTextarea.value = text;\n\t\t\t\t\t\tfallbackTextarea.setAttribute('readonly', '');\n\t\t\t\t\t\tfallbackTextarea.style.position = 'fixed';\n\t\t\t\t\t\tfallbackTextarea.style.opacity = '0';\n\t\t\t\t\t\tdocument.body.appendChild(fallbackTextarea);\n\t\t\t\t\t\tfallbackTextarea.select();\n\t\t\t\t\t\tfallbackTextarea.setSelectionRange(0, fallbackTextarea.value.length);\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tif (document.execCommand('copy')) {\n\t\t\t\t\t\t\t\tonCopySuccess();\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\tdocument.body.removeChild(fallbackTextarea);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\tfunction copyWebhookEndpointUrl(webhookID, button) {\n\t\t\t\t\tvar card = document.querySelector('[data-webhook-id=\"' + webhookID + '\"]');\n\t\t\t\t\tif (!card) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar token = (card.getAttribute('data-webhook-token') || '').trim();\n\t\t\t\t\tif (!token) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar url = window.location.origin + '/webhooks/inbound/' + token;\n\t\t\t\t\twriteToClipboardWithFeedback(url, button, 'Webhook URL copied', 'Failed to copy webhook URL');\n\t\t\t\t}\n\n\t\t\t\tfunction copyWebhookAbsoluteUrl(elementId, button) {\n\t\t\t\t\tvar el = document.getElementById(elementId);\n\t\t\t\t\tif (!el) return;\n\t\t\t\t\tvar val = (el.textContent || '').trim();\n\t\t\t\t\tif (!val || val.indexOf('(Save first') === 0 || val.indexOf('(Not available') === 0) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\twriteToClipboardWithFeedback(val, button, 'Webhook URL copied', 'Failed to copy webhook URL');\n\t\t\t\t}\n\n\t\t\t\tfunction closeWebhookModal() {\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\tfunction editChannelFromData(card) {\n\t\t\t\t\tconst type = card.dataset.channelType;\n\t\t\t\t\tif (type === 'telegram') {\n\t\t\t\t\t\tconst token = card.dataset.channelToken || '';\n\t\t\t\t\t\tdocument.getElementById('channel_telegram_token').value = token;\n\t\t\t\t\t\tvar richToggle = document.getElementById('channel_telegram_rich_messages_v2');\n\t\t\t\t\t\tif (richToggle) richToggle.checked = richToggle.defaultChecked;\n\t\t\t\t\t\tdocument.getElementById('channel_modal_title').textContent = 'Configure Telegram Bot';\n\t\t\t\t\t\tresetSecretInputVisibility('channel_telegram_token');\n\t\t\t\t\t\tchannel_modal.showModal();\n\t\t\t\t} else if (type === 'github') {\n\t\t\t\t\topenGitHubConfigModal();\n\t\t\t\t\t} else if (type === 'slack') {\n\t\t\t\t\t\topenSlackConfigModal();\n\t\t\t\t\t} else if (type === 'email') {\n\t\t\t\t\t\topenEmailConfigModal();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\tfunction closeAllDropdownMenus() {\n\t\t\t\tdocument.querySelectorAll('.dropdown ul').forEach(m => m.classList.remove('show'));\n\t\t\t}\n\n\t\t\tfunction openTelegramChannelFromMenu(event) {\n\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\tdocument.getElementById('channel_telegram_token').value = '';\n\t\t\t\tvar richToggle = document.getElementById('channel_telegram_rich_messages_v2');\n\t\t\t\tif (richToggle) richToggle.checked = true;\n\t\t\t\tdocument.getElementById('channel_modal_title').textContent = 'Add Telegram Bot';\n\t\t\t\tresetSecretInputVisibility('channel_telegram_token');\n\t\t\t\tchannel_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction openGitHubChannelFromMenu(event) {\n\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\topenGitHubConfigModal();\n\t\t\t}\n\n\t\t\t\tfunction openSlackChannelFromMenu(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\topenSlackConfigModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openEmailChannelFromMenu(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\topenEmailConfigModal();\n\t\t\t\t}\n\n\t\t\t\tfunction closeChannelModal() {\t\t\t\tchannel_modal.close();\n\t\t\t}\n\n\t\t\tfunction openGitHubConfigModal() {\n\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\tif (!modal) return;\n\t\t\t\tconst modeSelect = document.getElementById('github_auth_mode');\n\t\t\t\t\tif (modeSelect) {\n\t\t\t\t\t\ttoggleGitHubAuthMode(modeSelect.value);\n\t\t\t\t\t}\n\t\t\t\t\tresetSecretInputVisibility('github_pat');\n\t\t\t\t\tresetSecretTextareaVisibility('github_app_private_key');\n\t\t\t\t\tmodal.showModal();\n\t\t\t}\n\n\t\t\tfunction closeGitHubConfigModal() {\n\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\tif (modal) modal.close();\n\t\t\t}\n\n\t\t\tfunction openSlackConfigModal() {\n\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\tif (!modal) return;\n\t\t\t\tconst modeSelect = document.getElementById('slack_bot_token_mode');\n\t\t\t\t\tif (modeSelect) {\n\t\t\t\t\t\ttoggleSlackBotTokenMode(modeSelect.value);\n\t\t\t\t\t}\n\t\t\t\t\tresetSecretInputVisibility('slack_client_secret');\n\t\t\t\t\tresetSecretInputVisibility('slack_app_token');\n\t\t\t\t\tresetSecretInputVisibility('slack_bot_token');\n\t\t\t\t\tmodal.showModal();\n\t\t\t}\n\n\t\t\t\tfunction closeSlackConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\tfunction openEmailConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('email_config_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tconst provider = document.getElementById('email_provider');\n\t\t\t\t\tif (provider) setEmailProviderPreset(provider.value, true);\n\t\t\t\t\tresetSecretInputVisibility('email_password');\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction closeEmailConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('email_config_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\tfunction openOutboundTargetsModal() {\n\t\t\t\t\tconst modal = document.getElementById('outbound_targets_modal');\n\t\t\t\t\tif (modal) modal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction closeOutboundTargetsModal() {\n\t\t\t\t\tconst modal = document.getElementById('outbound_targets_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\tfunction setEmailProviderPreset(providerKey, preserveValues) {\n\t\t\t\t\tconst provider = document.getElementById('email_provider');\n\t\t\t\t\tif (!provider) return;\n\t\t\t\t\tconst option = provider.options[provider.selectedIndex];\n\t\t\t\t\tconst isCustom = (providerKey || '').toLowerCase() === 'custom';\n\t\t\t\t\tconst advanced = document.getElementById('email_advanced_details');\n\t\t\t\t\tif (advanced) advanced.open = isCustom;\n\t\t\t\t\tconst help = document.getElementById('email_provider_help');\n\t\t\t\t\tif (help && option) help.textContent = option.getAttribute('data-help') || help.textContent;\n\t\t\t\t\tif (!isCustom && option && !preserveValues) {\n\t\t\t\t\t\tdocument.getElementById('email_imap_host').value = option.getAttribute('data-imap-host') || '';\n\t\t\t\t\t\tdocument.getElementById('email_imap_port').value = option.getAttribute('data-imap-port') || '993';\n\t\t\t\t\t\tdocument.getElementById('email_smtp_host').value = option.getAttribute('data-smtp-host') || '';\n\t\t\t\t\t\tdocument.getElementById('email_smtp_port').value = option.getAttribute('data-smtp-port') || '587';\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction markEmailProviderCustom() {\n\t\t\t\t\tconst provider = document.getElementById('email_provider');\n\t\t\t\t\tif (provider) provider.value = 'custom';\n\t\t\t\t}\n\n\t\t\t\t\tfunction toggleSlackBotTokenMode(mode) {\n\t\t\t\t\t\tconst section = document.getElementById('slack_bot_token_override_section');\t\t\t\tif (!section) {\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tconst normalized = (mode || '').toLowerCase();\n\t\t\t\tsection.style.display = normalized === 'manual' ? '' : 'none';\n\t\t\t}\n\n\t\t\tfunction toggleGitHubAuthMode(mode) {\n\t\t\t\tconst normalized = (mode || '').toLowerCase();\n\t\t\t\tconst patSection = document.getElementById('github_pat_section');\n\t\t\t\tconst appSection = document.getElementById('github_app_section');\n\t\t\t\tif (!patSection || !appSection) {\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tconst isAppMode = normalized === 'app';\n\t\t\t\tpatSection.style.display = isAppMode ? 'none' : '';\n\t\t\t\tappSection.style.display = isAppMode ? '' : 'none';\n\t\t\t}\n\n\t\t\t// Close modal and refresh after successful save\n\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\tif (event.detail.pathInfo.requestPath === '/channels/telegram' && event.detail.successful) {\n\t\t\t\t\tconst modal = document.getElementById('channel_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (event.detail.pathInfo.requestPath === '/channels/github/configure' && event.detail.successful) {\n\t\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\t\tif (event.detail.pathInfo.requestPath === '/channels/slack/configure' && event.detail.successful) {\n\t\t\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif (event.detail.pathInfo.requestPath === '/channels/email/configure' && event.detail.successful) {\n\t\t\t\t\t\tconst modal = document.getElementById('email_config_modal');\n\t\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t// Close webhook modal after successful save\t\t\t\t\tvar rp = event.detail.pathInfo.requestPath || '';\n\t\t\t\t\tif (rp.startsWith('/channels/webhooks') && event.detail.successful) {\n\t\t\t\t\t\tvar whModal = document.getElementById('webhook_modal');\n\t\t\t\t\t\tif (whModal && whModal.open) {\n\t\t\t\t\t\t\twhModal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t});\n\n\t\t\t\tdocument.body.addEventListener('htmx:configRequest', function(event) {\n\t\t\t\t\tif (!event || !event.detail || !event.detail.path) return;\n\t\t\t\t\tif (event.detail.path.indexOf('/channels/webhooks') !== 0) return;\n\t\t\t\t\tvar params = event.detail.parameters || {};\n\t\t\t\t\tparams.agent_ids = selectedWebhookAgentIDsCSV('webhook_agent_ids');\n\t\t\t\t\tevent.detail.parameters = params;\n\t\t\t\t});\n\n\t\t\tsetTimeout(function() {\n\t\t\t\tconst modeSelect = document.getElementById('github_auth_mode');\n\t\t\t\tif (modeSelect) {\n\t\t\t\t\ttoggleGitHubAuthMode(modeSelect.value);\n\t\t\t\t}\n\t\t\t\t\tconst slackModeSelect = document.getElementById('slack_bot_token_mode');\n\t\t\t\t\tif (slackModeSelect) {\n\t\t\t\t\t\ttoggleSlackBotTokenMode(slackModeSelect.value);\n\t\t\t\t\t}\n\t\t\t\t\tconst emailProviderSelect = document.getElementById('email_provider');\n\t\t\t\t\tif (emailProviderSelect) {\n\t\t\t\t\t\tsetEmailProviderPreset(emailProviderSelect.value, true);\n\t\t\t\t\t}\n\t\t\t\t}, 0);\t\t</script></div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
+func OutboundTargetsCard(targets []models.ChannelTarget, explicitAllowed bool, oob bool) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var70 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var70 == nil {
+			templ_7745c5c3_Var70 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 157, "<div id=\"outbound-targets-card\" class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-channel-type=\"outbound-targets\" data-search-card data-search-text=\"Outbound Message Targets send_message Slack Telegram Email\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if oob {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 158, " hx-swap-oob")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, " onclick=\"openOutboundTargetsModal()\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\"><li><button type=\"button\" onclick=\"openOutboundTargetsModal()\">Edit</button></li></ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.031 9-11.622 0-1.042-.133-2.052-.382-3.016z\"></path></svg> Outbound Message Targets</h3><p class=\"text-sm opacity-60\">Safety controls for where the `send_message` chat tool can send.</p><div class=\"mt-2 flex flex-wrap items-center gap-2\"><span class=\"badge badge-sm badge-ghost\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var71 string
+		templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.JoinStringErrs(outboundTargetSummary(targets))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1766, Col: 78}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var71))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 160, "</span> ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if explicitAllowed {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, "<span class=\"badge badge-sm badge-warning\">Explicit targets allowed</span>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		} else {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 162, "<span class=\"badge badge-sm badge-success\">Saved targets only</span>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 163, "</div></div></div></div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
+func OutboundTargetsModal(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var72 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var72 == nil {
+			templ_7745c5c3_Var72 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 164, "<dialog id=\"outbound_targets_modal\" class=\"modal\"><div class=\"modal-box max-w-5xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeOutboundTargetsModal()\" aria-label=\"Close outbound message targets\" title=\"Close outbound message targets\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = OutboundTargetsSection(currentProjectID, targets, explicitAllowed, "").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 165, "</div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
+func OutboundTargetsFragment(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool, notice string) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var73 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var73 == nil {
+			templ_7745c5c3_Var73 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Err = OutboundTargetsSection(currentProjectID, targets, explicitAllowed, notice).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = OutboundTargetsCard(targets, explicitAllowed, true).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1621,216 +1782,216 @@ func OutboundTargetsSection(currentProjectID string, targets []models.ChannelTar
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var70 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var70 == nil {
-			templ_7745c5c3_Var70 = templ.NopComponent
+		templ_7745c5c3_Var74 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var74 == nil {
+			templ_7745c5c3_Var74 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 157, "<div id=\"outbound-targets-section\" class=\"card bg-base-100 shadow-sm border border-base-300 mb-8\" data-search-card data-search-text=\"Outbound message targets send_message Slack Telegram Email\"><div class=\"card-body\"><div class=\"flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between\"><div><h3 class=\"card-title\">Outbound Message Targets</h3><p class=\"text-sm opacity-70\">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, or `email:#client`.</p></div><form method=\"post\" hx-post=\"/channels/send-message-explicit-targets\" hx-target=\"#outbound-targets-section\" hx-swap=\"outerHTML\" class=\"form-control\" onclick=\"event.stopPropagation()\"><input type=\"hidden\" name=\"project_id\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 166, "<div id=\"outbound-targets-section\"><div><div class=\"flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between pr-10\"><div><h3 class=\"card-title\">Outbound Message Targets</h3><p class=\"text-sm opacity-70\">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, or `email:#client`.</p></div><form method=\"post\" hx-post=\"/channels/send-message-explicit-targets\" hx-target=\"#outbound-targets-section\" hx-swap=\"outerHTML\" class=\"form-control\" onclick=\"event.stopPropagation()\"><input type=\"hidden\" name=\"project_id\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var71 string
-		templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
+		var templ_7745c5c3_Var75 string
+		templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1712, Col: 68}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1806, Col: 68}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var71)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var75)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 158, "\"> <label class=\"label cursor-pointer gap-3 justify-start\"><span class=\"label-text text-sm\">Allow explicit unsaved targets</span> <input type=\"checkbox\" name=\"enabled\" value=\"true\" class=\"toggle toggle-sm\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 167, "\"> <label class=\"label cursor-pointer gap-3 justify-start\"><span class=\"label-text text-sm\">Allow explicit unsaved targets</span> <input type=\"checkbox\" name=\"enabled\" value=\"true\" class=\"toggle toggle-sm\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if explicitAllowed {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, " checked")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 160, " onchange=\"this.form.requestSubmit()\"></label></form></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 169, " onchange=\"this.form.requestSubmit()\"></label></form></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if notice != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, "<div class=\"alert alert-success py-2 text-sm mt-3\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var72 string
-			templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.JoinStringErrs(notice)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1720, Col: 63}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var72))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 162, "</div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 163, "<form method=\"post\" hx-post=\"/channels/outbound-targets\" hx-target=\"#outbound-targets-section\" hx-swap=\"outerHTML\" class=\"grid gap-3 md:grid-cols-6 mt-4\" onclick=\"event.stopPropagation()\"><input type=\"hidden\" name=\"project_id\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var73 string
-		templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1723, Col: 67}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var73)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 164, "\"> <select name=\"platform\" class=\"select select-bordered select-sm\" required><option value=\"slack\">Slack</option> <option value=\"telegram\">Telegram</option> <option value=\"email\">Email</option></select> <input name=\"name\" class=\"input input-bordered input-sm\" placeholder=\"name, e.g. ops\"> <input name=\"target_id\" class=\"input input-bordered input-sm md:col-span-2\" placeholder=\"channel/chat ID or email\" required> <input name=\"thread_id\" class=\"input input-bordered input-sm\" placeholder=\"thread/topic ID\"> <label class=\"label cursor-pointer justify-start gap-2 py-0\"><input type=\"checkbox\" name=\"is_home\" value=\"true\" class=\"checkbox checkbox-sm\"> <span class=\"label-text text-sm\">Home</span></label> <input name=\"default_subject\" class=\"input input-bordered input-sm md:col-span-5\" placeholder=\"default email subject (optional)\"> <button type=\"submit\" class=\"btn btn-primary btn-sm\">Save Target</button></form><div class=\"overflow-x-auto mt-4\"><table class=\"table table-sm\"><thead><tr><th>Platform</th><th>Name</th><th>Target</th><th>Thread/Topic</th><th>Home</th><th></th></tr></thead> <tbody>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if len(targets) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 165, "<tr><td colspan=\"6\" class=\"opacity-60\">No outbound targets saved yet.</td></tr>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		for _, target := range targets {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 166, "<tr><td>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var74 string
-			templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.JoinStringErrs(target.Platform)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1757, Col: 29}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var74))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 167, "</td><td>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if target.Name != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "<span>#")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var75 string
-				templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.JoinStringErrs(target.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1760, Col: 31}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var75))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 169, "</span>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 170, "<span class=\"opacity-50\">unnamed</span>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 171, "</td><td class=\"font-mono text-xs break-all\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 170, "<div class=\"alert alert-success py-2 text-sm mt-3\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var76 string
-			templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.JoinStringErrs(target.TargetID)
+			templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.JoinStringErrs(notice)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1765, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1814, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var76))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 172, "</td><td class=\"font-mono text-xs\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var77 string
-			templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.JoinStringErrs(target.ThreadID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1766, Col: 55}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var77))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 173, "</td><td>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if target.Home {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 174, "<span class=\"badge badge-sm badge-primary\">Home</span>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 175, "</td><td class=\"text-right\"><div id=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var78 string
-			templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.ResolveAttributeValue("outbound-target-test-" + target.ID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1773, Col: 54}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var78)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 176, "\" class=\"mb-1\"></div><button type=\"button\" class=\"btn btn-xs\" hx-post=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var79 string
-			templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/outbound-targets/" + target.ID + "/test")
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1774, Col: 111}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var79)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 177, "\" hx-target=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var80 string
-			templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.ResolveAttributeValue("#outbound-target-test-" + target.ID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1774, Col: 162}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var80)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 178, "\" hx-swap=\"innerHTML\">Test</button> <button type=\"button\" class=\"btn btn-xs btn-error\" hx-delete=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var81 string
-			templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/outbound-targets/" + target.ID + "?project_id=" + currentProjectID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1775, Col: 149}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var81)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "\" hx-target=\"#outbound-targets-section\" hx-swap=\"outerHTML\">Delete</button></td></tr>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 171, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 180, "</tbody></table></div></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 172, "<form method=\"post\" hx-post=\"/channels/outbound-targets\" hx-target=\"#outbound-targets-section\" hx-swap=\"outerHTML\" class=\"grid gap-3 md:grid-cols-6 mt-4\" onclick=\"event.stopPropagation()\"><input type=\"hidden\" name=\"project_id\" value=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var77 string
+		templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1817, Col: 67}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var77)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 173, "\"> <select name=\"platform\" class=\"select select-bordered select-sm\" required><option value=\"slack\">Slack</option> <option value=\"telegram\">Telegram</option> <option value=\"email\">Email</option></select> <input name=\"name\" class=\"input input-bordered input-sm\" placeholder=\"name, e.g. ops\"> <input name=\"target_id\" class=\"input input-bordered input-sm md:col-span-2\" placeholder=\"channel/chat ID or email\" required> <input name=\"thread_id\" class=\"input input-bordered input-sm\" placeholder=\"thread/topic ID\"> <label class=\"label cursor-pointer justify-start gap-2 py-0\"><input type=\"checkbox\" name=\"is_home\" value=\"true\" class=\"checkbox checkbox-sm\"> <span class=\"label-text text-sm\">Home</span></label> <input name=\"default_subject\" class=\"input input-bordered input-sm md:col-span-5\" placeholder=\"default email subject (optional)\"> <button type=\"submit\" class=\"btn btn-primary btn-sm\">Save Target</button></form><div class=\"overflow-x-auto mt-4\"><table class=\"table table-sm\"><thead><tr><th>Platform</th><th>Name</th><th>Target</th><th>Thread/Topic</th><th>Home</th><th></th></tr></thead> <tbody>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if len(targets) == 0 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 174, "<tr><td colspan=\"6\" class=\"opacity-60\">No outbound targets saved yet.</td></tr>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		for _, target := range targets {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 175, "<tr><td>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var78 string
+			templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.JoinStringErrs(target.Platform)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1851, Col: 29}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var78))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 176, "</td><td>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if target.Name != "" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 177, "<span>#")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var79 string
+				templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.JoinStringErrs(target.Name)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1854, Col: 31}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var79))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 178, "</span>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			} else {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "<span class=\"opacity-50\">unnamed</span>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 180, "</td><td class=\"font-mono text-xs break-all\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var80 string
+			templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.JoinStringErrs(target.TargetID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1859, Col: 65}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var80))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 181, "</td><td class=\"font-mono text-xs\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var81 string
+			templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.JoinStringErrs(target.ThreadID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1860, Col: 55}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var81))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 182, "</td><td>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if target.Home {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 183, "<span class=\"badge badge-sm badge-primary\">Home</span>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 184, "</td><td class=\"text-right\"><div id=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var82 string
+			templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.ResolveAttributeValue("outbound-target-test-" + target.ID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1867, Col: 54}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var82)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 185, "\" class=\"mb-1\"></div><button type=\"button\" class=\"btn btn-xs\" hx-post=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var83 string
+			templ_7745c5c3_Var83, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/outbound-targets/" + target.ID + "/test")
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1868, Col: 111}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var83)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 186, "\" hx-target=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var84 string
+			templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.ResolveAttributeValue("#outbound-target-test-" + target.ID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1868, Col: 162}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var84)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 187, "\" hx-swap=\"innerHTML\">Test</button> <button type=\"button\" class=\"btn btn-xs btn-error\" hx-delete=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var85 string
+			templ_7745c5c3_Var85, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/outbound-targets/" + target.ID + "?project_id=" + currentProjectID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1869, Col: 149}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var85)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 188, "\" hx-target=\"#outbound-targets-section\" hx-swap=\"outerHTML\">Delete</button></td></tr>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 189, "</tbody></table></div></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
