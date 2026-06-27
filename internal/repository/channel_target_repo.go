@@ -118,6 +118,86 @@ func (r *ChannelTargetRepo) DeleteForProject(ctx context.Context, projectID, id 
 	return nil
 }
 
+func (r *ChannelTargetRepo) DeleteProjectExcept(ctx context.Context, projectID string, keepIDs []string) error {
+	args := []interface{}{projectID}
+	query := `DELETE FROM channel_targets WHERE project_id = ?`
+	if len(keepIDs) > 0 {
+		placeholders := make([]string, 0, len(keepIDs))
+		for _, id := range keepIDs {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			placeholders = append(placeholders, "?")
+			args = append(args, id)
+		}
+		if len(placeholders) > 0 {
+			query += ` AND id NOT IN (` + strings.Join(placeholders, ",") + `)`
+		}
+	}
+	if _, err := r.db.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("delete removed channel targets: %w", err)
+	}
+	return nil
+}
+
+func (r *ChannelTargetRepo) ReplaceProjectTargets(ctx context.Context, projectID string, targets []models.ChannelTarget) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin replace channel targets: %w", err)
+	}
+	defer tx.Rollback()
+
+	keepIDs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if strings.TrimSpace(target.ID) == "" {
+			return fmt.Errorf("channel target id is required")
+		}
+		target.ProjectID = projectID
+		platform := normalizeChannelTargetField(target.Platform)
+		name := normalizeChannelTargetField(target.Name)
+		if target.Home {
+			if _, err := tx.ExecContext(ctx, `UPDATE channel_targets SET is_home = 0, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND platform = ?`, projectID, platform); err != nil {
+				return fmt.Errorf("clear channel home target: %w", err)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO channel_targets (id, project_id, platform, name, target_id, thread_id, is_home, default_subject, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			ON CONFLICT(id) DO UPDATE SET
+				project_id = excluded.project_id,
+				platform = excluded.platform,
+				name = excluded.name,
+				target_id = excluded.target_id,
+				thread_id = excluded.thread_id,
+				is_home = excluded.is_home,
+				default_subject = excluded.default_subject,
+				updated_at = CURRENT_TIMESTAMP`,
+			target.ID, projectID, platform, name, strings.TrimSpace(target.TargetID), strings.TrimSpace(target.ThreadID), target.Home, strings.TrimSpace(target.DefaultSubject)); err != nil {
+			return fmt.Errorf("upsert channel target: %w", err)
+		}
+		keepIDs = append(keepIDs, target.ID)
+	}
+
+	args := []interface{}{projectID}
+	query := `DELETE FROM channel_targets WHERE project_id = ?`
+	if len(keepIDs) > 0 {
+		placeholders := make([]string, 0, len(keepIDs))
+		for _, id := range keepIDs {
+			placeholders = append(placeholders, "?")
+			args = append(args, id)
+		}
+		query += ` AND id NOT IN (` + strings.Join(placeholders, ",") + `)`
+	}
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("delete removed channel targets: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit replace channel targets: %w", err)
+	}
+	return nil
+}
+
 func (r *ChannelTargetRepo) RecordSend(ctx context.Context, send models.ChannelMessageSend) error {
 	if strings.TrimSpace(send.ID) == "" {
 		return fmt.Errorf("channel message send id is required")

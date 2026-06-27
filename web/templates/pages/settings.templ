@@ -1619,22 +1619,122 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					if (modal) modal.close();
 				}
 
-				function resetOutboundTargetAddForm() {
-					const form = document.getElementById('outbound-target-add-form');
-					if (form) form.reset();
-				}
+					function resetOutboundTargetAddForm() {
+						const form = document.getElementById('outbound-target-add-form');
+						if (form) form.reset();
+					}
 
-				function openOutboundTargetsModal() {
-					const modal = document.getElementById('outbound_targets_modal');
-					resetOutboundTargetAddForm();
-					if (modal) modal.showModal();
-				}
+					function reloadOutboundTargetsModalDraft() {
+						const section = document.getElementById('outbound-targets-section');
+						if (!section || !window.htmx) return;
+						const projectID = section.getAttribute('data-project-id') || '';
+						window.htmx.ajax('GET', '/channels/outbound-targets?project_id=' + encodeURIComponent(projectID), {
+							target: '#outbound-targets-section',
+							swap: 'outerHTML'
+						});
+					}
 
-				function closeOutboundTargetsModal() {
-					const modal = document.getElementById('outbound_targets_modal');
-					if (modal) modal.close();
-					resetOutboundTargetAddForm();
-				}
+					function openOutboundTargetsModal() {
+						const modal = document.getElementById('outbound_targets_modal');
+						resetOutboundTargetAddForm();
+						reloadOutboundTargetsModalDraft();
+						if (modal) modal.showModal();
+					}
+
+					function closeOutboundTargetsModal() {
+						const modal = document.getElementById('outbound_targets_modal');
+						if (modal) modal.close();
+					}
+
+					function handleOutboundTargetsModalClose() {
+						resetOutboundTargetAddForm();
+						reloadOutboundTargetsModalDraft();
+					}
+
+					function outboundTargetsDraftInput(name, value) {
+						const input = document.createElement('input');
+						input.type = 'hidden';
+						input.name = name;
+						input.value = value || '';
+						return input;
+					}
+
+					function outboundTargetsAppendDraftFields(rowKey, id, platform, name, targetID, threadID, isHome, defaultSubject) {
+						const fields = document.getElementById('outbound-targets-draft-fields');
+						if (!fields) return;
+						const group = document.createElement('div');
+						group.setAttribute('data-outbound-target-draft-key', rowKey);
+						group.appendChild(outboundTargetsDraftInput('target_row_id', id));
+						group.appendChild(outboundTargetsDraftInput('target_platform', platform));
+						group.appendChild(outboundTargetsDraftInput('target_name', name));
+						group.appendChild(outboundTargetsDraftInput('target_target_id', targetID));
+						group.appendChild(outboundTargetsDraftInput('target_thread_id', threadID));
+						group.appendChild(outboundTargetsDraftInput('target_is_home', isHome ? 'true' : 'false'));
+						group.appendChild(outboundTargetsDraftInput('target_default_subject', defaultSubject));
+						fields.appendChild(group);
+					}
+
+					function outboundTargetsEscape(value) {
+						const div = document.createElement('div');
+						div.textContent = value || '';
+						return div.innerHTML;
+					}
+
+					function addOutboundTargetDraft(event) {
+						if (event) event.preventDefault();
+						const form = document.getElementById('outbound-target-add-form');
+						const tbody = document.getElementById('outbound-targets-draft-tbody');
+						if (!form || !tbody) return false;
+						const platform = (form.elements.platform.value || '').trim().toLowerCase();
+						const name = (form.elements.name.value || '').trim().replace(/^#+/, '').toLowerCase();
+						const targetID = (form.elements.target_id.value || '').trim();
+						const threadID = (form.elements.thread_id.value || '').trim();
+						const isHome = !!form.elements.is_home.checked;
+						const defaultSubject = (form.elements.default_subject.value || '').trim();
+						if (!platform || !targetID) return false;
+						if (isHome) {
+							document.querySelectorAll('#outbound-targets-draft-tbody tr[data-platform="' + platform + '"] .outbound-target-home-cell').forEach(function(cell) {
+								cell.innerHTML = '';
+							});
+							document.querySelectorAll('#outbound-targets-draft-fields [data-outbound-target-draft-key]').forEach(function(group) {
+								const platformInput = group.querySelector('input[name="target_platform"]');
+								const homeInput = group.querySelector('input[name="target_is_home"]');
+								if (platformInput && homeInput && platformInput.value === platform) homeInput.value = 'false';
+							});
+						}
+						const rowKey = 'draft-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+						const emptyRow = document.getElementById('outbound-targets-empty-row');
+						if (emptyRow) emptyRow.remove();
+						const row = document.createElement('tr');
+						row.setAttribute('data-outbound-target-draft-key', rowKey);
+						row.setAttribute('data-platform', platform);
+						row.innerHTML = '<td>' + outboundTargetsEscape(platform) + '</td>' +
+							'<td>' + (name ? '<span>#' + outboundTargetsEscape(name) + '</span>' : '<span class="opacity-50">unnamed</span>') + '</td>' +
+							'<td class="font-mono text-xs break-all">' + outboundTargetsEscape(targetID) + '</td>' +
+							'<td class="font-mono text-xs">' + outboundTargetsEscape(threadID) + '</td>' +
+							'<td class="outbound-target-home-cell">' + (isHome ? '<span class="badge badge-sm badge-primary">Home</span>' : '') + '</td>' +
+							'<td class="text-right"><span class="badge badge-sm badge-ghost mr-2">Unsaved</span><button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button></td>';
+						tbody.appendChild(row);
+						outboundTargetsAppendDraftFields(rowKey, '', platform, name, targetID, threadID, isHome, defaultSubject);
+						resetOutboundTargetAddForm();
+						return false;
+					}
+
+					function removeOutboundTargetDraft(button) {
+						const row = button ? button.closest('tr[data-outbound-target-draft-key]') : null;
+						if (!row) return;
+						const rowKey = row.getAttribute('data-outbound-target-draft-key');
+						row.remove();
+						const group = document.querySelector('#outbound-targets-draft-fields [data-outbound-target-draft-key="' + rowKey + '"]');
+						if (group) group.remove();
+						const tbody = document.getElementById('outbound-targets-draft-tbody');
+						if (tbody && !tbody.querySelector('tr[data-outbound-target-draft-key]')) {
+							const empty = document.createElement('tr');
+							empty.id = 'outbound-targets-empty-row';
+							empty.innerHTML = '<td colspan="6" class="opacity-60">No outbound targets saved yet.</td>';
+							tbody.appendChild(empty);
+						}
+					}
 
 				function setEmailProviderPreset(providerKey, preserveValues) {
 					const provider = document.getElementById('email_provider');
@@ -1712,12 +1812,11 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							whModal.close();
 						}
 					}
-					if (rp === '/channels/outbound-targets' && event.detail.successful) {
-						resetOutboundTargetAddForm();
-					}
-					if (rp === '/channels/send-message-explicit-targets' && event.detail.successful) {
-						closeOutboundTargetsModal();
-					}
+						if (rp === '/channels/send-message-explicit-targets' && event.detail.successful) {
+							const modal = document.getElementById('outbound_targets_modal');
+							if (modal) modal.close();
+							resetOutboundTargetAddForm();
+						}
 				});
 
 				document.body.addEventListener('htmx:configRequest', function(event) {
@@ -1793,7 +1892,7 @@ templ OutboundTargetsCard(currentProjectID string, targets []models.ChannelTarge
 }
 
 templ OutboundTargetsModal(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool) {
-	<dialog id="outbound_targets_modal" class="modal">
+		<dialog id="outbound_targets_modal" class="modal" onclose="handleOutboundTargetsModalClose()">
 		<div class="modal-box max-w-5xl">
 			<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeOutboundTargetsModal()" aria-label="Close outbound message targets" title="Close outbound message targets">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -1815,7 +1914,7 @@ templ OutboundTargetsCardFragment(currentProjectID string, targets []models.Chan
 }
 
 templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool, notice string) {
-	<div id="outbound-targets-section">
+		<div id="outbound-targets-section" data-project-id={ currentProjectID }>
 		<div>
 			<div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between pr-10">
 				<div>
@@ -1832,8 +1931,7 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 			if notice != "" {
 				<div class="alert alert-success py-2 text-sm mt-3">{ notice }</div>
 			}
-				<form id="outbound-target-add-form" method="post" hx-post="/channels/outbound-targets" hx-target="#outbound-targets-section" hx-swap="outerHTML" class="grid gap-3 md:grid-cols-6 mt-4" onclick="event.stopPropagation()">
-				<input type="hidden" name="project_id" value={ currentProjectID }/>
+					<form id="outbound-target-add-form" class="grid gap-3 md:grid-cols-6 mt-4" onclick="event.stopPropagation()" onsubmit="return addOutboundTargetDraft(event)">
 				<select name="platform" class="select select-bordered select-sm" required>
 					<option value="slack">Slack</option>
 					<option value="telegram">Telegram</option>
@@ -1861,12 +1959,12 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 								<th></th>
 							</tr>
 						</thead>
-						<tbody>
-							if len(targets) == 0 {
-								<tr><td colspan="6" class="opacity-60">No outbound targets saved yet.</td></tr>
-							}
-							for _, target := range targets {
-								<tr>
+							<tbody id="outbound-targets-draft-tbody">
+								if len(targets) == 0 {
+									<tr id="outbound-targets-empty-row"><td colspan="6" class="opacity-60">No outbound targets saved yet.</td></tr>
+								}
+								for _, target := range targets {
+									<tr data-outbound-target-draft-key={ target.ID } data-platform={ target.Platform }>
 									<td>{ target.Platform }</td>
 									<td>
 										if target.Name != "" {
@@ -1877,25 +1975,38 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 									</td>
 									<td class="font-mono text-xs break-all">{ target.TargetID }</td>
 									<td class="font-mono text-xs">{ target.ThreadID }</td>
-									<td>
-										if target.Home {
-											<span class="badge badge-sm badge-primary">Home</span>
-										}
-									</td>
-									<td class="text-right">
-										<div id={ "outbound-target-test-" + target.ID } class="mb-1"></div>
-										<button type="button" class="btn btn-xs" hx-post={ "/channels/outbound-targets/" + target.ID + "/test?project_id=" + currentProjectID } hx-target={ "#outbound-target-test-" + target.ID } hx-swap="innerHTML">Test</button>
-										<button type="button" class="btn btn-xs btn-error" hx-delete={ "/channels/outbound-targets/" + target.ID + "?project_id=" + currentProjectID } hx-target="#outbound-targets-section" hx-swap="outerHTML">Delete</button>
-									</td>
+										<td class="outbound-target-home-cell">
+											if target.Home {
+												<span class="badge badge-sm badge-primary">Home</span>
+											}
+										</td>
+										<td class="text-right">
+											<div id={ "outbound-target-test-" + target.ID } class="mb-1"></div>
+											<button type="button" class="btn btn-xs" hx-post={ "/channels/outbound-targets/" + target.ID + "/test?project_id=" + currentProjectID } hx-target={ "#outbound-target-test-" + target.ID } hx-swap="innerHTML">Test</button>
+											<button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button>
+										</td>
 								</tr>
 							}
 						</tbody>
 					</table>
 				</div>
-				<form id="outbound-targets-policy-form" method="post" hx-post="/channels/send-message-explicit-targets" hx-target="#outbound-targets-section" hx-swap="outerHTML" class="modal-action" onclick="event.stopPropagation()">
-					<input type="hidden" name="project_id" value={ currentProjectID }/>
-					<button type="button" class="btn" onclick="closeOutboundTargetsModal()">Cancel</button>
-					<button type="submit" class="btn btn-primary">Save Settings</button>
-				</form>		</div>
+					<form id="outbound-targets-policy-form" method="post" hx-post="/channels/send-message-explicit-targets" hx-target="#outbound-targets-section" hx-swap="outerHTML" class="modal-action" onclick="event.stopPropagation()">
+						<input type="hidden" name="project_id" value={ currentProjectID }/>
+						<div id="outbound-targets-draft-fields">
+							for _, target := range targets {
+								<div data-outbound-target-draft-key={ target.ID }>
+									<input type="hidden" name="target_row_id" value={ target.ID }/>
+									<input type="hidden" name="target_platform" value={ target.Platform }/>
+									<input type="hidden" name="target_name" value={ target.Name }/>
+									<input type="hidden" name="target_target_id" value={ target.TargetID }/>
+									<input type="hidden" name="target_thread_id" value={ target.ThreadID }/>
+									<input type="hidden" name="target_is_home" value={ fmt.Sprintf("%t", target.Home) }/>
+									<input type="hidden" name="target_default_subject" value={ target.DefaultSubject }/>
+								</div>
+							}
+						</div>
+						<button type="button" class="btn" onclick="closeOutboundTargetsModal()">Cancel</button>
+						<button type="submit" class="btn btn-primary">Save Settings</button>
+					</form>		</div>
 	</div>
 }
