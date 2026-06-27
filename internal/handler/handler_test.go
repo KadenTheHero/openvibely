@@ -2557,8 +2557,9 @@ func TestHandler_RescheduleTask_SubDailyPreservesRunAt(t *testing.T) {
 		s.RepeatType = models.RepeatHours
 	})
 
+	futureDate := time.Now().Local().AddDate(1, 0, 0)
 	form := url.Values{}
-	form.Set("new_date", "2026-06-26") // Future date to avoid adjustment
+	form.Set("new_date", futureDate.Format("2006-01-02")) // Future date to avoid adjustment
 	form.Set("hour", "9")
 	rec := htmxPatch(e, "/schedules/"+schedule.ID+"/reschedule", form)
 	assertCode(t, rec, http.StatusNoContent)
@@ -2573,7 +2574,7 @@ func TestHandler_RescheduleTask_SubDailyPreservesRunAt(t *testing.T) {
 	if updated.NextRun == nil {
 		t.Fatal("expected NextRun to be set")
 	}
-	expectedNextRun := time.Date(2026, 6, 26, 9, 30, 0, 0, time.Local).UTC()
+	expectedNextRun := time.Date(futureDate.Year(), futureDate.Month(), futureDate.Day(), 9, 30, 0, 0, time.Local).UTC()
 	if !updated.NextRun.Equal(expectedNextRun) {
 		t.Errorf("expected NextRun %v, got %v (local: %v)", expectedNextRun, *updated.NextRun, updated.NextRun.Local())
 	}
@@ -2590,8 +2591,9 @@ func TestHandler_RescheduleTask_DailyUpdatesBothRunAtAndNextRun(t *testing.T) {
 		s.RepeatType = models.RepeatDaily
 	})
 
+	futureDate := time.Now().Local().AddDate(1, 0, 0)
 	form := url.Values{}
-	form.Set("new_date", "2026-06-26") // Future date to avoid adjustment
+	form.Set("new_date", futureDate.Format("2006-01-02")) // Future date to avoid adjustment
 	form.Set("hour", "9")
 	rec := htmxPatch(e, "/schedules/"+schedule.ID+"/reschedule", form)
 	assertCode(t, rec, http.StatusNoContent)
@@ -2601,7 +2603,7 @@ func TestHandler_RescheduleTask_DailyUpdatesBothRunAtAndNextRun(t *testing.T) {
 		t.Fatalf("failed to fetch updated schedule: %v", err)
 	}
 
-	expectedTime := time.Date(2026, 6, 26, 9, 30, 0, 0, time.Local).UTC()
+	expectedTime := time.Date(futureDate.Year(), futureDate.Month(), futureDate.Day(), 9, 30, 0, 0, time.Local).UTC()
 	if !updated.RunAt.Equal(expectedTime) {
 		t.Errorf("daily RunAt should be updated: expected %v, got %v", expectedTime, updated.RunAt)
 	}
