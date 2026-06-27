@@ -14,6 +14,39 @@ import (
 
 // TestMigrations_PreserveForeignKeyData verifies that all migrations preserve
 // foreign key referenced data when recreating tables.
+func TestMigration100_ChannelTargetsAllowMultipleUnnamedTargets(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "channel-targets.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("failed to set dialect: %v", err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("failed to run migrations: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES ('channel-target-project', 'Channel Target Project', '', '')`); err != nil {
+		t.Fatalf("failed to insert project: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO channel_targets (id, project_id, platform, name, target_id) VALUES ('target-one', 'channel-target-project', 'email', '', 'one@example.com')`); err != nil {
+		t.Fatalf("failed to insert first unnamed target: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO channel_targets (id, project_id, platform, name, target_id) VALUES ('target-two', 'channel-target-project', 'email', '', 'two@example.com')`); err != nil {
+		t.Fatalf("expected second unnamed target to be allowed: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO channel_targets (id, project_id, platform, name, target_id) VALUES ('target-three', 'channel-target-project', 'email', 'billing', 'three@example.com')`); err != nil {
+		t.Fatalf("failed to insert named target: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO channel_targets (id, project_id, platform, name, target_id) VALUES ('target-four', 'channel-target-project', 'email', 'billing', 'four@example.com')`); err == nil {
+		t.Fatal("expected duplicate non-empty target name to be rejected")
+	}
+}
+
 func TestMigrations_PreserveForeignKeyData(t *testing.T) {
 	// Create a temporary database
 	tmpDir := t.TempDir()
@@ -389,8 +422,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 99 {
-		t.Fatalf("max goose version = %d, want 99", maxVersion)
+	if maxVersion != 100 {
+		t.Fatalf("max goose version = %d, want 100", maxVersion)
 	}
 }
 
@@ -741,8 +774,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 99 {
-		t.Fatalf("max goose version = %d, want 99", maxVersion)
+	if maxVersion != 100 {
+		t.Fatalf("max goose version = %d, want 100", maxVersion)
 	}
 }
 

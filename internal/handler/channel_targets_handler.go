@@ -102,7 +102,12 @@ func (h *Handler) handleSendMessageExplicitTargets(c echo.Context) error {
 	}
 	if h.channelTargetRepo != nil {
 		if err := h.saveOutboundTargetsDraft(c, projectID); err != nil {
-			return err
+			if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == http.StatusNotFound {
+				return err
+			}
+			targets, explicitAllowed := h.outboundTargetsDataForProject(c, projectID)
+			c.Response().Header().Set("HX-Trigger", "outbound-targets-save-error")
+			return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, outboundTargetSaveErrorMessage(err)))
 		}
 	}
 	if h.settingsRepo != nil {
@@ -117,6 +122,18 @@ func (h *Handler) handleSendMessageExplicitTargets(c echo.Context) error {
 	targets, explicitAllowed := h.outboundTargetsDataForProject(c, projectID)
 	c.Response().Header().Set("HX-Trigger", "outbound-targets-card-refresh")
 	return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, "Saved outbound message targets."))
+}
+
+func outboundTargetSaveErrorMessage(err error) string {
+	if err == nil {
+		return "Failed to save outbound targets."
+	}
+	if httpErr, ok := err.(*echo.HTTPError); ok {
+		if msg, ok := httpErr.Message.(string); ok && strings.TrimSpace(msg) != "" {
+			return msg
+		}
+	}
+	return "Failed to save outbound targets."
 }
 
 func (h *Handler) saveOutboundTargetsDraft(c echo.Context, projectID string) error {
@@ -136,6 +153,8 @@ func (h *Handler) saveOutboundTargetsDraft(c echo.Context, projectID string) err
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid outbound target form")
 	}
 	targets := make([]models.ChannelTarget, 0, rowCount)
+	seenNames := make(map[string]struct{})
+	seenDestinations := make(map[string]struct{})
 	for i := 0; i < rowCount; i++ {
 		platform := strings.ToLower(strings.TrimSpace(platforms[i]))
 		name := strings.Trim(strings.ToLower(strings.TrimSpace(names[i])), "#")
@@ -158,6 +177,18 @@ func (h *Handler) saveOutboundTargetsDraft(c echo.Context, projectID string) err
 			}
 			targetID = normalized
 		}
+		if name != "" {
+			nameKey := platform + "\x00" + name
+			if _, exists := seenNames[nameKey]; exists {
+				return echo.NewHTTPError(http.StatusBadRequest, "Duplicate outbound target name for "+platform)
+			}
+			seenNames[nameKey] = struct{}{}
+		}
+		destinationKey := platform + "\x00" + targetID + "\x00" + threadID
+		if _, exists := seenDestinations[destinationKey]; exists {
+			return echo.NewHTTPError(http.StatusBadRequest, "Duplicate outbound target destination")
+		}
+		seenDestinations[destinationKey] = struct{}{}
 		id := strings.TrimSpace(ids[i])
 		if id == "" {
 			id = repository.NewID()

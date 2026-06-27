@@ -10,7 +10,6 @@ CREATE TABLE IF NOT EXISTS channel_targets (
     default_subject TEXT NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(project_id, platform, name),
     UNIQUE(project_id, platform, target_id, thread_id),
     FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 );

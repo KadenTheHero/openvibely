@@ -150,9 +150,28 @@ func (r *ChannelTargetRepo) ReplaceProjectTargets(ctx context.Context, projectID
 
 	keepIDs := make([]string, 0, len(targets))
 	for _, target := range targets {
-		if strings.TrimSpace(target.ID) == "" {
+		id := strings.TrimSpace(target.ID)
+		if id == "" {
 			return fmt.Errorf("channel target id is required")
 		}
+		keepIDs = append(keepIDs, id)
+	}
+
+	args := []interface{}{projectID}
+	query := `DELETE FROM channel_targets WHERE project_id = ?`
+	if len(keepIDs) > 0 {
+		placeholders := make([]string, 0, len(keepIDs))
+		for _, id := range keepIDs {
+			placeholders = append(placeholders, "?")
+			args = append(args, id)
+		}
+		query += ` AND id NOT IN (` + strings.Join(placeholders, ",") + `)`
+	}
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("delete removed channel targets: %w", err)
+	}
+
+	for _, target := range targets {
 		target.ProjectID = projectID
 		platform := normalizeChannelTargetField(target.Platform)
 		name := normalizeChannelTargetField(target.Name)
@@ -176,21 +195,6 @@ func (r *ChannelTargetRepo) ReplaceProjectTargets(ctx context.Context, projectID
 			target.ID, projectID, platform, name, strings.TrimSpace(target.TargetID), strings.TrimSpace(target.ThreadID), target.Home, strings.TrimSpace(target.DefaultSubject)); err != nil {
 			return fmt.Errorf("upsert channel target: %w", err)
 		}
-		keepIDs = append(keepIDs, target.ID)
-	}
-
-	args := []interface{}{projectID}
-	query := `DELETE FROM channel_targets WHERE project_id = ?`
-	if len(keepIDs) > 0 {
-		placeholders := make([]string, 0, len(keepIDs))
-		for _, id := range keepIDs {
-			placeholders = append(placeholders, "?")
-			args = append(args, id)
-		}
-		query += ` AND id NOT IN (` + strings.Join(placeholders, ",") + `)`
-	}
-	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
-		return fmt.Errorf("delete removed channel targets: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit replace channel targets: %w", err)

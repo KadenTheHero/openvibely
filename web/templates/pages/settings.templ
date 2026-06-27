@@ -1812,12 +1812,15 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							whModal.close();
 						}
 					}
-						if (rp === '/channels/send-message-explicit-targets' && event.detail.successful) {
+					if (rp === '/channels/send-message-explicit-targets' && event.detail.successful) {
+						const xhr = event.detail.xhr;
+						const triggerHeader = xhr && typeof xhr.getResponseHeader === 'function' ? (xhr.getResponseHeader('HX-Trigger') || '') : '';
+						if (triggerHeader.indexOf('outbound-targets-card-refresh') !== -1) {
 							const modal = document.getElementById('outbound_targets_modal');
 							if (modal) modal.close();
 							resetOutboundTargetAddForm();
 						}
-				});
+					}				});
 
 				document.body.addEventListener('htmx:configRequest', function(event) {
 					if (!event || !event.detail || !event.detail.path) return;

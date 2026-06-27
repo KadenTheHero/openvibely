@@ -9,6 +9,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestChannelTargetRepo_ReplaceProjectTargetsDeletesRemovedRowsBeforeInsert(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := NewProjectRepo(db)
+	project := &models.Project{Name: "Replace Targets Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	repo := NewChannelTargetRepo(db)
+
+	first := models.ChannelTarget{ID: "target-keep", ProjectID: project.ID, Platform: "email", Name: "keep", TargetID: "keep@example.com"}
+	removed := models.ChannelTarget{ID: "target-removed", ProjectID: project.ID, Platform: "email", TargetID: "restore@example.com"}
+	require.NoError(t, repo.ReplaceProjectTargets(ctx, project.ID, []models.ChannelTarget{first, removed}))
+	require.NoError(t, repo.ReplaceProjectTargets(ctx, project.ID, []models.ChannelTarget{first}))
+
+	readded := models.ChannelTarget{ID: "target-readded", ProjectID: project.ID, Platform: "email", TargetID: "restore@example.com"}
+	require.NoError(t, repo.ReplaceProjectTargets(ctx, project.ID, []models.ChannelTarget{first, readded}))
+
+	targets, err := repo.ListByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, targets, 2)
+	foundReadded, err := repo.GetByID(ctx, "target-readded")
+	require.NoError(t, err)
+	require.NotNil(t, foundReadded)
+	require.Equal(t, "restore@example.com", foundReadded.TargetID)
+}
+
 func TestChannelTargetRepo_CRUDAndAudit(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

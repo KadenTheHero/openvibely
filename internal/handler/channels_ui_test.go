@@ -262,6 +262,9 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if !strings.Contains(body, "resetOutboundTargetAddForm") || !strings.Contains(body, "reloadOutboundTargetsModalDraft") || !strings.Contains(body, "rp === '/channels/send-message-explicit-targets'") {
 		t.Fatal("expected outbound modal close/reset/reload hooks")
 	}
+	if !strings.Contains(body, "outbound-targets-card-refresh") || !strings.Contains(body, "getResponseHeader('HX-Trigger')") {
+		t.Fatal("expected outbound modal to close only after successful saved-target refresh trigger")
+	}
 	if strings.Contains(body, "// Close webhook modal after successful save\t") || strings.Contains(body, "// Close webhook modal after successful save var rp") {
 		t.Fatal("expected rp declaration to be executable, not commented out")
 	}

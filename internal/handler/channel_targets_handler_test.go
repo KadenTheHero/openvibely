@@ -158,9 +158,9 @@ func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 	form.Add("target_is_home", "false")
 	form.Add("target_default_subject", "")
 	form.Add("target_row_id", "")
-	form.Add("target_platform", "telegram")
-	form.Add("target_name", "new")
-	form.Add("target_target_id", "123456")
+	form.Add("target_platform", "email")
+	form.Add("target_name", "")
+	form.Add("target_target_id", "billing@example.com")
 	form.Add("target_thread_id", "")
 	form.Add("target_is_home", "false")
 	form.Add("target_default_subject", "")
@@ -185,7 +185,7 @@ func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 	var sawKeep, sawNew, sawRemoved bool
 	for _, target := range targets {
 		sawKeep = sawKeep || target.ID == keep.ID
-		sawNew = sawNew || target.Platform == "telegram" && target.TargetID == "123456"
+		sawNew = sawNew || target.Platform == "email" && target.Name == "" && target.TargetID == "billing@example.com"
 		sawRemoved = sawRemoved || target.ID == remove.ID
 	}
 	if !sawKeep || !sawNew || sawRemoved {
@@ -193,8 +193,36 @@ func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 	}
 
 	cardAfter := tc.HTTP().Get("/channels/outbound-targets/card?project_id=" + url.QueryEscape(project.ID)).Execute()
-	if cardAfter.Code != http.StatusOK || !strings.Contains(cardAfter.Body.String(), "email: 1") || !strings.Contains(cardAfter.Body.String(), "telegram: 1") || !strings.Contains(cardAfter.Body.String(), "Explicit targets allowed") || strings.Contains(cardAfter.Body.String(), "slack: 1") {
+	if cardAfter.Code != http.StatusOK || !strings.Contains(cardAfter.Body.String(), "email: 2") || !strings.Contains(cardAfter.Body.String(), "Explicit targets allowed") || strings.Contains(cardAfter.Body.String(), "slack: 1") {
 		t.Fatalf("expected card after save to reflect reconciled targets and policy, status=%d body=%s", cardAfter.Code, cardAfter.Body.String())
+	}
+
+	duplicateForm := url.Values{}
+	duplicateForm.Set("project_id", project.ID)
+	duplicateForm.Add("target_row_id", keep.ID)
+	duplicateForm.Add("target_platform", "email")
+	duplicateForm.Add("target_name", "keep")
+	duplicateForm.Add("target_target_id", "keep@example.com")
+	duplicateForm.Add("target_thread_id", "")
+	duplicateForm.Add("target_is_home", "false")
+	duplicateForm.Add("target_default_subject", "")
+	duplicateForm.Add("target_row_id", "")
+	duplicateForm.Add("target_platform", "email")
+	duplicateForm.Add("target_name", "")
+	duplicateForm.Add("target_target_id", "keep@example.com")
+	duplicateForm.Add("target_thread_id", "")
+	duplicateForm.Add("target_is_home", "false")
+	duplicateForm.Add("target_default_subject", "")
+	duplicateReq := httptest.NewRequest(http.MethodPost, "/channels/send-message-explicit-targets", strings.NewReader(duplicateForm.Encode()))
+	duplicateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	duplicateRec := httptest.NewRecorder()
+	tc.echo.ServeHTTP(duplicateRec, duplicateReq)
+	if duplicateRec.Code != http.StatusOK || duplicateRec.Header().Get("HX-Trigger") != "outbound-targets-save-error" || !strings.Contains(duplicateRec.Body.String(), "Duplicate outbound target destination") {
+		t.Fatalf("expected inline duplicate destination validation, got %d trigger=%q body=%s", duplicateRec.Code, duplicateRec.Header().Get("HX-Trigger"), duplicateRec.Body.String())
+	}
+	targetsAfterDuplicate, err := targetRepo.ListByProject(context.Background(), project.ID)
+	if err != nil || len(targetsAfterDuplicate) != 2 {
+		t.Fatalf("duplicate validation should not mutate saved targets, targets=%+v err=%v", targetsAfterDuplicate, err)
 	}
 }
 
