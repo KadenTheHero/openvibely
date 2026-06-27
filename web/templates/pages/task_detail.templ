@@ -1425,13 +1425,25 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 						var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
 						if (!taskIdMatch || !taskIdMatch[1] || data.task_id !== taskIdMatch[1]) return;
 						if (data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied') {
-							_refreshActiveThreadContent(data.task_id, true, data.exec_id || '', 0);
+							// Skip the full thread reload if the composer has a pending attachment
+							// upload session — TaskThreadLiveEventsScript handles ensureStreamingFragment
+							// for this event, appending the execution fragment without replacing the form.
+							var sessionInputEl = document.getElementById('task-thread-form-session-id');
+							if (!sessionInputEl || !sessionInputEl.value) {
+								_refreshActiveThreadContent(data.task_id, true, data.exec_id || '', 0);
+							}
 							return;
 						}
 						if (data.type === 'task_status_changed') {
 							var activeStatuses = { pending: true, queued: true, running: true };
 							if (activeStatuses[data.status]) {
-								_refreshActiveThreadContent(data.task_id, true, data.exec_id || '', 0);
+								// Skip the full thread reload if the composer has a pending attachment
+								// upload session to avoid destroying unsent attachment state while a
+								// parallel task activation event arrives.
+								var sessionInputSC = document.getElementById('task-thread-form-session-id');
+								if (!sessionInputSC || !sessionInputSC.value) {
+									_refreshActiveThreadContent(data.task_id, true, data.exec_id || '', 0);
+								}
 							}
 							var terminalStatuses = { completed: true, failed: true, cancelled: true };
 							if (terminalStatuses[data.status]) {
@@ -1440,9 +1452,21 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 						}
 					};
 
-					var _taskDetailLiveConnectedHandler = function() {
+					var _taskDetailLiveConnectedHandler = function(event) {
+						var detail = event.detail || {};
+						// Only react to actual SSE reconnects (e.g. after tab blur/refocus).
+						// The initial SSE connection is handled by the page-load init below.
+						if (!detail.reconnected) return;
 						var taskId = _currentTaskIdFromPath();
-						if (taskId) _refreshActiveThreadContent(taskId, true);
+						if (!taskId) return;
+						// Skip the full thread reload if the composer has a pending attachment
+						// upload session — replacing #thread-content innerHTML would destroy the
+						// user's unsent attachment previews and session ID. The per-task
+						// TaskThreadLiveEventsScript reconnect handler already reconciles
+						// pending-input rows without touching the composer.
+						var sessionInput = document.getElementById('task-thread-form-session-id');
+						if (sessionInput && sessionInput.value) return;
+						_refreshActiveThreadContent(taskId, true);
 					};
 
 					var _taskDetailBeforeUnloadHandler = function() {

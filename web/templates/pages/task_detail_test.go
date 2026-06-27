@@ -539,6 +539,118 @@ func TestTaskDetailContent_ThreadReloadsForCurrentTaskLiveRunEvents(t *testing.T
 	}
 }
 
+// TestTaskDetailContent_LiveConnectedHandler_SkipsInitialConnect verifies that
+// _taskDetailLiveConnectedHandler checks detail.reconnected and returns early for
+// the initial SSE connection event. Without this guard the handler would trigger a
+// redundant full thread reload on page load (the page-init path already handles it).
+func TestTaskDetailContent_LiveConnectedHandler_SkipsInitialConnect(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-live-initial",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	output := buf.String()
+
+	if !strings.Contains(output, "var _taskDetailLiveConnectedHandler = function(event) {") {
+		t.Fatal("expected _taskDetailLiveConnectedHandler to accept an event parameter")
+	}
+	if !strings.Contains(output, "if (!detail.reconnected) return;") {
+		t.Fatal("expected _taskDetailLiveConnectedHandler to return early when detail.reconnected is false")
+	}
+}
+
+// TestTaskDetailContent_LiveConnectedHandler_PreservesPendingAttachmentOnReconnect
+// verifies that _taskDetailLiveConnectedHandler skips the full #thread-content reload
+// when the task-thread composer has a pending attachment upload session. Without this
+// guard, returning to a tab after switching away triggers an innerHTML swap that wipes
+// the user's unsent attachment previews and session ID.
+func TestTaskDetailContent_LiveConnectedHandler_PreservesPendingAttachmentOnReconnect(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-attach-reconnect",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	output := buf.String()
+
+	// The handler must read the session input by the stable element ID so it
+	// can detect a pending upload and bail out before replacing the composer.
+	if !strings.Contains(output, "var sessionInput = document.getElementById('task-thread-form-session-id');") {
+		t.Fatal("expected _taskDetailLiveConnectedHandler to read attachment session input by ID")
+	}
+	if !strings.Contains(output, "if (sessionInput && sessionInput.value) return;") {
+		t.Fatal("expected _taskDetailLiveConnectedHandler to return early when a pending attachment session is active")
+	}
+}
+
+// TestTaskDetailContent_TaskEventHandler_PreservesPendingAttachmentOnExecutionStarted
+// verifies that _taskDetailTaskEventHandler skips the full thread reload for
+// task_thread_execution_started / task_thread_input_applied events when the composer
+// has a pending attachment upload session. TaskThreadLiveEventsScript handles
+// ensureStreamingFragment for those events without replacing the composer.
+func TestTaskDetailContent_TaskEventHandler_PreservesPendingAttachmentOnExecutionStarted(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-attach-exec-start",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	output := buf.String()
+
+	if !strings.Contains(output, "var sessionInputEl = document.getElementById('task-thread-form-session-id');") {
+		t.Fatal("expected execution_started handler to read attachment session input by ID")
+	}
+	if !strings.Contains(output, "if (!sessionInputEl || !sessionInputEl.value) {") {
+		t.Fatal("expected execution_started handler to guard _refreshActiveThreadContent behind attachment session check")
+	}
+}
+
+// TestTaskDetailContent_TaskEventHandler_PreservesPendingAttachmentOnStatusChanged
+// verifies that the task_status_changed → active-status branch of
+// _taskDetailTaskEventHandler also guards the full thread reload when a pending
+// attachment upload session is active, covering the analogous live-event path.
+func TestTaskDetailContent_TaskEventHandler_PreservesPendingAttachmentOnStatusChanged(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-attach-status-change",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	output := buf.String()
+
+	if !strings.Contains(output, "var sessionInputSC = document.getElementById('task-thread-form-session-id');") {
+		t.Fatal("expected task_status_changed handler to read attachment session input by ID")
+	}
+	if !strings.Contains(output, "if (!sessionInputSC || !sessionInputSC.value) {") {
+		t.Fatal("expected task_status_changed handler to guard _refreshActiveThreadContent behind attachment session check")
+	}
+}
+
 func TestTaskDetailActions_RunButtonLoadsThreadThroughRaceSafeLoader(t *testing.T) {
 	task := &models.Task{
 		ID:        "task-run-button",
