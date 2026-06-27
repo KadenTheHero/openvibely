@@ -326,6 +326,55 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	}
 }
 
+func TestChannelsPageOutboundTargetTestButtonIncludesSelectedProjectID(t *testing.T) {
+	tc := NewTestContext(t)
+	firstProject := tc.CreateProject().WithName("First Project").Build()
+	selectedProject := tc.CreateProject().WithName("Selected Project").Build()
+	if firstProject.ID == selectedProject.ID {
+		t.Fatal("expected distinct projects")
+	}
+
+	targetRepo := repository.NewChannelTargetRepo(tc.db)
+	slack := &outboundTargetTestSlack{}
+	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
+	router.SetSlackService(slack)
+	tc.handler.SetChannelTargetRepo(targetRepo)
+	tc.handler.SetChannelMessageRouter(router)
+
+	target := models.ChannelTarget{
+		ID:        repository.NewID(),
+		ProjectID: selectedProject.ID,
+		Platform:  "slack",
+		Name:      "selected-alerts",
+		TargetID:  "CSELECTED",
+	}
+	if err := targetRepo.Upsert(context.Background(), target); err != nil {
+		t.Fatalf("failed to seed selected project target: %v", err)
+	}
+
+	pagePath := "/channels?project_id=" + url.QueryEscape(selectedProject.ID)
+	rec := tc.HTTP().Get(pagePath).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	expectedPost := `/channels/outbound-targets/` + target.ID + `/test?project_id=` + selectedProject.ID
+	if !strings.Contains(body, `hx-post="`+expectedPost+`"`) {
+		t.Fatalf("expected rendered Test button to include selected project id %q, body=%s", expectedPost, body)
+	}
+	if strings.Contains(body, `/channels/outbound-targets/`+target.ID+`/test"`) {
+		t.Fatal("rendered Test button must not use a bare target test URL")
+	}
+
+	testRec := tc.HTMX().Post(expectedPost).Execute()
+	if testRec.Code != http.StatusOK {
+		t.Fatalf("expected rendered Test URL to succeed for selected project, got %d body=%s", testRec.Code, testRec.Body.String())
+	}
+	if slack.channelID != "CSELECTED" {
+		t.Fatalf("expected test send through selected project target, got channel %q", slack.channelID)
+	}
+}
+
 func TestChannelsPageConnectedCardsHideTokenSpecificTextAndActions(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 
