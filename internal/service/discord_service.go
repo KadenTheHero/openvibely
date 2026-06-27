@@ -69,6 +69,7 @@ type DiscordService struct {
 	queuedTaskThreadPromoter func(taskID string)
 	channelChatRunner        ChannelChatRunner
 	channelTaskRunner        ChannelTaskRunner
+	channelMessageRouter     *ChannelMessageRouter
 	userProjects             map[string]string
 
 	mu                       sync.RWMutex
@@ -126,6 +127,9 @@ func (s *DiscordService) SetQueuedTaskThreadPromoter(promoter func(taskID string
 }
 func (s *DiscordService) SetChannelChatRunner(runner ChannelChatRunner) { s.channelChatRunner = runner }
 func (s *DiscordService) SetChannelTaskRunner(runner ChannelTaskRunner) { s.channelTaskRunner = runner }
+func (s *DiscordService) SetChannelMessageRouter(router *ChannelMessageRouter) {
+	s.channelMessageRouter = router
+}
 
 func (s *DiscordService) IsRunning() bool {
 	s.mu.RLock()
@@ -760,6 +764,12 @@ func (s *DiscordService) discordActionHandlers(projectID string, markerCtx disco
 		"send_to_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return s.discordSendToTask(ctx, projectID, input, markerCtx), nil
 		},
+		"send_message": func(ctx context.Context, input json.RawMessage) (string, error) {
+			if s.channelMessageRouter == nil {
+				return "", fmt.Errorf("channel message router unavailable")
+			}
+			return ExecuteSendMessageTool(ctx, s.channelMessageRouter.WithAuditContext(string(chatcontrol.SurfaceDiscord), markerCtx.UserID), projectID, input)
+		},
 		"set_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return s.executeChannelSetTaskGoal(ctx, projectID, input)
 		},
@@ -1167,10 +1177,36 @@ func (s *DiscordService) executeChannelReportTaskGoalBlocked(ctx context.Context
 	return channelGoalToolJSON(goal)
 }
 
+func (s *DiscordService) SendOutboundMessage(ctx context.Context, channelID, threadID, text string) SendMessageResult {
+	_ = ctx
+	channelID = strings.TrimSpace(channelID)
+	threadID = strings.TrimSpace(threadID)
+	if channelID == "" {
+		return SendMessageResult{OK: false, Platform: "discord", Error: "discord channel id is required"}
+	}
+	if strings.TrimSpace(text) == "" {
+		return SendMessageResult{OK: false, Platform: "discord", Target: formatResolvedMessageTarget("discord", channelID, threadID), Error: "message is required"}
+	}
+	messageID, err := s.sendDiscordOutboundMessageWithID(channelID, threadID, text)
+	if err != nil {
+		return SendMessageResult{OK: false, Platform: "discord", Target: formatResolvedMessageTarget("discord", channelID, threadID), Error: err.Error()}
+	}
+	return SendMessageResult{OK: true, Platform: "discord", Target: formatResolvedMessageTarget("discord", channelID, threadID), MessageID: messageID}
+}
+
 func (s *DiscordService) sendDiscordMessage(channelID, messageID, text string) error {
 	_, err := s.sendDiscordMessageWithID(channelID, messageID, text)
 	return err
 }
+
+func (s *DiscordService) sendDiscordOutboundMessageWithID(channelID, threadID, text string) (string, error) {
+	destinationID := strings.TrimSpace(channelID)
+	if strings.TrimSpace(threadID) != "" {
+		destinationID = strings.TrimSpace(threadID)
+	}
+	return s.sendDiscordMessageWithID(destinationID, "", text)
+}
+
 func (s *DiscordService) sendDiscordMessageWithID(channelID, messageID, text string) (string, error) {
 	if strings.TrimSpace(channelID) == "" || strings.TrimSpace(text) == "" {
 		return "", nil

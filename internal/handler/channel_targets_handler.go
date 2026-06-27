@@ -191,7 +191,7 @@ func (h *Handler) saveOutboundTargetsDraft(c echo.Context, projectID string) err
 		if platform == "" && targetID == "" {
 			continue
 		}
-		if platform != "slack" && platform != "telegram" && platform != "email" {
+		if platform != "slack" && platform != "telegram" && platform != "email" && platform != "discord" {
 			return echo.NewHTTPError(http.StatusBadRequest, "Unsupported platform")
 		}
 		if targetID == "" {

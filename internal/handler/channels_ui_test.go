@@ -265,6 +265,9 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if !strings.Contains(body, `id="outbound-target-add-form"`) || !strings.Contains(body, `>Add Target</button>`) {
 		t.Fatal("expected add-target form and Add Target button label")
 	}
+	if !strings.Contains(body, `<option value="discord">Discord</option>`) {
+		t.Fatal("expected outbound targets modal to support Discord targets")
+	}
 	if !strings.Contains(body, `/channels/outbound-targets/test-draft`) || !strings.Contains(body, `window.htmx.process(row)`) {
 		t.Fatal("expected draft-added target rows to include an immediately usable Test button")
 	}

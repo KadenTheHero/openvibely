@@ -26,6 +26,57 @@ func newDiscordServiceForTest(t *testing.T) (*DiscordService, *sql.DB, *reposito
 	return svc, db, settingsRepo, projectRepo, taskRepo, discordAuthRepo, discordTaskContextRepo
 }
 
+func TestDiscordService_SendOutboundMessageUsesChannelAndThread(t *testing.T) {
+	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
+	var gotChannelID, gotMessageID, gotText string
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) {
+		gotChannelID, gotMessageID, gotText = channelID, messageID, text
+		return "discord-msg-1", nil
+	}
+
+	res := svc.SendOutboundMessage(context.Background(), "chan-1", "thread-1", "hello discord")
+	if !res.OK || res.Platform != "discord" || res.Target != "discord:chan-1:thread-1" || res.MessageID != "discord-msg-1" {
+		t.Fatalf("unexpected outbound result: %#v", res)
+	}
+	if gotChannelID != "thread-1" || gotMessageID != "" || gotText != "hello discord" {
+		t.Fatalf("unexpected outbound send channel=%q message=%q text=%q", gotChannelID, gotMessageID, gotText)
+	}
+}
+
+func TestDiscordActionHandlersSendMessageUsesChannelRouter(t *testing.T) {
+	svc, db, _, projectRepo, _, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Discord Outbound"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	targetRepo := repository.NewChannelTargetRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	router := NewChannelMessageRouter(targetRepo, settingsRepo)
+	router.SetDiscordService(svc)
+	svc.SetChannelMessageRouter(router)
+	if err := targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-target", ProjectID: project.ID, Platform: "discord", Name: "ops", TargetID: "chan-1", ThreadID: "thread-1"}); err != nil {
+		t.Fatalf("save target: %v", err)
+	}
+	var gotChannelID, gotMessageID, gotText string
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) {
+		gotChannelID, gotMessageID, gotText = channelID, messageID, text
+		return "discord-msg-2", nil
+	}
+
+	handlers := svc.discordActionHandlers(project.ID, discordMarkerContext{UserID: "discord-user"}, nil)
+	out, err := handlers["send_message"](ctx, []byte(`{"target":"discord:#ops","message":"hello ops"}`))
+	if err != nil {
+		t.Fatalf("send_message handler failed: %v", err)
+	}
+	if !strings.Contains(out, `"ok":true`) || !strings.Contains(out, `discord-msg-2`) {
+		t.Fatalf("unexpected send_message output: %s", out)
+	}
+	if gotChannelID != "thread-1" || gotMessageID != "" || gotText != "hello ops" {
+		t.Fatalf("unexpected routed send channel=%q message=%q text=%q", gotChannelID, gotMessageID, gotText)
+	}
+}
+
 func TestDiscordHandleMessageCreateIgnoresSelfAndBotMessages(t *testing.T) {
 	svc, _, settingsRepo, _, _, _, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()

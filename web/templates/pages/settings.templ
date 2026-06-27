@@ -135,7 +135,7 @@ func outboundTargetSummary(targets []models.ChannelTarget) string {
 		counts[strings.ToLower(target.Platform)]++
 	}
 	parts := []string{}
-	for _, platform := range []string{"email", "slack", "telegram"} {
+	for _, platform := range []string{"email", "slack", "telegram", "discord"} {
 		if counts[platform] > 0 {
 			parts = append(parts, fmt.Sprintf("%s: %d", platform, counts[platform]))
 		}
@@ -1977,7 +1977,7 @@ templ OutboundTargetsCard(currentProjectID string, targets []models.ChannelTarge
 		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 		data-channel-type="outbound-targets"
 		data-search-card
-		data-search-text="Outbound Message Targets send_message Slack Telegram Email"
+		data-search-text="Outbound Message Targets send_message Slack Telegram Email Discord"
 		hx-get={ "/channels/outbound-targets/card?project_id=" + currentProjectID }
 		hx-trigger="outbound-targets-card-refresh from:body"
 		hx-target="this"
@@ -2046,7 +2046,7 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 			<div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between pr-10">
 				<div>
 					<h3 class="card-title">Outbound Message Targets</h3>
-					<p class="text-sm opacity-70">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, or `email:#client`.</p>
+					<p class="text-sm opacity-70">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, `discord:#ops`, or `email:#client`.</p>
 				</div>
 				<div class="form-control" onclick="event.stopPropagation()">
 					<label class="label cursor-pointer gap-3 justify-start">
@@ -2063,6 +2063,7 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 					<option value="slack">Slack</option>
 					<option value="telegram">Telegram</option>
 					<option value="email">Email</option>
+					<option value="discord">Discord</option>
 				</select>
 				<input name="name" class="input input-bordered input-sm" placeholder="name, e.g. ops"/>
 				<input name="target_id" class="input input-bordered input-sm md:col-span-2" placeholder="channel/chat ID or email" required/>

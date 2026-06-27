@@ -14,6 +14,110 @@ import (
 
 // TestMigrations_PreserveForeignKeyData verifies that all migrations preserve
 // foreign key referenced data when recreating tables.
+func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "old-discord-099.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("failed to set dialect: %v", err)
+	}
+	if err := goose.UpTo(db, ".", 98); err != nil {
+		t.Fatalf("failed to migrate to 098: %v", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS discord_authorized_users (
+			id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+			project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			discord_user_id TEXT NOT NULL,
+			display_name TEXT NOT NULL DEFAULT '',
+			added_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			added_by TEXT NOT NULL DEFAULT 'web'
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_discord_auth_unique_user_id ON discord_authorized_users(project_id, discord_user_id);
+		CREATE INDEX IF NOT EXISTS idx_discord_auth_project ON discord_authorized_users(project_id);
+		CREATE INDEX IF NOT EXISTS idx_discord_auth_user ON discord_authorized_users(discord_user_id);
+		CREATE TABLE IF NOT EXISTS discord_task_context (
+			task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+			discord_channel_id TEXT NOT NULL,
+			discord_thread_id TEXT NOT NULL DEFAULT '',
+			discord_message_id TEXT NOT NULL DEFAULT '',
+			discord_user_id TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+		);
+		CREATE INDEX IF NOT EXISTS idx_discord_task_context_channel ON discord_task_context(discord_channel_id, discord_thread_id);
+	`); err != nil {
+		t.Fatalf("failed to simulate old local discord 099 schema: %v", err)
+	}
+	for _, column := range []string{"discord_channel_id", "discord_thread_id", "discord_message_id", "discord_user_id"} {
+		if !tableHasColumn(t, db, "thread_inputs", column) {
+			if _, err := db.Exec(`ALTER TABLE thread_inputs ADD COLUMN ` + column + ` TEXT NOT NULL DEFAULT ''`); err != nil {
+				t.Fatalf("failed to simulate old local discord 099 column %s: %v", column, err)
+			}
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (99, 1)`); err != nil {
+		t.Fatalf("failed to simulate old local discord 099 goose row: %v", err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("failed to run pending migrations after stale 099: %v", err)
+	}
+
+	for _, table := range []string{"channel_targets", "channel_message_sends", "discord_authorized_users", "discord_task_context"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatalf("failed to inspect table %s: %v", table, err)
+		}
+		if count != 1 {
+			t.Fatalf("expected table %s to exist after repaired migration chain", table)
+		}
+	}
+	for _, column := range []string{"discord_channel_id", "discord_thread_id", "discord_message_id", "discord_user_id"} {
+		if !tableHasColumn(t, db, "thread_inputs", column) {
+			t.Fatalf("expected thread_inputs.%s to exist after discord migration", column)
+		}
+	}
+	var maxVersion int
+	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
+		t.Fatalf("failed to read max goose version: %v", err)
+	}
+	if maxVersion != 101 {
+		t.Fatalf("max goose version = %d, want 101", maxVersion)
+	}
+}
+
+func tableHasColumn(t *testing.T, db *sql.DB, table, column string) bool {
+	t.Helper()
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		t.Fatalf("failed to inspect columns for %s: %v", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			t.Fatalf("failed to scan column for %s: %v", table, err)
+		}
+		if name == column {
+			return true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("failed to iterate columns for %s: %v", table, err)
+	}
+	return false
+}
+
 func TestMigration100_ChannelTargetsAllowMultipleUnnamedTargets(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "channel-targets.db")
@@ -422,8 +526,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 100 {
-		t.Fatalf("max goose version = %d, want 100", maxVersion)
+	if maxVersion != 101 {
+		t.Fatalf("max goose version = %d, want 101", maxVersion)
 	}
 }
 
@@ -774,8 +878,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 100 {
-		t.Fatalf("max goose version = %d, want 100", maxVersion)
+	if maxVersion != 101 {
+		t.Fatalf("max goose version = %d, want 101", maxVersion)
 	}
 }
 

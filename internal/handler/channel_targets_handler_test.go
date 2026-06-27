@@ -164,6 +164,13 @@ func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 	form.Add("target_thread_id", "")
 	form.Add("target_is_home", "false")
 	form.Add("target_default_subject", "")
+	form.Add("target_row_id", "")
+	form.Add("target_platform", "discord")
+	form.Add("target_name", "ops")
+	form.Add("target_target_id", "123456789")
+	form.Add("target_thread_id", "987654321")
+	form.Add("target_is_home", "false")
+	form.Add("target_default_subject", "")
 	req := httptest.NewRequest(http.MethodPost, "/channels/send-message-explicit-targets", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -179,21 +186,22 @@ func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list targets after save: %v", err)
 	}
-	if len(targets) != 2 {
-		t.Fatalf("expected save to reconcile target list to two rows, got %+v", targets)
+	if len(targets) != 3 {
+		t.Fatalf("expected save to reconcile target list to three rows, got %+v", targets)
 	}
-	var sawKeep, sawNew, sawRemoved bool
+	var sawKeep, sawNew, sawDiscord, sawRemoved bool
 	for _, target := range targets {
 		sawKeep = sawKeep || target.ID == keep.ID
 		sawNew = sawNew || target.Platform == "email" && target.Name == "" && target.TargetID == "billing@example.com"
+		sawDiscord = sawDiscord || target.Platform == "discord" && target.Name == "ops" && target.TargetID == "123456789" && target.ThreadID == "987654321"
 		sawRemoved = sawRemoved || target.ID == remove.ID
 	}
-	if !sawKeep || !sawNew || sawRemoved {
-		t.Fatalf("unexpected reconciled targets: keep=%v new=%v removed=%v targets=%+v", sawKeep, sawNew, sawRemoved, targets)
+	if !sawKeep || !sawNew || !sawDiscord || sawRemoved {
+		t.Fatalf("unexpected reconciled targets: keep=%v new=%v discord=%v removed=%v targets=%+v", sawKeep, sawNew, sawDiscord, sawRemoved, targets)
 	}
 
 	cardAfter := tc.HTTP().Get("/channels/outbound-targets/card?project_id=" + url.QueryEscape(project.ID)).Execute()
-	if cardAfter.Code != http.StatusOK || !strings.Contains(cardAfter.Body.String(), "email: 2") || !strings.Contains(cardAfter.Body.String(), "Explicit targets allowed") || strings.Contains(cardAfter.Body.String(), "slack: 1") {
+	if cardAfter.Code != http.StatusOK || !strings.Contains(cardAfter.Body.String(), "email: 2") || !strings.Contains(cardAfter.Body.String(), "discord: 1") || !strings.Contains(cardAfter.Body.String(), "Explicit targets allowed") || strings.Contains(cardAfter.Body.String(), "slack: 1") {
 		t.Fatalf("expected card after save to reflect reconciled targets and policy, status=%d body=%s", cardAfter.Code, cardAfter.Body.String())
 	}
 
@@ -221,7 +229,7 @@ func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 		t.Fatalf("expected inline duplicate destination validation, got %d trigger=%q body=%s", duplicateRec.Code, duplicateRec.Header().Get("HX-Trigger"), duplicateRec.Body.String())
 	}
 	targetsAfterDuplicate, err := targetRepo.ListByProject(context.Background(), project.ID)
-	if err != nil || len(targetsAfterDuplicate) != 2 {
+	if err != nil || len(targetsAfterDuplicate) != 3 {
 		t.Fatalf("duplicate validation should not mutate saved targets, targets=%+v err=%v", targetsAfterDuplicate, err)
 	}
 }

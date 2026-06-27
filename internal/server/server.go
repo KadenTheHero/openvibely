@@ -539,6 +539,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	discordSvc.SetTaskGoalService(taskGoalSvc)
 	discordSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 	discordSvc.SetAgentRepo(agentRepo)
+	discordSvc.SetChannelMessageRouter(channelMessageRouter)
+	channelMessageRouter.SetDiscordService(discordSvc)
 
 	// Git worktree service for task isolation
 	worktreeSvc := service.NewWorktreeService(taskRepo, projectRepo, settingsRepo)
