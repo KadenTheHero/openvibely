@@ -36,12 +36,12 @@ func TestKanbanBoardUsesResponsiveNonScrollingLayout(t *testing.T) {
 	}
 }
 
-func TestKanbanBoardRendersActiveCancelledTask(t *testing.T) {
+func TestKanbanBoardDoesNotRenderActiveCancelledTaskAsQueued(t *testing.T) {
 	tasks := []models.Task{
 		{
 			ID:        "task-active-cancelled",
 			ProjectID: "project-1",
-			Title:     "Visible cancelled active task",
+			Title:     "Hidden cancelled active task",
 			Category:  models.CategoryActive,
 			Status:    models.StatusCancelled,
 			Priority:  2,
@@ -54,14 +54,8 @@ func TestKanbanBoardRendersActiveCancelledTask(t *testing.T) {
 	}
 
 	body := buf.String()
-	for _, want := range []string{
-		"Visible cancelled active task",
-		`data-task-status="cancelled"`,
-		`data-task-category="active"`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("expected active cancelled task to remain visible in active column markup with %q, got %s", want, body)
-		}
+	if strings.Contains(body, "Hidden cancelled active task") || strings.Contains(body, `data-task-status="cancelled"`) {
+		t.Fatalf("active cancelled task should not render as queued active-column markup, got %s", body)
 	}
 }
 

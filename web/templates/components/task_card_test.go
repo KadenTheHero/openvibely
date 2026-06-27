@@ -202,6 +202,37 @@ func TestTaskThreadStatusIndicator_Pending_NoIndicator(t *testing.T) {
 	}
 }
 
+func TestKanbanBoard_DoesNotRenderActiveCancelledTaskAsQueued(t *testing.T) {
+	tasks := []models.Task{
+		{
+			ID:        "active-cancelled",
+			ProjectID: "default",
+			Title:     "Cancelled Active Orphan",
+			Category:  models.CategoryActive,
+			Status:    models.StatusCancelled,
+		},
+		{
+			ID:        "active-queued",
+			ProjectID: "default",
+			Title:     "Real Queued Task",
+			Category:  models.CategoryActive,
+			Status:    models.StatusQueued,
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := KanbanBoard(tasks, "default", "", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render kanban board: %v", err)
+	}
+	body := buf.String()
+	if strings.Contains(body, "Cancelled Active Orphan") {
+		t.Fatalf("cancelled active orphan should not render in Active queued dropzone, got %s", body)
+	}
+	if !strings.Contains(body, "Real Queued Task") {
+		t.Fatalf("real queued active task should still render, got %s", body)
+	}
+}
+
 func TestTaskCard_HasMobileSafeActionsAndReadableText(t *testing.T) {
 	task := models.Task{
 		ID:        "task-1",

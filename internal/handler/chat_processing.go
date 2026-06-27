@@ -1504,6 +1504,14 @@ func (h *Handler) completeWithCancellation(execID, taskID, output string, tokens
 		applog.Infof("[handler] completeWithCancellation task=%s error getting task: %v", taskID, err)
 		return
 	}
+	if task != nil && task.Category == models.CategoryActive {
+		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryBacklog); err != nil {
+			applog.Infof("[handler] completeWithCancellation task=%s error moving to backlog: %v", taskID, err)
+		} else {
+			applog.Infof("[handler] completeWithCancellation task=%s moved to backlog", taskID)
+			task.Category = models.CategoryBacklog
+		}
+	}
 	reply := service.ChannelReplyContext{}
 	if len(channelReply) > 0 {
 		reply = channelReply[0]

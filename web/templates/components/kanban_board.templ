@@ -51,9 +51,10 @@ func filterRunningTasks(tasks []models.Task) []models.Task {
 func filterPendingTasks(tasks []models.Task) []models.Task {
 	var pending []models.Task
 	for _, task := range tasks {
-		// Include pending/queued/blocked tasks, cancelled defensive orphans,
-		// and completed/failed tasks (transitional state before auto-move to Complete).
-		if task.Status == models.StatusPending || task.Status == models.StatusQueued || task.Status == models.StatusCompleted || task.Status == models.StatusFailed || task.Status == models.StatusBlocked || task.Status == models.StatusCancelled {
+		// Include only genuinely active queued/pending work. Terminal failed/cancelled
+		// tasks are normalized out of Active by finalization and should not render
+		// under the Queued dropzone if a stale row still has category=active.
+		if task.Status == models.StatusPending || task.Status == models.StatusQueued || task.Status == models.StatusBlocked {
 			pending = append(pending, task)
 		}
 	}

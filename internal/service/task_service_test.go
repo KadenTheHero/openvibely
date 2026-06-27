@@ -25,6 +25,55 @@ func newTestWorkerService(t *testing.T) *WorkerService {
 	return ws
 }
 
+func TestTaskService_ListNormalizesActiveTerminalTasks(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	svc := NewTaskService(taskRepo, attachmentRepo, nil)
+	ctx := context.Background()
+
+	orphan := &models.Task{
+		ProjectID: "default",
+		Title:     "Active Cancelled Orphan",
+		Category:  models.CategoryActive,
+		Status:    models.StatusCancelled,
+		Prompt:    "was stopped",
+	}
+	realQueued := &models.Task{
+		ProjectID: "default",
+		Title:     "Real Queued Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusQueued,
+		Prompt:    "queued work",
+	}
+	require.NoError(t, taskRepo.Create(ctx, orphan))
+	require.NoError(t, taskRepo.Create(ctx, realQueued))
+
+	tasks, err := svc.ListByProjectWithCategorySorts(ctx, "default", "", "", "")
+	require.NoError(t, err)
+
+	var listedOrphan *models.Task
+	var listedQueued *models.Task
+	for i := range tasks {
+		switch tasks[i].ID {
+		case orphan.ID:
+			listedOrphan = &tasks[i]
+		case realQueued.ID:
+			listedQueued = &tasks[i]
+		}
+	}
+	require.NotNil(t, listedOrphan)
+	require.Equal(t, models.CategoryBacklog, listedOrphan.Category)
+	require.Equal(t, models.StatusCancelled, listedOrphan.Status)
+	require.NotNil(t, listedQueued)
+	require.Equal(t, models.CategoryActive, listedQueued.Category)
+	require.Equal(t, models.StatusQueued, listedQueued.Status)
+
+	storedOrphan, err := taskRepo.GetByID(ctx, orphan.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryBacklog, storedOrphan.Category)
+}
+
 func TestTaskService_Create_DefaultsStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

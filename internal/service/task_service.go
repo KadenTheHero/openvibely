@@ -79,8 +79,35 @@ func (s *TaskService) ListByProjectWithCategorySorts(ctx context.Context, projec
 		applog.Infof("[task-svc] ListByProjectWithCategorySorts error: %v", err)
 		return nil, err
 	}
+	if moved, moveErr := s.normalizeActiveTerminalTasks(ctx, tasks); moveErr != nil {
+		applog.Infof("[task-svc] ListByProjectWithCategorySorts error normalizing active terminal tasks: %v", moveErr)
+		return nil, moveErr
+	} else if moved > 0 {
+		tasks, err = s.repo.ListByProjectWithCategorySorts(ctx, projectID, category, backlogSort, completedSort)
+		if err != nil {
+			applog.Infof("[task-svc] ListByProjectWithCategorySorts error reloading after normalization: %v", err)
+			return nil, err
+		}
+	}
 	applog.Infof("[task-svc] ListByProjectWithCategorySorts returned %d tasks", len(tasks))
 	return tasks, nil
+}
+
+func (s *TaskService) normalizeActiveTerminalTasks(ctx context.Context, tasks []models.Task) (int, error) {
+	moved := 0
+	for _, task := range tasks {
+		if task.Category != models.CategoryActive {
+			continue
+		}
+		if task.Status != models.StatusFailed && task.Status != models.StatusCancelled {
+			continue
+		}
+		if err := s.repo.UpdateCategory(ctx, task.ID, models.CategoryBacklog); err != nil {
+			return moved, fmt.Errorf("moving terminal active task %s to backlog: %w", task.ID, err)
+		}
+		moved++
+	}
+	return moved, nil
 }
 
 func (s *TaskService) GetByID(ctx context.Context, id string) (*models.Task, error) {

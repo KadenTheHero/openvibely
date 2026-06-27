@@ -3291,6 +3291,7 @@ func TestProcessStreamingResponse_CancelledContextUpdatesTaskStatus(t *testing.T
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusCancelled, updatedTask.Status)
+	require.Equal(t, models.CategoryBacklog, updatedTask.Category)
 }
 
 func TestProcessStreamingResponse_DoesNotApplyPreparedSteeringWhenProviderCallFails(t *testing.T) {
