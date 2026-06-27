@@ -1704,7 +1704,8 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							modal.close();
 						}
 					}
-					// Close webhook modal after successful save					var rp = event.detail.pathInfo.requestPath || '';
+					// Close webhook modal after successful save
+					var rp = event.detail.pathInfo.requestPath || '';
 					if (rp.startsWith('/channels/webhooks') && event.detail.successful) {
 						var whModal = document.getElementById('webhook_modal');
 						if (whModal && whModal.open) {

@@ -258,6 +258,10 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if !strings.Contains(body, "resetOutboundTargetAddForm") || !strings.Contains(body, "rp === '/channels/send-message-explicit-targets'") {
 		t.Fatal("expected outbound modal close/reset hooks")
 	}
+	if strings.Contains(body, "// Close webhook modal after successful save\t") || strings.Contains(body, "// Close webhook modal after successful save var rp") {
+		t.Fatal("expected rp declaration to be executable, not commented out")
+	}
+	assertIndexOrder(t, body, "// Close webhook modal after successful save", "var rp = event.detail.pathInfo.requestPath || '';", "expected rp declaration after webhook modal comment")
 
 	form := url.Values{}
 	form.Set("project_id", "default")
