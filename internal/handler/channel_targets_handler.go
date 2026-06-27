@@ -82,6 +82,14 @@ func (h *Handler) handleOutboundTargetSave(c echo.Context) error {
 	id := strings.TrimSpace(c.FormValue("id"))
 	if id == "" {
 		id = repository.NewID()
+	} else {
+		existing, err := h.channelTargetRepo.GetByID(c.Request().Context(), id)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load outbound target")
+		}
+		if existing != nil && existing.ProjectID != projectID {
+			return echo.NewHTTPError(http.StatusNotFound, "Outbound target not found")
+		}
 	}
 	if err := h.channelTargetRepo.Upsert(c.Request().Context(), models.ChannelTarget{ID: id, ProjectID: projectID, Platform: platform, Name: name, TargetID: targetID, ThreadID: threadID, Home: c.FormValue("is_home") == "true", DefaultSubject: defaultSubject}); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save outbound target")
@@ -95,12 +103,12 @@ func (h *Handler) handleOutboundTargetDelete(c echo.Context) error {
 	if h.channelTargetRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Outbound target repository unavailable")
 	}
-	if err := h.channelTargetRepo.Delete(c.Request().Context(), c.Param("id")); err != nil {
+	projectID, target, err := h.outboundTargetForRequestProject(c)
+	if err != nil || target == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "Outbound target not found")
 	}
-	projectID := c.QueryParam("project_id")
-	if projectID == "" {
-		projectID, _ = h.getCurrentProjectID(c)
+	if err := h.channelTargetRepo.DeleteForProject(c.Request().Context(), projectID, target.ID); err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Outbound target not found")
 	}
 	targets, explicitAllowed := h.outboundTargetsDataForProject(c, projectID)
 	c.Response().Header().Set("HX-Trigger", "outbound-targets-card-refresh")
@@ -111,7 +119,7 @@ func (h *Handler) handleOutboundTargetTest(c echo.Context) error {
 	if h.channelTargetRepo == nil || h.channelMessageRouter == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Outbound messaging is unavailable")
 	}
-	target, err := h.channelTargetRepo.GetByID(c.Request().Context(), c.Param("id"))
+	projectID, target, err := h.outboundTargetForRequestProject(c)
 	if err != nil || target == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "Outbound target not found")
 	}
@@ -119,13 +127,31 @@ func (h *Handler) handleOutboundTargetTest(c echo.Context) error {
 	if strings.TrimSpace(target.ThreadID) != "" {
 		targetRef += ":" + strings.TrimSpace(target.ThreadID)
 	}
-	result := h.channelMessageRouter.WithAuditContext("web", "test_button").Send(c.Request().Context(), target.ProjectID, service.SendMessageRequest{Target: targetRef, Message: "Test message from OpenVibely", Subject: target.DefaultSubject})
+	result := h.channelMessageRouter.WithAuditContext("web", "test_button").Send(c.Request().Context(), projectID, service.SendMessageRequest{Target: targetRef, Message: "Test message from OpenVibely", Subject: target.DefaultSubject})
 	b, _ := json.Marshal(result)
 	escaped := html.EscapeString(string(b))
 	if result.OK {
 		return c.HTML(http.StatusOK, `<div class="text-success text-sm">Test sent: `+escaped+`</div>`)
 	}
 	return c.HTML(http.StatusOK, `<div class="text-error text-sm">Test failed: `+escaped+`</div>`)
+}
+
+func (h *Handler) outboundTargetForRequestProject(c echo.Context) (string, *models.ChannelTarget, error) {
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if projectID == "" {
+		projectID, _ = h.getCurrentProjectID(c)
+	}
+	if projectID == "" {
+		return "", nil, fmt.Errorf("project is required")
+	}
+	target, err := h.channelTargetRepo.GetByID(c.Request().Context(), c.Param("id"))
+	if err != nil || target == nil {
+		return projectID, nil, err
+	}
+	if target.ProjectID != projectID {
+		return projectID, nil, fmt.Errorf("outbound target not found")
+	}
+	return projectID, target, nil
 }
 
 func (h *Handler) handleSendMessageExplicitTargets(c echo.Context) error {

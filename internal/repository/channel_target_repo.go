@@ -107,6 +107,17 @@ func (r *ChannelTargetRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+func (r *ChannelTargetRepo) DeleteForProject(ctx context.Context, projectID, id string) error {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM channel_targets WHERE project_id = ? AND id = ?`, projectID, id)
+	if err != nil {
+		return fmt.Errorf("delete channel target: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return fmt.Errorf("channel target not found")
+	}
+	return nil
+}
+
 func (r *ChannelTargetRepo) RecordSend(ctx context.Context, send models.ChannelMessageSend) error {
 	if strings.TrimSpace(send.ID) == "" {
 		return fmt.Errorf("channel message send id is required")
