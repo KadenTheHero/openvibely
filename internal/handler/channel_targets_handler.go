@@ -19,6 +19,10 @@ func (h *Handler) outboundTargetsData(c echo.Context) ([]models.ChannelTarget, b
 	if projectID == "" {
 		projectID, _ = h.getCurrentProjectID(c)
 	}
+	return h.outboundTargetsDataForProject(c, projectID)
+}
+
+func (h *Handler) outboundTargetsDataForProject(c echo.Context, projectID string) ([]models.ChannelTarget, bool) {
 	var targets []models.ChannelTarget
 	if projectID != "" && h.channelTargetRepo != nil {
 		targets, _ = h.channelTargetRepo.ListByProject(c.Request().Context(), projectID)
@@ -73,8 +77,8 @@ func (h *Handler) handleOutboundTargetSave(c echo.Context) error {
 	if err := h.channelTargetRepo.Upsert(c.Request().Context(), models.ChannelTarget{ID: id, ProjectID: projectID, Platform: platform, Name: name, TargetID: targetID, ThreadID: threadID, Home: c.FormValue("is_home") == "true", DefaultSubject: defaultSubject}); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save outbound target")
 	}
-	targets, explicitAllowed := h.outboundTargetsData(c)
-	return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, "Saved outbound target."))
+	targets, explicitAllowed := h.outboundTargetsDataForProject(c, projectID)
+	return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, "Added outbound target."))
 }
 
 func (h *Handler) handleOutboundTargetDelete(c echo.Context) error {
@@ -84,11 +88,11 @@ func (h *Handler) handleOutboundTargetDelete(c echo.Context) error {
 	if err := h.channelTargetRepo.Delete(c.Request().Context(), c.Param("id")); err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "Outbound target not found")
 	}
-	targets, explicitAllowed := h.outboundTargetsData(c)
 	projectID := c.QueryParam("project_id")
 	if projectID == "" {
 		projectID, _ = h.getCurrentProjectID(c)
 	}
+	targets, explicitAllowed := h.outboundTargetsDataForProject(c, projectID)
 	return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, "Deleted outbound target."))
 }
 
@@ -127,6 +131,6 @@ func (h *Handler) handleSendMessageExplicitTargets(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save setting")
 		}
 	}
-	targets, explicitAllowed := h.outboundTargetsData(c)
+	targets, explicitAllowed := h.outboundTargetsDataForProject(c, projectID)
 	return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, "Saved send_message target policy."))
 }

@@ -1619,14 +1619,21 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					if (modal) modal.close();
 				}
 
+				function resetOutboundTargetAddForm() {
+					const form = document.getElementById('outbound-target-add-form');
+					if (form) form.reset();
+				}
+
 				function openOutboundTargetsModal() {
 					const modal = document.getElementById('outbound_targets_modal');
+					resetOutboundTargetAddForm();
 					if (modal) modal.showModal();
 				}
 
 				function closeOutboundTargetsModal() {
 					const modal = document.getElementById('outbound_targets_modal');
 					if (modal) modal.close();
+					resetOutboundTargetAddForm();
 				}
 
 				function setEmailProviderPreset(providerKey, preserveValues) {
@@ -1703,6 +1710,12 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						if (whModal && whModal.open) {
 							whModal.close();
 						}
+					}
+					if (rp === '/channels/outbound-targets' && event.detail.successful) {
+						resetOutboundTargetAddForm();
+					}
+					if (rp === '/channels/send-message-explicit-targets' && event.detail.successful) {
+						closeOutboundTargetsModal();
 					}
 				});
 
@@ -1811,7 +1824,7 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 			if notice != "" {
 				<div class="alert alert-success py-2 text-sm mt-3">{ notice }</div>
 			}
-			<form method="post" hx-post="/channels/outbound-targets" hx-target="#outbound-targets-section" hx-swap="outerHTML" class="grid gap-3 md:grid-cols-6 mt-4" onclick="event.stopPropagation()">
+				<form id="outbound-target-add-form" method="post" hx-post="/channels/outbound-targets" hx-target="#outbound-targets-section" hx-swap="outerHTML" class="grid gap-3 md:grid-cols-6 mt-4" onclick="event.stopPropagation()">
 				<input type="hidden" name="project_id" value={ currentProjectID }/>
 				<select name="platform" class="select select-bordered select-sm" required>
 					<option value="slack">Slack</option>
@@ -1826,7 +1839,7 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 					<span class="label-text text-sm">Home</span>
 				</label>
 				<input name="default_subject" class="input input-bordered input-sm md:col-span-5" placeholder="default email subject (optional)"/>
-				<button type="submit" class="btn btn-primary btn-sm">Save Target</button>
+					<button type="submit" class="btn btn-primary btn-sm">Add Target</button>
 			</form>
 				<div class="overflow-x-auto mt-4">
 					<table class="table table-sm">

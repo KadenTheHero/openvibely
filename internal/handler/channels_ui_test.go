@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -250,6 +251,29 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	fragmentBody := fragmentRec.Body.String()
 	if strings.Contains(fragmentBody, `data-channel-type="outbound-targets"`) || strings.Contains(fragmentBody, `hx-swap-oob`) {
 		t.Fatal("outbound targets fragment must not include the top-level card or OOB card markup")
+	}
+	if !strings.Contains(body, `id="outbound-target-add-form"`) || !strings.Contains(body, `>Add Target</button>`) {
+		t.Fatal("expected add-target form and Add Target button label")
+	}
+	if !strings.Contains(body, "resetOutboundTargetAddForm") || !strings.Contains(body, "rp === '/channels/send-message-explicit-targets'") {
+		t.Fatal("expected outbound modal close/reset hooks")
+	}
+
+	form := url.Values{}
+	form.Set("project_id", "default")
+	form.Set("platform", "email")
+	form.Set("name", "billing")
+	form.Set("target_id", "billing@example.com")
+	postReq := httptest.NewRequest(http.MethodPost, "/channels/outbound-targets", strings.NewReader(form.Encode()))
+	postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	postRec := httptest.NewRecorder()
+	e.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("expected add-target status 200, got %d", postRec.Code)
+	}
+	postBody := postRec.Body.String()
+	if !strings.Contains(postBody, "Added outbound target.") || !strings.Contains(postBody, "billing@example.com") {
+		t.Fatalf("expected added target to appear in refreshed modal fragment, got %q", postBody)
 	}
 }
 
