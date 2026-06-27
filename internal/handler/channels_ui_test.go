@@ -231,6 +231,26 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if !strings.Contains(body, `hx-post="/channels/outbound-targets"`) || !strings.Contains(body, `client@example.com`) {
 		t.Fatal("expected existing outbound target controls inside modal")
 	}
+	if strings.Count(body, `data-channel-type="outbound-targets"`) != 1 {
+		t.Fatalf("expected exactly one outbound targets card on page, got %d", strings.Count(body, `data-channel-type="outbound-targets"`))
+	}
+	if !strings.Contains(body, `closeOutboundTargetsModal()">Cancel`) || !strings.Contains(body, `Save Settings`) {
+		t.Fatal("expected outbound targets modal to expose Cancel and Save Settings actions")
+	}
+	if strings.Contains(body, `onchange="this.form.requestSubmit()"`) {
+		t.Fatal("explicit-target toggle should not autosubmit and append refreshed cards into the modal")
+	}
+
+	fragmentReq := httptest.NewRequest(http.MethodGet, "/channels/outbound-targets?project_id=default", nil)
+	fragmentRec := httptest.NewRecorder()
+	e.ServeHTTP(fragmentRec, fragmentReq)
+	if fragmentRec.Code != http.StatusOK {
+		t.Fatalf("expected fragment status 200, got %d", fragmentRec.Code)
+	}
+	fragmentBody := fragmentRec.Body.String()
+	if strings.Contains(fragmentBody, `data-channel-type="outbound-targets"`) || strings.Contains(fragmentBody, `hx-swap-oob`) {
+		t.Fatal("outbound targets fragment must not include the top-level card or OOB card markup")
+	}
 }
 
 func TestChannelsPageConnectedCardsHideTokenSpecificTextAndActions(t *testing.T) {

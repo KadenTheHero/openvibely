@@ -1791,7 +1791,6 @@ templ OutboundTargetsModal(currentProjectID string, targets []models.ChannelTarg
 
 templ OutboundTargetsFragment(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool, notice string) {
 	@OutboundTargetsSection(currentProjectID, targets, explicitAllowed, notice)
-	@OutboundTargetsCard(targets, explicitAllowed, true)
 }
 
 templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool, notice string) {
@@ -1802,13 +1801,12 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 					<h3 class="card-title">Outbound Message Targets</h3>
 					<p class="text-sm opacity-70">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, or `email:#client`.</p>
 				</div>
-				<form method="post" hx-post="/channels/send-message-explicit-targets" hx-target="#outbound-targets-section" hx-swap="outerHTML" class="form-control" onclick="event.stopPropagation()">
-					<input type="hidden" name="project_id" value={ currentProjectID }/>
+				<div class="form-control" onclick="event.stopPropagation()">
 					<label class="label cursor-pointer gap-3 justify-start">
 						<span class="label-text text-sm">Allow explicit unsaved targets</span>
-						<input type="checkbox" name="enabled" value="true" class="toggle toggle-sm" if explicitAllowed { checked } onchange="this.form.requestSubmit()"/>
+						<input type="checkbox" form="outbound-targets-policy-form" name="enabled" value="true" class="toggle toggle-sm" if explicitAllowed { checked }/>
 					</label>
-				</form>
+				</div>
 			</div>
 			if notice != "" {
 				<div class="alert alert-success py-2 text-sm mt-3">{ notice }</div>
@@ -1830,25 +1828,25 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 				<input name="default_subject" class="input input-bordered input-sm md:col-span-5" placeholder="default email subject (optional)"/>
 				<button type="submit" class="btn btn-primary btn-sm">Save Target</button>
 			</form>
-			<div class="overflow-x-auto mt-4">
-				<table class="table table-sm">
-					<thead>
-						<tr>
-							<th>Platform</th>
-							<th>Name</th>
-							<th>Target</th>
-							<th>Thread/Topic</th>
-							<th>Home</th>
-							<th></th>
-						</tr>
-					</thead>
-					<tbody>
-						if len(targets) == 0 {
-							<tr><td colspan="6" class="opacity-60">No outbound targets saved yet.</td></tr>
-						}
-						for _, target := range targets {
+				<div class="overflow-x-auto mt-4">
+					<table class="table table-sm">
+						<thead>
 							<tr>
-								<td>{ target.Platform }</td>
+								<th>Platform</th>
+								<th>Name</th>
+								<th>Target</th>
+								<th>Thread/Topic</th>
+								<th>Home</th>
+								<th></th>
+							</tr>
+						</thead>
+						<tbody>
+							if len(targets) == 0 {
+								<tr><td colspan="6" class="opacity-60">No outbound targets saved yet.</td></tr>
+							}
+							for _, target := range targets {
+								<tr>
+									<td>{ target.Platform }</td>
 									<td>
 										if target.Name != "" {
 											<span>#{ target.Name }</span>
@@ -1856,23 +1854,27 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 											<span class="opacity-50">unnamed</span>
 										}
 									</td>
-								<td class="font-mono text-xs break-all">{ target.TargetID }</td>
-								<td class="font-mono text-xs">{ target.ThreadID }</td>
+									<td class="font-mono text-xs break-all">{ target.TargetID }</td>
+									<td class="font-mono text-xs">{ target.ThreadID }</td>
 									<td>
 										if target.Home {
 											<span class="badge badge-sm badge-primary">Home</span>
 										}
 									</td>
-								<td class="text-right">
-									<div id={ "outbound-target-test-" + target.ID } class="mb-1"></div>
-									<button type="button" class="btn btn-xs" hx-post={ "/channels/outbound-targets/" + target.ID + "/test" } hx-target={ "#outbound-target-test-" + target.ID } hx-swap="innerHTML">Test</button>
-									<button type="button" class="btn btn-xs btn-error" hx-delete={ "/channels/outbound-targets/" + target.ID + "?project_id=" + currentProjectID } hx-target="#outbound-targets-section" hx-swap="outerHTML">Delete</button>
-								</td>
-							</tr>
-						}
-					</tbody>
-				</table>
-			</div>
-		</div>
+									<td class="text-right">
+										<div id={ "outbound-target-test-" + target.ID } class="mb-1"></div>
+										<button type="button" class="btn btn-xs" hx-post={ "/channels/outbound-targets/" + target.ID + "/test" } hx-target={ "#outbound-target-test-" + target.ID } hx-swap="innerHTML">Test</button>
+										<button type="button" class="btn btn-xs btn-error" hx-delete={ "/channels/outbound-targets/" + target.ID + "?project_id=" + currentProjectID } hx-target="#outbound-targets-section" hx-swap="outerHTML">Delete</button>
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+				<form id="outbound-targets-policy-form" method="post" hx-post="/channels/send-message-explicit-targets" hx-target="#outbound-targets-section" hx-swap="outerHTML" class="modal-action" onclick="event.stopPropagation()">
+					<input type="hidden" name="project_id" value={ currentProjectID }/>
+					<button type="button" class="btn" onclick="closeOutboundTargetsModal()">Cancel</button>
+					<button type="submit" class="btn btn-primary">Save Settings</button>
+				</form>		</div>
 	</div>
 }
