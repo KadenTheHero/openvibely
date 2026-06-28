@@ -583,70 +583,46 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 		applog.Infof("[email] unauthorized or no project for sender=%s", redactEmail(msg.FromAddress))
 		return
 	}
-	agent, err := s.autoSelectAgent(ctx, msg.Body)
-	if err != nil {
-		applog.Infof("[email] model selection failed: %v", err)
-		return
-	}
 	prompt := BuildEmailPrompt(msg)
 	sessionKey := EmailSessionKey(msg.FromAddress, msg.MessageID, msg.References, msg.Subject)
-	if activeChatExec, activeErr := s.execRepo.FindLatestActiveEmailChatExecution(ctx, projectID, sessionKey); activeErr != nil {
-		applog.Infof("[email] active chat check failed: %v", activeErr)
-		return
-	} else if activeChatExec != nil {
-		if s.queueChatInput(ctx, projectID, activeChatExec.ID, agent.ID, prompt, msg, sessionKey) {
-			return
-		}
-	}
-	runChannelChatFirstTurn(ctx, channelChatIngressFirstTurnOptions{
-		Platform:  "email",
-		ProjectID: projectID,
-		Message:   prompt,
-		Source:    models.TaskOriginEmail,
-		Task:      &models.Task{Title: fmt.Sprintf("Email %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Subject, 47)), CreatedVia: models.TaskOriginEmail},
-		Agent:     agent,
-		Surface:   chatcontrol.SurfaceEmail,
-		ReplyContext: ChannelReplyContext{
-			Source:          models.TaskOriginEmail,
-			EmailFrom:       msg.FromAddress,
-			EmailMessageID:  msg.MessageID,
-			EmailReferences: msg.References,
-			EmailSubject:    msg.Subject,
-			EmailSessionKey: sessionKey,
+	runChannelChatIngress(ctx, channelChatIngressOptions{
+		Platform:         "email",
+		ProjectID:        projectID,
+		Message:          prompt,
+		Source:           models.TaskOriginEmail,
+		Surface:          chatcontrol.SurfaceEmail,
+		TaskRepo:         s.taskRepo,
+		ExecRepo:         s.execRepo,
+		ThreadInputRepo:  s.threadInputRepo,
+		LLMConfigRepo:    s.llmConfigRepo,
+		ChatBroadcaster:  s.chatBroadcaster,
+		SelectionMessage: msg.Body,
+		FindActiveExecution: func(ctx context.Context, projectID string) (*models.Execution, error) {
+			return s.execRepo.FindLatestActiveEmailChatExecution(ctx, projectID, sessionKey)
 		},
-		TaskRepo:          s.taskRepo,
-		ExecRepo:          s.execRepo,
-		ChatBroadcaster:   s.chatBroadcaster,
-		ChannelChatRunner: s.channelChatRunner,
-		CreateTaskContext: func(ctx context.Context, taskID string) error {
-			if s.emailTaskContextRepo == nil {
-				return nil
-			}
-			return s.emailTaskContextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: taskID, EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey})
-		},
-		CompleteExecution: s.completeExecution,
-		ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
-			return s.execRepo.ListEmailChatHistory(ctx, projectID, sessionKey, emailChatHistoryLimit)
-		},
-		FilterChatHistory:     filterEmailChatHistory,
-		BuildChatContext:      s.buildChatContext,
-		GetPersonalityContext: s.getPersonalityContext,
-		ResolveWorkDir:        s.resolveWorkDir,
-	})
-}
-
-func (s *EmailService) queueChatInput(ctx context.Context, projectID, activeExecID, agentID, prompt string, msg EmailInboundMessage, sessionKey string) bool {
-	return runChannelChatQueuedInput(ctx, channelChatIngressQueueOptions{
-		Platform:        "email",
-		ProjectID:       projectID,
-		ActiveExecID:    activeExecID,
-		AgentID:         agentID,
-		Message:         prompt,
-		Source:          models.TaskOriginEmail,
-		ThreadInputRepo: s.threadInputRepo,
-		ChatBroadcaster: s.chatBroadcaster,
-		NewThreadInput: func() *models.ThreadInput {
+		NewQueuedInput: func() *models.ThreadInput {
 			return &models.ThreadInput{EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey}
+		},
+		OnModelSelectionFailed: func(context.Context, error) { applog.Infof("[email] model selection failed") },
+		OnActiveLookupFailed:   func(context.Context) { applog.Infof("[email] active chat check failed") },
+		FirstTurn: channelChatIngressFirstTurnOptions{
+			Task:              &models.Task{Title: fmt.Sprintf("Email %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Subject, 47)), CreatedVia: models.TaskOriginEmail},
+			ReplyContext:      ChannelReplyContext{Source: models.TaskOriginEmail, EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey},
+			ChannelChatRunner: s.channelChatRunner,
+			CreateTaskContext: func(ctx context.Context, taskID string) error {
+				if s.emailTaskContextRepo == nil {
+					return nil
+				}
+				return s.emailTaskContextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: taskID, EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey})
+			},
+			CompleteExecution: s.completeExecution,
+			ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
+				return s.execRepo.ListEmailChatHistory(ctx, projectID, sessionKey, emailChatHistoryLimit)
+			},
+			FilterChatHistory:     filterEmailChatHistory,
+			BuildChatContext:      s.buildChatContext,
+			GetPersonalityContext: s.getPersonalityContext,
+			ResolveWorkDir:        s.resolveWorkDir,
 		},
 	})
 }
@@ -731,26 +707,6 @@ func EmailSessionKey(sender, messageID, references, subject string) string {
 	}
 	h := sha256.Sum256([]byte(strings.TrimSpace(strings.ToLower(subject))))
 	return "email:" + sender + ":" + hex.EncodeToString(h[:8])
-}
-
-func (s *EmailService) autoSelectAgent(ctx context.Context, message string) (*models.LLMConfig, error) {
-	agents, err := s.llmConfigRepo.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list agents: %w", err)
-	}
-	if len(agents) == 0 {
-		return nil, fmt.Errorf("no agents configured")
-	}
-	complexity := AnalyzeComplexity(message)
-	if result := SelectLLMWithVision(complexity, agents, false); result != nil {
-		return result.LLMConfig, nil
-	}
-	for i := range agents {
-		if agents[i].IsDefault {
-			return &agents[i], nil
-		}
-	}
-	return &agents[0], nil
 }
 
 func (s *EmailService) buildChatContext(ctx context.Context, projectID string) string {

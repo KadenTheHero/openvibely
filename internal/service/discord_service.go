@@ -379,108 +379,102 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 		_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "You are not authorized to use Discord access for this project. Contact the project owner to get access.")
 		return
 	}
-	if activeChatExec, activeErr := s.execRepo.FindLatestActiveChatExecution(ctx, projectID); activeErr != nil {
-		applog.Infof("[discord] error checking active chat turn: %v", activeErr)
-		_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error checking active chat response. Please try again.")
-		return
-	} else if activeChatExec != nil {
-		if s.queueChatInput(ctx, projectID, activeChatExec.ID, msg) {
-			return
-		}
-	}
-
-	var attachmentContext string
-	var imageAttachments []models.Attachment
-	var chatAtts []models.ChatAttachment
-	if len(msg.Attachments) > 0 {
-		attCtx, imgAtts, downloadedChatAtts, err := s.downloadDiscordAttachments(ctx, msg.Attachments)
-		if err != nil {
-			applog.Infof("[discord] attachment download error: %v", err)
-			msgText := "Failed to process attachment: unable to download attachment. Please try again."
-			agent, agentErr := s.autoSelectAgent(ctx, msg.Text, discordIncomingAttachmentsRequireVision(msg.Attachments))
-			if agentErr != nil {
-				_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, fmt.Sprintf("Error selecting model: %v", agentErr))
-				return
-			}
-			s.recordQueuedAttachmentFailure(ctx, projectID, agent.ID, msg, msgText)
-			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
-			return
-		}
-		attachmentContext = attCtx
-		imageAttachments = imgAtts
-		chatAtts = downloadedChatAtts
-	}
-
-	agent, err := s.autoSelectAgent(ctx, msg.Text, len(imageAttachments) > 0)
-	if err != nil {
-		cleanupDiscordAttachmentSourceDirs(chatAtts)
-		_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, fmt.Sprintf("Error selecting model: %v", err))
-		return
-	}
 	discordAckID := ""
-	runChannelChatFirstTurn(ctx, channelChatIngressFirstTurnOptions{
-		Platform:          "discord",
-		ProjectID:         projectID,
-		Message:           msg.Text,
-		Source:            msg.Source,
-		Task:              &models.Task{Title: fmt.Sprintf("Discord %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginDiscord},
-		Agent:             agent,
-		Attachments:       chatAtts,
-		AttachmentContext: attachmentContext,
-		ImageAttachments:  imageAttachments,
-		HasAttachments:    len(msg.Attachments) > 0,
-		Surface:           chatcontrol.SurfaceDiscord,
-		ReplyContext: ChannelReplyContext{
-			Source:           models.TaskOriginDiscord,
-			DiscordChannelID: msg.replyChannelID(),
-			DiscordThreadID:  msg.ThreadID,
-			DiscordMessageID: msg.MessageID,
-			DiscordUserID:    msg.UserID,
-		},
-		Start:             start,
-		TaskRepo:          s.taskRepo,
-		ExecRepo:          s.execRepo,
-		ChatBroadcaster:   s.chatBroadcaster,
-		ChannelChatRunner: s.channelChatRunner,
-		CreateTaskContext: func(ctx context.Context, taskID string) error {
-			if s.discordTaskContextRepo == nil {
-				return nil
+	runChannelChatIngress(ctx, channelChatIngressOptions{
+		Platform:        "discord",
+		ProjectID:       projectID,
+		Message:         msg.Text,
+		Source:          msg.Source,
+		Surface:         chatcontrol.SurfaceDiscord,
+		HasAttachments:  len(msg.Attachments) > 0,
+		Start:           start,
+		TaskRepo:        s.taskRepo,
+		ExecRepo:        s.execRepo,
+		ThreadInputRepo: s.threadInputRepo,
+		LLMConfigRepo:   s.llmConfigRepo,
+		ChatBroadcaster: s.chatBroadcaster,
+		UploadsDir:      s.uploadsDir,
+		DownloadAttachments: func(ctx context.Context) (channelChatIngressDownloadResult, error) {
+			if len(msg.Attachments) == 0 {
+				return channelChatIngressDownloadResult{}, nil
 			}
-			return s.discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{TaskID: taskID, DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: msg.MessageID, DiscordUserID: msg.UserID})
+			attCtx, imgAtts, chatAtts, err := s.downloadDiscordAttachments(ctx, msg.Attachments)
+			return channelChatIngressDownloadResult{AttachmentContext: attCtx, ImageAttachments: imgAtts, ChatAttachments: chatAtts}, err
 		},
-		CompleteExecution:          s.completeExecution,
-		LinkAttachments:            s.linkAttachmentsToExecution,
-		AttachmentContextAndImages: discordAttachmentContextAndImages,
-		ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
-			return s.execRepo.ListChatHistory(ctx, projectID, discordChatHistoryLimit)
+		IncomingAttachmentsNeedVision: func() bool { return discordIncomingAttachmentsRequireVision(msg.Attachments) },
+		AttachmentDownloadFailureMessage: func(error, bool) string {
+			return "Failed to process attachment: unable to download attachment. Please try again."
 		},
-		FilterChatHistory:     filterDiscordChatHistory,
-		BuildChatContext:      s.buildChatContext,
-		GetPersonalityContext: s.getPersonalityContext,
-		ResolveWorkDir:        s.resolveWorkDir,
-		OnTaskCreateFailure: func(context.Context) {
-			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error processing your message. Please try again.")
+		SavePendingAttachments: s.saveChatAttachmentsToPendingSession,
+		FindActiveExecution:    s.execRepo.FindLatestActiveChatExecution,
+		RecordAttachmentFailure: func(ctx context.Context, agentID, msgText string) {
+			s.recordQueuedAttachmentFailure(ctx, projectID, agentID, msg, msgText)
 		},
-		OnTaskContextFailure: func(context.Context) {
-			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error processing your message. Please try again.")
+		NewQueuedInput: func() *models.ThreadInput {
+			return &models.ThreadInput{DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: msg.MessageID, DiscordUserID: msg.UserID}
 		},
-		OnExecutionCreateFailure: func(context.Context) {
-			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error processing your message. Please try again.")
-		},
-		OnAttachmentLinkFailure: func(_ context.Context, msgText string) {
+		OnAttachmentDownloadFailed: func(_ context.Context, msgText string) {
 			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
 		},
-		PrepareRunner: func(ctx context.Context, taskID, execID string) int {
-			discordAckID, _ = s.sendDiscordMessageWithID(msg.replyChannelID(), msg.MessageID, "Thinking...")
-			if discordAckID != "" && s.discordTaskContextRepo != nil {
-				if err := s.discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{TaskID: taskID, DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: discordAckID, DiscordUserID: msg.UserID}); err != nil {
-					applog.Infof("[discord] update chat ack context failed task=%s: %v", taskID, err)
-				}
-			}
-			return 0
+		OnAttachmentStoreFailed: func(_ context.Context, msgText string) {
+			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
 		},
-		OnRunnerUnavailable: func(_ context.Context, msgText string, _ int) {
-			_ = s.editOrSendDiscordMessage(msg.replyChannelID(), discordAckID, msg.MessageID, msgText)
+		OnModelSelectionFailed: func(_ context.Context, err error) {
+			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, fmt.Sprintf("Error selecting model: %v", err))
+		},
+		OnActiveLookupFailed: func(context.Context) {
+			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error checking active chat response. Please try again.")
+		},
+		OnQueueFailure: func(context.Context) {
+			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error queueing your message. Please try again.")
+		},
+		OnQueued: func(context.Context) {
+			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Queued. I'll send this after the current response finishes.")
+		},
+		FirstTurn: channelChatIngressFirstTurnOptions{
+			Task:              &models.Task{Title: fmt.Sprintf("Discord %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginDiscord},
+			ReplyContext:      ChannelReplyContext{Source: models.TaskOriginDiscord, DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: msg.MessageID, DiscordUserID: msg.UserID},
+			ChannelChatRunner: s.channelChatRunner,
+			CreateTaskContext: func(ctx context.Context, taskID string) error {
+				if s.discordTaskContextRepo == nil {
+					return nil
+				}
+				return s.discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{TaskID: taskID, DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: msg.MessageID, DiscordUserID: msg.UserID})
+			},
+			CompleteExecution:          s.completeExecution,
+			LinkAttachments:            s.linkAttachmentsToExecution,
+			AttachmentContextAndImages: discordAttachmentContextAndImages,
+			ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
+				return s.execRepo.ListChatHistory(ctx, projectID, discordChatHistoryLimit)
+			},
+			FilterChatHistory:     filterDiscordChatHistory,
+			BuildChatContext:      s.buildChatContext,
+			GetPersonalityContext: s.getPersonalityContext,
+			ResolveWorkDir:        s.resolveWorkDir,
+			OnTaskCreateFailure: func(context.Context) {
+				_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error processing your message. Please try again.")
+			},
+			OnTaskContextFailure: func(context.Context) {
+				_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error processing your message. Please try again.")
+			},
+			OnExecutionCreateFailure: func(context.Context) {
+				_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error processing your message. Please try again.")
+			},
+			OnAttachmentLinkFailure: func(_ context.Context, msgText string) {
+				_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
+			},
+			PrepareRunner: func(ctx context.Context, taskID, execID string) int {
+				discordAckID, _ = s.sendDiscordMessageWithID(msg.replyChannelID(), msg.MessageID, "Thinking...")
+				if discordAckID != "" && s.discordTaskContextRepo != nil {
+					if err := s.discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{TaskID: taskID, DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: discordAckID, DiscordUserID: msg.UserID}); err != nil {
+						applog.Infof("[discord] update chat ack context failed task=%s: %v", taskID, err)
+					}
+				}
+				return 0
+			},
+			OnRunnerUnavailable: func(_ context.Context, msgText string, _ int) {
+				_ = s.editOrSendDiscordMessage(msg.replyChannelID(), discordAckID, msg.MessageID, msgText)
+			},
 		},
 	})
 }
@@ -493,62 +487,51 @@ func (m discordIncomingMessage) replyChannelID() string {
 }
 
 func (s *DiscordService) queueChatInput(ctx context.Context, projectID, activeExecID string, msg discordIncomingMessage) bool {
-	if s.threadInputRepo == nil {
-		return false
-	}
-	attachmentSessionID := ""
-	hasImages := false
-	if len(msg.Attachments) > 0 {
-		chatAttachments, err := s.downloadDiscordFiles(ctx, msg.Attachments)
-		if err != nil {
-			applog.Infof("[discord] queue chat attachment download failed: %v", err)
-			msgText := "Failed to process attachment: unable to download attachment. Please try again."
-			agent, agentErr := s.autoSelectAgent(ctx, msg.Text, discordIncomingAttachmentsRequireVision(msg.Attachments))
-			if agentErr != nil {
-				_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, fmt.Sprintf("Error selecting model: %v", agentErr))
-				return true
+	return runChannelChatIngress(ctx, channelChatIngressOptions{
+		Platform:        "discord",
+		ProjectID:       projectID,
+		Message:         msg.Text,
+		Source:          msg.Source,
+		Surface:         chatcontrol.SurfaceDiscord,
+		HasAttachments:  len(msg.Attachments) > 0,
+		ThreadInputRepo: s.threadInputRepo,
+		LLMConfigRepo:   s.llmConfigRepo,
+		ChatBroadcaster: s.chatBroadcaster,
+		UploadsDir:      s.uploadsDir,
+		DownloadAttachments: func(ctx context.Context) (channelChatIngressDownloadResult, error) {
+			if len(msg.Attachments) == 0 {
+				return channelChatIngressDownloadResult{}, nil
 			}
-			s.recordQueuedAttachmentFailure(ctx, projectID, agent.ID, msg, msgText)
-			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
-			return true
-		}
-		_, imageAttachments := discordAttachmentContextAndImages(chatAttachments)
-		hasImages = len(imageAttachments) > 0
-		attachmentSessionID, err = s.saveChatAttachmentsToPendingSession(chatAttachments)
-		if err != nil {
-			applog.Infof("[discord] queue chat attachment staging failed: %v", err)
-			msgText := "Failed to process attachment: unable to store attachment. Please try again."
-			agent, agentErr := s.autoSelectAgent(ctx, msg.Text, hasImages)
-			if agentErr != nil {
-				_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, fmt.Sprintf("Error selecting model: %v", agentErr))
-				return true
+			chatAtts, err := s.downloadDiscordFiles(ctx, msg.Attachments)
+			if err != nil {
+				applog.Infof("[discord] queue chat attachment download failed: %v", err)
+				return channelChatIngressDownloadResult{}, err
 			}
-			s.recordQueuedAttachmentFailure(ctx, projectID, agent.ID, msg, msgText)
-			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
-			return true
-		}
-	}
-	agent, err := s.autoSelectAgent(ctx, msg.Text, hasImages)
-	if err != nil {
-		if attachmentSessionID != "" {
-			_ = os.RemoveAll(filepath.Join(s.uploadsDir, "chat", "pending", attachmentSessionID))
-		}
-		_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, fmt.Sprintf("Error selecting model: %v", err))
-		return true
-	}
-	return runChannelChatQueuedInput(ctx, channelChatIngressQueueOptions{
-		Platform:            "discord",
-		ProjectID:           projectID,
-		ActiveExecID:        activeExecID,
-		AgentID:             agent.ID,
-		Message:             msg.Text,
-		Source:              msg.Source,
-		AttachmentSessionID: attachmentSessionID,
-		UploadsDir:          s.uploadsDir,
-		ThreadInputRepo:     s.threadInputRepo,
-		ChatBroadcaster:     s.chatBroadcaster,
-		NewThreadInput: func() *models.ThreadInput {
+			attCtx, imgAtts := discordAttachmentContextAndImages(chatAtts)
+			return channelChatIngressDownloadResult{AttachmentContext: attCtx, ImageAttachments: imgAtts, ChatAttachments: chatAtts}, nil
+		},
+		IncomingAttachmentsNeedVision: func() bool { return discordIncomingAttachmentsRequireVision(msg.Attachments) },
+		AttachmentDownloadFailureMessage: func(error, bool) string {
+			return "Failed to process attachment: unable to download attachment. Please try again."
+		},
+		SavePendingAttachments: s.saveChatAttachmentsToPendingSession,
+		FindActiveExecution: func(context.Context, string) (*models.Execution, error) {
+			return &models.Execution{ID: activeExecID}, nil
+		},
+		RecordAttachmentFailure: func(ctx context.Context, agentID, msgText string) {
+			s.recordQueuedAttachmentFailure(ctx, projectID, agentID, msg, msgText)
+		},
+		NewQueuedInput: func() *models.ThreadInput {
 			return &models.ThreadInput{DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: msg.MessageID, DiscordUserID: msg.UserID}
+		},
+		OnQueuedAttachmentDownloadFailed: func(_ context.Context, msgText string) {
+			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
+		},
+		OnAttachmentStoreFailed: func(_ context.Context, msgText string) {
+			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
+		},
+		OnModelSelectionFailed: func(_ context.Context, err error) {
+			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, fmt.Sprintf("Error selecting model: %v", err))
 		},
 		OnQueueFailure: func(context.Context) {
 			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error queueing your message. Please try again.")
@@ -683,29 +666,6 @@ func (s *DiscordService) promoteQueuedChatAfterCompletion(ctx context.Context, t
 		return
 	}
 	s.queuedTurnPromoter(task.ProjectID)
-}
-
-func (s *DiscordService) autoSelectAgent(ctx context.Context, message string, hasImages bool) (*models.LLMConfig, error) {
-	if s.llmConfigRepo == nil {
-		return nil, fmt.Errorf("no model repository configured")
-	}
-	agents, err := s.llmConfigRepo.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list agents: %w", err)
-	}
-	if len(agents) == 0 {
-		return nil, fmt.Errorf("no agents configured")
-	}
-	complexity := AnalyzeComplexity(message)
-	if result := SelectLLMWithVision(complexity, agents, hasImages); result != nil {
-		return result.LLMConfig, nil
-	}
-	for i := range agents {
-		if agents[i].IsDefault {
-			return &agents[i], nil
-		}
-	}
-	return &agents[0], nil
 }
 
 func (s *DiscordService) buildChatContext(ctx context.Context, projectID string) string {
@@ -1127,7 +1087,7 @@ func (s *DiscordService) agentForTaskMessage(ctx context.Context, task *models.T
 			return agent, nil
 		}
 	}
-	return s.autoSelectAgent(ctx, message, false)
+	return selectChannelChatAgent(ctx, s.llmConfigRepo, message, false)
 }
 
 func (s *DiscordService) buildProjectListResult(ctx context.Context, projectID string) string {

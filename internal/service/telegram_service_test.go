@@ -414,19 +414,14 @@ func TestTelegramService_BuildChatContext(t *testing.T) {
 	assert.Contains(t, context_, `Name: "Reviewer"`)
 }
 
-func TestTelegramService_AutoSelectAgent(t *testing.T) {
+func TestChannelChatSelectAgent(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
-
-	svc := &TelegramService{
-		llmConfigRepo: llmConfigRepo,
-		userProjects:  make(map[int64]string),
-	}
 
 	ctx := context.Background()
 
 	// Should return a model (the default one from migration)
-	agent, err := svc.autoSelectAgent(ctx, "hello world", false)
+	agent, err := selectChannelChatAgent(ctx, llmConfigRepo, "hello world", false)
 	assert.NoError(t, err)
 	assert.NotNil(t, agent)
 }
@@ -1209,19 +1204,14 @@ func TestTelegramService_LinkAttachments_RollsBackPartialLinksOnFailure(t *testi
 	require.Empty(t, entries, "partial attachment files should be removed after rollback")
 }
 
-func TestTelegramService_AutoSelectAgent_WithImages(t *testing.T) {
+func TestChannelChatSelectAgent_WithImages(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
-
-	svc := &TelegramService{
-		llmConfigRepo: llmConfigRepo,
-		userProjects:  make(map[int64]string),
-	}
 
 	ctx := context.Background()
 
 	// Should return a model even with hasImages=true (uses vision-aware selection)
-	agent, err := svc.autoSelectAgent(ctx, "analyze this image", true)
+	agent, err := selectChannelChatAgent(ctx, llmConfigRepo, "analyze this image", true)
 	assert.NoError(t, err)
 	assert.NotNil(t, agent)
 }
@@ -2649,7 +2639,7 @@ func TestTelegramService_ProcessIncomingMessage_QueuesTelegramAttachmentWhenChat
 		userProjects:    map[int64]string{7: project.ID},
 	}
 
-	require.True(t, svc.queueChatInput(ctx, project.ID, activeExec.ID, agent.ID, "follow up with attachment", 42, []models.ChatAttachment{{
+	require.True(t, svc.queueChatInput(ctx, project.ID, activeExec.ID, "follow up with attachment", 42, []models.ChatAttachment{{
 		FileName:  "test.txt",
 		FilePath:  sourcePath,
 		MediaType: "text/plain",
@@ -2692,11 +2682,12 @@ func TestTelegramService_QueueChatInputCleansPendingAttachmentsWhenQueueInsertFa
 
 	var sent []string
 	svc := &TelegramService{
+		llmConfigRepo:   llmConfigRepo,
 		threadInputRepo: threadInputRepo,
 		sendMessageFunc: func(chatID int64, text string) { sent = append(sent, text) },
 	}
 
-	require.True(t, svc.queueChatInput(ctx, "project-1", "exec-1", agent.ID, "follow up with attachment", 42, []models.ChatAttachment{{
+	require.True(t, svc.queueChatInput(ctx, "project-1", "exec-1", "follow up with attachment", 42, []models.ChatAttachment{{
 		FileName:  "test.txt",
 		FilePath:  sourcePath,
 		MediaType: "text/plain",

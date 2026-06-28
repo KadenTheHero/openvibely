@@ -81,6 +81,213 @@ type channelChatIngressFirstTurnOptions struct {
 	OnRunnerUnavailable        func(context.Context, string, int)
 }
 
+type channelChatIngressDownloadResult struct {
+	AttachmentContext string
+	ImageAttachments  []models.Attachment
+	ChatAttachments   []models.ChatAttachment
+}
+
+type channelChatIngressOptions struct {
+	Platform       string
+	ProjectID      string
+	Message        string
+	Source         string
+	Surface        chatcontrol.Surface
+	HasAttachments bool
+	Start          time.Time
+
+	TaskRepo        *repository.TaskRepo
+	ExecRepo        *repository.ExecutionRepo
+	ThreadInputRepo *repository.ThreadInputRepo
+	LLMConfigRepo   *repository.LLMConfigRepo
+	ChatBroadcaster *events.ChatBroadcaster
+	UploadsDir      string
+
+	DownloadAttachments                       func(context.Context) (channelChatIngressDownloadResult, error)
+	ContinueWithoutAttachmentsOnDownloadError bool
+	IncomingAttachmentsNeedVision             func() bool
+	SavePendingAttachments                    func([]models.ChatAttachment) (string, error)
+	SelectionMessage                          string
+	FindActiveExecution                       func(context.Context, string) (*models.Execution, error)
+	RecordAttachmentFailure                   func(context.Context, string, string)
+	NewQueuedInput                            func() *models.ThreadInput
+	AttachmentDownloadFailureMessage          func(error, bool) string
+	OnAttachmentDownloadFailed                func(context.Context, string)
+	OnQueuedAttachmentDownloadFailed          func(context.Context, string)
+	OnAttachmentStoreFailed                   func(context.Context, string)
+	OnModelSelectionFailed                    func(context.Context, error)
+	OnActiveLookupFailed                      func(context.Context)
+	OnQueueFailure                            func(context.Context)
+	OnQueued                                  func(context.Context)
+	FirstTurn                                 channelChatIngressFirstTurnOptions
+}
+
+func (opts channelChatIngressOptions) selectionPrompt() string {
+	if strings.TrimSpace(opts.SelectionMessage) != "" {
+		return opts.SelectionMessage
+	}
+	return opts.Message
+}
+
+func selectChannelChatAgent(ctx context.Context, repo *repository.LLMConfigRepo, message string, hasImages bool) (*models.LLMConfig, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("no model repository configured")
+	}
+	agents, err := repo.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list agents: %w", err)
+	}
+	if len(agents) == 0 {
+		return nil, fmt.Errorf("no agents configured")
+	}
+	complexity := AnalyzeComplexity(message)
+	if result := SelectLLMWithVision(complexity, agents, hasImages); result != nil {
+		return result.LLMConfig, nil
+	}
+	for i := range agents {
+		if agents[i].IsDefault {
+			return &agents[i], nil
+		}
+	}
+	return &agents[0], nil
+}
+
+func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) bool {
+	platform := strings.TrimSpace(opts.Platform)
+	if platform == "" {
+		platform = "channel"
+	}
+	var activeChatExec *models.Execution
+	if opts.FindActiveExecution != nil {
+		var activeErr error
+		activeChatExec, activeErr = opts.FindActiveExecution(ctx, opts.ProjectID)
+		if activeErr != nil {
+			applog.Infof("[%s] error checking active chat turn: %v", platform, activeErr)
+			if opts.OnActiveLookupFailed != nil {
+				opts.OnActiveLookupFailed(ctx)
+			}
+			return true
+		}
+	}
+
+	attachmentContext := ""
+	imageAttachments := []models.Attachment{}
+	chatAttachments := []models.ChatAttachment{}
+	if opts.DownloadAttachments != nil {
+		downloaded, err := opts.DownloadAttachments(ctx)
+		if err != nil {
+			applog.Infof("[%s] attachment download error: %v", platform, err)
+			msgText := fmt.Sprintf("Failed to process attachment: %v", err)
+			if opts.AttachmentDownloadFailureMessage != nil {
+				msgText = opts.AttachmentDownloadFailureMessage(err, activeChatExec != nil)
+			} else if activeChatExec != nil {
+				msgText = "Failed to process attachment: unable to download attachment. Please try again."
+			}
+			if activeChatExec != nil && opts.OnQueuedAttachmentDownloadFailed != nil {
+				opts.OnQueuedAttachmentDownloadFailed(ctx, msgText)
+			} else if opts.OnAttachmentDownloadFailed != nil {
+				opts.OnAttachmentDownloadFailed(ctx, msgText)
+			}
+			if opts.ContinueWithoutAttachmentsOnDownloadError {
+				// Preserve adapters such as Telegram that currently warn but continue the text turn.
+			} else {
+				agent, agentErr := selectChannelChatAgent(ctx, opts.LLMConfigRepo, opts.selectionPrompt(), opts.IncomingAttachmentsNeedVision != nil && opts.IncomingAttachmentsNeedVision())
+				if agentErr != nil {
+					if opts.OnModelSelectionFailed != nil {
+						opts.OnModelSelectionFailed(ctx, agentErr)
+					}
+					return true
+				}
+				if opts.RecordAttachmentFailure != nil {
+					opts.RecordAttachmentFailure(ctx, agent.ID, msgText)
+				}
+				return true
+			}
+		}
+		attachmentContext = downloaded.AttachmentContext
+		imageAttachments = downloaded.ImageAttachments
+		chatAttachments = downloaded.ChatAttachments
+	}
+
+	agent, err := selectChannelChatAgent(ctx, opts.LLMConfigRepo, opts.selectionPrompt(), len(imageAttachments) > 0)
+	if err != nil {
+		cleanupChannelChatAttachmentSourceDirs(chatAttachments)
+		if opts.OnModelSelectionFailed != nil {
+			opts.OnModelSelectionFailed(ctx, err)
+		}
+		return true
+	}
+
+	if activeChatExec != nil {
+		attachmentSessionID := ""
+		if len(chatAttachments) > 0 {
+			if opts.SavePendingAttachments == nil {
+				cleanupChannelChatAttachmentSourceDirs(chatAttachments)
+				if opts.OnAttachmentStoreFailed != nil {
+					opts.OnAttachmentStoreFailed(ctx, "Failed to process attachment: unable to store attachment. Please try again.")
+				}
+				return true
+			}
+			var stageErr error
+			attachmentSessionID, stageErr = opts.SavePendingAttachments(chatAttachments)
+			if stageErr != nil {
+				applog.Infof("[%s] queue chat attachment staging failed: %v", platform, stageErr)
+				msgText := "Failed to process attachment: unable to store attachment. Please try again."
+				if opts.RecordAttachmentFailure != nil {
+					opts.RecordAttachmentFailure(ctx, agent.ID, msgText)
+				}
+				if opts.OnAttachmentStoreFailed != nil {
+					opts.OnAttachmentStoreFailed(ctx, msgText)
+				}
+				return true
+			}
+		}
+		return runChannelChatQueuedInput(ctx, channelChatIngressQueueOptions{
+			Platform:                platform,
+			ProjectID:               opts.ProjectID,
+			ActiveExecID:            activeChatExec.ID,
+			AgentID:                 agent.ID,
+			Message:                 opts.Message,
+			Source:                  opts.Source,
+			AttachmentSessionID:     attachmentSessionID,
+			UploadsDir:              opts.UploadsDir,
+			BroadcastHasAttachments: opts.HasAttachments,
+			ThreadInputRepo:         opts.ThreadInputRepo,
+			ChatBroadcaster:         opts.ChatBroadcaster,
+			NewThreadInput:          opts.NewQueuedInput,
+			OnQueueFailure:          opts.OnQueueFailure,
+			OnQueued:                opts.OnQueued,
+		})
+	}
+
+	first := opts.FirstTurn
+	first.Platform = platform
+	first.ProjectID = opts.ProjectID
+	first.Message = opts.Message
+	first.Source = opts.Source
+	first.Agent = agent
+	first.Attachments = chatAttachments
+	first.AttachmentContext = attachmentContext
+	first.ImageAttachments = imageAttachments
+	first.HasAttachments = opts.HasAttachments || len(chatAttachments) > 0
+	first.Surface = opts.Surface
+	first.Start = opts.Start
+	if first.Start.IsZero() {
+		first.Start = time.Now()
+	}
+	if first.TaskRepo == nil {
+		first.TaskRepo = opts.TaskRepo
+	}
+	if first.ExecRepo == nil {
+		first.ExecRepo = opts.ExecRepo
+	}
+	if first.ChatBroadcaster == nil {
+		first.ChatBroadcaster = opts.ChatBroadcaster
+	}
+	runChannelChatFirstTurn(ctx, first)
+	return true
+}
+
 func runChannelChatQueuedInput(ctx context.Context, opts channelChatIngressQueueOptions) bool {
 	if opts.ThreadInputRepo == nil {
 		return false
