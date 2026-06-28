@@ -236,7 +236,7 @@ func (s *SlackService) Start() error {
 		return nil
 	}
 
-	botClient := slack.New(botToken, slack.OptionAppLevelToken(appToken))
+	botClient := slack.New(botToken, slack.OptionAppLevelToken(appToken), slack.OptionHTTPClient(s.httpClient))
 	socketClient := socketmode.New(botClient)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -625,6 +625,11 @@ type slackIncomingFile struct {
 	Size               int
 	URLPrivate         string
 	URLPrivateDownload string
+	Thumb360           string
+	Thumb480           string
+	Thumb720           string
+	Thumb960           string
+	Thumb1024          string
 }
 
 func (s *SlackService) processIncoming(msg slackIncomingMessage) {
@@ -649,6 +654,11 @@ func slackIncomingFilesFromEventFiles(files []slack.File) []slackIncomingFile {
 			Size:               f.Size,
 			URLPrivate:         f.URLPrivate,
 			URLPrivateDownload: f.URLPrivateDownload,
+			Thumb360:           f.Thumb360,
+			Thumb480:           f.Thumb480,
+			Thumb720:           f.Thumb720,
+			Thumb960:           f.Thumb960,
+			Thumb1024:          f.Thumb1024,
 		})
 	}
 	return out
@@ -2384,8 +2394,8 @@ func (s *SlackService) downloadSlackFiles(ctx context.Context, files []slackInco
 	if len(files) > slackMaxFilesPerMessage {
 		return nil, fmt.Errorf("too many files (%d, max %d)", len(files), slackMaxFilesPerMessage)
 	}
-	client := s.slackClientForFiles()
-	if client == nil {
+	botToken := strings.TrimSpace(s.resolveBotToken(ctx))
+	if botToken == "" {
 		return nil, fmt.Errorf("slack bot token is not configured")
 	}
 	tmpDir, err := os.MkdirTemp("", "slack-attachment-*")
@@ -2403,39 +2413,18 @@ func (s *SlackService) downloadSlackFiles(ctx context.Context, files []slackInco
 		if f.Size > slackMaxFileSize {
 			return nil, fmt.Errorf("file %q too large (%d bytes, max %d)", slackFileDisplayName(f), f.Size, slackMaxFileSize)
 		}
-		downloadURL := strings.TrimSpace(f.URLPrivateDownload)
-		if downloadURL == "" {
-			downloadURL = strings.TrimSpace(f.URLPrivate)
-		}
-		if downloadURL == "" {
-			return nil, fmt.Errorf("file %q has no private download URL", slackFileDisplayName(f))
-		}
 		fileName := slackSafeFileName(f)
-		destPath := filepath.Join(tmpDir, uniqueSlackTempFilename(tmpDir, fileName))
-		dest, err := os.Create(destPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create file: %w", err)
-		}
-		err = client.GetFileContext(ctx, downloadURL, dest)
-		closeErr := dest.Close()
-		if err != nil {
-			return nil, fmt.Errorf("failed to download file %q: %w", fileName, err)
-		}
-		if closeErr != nil {
-			return nil, fmt.Errorf("failed to save file %q: %w", fileName, closeErr)
-		}
-		info, err := os.Stat(destPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to stat file %q: %w", fileName, err)
-		}
 		mediaType := strings.TrimSpace(f.Mimetype)
 		if mediaType == "" {
 			mediaType = mediaTypeFromSlackFilename(fileName)
 		}
-		if normalizedMediaType, err := validateSlackDownloadedFile(destPath, fileName, mediaType); err != nil {
+		destPath, mediaType, err := s.downloadSlackFileCandidate(ctx, botToken, tmpDir, fileName, mediaType, f)
+		if err != nil {
 			return nil, err
-		} else if normalizedMediaType != "" {
-			mediaType = normalizedMediaType
+		}
+		info, err := os.Stat(destPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to stat file %q: %w", fileName, err)
 		}
 		absPath, err := filepath.Abs(destPath)
 		if err != nil {
@@ -2451,6 +2440,179 @@ func (s *SlackService) downloadSlackFiles(ctx context.Context, files []slackInco
 	}
 	cleanup = false
 	return attachments, nil
+}
+
+func (s *SlackService) downloadSlackFileCandidate(ctx context.Context, botToken, tmpDir, fileName, mediaType string, f slackIncomingFile) (string, string, error) {
+	candidates := slackFileDownloadURLs(f, mediaType)
+	if len(candidates) == 0 {
+		return "", "", fmt.Errorf("file %q has no private download URL", slackFileDisplayName(f))
+	}
+	var lastErr error
+	for i, candidateURL := range candidates {
+		destPath := filepath.Join(tmpDir, uniqueSlackTempFilename(tmpDir, fileName))
+		dest, err := os.Create(destPath)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to create file: %w", err)
+		}
+		err = s.downloadSlackPrivateFile(ctx, botToken, candidateURL, dest)
+		closeErr := dest.Close()
+		if err != nil {
+			_ = os.Remove(destPath)
+			lastErr = fmt.Errorf("failed to download file %q: %w", fileName, err)
+			continue
+		}
+		if closeErr != nil {
+			_ = os.Remove(destPath)
+			return "", "", fmt.Errorf("failed to save file %q: %w", fileName, closeErr)
+		}
+		normalizedMediaType, err := validateSlackDownloadedFile(destPath, fileName, mediaType)
+		if err == nil {
+			if i > 0 {
+				applog.Infof("[slack] attachment file=%s downloaded from fallback URL after earlier candidate failed", fileName)
+			}
+			if normalizedMediaType != "" {
+				mediaType = normalizedMediaType
+			}
+			return destPath, mediaType, nil
+		}
+		_ = os.Remove(destPath)
+		lastErr = err
+		if !isSlackImageFile(mediaType) {
+			break
+		}
+	}
+	if lastErr != nil {
+		return "", "", lastErr
+	}
+	return "", "", fmt.Errorf("failed to download file %q", fileName)
+}
+
+func slackFileDownloadURLs(f slackIncomingFile, mediaType string) []string {
+	seen := make(map[string]bool)
+	var urls []string
+	add := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" || seen[raw] {
+			return
+		}
+		seen[raw] = true
+		urls = append(urls, raw)
+	}
+	add(f.URLPrivateDownload)
+	add(f.URLPrivate)
+	if isSlackImageFile(mediaType) {
+		add(f.Thumb1024)
+		add(f.Thumb960)
+		add(f.Thumb720)
+		add(f.Thumb480)
+		add(f.Thumb360)
+	}
+	return urls
+}
+
+func (s *SlackService) downloadSlackPrivateFile(ctx context.Context, botToken, downloadURL string, writer io.Writer) error {
+	if strings.TrimSpace(downloadURL) == "" {
+		return fmt.Errorf("received empty download URL")
+	}
+	if strings.TrimSpace(botToken) == "" {
+		return fmt.Errorf("slack bot token is not configured")
+	}
+	client := s.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	downloadClient := *client
+	downloadClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	currentURL := downloadURL
+	for redirects := 0; redirects <= 10; redirects++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, currentURL, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+botToken)
+		req.Header.Set("User-Agent", "OpenVibely Slack file downloader")
+
+		resp, err := downloadClient.Do(req)
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			nextURL, err := slackRedirectLocation(currentURL, resp.Header.Get("Location"))
+			_ = resp.Body.Close()
+			if err != nil {
+				return err
+			}
+			if !slackCanForwardFileAuth(downloadURL, nextURL) {
+				return fmt.Errorf("slack file download redirected to untrusted host %q", nextURL.Host)
+			}
+			currentURL = nextURL.String()
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return fmt.Errorf("slack file download returned HTTP %d", resp.StatusCode)
+		}
+		if _, err := io.Copy(writer, resp.Body); err != nil {
+			return err
+		}
+		return nil
+	}
+	return fmt.Errorf("slack file download exceeded redirect limit")
+}
+
+func slackRedirectLocation(currentURL, location string) (*url.URL, error) {
+	if strings.TrimSpace(location) == "" {
+		return nil, fmt.Errorf("slack file download redirect missing Location header")
+	}
+	base, err := url.Parse(currentURL)
+	if err != nil {
+		return nil, err
+	}
+	next, err := url.Parse(location)
+	if err != nil {
+		return nil, err
+	}
+	return base.ResolveReference(next), nil
+}
+
+func slackCanForwardFileAuth(originalURL string, nextURL *url.URL) bool {
+	if nextURL == nil {
+		return false
+	}
+	original, err := url.Parse(originalURL)
+	if err != nil {
+		return false
+	}
+	return slackTrustedFileDownloadHost(original.Hostname(), nextURL.Hostname())
+}
+
+func slackTrustedFileDownloadHost(originalHost, nextHost string) bool {
+	originalHost = strings.ToLower(strings.TrimSpace(originalHost))
+	nextHost = strings.ToLower(strings.TrimSpace(nextHost))
+	if nextHost == "" {
+		return false
+	}
+	if nextHost == originalHost {
+		return true
+	}
+	if slackIsLocalhost(originalHost) && slackIsLocalhost(nextHost) {
+		return true
+	}
+	if nextHost == "slack.com" || strings.HasSuffix(nextHost, ".slack.com") {
+		return true
+	}
+	if nextHost == "slack-files.com" || strings.HasSuffix(nextHost, ".slack-files.com") {
+		return true
+	}
+	return false
+}
+
+func slackIsLocalhost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 func (s *SlackService) slackClientForFiles() *slack.Client {
