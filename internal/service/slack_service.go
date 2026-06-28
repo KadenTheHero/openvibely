@@ -569,9 +569,7 @@ func (s *SlackService) handleAppMention(ctx context.Context, teamID string, even
 }
 
 func (s *SlackService) handleMessageEvent(ctx context.Context, teamID string, event slackevents.MessageEvent) {
-	if strings.TrimSpace(event.ChannelType) != "im" {
-		return
-	}
+	channelType := strings.TrimSpace(event.ChannelType)
 	if strings.TrimSpace(event.User) == "" {
 		return
 	}
@@ -583,6 +581,9 @@ func (s *SlackService) handleMessageEvent(ctx context.Context, teamID string, ev
 	}
 	botUserID := strings.TrimSpace(s.getSetting(ctx, SlackSettingBotUserID))
 	if botUserID != "" && strings.TrimSpace(event.User) == botUserID {
+		return
+	}
+	if channelType != "im" && !slackMessageMentionsBot(event, botUserID) {
 		return
 	}
 
@@ -2474,6 +2475,21 @@ func (s *SlackService) checkAuthorization(ctx context.Context, projectID, slackU
 func sanitizeSlackText(text string) string {
 	cleaned := strings.TrimSpace(slackMentionRegex.ReplaceAllString(text, ""))
 	return strings.TrimSpace(cleaned)
+}
+
+func slackMessageMentionsBot(event slackevents.MessageEvent, botUserID string) bool {
+	botUserID = strings.TrimSpace(botUserID)
+	if botUserID == "" {
+		return false
+	}
+	needle := "<@" + botUserID + ">"
+	if strings.Contains(event.Text, needle) {
+		return true
+	}
+	if event.Message != nil && strings.Contains(event.Message.Text, needle) {
+		return true
+	}
+	return false
 }
 
 func (s *SlackService) downloadSlackAttachments(ctx context.Context, files []slackIncomingFile) (string, []models.Attachment, []models.ChatAttachment, error) {

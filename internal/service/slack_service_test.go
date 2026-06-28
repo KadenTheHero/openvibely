@@ -177,7 +177,7 @@ func TestSlackService_HandleOAuthCallbackInvalidState(t *testing.T) {
 	require.Contains(t, err.Error(), "invalid oauth state")
 }
 
-func TestSlackService_EventFilteringAcceptsDMAndAppMentions(t *testing.T) {
+func TestSlackService_EventFilteringAcceptsDMAppMentionsAndChannelMessageMentions(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "UBOT"))
@@ -201,13 +201,22 @@ func TestSlackService_EventFilteringAcceptsDMAndAppMentions(t *testing.T) {
 		Text:        "hello from dm",
 		TimeStamp:   "1710000001.100000",
 	})
+	svc.handleMessageEvent(context.Background(), "T1", slackevents.MessageEvent{
+		ChannelType: "channel",
+		User:        "U3",
+		Channel:     "C2",
+		Text:        "<@UBOT> hello from channel message",
+		TimeStamp:   "1710000002.100000",
+	})
 
-	require.Len(t, received, 2)
+	require.Len(t, received, 3)
 	require.Equal(t, "T1", received[0].TeamID)
 	require.Equal(t, "C1", received[0].ChannelID)
 	require.Equal(t, "hello from mention", received[0].Text)
 	require.Equal(t, "D1", received[1].ChannelID)
 	require.Equal(t, "hello from dm", received[1].Text)
+	require.Equal(t, "C2", received[2].ChannelID)
+	require.Equal(t, "hello from channel message", received[2].Text)
 }
 
 func TestSlackService_EventFilteringIgnoresBotSelfAndNonDMMessages(t *testing.T) {
@@ -1044,14 +1053,47 @@ func TestSlackService_EventFilteringPreservesFileMetadata(t *testing.T) {
 			URLPrivateDownload: "https://files.slack.test/dm-shot.png",
 		}}},
 	})
+	svc.handleMessageEvent(context.Background(), "T1", slackevents.MessageEvent{
+		ChannelType: "channel",
+		SubType:     "file_share",
+		User:        "U3",
+		Channel:     "C2",
+		Text:        "<@UBOT> what is this?",
+		TimeStamp:   "1710000002.100000",
+		Message: &slack.Msg{Files: []slack.File{{
+			ID:                 "F3",
+			Name:               "channel-shot.png",
+			Mimetype:           "image/png",
+			Size:               9,
+			URLPrivateDownload: "https://files.slack.test/channel-shot.png",
+		}}},
+	})
+	svc.handleMessageEvent(context.Background(), "T1", slackevents.MessageEvent{
+		ChannelType: "channel",
+		SubType:     "file_share",
+		User:        "U4",
+		Channel:     "C3",
+		Text:        "unmentioned screenshot",
+		TimeStamp:   "1710000003.100000",
+		Message: &slack.Msg{Files: []slack.File{{
+			ID:                 "F4",
+			Name:               "ignored-shot.png",
+			Mimetype:           "image/png",
+			Size:               10,
+			URLPrivateDownload: "https://files.slack.test/ignored-shot.png",
+		}}},
+	})
 
-	require.Len(t, received, 2)
+	require.Len(t, received, 3)
 	require.Len(t, received[0].Files, 1)
 	require.Equal(t, "F1", received[0].Files[0].ID)
 	require.Equal(t, "screenshot.png", received[0].Files[0].Name)
 	require.Len(t, received[1].Files, 1)
 	require.Equal(t, "F2", received[1].Files[0].ID)
 	require.Equal(t, "dm-shot.png", received[1].Files[0].Name)
+	require.Len(t, received[2].Files, 1)
+	require.Equal(t, "F3", received[2].Files[0].ID)
+	require.Equal(t, "channel-shot.png", received[2].Files[0].Name)
 }
 
 func TestSlackService_EventFilteringPreservesAttachmentAndBlockFileReferences(t *testing.T) {

@@ -25,6 +25,9 @@ In your Slack app:
 4. Subscribe to bot events:
    - `app_mention`
    - `message.im`
+   - `message.channels` if the bot should receive screenshot/file-share messages from public channels
+   - `message.groups` if the bot should receive screenshot/file-share messages from private channels
+   - `message.mpim` if the bot should receive screenshot/file-share messages from multi-person DMs
 5. Ensure the bot token has these OAuth scopes:
    - `app_mentions:read`
    - `channels:history`
@@ -35,7 +38,7 @@ In your Slack app:
    - `files:read`
 6. Reinstall the app to the workspace after changing scopes/events
 
-If message events are missing, you may see a valid token test but no message handling. If `files:read` is missing, text messages may work but screenshots/files attached to Slack messages cannot be downloaded into OpenVibely.
+If message events are missing, you may see a valid token test but no message handling. If `files:read` is missing, text messages may work but screenshots/files attached to Slack messages cannot be downloaded into OpenVibely. In channels, Slack may deliver file shares as `message.*` events instead of `app_mention`; OpenVibely only processes those channel message events when the text explicitly mentions the bot.
 
 ## Two Bot Token Modes in OpenVibely
 
