@@ -330,3 +330,62 @@ func TestHandler_DeleteAgent_NoDiskDirDoesNotFail(t *testing.T) {
 		t.Fatal("expected No-Disk Agent to be absent from agents list after delete")
 	}
 }
+
+// TestHandler_DeleteAgent_CleansUpAgentsIndex verifies that deleting an agent
+// also removes its ## <key> section from agents/AGENTS.md so stale entries do
+// not pollute LLM context on subsequent task turns.
+func TestHandler_DeleteAgent_CleansUpAgentsIndex(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+
+	// Create an agent with a SKILLS.md on disk (also writes agents/AGENTS.md entry).
+	writeAgentRootSKILLSmd(t, root, "claudia", "Claudia", "does nothing")
+
+	// Confirm AGENTS.md has the entry before deletion.
+	agentsIndexPath := filepath.Join(root, "agents", "AGENTS.md")
+	before, err := os.ReadFile(agentsIndexPath)
+	if err != nil {
+		t.Fatalf("read AGENTS.md before delete: %v", err)
+	}
+	if !strings.Contains(string(before), "## claudia") {
+		t.Fatalf("expected ## claudia section in AGENTS.md before delete:\n%s", before)
+	}
+
+	// Persist the agent in DB.
+	agent := &models.Agent{
+		Name:    "Claudia",
+		Key:     "claudia",
+		Scope:   models.AgentScopeGlobal,
+		Model:   "inherit",
+		Enabled: true,
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	// Register routes and DELETE.
+	e.DELETE("/agents/:id", h.DeleteAgent)
+	e.GET("/agents", h.ListAgents)
+
+	req := httptest.NewRequest(http.MethodDelete, "/agents/"+agent.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// AGENTS.md must no longer contain the ## claudia section.
+	after, err := os.ReadFile(agentsIndexPath)
+	if err != nil {
+		t.Fatalf("read AGENTS.md after delete: %v", err)
+	}
+	if strings.Contains(string(after), "## claudia") {
+		t.Fatalf("expected ## claudia section removed from AGENTS.md after delete:\n%s", after)
+	}
+}

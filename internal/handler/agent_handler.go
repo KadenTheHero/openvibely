@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	"github.com/openvibely/openvibely/internal/applog"
 	llmretry "github.com/openvibely/openvibely/internal/llm/retry"
@@ -1705,6 +1706,12 @@ func (h *Handler) DeleteAgent(c echo.Context) error {
 				} else {
 					applog.Infof("[handler] DeleteAgent removed on-disk agent dir key=%q path=%q", key, agentDir)
 				}
+			}
+			// Remove the agent's ## <key> section from the AGENTS.md index so the
+			// deleted agent no longer appears in LLM context or the skill catalog.
+			agentsIndexPath := filepath.Join(filepath.Dir(agentDir), "AGENTS.md")
+			if _, idxErr := agentlibrary.RemoveAgentIndexEntry(agentsIndexPath, key); idxErr != nil {
+				applog.Infof("[handler] DeleteAgent AGENTS.md cleanup warning key=%q: %v", key, idxErr)
 			}
 		}
 	}

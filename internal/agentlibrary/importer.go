@@ -1212,6 +1212,13 @@ func removeSkillIndexEntry(path, handle string) (bool, error) {
 	return true, nil
 }
 
+// RemoveAgentIndexEntry removes the ## <key> section for the given agent key
+// from the AGENTS.md index at path. It is a no-op when the file does not exist
+// or the key is not present. Returns true when the file was modified.
+func RemoveAgentIndexEntry(path, key string) (bool, error) {
+	return removeSkillIndexEntry(path, key)
+}
+
 func removeSkillIndexSection(body, handle string) string {
 	lines := strings.Split(body, "\n")
 	sections := splitSkillIndexSections(body)
