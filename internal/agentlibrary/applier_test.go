@@ -455,6 +455,76 @@ func TestRepoApplier_NilStoreErrors(t *testing.T) {
 	}
 }
 
+func TestRepoApplier_ImportPreservesDisabledAgent(t *testing.T) {
+	// A root declaration with enabled: false must produce a disabled agent row.
+	agents := newMemAgentStore()
+	ap := NewRepoApplier(agents, newMemHookStore())
+
+	disabled := false
+	decl := newTestDeclaration()
+	decl.Agent.Enabled = &disabled
+
+	if _, err := ap.ApplyDeclaration(context.Background(), decl); err != nil {
+		t.Fatalf("ApplyDeclaration: %v", err)
+	}
+	stored := agents.byKey["backend-engineer"]
+	if stored == nil {
+		t.Fatal("expected agent to be created")
+	}
+	if stored.Enabled {
+		t.Fatalf("expected stored.Enabled=false for declaration with enabled: false, got true")
+	}
+}
+
+func TestRepoApplier_ImportPreservesDisabledAgentOnUpdate(t *testing.T) {
+	// Updating an existing enabled agent from a declaration with enabled: false
+	// must flip the stored row to disabled.
+	agents := newMemAgentStore()
+	agents.byKey["backend-engineer"] = &models.Agent{
+		ID:              "id_backend-engineer",
+		Key:             "backend-engineer",
+		Enabled:         true,
+		GeneratedStatus: models.AgentStatusUserEdited,
+		CreatedBy:       models.AgentCreatedByUser,
+	}
+	ap := NewRepoApplier(agents, newMemHookStore())
+
+	disabled := false
+	decl := newTestDeclaration()
+	decl.Agent.Enabled = &disabled
+
+	if _, err := ap.ApplyDeclaration(context.Background(), decl); err != nil {
+		t.Fatalf("ApplyDeclaration: %v", err)
+	}
+	stored := agents.byKey["backend-engineer"]
+	if stored.Enabled {
+		t.Fatalf("expected stored.Enabled=false after update with declaration enabled: false, got true")
+	}
+}
+
+func TestRepoApplier_ImportDefaultsToEnabledWhenFieldAbsent(t *testing.T) {
+	// Declarations that do not set the enabled field at all (nil pointer) should
+	// produce an enabled agent so existing declarations are not broken.
+	agents := newMemAgentStore()
+	ap := NewRepoApplier(agents, newMemHookStore())
+
+	decl := newTestDeclaration()
+	// Ensure the field is nil (the default for newTestDeclaration already is nil,
+	// but be explicit for test readability).
+	decl.Agent.Enabled = nil
+
+	if _, err := ap.ApplyDeclaration(context.Background(), decl); err != nil {
+		t.Fatalf("ApplyDeclaration: %v", err)
+	}
+	stored := agents.byKey["backend-engineer"]
+	if stored == nil {
+		t.Fatal("expected agent to be created")
+	}
+	if !stored.Enabled {
+		t.Fatalf("expected stored.Enabled=true when declaration omits enabled field, got false")
+	}
+}
+
 func TestRepoApplier_RejectsInvalidDeclaration(t *testing.T) {
 	ap := NewRepoApplier(newMemAgentStore(), newMemHookStore())
 	bad := newTestDeclaration()

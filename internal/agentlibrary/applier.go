@@ -228,6 +228,12 @@ func agentFromDeclaration(decl *SkillDeclaration, existing *models.Agent) *model
 	if !decl.IsAgentRootDeclaration() {
 		return agentFromSkillDeclaration(decl, existing)
 	}
+	// Respect the declaration's enabled field. When absent (nil), default to
+	// true so legacy declarations that never set the field stay enabled.
+	enabled := true
+	if decl.Agent.Enabled != nil {
+		enabled = *decl.Agent.Enabled
+	}
 	a := &models.Agent{
 		Name:                decl.Agent.AgentDisplayName(),
 		Description:         decl.Agent.Description,
@@ -242,7 +248,7 @@ func agentFromDeclaration(decl *SkillDeclaration, existing *models.Agent) *model
 		Scope:               models.AgentScope(firstNonEmpty(decl.Agent.Scope, "global")),
 		ProjectID:           decl.Agent.ProjectID,
 		SelectableAsPrimary: decl.Agent.SelectableAsPrimary,
-		Enabled:             true,
+		Enabled:             enabled,
 		PermissionDefaults:  permissionDefaultsFromDecl(decl),
 		ModelDefaults: models.AgentModelDefaults{
 			Model:       decl.ModelDefaults.Model,

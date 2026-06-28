@@ -453,6 +453,20 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 		</dialog>
 
 		<script>
+			// Returns "?project_id=<id>" when the current page URL has a
+			// project_id param, or "" for global-scope views.
+			function currentProjectQueryString() {
+				const params = new URLSearchParams(window.location.search || '');
+				const projectID = (params.get('project_id') || '').trim();
+				return projectID ? ('?project_id=' + encodeURIComponent(projectID)) : '';
+			}
+
+			// Appends the current project_id query string to a URL that has no
+			// existing query string of its own.
+			function withCurrentProject(url) {
+				return url + currentProjectQueryString();
+			}
+
 			let agentPluginState = { marketplaces: [], installed: [], available: [], runtime: [] };
 			let selectedPluginIDs = [];
 			let generatedSkillsState = [];
@@ -486,7 +500,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					var modal = document.getElementById('delete_agent_confirm_modal');
 					if (modal) modal.close();
 					try {
-						const response = await fetch('/agents/' + encodeURIComponent(id), {
+						const response = await fetch(withCurrentProject('/agents/' + encodeURIComponent(id)), {
 							method: 'DELETE',
 							headers: { 'HX-Request': 'true' }
 						});
@@ -1355,9 +1369,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			activeAgentID = String(id || '').trim();
 			document.getElementById('agent_modal_title').textContent = 'Edit Agent';
 			const form = document.getElementById('agent_form');
-			form.action = '/agents/' + id;
+			form.action = withCurrentProject('/agents/' + id);
 			form.removeAttribute('hx-post');
-			form.setAttribute('hx-put', '/agents/' + id);
+			form.setAttribute('hx-put', withCurrentProject('/agents/' + id));
 			form.setAttribute('hx-target', '#agents-container');
 			form.setAttribute('hx-swap', 'outerHTML');
 			htmx.process(form);
@@ -1386,7 +1400,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 		async function loadAgentLifecycleFromServer(agentID) {
 			if (!agentID) return;
 			try {
-				const response = await fetch('/agents/' + encodeURIComponent(agentID) + '/json', { headers: { 'Accept': 'application/json' }});
+				const response = await fetch(withCurrentProject('/agents/' + encodeURIComponent(agentID) + '/json'), { headers: { 'Accept': 'application/json' }});
 				if (response.ok) {
 					const data = await response.json();
 					populateLifecycleFormFromAgent(data);
@@ -1586,7 +1600,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				document.getElementById('lifecycle_hooks_list').innerHTML = '';
 				if (!agentID) return;
 				try {
-					const response = await fetch('/agents/' + encodeURIComponent(agentID) + '/lifecycle-hooks', { headers: { 'Accept': 'application/json' }});
+					const response = await fetch(withCurrentProject('/agents/' + encodeURIComponent(agentID) + '/lifecycle-hooks'), { headers: { 'Accept': 'application/json' }});
 					if (!response.ok) {
 						throw new Error('failed to load hooks: ' + response.status);
 					}

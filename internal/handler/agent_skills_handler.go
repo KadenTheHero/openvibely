@@ -309,6 +309,18 @@ func (h *Handler) currentProjectSkillRoot(c echo.Context) string {
 	return service.ProjectSkillRootForResolver(c.Request().Context(), h.projectRepo, projectID)
 }
 
+// projectSkillRootForAgent resolves the correct project skill root for an
+// agent-scoped operation. It prefers the project recorded on the agent row so
+// that requests lacking a query-string project_id still target the right
+// directory (covers non-browser callers and older UI requests). Falls back to
+// the request-derived current project when the agent has no ProjectID set.
+func (h *Handler) projectSkillRootForAgent(c echo.Context, agent *models.Agent) string {
+	if agent != nil && strings.TrimSpace(agent.ProjectID) != "" && h.projectRepo != nil {
+		return service.ProjectSkillRootForResolver(c.Request().Context(), h.projectRepo, strings.TrimSpace(agent.ProjectID))
+	}
+	return h.currentProjectSkillRoot(c)
+}
+
 func (h *Handler) rootForDialogScope(c echo.Context, scope string) (string, error) {
 	switch scope {
 	case "global":

@@ -389,3 +389,167 @@ func TestHandler_DeleteAgent_CleansUpAgentsIndex(t *testing.T) {
 		t.Fatalf("expected ## claudia section removed from AGENTS.md after delete:\n%s", after)
 	}
 }
+
+// TestHandler_DisabledAgentSurvivesListAgents is the key regression test for
+// Bug 2. Before the fix, SyncRootDeclarations always hard-coded Enabled: true
+// when importing a root declaration, so a disabled agent would be silently
+// re-enabled the next time ListAgents ran. This test verifies that after saving
+// a disabled agent and materializing it to disk, a subsequent ListAgents call
+// leaves the agent disabled.
+func TestHandler_DisabledAgentSurvivesListAgents(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+
+	root := t.TempDir()
+
+	maintenanceSvc := service.NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
+	maintenanceSvc.SetLifecycleRepo(lifecycleRepo)
+	maintenanceSvc.SetAgentsRootPath(root)
+
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+	h.SetAgentSkillRoot(root)
+	h.SetAgentLibraryMaintenanceService(maintenanceSvc)
+
+	// Create the agent disabled.
+	agent := &models.Agent{
+		Name:                "Disabled Agent",
+		Key:                 "disabled-agent",
+		Scope:               models.AgentScopeGlobal,
+		Model:               "inherit",
+		Enabled:             false,
+		SelectableAsPrimary: true,
+		GeneratedStatus:     models.AgentStatusUserEdited,
+		CreatedBy:           models.AgentCreatedByUser,
+		Tools:               []string{},
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create disabled agent: %v", err)
+	}
+
+	// Materialize to disk — the on-disk SKILLS.md will contain "enabled: false".
+	synthCtx := e.NewContext(httptest.NewRequest(http.MethodGet, "/agents", nil), httptest.NewRecorder())
+	if err := h.materializeAgentToDisk(synthCtx, agent, ""); err != nil {
+		t.Fatalf("materialize agent to disk: %v", err)
+	}
+
+	skillsPath := filepath.Join(root, "agents", "disabled-agent", "SKILLS.md")
+	data, readErr := os.ReadFile(skillsPath)
+	if readErr != nil {
+		t.Fatalf("read SKILLS.md after materialize: %v", readErr)
+	}
+	if !strings.Contains(string(data), "enabled: false") {
+		t.Fatalf("expected SKILLS.md to contain 'enabled: false' after materialize, got:\n%s", data)
+	}
+
+	// GET /agents triggers SyncRootDeclarations which re-imports from the
+	// on-disk SKILLS.md. Before the fix this would silently flip Enabled→true.
+	req := httptest.NewRequest(http.MethodGet, "/agents", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /agents expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	body := rec.Body.String()
+
+	// The rendered card must carry data-agent-enabled="false".
+	if !strings.Contains(body, `data-agent-enabled="false"`) {
+		t.Fatalf("expected card with data-agent-enabled=\"false\" after ListAgents, but not found.\nBody excerpt: %s",
+			truncateBody(body, 2000))
+	}
+
+	// Verify the DB row remained disabled.
+	stored, err := agentRepo.GetByKey(t.Context(), "disabled-agent")
+	if err != nil {
+		t.Fatalf("GetByKey after ListAgents: %v", err)
+	}
+	if stored == nil {
+		t.Fatal("expected disabled agent to still exist in DB after ListAgents")
+	}
+	if stored.Enabled {
+		t.Fatalf("expected agent to remain Enabled=false after SyncRootDeclarations, but got Enabled=true")
+	}
+}
+
+// truncateBody is a local test helper to avoid giant failure messages.
+func truncateBody(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "...[truncated]"
+}
+
+// TestHandler_DeleteAgent_ProjectScopedUsesAgentProjectID verifies that when a
+// project-scoped agent has ProjectID set, deleting it without supplying a
+// ?project_id query string still removes the agent directory from the correct
+// project. This covers non-browser callers and older UI requests that omit the
+// project context.
+func TestHandler_DeleteAgent_ProjectScopedUsesAgentProjectID(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	// A global skill root is required for the directory-cleanup guard.
+	globalRoot := t.TempDir()
+	h.SetAgentSkillRoot(globalRoot)
+
+	// Create a project whose RepoPath is a real temp directory so that
+	// ProjectSkillRootForResolver can resolve the .openvibely path.
+	projectRepoDir := t.TempDir()
+	proj := &models.Project{Name: "Project Alpha", RepoPath: projectRepoDir}
+	if err := h.projectSvc.Create(t.Context(), proj); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	// Write the agent's SKILLS.md inside the project's .openvibely root.
+	projectRoot := filepath.Join(projectRepoDir, ".openvibely")
+	writeAgentRootSKILLSmd(t, projectRoot, "project-agent", "Project Agent", "project scoped agent")
+
+	agentDir := filepath.Join(projectRoot, "agents", "project-agent")
+	if _, err := os.Stat(agentDir); err != nil {
+		t.Fatalf("expected agent dir to exist before delete: %v", err)
+	}
+
+	// Create the project-scoped agent in the DB with ProjectID set.
+	agent := &models.Agent{
+		Name:      "Project Agent",
+		Key:       "project-agent",
+		Scope:     models.AgentScopeProject,
+		ProjectID: proj.ID,
+		Model:     "inherit",
+		Tools:     []string{},
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	// DELETE without ?project_id in the URL — agent.ProjectID must be used.
+	req := httptest.NewRequest(http.MethodDelete, "/agents/"+agent.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Project agent directory must be removed via agent.ProjectID resolution.
+	if _, err := os.Stat(agentDir); !os.IsNotExist(err) {
+		t.Fatalf("expected project agent directory removed via agent.ProjectID, stat err=%v", err)
+	}
+
+	// DB row must be gone.
+	gone, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("GetByID after delete: %v", err)
+	}
+	if gone != nil {
+		t.Fatalf("expected agent deleted from DB, got %+v", gone)
+	}
+}

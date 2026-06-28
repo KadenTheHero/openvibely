@@ -61,8 +61,10 @@ func TestHandler_ListAgents_DeleteConfirmationDialog(t *testing.T) {
 		`onclick="openDeleteAgentConfirm(this)"`,
 		`modal.showModal()`,
 		`async function confirmDeleteAgent()`,
-		`fetch('/agents/' + encodeURIComponent(id)`,
+		`fetch(withCurrentProject('/agents/' + encodeURIComponent(id))`,
 		`method: 'DELETE'`,
+		`function withCurrentProject(url)`,
+		`function currentProjectQueryString()`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected agents delete confirmation markup/script to contain %q", want)
@@ -2485,8 +2487,9 @@ func TestHandler_ListAgents_DeleteUsesDurableDeleteRequest(t *testing.T) {
 	for _, want := range []string{
 		`onclick="openDeleteAgentConfirm(this)"`,
 		`async function confirmDeleteAgent()`,
-		`fetch('/agents/' + encodeURIComponent(id)`,
+		`fetch(withCurrentProject('/agents/' + encodeURIComponent(id))`,
 		`method: 'DELETE'`,
+		`function withCurrentProject(url)`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected durable delete flow markup to contain %q; body:\n%s", want, body)

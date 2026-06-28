@@ -1551,6 +1551,13 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 	if err := applyLifecycleAgentFormFields(c, &agent); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	// Ensure project-scoped new agents carry a ProjectID so disk operations
+	// target the correct project directory from the start.
+	if agent.Scope == models.AgentScopeProject && strings.TrimSpace(agent.ProjectID) == "" {
+		if pid, _ := h.getCurrentProjectID(c); pid != "" {
+			agent.ProjectID = pid
+		}
+	}
 
 	applog.Infof("[handler] CreateAgent name=%q model=%s tools=%d skills=%d mcp=%d",
 		agent.Name, agent.Model, len(agent.Tools), len(agent.Skills), len(agent.MCPServers))
@@ -1641,6 +1648,14 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 	if err := applyLifecycleAgentFormFields(c, existing); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	// Ensure project-scoped agents always carry a ProjectID so subsequent disk
+	// and delete operations target the correct project directory even when the
+	// request lacks a query-string project_id.
+	if existing.Scope == models.AgentScopeProject && strings.TrimSpace(existing.ProjectID) == "" {
+		if pid, _ := h.getCurrentProjectID(c); pid != "" {
+			existing.ProjectID = pid
+		}
+	}
 
 	applog.Infof("[handler] UpdateAgent id=%s name=%q", id, existing.Name)
 
@@ -1653,10 +1668,10 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 			return err
 		}
 	}
-	if err := h.materializeAgentToDisk(c, existing, h.currentProjectSkillRoot(c)); err != nil {
+	if err := h.materializeAgentToDisk(c, existing, h.projectSkillRootForAgent(c, existing)); err != nil {
 		return err
 	}
-	if err := h.migrateLegacyAgentSkills(c, existing, h.currentProjectSkillRoot(c)); err != nil {
+	if err := h.migrateLegacyAgentSkills(c, existing, h.projectSkillRootForAgent(c, existing)); err != nil {
 		return err
 	}
 
@@ -1693,7 +1708,7 @@ func (h *Handler) DeleteAgent(c echo.Context) error {
 		var agentDir string
 		switch scope {
 		case "project":
-			if projectRoot := h.currentProjectSkillRoot(c); projectRoot != "" {
+			if projectRoot := h.projectSkillRootForAgent(c, agent); projectRoot != "" {
 				agentDir = filepath.Join(projectRoot, "agents", key)
 			}
 		default:
