@@ -27,6 +27,10 @@ type outboundSlackSender interface {
 	SendOutboundMessage(ctx context.Context, channelID, threadTS, text string) SendMessageResult
 }
 
+type outboundSlackDMSender interface {
+	SendOutboundDirectMessage(ctx context.Context, userID, text string) SendMessageResult
+}
+
 type outboundTelegramSender interface {
 	SendOutboundMessage(ctx context.Context, chatID int64, threadID int, text string) SendMessageResult
 }
@@ -39,11 +43,21 @@ type outboundDiscordSender interface {
 	SendOutboundMessage(ctx context.Context, channelID, threadID, text string) SendMessageResult
 }
 
+type outboundDiscordDMSender interface {
+	SendOutboundDirectMessage(ctx context.Context, userID, text string) SendMessageResult
+}
+
+type outboundAuthorizedUserStore interface {
+	IsAuthorized(ctx context.Context, projectID, userID string) (bool, error)
+}
+
 type ChannelMessageRouter struct {
 	slack        outboundSlackSender
 	telegram     outboundTelegramSender
 	email        outboundEmailSender
 	discord      outboundDiscordSender
+	slackAuth    outboundAuthorizedUserStore
+	discordAuth  outboundAuthorizedUserStore
 	targets      channelTargetStore
 	settings     *repository.SettingsRepo
 	newID        func() string
@@ -84,6 +98,12 @@ func (r *ChannelMessageRouter) SetSlackService(svc outboundSlackSender)       { 
 func (r *ChannelMessageRouter) SetTelegramService(svc outboundTelegramSender) { r.telegram = svc }
 func (r *ChannelMessageRouter) SetEmailService(svc outboundEmailSender)       { r.email = svc }
 func (r *ChannelMessageRouter) SetDiscordService(svc outboundDiscordSender)   { r.discord = svc }
+func (r *ChannelMessageRouter) SetSlackAuthStore(store outboundAuthorizedUserStore) {
+	r.slackAuth = store
+}
+func (r *ChannelMessageRouter) SetDiscordAuthStore(store outboundAuthorizedUserStore) {
+	r.discordAuth = store
+}
 func (r *ChannelMessageRouter) WithAuditContext(surface, user string) *ChannelMessageRouter {
 	if r == nil {
 		return nil
@@ -208,6 +228,7 @@ type resolvedMessageTarget struct {
 	TargetID       string
 	ThreadID       string
 	DefaultSubject string
+	DirectUser     bool
 }
 
 func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw string) (resolvedMessageTarget, error) {
@@ -247,6 +268,12 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 		ref = normalized
 	}
 	if !isNativeTarget(platform, ref) {
+		if isOutboundDirectUserTarget(platform, ref) {
+			dmTarget, dmErr := r.resolveAuthorizedDirectUserTarget(ctx, projectID, platform, ref)
+			if dmErr == nil {
+				return dmTarget, nil
+			}
+		}
 		return resolvedMessageTarget{}, fmt.Errorf("Invalid %s target %q; call send_message with action=list", platform, ref)
 	}
 	if platform == "telegram" && threadID != "" {
@@ -259,6 +286,12 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 	} else if saved != nil {
 		return fromStoredTarget(*saved), nil
 	}
+	if threadID == "" && isOutboundDirectUserTarget(platform, ref) {
+		dmTarget, dmErr := r.resolveAuthorizedDirectUserTarget(ctx, projectID, platform, ref)
+		if dmErr == nil {
+			return dmTarget, nil
+		}
+	}
 	if !r.allowExplicitTargets(ctx, projectID) {
 		return resolvedMessageTarget{}, fmt.Errorf("Explicit %s target is not saved for this project; call send_message with action=list", platform)
 	}
@@ -270,6 +303,13 @@ func (r *ChannelMessageRouter) dispatch(ctx context.Context, req SendMessageRequ
 	case "slack":
 		if r.slack == nil {
 			return sendMessageError("slack channel is not configured")
+		}
+		if target.DirectUser {
+			dmSender, ok := r.slack.(outboundSlackDMSender)
+			if !ok {
+				return sendMessageError("slack direct messages are not supported by this channel service")
+			}
+			return dmSender.SendOutboundDirectMessage(ctx, target.TargetID, req.Message)
 		}
 		return r.slack.SendOutboundMessage(ctx, target.TargetID, target.ThreadID, req.Message)
 	case "telegram":
@@ -300,6 +340,13 @@ func (r *ChannelMessageRouter) dispatch(ctx context.Context, req SendMessageRequ
 	case "discord":
 		if r.discord == nil {
 			return sendMessageError("discord channel is not configured")
+		}
+		if target.DirectUser {
+			dmSender, ok := r.discord.(outboundDiscordDMSender)
+			if !ok {
+				return sendMessageError("discord direct messages are not supported by this channel service")
+			}
+			return dmSender.SendOutboundDirectMessage(ctx, target.TargetID, req.Message)
 		}
 		return r.discord.SendOutboundMessage(ctx, target.TargetID, target.ThreadID, req.Message)
 	default:
@@ -366,6 +413,8 @@ func fromStoredTarget(target models.ChannelTarget) resolvedMessageTarget {
 }
 
 var slackNativeTargetPattern = regexp.MustCompile(`^[CGD][A-Z0-9]+$`)
+var slackUserTargetPattern = regexp.MustCompile(`^U[A-Z0-9]+$`)
+var discordUserTargetPattern = regexp.MustCompile(`^[0-9]+$`)
 
 func isNativeTarget(platform, ref string) bool {
 	ref = strings.TrimSpace(ref)
@@ -382,6 +431,42 @@ func isNativeTarget(platform, ref string) bool {
 	default:
 		return false
 	}
+}
+
+func isOutboundDirectUserTarget(platform, ref string) bool {
+	ref = strings.TrimSpace(ref)
+	switch platform {
+	case "slack":
+		return slackUserTargetPattern.MatchString(ref)
+	case "discord":
+		return discordUserTargetPattern.MatchString(ref)
+	default:
+		return false
+	}
+}
+
+func (r *ChannelMessageRouter) resolveAuthorizedDirectUserTarget(ctx context.Context, projectID, platform, userID string) (resolvedMessageTarget, error) {
+	userID = strings.TrimSpace(userID)
+	var store outboundAuthorizedUserStore
+	switch platform {
+	case "slack":
+		store = r.slackAuth
+	case "discord":
+		store = r.discordAuth
+	default:
+		return resolvedMessageTarget{}, fmt.Errorf("unsupported direct-message platform")
+	}
+	if store == nil {
+		return resolvedMessageTarget{}, fmt.Errorf("%s authorized-user store is not configured", platform)
+	}
+	allowed, err := store.IsAuthorized(ctx, projectID, userID)
+	if err != nil {
+		return resolvedMessageTarget{}, err
+	}
+	if !allowed {
+		return resolvedMessageTarget{}, fmt.Errorf("%s user is not authorized for outbound direct messages", platform)
+	}
+	return resolvedMessageTarget{Platform: platform, TargetID: userID, DirectUser: true}, nil
 }
 
 func NormalizeOutboundEmailForTarget(email string) (string, error) {

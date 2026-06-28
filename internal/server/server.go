@@ -561,6 +561,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	channelMessageRouter := service.NewChannelMessageRouter(channelTargetRepo, settingsRepo)
 	llmSvc.SetChannelMessageRouter(channelMessageRouter)
 	channelMessageRouter.SetSlackService(slackSvc)
+	channelMessageRouter.SetSlackAuthStore(slackAuthRepo)
 	channelMessageRouter.SetEmailService(emailSvc)
 	slackSvc.SetChannelMessageRouter(channelMessageRouter)
 	emailSvc.SetChannelMessageRouter(channelMessageRouter)
@@ -591,6 +592,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	discordSvc.SetAgentRepo(agentRepo)
 	discordSvc.SetChannelMessageRouter(channelMessageRouter)
 	channelMessageRouter.SetDiscordService(discordSvc)
+	channelMessageRouter.SetDiscordAuthStore(discordAuthRepo)
 
 	// Git worktree service for task isolation
 	worktreeSvc := service.NewWorktreeService(taskRepo, projectRepo, settingsRepo)

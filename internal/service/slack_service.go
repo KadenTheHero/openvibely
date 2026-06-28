@@ -118,6 +118,7 @@ type SlackService struct {
 	userProjects             map[string]string
 	processedMessageEvents   map[string]time.Time
 	postMessageFn            func(channelID, threadTS, text string) (string, error)
+	openConversationFn       func(userID string) (string, error)
 	processIncomingMessageFn func(msg slackIncomingMessage)
 }
 
@@ -321,7 +322,7 @@ func (s *SlackService) ConnectURL(ctx context.Context, redirectURI string) (stri
 
 	v := url.Values{}
 	v.Set("client_id", clientID)
-	v.Set("scope", "app_mentions:read,channels:history,groups:history,im:history,mpim:history,chat:write,files:read")
+	v.Set("scope", "app_mentions:read,channels:history,groups:history,im:history,mpim:history,chat:write,im:write,files:read")
 	v.Set("redirect_uri", redirectURI)
 	v.Set("state", state)
 	return "https://slack.com/oauth/v2/authorize?" + v.Encode(), nil
@@ -3357,6 +3358,34 @@ func (s *SlackService) sendSlackMessage(channelID, threadTS, text string) error 
 	return err
 }
 
+func (s *SlackService) openSlackDirectMessage(userID string) (string, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return "", fmt.Errorf("slack user id is required")
+	}
+	if s.openConversationFn != nil {
+		return s.openConversationFn(userID)
+	}
+	s.mu.RLock()
+	client := s.botClient
+	s.mu.RUnlock()
+	if client == nil {
+		botToken := strings.TrimSpace(s.resolveBotToken(context.Background()))
+		if botToken == "" {
+			return "", fmt.Errorf("slack bot token is not configured")
+		}
+		client = slack.New(botToken)
+	}
+	channel, _, _, err := client.OpenConversation(&slack.OpenConversationParameters{ReturnIM: true, Users: []string{userID}})
+	if err != nil {
+		return "", fmt.Errorf("open slack direct message: %w", err)
+	}
+	if channel == nil || strings.TrimSpace(channel.ID) == "" {
+		return "", fmt.Errorf("open slack direct message: missing channel id")
+	}
+	return strings.TrimSpace(channel.ID), nil
+}
+
 func (s *SlackService) postSlackMessage(channelID, threadTS, text string) (string, error) {
 	if strings.TrimSpace(channelID) == "" || strings.TrimSpace(text) == "" {
 		return "", nil
@@ -3403,6 +3432,26 @@ func (s *SlackService) SendOutboundMessage(ctx context.Context, channelID, threa
 		return SendMessageResult{OK: false, Platform: "slack", Target: formatResolvedMessageTarget("slack", channelID, threadTS), Error: err.Error()}
 	}
 	return SendMessageResult{OK: true, Platform: "slack", Target: formatResolvedMessageTarget("slack", channelID, threadTS), MessageID: messageID}
+}
+
+func (s *SlackService) SendOutboundDirectMessage(ctx context.Context, userID, text string) SendMessageResult {
+	_ = ctx
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return SendMessageResult{OK: false, Platform: "slack", Error: "slack user id is required"}
+	}
+	if strings.TrimSpace(text) == "" {
+		return SendMessageResult{OK: false, Platform: "slack", Target: formatResolvedMessageTarget("slack", userID, ""), Error: "message is required"}
+	}
+	channelID, err := s.openSlackDirectMessage(userID)
+	if err != nil {
+		return SendMessageResult{OK: false, Platform: "slack", Target: formatResolvedMessageTarget("slack", userID, ""), Error: err.Error()}
+	}
+	messageID, err := s.postSlackMessage(channelID, "", text)
+	if err != nil {
+		return SendMessageResult{OK: false, Platform: "slack", Target: formatResolvedMessageTarget("slack", userID, ""), Error: err.Error()}
+	}
+	return SendMessageResult{OK: true, Platform: "slack", Target: formatResolvedMessageTarget("slack", userID, ""), MessageID: messageID}
 }
 
 func generateOAuthState() (string, error) {

@@ -21,6 +21,25 @@ func TestRegistry_AllActionsHaveValidJSON(t *testing.T) {
 	}
 }
 
+func TestRegistry_SendMessageTargetDescriptionMentionsAuthorizedUserDMs(t *testing.T) {
+	def := Get("send_message")
+	if def == nil {
+		t.Fatal("send_message action missing")
+	}
+	var schema struct {
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		t.Fatalf("decode send_message schema: %v", err)
+	}
+	desc := schema.Properties["target"].Description
+	if !strings.Contains(desc, "slack:U123") || !strings.Contains(desc, "discord:1518288288572641398") {
+		t.Fatalf("send_message target description should mention authorized user DM targets, got %q", desc)
+	}
+}
+
 func TestRegistry_NoDuplicateNames(t *testing.T) {
 	seen := map[string]bool{}
 	for _, a := range Registry() {

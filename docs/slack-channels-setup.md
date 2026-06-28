@@ -35,10 +35,11 @@ In your Slack app:
    - `im:history`
    - `mpim:history`
    - `chat:write`
+   - `im:write` for outbound direct messages to authorized Slack users
    - `files:read`
 6. Reinstall the app to the workspace after changing scopes/events
 
-If message events are missing, you may see a valid token test but no message handling. If `files:read` is missing, text messages may work but screenshots/files attached to Slack messages cannot be downloaded into OpenVibely. In channels, Slack may deliver file shares as `message.*` events instead of `app_mention`; OpenVibely only processes those channel message events when the text explicitly mentions the bot.
+If message events are missing, you may see a valid token test but no message handling. If `files:read` is missing, text messages may work but screenshots/files attached to Slack messages cannot be downloaded into OpenVibely. If `im:write` is missing, the `send_message` tool may be unable to open a direct-message destination for an authorized Slack user ID such as `slack:U123...`. In channels, Slack may deliver file shares as `message.*` events instead of `app_mention`; OpenVibely only processes those channel message events when the text explicitly mentions the bot.
 
 ## Two Bot Token Modes in OpenVibely
 

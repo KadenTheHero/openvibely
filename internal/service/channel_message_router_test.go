@@ -12,11 +12,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type fakeSlackOutbound struct{ channelID, threadTS, text string }
+type fakeSlackOutbound struct{ channelID, threadTS, userID, text string }
 
 func (f *fakeSlackOutbound) SendOutboundMessage(_ context.Context, channelID, threadTS, text string) SendMessageResult {
 	f.channelID, f.threadTS, f.text = channelID, threadTS, text
 	return SendMessageResult{OK: true, Platform: "slack", Target: formatResolvedMessageTarget("slack", channelID, threadTS), MessageID: "171.1"}
+}
+
+func (f *fakeSlackOutbound) SendOutboundDirectMessage(_ context.Context, userID, text string) SendMessageResult {
+	f.userID, f.text = userID, text
+	return SendMessageResult{OK: true, Platform: "slack", Target: formatResolvedMessageTarget("slack", userID, ""), MessageID: "171.2"}
 }
 
 type fakeTelegramOutbound struct {
@@ -37,14 +42,19 @@ func (f *fakeEmailOutbound) SendOutboundMessage(_ context.Context, to, subject, 
 	return SendMessageResult{OK: true, Platform: "email", Target: "email:" + to}
 }
 
-type fakeDiscordOutbound struct{ channelID, threadID, text string }
+type fakeDiscordOutbound struct{ channelID, threadID, userID, text string }
 
 func (f *fakeDiscordOutbound) SendOutboundMessage(_ context.Context, channelID, threadID, text string) SendMessageResult {
 	f.channelID, f.threadID, f.text = channelID, threadID, text
 	return SendMessageResult{OK: true, Platform: "discord", Target: formatResolvedMessageTarget("discord", channelID, threadID), MessageID: "discord-msg-1"}
 }
 
-func setupChannelMessageRouterTest(t *testing.T) (context.Context, *repository.ChannelTargetRepo, *repository.SettingsRepo, *models.Project, *ChannelMessageRouter, *fakeSlackOutbound, *fakeTelegramOutbound, *fakeEmailOutbound, *fakeDiscordOutbound) {
+func (f *fakeDiscordOutbound) SendOutboundDirectMessage(_ context.Context, userID, text string) SendMessageResult {
+	f.userID, f.text = userID, text
+	return SendMessageResult{OK: true, Platform: "discord", Target: formatResolvedMessageTarget("discord", userID, ""), MessageID: "discord-dm-1"}
+}
+
+func setupChannelMessageRouterTest(t *testing.T) (context.Context, *repository.ChannelTargetRepo, *repository.SettingsRepo, *repository.SlackAuthRepo, *repository.DiscordAuthRepo, *models.Project, *ChannelMessageRouter, *fakeSlackOutbound, *fakeTelegramOutbound, *fakeEmailOutbound, *fakeDiscordOutbound) {
 	t.Helper()
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -53,6 +63,8 @@ func setupChannelMessageRouterTest(t *testing.T) (context.Context, *repository.C
 	require.NoError(t, projectRepo.Create(ctx, project))
 	targetRepo := repository.NewChannelTargetRepo(db)
 	settingsRepo := repository.NewSettingsRepo(db)
+	slackAuthRepo := repository.NewSlackAuthRepo(db)
+	discordAuthRepo := repository.NewDiscordAuthRepo(db)
 	router := NewChannelMessageRouter(targetRepo, settingsRepo)
 	slack := &fakeSlackOutbound{}
 	telegram := &fakeTelegramOutbound{}
@@ -62,16 +74,18 @@ func setupChannelMessageRouterTest(t *testing.T) (context.Context, *repository.C
 	router.SetTelegramService(telegram)
 	router.SetEmailService(email)
 	router.SetDiscordService(discord)
+	router.SetSlackAuthStore(slackAuthRepo)
+	router.SetDiscordAuthStore(discordAuthRepo)
 	auditSeq := 0
 	router.newID = func() string {
 		auditSeq++
 		return fmt.Sprintf("send-audit-id-%d", auditSeq)
 	}
-	return ctx, targetRepo, settingsRepo, project, router, slack, telegram, email, discord
+	return ctx, targetRepo, settingsRepo, slackAuthRepo, discordAuthRepo, project, router, slack, telegram, email, discord
 }
 
 func TestChannelMessageRouter_ListTargets(t *testing.T) {
-	ctx, targetRepo, _, project, router, _, _, _, _ := setupChannelMessageRouterTest(t)
+	ctx, targetRepo, _, _, _, project, router, _, _, _, _ := setupChannelMessageRouterTest(t)
 	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "t1", ProjectID: project.ID, Platform: "slack", Name: "ops", TargetID: "C123", Home: true}))
 	out, err := ExecuteSendMessageTool(ctx, router, project.ID, json.RawMessage(`{"action":"list"}`))
 	require.NoError(t, err)
@@ -80,7 +94,7 @@ func TestChannelMessageRouter_ListTargets(t *testing.T) {
 }
 
 func TestChannelMessageRouter_ResolvesHomeTargets(t *testing.T) {
-	ctx, targetRepo, _, project, router, slack, telegram, email, discord := setupChannelMessageRouterTest(t)
+	ctx, targetRepo, _, _, _, project, router, slack, telegram, email, discord := setupChannelMessageRouterTest(t)
 	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "slack-home", ProjectID: project.ID, Platform: "slack", TargetID: "C123", Home: true}))
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "slack", Message: "hello slack"}).OK)
 	require.Equal(t, "C123", slack.channelID)
@@ -101,7 +115,7 @@ func TestChannelMessageRouter_ResolvesHomeTargets(t *testing.T) {
 }
 
 func TestChannelMessageRouter_ResolvesNamedAndThreadTargets(t *testing.T) {
-	ctx, targetRepo, _, project, router, slack, telegram, email, discord := setupChannelMessageRouterTest(t)
+	ctx, targetRepo, _, _, _, project, router, slack, telegram, email, discord := setupChannelMessageRouterTest(t)
 	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "slack-ops", ProjectID: project.ID, Platform: "slack", Name: "ops", TargetID: "COPS", ThreadID: "1690000000.000000"}))
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:#ops", Message: "thread msg"}).OK)
 	require.Equal(t, "COPS", slack.channelID)
@@ -123,7 +137,7 @@ func TestChannelMessageRouter_ResolvesNamedAndThreadTargets(t *testing.T) {
 }
 
 func TestChannelMessageRouter_SendDirectTargetDoesNotRequireSavedOrExplicitPolicy(t *testing.T) {
-	ctx, targetRepo, _, project, router, _, _, email, discord := setupChannelMessageRouterTest(t)
+	ctx, targetRepo, _, _, _, project, router, _, _, email, discord := setupChannelMessageRouterTest(t)
 	res := router.SendDirectTarget(ctx, project.ID, ChannelTarget{Platform: "email", TargetID: "Draft@Example.com", DefaultSubject: "Draft Subject"}, SendMessageRequest{Message: "draft test"})
 	require.True(t, res.OK)
 	require.Equal(t, "draft@example.com", email.to)
@@ -145,7 +159,7 @@ func TestChannelMessageRouter_SendDirectTargetDoesNotRequireSavedOrExplicitPolic
 }
 
 func TestChannelMessageRouter_ExplicitTargetsRequireSetting(t *testing.T) {
-	ctx, targetRepo, settingsRepo, project, router, _, _, email, _ := setupChannelMessageRouterTest(t)
+	ctx, targetRepo, settingsRepo, _, _, project, router, _, _, email, _ := setupChannelMessageRouterTest(t)
 	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "email:Person@Example.com", Message: "body"})
 	require.False(t, res.OK)
 	require.Contains(t, res.Error, "not saved")
@@ -163,7 +177,7 @@ func TestChannelMessageRouter_ExplicitTargetsRequireSetting(t *testing.T) {
 }
 
 func TestChannelMessageRouter_ExplicitSlackAndTelegramTargets(t *testing.T) {
-	ctx, _, settingsRepo, project, router, slack, telegram, _, discord := setupChannelMessageRouterTest(t)
+	ctx, _, settingsRepo, _, _, project, router, slack, telegram, _, discord := setupChannelMessageRouterTest(t)
 	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting, "true"))
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:C123:169.1", Message: "slack"}).OK)
 	require.Equal(t, "C123", slack.channelID)
@@ -176,8 +190,46 @@ func TestChannelMessageRouter_ExplicitSlackAndTelegramTargets(t *testing.T) {
 	require.Equal(t, "987654321", discord.threadID)
 }
 
+func TestChannelMessageRouter_AuthorizedUserIDsResolveToDirectMessages(t *testing.T) {
+	ctx, _, _, slackAuthRepo, discordAuthRepo, project, router, slack, _, _, discord := setupChannelMessageRouterTest(t)
+
+	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:U0AQYLJR14Y", Message: "hi"})
+	require.False(t, res.OK)
+	require.Contains(t, res.Error, "Invalid slack target")
+
+	require.NoError(t, slackAuthRepo.Create(ctx, &models.SlackAuthorizedUser{ProjectID: project.ID, SlackUserID: "U0AQYLJR14Y", DisplayName: "Slack User", AddedBy: "test"}))
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:U0AQYLJR14Y", Message: "hi"})
+	require.True(t, res.OK, "authorized Slack user IDs should send as DMs: %#v", res)
+	require.Equal(t, "U0AQYLJR14Y", slack.userID)
+	require.Equal(t, "hi", slack.text)
+	require.Empty(t, slack.channelID, "authorized user DM should not be treated as a Slack channel ID")
+
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:1518288288572641398", Message: "hi"})
+	require.False(t, res.OK)
+	require.Contains(t, res.Error, "not saved")
+
+	require.NoError(t, discordAuthRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "1518288288572641398", DisplayName: "Discord User", AddedBy: "test"}))
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:1518288288572641398", Message: "hi"})
+	require.True(t, res.OK, "authorized Discord user IDs should send as DMs: %#v", res)
+	require.Equal(t, "1518288288572641398", discord.userID)
+	require.Equal(t, "hi", discord.text)
+	require.Empty(t, discord.channelID, "authorized Discord user ID should not be treated as a channel ID")
+}
+
+func TestChannelMessageRouter_SavedDiscordTargetTakesPrecedenceOverAuthorizedUserID(t *testing.T) {
+	ctx, targetRepo, _, _, discordAuthRepo, project, router, _, _, _, discord := setupChannelMessageRouterTest(t)
+	require.NoError(t, discordAuthRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "1518288288572641398", DisplayName: "Discord User", AddedBy: "test"}))
+	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-channel", ProjectID: project.ID, Platform: "discord", TargetID: "1518288288572641398"}))
+
+	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:1518288288572641398", Message: "hi channel"})
+	require.True(t, res.OK, "saved Discord channel targets should still send as channels: %#v", res)
+	require.Equal(t, "1518288288572641398", discord.channelID)
+	require.Equal(t, "hi channel", discord.text)
+	require.Empty(t, discord.userID)
+}
+
 func TestChannelMessageRouter_ValidationFailures(t *testing.T) {
-	ctx, _, settingsRepo, project, router, _, _, _, _ := setupChannelMessageRouterTest(t)
+	ctx, _, settingsRepo, _, _, project, router, _, _, _, _ := setupChannelMessageRouterTest(t)
 	require.False(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "", Message: "x"}).OK)
 	require.False(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:C123", Message: ""}).OK)
 	require.False(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "unknown:123", Message: "x"}).OK)

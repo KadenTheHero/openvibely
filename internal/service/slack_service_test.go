@@ -1028,6 +1028,28 @@ func TestSlackService_SendOutboundMessage_PostsChannelAndThread(t *testing.T) {
 	require.Equal(t, "1710000000.000001", res.MessageID)
 }
 
+func TestSlackService_SendOutboundDirectMessage_OpensDMBeforePosting(t *testing.T) {
+	svc := NewSlackService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	var gotUser, gotChannel, gotThread, gotText string
+	svc.openConversationFn = func(userID string) (string, error) {
+		gotUser = userID
+		return "D123", nil
+	}
+	svc.postMessageFn = func(channelID, threadTS, text string) (string, error) {
+		gotChannel, gotThread, gotText = channelID, threadTS, text
+		return "1710000000.000002", nil
+	}
+
+	res := svc.SendOutboundDirectMessage(context.Background(), "U0AQYLJR14Y", "hi")
+	require.True(t, res.OK)
+	require.Equal(t, "slack:U0AQYLJR14Y", res.Target)
+	require.Equal(t, "1710000000.000002", res.MessageID)
+	require.Equal(t, "U0AQYLJR14Y", gotUser)
+	require.Equal(t, "D123", gotChannel)
+	require.Empty(t, gotThread)
+	require.Equal(t, "hi", gotText)
+}
+
 func TestSlackService_SendOutboundMessage_MissingTokenReturnsCleanError(t *testing.T) {
 	svc := NewSlackService(repository.NewSettingsRepo(testutil.NewTestDB(t)), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	res := svc.SendOutboundMessage(context.Background(), "C123", "", "hello")
@@ -1049,6 +1071,7 @@ func TestSlackService_ConnectURLIncludesFilesReadScope(t *testing.T) {
 	require.NoError(t, err)
 	scopes := strings.Split(parsed.Query().Get("scope"), ",")
 	require.Contains(t, scopes, "files:read")
+	require.Contains(t, scopes, "im:write")
 }
 
 func TestSlackService_EventFilteringPreservesFileMetadata(t *testing.T) {

@@ -86,6 +86,7 @@ type DiscordService struct {
 	ctx                      context.Context
 	cancel                   context.CancelFunc
 	sendMessageFunc          func(channelID, messageID, text string) (string, error)
+	createDMChannelFunc      func(userID string) (string, error)
 	processIncomingMessageFn func(msg discordIncomingMessage)
 }
 
@@ -1342,6 +1343,58 @@ func (s *DiscordService) SendOutboundMessage(ctx context.Context, channelID, thr
 		return SendMessageResult{OK: false, Platform: "discord", Target: formatResolvedMessageTarget("discord", channelID, threadID), Error: err.Error()}
 	}
 	return SendMessageResult{OK: true, Platform: "discord", Target: formatResolvedMessageTarget("discord", channelID, threadID), MessageID: messageID}
+}
+
+func (s *DiscordService) SendOutboundDirectMessage(ctx context.Context, userID, text string) SendMessageResult {
+	_ = ctx
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return SendMessageResult{OK: false, Platform: "discord", Error: "discord user id is required"}
+	}
+	if strings.TrimSpace(text) == "" {
+		return SendMessageResult{OK: false, Platform: "discord", Target: formatResolvedMessageTarget("discord", userID, ""), Error: "message is required"}
+	}
+	channelID, err := s.openDiscordDirectMessage(userID)
+	if err != nil {
+		return SendMessageResult{OK: false, Platform: "discord", Target: formatResolvedMessageTarget("discord", userID, ""), Error: err.Error()}
+	}
+	messageID, err := s.sendDiscordMessageWithID(channelID, "", text)
+	if err != nil {
+		return SendMessageResult{OK: false, Platform: "discord", Target: formatResolvedMessageTarget("discord", userID, ""), Error: err.Error()}
+	}
+	return SendMessageResult{OK: true, Platform: "discord", Target: formatResolvedMessageTarget("discord", userID, ""), MessageID: messageID}
+}
+
+func (s *DiscordService) openDiscordDirectMessage(userID string) (string, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return "", fmt.Errorf("discord user id is required")
+	}
+	if s.createDMChannelFunc != nil {
+		return s.createDMChannelFunc(userID)
+	}
+	s.mu.RLock()
+	session := s.session
+	s.mu.RUnlock()
+	if session == nil {
+		botToken := strings.TrimSpace(s.getSetting(context.Background(), DiscordSettingBotToken))
+		if botToken == "" {
+			return "", fmt.Errorf("discord bot token is not configured")
+		}
+		var err error
+		session, err = discordgo.New("Bot " + botToken)
+		if err != nil {
+			return "", err
+		}
+	}
+	channel, err := session.UserChannelCreate(userID)
+	if err != nil {
+		return "", fmt.Errorf("open discord direct message: %w", err)
+	}
+	if channel == nil || strings.TrimSpace(channel.ID) == "" {
+		return "", fmt.Errorf("open discord direct message: missing channel id")
+	}
+	return strings.TrimSpace(channel.ID), nil
 }
 
 func (s *DiscordService) sendDiscordMessage(channelID, messageID, text string) error {

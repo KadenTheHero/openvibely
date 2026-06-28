@@ -92,6 +92,27 @@ func TestDiscordService_SendOutboundMessageUsesChannelAndThread(t *testing.T) {
 	}
 }
 
+func TestDiscordService_SendOutboundDirectMessage_CreatesDMBeforeSending(t *testing.T) {
+	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
+	var gotUserID, gotChannelID, gotMessageID, gotText string
+	svc.createDMChannelFunc = func(userID string) (string, error) {
+		gotUserID = userID
+		return "dm-channel-1", nil
+	}
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) {
+		gotChannelID, gotMessageID, gotText = channelID, messageID, text
+		return "discord-dm-msg-1", nil
+	}
+
+	res := svc.SendOutboundDirectMessage(context.Background(), "1518288288572641398", "hi")
+	if !res.OK || res.Platform != "discord" || res.Target != "discord:1518288288572641398" || res.MessageID != "discord-dm-msg-1" {
+		t.Fatalf("unexpected outbound direct result: %#v", res)
+	}
+	if gotUserID != "1518288288572641398" || gotChannelID != "dm-channel-1" || gotMessageID != "" || gotText != "hi" {
+		t.Fatalf("unexpected dm send user=%q channel=%q message=%q text=%q", gotUserID, gotChannelID, gotMessageID, gotText)
+	}
+}
+
 func TestDiscordActionHandlersSendMessageUsesChannelRouter(t *testing.T) {
 	svc, db, _, projectRepo, _, _, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()
