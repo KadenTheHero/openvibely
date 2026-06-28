@@ -1007,12 +1007,6 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 	}
 
 	msg.Files = s.resolveSlackIncomingFilesForRouting(ctx, msg.Files)
-	agent, err := s.autoSelectAgent(ctx, msg.Text, slackIncomingFilesContainImage(msg.Files))
-	if err != nil {
-		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, fmt.Sprintf("Error selecting model: %v", err))
-		return
-	}
-
 	if activeChatExec, activeErr := s.execRepo.FindLatestActiveChatExecution(ctx, projectID); activeErr != nil {
 		applog.Infof("[slack] error checking active chat turn: %v", activeErr)
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error checking active chat response. Please try again.")
@@ -1023,6 +1017,34 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		}
 	}
 
+	var attachmentContext string
+	var imageAttachments []models.Attachment
+	var chatAtts []models.ChatAttachment
+	if len(msg.Files) > 0 {
+		attCtx, imgAtts, downloadedChatAtts, err := s.downloadSlackAttachments(ctx, msg.Files)
+		if err != nil {
+			applog.Infof("[slack] attachment download error: %v", err)
+			msgText := fmt.Sprintf("Failed to process attachment: %v", err)
+			agent, agentErr := s.autoSelectAgent(ctx, msg.Text, slackIncomingFilesRequireVision(msg.Files))
+			if agentErr != nil {
+				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, fmt.Sprintf("Error selecting model: %v", agentErr))
+				return
+			}
+			s.recordQueuedAttachmentFailure(ctx, projectID, agent.ID, msg, msgText)
+			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
+			return
+		}
+		attachmentContext = attCtx
+		imageAttachments = imgAtts
+		chatAtts = downloadedChatAtts
+	}
+
+	agent, err := s.autoSelectAgent(ctx, msg.Text, len(imageAttachments) > 0)
+	if err != nil {
+		cleanupSlackAttachmentSourceDirs(chatAtts)
+		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, fmt.Sprintf("Error selecting model: %v", err))
+		return
+	}
 	selectedAgentID := agent.ID
 	chatTitle := fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47))
 	task := &models.Task{
@@ -1036,6 +1058,7 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 	}
 	if err := s.taskRepo.Create(ctx, task); err != nil {
 		applog.Infof("[slack] create chat task failed: %v", err)
+		cleanupSlackAttachmentSourceDirs(chatAtts)
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
 		return
 	}
@@ -1049,6 +1072,7 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 			SlackUserID:    msg.UserID,
 		}); err != nil {
 			applog.Infof("[slack] create chat context failed task=%s: %v", task.ID, err)
+			cleanupSlackAttachmentSourceDirs(chatAtts)
 			if delErr := s.taskRepo.Delete(ctx, task.ID); delErr != nil {
 				applog.Infof("[slack] cleanup chat task failed task=%s: %v", task.ID, delErr)
 			}
@@ -1064,6 +1088,7 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 	}
 	if err := s.execRepo.Create(ctx, exec); err != nil {
 		applog.Infof("[slack] create execution failed: %v", err)
+		cleanupSlackAttachmentSourceDirs(chatAtts)
 		if delErr := s.taskRepo.Delete(ctx, task.ID); delErr != nil {
 			applog.Infof("[slack] cleanup chat task failed task=%s after execution create failure: %v", task.ID, delErr)
 		}
@@ -1071,14 +1096,13 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		return
 	}
 
-	var attachmentContext string
-	var imageAttachments []models.Attachment
 	hasLinkedAttachments := false
-	if len(msg.Files) > 0 {
-		attCtx, imgAtts, chatAtts, err := s.downloadSlackAttachments(ctx, msg.Files)
+	if len(chatAtts) > 0 {
+		var err error
+		chatAtts, err = s.linkAttachmentsToExecution(ctx, exec.ID, chatAtts)
 		if err != nil {
-			applog.Infof("[slack] attachment download error: %v", err)
-			msgText := fmt.Sprintf("Failed to process attachment: %v", err)
+			applog.Infof("[slack] attachment link error: %v", err)
+			msgText := "Failed to process attachment: unable to store attachment. Please try again."
 			s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, time.Since(start).Milliseconds())
 			if s.chatBroadcaster != nil {
 				s.chatBroadcaster.Publish(events.ChatEvent{
@@ -1095,40 +1119,8 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
 			return
 		}
-		attachmentContext = attCtx
-		imageAttachments = imgAtts
-		if len(chatAtts) > 0 {
-			var err error
-			chatAtts, err = s.linkAttachmentsToExecution(ctx, exec.ID, chatAtts)
-			if err != nil {
-				applog.Infof("[slack] attachment link error: %v", err)
-				msgText := "Failed to process attachment: unable to store attachment. Please try again."
-				s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, time.Since(start).Milliseconds())
-				if s.chatBroadcaster != nil {
-					s.chatBroadcaster.Publish(events.ChatEvent{
-						Type:           events.ChatNewMessage,
-						ProjectID:      projectID,
-						ExecID:         exec.ID,
-						TaskID:         task.ID,
-						Message:        msg.Text,
-						Source:         msg.Source,
-						AgentName:      agent.Name,
-						HasAttachments: len(msg.Files) > 0,
-					})
-				}
-				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
-				return
-			}
-			attachmentContext, imageAttachments = slackAttachmentContextAndImages(chatAtts)
-			hasLinkedAttachments = true
-		}
-	}
-	if len(imageAttachments) > 0 {
-		if selectedAgent, selectErr := s.autoSelectAgent(ctx, msg.Text, true); selectErr == nil && selectedAgent != nil {
-			agent = selectedAgent
-		} else if selectErr != nil {
-			applog.Infof("[slack] vision model selection after attachment download failed; using initially selected model: %v", selectErr)
-		}
+		attachmentContext, imageAttachments = slackAttachmentContextAndImages(chatAtts)
+		hasLinkedAttachments = true
 	}
 
 	if s.chatBroadcaster != nil {
@@ -2685,32 +2677,7 @@ func (s *SlackService) downloadSlackAttachments(ctx context.Context, files []sla
 }
 
 func slackAttachmentContextAndImages(chatAttachments []models.ChatAttachment) (string, []models.Attachment) {
-	var imageAttachments []models.Attachment
-	var attachmentContents []string
-	for _, att := range chatAttachments {
-		if isSlackImageFile(att.MediaType) {
-			imageAttachments = append(imageAttachments, models.Attachment{
-				FileName:  att.FileName,
-				FilePath:  att.FilePath,
-				MediaType: att.MediaType,
-				FileSize:  att.FileSize,
-			})
-			continue
-		}
-		if att.FileSize <= slackMaxTextFileSize {
-			content, readErr := os.ReadFile(att.FilePath)
-			if readErr == nil {
-				attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", att.FileName, string(content)))
-				continue
-			}
-		}
-		attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", att.FileName, att.FileSize))
-	}
-	attachmentContext := ""
-	if len(attachmentContents) > 0 {
-		attachmentContext = "\n\n--- Attached Files ---\n" + strings.Join(attachmentContents, "")
-	}
-	return attachmentContext, imageAttachments
+	return channelChatAttachmentContextAndImages(chatAttachments, slackMaxTextFileSize)
 }
 
 func (s *SlackService) downloadSlackFiles(ctx context.Context, files []slackIncomingFile) ([]models.ChatAttachment, error) {
@@ -3111,113 +3078,24 @@ func (s *SlackService) slackClientForFiles() *slack.Client {
 }
 
 func (s *SlackService) saveChatAttachmentsToPendingSession(attachments []models.ChatAttachment) (string, error) {
-	if len(attachments) == 0 {
-		return "", nil
-	}
-	sessionID := generateSlackPendingSessionID()
-	sessionDir := filepath.Join(s.uploadsDir, "chat", "pending", sessionID)
-	if err := os.MkdirAll(sessionDir, 0755); err != nil {
-		return "", fmt.Errorf("creating pending upload directory: %w", err)
-	}
-	cleanupDirs := make(map[string]struct{})
-	for _, att := range attachments {
-		fileName := filepath.Base(att.FileName)
-		if fileName == "." || fileName == string(filepath.Separator) || fileName == "" {
-			fileName = "slack-attachment"
-		}
-		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
-		destPath := filepath.Join(sessionDir, fmt.Sprintf("%s_%s", generateSlackPendingSessionID()[:8], fileName))
-		if err := moveOrCopyFile(att.FilePath, destPath); err != nil {
-			_ = os.RemoveAll(sessionDir)
-			for dir := range cleanupDirs {
-				_ = os.RemoveAll(dir)
-			}
-			return "", fmt.Errorf("staging %s: %w", fileName, err)
-		}
-	}
-	for dir := range cleanupDirs {
-		_ = os.RemoveAll(dir)
-	}
-	return sessionID, nil
+	return saveChannelChatAttachmentsToPendingSession(s.uploadsDir, "slack-attachment", attachments)
 }
 
 func (s *SlackService) linkAttachmentsToExecution(ctx context.Context, execID string, attachments []models.ChatAttachment) ([]models.ChatAttachment, error) {
-	if len(attachments) == 0 {
-		return nil, nil
-	}
-	if s.chatAttachmentRepo == nil {
-		cleanupSlackAttachmentSourceDirs(attachments)
-		return nil, fmt.Errorf("chat attachment repository is unavailable")
-	}
-	execDir := filepath.Join(s.uploadsDir, "chat", execID)
-	if err := os.MkdirAll(execDir, 0755); err != nil {
-		applog.Infof("[slack] error creating exec dir %s: %v", execDir, err)
-		cleanupSlackAttachmentSourceDirs(attachments)
-		return nil, fmt.Errorf("storing Slack attachment: %w", err)
-	}
-	cleanupDirs := make(map[string]struct{})
-	linked := make([]models.ChatAttachment, 0, len(attachments))
-	var linkErrs []string
-	for i := range attachments {
-		att := &attachments[i]
-		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
-		destPath := filepath.Join(execDir, uniqueSlackTempFilename(execDir, filepath.Base(att.FileName)))
-		if err := moveOrCopyFile(att.FilePath, destPath); err != nil {
-			applog.Infof("[slack] error moving attachment file=%s: %v", att.FileName, err)
-			linkErrs = append(linkErrs, fmt.Sprintf("%s: %v", att.FileName, err))
-			continue
-		}
-		absPath, err := filepath.Abs(destPath)
-		if err != nil {
-			absPath = destPath
-		}
-		att.FilePath = absPath
-		att.ExecutionID = execID
-		if err := s.chatAttachmentRepo.Create(ctx, att); err != nil {
-			applog.Infof("[slack] error creating chat attachment record: %v", err)
-			_ = os.Remove(destPath)
-			linkErrs = append(linkErrs, fmt.Sprintf("%s: %v", att.FileName, err))
-		} else {
-			linked = append(linked, *att)
-			applog.Infof("[slack] linked attachment id=%s file=%s to exec=%s", att.ID, att.FileName, execID)
-		}
-	}
-	for dir := range cleanupDirs {
-		_ = os.RemoveAll(dir)
-	}
-	if len(linkErrs) > 0 {
-		s.cleanupLinkedSlackAttachments(ctx, linked)
-		return nil, fmt.Errorf("storing Slack attachment failed for %d of %d file(s): %s", len(linkErrs), len(attachments), strings.Join(linkErrs, "; "))
-	}
-	return linked, nil
+	return linkChannelChatAttachmentsToExecution(ctx, execID, attachments, channelChatAttachmentLinkOptions{
+		Platform:     "slack",
+		UploadsDir:   s.uploadsDir,
+		Repo:         s.chatAttachmentRepo,
+		FallbackName: "slack-attachment",
+	})
 }
 
 func (s *SlackService) cleanupLinkedSlackAttachments(ctx context.Context, attachments []models.ChatAttachment) {
-	for _, att := range attachments {
-		if strings.TrimSpace(att.ID) != "" && s.chatAttachmentRepo != nil {
-			if err := s.chatAttachmentRepo.Delete(ctx, att.ID); err != nil {
-				applog.Infof("[slack] error deleting partial chat attachment record id=%s: %v", att.ID, err)
-			}
-		}
-		if strings.TrimSpace(att.FilePath) != "" {
-			if err := os.Remove(att.FilePath); err != nil && !os.IsNotExist(err) {
-				applog.Infof("[slack] error deleting partial chat attachment file=%s: %v", att.FilePath, err)
-			}
-		}
-	}
+	cleanupLinkedChannelChatAttachments(ctx, s.chatAttachmentRepo, "slack", attachments)
 }
 
 func cleanupSlackAttachmentSourceDirs(attachments []models.ChatAttachment) {
-	cleanupDirs := make(map[string]struct{})
-	for _, att := range attachments {
-		if strings.TrimSpace(att.FilePath) == "" {
-			continue
-		}
-		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
-	}
-	for dir := range cleanupDirs {
-		_ = os.RemoveAll(dir)
-	}
+	cleanupChannelChatAttachmentSourceDirs(attachments)
 }
 
 func generateSlackPendingSessionID() string {

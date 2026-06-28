@@ -745,18 +745,19 @@ func TestDiscordLinkAttachmentsReturnsOnlySuccessfullyPersistedAttachments(t *te
 	if err == nil || !strings.Contains(err.Error(), "storing Discord attachment failed") {
 		t.Fatalf("expected partial link error, got %v", err)
 	}
-	if len(linked) != 1 {
-		t.Fatalf("expected one linked attachment, got %#v", linked)
+	if len(linked) != 0 {
+		t.Fatalf("expected partial links to be rolled back, got %#v", linked)
 	}
-	if linked[0].FileName != "ok.png" || linked[0].FilePath == goodPath {
-		t.Fatalf("unexpected linked attachment: %#v", linked[0])
+	persisted, err := svc.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("list attachments: %v", err)
 	}
-	if _, err := os.Stat(linked[0].FilePath); err != nil {
-		t.Fatalf("linked file missing: %v", err)
+	if len(persisted) != 0 {
+		t.Fatalf("expected no persisted attachments after rollback, got %#v", persisted)
 	}
-	images := discordImageAttachmentsFromChatAttachments(linked)
-	if len(images) != 1 || images[0].FilePath != linked[0].FilePath {
-		t.Fatalf("expected images to include only linked attachment, got %#v", images)
+	movedPath := filepath.Join(svc.uploadsDir, "chat", exec.ID, "ok.png")
+	if _, err := os.Stat(movedPath); !os.IsNotExist(err) {
+		t.Fatalf("expected moved file cleanup after rollback, stat err=%v", err)
 	}
 }
 

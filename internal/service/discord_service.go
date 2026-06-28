@@ -1588,32 +1588,7 @@ func (s *DiscordService) downloadDiscordAttachments(ctx context.Context, files [
 }
 
 func discordAttachmentContextAndImages(chatAttachments []models.ChatAttachment) (string, []models.Attachment) {
-	var imageAttachments []models.Attachment
-	var attachmentContents []string
-	for _, att := range chatAttachments {
-		if isSlackImageFile(att.MediaType) {
-			imageAttachments = append(imageAttachments, models.Attachment{
-				FileName:  att.FileName,
-				FilePath:  att.FilePath,
-				MediaType: att.MediaType,
-				FileSize:  att.FileSize,
-			})
-			continue
-		}
-		if att.FileSize <= discordMaxTextFileSize {
-			content, readErr := os.ReadFile(att.FilePath)
-			if readErr == nil {
-				attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", att.FileName, string(content)))
-				continue
-			}
-		}
-		attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", att.FileName, att.FileSize))
-	}
-	attachmentContext := ""
-	if len(attachmentContents) > 0 {
-		attachmentContext = "\n\n--- Attached Files ---\n" + strings.Join(attachmentContents, "")
-	}
-	return attachmentContext, imageAttachments
+	return channelChatAttachmentContextAndImages(chatAttachments, discordMaxTextFileSize)
 }
 
 func (s *DiscordService) downloadDiscordFiles(ctx context.Context, files []discordIncomingAttachment) ([]models.ChatAttachment, error) {
@@ -1812,97 +1787,20 @@ func discordTrustedAttachmentHost(host string) bool {
 }
 
 func (s *DiscordService) saveChatAttachmentsToPendingSession(attachments []models.ChatAttachment) (string, error) {
-	if len(attachments) == 0 {
-		return "", nil
-	}
-	sessionID := generateSlackPendingSessionID()
-	sessionDir := filepath.Join(s.uploadsDir, "chat", "pending", sessionID)
-	if err := os.MkdirAll(sessionDir, 0755); err != nil {
-		return "", fmt.Errorf("creating pending upload directory: %w", err)
-	}
-	cleanupDirs := make(map[string]struct{})
-	for _, att := range attachments {
-		fileName := filepath.Base(att.FileName)
-		if fileName == "." || fileName == string(filepath.Separator) || fileName == "" {
-			fileName = "discord-attachment"
-		}
-		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
-		destPath := filepath.Join(sessionDir, fmt.Sprintf("%s_%s", generateSlackPendingSessionID()[:8], fileName))
-		if err := moveOrCopyFile(att.FilePath, destPath); err != nil {
-			_ = os.RemoveAll(sessionDir)
-			for dir := range cleanupDirs {
-				_ = os.RemoveAll(dir)
-			}
-			return "", fmt.Errorf("staging %s: %w", fileName, err)
-		}
-	}
-	for dir := range cleanupDirs {
-		_ = os.RemoveAll(dir)
-	}
-	return sessionID, nil
+	return saveChannelChatAttachmentsToPendingSession(s.uploadsDir, "discord-attachment", attachments)
 }
 
 func (s *DiscordService) linkAttachmentsToExecution(ctx context.Context, execID string, attachments []models.ChatAttachment) ([]models.ChatAttachment, error) {
-	if len(attachments) == 0 {
-		return nil, nil
-	}
-	if s.chatAttachmentRepo == nil {
-		cleanupDiscordAttachmentSourceDirs(attachments)
-		return nil, fmt.Errorf("chat attachment repository is unavailable")
-	}
-	execDir := filepath.Join(s.uploadsDir, "chat", execID)
-	if err := os.MkdirAll(execDir, 0755); err != nil {
-		applog.Infof("[discord] error creating exec dir %s: %v", execDir, err)
-		cleanupDiscordAttachmentSourceDirs(attachments)
-		return nil, fmt.Errorf("storing Discord attachment: %w", err)
-	}
-	cleanupDirs := make(map[string]struct{})
-	linked := make([]models.ChatAttachment, 0, len(attachments))
-	var linkErrs []string
-	for i := range attachments {
-		att := &attachments[i]
-		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
-		destPath := filepath.Join(execDir, uniqueSlackTempFilename(execDir, filepath.Base(att.FileName)))
-		if err := moveOrCopyFile(att.FilePath, destPath); err != nil {
-			applog.Infof("[discord] error moving attachment file=%s: %v", att.FileName, err)
-			linkErrs = append(linkErrs, fmt.Sprintf("%s: %v", att.FileName, err))
-			continue
-		}
-		absPath, err := filepath.Abs(destPath)
-		if err != nil {
-			absPath = destPath
-		}
-		att.FilePath = absPath
-		att.ExecutionID = execID
-		if err := s.chatAttachmentRepo.Create(ctx, att); err != nil {
-			applog.Infof("[discord] error creating chat attachment record: %v", err)
-			_ = os.Remove(destPath)
-			linkErrs = append(linkErrs, fmt.Sprintf("%s: %v", att.FileName, err))
-		} else {
-			linked = append(linked, *att)
-			applog.Infof("[discord] linked attachment id=%s file=%s to exec=%s", att.ID, att.FileName, execID)
-		}
-	}
-	for dir := range cleanupDirs {
-		_ = os.RemoveAll(dir)
-	}
-	if len(linkErrs) > 0 {
-		return linked, fmt.Errorf("storing Discord attachment failed for %d of %d file(s): %s", len(linkErrs), len(attachments), strings.Join(linkErrs, "; "))
-	}
-	return linked, nil
+	return linkChannelChatAttachmentsToExecution(ctx, execID, attachments, channelChatAttachmentLinkOptions{
+		Platform:     "discord",
+		UploadsDir:   s.uploadsDir,
+		Repo:         s.chatAttachmentRepo,
+		FallbackName: "discord-attachment",
+	})
 }
 
 func cleanupDiscordAttachmentSourceDirs(attachments []models.ChatAttachment) {
-	cleanupDirs := make(map[string]struct{})
-	for _, att := range attachments {
-		if strings.TrimSpace(att.FilePath) == "" {
-			continue
-		}
-		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
-	}
-	for dir := range cleanupDirs {
-		_ = os.RemoveAll(dir)
-	}
+	cleanupChannelChatAttachmentSourceDirs(attachments)
 }
 
 func discordImageAttachmentsFromChatAttachments(chatAttachments []models.ChatAttachment) []models.Attachment {

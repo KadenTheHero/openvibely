@@ -1533,6 +1533,10 @@ func TestSlackService_ProcessIncomingMessage_SniffsUnknownTypeImageWhenFileInfoF
 	require.Equal(t, "image/png", got.ImageAttachments[0].MediaType)
 	require.Equal(t, visionAgent.ID, got.Agent.ID)
 	require.False(t, got.Agent.IsAnthropicCLI())
+	persistedExec, err := execRepo.GetByID(ctx, got.ExecID)
+	require.NoError(t, err)
+	require.NotNil(t, persistedExec)
+	require.Equal(t, visionAgent.ID, persistedExec.AgentConfigID)
 	require.Equal(t, 1, fileInfoCalls)
 }
 
