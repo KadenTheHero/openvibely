@@ -260,6 +260,14 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if !strings.Contains(body, `closeOutboundTargetsModal()">Cancel`) || !strings.Contains(body, `Save Settings`) {
 		t.Fatal("expected outbound targets modal to expose Cancel and Save Settings actions")
 	}
+	if !strings.Contains(body, `class="alert alert-info mt-3 mb-4 text-sm"`) || !strings.Contains(body, `Saved destinations for send_message`) {
+		t.Fatal("expected outbound targets guidance to render as an info alert")
+	}
+	assertIndexOrder(t, body, `id="outbound-target-add-form"`, `Allow explicit unsaved targets`, "expected explicit-target toggle below target list controls, not in the modal header")
+	assertIndexOrder(t, body, `Allow explicit unsaved targets`, `closeOutboundTargetsModal()">Cancel`, "expected explicit-target toggle in the left side of the footer before action buttons")
+	if !strings.Contains(body, `modal-action flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between`) || !strings.Contains(body, `toggle toggle-primary toggle-sm`) {
+		t.Fatal("expected outbound targets footer to split toggle on the left and save actions on the right")
+	}
 	if strings.Contains(body, `onchange="this.form.requestSubmit()"`) {
 		t.Fatal("explicit-target toggle should not autosubmit and append refreshed cards into the modal")
 	}

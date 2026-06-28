@@ -2093,20 +2093,19 @@ templ OutboundTargetsCardFragment(currentProjectID string, targets []models.Chan
 
 templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool, notice string) {
 		<div id="outbound-targets-section" data-project-id={ currentProjectID }>
-		<div>
-			<div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between pr-10">
-				<div>
+			<div>
+				<div class="pr-10">
 					<h3 class="card-title">Outbound Message Targets</h3>
-					<p class="text-sm opacity-70">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, `discord:#ops`, or `email:#client`.</p>
 				</div>
-				<div class="form-control" onclick="event.stopPropagation()">
-					<label class="label cursor-pointer gap-3 justify-start">
-						<span class="label-text text-sm">Allow explicit unsaved targets</span>
-						<input type="checkbox" form="outbound-targets-policy-form" name="enabled" value="true" class="toggle toggle-sm" if explicitAllowed { checked }/>
-					</label>
-				</div>
-			</div>
-			if notice != "" {
+				<div class="alert alert-info mt-3 mb-4 text-sm">
+					<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-5 h-5">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+					</svg>
+					<div>
+						<p class="font-semibold">Saved destinations for send_message</p>
+						<p class="text-xs opacity-80 mt-1">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, `discord:#ops`, or `email:#client`.</p>
+					</div>
+				</div>			if notice != "" {
 				<div class="alert alert-success py-2 text-sm mt-3">{ notice }</div>
 			}
 					<form id="outbound-target-add-form" class="grid gap-3 md:grid-cols-6 mt-4" onclick="event.stopPropagation()" onsubmit="return addOutboundTargetDraft(event)">
@@ -2167,23 +2166,33 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 						</tbody>
 					</table>
 				</div>
-					<form id="outbound-targets-policy-form" method="post" hx-post="/channels/send-message-explicit-targets" hx-target="#outbound-targets-section" hx-swap="outerHTML" class="modal-action" onclick="event.stopPropagation()">
-						<input type="hidden" name="project_id" value={ currentProjectID }/>
-						<div id="outbound-targets-draft-fields">
-								for _, target := range targets {
-									<div id={ "outbound-target-draft-fields-" + target.ID } data-outbound-target-draft-key={ target.ID }>
-									<input type="hidden" name="target_row_id" value={ target.ID }/>
-									<input type="hidden" name="target_platform" value={ target.Platform }/>
-									<input type="hidden" name="target_name" value={ target.Name }/>
-									<input type="hidden" name="target_target_id" value={ target.TargetID }/>
-									<input type="hidden" name="target_thread_id" value={ target.ThreadID }/>
-									<input type="hidden" name="target_is_home" value={ fmt.Sprintf("%t", target.Home) }/>
-									<input type="hidden" name="target_default_subject" value={ target.DefaultSubject }/>
-								</div>
-							}
-						</div>
-						<button type="button" class="btn" onclick="closeOutboundTargetsModal()">Cancel</button>
-						<button type="submit" class="btn btn-primary">Save Settings</button>
-					</form>		</div>
-	</div>
+						<form id="outbound-targets-policy-form" method="post" hx-post="/channels/send-message-explicit-targets" hx-target="#outbound-targets-section" hx-swap="outerHTML" class="modal-action flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" onclick="event.stopPropagation()">
+							<input type="hidden" name="project_id" value={ currentProjectID }/>
+							<div id="outbound-targets-draft-fields">
+									for _, target := range targets {
+										<div id={ "outbound-target-draft-fields-" + target.ID } data-outbound-target-draft-key={ target.ID }>
+										<input type="hidden" name="target_row_id" value={ target.ID }/>
+										<input type="hidden" name="target_platform" value={ target.Platform }/>
+										<input type="hidden" name="target_name" value={ target.Name }/>
+										<input type="hidden" name="target_target_id" value={ target.TargetID }/>
+										<input type="hidden" name="target_thread_id" value={ target.ThreadID }/>
+										<input type="hidden" name="target_is_home" value={ fmt.Sprintf("%t", target.Home) }/>
+										<input type="hidden" name="target_default_subject" value={ target.DefaultSubject }/>
+									</div>
+								}
+							</div>
+							<div class="form-control">
+								<label class="label cursor-pointer gap-3 justify-start px-0">
+									<input type="checkbox" name="enabled" value="true" class="toggle toggle-primary toggle-sm" if explicitAllowed { checked }/>
+									<div>
+										<span class="label-text text-sm font-semibold">Allow explicit unsaved targets</span>
+										<p class="text-xs opacity-50 mt-1">Permit send_message to use direct destinations that are not saved here.</p>
+									</div>
+								</label>
+							</div>
+							<div class="flex justify-end gap-2">
+								<button type="button" class="btn" onclick="closeOutboundTargetsModal()">Cancel</button>
+								<button type="submit" class="btn btn-primary">Save Settings</button>
+							</div>
+						</form>		</div>	</div>
 }
