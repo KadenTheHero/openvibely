@@ -573,6 +573,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	agent, err := s.autoSelectAgent(ctx, text, hasImages)
 	if err != nil {
 		applog.Infof("[telegram] agent selection error: %v", err)
+		cleanupChannelChatAttachmentSourceDirs(chatAttachments)
 		s.sendMessage(ctx, chatID, fmt.Sprintf("Error selecting model: %v", err))
 		return
 	}
