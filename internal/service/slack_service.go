@@ -976,8 +976,14 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Queued. I'll send this after the current response finishes.")
 		},
 		FirstTurn: channelChatIngressFirstTurnOptions{
-			Task:              &models.Task{Title: fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginSlack},
-			ReplyContext:      ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID},
+			Task:         &models.Task{Title: fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginSlack},
+			ReplyContext: ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID},
+			RuntimeTools: s.buildSlackActionToolRuntime(projectID, slackMarkerContext{
+				TeamID:    msg.TeamID,
+				ChannelID: msg.ChannelID,
+				ThreadTS:  msg.ThreadTS,
+				UserID:    msg.UserID,
+			}, nil),
 			ChannelChatRunner: s.channelChatRunner,
 			CreateTaskContext: func(ctx context.Context, taskID string) error {
 				if s.slackTaskContextRepo == nil {
@@ -1093,8 +1099,11 @@ func (s *SlackService) slackActionHandlers(projectID string, markerCtx slackMark
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 		ProjectID:   projectID,
 		ProjectRepo: s.projectRepo,
-		SwitchProject: func(ctx context.Context, project *models.Project) {
-			s.setActiveProject(ctx, markerCtx.TeamID, markerCtx.UserID, project.ID)
+		SwitchProject: func(ctx context.Context, project *models.Project) error {
+			if !s.checkAuthorization(ctx, project.ID, markerCtx.UserID) {
+				return fmt.Errorf("Slack user %q is not authorized to use project %q", markerCtx.UserID, project.Name)
+			}
+			return s.setActiveProject(ctx, markerCtx.TeamID, markerCtx.UserID, project.ID)
 		},
 	}))
 	handlers["get_current_project"] = func(ctx context.Context, _ json.RawMessage) (string, error) {
@@ -1111,7 +1120,7 @@ func (s *SlackService) slackActionHandlers(projectID string, markerCtx slackMark
 
 // ---- New channel action executors for Slack ----
 
-func (s *SlackService) setActiveProject(ctx context.Context, teamID, userID, projectID string) {
+func (s *SlackService) setActiveProject(ctx context.Context, teamID, userID, projectID string) error {
 	key := slackUserProjectKey(teamID, userID)
 	s.mu.Lock()
 	s.userProjects[key] = projectID
@@ -1119,8 +1128,10 @@ func (s *SlackService) setActiveProject(ctx context.Context, teamID, userID, pro
 	if s.slackUserProjectRepo != nil {
 		if err := s.slackUserProjectRepo.SetUserProject(ctx, teamID, userID, projectID); err != nil {
 			applog.Infof("[slack] persist active project failed: %v", err)
+			return fmt.Errorf("persist failed: %w", err)
 		}
 	}
+	return nil
 }
 
 func (s *SlackService) getActiveProject(ctx context.Context, teamID, userID string) string {

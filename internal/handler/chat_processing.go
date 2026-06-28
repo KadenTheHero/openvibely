@@ -76,6 +76,13 @@ type streamingResponseParams struct {
 	InputOrigin        string
 	InputOriginAgent   string
 
+	// RuntimeTools holds channel-specific runtime tools pre-built by a channel
+	// service (Discord, Slack, Telegram, Email). When non-nil, processStreamingResponse
+	// uses these tools for this turn instead of rebuilding the generic handler
+	// runtime, so switch_project and other channel-sensitive tools execute through
+	// the channel service handler rather than the informational web/API path.
+	RuntimeTools *llmcontracts.RuntimeTools
+
 	// DeferHistoryLoad signals processStreamingResponse to load ChatHistory,
 	// SystemContext, and WorkDir lazily after acquiring worker slots. Set by
 	// TaskThreadSend so the HTTP handler can return immediately without blocking
@@ -302,6 +309,12 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// Runtime-tools and marker post-processing are mutually exclusive per request.
 	// Build these after lifecycle preparation so task follow-up capabilities see
 	// selected memory handles/tools from the router.
+	//
+	// For channel surfaces (Discord, Slack, Telegram, Email), params.RuntimeTools
+	// carries a complete channel-specific runtime pre-built by the channel service.
+	// Using it directly ensures switch_project and other channel-sensitive tools
+	// execute the channel service handler (with persistence) rather than the
+	// informational web/API handler.
 	runtimeToolsInjected := false
 	if supportsChatActionTools(params.Agent) {
 		surface := params.Surface
@@ -318,7 +331,21 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 				defs = filterAssignedAgentRuntimeToolDefs(defs, agentDef)
 			}
 		}
-		if len(defs) > 0 {
+		if params.RuntimeTools != nil && len(params.RuntimeTools.Definitions) > 0 {
+			// Channel-provided runtime takes priority over the handler's generic tools.
+			// Channel-sensitive tools (e.g. switch_project with active-project
+			// persistence) are resolved by the channel service handler; any tools not
+			// covered by the channel runtime fall through to the handler's generic
+			// executor. This correctly handles both complete channel runtimes
+			// (Discord, Slack, Telegram) and partial ones (Email: project tools only).
+			genericRT := h.buildChatActionToolRuntimeFromDefs(params, nil, defs, chatMode, surface)
+			merged := llmcontracts.CompositeRuntimeTools(params.RuntimeTools, genericRT)
+			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), merged))
+			params.ProcessMarkers = false
+			runtimeToolsInjected = true
+			applog.Infof("[handler] processStreamingResponse exec=%s injected channel+generic runtime action tools surface=%s followup=%v channel_defs=%d generic_defs=%d",
+				params.ExecID, surface, params.IsTaskFollowup, len(params.RuntimeTools.Definitions), len(defs))
+		} else if len(defs) > 0 {
 			rt := h.buildChatActionToolRuntimeFromDefs(params, nil, defs, chatMode, surface)
 			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), rt))
 			params.ProcessMarkers = false

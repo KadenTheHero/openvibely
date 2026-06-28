@@ -31,6 +31,7 @@ func (h *Handler) StartChannelChatRun(ctx context.Context, req service.ChannelCh
 		TelegramInitialAckMessageID: req.InitialAckMessageID,
 		ChannelReply:                req.ReplyContext,
 		InputOrigin:                 req.ReplyContext.Source,
+		RuntimeTools:                req.RuntimeTools,
 	})
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -100,6 +101,11 @@ type channelChatIngressFirstTurnOptions struct {
 	InitialAckID      int
 	Start             time.Time
 	ChatHistoryLimit  int
+
+	// RuntimeTools holds channel-specific runtime tools to pass to the handler
+	// runner. When non-nil, the handler uses these tools for the chat turn
+	// instead of rebuilding the generic handler runtime.
+	RuntimeTools *llmcontracts.RuntimeTools
 
 	TaskRepo           *repository.TaskRepo
 	ExecRepo           *repository.ExecutionRepo
@@ -972,6 +978,7 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 		Surface:             opts.Surface,
 		InitialAckMessageID: initialAckID,
 		ReplyContext:        opts.ReplyContext,
+		RuntimeTools:        opts.RuntimeTools,
 	})
 	return true, linkedAttachments
 }

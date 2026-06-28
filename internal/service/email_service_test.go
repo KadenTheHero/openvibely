@@ -214,3 +214,133 @@ func TestEmailService_CompleteExecutionUsesSharedChatPromotion(t *testing.T) {
 	completeExecution(ctx, chatExec.ID, chatTask.ID, "done", "", 1, 10)
 	require.Equal(t, []string{project.ID}, promoted)
 }
+
+// TestEmailServiceProcessIncomingPassesChannelRuntimeTools verifies that
+// processIncomingMessage populates FirstTurn.RuntimeTools so the channel-specific
+// switch_project executor (with persistence) is wired into the ChannelChatRunRequest
+// handed to the handler runner.
+func TestEmailServiceProcessIncomingPassesChannelRuntimeTools(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+
+	project := &models.Project{Name: "Email RT Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "rt@example.com", AddedBy: "test"}))
+
+	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
+	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+
+	var got ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
+
+	svc.ProcessIncoming(ctx, EmailInboundMessage{
+		FromAddress: "rt@example.com",
+		Subject:     "Hello",
+		Body:        "hi there",
+		MessageID:   "<rt-1@example.com>",
+	})
+
+	require.NotNil(t, got.RuntimeTools, "RuntimeTools must be non-nil for email channel turns")
+	require.NotEmpty(t, got.RuntimeTools.Definitions, "RuntimeTools must carry definitions")
+	require.NotNil(t, got.RuntimeTools.Executor, "RuntimeTools must have an executor")
+}
+
+// TestEmailServiceSwitchProjectViaRuntimeToolsPersists verifies that calling
+// switch_project through the channel RuntimeTools executor (built by buildEmailActionToolRuntime)
+// actually persists the sender's active project in the email_sender_projects table.
+func TestEmailServiceSwitchProjectViaRuntimeToolsPersists(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+
+	project1 := &models.Project{Name: "Default Email Project"}
+	project2 := &models.Project{Name: "Target Email Project"}
+	require.NoError(t, projectRepo.Create(ctx, project1))
+	require.NoError(t, projectRepo.Create(ctx, project2))
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project1.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project2.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
+
+	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
+	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+
+	var got ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
+
+	svc.ProcessIncoming(ctx, EmailInboundMessage{
+		FromAddress: "alice@example.com",
+		Subject:     "Switch please",
+		Body:        "switch project",
+		MessageID:   "<alice-1@example.com>",
+	})
+
+	require.NotNil(t, got.RuntimeTools, "RuntimeTools must be non-nil for email channel turns")
+
+	// Call switch_project through the channel runtime executor.
+	result, handled, _, err := got.RuntimeTools.Executor(ctx, "switch_project", []byte(`{"project":"Target Email Project"}`))
+	require.NoError(t, err)
+	require.True(t, handled, "switch_project must be handled by email channel executor")
+	require.Contains(t, result, "Target Email Project", "result must mention the project")
+	require.Contains(t, result, "Future messages", "result must include same-turn semantics message")
+
+	// Verify the selection was persisted.
+	saved, err := emailSenderProjectRepo.GetSenderProject(ctx, "alice@example.com")
+	require.NoError(t, err)
+	require.Equal(t, project2.ID, saved, "switch_project must have persisted selection to email_sender_projects")
+}
+
+// TestEmailServiceResolveAuthorizedProjectUsesSavedSelection verifies that
+// resolveAuthorizedProject returns the sender's saved active project (from
+// email_sender_projects) instead of the first authorized project in the list.
+func TestEmailServiceResolveAuthorizedProjectUsesSavedSelection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+
+	project1 := &models.Project{Name: "First Project"}
+	project2 := &models.Project{Name: "Second Project"}
+	require.NoError(t, projectRepo.Create(ctx, project1))
+	require.NoError(t, projectRepo.Create(ctx, project2))
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project1.ID, EmailAddress: "bob@example.com", AddedBy: "test"}))
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project2.ID, EmailAddress: "bob@example.com", AddedBy: "test"}))
+
+	// Save project2 as the active project for bob.
+	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "bob@example.com", project2.ID))
+
+	svc := NewEmailService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, emailAuthRepo, nil)
+	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
+
+	resolved := svc.resolveAuthorizedProject(ctx, "bob@example.com")
+	require.Equal(t, project2.ID, resolved, "resolveAuthorizedProject must return the saved active project, not the first one")
+}

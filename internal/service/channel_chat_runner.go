@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -23,6 +24,11 @@ type ChannelChatRunRequest struct {
 	Surface             chatcontrol.Surface
 	InitialAckMessageID int
 	ReplyContext        ChannelReplyContext
+	// RuntimeTools holds channel-specific runtime tool definitions and executor.
+	// When non-nil, the handler runner uses these tools for the chat turn instead
+	// of rebuilding the generic handler runtime, so switch_project and other
+	// channel-sensitive tools execute through the channel service handler.
+	RuntimeTools *llmcontracts.RuntimeTools
 }
 
 type ChannelChatRunner func(context.Context, ChannelChatRunRequest)

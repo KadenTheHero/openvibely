@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -23,6 +24,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -181,8 +183,9 @@ type EmailService struct {
 	taskSvc               *TaskService
 	llmSvc                *LLMService
 	workerSvc             *WorkerService
-	emailAuthRepo         *repository.EmailAuthRepo
-	emailTaskContextRepo  *repository.EmailTaskContextRepo
+	emailAuthRepo            *repository.EmailAuthRepo
+	emailTaskContextRepo     *repository.EmailTaskContextRepo
+	emailSenderProjectRepo   *repository.EmailSenderProjectRepo
 	threadInputRepo       *repository.ThreadInputRepo
 	customPersonalityRepo *repository.CustomPersonalityRepo
 	agentRepo             *repository.AgentRepo
@@ -257,6 +260,9 @@ func (s *EmailService) SetQueuedTurnPromoter(promoter func(projectID string)) {
 func (s *EmailService) SetChannelChatRunner(runner ChannelChatRunner) { s.channelChatRunner = runner }
 func (s *EmailService) SetChannelMessageRouter(router *ChannelMessageRouter) {
 	s.channelMessageRouter = router
+}
+func (s *EmailService) SetEmailSenderProjectRepo(repo *repository.EmailSenderProjectRepo) {
+	s.emailSenderProjectRepo = repo
 }
 
 func (s *EmailService) IsRunning() bool {
@@ -615,6 +621,7 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 			Task:              &models.Task{Title: fmt.Sprintf("Email %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Subject, 47)), CreatedVia: models.TaskOriginEmail},
 			ReplyContext:      ChannelReplyContext{Source: models.TaskOriginEmail, EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey},
 			ChannelChatRunner: s.channelChatRunner,
+			RuntimeTools:      s.buildEmailActionToolRuntime(projectID, msg.FromAddress),
 			CreateTaskContext: func(ctx context.Context, taskID string) error {
 				if s.emailTaskContextRepo == nil {
 					return nil
@@ -634,6 +641,19 @@ func (s *EmailService) resolveAuthorizedProject(ctx context.Context, sender stri
 	if s.emailAuthRepo == nil || sender == "" {
 		return ""
 	}
+	// If the sender has a saved active project selection, use it (after verifying
+	// they are still authorized for that project).
+	if s.emailSenderProjectRepo != nil {
+		savedProjectID, err := s.emailSenderProjectRepo.GetSenderProject(ctx, sender)
+		if err == nil && savedProjectID != "" {
+			ok, authErr := s.emailAuthRepo.IsAuthorized(ctx, savedProjectID, sender)
+			if authErr == nil && ok {
+				return savedProjectID
+			}
+			// Authorization for saved project lost — fall through to default scan.
+			applog.Infof("[email] saved project %s no longer authorized for sender=%s; rescanning", savedProjectID, redactEmail(sender))
+		}
+	}
 	projects, err := s.projectRepo.List(ctx)
 	if err != nil {
 		return ""
@@ -649,6 +669,56 @@ func (s *EmailService) resolveAuthorizedProject(ctx context.Context, sender stri
 		}
 	}
 	return ""
+}
+
+// buildEmailActionToolRuntime returns channel-specific RuntimeTools for an
+// inbound email chat turn. It covers only the project-sensitive tools
+// (switch_project with persistence, get_current_project). The handler's
+// generic runtime supplies the remaining tools (task creation, scheduling, etc.)
+// via CompositeRuntimeTools in processStreamingResponse.
+func (s *EmailService) buildEmailActionToolRuntime(projectID, sender string) *llmcontracts.RuntimeTools {
+	handlers := s.emailActionHandlers(projectID, sender)
+	defs := make([]llmcontracts.RuntimeToolDefinition, 0, len(handlers))
+	// Emit definitions only for the handlers this runtime covers.
+	allDefs := actionToolDefinitions(chatcontrol.SurfaceEmail, true)
+	for _, def := range allDefs {
+		if _, ok := handlers[def.Name]; ok {
+			defs = append(defs, def)
+		}
+	}
+	return &llmcontracts.RuntimeTools{
+		Definitions: defs,
+		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceEmail, handlers),
+	}
+}
+
+func (s *EmailService) emailActionHandlers(projectID, sender string) map[string]chatcontrol.RuntimeActionHandler {
+	handlers := buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
+		ProjectID:   projectID,
+		ProjectRepo: s.projectRepo,
+		SwitchProject: func(ctx context.Context, project *models.Project) error {
+			if s.emailAuthRepo != nil {
+				ok, err := s.emailAuthRepo.IsAuthorized(ctx, project.ID, sender)
+				if err != nil || !ok {
+					return fmt.Errorf("email sender is not authorized to use project %q", project.Name)
+				}
+			}
+			if s.emailSenderProjectRepo == nil {
+				return fmt.Errorf("email sender project repository not configured")
+			}
+			return s.emailSenderProjectRepo.SetSenderProject(ctx, sender, project.ID)
+		},
+	})
+	handlers["get_current_project"] = func(ctx context.Context, _ json.RawMessage) (string, error) {
+		return channelCurrentProjectResult(ctx, s.projectRepo, projectID), nil
+	}
+	handlers["get_chat_mode"] = func(_ context.Context, _ json.RawMessage) (string, error) {
+		return "Current chat mode: orchestrate", nil
+	}
+	handlers["set_chat_mode"] = func(_ context.Context, _ json.RawMessage) (string, error) {
+		return "Chat mode changes are not supported on Email. Email always uses orchestrate mode.", nil
+	}
+	return handlers
 }
 
 func (s *EmailService) getConfiguredAddress(ctx context.Context) string {

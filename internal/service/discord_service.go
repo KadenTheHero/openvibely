@@ -438,8 +438,14 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Queued. I'll send this after the current response finishes.")
 		},
 		FirstTurn: channelChatIngressFirstTurnOptions{
-			Task:              &models.Task{Title: fmt.Sprintf("Discord %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginDiscord},
-			ReplyContext:      ChannelReplyContext{Source: models.TaskOriginDiscord, DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: msg.MessageID, DiscordUserID: msg.UserID},
+			Task:         &models.Task{Title: fmt.Sprintf("Discord %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginDiscord},
+			ReplyContext: ChannelReplyContext{Source: models.TaskOriginDiscord, DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: msg.MessageID, DiscordUserID: msg.UserID},
+			RuntimeTools: s.buildDiscordActionToolRuntime(projectID, discordMarkerContext{
+				ChannelID: msg.replyChannelID(),
+				ThreadID:  msg.ThreadID,
+				MessageID: msg.MessageID,
+				UserID:    msg.UserID,
+			}, nil),
 			ChannelChatRunner: s.channelChatRunner,
 			CreateTaskContext: func(ctx context.Context, taskID string) error {
 				if s.discordTaskContextRepo == nil {
@@ -727,8 +733,11 @@ func (s *DiscordService) discordActionHandlers(projectID string, markerCtx disco
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 		ProjectID:   projectID,
 		ProjectRepo: s.projectRepo,
-		SwitchProject: func(ctx context.Context, project *models.Project) {
-			s.setActiveProject(ctx, markerCtx.UserID, project.ID)
+		SwitchProject: func(ctx context.Context, project *models.Project) error {
+			if !s.checkAuthorization(ctx, project.ID, markerCtx.UserID) {
+				return fmt.Errorf("Discord user %q is not authorized to use project %q", markerCtx.UserID, project.Name)
+			}
+			return s.setActiveProject(ctx, markerCtx.UserID, project.ID)
 		},
 	}))
 	handlers["get_current_project"] = func(ctx context.Context, _ json.RawMessage) (string, error) {
@@ -743,7 +752,7 @@ func (s *DiscordService) discordActionHandlers(projectID string, markerCtx disco
 	return handlers
 }
 
-func (s *DiscordService) setActiveProject(ctx context.Context, userID, projectID string) {
+func (s *DiscordService) setActiveProject(ctx context.Context, userID, projectID string) error {
 	key := strings.TrimSpace(userID)
 	s.mu.Lock()
 	s.userProjects[key] = projectID
@@ -751,8 +760,10 @@ func (s *DiscordService) setActiveProject(ctx context.Context, userID, projectID
 	if s.discordUserProjectRepo != nil {
 		if err := s.discordUserProjectRepo.SetUserProject(ctx, key, projectID); err != nil {
 			applog.Infof("[discord] persist active project failed for user=%s: %v", key, err)
+			return fmt.Errorf("persist failed: %w", err)
 		}
 	}
+	return nil
 }
 
 func (s *DiscordService) SendOutboundMessage(ctx context.Context, channelID, threadID, text string) SendMessageResult {

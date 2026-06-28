@@ -2423,8 +2423,9 @@ func TestBuildChannelProjectActionHandlersSwitchProjectCallback(t *testing.T) {
 	handlers := buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 		ProjectID:   project1.ID,
 		ProjectRepo: projectRepo,
-		SwitchProject: func(_ context.Context, project *models.Project) {
+		SwitchProject: func(_ context.Context, project *models.Project) error {
 			switchedProjectID = project.ID
+			return nil
 		},
 	})
 	result, err := handlers["switch_project"](ctx, json.RawMessage(`{"project":"Beta"}`))

@@ -69,9 +69,13 @@ type channelThreadActionHandlerOptions struct {
 }
 
 type channelProjectActionHandlerOptions struct {
-	ProjectID     string
-	ProjectRepo   *repository.ProjectRepo
-	SwitchProject func(context.Context, *models.Project)
+	ProjectID   string
+	ProjectRepo *repository.ProjectRepo
+	// SwitchProject persists the active project selection for the channel identity.
+	// It must verify authorization before writing and return an error if
+	// persistence or authorization fails. A nil SwitchProject means no persistence
+	// is attempted (informational only).
+	SwitchProject func(context.Context, *models.Project) error
 }
 
 type channelUtilityActionHandlerOptions struct {
@@ -414,7 +418,7 @@ func buildChannelProjectListResult(ctx context.Context, projectRepo *repository.
 	return strings.TrimSpace(sb.String())
 }
 
-func switchChannelProjectResult(ctx context.Context, projectRepo *repository.ProjectRepo, targetProject string, switchProject func(context.Context, *models.Project)) (string, error) {
+func switchChannelProjectResult(ctx context.Context, projectRepo *repository.ProjectRepo, targetProject string, switchProject func(context.Context, *models.Project) error) (string, error) {
 	if targetProject == "" {
 		return "Project switch requires a project name or ID.", nil
 	}
@@ -440,9 +444,11 @@ func switchChannelProjectResult(ctx context.Context, projectRepo *repository.Pro
 		return fmt.Sprintf("Project not found: %q. Available projects: %s", targetProject, strings.Join(names, ", ")), nil
 	}
 	if switchProject != nil {
-		switchProject(ctx, target)
+		if err := switchProject(ctx, target); err != nil {
+			return fmt.Sprintf("Failed to switch project: %v", err), nil
+		}
 	}
-	return fmt.Sprintf("Switched to project: %s", target.Name), nil
+	return fmt.Sprintf("Switched to project: %s. Future messages from this channel identity will use that project.", target.Name), nil
 }
 
 func runChannelScheduleTask(ctx context.Context, opts channelUtilityActionHandlerOptions, input json.RawMessage) string {

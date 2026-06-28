@@ -393,6 +393,139 @@ func TestDiscordSwitchProjectPersistsForSubsequentMessages(t *testing.T) {
 	}
 }
 
+// TestDiscordProcessIncomingMessagePassesChannelRuntimeTools verifies that
+// processIncomingMessage populates FirstTurn.RuntimeTools so the channel-specific
+// switch_project executor (with persistence) is wired into the ChannelChatRunRequest
+// handed to the handler runner. This is the primary regression guard for the
+// channel project-switch persistence bug.
+func TestDiscordProcessIncomingMessagePassesChannelRuntimeTools(t *testing.T) {
+	svc, db, settingsRepo, projectRepo, taskRepo, authRepo, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Runtime Project", IsDefault: true}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "user-rt", DisplayName: "RT", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize user: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
+		t.Fatalf("set responses: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	svc.llmConfigRepo = agentRepo
+	svc.execRepo = execRepo
+	svc.scheduleRepo = scheduleRepo
+	svc.taskSvc = NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, repository.NewAttachmentRepo(db))
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
+
+	var got ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
+
+	svc.processIncomingMessage(discordIncomingMessage{
+		ChannelID: "chan-1", MessageID: "msg-1", UserID: "user-rt",
+		Username: "RT", Text: "hello", Source: "discord",
+	})
+
+	if got.RuntimeTools == nil {
+		t.Fatal("expected RuntimeTools to be non-nil on ChannelChatRunRequest")
+	}
+	if len(got.RuntimeTools.Definitions) == 0 {
+		t.Fatal("expected RuntimeTools.Definitions to be non-empty")
+	}
+	if got.RuntimeTools.Executor == nil {
+		t.Fatal("expected RuntimeTools.Executor to be non-nil")
+	}
+}
+
+// TestDiscordProcessIncomingMessageSwitchProjectViaRuntimeToolsPersists verifies
+// that the switch_project handler carried in ChannelChatRunRequest.RuntimeTools
+// (built from processIncomingMessage) actually persists the selection via the
+// Discord user-project repo.
+func TestDiscordProcessIncomingMessageSwitchProjectViaRuntimeToolsPersists(t *testing.T) {
+	svc, db, settingsRepo, projectRepo, taskRepo, authRepo, discordTaskContextRepo := newDiscordServiceForTest(t)
+	ctx := context.Background()
+
+	project1 := &models.Project{Name: "Alpha", IsDefault: true}
+	project2 := &models.Project{Name: "Beta"}
+	if err := projectRepo.Create(ctx, project1); err != nil {
+		t.Fatalf("create project1: %v", err)
+	}
+	if err := projectRepo.Create(ctx, project2); err != nil {
+		t.Fatalf("create project2: %v", err)
+	}
+	userProjectRepo := repository.NewDiscordUserProjectRepo(db)
+	svc.SetDiscordUserProjectRepo(userProjectRepo)
+	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project1.ID, DiscordUserID: "user-rt2", DisplayName: "RT2", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize user for project1: %v", err)
+	}
+	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project2.ID, DiscordUserID: "user-rt2", DisplayName: "RT2", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize user for project2: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
+		t.Fatalf("set responses: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	svc.llmConfigRepo = agentRepo
+	svc.execRepo = execRepo
+	svc.scheduleRepo = scheduleRepo
+	svc.taskSvc = NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, repository.NewAttachmentRepo(db))
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
+
+	var got ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
+
+	svc.processIncomingMessage(discordIncomingMessage{
+		ChannelID: "chan-1", MessageID: "msg-1", UserID: "user-rt2",
+		Username: "RT2", Text: "switch project", Source: "discord",
+	})
+
+	if got.RuntimeTools == nil {
+		t.Fatal("expected RuntimeTools to be non-nil on ChannelChatRunRequest from processIncomingMessage")
+	}
+
+	// Call switch_project through the channel RuntimeTools executor.
+	result, handled, _, err := got.RuntimeTools.Executor(ctx, "switch_project", []byte(`{"project":"Beta"}`))
+	if err != nil {
+		t.Fatalf("switch_project executor error: %v", err)
+	}
+	if !handled {
+		t.Fatal("switch_project must be handled by channel executor")
+	}
+	if !strings.Contains(result, "Beta") {
+		t.Fatalf("result must mention the project name: %q", result)
+	}
+	if !strings.Contains(result, "Future messages") {
+		t.Fatalf("result must include same-turn semantics message: %q", result)
+	}
+
+	// Verify the selection was persisted to the user-project repo.
+	saved, err := userProjectRepo.GetUserProject(ctx, "user-rt2")
+	if err != nil {
+		t.Fatalf("get saved project: %v", err)
+	}
+	if saved != project2.ID {
+		t.Fatalf("switch_project did not persist selection: got %q, want %q", saved, project2.ID)
+	}
+
+	// Suppress unused variable warning for discordTaskContextRepo.
+	_ = discordTaskContextRepo
+}
+
 func TestDiscordProcessIncomingMessagePassesReplyContextToSharedChatRunner(t *testing.T) {
 	svc, db, settingsRepo, projectRepo, taskRepo, authRepo, discordTaskContextRepo := newDiscordServiceForTest(t)
 	ctx := context.Background()

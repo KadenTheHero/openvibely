@@ -553,6 +553,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 		},
 		FirstTurn: channelChatIngressFirstTurnOptions{
 			Task:              &models.Task{Title: fmt.Sprintf("Telegram %s: %s", start.Format("15:04:05.000"), util.Truncate(text, 47)), CreatedVia: models.TaskOriginTelegram, TelegramChatID: chatID},
+			RuntimeTools:      s.buildTelegramActionToolRuntime(projectID, chatID, userID, nil),
 			ChannelChatRunner: s.channelChatRunner,
 			CompleteExecution: channelCompletionFunc("telegram", s.execRepo, s.taskRepo, s.queuedTurnPromoter),
 			LinkAttachments: func(ctx context.Context, execID string, atts []models.ChatAttachment) ([]models.ChatAttachment, error) {
@@ -1181,8 +1182,11 @@ func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64,
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 		ProjectID:   projectID,
 		ProjectRepo: s.projectRepo,
-		SwitchProject: func(ctx context.Context, project *models.Project) {
-			s.setTelegramActiveProject(ctx, userID, project.ID)
+		SwitchProject: func(ctx context.Context, project *models.Project) error {
+			if !s.checkAuthorization(userID, "", project.ID) {
+				return fmt.Errorf("Telegram user %d is not authorized to use project %q", userID, project.Name)
+			}
+			return s.setTelegramActiveProject(ctx, userID, project.ID)
 		},
 	}))
 	handlers["get_current_project"] = func(ctx context.Context, _ json.RawMessage) (string, error) {
@@ -1204,13 +1208,15 @@ func telegramSendToTaskActionResult(result string) (string, error) {
 	return result, nil
 }
 
-func (s *TelegramService) setTelegramActiveProject(ctx context.Context, userID int64, projectID string) {
+func (s *TelegramService) setTelegramActiveProject(ctx context.Context, userID int64, projectID string) error {
 	s.userProjects[userID] = projectID
 	if s.telegramUserProjectRepo != nil {
 		if err := s.telegramUserProjectRepo.SetUserProject(ctx, fmt.Sprintf("%d", userID), projectID); err != nil {
 			applog.Infof("[telegram] runtime switch_project error persisting selection: %v", err)
+			return fmt.Errorf("persist failed: %w", err)
 		}
 	}
+	return nil
 }
 
 func (s *TelegramService) processViewThread(ctx context.Context, execID, projectID, output string) string {
