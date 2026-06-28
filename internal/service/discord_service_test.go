@@ -409,9 +409,13 @@ func TestDiscordProcessIncomingMessageDownloadsPersistsAndPassesImageAttachment(
 		t.Fatalf("set responses: %v", err)
 	}
 	agentRepo := repository.NewLLMConfigRepo(db)
-	agent := &models.LLMConfig{Name: "vision", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
-	if err := agentRepo.Create(ctx, agent); err != nil {
-		t.Fatalf("create agent: %v", err)
+	defaultAgent := &models.LLMConfig{Name: "text-cli", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodCLI, Model: "claude-sonnet-4-5", IsDefault: true}
+	if err := agentRepo.Create(ctx, defaultAgent); err != nil {
+		t.Fatalf("create default agent: %v", err)
+	}
+	visionAgent := &models.LLMConfig{Name: "vision", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-3-5-sonnet-20241022", APIKey: "key"}
+	if err := agentRepo.Create(ctx, visionAgent); err != nil {
+		t.Fatalf("create vision agent: %v", err)
 	}
 	execRepo := repository.NewExecutionRepo(db)
 	scheduleRepo := repository.NewScheduleRepo(db)
@@ -461,6 +465,9 @@ func TestDiscordProcessIncomingMessageDownloadsPersistsAndPassesImageAttachment(
 	if got.ImageAttachments[0].FileName != "screenshot.png" || got.ImageAttachments[0].MediaType != "image/png" {
 		t.Fatalf("unexpected image attachment: %#v", got.ImageAttachments[0])
 	}
+	if got.Agent.ID != visionAgent.ID {
+		t.Fatalf("expected runner to use vision agent %q, got %q", visionAgent.ID, got.Agent.ID)
+	}
 	savedImage, err := os.ReadFile(got.ImageAttachments[0].FilePath)
 	if err != nil {
 		t.Fatalf("read saved image: %v", err)
@@ -474,6 +481,13 @@ func TestDiscordProcessIncomingMessageDownloadsPersistsAndPassesImageAttachment(
 	}
 	if len(persisted) != 1 || persisted[0].FilePath != got.ImageAttachments[0].FilePath {
 		t.Fatalf("unexpected persisted attachments: %#v", persisted)
+	}
+	persistedExec, err := execRepo.GetByID(ctx, got.ExecID)
+	if err != nil {
+		t.Fatalf("get persisted execution: %v", err)
+	}
+	if persistedExec == nil || persistedExec.AgentConfigID != visionAgent.ID {
+		t.Fatalf("expected persisted execution to use vision agent %q, got %#v", visionAgent.ID, persistedExec)
 	}
 }
 
