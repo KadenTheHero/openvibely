@@ -569,9 +569,11 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		})
 	}
 	taskActionTools := s.taskSendMessageRuntimeTools(task)
+	runtimeToolsActive := false
 	if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil || taskActionTools != nil {
 		mergedTools := llmcontracts.CompositeRuntimeTools(runtimeTools, ctxTools, taskActionTools)
 		callCtx = llmcontracts.WithRuntimeTools(callCtx, mergedTools)
+		runtimeToolsActive = mergedTools != nil && len(mergedTools.Definitions) > 0
 		if mergedTools != nil && mergedTools.SkipDefaultTools {
 			projectInstructions = ""
 		}
@@ -766,7 +768,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// Webhook-created tasks must remain one-task-per-webhook-call, so do not
 	// allow marker-driven fan-out during their execution.
 	if s.taskSvc != nil {
-		if task.CreatedVia == models.TaskOriginWebhook {
+		if runtimeToolsActive {
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent skipping marker task creation because runtime tools are active task=%s", task.ID)
+		} else if task.CreatedVia == models.TaskOriginWebhook {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent skipping marker task creation for webhook-origin task=%s", task.ID)
 		} else {
 			taskRequests := ParseTaskCreations(output)

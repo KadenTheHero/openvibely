@@ -1632,6 +1632,47 @@ func TestLLMService_ExecuteTaskWithAgent_IncludesSendMessageRuntimeTool(t *testi
 	}
 }
 
+func TestLLMService_ExecuteTaskWithAgent_RuntimeToolsSkipTaskCreationMarkers(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	svc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
+	svc.SetChannelMessageRouter(NewChannelMessageRouter(repository.NewChannelTargetRepo(db), repository.NewSettingsRepo(db)))
+
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "Story complete.\n[CREATE_TASK]{\"title\":\"Unexpected child\",\"prompt\":\"should not be created\"}[/CREATE_TASK]"
+	mock.TextOnly = mock.Response
+	mock.Tokens = 12
+	svc.SetLLMCaller(mock)
+
+	task := &models.Task{ProjectID: "default", Title: "Write and email a story", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "Write a story then email me when done"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil || exec.Status != models.ExecCompleted {
+		t.Fatalf("expected completed execution, got %#v", exec)
+	}
+	tasks, err := taskRepo.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected runtime-tool task output not to create marker child tasks, got %d tasks: %#v", len(tasks), tasks)
+	}
+}
+
 func TestLLMService_ExecuteTaskWithAgent_CustomAgentSkillLibraryToolsUseRoutedSelection(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
