@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
@@ -2481,7 +2480,7 @@ func (s *SlackService) downloadSlackFiles(ctx context.Context, files []slackInco
 func (s *SlackService) resolveSlackFileInfo(ctx context.Context, f slackIncomingFile) (slackIncomingFile, error) {
 	mediaType := slackIncomingFileMediaType(f, slackSafeFileName(f))
 	forceInfo := strings.EqualFold(strings.TrimSpace(f.FileAccess), "check_file_info") || !slackIncomingFileHasDownloadURL(f)
-	optionalInfo := isSlackImageFile(mediaType) && strings.TrimSpace(f.URLPrivateDownload) == "" && strings.TrimSpace(f.URLPrivate) != ""
+	optionalInfo := isChannelChatImageMediaType(mediaType) && strings.TrimSpace(f.URLPrivateDownload) == "" && strings.TrimSpace(f.URLPrivate) != ""
 	needsInfo := strings.TrimSpace(f.ID) != "" && (forceInfo || optionalInfo)
 	if !needsInfo {
 		return f, nil
@@ -2520,7 +2519,7 @@ func (s *SlackService) resolveSlackIncomingFilesForRouting(ctx context.Context, 
 	copy(resolved, files)
 	for i, f := range resolved {
 		mediaType := slackIncomingFileMediaType(f, slackSafeFileName(f))
-		if isSlackImageFile(mediaType) {
+		if isChannelChatImageMediaType(mediaType) {
 			continue
 		}
 		if strings.TrimSpace(f.ID) == "" {
@@ -2601,7 +2600,7 @@ func (s *SlackService) downloadSlackFileCandidate(ctx context.Context, botToken,
 	}
 	var lastErr error
 	for i, candidateURL := range candidates {
-		destPath := filepath.Join(tmpDir, uniqueSlackTempFilename(tmpDir, fileName))
+		destPath := filepath.Join(tmpDir, uniqueChannelChatTempFilename(tmpDir, fileName))
 		dest, err := os.Create(destPath)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to create file: %w", err)
@@ -2617,7 +2616,7 @@ func (s *SlackService) downloadSlackFileCandidate(ctx context.Context, botToken,
 			_ = os.Remove(destPath)
 			return "", "", fmt.Errorf("failed to save file %q: %w", fileName, closeErr)
 		}
-		normalizedMediaType, err := validateSlackDownloadedFile(destPath, fileName, mediaType)
+		normalizedMediaType, err := validateChannelChatDownloadedImageFile(destPath, fileName, mediaType, "slack")
 		if err == nil {
 			if i > 0 {
 				applog.Infof("[slack] attachment file=%s downloaded from fallback URL after earlier candidate failed", fileName)
@@ -2629,7 +2628,7 @@ func (s *SlackService) downloadSlackFileCandidate(ctx context.Context, botToken,
 		}
 		_ = os.Remove(destPath)
 		lastErr = err
-		if !isSlackImageFile(mediaType) {
+		if !isChannelChatImageMediaType(mediaType) {
 			break
 		}
 	}
@@ -2652,7 +2651,7 @@ func slackFileDownloadURLs(f slackIncomingFile, mediaType string) []string {
 	}
 	add(f.URLPrivateDownload)
 	add(f.URLPrivate)
-	if isSlackImageFile(mediaType) {
+	if isChannelChatImageMediaType(mediaType) {
 		add(f.Thumb1024)
 		add(f.Thumb960)
 		add(f.Thumb720)
@@ -2839,14 +2838,6 @@ func cleanupSlackAttachmentSourceDirs(attachments []models.ChatAttachment) {
 	cleanupChannelChatAttachmentSourceDirs(attachments)
 }
 
-func generateSlackPendingSessionID() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b)
-}
-
 func slackSafeFileName(f slackIncomingFile) string {
 	name := strings.TrimSpace(f.Name)
 	if name == "" {
@@ -2867,21 +2858,6 @@ func slackFileDisplayName(f slackIncomingFile) string {
 	return slackSafeFileName(f)
 }
 
-func uniqueSlackTempFilename(dir, filename string) string {
-	candidate := filename
-	ext := filepath.Ext(filename)
-	base := strings.TrimSuffix(filename, ext)
-	if base == "" {
-		base = "slack-attachment"
-	}
-	for i := 1; ; i++ {
-		if _, err := os.Stat(filepath.Join(dir, candidate)); os.IsNotExist(err) {
-			return candidate
-		}
-		candidate = fmt.Sprintf("%s-%d%s", base, i, ext)
-	}
-}
-
 func slackIncomingFileMediaType(f slackIncomingFile, fileName string) string {
 	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(f.Mimetype, ";")[0]))
 	filenameMediaType := mediaTypeFromSlackFilename(fileName)
@@ -2893,7 +2869,7 @@ func slackIncomingFileMediaType(f slackIncomingFile, fileName string) string {
 
 func slackIncomingFilesContainImage(files []slackIncomingFile) bool {
 	for _, f := range files {
-		if isSlackImageFile(slackIncomingFileMediaType(f, slackSafeFileName(f))) {
+		if isChannelChatImageMediaType(slackIncomingFileMediaType(f, slackSafeFileName(f))) {
 			return true
 		}
 	}
@@ -2903,7 +2879,7 @@ func slackIncomingFilesContainImage(files []slackIncomingFile) bool {
 func slackIncomingFilesRequireVision(files []slackIncomingFile) bool {
 	for _, f := range files {
 		mediaType := slackIncomingFileMediaType(f, slackSafeFileName(f))
-		if isSlackImageFile(mediaType) {
+		if isChannelChatImageMediaType(mediaType) {
 			return true
 		}
 		if (mediaType == "" || mediaType == "application/octet-stream") && slackIncomingFileHasDownloadURL(f) {
@@ -2915,7 +2891,7 @@ func slackIncomingFilesRequireVision(files []slackIncomingFile) bool {
 
 func slackChatAttachmentsContainImage(chatAttachments []models.ChatAttachment) bool {
 	for _, att := range chatAttachments {
-		if isSlackImageFile(att.MediaType) {
+		if isChannelChatImageMediaType(att.MediaType) {
 			return true
 		}
 	}
@@ -2939,81 +2915,6 @@ func mediaTypeFromSlackFilename(filename string) string {
 		return "text/plain"
 	default:
 		return "application/octet-stream"
-	}
-}
-
-func validateSlackDownloadedFile(path, fileName, declaredMediaType string) (string, error) {
-	declaredMediaType = strings.ToLower(strings.TrimSpace(strings.Split(declaredMediaType, ";")[0]))
-	shouldValidateImage := isSlackImageFile(declaredMediaType)
-	if !shouldValidateImage && declaredMediaType != "" && declaredMediaType != "application/octet-stream" {
-		return declaredMediaType, nil
-	}
-
-	file, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("failed to validate image %q: %w", fileName, err)
-	}
-	defer file.Close()
-
-	head := make([]byte, 512)
-	n, readErr := io.ReadFull(file, head)
-	if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
-		return "", fmt.Errorf("failed to validate image %q: %w", fileName, readErr)
-	}
-	sniffedMediaType := strings.ToLower(strings.TrimSpace(http.DetectContentType(head[:n])))
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return "", fmt.Errorf("failed to validate image %q: %w", fileName, err)
-	}
-	if slackLooksLikeWebP(head[:n]) {
-		return "image/webp", nil
-	}
-	format, err := slackDecodeImageConfig(file)
-	if err != nil {
-		if !shouldValidateImage {
-			return declaredMediaType, nil
-		}
-		return "", fmt.Errorf("downloaded Slack file %q was labeled %s but is not a valid supported image (detected %s)", fileName, declaredMediaType, sniffedMediaType)
-	}
-	detectedMediaType := slackImageFormatMediaType(format)
-	if detectedMediaType == "" {
-		return "", fmt.Errorf("downloaded Slack file %q uses unsupported image format %q", fileName, format)
-	}
-	if declaredMediaType != "" && declaredMediaType != "application/octet-stream" && declaredMediaType != detectedMediaType {
-		applog.Infof("[slack] attachment file=%s declared mime=%s but detected mime=%s; using detected mime", fileName, declaredMediaType, detectedMediaType)
-	}
-	return detectedMediaType, nil
-}
-
-func slackDecodeImageConfig(r io.Reader) (string, error) {
-	_, format, err := image.DecodeConfig(r)
-	return format, err
-}
-
-func slackLooksLikeWebP(data []byte) bool {
-	return len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WEBP"
-}
-
-func slackImageFormatMediaType(format string) string {
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "jpeg":
-		return "image/jpeg"
-	case "png":
-		return "image/png"
-	case "gif":
-		return "image/gif"
-	case "webp":
-		return "image/webp"
-	default:
-		return ""
-	}
-}
-
-func isSlackImageFile(mimeType string) bool {
-	switch strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0])) {
-	case "image/jpeg", "image/png", "image/gif", "image/webp":
-		return true
-	default:
-		return false
 	}
 }
 

@@ -787,7 +787,7 @@ func detectTelegramDownloadedAttachmentMediaType(path, declaredMediaType string)
 		return declaredMediaType
 	}
 	sniffedMediaType := strings.ToLower(strings.TrimSpace(http.DetectContentType(head[:n])))
-	if slackLooksLikeWebP(head[:n]) {
+	if channelChatLooksLikeWebP(head[:n]) {
 		sniffedMediaType = "image/webp"
 	}
 	if isTelegramImageFile(sniffedMediaType) {

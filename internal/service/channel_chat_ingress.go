@@ -2,7 +2,12 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"image"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -614,11 +619,109 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 	return true, linkedAttachments
 }
 
+func generateChannelChatPendingSessionID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+func uniqueChannelChatTempFilename(dir, filename string) string {
+	candidate := filename
+	ext := filepath.Ext(filename)
+	base := strings.TrimSuffix(filename, ext)
+	if base == "" {
+		base = "attachment"
+	}
+	for i := 1; ; i++ {
+		if _, err := os.Stat(filepath.Join(dir, candidate)); os.IsNotExist(err) {
+			return candidate
+		}
+		candidate = fmt.Sprintf("%s-%d%s", base, i, ext)
+	}
+}
+
+func isChannelChatImageMediaType(mimeType string) bool {
+	switch strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0])) {
+	case "image/jpeg", "image/png", "image/gif", "image/webp":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateChannelChatDownloadedImageFile(path, fileName, declaredMediaType, platform string) (string, error) {
+	declaredMediaType = strings.ToLower(strings.TrimSpace(strings.Split(declaredMediaType, ";")[0]))
+	shouldValidateImage := isChannelChatImageMediaType(declaredMediaType)
+	if !shouldValidateImage && declaredMediaType != "" && declaredMediaType != "application/octet-stream" {
+		return declaredMediaType, nil
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to validate image %q: %w", fileName, err)
+	}
+	defer file.Close()
+
+	head := make([]byte, 512)
+	n, readErr := io.ReadFull(file, head)
+	if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+		return "", fmt.Errorf("failed to validate image %q: %w", fileName, readErr)
+	}
+	sniffedMediaType := strings.ToLower(strings.TrimSpace(http.DetectContentType(head[:n])))
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("failed to validate image %q: %w", fileName, err)
+	}
+	if channelChatLooksLikeWebP(head[:n]) {
+		return "image/webp", nil
+	}
+	format, err := channelChatDecodeImageConfig(file)
+	if err != nil {
+		if !shouldValidateImage {
+			return declaredMediaType, nil
+		}
+		return "", fmt.Errorf("downloaded %s file %q was labeled %s but is not a valid supported image (detected %s)", channelChatAttachmentDisplayPlatform(platform), fileName, declaredMediaType, sniffedMediaType)
+	}
+	detectedMediaType := channelChatImageFormatMediaType(format)
+	if detectedMediaType == "" {
+		return "", fmt.Errorf("downloaded %s file %q uses unsupported image format %q", channelChatAttachmentDisplayPlatform(platform), fileName, format)
+	}
+	if declaredMediaType != "" && declaredMediaType != "application/octet-stream" && declaredMediaType != detectedMediaType {
+		applog.Infof("[%s] attachment file=%s declared mime=%s but detected mime=%s; using detected mime", platform, fileName, declaredMediaType, detectedMediaType)
+	}
+	return detectedMediaType, nil
+}
+
+func channelChatDecodeImageConfig(r io.Reader) (string, error) {
+	_, format, err := image.DecodeConfig(r)
+	return format, err
+}
+
+func channelChatLooksLikeWebP(data []byte) bool {
+	return len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WEBP"
+}
+
+func channelChatImageFormatMediaType(format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "jpeg":
+		return "image/jpeg"
+	case "png":
+		return "image/png"
+	case "gif":
+		return "image/gif"
+	case "webp":
+		return "image/webp"
+	default:
+		return ""
+	}
+}
+
 func channelChatAttachmentContextAndImages(chatAttachments []models.ChatAttachment, maxTextFileSize int64) (string, []models.Attachment) {
 	var imageAttachments []models.Attachment
 	var attachmentContents []string
 	for _, att := range chatAttachments {
-		if isSlackImageFile(att.MediaType) {
+		if isChannelChatImageMediaType(att.MediaType) {
 			imageAttachments = append(imageAttachments, models.Attachment{
 				FileName:  att.FileName,
 				FilePath:  att.FilePath,
@@ -647,7 +750,7 @@ func saveChannelChatAttachmentsToPendingSession(uploadsDir, fallbackName string,
 	if len(attachments) == 0 {
 		return "", nil
 	}
-	sessionID := generateSlackPendingSessionID()
+	sessionID := generateChannelChatPendingSessionID()
 	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		return "", fmt.Errorf("creating pending upload directory: %w", err)
@@ -656,7 +759,7 @@ func saveChannelChatAttachmentsToPendingSession(uploadsDir, fallbackName string,
 	for _, att := range attachments {
 		fileName := safeChannelChatAttachmentFileName(att.FileName, fallbackName)
 		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
-		destPath := filepath.Join(sessionDir, fmt.Sprintf("%s_%s", generateSlackPendingSessionID()[:8], fileName))
+		destPath := filepath.Join(sessionDir, fmt.Sprintf("%s_%s", generateChannelChatPendingSessionID()[:8], fileName))
 		if err := moveOrCopyFile(att.FilePath, destPath); err != nil {
 			_ = os.RemoveAll(sessionDir)
 			cleanupChannelChatAttachmentDirs(cleanupDirs)
@@ -692,7 +795,7 @@ func linkChannelChatAttachmentsToExecution(ctx context.Context, execID string, a
 	for i := range attachments {
 		att := &attachments[i]
 		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
-		destPath := filepath.Join(execDir, uniqueSlackTempFilename(execDir, safeChannelChatAttachmentFileName(att.FileName, opts.FallbackName)))
+		destPath := filepath.Join(execDir, uniqueChannelChatTempFilename(execDir, safeChannelChatAttachmentFileName(att.FileName, opts.FallbackName)))
 		if err := moveOrCopyFile(att.FilePath, destPath); err != nil {
 			applog.Infof("[%s] error moving attachment file=%s: %v", platform, att.FileName, err)
 			linkErrs = append(linkErrs, fmt.Sprintf("%s: %v", att.FileName, err))

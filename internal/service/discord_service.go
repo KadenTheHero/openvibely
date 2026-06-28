@@ -1414,7 +1414,7 @@ func discordIncomingAttachmentsRequireVision(files []discordIncomingAttachment) 
 	for _, f := range files {
 		fileName := discordSafeFileName(f)
 		mediaType := discordIncomingFileMediaType(f, fileName)
-		if isSlackImageFile(mediaType) {
+		if isChannelChatImageMediaType(mediaType) {
 			return true
 		}
 		if (mediaType == "" || mediaType == "application/octet-stream") && (strings.TrimSpace(f.URL) != "" || strings.TrimSpace(f.ProxyURL) != "") {
@@ -1479,7 +1479,7 @@ func (s *DiscordService) downloadDiscordFileCandidate(ctx context.Context, tmpDi
 	}
 	var lastErr error
 	for _, candidateURL := range candidates {
-		destPath := filepath.Join(tmpDir, uniqueSlackTempFilename(tmpDir, fileName))
+		destPath := filepath.Join(tmpDir, uniqueChannelChatTempFilename(tmpDir, fileName))
 		dest, err := os.Create(destPath)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to create file: %w", err)
@@ -1495,7 +1495,7 @@ func (s *DiscordService) downloadDiscordFileCandidate(ctx context.Context, tmpDi
 			_ = os.Remove(destPath)
 			return "", "", fmt.Errorf("failed to save file %q: %w", fileName, closeErr)
 		}
-		normalizedMediaType, err := validateSlackDownloadedFile(destPath, fileName, mediaType)
+		normalizedMediaType, err := validateChannelChatDownloadedImageFile(destPath, fileName, mediaType, "discord")
 		if err == nil {
 			if normalizedMediaType != "" {
 				mediaType = normalizedMediaType
@@ -1504,7 +1504,7 @@ func (s *DiscordService) downloadDiscordFileCandidate(ctx context.Context, tmpDi
 		}
 		_ = os.Remove(destPath)
 		lastErr = err
-		if !isSlackImageFile(mediaType) {
+		if !isChannelChatImageMediaType(mediaType) {
 			break
 		}
 	}
@@ -1642,7 +1642,7 @@ func discordImageAttachmentsFromChatAttachments(chatAttachments []models.ChatAtt
 	}
 	imageAttachments := make([]models.Attachment, 0, len(chatAttachments))
 	for _, att := range chatAttachments {
-		if !isSlackImageFile(att.MediaType) {
+		if !isChannelChatImageMediaType(att.MediaType) {
 			continue
 		}
 		imageAttachments = append(imageAttachments, models.Attachment{
