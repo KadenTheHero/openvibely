@@ -15,7 +15,7 @@ always_use:
 
 ## openvibely_skill_index_staleness
 
-[OpenVibely Skill Index Staleness](openvibely_skill_index_staleness/SKILL.md) — Diagnose and regress stale skills_list entries after skill metadata patches, archives, or deletes.
+[OpenVibely Skill Index Staleness](openvibely_skill_index_staleness/SKILL.md) — Diagnose and regress stale skill or agent index entries after metadata patches, archives, or deletes.
 
 ## openvibely_validation_workflow
 
@@ -63,7 +63,7 @@ always_use:
 
 ## openvibely_channel_integrations_workflow
 
-[OpenVibely Channel Integrations Workflow](openvibely_channel_integrations_workflow/SKILL.md) — Implement and debug OpenVibely GitHub, Slack, Telegram, and inbound webhook integrations with shared chat/task-thread behavior.
+[OpenVibely Channel Integrations Workflow](openvibely_channel_integrations_workflow/SKILL.md) — Implement and debug OpenVibely GitHub, Slack, Telegram, Discord, Email, and inbound webhook integrations with shared chat/task-thread behavior.
 
 ## openvibely_lifecycle_hook_workflow
 
@@ -151,3 +151,27 @@ always_use:
 ## openvibely_responsive_templ_layout_workflow
 
 [OpenVibely Responsive Templ Layout Workflow](openvibely_responsive_templ_layout_workflow/SKILL.md) — Diagnose and fix responsive Tailwind/DaisyUI layout issues in OpenVibely templ UI without relying on screenshots.
+
+## openvibely_agent_tool_surface_workflow
+
+[OpenVibely Agent Tool Surface Workflow](openvibely_agent_tool_surface_workflow/SKILL.md) — Keep OpenVibely agent allowed-tool UI, validation, and runtime tool catalogs aligned when adding callable tools.
+
+## openvibely_outbound_message_delivery_workflow
+
+[OpenVibely Outbound Message Delivery Workflow](openvibely_outbound_message_delivery_workflow/SKILL.md) — Complete user-requested email or outbound-message delivery tasks without unnecessary confirmation and without falsely claiming sends.
+
+## openvibely_agent_management_workflow
+
+[OpenVibely Agent Management Workflow](openvibely_agent_management_workflow/SKILL.md) — Implement and audit OpenVibely Agents page CRUD, filesystem-backed agent declarations, and advanced agent settings persistence.
+
+## openvibely_swarm_task_workflow
+
+[OpenVibely Swarm Task Workflow](openvibely_swarm_task_workflow/SKILL.md) — Implement and audit OpenVibely agent/task swarm orchestration across task persistence, workers, tools, UI, and docs.
+
+## openvibely_virtual_model_provider_workflow
+
+[OpenVibely Virtual Model Provider Workflow](openvibely_virtual_model_provider_workflow/SKILL.md) — Implement OpenVibely virtual model providers that orchestrate other configured models without adding external credentials.
+
+## openvibely_channel_ingress_refactor_audit
+
+[OpenVibely Channel Ingress Refactor Audit](openvibely_channel_ingress_refactor_audit/SKILL.md) — Audit shared channel chat ingress refactors for residual duplicated adapter logic before claiming new-channel reusability.

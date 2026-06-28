@@ -38,6 +38,7 @@ Tool calls (`read_file`, `edit_file`, `write_file`, `bash`) resolve **relative p
 3. **All `read_file`, `edit_file`, `write_file` calls must use absolute paths** rooted at the worktree, not relative paths from the repo root.
 4. **Before committing**, run `git -C <worktree-path> status` and `git -C <worktree-path> diff --stat HEAD` to verify changes are in the worktree branch, not main.
 5. If accidental edits land in the main checkout, stop immediately: inspect both trees, move changes to the worktree, restore main before continuing.
+6. After recovering wrong-checkout edits or before claiming a task branch is ready to merge, verify the main checkout is clean of task-owned paths with path-limited status/diff checks such as `git -C <main-repo> status --short -- <paths>` and `git -C <main-repo> diff --stat HEAD -- <paths>`. Only restore/delete paths after confirming the same intended changes are committed or preserved in the task worktree; leave unrelated user/system dirty files untouched and explicitly report them as unrelated.
 
 ## Core Model
 

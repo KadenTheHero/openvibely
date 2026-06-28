@@ -2,16 +2,16 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-06-21
+updated: 2026-06-26
 source: consolidation
-source_id: memory_consolidation_2026_06_21
+source_id: memory_consolidation_2026_06_26
 confidence: high
 title: Worktree and Lineage
 ---
 
 Task execution uses isolated git worktrees in `.worktrees/task_<id>` with task-scoped branches `task/<id_prefix>-<slug>`. LLM task prompts include explicit worktree path orientation when a workdir is present, while runtime workdir enforcement remains the source of truth. Coding changes for assigned tasks must be made in the assigned task worktree, not the main checkout, unless the user explicitly asks for main-checkout changes.
 
-Worktree path discipline is mandatory when a task provides a worktree path: relative tool paths resolve against the agent's working directory, not automatically against the task worktree, so coding agents must explicitly operate in and verify the assigned worktree branch. Procedure-level details belong in the `openvibely_worktree_merge_lineage_workflow` skill.
+Worktree path discipline is mandatory when a task provides a worktree path: relative tool paths resolve against the agent's working directory, not automatically against the task worktree. Procedure-level details belong in the `openvibely_worktree_merge_lineage_workflow` skill.
 
 Durable worktree model:
 - Auto-merge supports merge commit, fast-forward only, and squash merge.
@@ -20,7 +20,7 @@ Durable worktree model:
 - `LLMService.ExecuteTaskWithAgent` creates the worktree before execution, runs startup sync from the latest target/default branch when the worktree is clean, and handles post-execution merge.
 - Startup sync uses the task's `MergeTargetBranch` when set, falling back to the default branch only when no target is stored.
 - Changes tab shows worktree branch diff vs target branch when available, falling back to execution diff.
-- Active worktree Changes diffs should represent one net diff from the task's target branch to the current worktree state, including committed, staged, and unstaged tracked changes as a single per-path diff. Untracked files are appended separately when Git cannot include them in that comparison; do not concatenate committed branch diff blocks with `git diff HEAD`, because follow-ups that re-edit an already-committed file can otherwise duplicate the same path in Task Changes while running.
+- Active worktree Changes diffs should represent one net diff from the task's target branch to the current worktree state, including committed, staged, and unstaged tracked changes as a single per-path diff. Untracked files are appended separately when Git cannot include them in that comparison; do not concatenate committed branch diff blocks with `git diff HEAD`.
 - Cleanup policy supports after-merge, keep, and manual.
 - Periodic cleanup removes merged worktrees and detects orphaned worktrees with no corresponding task.
 - Chained tasks carry git lineage through `base_branch`, `base_commit_sha`, and `lineage_depth`.

@@ -168,6 +168,30 @@ For a dry-run-only release rehearsal, still verify public state read-only: compa
 
 **Known dry-run caveat:** if `release-build.sh` prints `cp` or `chmod` errors while building macOS desktop bundles in `DRY_RUN=1`, treat them as a dry-run script leak unless the real build was requested. The `build_macos_app()` path may print the skipped binary build but still attempt bundle setup against a missing dry-run binary; report this as a script bug to fix before relying on clean dry-run output, but do not treat it as proof that an actual release build is blocked. If a dry-run rehearsal must exercise `release-build.sh` without allowing native macOS bundle filesystem writes, run the build script behind a temporary non-Darwin `uname` shim and record that macOS bundle behavior was intentionally bypassed because of the known leak.
 
+### Post-release factual questions
+
+When a user asks a factual follow-up about what a completed release included, keep the task read-only unless they explicitly ask for edits. Prefer the published tag or GitHub release as source of truth over the current working tree, because the checkout may contain unrelated uncommitted or post-release changes.
+
+For model-provider counts, distinguish provider layers before answering:
+
+- Backend provider type: count canonical `models.LLMProvider` additions such as `openai_compatible`.
+- UI preset choices: count `openai_compatible_<slug>` options from the released tag/template or generated UI, not from memory.
+- Named providers vs Custom: report `Custom OpenAI-Compatible` separately when present because it is a user-defined endpoint choice, not a named hosted/local provider preset.
+
+Example read-only check against a release tag:
+
+```bash
+git show v<version>:web/templates/pages/models.templ \
+  | sed -n '340,390p' \
+  | grep -c '<option value="openai_compatible_'
+```
+
+### Published Release Note Updates
+
+When a user asks to edit an already-published GitHub release body, treat it as public release-state mutation but keep the scope to the release notes unless they explicitly ask for artifacts, tags, Docker, or source changes. Confirm the target release exists, read the current body with `gh release view`, update only the release body, and avoid rebuilding or moving any tag.
+
+Use the preferred style from `references/release-note-style.md` when rewriting release bullets: bold lead label, em dash, concise user-facing explanation. If the update mentions exact model-provider counts, verify the counts from the published tag first and distinguish backend provider types, UI preset choices, named provider presets, and local/self-hosted presets.
+
 ---
 
 ## Artifact Naming (matches v0.1.0 release pattern)

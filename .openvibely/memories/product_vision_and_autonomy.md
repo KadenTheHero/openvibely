@@ -2,9 +2,9 @@
 name: product_vision_and_autonomy
 type: project
 created: 2026-06-10
-updated: 2026-06-21
+updated: 2026-06-26
 source: consolidation
-source_id: memory_consolidation_2026_06_21
+source_id: memory_consolidation_2026_06_26
 confidence: high
 title: Product Vision and Reviewable Autonomy
 ---
@@ -28,7 +28,7 @@ Recursive bootstrap skill direction:
 - The user wants the skill indexed in `.openvibely/skills/SKILLS.md` for local OpenVibely testing before release; the draft package body may remain ignored/local until ready to publish.
 - The skill should behave as an easy button: short prompts such as “make this project autonomous” or “loop on this vision” should be enough.
 - The skill should use real OpenVibely control-plane tools to create/update the priority inbox, autonomous driver task, persisted goals, triage/audit/implementation/repair/review tasks, recurring schedules, dynamic wakeup guidance, task chaining, and curator loops; it should not merely describe the loop.
-- Source-of-truth file selection should be conservative: use explicit file paths or a single obvious canonical root file. If vision/spec/defect files are missing or ambiguous, ask the user which exact file(s) to use rather than broadly guessing or creating a generic discovery task.
+- Source-of-truth file selection should be conservative: use explicit file paths or a single obvious canonical root file. If vision/spec/defect files are missing or ambiguous, ask the user which exact file(s) to use rather than guessing or creating a generic discovery task.
 - Direct setup must run from project Chat in Orchestrate mode because task-thread follow-ups are intentionally constrained from creating, editing, or scheduling tasks.
 - Indexed standalone skills still do not automatically kick in from ordinary interactive Chat prompts: interactive Chat uses recall-only memory preparation and does not run Skill Curator selected-skill routing or expose `skill_view`. “Make this project autonomous” needs manual skill selection/invocation or a product change that adds Chat standalone-skill routing.
 - The tool contract should stay aligned with actual chat-control capabilities and avoid fictional orchestration APIs; current bootstrap idempotency is limited because there is no generic `list_tasks`/`list_schedules` action, and several goal/task actions require real task IDs rather than titles.

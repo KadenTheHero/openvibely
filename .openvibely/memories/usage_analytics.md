@@ -2,9 +2,9 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-06-21
+updated: 2026-06-26
 source: consolidation
-source_id: memory_consolidation_2026_06_21
+source_id: memory_consolidation_2026_06_26
 confidence: high
 title: Usage Analytics
 ---
@@ -13,13 +13,13 @@ OpenVibely usage analytics are local operational analytics, not third-party prod
 
 Durable analytics model:
 - Persistent model-usage analytics exist for Anthropic and OpenAI OAuth/API-key paths, plus OpenAI-compatible Chat Completions API-key configs.
-- OpenAI-compatible Chat Completions usage is parsed by the shared client/adapter into canonical input/output/total/cached/reasoning fields and persisted through `RecordUsageFromResult` for `ProviderOpenAICompatible` API-key configs. Analytics displays these rows as provider `openai_compatible` with the exact configured model ID in totals, usage-rate series, and model breakdowns.
+- OpenAI-compatible Chat Completions usage is parsed by the shared client/adapter into canonical input/output/total/cached/reasoning fields and persisted through `RecordUsageFromResult` for `ProviderOpenAICompatible` API-key configs.
 - Skill analytics events are stored locally in `skill_analytics_events`.
 - Usage rows are stored locally in `llm_usage_events`.
 - OAuth account-limit snapshots are stored in `account_usage_snapshots`, with extra/model-specific account limits stored in `account_usage_extra_limits`.
 - Usage capture is one final row per completed provider model call at the owning execution/call-site boundary, not per streamed chunk.
 - Skill analytics event semantics distinguish selection, consumption, and skill changes: `selected` records routed/available skills, `loaded` records successful full-body `skill_view` loads, `viewed` records successful `skill_view` access, `created` records skill creation, and `edited` records app-managed skill updates/mutations.
-- Agent-owned lifecycle hook executions record real hook starts as `selected` skill analytics events with `source=lifecycle_hook`/`surface=lifecycle_hook`, `skill_scope=agent_owned`, and the owning project/task/agent metadata; hook body resolution does not synthesize `loaded` or `viewed` events.
+- Agent-owned lifecycle hook executions record real hook starts as `selected` skill analytics events with `source=lifecycle_hook`/`surface=lifecycle_hook`, `skill_scope=agent_owned`, and owning project/task/agent metadata; hook body resolution does not synthesize `loaded` or `viewed` events.
 - Lifecycle hook analytics keep ordinary task-execution foreign keys intact by storing the lifecycle execution identifier in the analytics turn/thread field rather than `skill_analytics_events.execution_id`.
 - Skill create/edit telemetry is separated: create/import UI paths record `created` only for new skills, overwrites record `edited`, mutation tools record `created` for create actions, and other successful mutations record `edited`.
 - Provider cost fields are stored only when provider data exists; OpenVibely does not silently estimate provider costs.
@@ -45,7 +45,7 @@ Analytics surface facts:
 - Provider account cards appear before usage charts/tables.
 - Skill Curator Analytics appears immediately above the Failed Task Patterns card.
 - The usage chart label is `Token Usage`; token-count breakdowns are `Model Breakdown by Tokens`; execution-count breakdowns are `Model Breakdown by Executions`.
-- The Token Usage chart card's model selector must stay within the card on narrow/mobile widths: avoid an unconditional fixed minimum width on the select, keep the header/select wrapper shrink-safe with `min-w-0`, let the select use `w-full max-w-full` on narrow screens, and apply wider minimums only at larger breakpoints such as `sm:min-w-48`.
+- Token Usage chart card controls must stay within the card on narrow/mobile widths by keeping header/select wrappers shrink-safe and applying wider minimums only at larger breakpoints.
 - Account-limit cards use provider as the heading with normalized plan/subscription metadata underneath; raw plan types, account IDs, config IDs, emails, and provider identity fields are not public card labels.
 - Account-limit horizontal usage bars intentionally use explicit shared-theme track/fill meter markup instead of native/DaisyUI `<progress>` rendering because packaged macOS desktop light-mode WebView made native bars invisible.
 

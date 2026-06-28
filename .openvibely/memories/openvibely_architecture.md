@@ -2,16 +2,14 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-06-21
+updated: 2026-06-26
 source: consolidation
-source_id: memory_consolidation_2026_06_21
+source_id: memory_consolidation_2026_06_26
 confidence: high
 title: OpenVibely Architecture
 ---
 
-OpenVibely is an open-source Go application for automated task scheduling and AI-powered execution. Users create tasks, schedule them, and have LLM agents execute them automatically.
-
-The backend uses Echo v4, SQLite via `modernc.org/sqlite`, goose migrations, and a channel-based worker pool. The frontend is server-rendered with HTMX, templ, Tailwind CSS, and DaisyUI.
+OpenVibely is an open-source Go application for automated task scheduling and AI-powered execution. Users create tasks, schedule them, and have LLM agents execute them automatically. The backend uses Echo v4, SQLite via `modernc.org/sqlite`, goose migrations, and a channel-based worker pool. The frontend is server-rendered with HTMX, templ, Tailwind CSS, and DaisyUI.
 
 Dual mode architecture:
 - `internal/server.Start(ctx, cfg)` wires the shared backend and returns a server instance with bound address, base URL, and shutdown handle.
@@ -19,8 +17,7 @@ Dual mode architecture:
 - Hosted/Docker deployments use explicit env-driven storage such as mounted `/data` paths rather than local `$HOME/.openvibely` behavior.
 - Desktop mode (`cmd/desktop`) uses `config.LoadWithMode(ModeDesktop)`, ephemeral port `PORT=0`, local repo paths, and Wails WebView loading from the server base URL.
 - `make package-desktop-macos` builds a raw intermediate executable and packages it as `OpenVibely.app/Contents/MacOS/OpenVibely`; release packaging pitfalls belong with release-discipline memory.
-- `OPENVIBELY_APP_DATA_DIR` is the shared override for the local app-data root when users need web/server and desktop to point at the same runtime state; explicit overrides bypass legacy-path migration into another app-data default.
-- `OPENVIBELY_APP_DATA_DIR` is read as a literal path by config loading; shell `~` expansion is not performed, so quoted `~` assignments can point at an unintended relative directory.
+- `OPENVIBELY_APP_DATA_DIR` is the shared override for the local app-data root when users need web/server and desktop to point at the same runtime state. It is read as a literal path; shell `~` expansion is not performed.
 - Env vars override mode defaults. `DATABASE_PATH`, `PROJECT_REPO_ROOT`, and related storage env vars remain explicit paths; `DATABASE_PATH` overrides database location even when `OPENVIBELY_APP_DATA_DIR` is set.
 - Desktop defaults to localhost OAuth callback flow (`APP_BASE_URL` unset). Server/VPS mode uses `APP_BASE_URL` for hosted callbacks.
 - Desktop/Wails GUI launches, especially on macOS, may not inherit the user's interactive shell `PATH`; task execution relies on centralized environment/PATH construction rather than hardcoded developer-tool paths.
@@ -38,16 +35,12 @@ Storage and runtime-state pitfalls:
 - Web/server and desktop local runs are expected to use the same database by default unless env vars explicitly separate them.
 - Local runtime-state diagnosis depends on the active process, port, and database path because multiple local/server/desktop instances may use different configured storage roots.
 
-OAuth and base URLs:
+OAuth and hosted deployment facts:
 - Model OAuth initiate/callback resolves absolute app URLs through shared URL-building behavior: `APP_BASE_URL` first, then forwarded/request host fallback.
-- Hosted deployments use `APP_BASE_URL` so Anthropic/OpenAI OAuth redirects stay on the public hostname.
-- Without `APP_BASE_URL`, OAuth keeps localhost callback-server behavior for local development.
-
-Hosted deployment state:
+- Hosted deployments use `APP_BASE_URL` so Anthropic/OpenAI OAuth redirects stay on the public hostname. Without it, OAuth keeps localhost callback-server behavior for local development.
 - Current Hostinger VPS state as of 2026-06-14: VPS id `1580249`, hostname `srv1580249.hstgr.cloud`, plan `KVM 2`, Ubuntu 24.04 LTS, public IPv4 `2.24.193.101`, public IPv6 `2a02:4780:75:dff5::1`, state `running`.
 - Hostinger Docker Compose projects are managed under `/docker/<project>/docker-compose.yml`.
-- Running projects on that VPS include `agency` (`openvibely/openvibely-agency:latest`, port `3002`), `openvibely` (`openvibely/openvibely:latest`, port `3001`), `openvibely-docs` (`openvibely/openvibely-docs:latest`, port `4173`, `pull_policy: always`, `restart: unless-stopped`, Traefik-routed at `docs.openvibely.ai` with Let's Encrypt TLS), and `httpbin-traefik` (`traefik:latest`).
-- `httpbin` (`kennethreitz/httpbin:latest`) was stopped as of 2026-06-14 and may be unused.
+- Running projects on that VPS include `agency` (`openvibely/openvibely-agency:latest`, port `3002`), `openvibely` (`openvibely/openvibely:latest`, port `3001`), `openvibely-docs` (`openvibely/openvibely-docs:latest`, port `4173`, `pull_policy: always`, `restart: unless-stopped`, Traefik-routed at `docs.openvibely.ai` with Let's Encrypt TLS), and `httpbin-traefik` (`traefik:latest`). `httpbin` was stopped as of 2026-06-14 and may be unused.
 
 Shared conventions:
 - `internal/handler` is the Echo HTTP boundary: `handler.go` owns the shared `Handler` dependency graph and route registration, while feature-specific files attach methods for tasks, projects, chat, models, auth, integrations, SSE, worktrees, and HTMX/API surfaces.
