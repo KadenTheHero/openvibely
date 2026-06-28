@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -288,6 +289,13 @@ func TestTelegramService_NewTelegramService_InvalidToken(t *testing.T) {
 }
 
 // Helper to create a TelegramService for testing (no real bot connection)
+func closedTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db := testutil.NewTestDB(t)
+	require.NoError(t, db.Close())
+	return db
+}
+
 func newTestTelegramService(t *testing.T) (*TelegramService, *repository.ProjectRepo, *repository.TaskRepo) {
 	t.Helper()
 	oldUploadsDir := telegramUploadsDir
@@ -2704,85 +2712,129 @@ func TestTelegramService_QueueChatInputCleansPendingAttachmentsWhenQueueInsertFa
 	require.Contains(t, strings.Join(sent, "\n"), "Error queueing your message")
 }
 
-func TestTelegramService_HandleChatMessageCleansDownloadedAttachmentWhenAgentSelectionFails(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-
-	project := &models.Project{Name: "Telegram Attachment Cleanup Project"}
-	require.NoError(t, projectRepo.Create(ctx, project))
-
-	modelDB := testutil.NewTestDB(t)
-	llmConfigRepo := repository.NewLLMConfigRepo(modelDB)
-	require.NoError(t, modelDB.Close())
-
-	var sent []string
-	svc := &TelegramService{
-		projectRepo:     projectRepo,
-		llmConfigRepo:   llmConfigRepo,
-		sendMessageFunc: func(chatID int64, text string) { sent = append(sent, text) },
-		userProjects:    map[int64]string{7: project.ID},
+func TestTelegramService_HandleChatMessageCleansDownloadedAttachmentOnPostDownloadFailures(t *testing.T) {
+	tests := []struct {
+		name        string
+		configure   func(t *testing.T, db *sql.DB, projectID string, svc *TelegramService)
+		wantMessage string
+	}{
+		{
+			name: "agent selection fails",
+			configure: func(t *testing.T, db *sql.DB, projectID string, svc *TelegramService) {
+				modelDB := testutil.NewTestDB(t)
+				svc.llmConfigRepo = repository.NewLLMConfigRepo(modelDB)
+				require.NoError(t, modelDB.Close())
+			},
+			wantMessage: "Error selecting model",
+		},
+		{
+			name: "active chat lookup fails",
+			configure: func(t *testing.T, db *sql.DB, projectID string, svc *TelegramService) {
+				svc.execRepo = repository.NewExecutionRepo(closedTestDB(t))
+			},
+			wantMessage: "Error checking active chat response",
+		},
+		{
+			name: "task creation fails",
+			configure: func(t *testing.T, db *sql.DB, projectID string, svc *TelegramService) {
+				svc.taskRepo = repository.NewTaskRepo(closedTestDB(t), nil)
+			},
+			wantMessage: "Error processing your message",
+		},
+		{
+			name: "execution creation fails",
+			configure: func(t *testing.T, db *sql.DB, projectID string, svc *TelegramService) {
+				_, err := db.Exec(`CREATE TRIGGER telegram_test_fail_execution_insert BEFORE INSERT ON executions BEGIN SELECT RAISE(FAIL, 'forced execution create failure'); END;`)
+				require.NoError(t, err)
+			},
+			wantMessage: "Error processing your message",
+		},
 	}
 
-	var apiServer *httptest.Server
-	apiServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/botTESTTOKEN/getMe":
-			_, _ = w.Write([]byte(`{"ok":true,"result":{"id":123,"is_bot":true,"first_name":"TestBot","username":"test_bot"}}`))
-		case "/botTESTTOKEN/getFile":
-			_, _ = w.Write([]byte(`{"ok":true,"result":{"file_id":"file-1","file_unique_id":"unique-1","file_path":"documents/test.txt"}}`))
-		case "/file/botTESTTOKEN/documents/test.txt":
-			_, _ = w.Write([]byte("downloaded telegram attachment"))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer apiServer.Close()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			projectRepo := repository.NewProjectRepo(db)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			execRepo := repository.NewExecutionRepo(db)
+			llmConfigRepo := repository.NewLLMConfigRepo(db)
 
-	bot, err := tgbotapi.NewBotAPIWithAPIEndpoint("TESTTOKEN", apiServer.URL+"/bot%s/%s")
-	require.NoError(t, err)
-	svc.bot = bot
+			project := &models.Project{Name: "Telegram Attachment Cleanup Project"}
+			require.NoError(t, projectRepo.Create(ctx, project))
 
-	oldTransport := http.DefaultTransport
-	apiServerURL := apiServer.URL
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Host == "api.telegram.org" && strings.HasPrefix(req.URL.Path, "/file/botTESTTOKEN/") {
-			rewritten := req.Clone(req.Context())
-			rewritten.URL.Scheme = "http"
-			rewritten.URL.Host = strings.TrimPrefix(apiServerURL, "http://")
-			return oldTransport.RoundTrip(rewritten)
-		}
-		return oldTransport.RoundTrip(req)
-	})
-	t.Cleanup(func() { http.DefaultTransport = oldTransport })
+			var sent []string
+			svc := &TelegramService{
+				projectRepo:     projectRepo,
+				llmConfigRepo:   llmConfigRepo,
+				taskRepo:        taskRepo,
+				execRepo:        execRepo,
+				sendMessageFunc: func(chatID int64, text string) { sent = append(sent, text) },
+				userProjects:    map[int64]string{7: project.ID},
+			}
+			tt.configure(t, db, project.ID, svc)
 
-	tempRoot := t.TempDir()
-	oldTempDir := os.Getenv("TMPDIR")
-	require.NoError(t, os.Setenv("TMPDIR", tempRoot))
-	t.Cleanup(func() {
-		if oldTempDir == "" {
-			require.NoError(t, os.Unsetenv("TMPDIR"))
-		} else {
-			require.NoError(t, os.Setenv("TMPDIR", oldTempDir))
-		}
-	})
+			var apiServer *httptest.Server
+			apiServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/botTESTTOKEN/getMe":
+					_, _ = w.Write([]byte(`{"ok":true,"result":{"id":123,"is_bot":true,"first_name":"TestBot","username":"test_bot"}}`))
+				case "/botTESTTOKEN/getFile":
+					_, _ = w.Write([]byte(`{"ok":true,"result":{"file_id":"file-1","file_unique_id":"unique-1","file_path":"documents/test.txt"}}`))
+				case "/file/botTESTTOKEN/documents/test.txt":
+					_, _ = w.Write([]byte("downloaded telegram attachment"))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer apiServer.Close()
 
-	svc.handleChatMessage(&tgbotapi.Message{
-		From:    &tgbotapi.User{ID: 7},
-		Chat:    &tgbotapi.Chat{ID: 42},
-		Caption: "summarize this file",
-		Document: &tgbotapi.Document{
-			FileID:   "file-1",
-			FileName: "test.txt",
-			FileSize: 32,
-			MimeType: "text/plain",
-		},
-	})
+			bot, err := tgbotapi.NewBotAPIWithAPIEndpoint("TESTTOKEN", apiServer.URL+"/bot%s/%s")
+			require.NoError(t, err)
+			svc.bot = bot
 
-	entries, err := os.ReadDir(tempRoot)
-	require.NoError(t, err)
-	require.Empty(t, entries, "downloaded Telegram attachment temp directories should be cleaned up when model selection fails")
-	require.Contains(t, strings.Join(sent, "\n"), "Error selecting model")
+			oldTransport := http.DefaultTransport
+			apiServerURL := apiServer.URL
+			http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Host == "api.telegram.org" && strings.HasPrefix(req.URL.Path, "/file/botTESTTOKEN/") {
+					rewritten := req.Clone(req.Context())
+					rewritten.URL.Scheme = "http"
+					rewritten.URL.Host = strings.TrimPrefix(apiServerURL, "http://")
+					return oldTransport.RoundTrip(rewritten)
+				}
+				return oldTransport.RoundTrip(req)
+			})
+			t.Cleanup(func() { http.DefaultTransport = oldTransport })
+
+			tempRoot := t.TempDir()
+			oldTempDir := os.Getenv("TMPDIR")
+			require.NoError(t, os.Setenv("TMPDIR", tempRoot))
+			t.Cleanup(func() {
+				if oldTempDir == "" {
+					require.NoError(t, os.Unsetenv("TMPDIR"))
+				} else {
+					require.NoError(t, os.Setenv("TMPDIR", oldTempDir))
+				}
+			})
+
+			svc.handleChatMessage(&tgbotapi.Message{
+				From:    &tgbotapi.User{ID: 7},
+				Chat:    &tgbotapi.Chat{ID: 42},
+				Caption: "summarize this file",
+				Document: &tgbotapi.Document{
+					FileID:   "file-1",
+					FileName: "test.txt",
+					FileSize: 32,
+					MimeType: "text/plain",
+				},
+			})
+
+			entries, err := os.ReadDir(tempRoot)
+			require.NoError(t, err)
+			require.Empty(t, entries, "downloaded Telegram attachment temp directories should be cleaned up on %s", tt.name)
+			require.Contains(t, strings.Join(sent, "\n"), tt.wantMessage)
+		})
+	}
 }
 
 func TestTelegramService_HandleChatMessage_UsesSharedChannelChatRunner(t *testing.T) {

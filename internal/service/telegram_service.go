@@ -584,6 +584,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 
 	if activeChatExec, activeErr := s.execRepo.FindLatestActiveChatExecution(ctx, projectID); activeErr != nil {
 		applog.Infof("[telegram] error checking active chat turn: %v", activeErr)
+		cleanupChannelChatAttachmentSourceDirs(chatAttachments)
 		s.sendMessage(ctx, chatID, "Error checking active chat response. Please try again.")
 		return
 	} else if activeChatExec != nil {
@@ -607,6 +608,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	}
 	if err := s.taskRepo.Create(ctx, task); err != nil {
 		applog.Infof("[telegram] error creating task: %v", err)
+		cleanupChannelChatAttachmentSourceDirs(chatAttachments)
 		s.sendMessage(ctx, chatID, "Error processing your message. Please try again.")
 		return
 	}
@@ -620,6 +622,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	}
 	if err := s.execRepo.Create(ctx, exec); err != nil {
 		applog.Infof("[telegram] error creating execution: %v", err)
+		cleanupChannelChatAttachmentSourceDirs(chatAttachments)
 		if delErr := s.taskRepo.Delete(ctx, task.ID); delErr != nil {
 			applog.Infof("[telegram] cleanup chat task failed task=%s after execution create failure: %v", task.ID, delErr)
 		}
