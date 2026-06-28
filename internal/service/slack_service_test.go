@@ -39,6 +39,49 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
 
+func slackTestURL(path string) string {
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return "https://files.slack.com" + path
+}
+
+func useSlackFileServer(t *testing.T, svc *SlackService, server *httptest.Server) {
+	t.Helper()
+	useSlackFileServers(t, svc, map[string]*httptest.Server{
+		"files.slack.com": server,
+	})
+}
+
+func useSlackFileServers(t *testing.T, svc *SlackService, servers map[string]*httptest.Server) {
+	t.Helper()
+	serverURLs := make(map[string]*url.URL, len(servers))
+	for host, server := range servers {
+		serverURL, err := url.Parse(server.URL)
+		require.NoError(t, err)
+		serverURLs[host] = serverURL
+	}
+	transport := http.DefaultTransport
+	svc.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if serverURL := serverURLs[req.URL.Hostname()]; serverURL != nil {
+			rewritten := req.Clone(req.Context())
+			rewritten.URL = cloneURL(req.URL)
+			rewritten.URL.Scheme = serverURL.Scheme
+			rewritten.URL.Host = serverURL.Host
+			return transport.RoundTrip(rewritten)
+		}
+		return transport.RoundTrip(req)
+	})}
+}
+
+func cloneURL(u *url.URL) *url.URL {
+	if u == nil {
+		return nil
+	}
+	copied := *u
+	return &copied
+}
+
 func TestSlackService_GetConnectionStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
@@ -1027,7 +1070,7 @@ func TestSlackService_EventFilteringPreservesAttachmentAndBlockFileReferences(t 
 		TimeStamp: "1710000000.100000",
 		Attachments: []slack.Attachment{{
 			Title:    "attachment-shot.png",
-			ImageURL: "http://localhost/attachment-shot.png",
+			ImageURL: slackTestURL("/attachment-shot.png"),
 		}},
 		Blocks: slack.Blocks{BlockSet: []slack.Block{
 			slack.NewImageBlockSlackFile(&slack.SlackFileObject{ID: "F-BLOCK"}, "block-shot.png", "b1", nil),
@@ -1037,7 +1080,7 @@ func TestSlackService_EventFilteringPreservesAttachmentAndBlockFileReferences(t 
 	require.Len(t, received, 1)
 	require.Len(t, received[0].Files, 2)
 	require.Equal(t, "attachment-shot.png", received[0].Files[0].Name)
-	require.Equal(t, "http://localhost/attachment-shot.png", received[0].Files[0].URLPrivate)
+	require.Equal(t, slackTestURL("/attachment-shot.png"), received[0].Files[0].URLPrivate)
 	require.Equal(t, "F-BLOCK", received[0].Files[1].ID)
 	require.Equal(t, "block-shot.png", received[0].Files[1].Name)
 }
@@ -1046,9 +1089,10 @@ func TestSlackService_EventFilteringIgnoresExternalAttachmentImageURLs(t *testin
 	files := slackIncomingFilesFromAttachments([]slack.Attachment{{
 		Title:    "external.png",
 		ImageURL: "https://example.com/external.png",
-		ThumbURL: "https://cdn.example.com/thumb.png",
+		ThumbURL: "http://localhost/thumb.png",
 		Blocks: slack.Blocks{BlockSet: []slack.Block{
 			slack.NewImageBlockSlackFile(&slack.SlackFileObject{URL: "https://evil.example.com/file.png"}, "external-block.png", "b1", nil),
+			slack.NewImageBlock("http://127.0.0.1/file.png", "localhost-block.png", "b2", nil),
 		}},
 	}})
 	require.Empty(t, files)
@@ -1077,6 +1121,7 @@ func TestSlackService_ProcessIncomingMessage_DownloadsPersistsAndPassesImageAtta
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
+	useSlackFileServer(t, svc, fileServer)
 	uploadRoot := useTempSlackUploadsDir(t, svc)
 	svc.SetChatAttachmentRepo(chatAttachmentRepo)
 	svc.SetChatBroadcaster(events.NewChatBroadcaster())
@@ -1099,7 +1144,7 @@ func TestSlackService_ProcessIncomingMessage_DownloadsPersistsAndPassesImageAtta
 			Name:               "screenshot.png",
 			Mimetype:           "image/png",
 			Size:               7,
-			URLPrivateDownload: fileServer.URL + "/screenshot.png",
+			URLPrivateDownload: slackTestURL("/screenshot.png"),
 		}},
 	})
 
@@ -1151,7 +1196,7 @@ func TestSlackService_ProcessIncomingMessage_ResolvesSlackFileInfoPlaceholder(t 
 		require.Equal(t, "xoxb-test", r.Form.Get("token"))
 		require.Equal(t, "FPLACEHOLDER", r.Form.Get("file"))
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"ok":true,"file":{"id":"FPLACEHOLDER","name":"resolved-shot.png","title":"resolved-shot.png","mimetype":"image/png","size":%d,"url_private_download":%q}}`, len(slackTestPNGBytes), fileServer.URL+"/resolved-shot.png")
+		_, _ = fmt.Fprintf(w, `{"ok":true,"file":{"id":"FPLACEHOLDER","name":"resolved-shot.png","title":"resolved-shot.png","mimetype":"image/png","size":%d,"url_private_download":%q}}`, len(slackTestPNGBytes), slackTestURL("/resolved-shot.png"))
 	}))
 	defer apiServer.Close()
 
@@ -1159,6 +1204,7 @@ func TestSlackService_ProcessIncomingMessage_ResolvesSlackFileInfoPlaceholder(t 
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
+	useSlackFileServer(t, svc, fileServer)
 	svc.SetUploadsDir(t.TempDir())
 	svc.SetChatAttachmentRepo(chatAttachmentRepo)
 	svc.botClient = slack.New("xoxb-test", slack.OptionAPIURL(apiServer.URL+"/"), slack.OptionHTTPClient(apiServer.Client()))
@@ -1220,6 +1266,7 @@ func TestSlackService_ProcessIncomingMessage_FallsBackToSlackImageThumbnailWhenD
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
+	useSlackFileServer(t, svc, fileServer)
 	svc.SetUploadsDir(t.TempDir())
 	svc.SetChatAttachmentRepo(chatAttachmentRepo)
 	svc.setActiveProject(ctx, "T1", "U1", project.ID)
@@ -1238,8 +1285,8 @@ func TestSlackService_ProcessIncomingMessage_FallsBackToSlackImageThumbnailWhenD
 			Name:               "screenshot.png",
 			Mimetype:           "image/png",
 			Size:               len(slackTestPNGBytes),
-			URLPrivateDownload: fileServer.URL + "/download.png",
-			Thumb1024:          fileServer.URL + "/thumb.png",
+			URLPrivateDownload: slackTestURL("/download.png"),
+			Thumb1024:          slackTestURL("/thumb.png"),
 		}},
 	})
 
@@ -1276,7 +1323,7 @@ func TestSlackService_ProcessIncomingMessage_PreservesBotTokenAcrossSlackFileRed
 	defer cdnServer.Close()
 	fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "Bearer xoxb-test", r.Header.Get("Authorization"))
-		http.Redirect(w, r, cdnServer.URL+"/screenshot.png", http.StatusFound)
+		http.Redirect(w, r, "https://downloads.slack-files.com/screenshot.png", http.StatusFound)
 	}))
 	defer fileServer.Close()
 
@@ -1284,6 +1331,10 @@ func TestSlackService_ProcessIncomingMessage_PreservesBotTokenAcrossSlackFileRed
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
+	useSlackFileServers(t, svc, map[string]*httptest.Server{
+		"files.slack.com":           fileServer,
+		"downloads.slack-files.com": cdnServer,
+	})
 	svc.SetUploadsDir(t.TempDir())
 	svc.SetChatAttachmentRepo(chatAttachmentRepo)
 	svc.setActiveProject(ctx, "T1", "U1", project.ID)
@@ -1302,7 +1353,7 @@ func TestSlackService_ProcessIncomingMessage_PreservesBotTokenAcrossSlackFileRed
 			Name:               "screenshot.png",
 			Mimetype:           "image/png",
 			Size:               len(slackTestPNGBytes),
-			URLPrivateDownload: fileServer.URL + "/screenshot.png",
+			URLPrivateDownload: slackTestURL("/screenshot.png"),
 		}},
 	})
 
@@ -1316,9 +1367,16 @@ func TestSlackService_ProcessIncomingMessage_PreservesBotTokenAcrossSlackFileRed
 
 func TestSlackService_DownloadSlackPrivateFileRejectsUntrustedOriginalHost(t *testing.T) {
 	svc := NewSlackService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	err := svc.downloadSlackPrivateFile(context.Background(), "xoxb-secret", "https://example.com/screenshot.png", io.Discard)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not trusted")
+	for _, rawURL := range []string{
+		"https://example.com/screenshot.png",
+		"http://localhost/screenshot.png",
+		"http://127.0.0.1/screenshot.png",
+		"http://[::1]/screenshot.png",
+	} {
+		err := svc.downloadSlackPrivateFile(context.Background(), "xoxb-secret", rawURL, io.Discard)
+		require.Error(t, err, rawURL)
+		require.Contains(t, err.Error(), "not trusted", rawURL)
+	}
 }
 
 func TestSlackService_DownloadSlackPrivateFileRejectsUntrustedRedirect(t *testing.T) {
@@ -1369,6 +1427,7 @@ func TestSlackService_ProcessIncomingMessage_RejectsInvalidSlackImageBytes(t *te
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
+	useSlackFileServer(t, svc, fileServer)
 	svc.SetUploadsDir(t.TempDir())
 	svc.setActiveProject(ctx, "T1", "U1", project.ID)
 	var slackReply string
@@ -1391,7 +1450,7 @@ func TestSlackService_ProcessIncomingMessage_RejectsInvalidSlackImageBytes(t *te
 			Name:               "screenshot.png",
 			Mimetype:           "image/png",
 			Size:               24,
-			URLPrivateDownload: fileServer.URL + "/screenshot.png",
+			URLPrivateDownload: slackTestURL("/screenshot.png"),
 		}},
 	})
 
@@ -1437,6 +1496,7 @@ func TestSlackService_ProcessIncomingMessage_QueuesSlackFilesInAttachmentSession
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
+	useSlackFileServer(t, svc, fileServer)
 	uploadRoot := useTempSlackUploadsDir(t, svc)
 	svc.SetThreadInputRepo(threadInputRepo)
 	svc.SetChatBroadcaster(events.NewChatBroadcaster())
@@ -1458,7 +1518,7 @@ func TestSlackService_ProcessIncomingMessage_QueuesSlackFilesInAttachmentSession
 			Name:               "queued.png",
 			Mimetype:           "image/png",
 			Size:               10,
-			URLPrivateDownload: fileServer.URL + "/queued.png",
+			URLPrivateDownload: slackTestURL("/queued.png"),
 		}},
 	})
 

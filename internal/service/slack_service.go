@@ -2807,9 +2807,6 @@ func slackTrustedOriginalFileDownloadHost(host string) bool {
 	if host == "" {
 		return false
 	}
-	if slackIsLocalhost(host) {
-		return true
-	}
 	if host == "slack.com" || strings.HasSuffix(host, ".slack.com") {
 		return true
 	}
@@ -2828,9 +2825,6 @@ func slackTrustedFileDownloadHost(originalHost, nextHost string) bool {
 	if nextHost == originalHost {
 		return true
 	}
-	if slackIsLocalhost(originalHost) && slackIsLocalhost(nextHost) {
-		return true
-	}
 	if nextHost == "slack.com" || strings.HasSuffix(nextHost, ".slack.com") {
 		return true
 	}
@@ -2838,11 +2832,6 @@ func slackTrustedFileDownloadHost(originalHost, nextHost string) bool {
 		return true
 	}
 	return false
-}
-
-func slackIsLocalhost(host string) bool {
-	host = strings.ToLower(strings.TrimSpace(host))
-	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 func (s *SlackService) slackClientForFiles() *slack.Client {
