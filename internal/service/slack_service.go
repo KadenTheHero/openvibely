@@ -850,34 +850,54 @@ func dedupeSlackIncomingFiles(files []slackIncomingFile) []slackIncomingFile {
 	return out
 }
 
-func (s *SlackService) queueChatInput(ctx context.Context, projectID, activeExecID, agentID string, msg slackIncomingMessage) bool {
+func (s *SlackService) queueChatInput(ctx context.Context, projectID, activeExecID string, msg slackIncomingMessage) bool {
 	if s.threadInputRepo == nil {
 		return false
 	}
 	attachmentSessionID := ""
+	hasImages := false
 	if len(msg.Files) > 0 {
 		chatAttachments, err := s.downloadSlackFiles(ctx, msg.Files)
 		if err != nil {
 			applog.Infof("[slack] queue chat attachment download failed: %v", err)
 			msgText := "Failed to process attachment: unable to download attachment. Please try again."
-			s.recordQueuedAttachmentFailure(ctx, projectID, agentID, msg, msgText)
+			agent, agentErr := s.autoSelectAgent(ctx, msg.Text, slackIncomingFilesRequireVision(msg.Files))
+			if agentErr != nil {
+				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, fmt.Sprintf("Error selecting model: %v", agentErr))
+				return true
+			}
+			s.recordQueuedAttachmentFailure(ctx, projectID, agent.ID, msg, msgText)
 			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
 			return true
 		}
+		hasImages = slackChatAttachmentsContainImage(chatAttachments)
 		attachmentSessionID, err = s.saveChatAttachmentsToPendingSession(chatAttachments)
 		if err != nil {
 			applog.Infof("[slack] queue chat attachment staging failed: %v", err)
 			msgText := "Failed to process attachment: unable to store attachment. Please try again."
-			s.recordQueuedAttachmentFailure(ctx, projectID, agentID, msg, msgText)
+			agent, agentErr := s.autoSelectAgent(ctx, msg.Text, hasImages)
+			if agentErr != nil {
+				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, fmt.Sprintf("Error selecting model: %v", agentErr))
+				return true
+			}
+			s.recordQueuedAttachmentFailure(ctx, projectID, agent.ID, msg, msgText)
 			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
 			return true
 		}
+	}
+	agent, err := s.autoSelectAgent(ctx, msg.Text, hasImages)
+	if err != nil {
+		if attachmentSessionID != "" {
+			_ = os.RemoveAll(filepath.Join(s.uploadsDir, "chat", "pending", attachmentSessionID))
+		}
+		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, fmt.Sprintf("Error selecting model: %v", err))
+		return true
 	}
 	queued := &models.ThreadInput{
 		Scope:               models.ThreadInputScopeChat,
 		ProjectID:           projectID,
 		RunExecutionID:      activeExecID,
-		AgentConfigID:       agentID,
+		AgentConfigID:       agent.ID,
 		InputMode:           models.ThreadInputModeQueued,
 		InputStatus:         models.ThreadInputPending,
 		Content:             msg.Text,
@@ -998,7 +1018,7 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error checking active chat response. Please try again.")
 		return
 	} else if activeChatExec != nil {
-		if s.queueChatInput(ctx, projectID, activeChatExec.ID, agent.ID, msg) {
+		if s.queueChatInput(ctx, projectID, activeChatExec.ID, msg) {
 			return
 		}
 	}
@@ -1101,6 +1121,13 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 			}
 			attachmentContext, imageAttachments = slackAttachmentContextAndImages(chatAtts)
 			hasLinkedAttachments = true
+		}
+	}
+	if len(imageAttachments) > 0 {
+		if selectedAgent, selectErr := s.autoSelectAgent(ctx, msg.Text, true); selectErr == nil && selectedAgent != nil {
+			agent = selectedAgent
+		} else if selectErr != nil {
+			applog.Infof("[slack] vision model selection after attachment download failed; using initially selected model: %v", selectErr)
 		}
 	}
 
@@ -2784,14 +2811,20 @@ func (s *SlackService) resolveSlackIncomingFilesForRouting(ctx context.Context, 
 	resolved := make([]slackIncomingFile, len(files))
 	copy(resolved, files)
 	for i, f := range resolved {
-		if isSlackImageFile(slackIncomingFileMediaType(f, slackSafeFileName(f))) {
+		mediaType := slackIncomingFileMediaType(f, slackSafeFileName(f))
+		if isSlackImageFile(mediaType) {
 			continue
 		}
 		if strings.TrimSpace(f.ID) == "" {
 			continue
 		}
-		if !strings.EqualFold(strings.TrimSpace(f.FileAccess), "check_file_info") && slackIncomingFileHasDownloadURL(f) {
+		needsFileInfo := strings.EqualFold(strings.TrimSpace(f.FileAccess), "check_file_info")
+		needsFileInfo = needsFileInfo || mediaType == "" || mediaType == "application/octet-stream"
+		if !needsFileInfo && slackIncomingFileHasDownloadURL(f) {
 			continue
+		}
+		if needsFileInfo {
+			f.FileAccess = "check_file_info"
 		}
 		fileInfo, err := s.resolveSlackFileInfo(ctx, f)
 		if err != nil {
@@ -3092,6 +3125,7 @@ func (s *SlackService) saveChatAttachmentsToPendingSession(attachments []models.
 		if fileName == "." || fileName == string(filepath.Separator) || fileName == "" {
 			fileName = "slack-attachment"
 		}
+		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
 		destPath := filepath.Join(sessionDir, fmt.Sprintf("%s_%s", generateSlackPendingSessionID()[:8], fileName))
 		if err := moveOrCopyFile(att.FilePath, destPath); err != nil {
 			_ = os.RemoveAll(sessionDir)
@@ -3100,7 +3134,6 @@ func (s *SlackService) saveChatAttachmentsToPendingSession(attachments []models.
 			}
 			return "", fmt.Errorf("staging %s: %w", fileName, err)
 		}
-		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
 	}
 	for dir := range cleanupDirs {
 		_ = os.RemoveAll(dir)
@@ -3248,6 +3281,28 @@ func slackIncomingFilesContainImage(files []slackIncomingFile) bool {
 	return false
 }
 
+func slackIncomingFilesRequireVision(files []slackIncomingFile) bool {
+	for _, f := range files {
+		mediaType := slackIncomingFileMediaType(f, slackSafeFileName(f))
+		if isSlackImageFile(mediaType) {
+			return true
+		}
+		if (mediaType == "" || mediaType == "application/octet-stream") && slackIncomingFileHasDownloadURL(f) {
+			return true
+		}
+	}
+	return false
+}
+
+func slackChatAttachmentsContainImage(chatAttachments []models.ChatAttachment) bool {
+	for _, att := range chatAttachments {
+		if isSlackImageFile(att.MediaType) {
+			return true
+		}
+	}
+	return false
+}
+
 func mediaTypeFromSlackFilename(filename string) string {
 	ext := strings.ToLower(filepath.Ext(filename))
 	switch ext {
@@ -3270,7 +3325,8 @@ func mediaTypeFromSlackFilename(filename string) string {
 
 func validateSlackDownloadedFile(path, fileName, declaredMediaType string) (string, error) {
 	declaredMediaType = strings.ToLower(strings.TrimSpace(strings.Split(declaredMediaType, ";")[0]))
-	if !isSlackImageFile(declaredMediaType) {
+	shouldValidateImage := isSlackImageFile(declaredMediaType)
+	if !shouldValidateImage && declaredMediaType != "" && declaredMediaType != "application/octet-stream" {
 		return declaredMediaType, nil
 	}
 
@@ -3294,6 +3350,9 @@ func validateSlackDownloadedFile(path, fileName, declaredMediaType string) (stri
 	}
 	format, err := slackDecodeImageConfig(file)
 	if err != nil {
+		if !shouldValidateImage {
+			return declaredMediaType, nil
+		}
 		return "", fmt.Errorf("downloaded Slack file %q was labeled %s but is not a valid supported image (detected %s)", fileName, declaredMediaType, sniffedMediaType)
 	}
 	detectedMediaType := slackImageFormatMediaType(format)
