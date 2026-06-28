@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,6 +22,14 @@ import (
 	"github.com/slack-go/slack/slackevents"
 	"github.com/stretchr/testify/require"
 )
+
+var slackTestPNGBytes = func() []byte {
+	data, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC")
+	if err != nil {
+		panic(err)
+	}
+	return data
+}()
 
 func TestSlackService_GetConnectionStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
@@ -1008,7 +1017,8 @@ func TestSlackService_ProcessIncomingMessage_DownloadsPersistsAndPassesImageAtta
 
 	fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "Bearer xoxb-test", r.Header.Get("Authorization"))
-		_, _ = w.Write([]byte("pngdata"))
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(slackTestPNGBytes)
 	}))
 	defer fileServer.Close()
 
@@ -1044,10 +1054,67 @@ func TestSlackService_ProcessIncomingMessage_DownloadsPersistsAndPassesImageAtta
 	require.Equal(t, "image/png", got.ImageAttachments[0].MediaType)
 	require.FileExists(t, got.ImageAttachments[0].FilePath)
 	require.Contains(t, got.ImageAttachments[0].FilePath, filepath.Join(uploadRoot, "chat", got.ExecID))
+	savedImage, err := os.ReadFile(got.ImageAttachments[0].FilePath)
+	require.NoError(t, err)
+	require.Equal(t, slackTestPNGBytes, savedImage)
 	persisted, err := chatAttachmentRepo.ListByExecution(ctx, got.ExecID)
 	require.NoError(t, err)
 	require.Len(t, persisted, 1)
 	require.Equal(t, got.ImageAttachments[0].FilePath, persisted[0].FilePath)
+}
+
+func TestSlackService_ProcessIncomingMessage_RejectsInvalidSlackImageBytes(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, _, settingsRepo, slackUserProjectRepo, slackTaskContextRepo := newSlackAttachmentTestRepos(t, db)
+	project := &models.Project{Name: "Slack Invalid Attachment Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, settingsRepo.Set(ctx, SlackSettingBotTokenOverride, "xoxb-test"))
+	require.NoError(t, settingsRepo.Set(ctx, SlackSettingBotTokenSource, SlackBotTokenSourceManual))
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, agent)
+
+	fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "Bearer xoxb-test", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html>not an image</html>"))
+	}))
+	defer fileServer.Close()
+
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	workerSvc := NewWorkerService(llmSvc, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
+	svc.SetUploadsDir(t.TempDir())
+	svc.setActiveProject(ctx, "T1", "U1", project.ID)
+	var slackReply string
+	svc.postMessageFn = func(channelID, threadTS, text string) (string, error) {
+		slackReply = text
+		return "", nil
+	}
+	runnerCalled := false
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runnerCalled = true })
+
+	svc.processIncomingMessage(slackIncomingMessage{
+		TeamID:    "T1",
+		ChannelID: "C1",
+		ThreadTS:  "1710000000.100000",
+		UserID:    "U1",
+		Text:      "what is this screenshot?",
+		Source:    "slack",
+		Files: []slackIncomingFile{{
+			ID:                 "F1",
+			Name:               "screenshot.png",
+			Mimetype:           "image/png",
+			Size:               24,
+			URLPrivateDownload: fileServer.URL + "/screenshot.png",
+		}},
+	})
+
+	require.False(t, runnerCalled)
+	require.Contains(t, slackReply, "Failed to process attachment")
+	require.Contains(t, slackReply, "not a valid supported image")
 }
 
 func TestSlackService_SetUploadsDir_NormalizesConfiguredRoot(t *testing.T) {
@@ -1078,7 +1145,8 @@ func TestSlackService_ProcessIncomingMessage_QueuesSlackFilesInAttachmentSession
 
 	fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "Bearer xoxb-test", r.Header.Get("Authorization"))
-		_, _ = w.Write([]byte("queued-png"))
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(slackTestPNGBytes)
 	}))
 	defer fileServer.Close()
 
@@ -1117,7 +1185,7 @@ func TestSlackService_ProcessIncomingMessage_QueuesSlackFilesInAttachmentSession
 	require.Len(t, entries, 1)
 	staged, err := os.ReadFile(filepath.Join(uploadRoot, "chat", "pending", inputs[0].AttachmentSessionID, entries[0].Name()))
 	require.NoError(t, err)
-	require.Equal(t, []byte("queued-png"), staged)
+	require.Equal(t, slackTestPNGBytes, staged)
 }
 
 func newSlackAttachmentTestRepos(t *testing.T, db interface{}) (*repository.ProjectRepo, *repository.TaskRepo, *repository.LLMConfigRepo, *repository.ExecutionRepo, *repository.ScheduleRepo, *repository.AttachmentRepo, *repository.ChatAttachmentRepo, *repository.SettingsRepo, *repository.SlackUserProjectRepo, *repository.SlackTaskContextRepo) {
