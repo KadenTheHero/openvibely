@@ -49,6 +49,41 @@ type channelChatIngressQueueOptions struct {
 	OnQueued       func(context.Context)
 }
 
+type channelTaskThreadSendOptions struct {
+	Platform                   string
+	ProjectID                  string
+	TaskID                     string
+	Title                      string
+	Message                    string
+	Source                     string
+	Surface                    chatcontrol.Surface
+	ReplyContext               ChannelReplyContext
+	TaskRepo                   *repository.TaskRepo
+	ExecRepo                   *repository.ExecutionRepo
+	ThreadInputRepo            *repository.ThreadInputRepo
+	LLMConfigRepo              *repository.LLMConfigRepo
+	SettingsRepo               *repository.SettingsRepo
+	CustomPersonalityRepo      *repository.CustomPersonalityRepo
+	ChannelTaskRunner          ChannelTaskRunner
+	QueuedTaskThreadPromoter   func(taskID string)
+	CompleteExecution          func(context.Context, string, string, string, string, int, int64)
+	NewQueuedInput             func(*models.Task, string, string) *models.ThreadInput
+	FilterHistory              func([]models.Execution, string) []models.Execution
+	OnBindQueuedInputSkipped   func(context.Context, *models.Task, *models.ThreadInput, error)
+	OnPromotionRecheckSkipped  func(context.Context, *models.Task, *models.ThreadInput, error)
+	OnUpdateCategoryError      func(context.Context, *models.Task, error)
+	QueueUnavailableResult     func(*models.Task) string
+	ErrorResult                func(string, ...any) string
+	QueueErrorResult           func(*models.Task, error) string
+	ActiveLookupErrorResult    func(*models.Task, error) string
+	AgentSelectionErrorResult  func(*models.Task, error) string
+	ExecutionCreateErrorResult func(*models.Task, error) string
+	RunnerUnavailableResult    func(*models.Task, string) string
+	UpdateStatusErrorResult    func(*models.Task, error) string
+	QueuedResult               func(*models.Task) string
+	StartedResult              func(*models.Task) string
+}
+
 type channelChatIngressFirstTurnOptions struct {
 	Platform          string
 	ProjectID         string
@@ -249,6 +284,43 @@ func resolveChannelChatWorkDir(ctx context.Context, projectRepo *repository.Proj
 	return project.RepoPath
 }
 
+func completeChannelExecution(ctx context.Context, opts channelExecutionCompletionOptions) {
+	if opts.ExecRepo == nil || opts.TaskRepo == nil {
+		return
+	}
+	platform := channelChatLogPlatform(opts.Platform)
+	if opts.ErrorMessage != "" {
+		if err := opts.ExecRepo.Complete(ctx, opts.ExecID, models.ExecFailed, "", opts.ErrorMessage, 0, opts.DurationMs); err != nil {
+			applog.Infof("[%s] complete failed execution error: %v", platform, err)
+		}
+		if err := opts.TaskRepo.UpdateStatus(ctx, opts.TaskID, models.StatusFailed); err != nil {
+			applog.Infof("[%s] update failed task status error: %v", platform, err)
+		}
+		promoteQueuedChannelChatAfterCompletion(ctx, opts.TaskRepo, opts.QueuedTurnPromoter, opts.TaskID)
+		return
+	}
+	if err := opts.ExecRepo.Complete(ctx, opts.ExecID, models.ExecCompleted, opts.Output, "", opts.TokensUsed, opts.DurationMs); err != nil {
+		applog.Infof("[%s] complete execution error: %v", platform, err)
+	}
+	if err := opts.TaskRepo.UpdateStatus(ctx, opts.TaskID, models.StatusCompleted); err != nil {
+		applog.Infof("[%s] update task status error: %v", platform, err)
+	}
+	promoteQueuedChannelChatAfterCompletion(ctx, opts.TaskRepo, opts.QueuedTurnPromoter, opts.TaskID)
+}
+
+type channelExecutionCompletionOptions struct {
+	Platform           string
+	ExecRepo           *repository.ExecutionRepo
+	TaskRepo           *repository.TaskRepo
+	QueuedTurnPromoter func(projectID string)
+	ExecID             string
+	TaskID             string
+	Output             string
+	ErrorMessage       string
+	TokensUsed         int
+	DurationMs         int64
+}
+
 func promoteQueuedChannelChatAfterCompletion(ctx context.Context, taskRepo *repository.TaskRepo, queuedTurnPromoter func(projectID string), taskID string) {
 	if queuedTurnPromoter == nil || taskRepo == nil {
 		return
@@ -258,6 +330,288 @@ func promoteQueuedChannelChatAfterCompletion(ctx context.Context, taskRepo *repo
 		return
 	}
 	queuedTurnPromoter(task.ProjectID)
+}
+
+func resolveChannelTaskReference(ctx context.Context, taskRepo *repository.TaskRepo, projectID, taskID, title string) (*models.Task, error) {
+	if taskRepo == nil {
+		return nil, fmt.Errorf("task repository not configured")
+	}
+	if strings.TrimSpace(taskID) != "" {
+		taskID = strings.TrimSpace(taskID)
+		task, err := taskRepo.GetByID(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("error looking up task %s: %w", taskID, err)
+		}
+		if task == nil {
+			return nil, fmt.Errorf("task %s not found", taskID)
+		}
+		if task.ProjectID != projectID {
+			return nil, fmt.Errorf("task %s belongs to a different project", taskID)
+		}
+		return task, nil
+	}
+	title = strings.TrimSpace(title)
+	if title != "" {
+		tasks, err := taskRepo.SearchByTitle(ctx, projectID, title)
+		if err != nil {
+			return nil, fmt.Errorf("error searching for task %q: %w", title, err)
+		}
+		if len(tasks) == 0 {
+			return nil, fmt.Errorf("no task found matching %q", title)
+		}
+		return &tasks[0], nil
+	}
+	return nil, fmt.Errorf("no task_id or title provided")
+}
+
+func resolveChannelScheduleReference(ctx context.Context, taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, projectID, scheduleID, taskID, title string) (*models.Schedule, *models.Task, error) {
+	if scheduleRepo == nil {
+		return nil, nil, fmt.Errorf("schedule repository not available")
+	}
+	if strings.TrimSpace(scheduleID) != "" {
+		scheduleID = strings.TrimSpace(scheduleID)
+		schedule, err := scheduleRepo.GetByID(ctx, scheduleID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error looking up schedule %s: %w", scheduleID, err)
+		}
+		if schedule == nil {
+			return nil, nil, fmt.Errorf("schedule %s not found", scheduleID)
+		}
+		if taskRepo == nil {
+			return nil, nil, fmt.Errorf("task repository not configured")
+		}
+		task, err := taskRepo.GetByID(ctx, schedule.TaskID)
+		if err != nil || task == nil {
+			return nil, nil, fmt.Errorf("task for schedule %s not found", scheduleID)
+		}
+		if task.ProjectID != projectID {
+			return nil, nil, fmt.Errorf("schedule %s belongs to a different project", scheduleID)
+		}
+		return schedule, task, nil
+	}
+	task, err := resolveChannelTaskReference(ctx, taskRepo, projectID, taskID, title)
+	if err != nil {
+		return nil, nil, err
+	}
+	schedules, err := scheduleRepo.ListByTask(ctx, task.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error listing schedules for task %s: %w", task.ID, err)
+	}
+	if len(schedules) == 0 {
+		return nil, nil, fmt.Errorf("no schedules found for task %q", task.Title)
+	}
+	return &schedules[0], task, nil
+}
+
+func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts channelTaskThreadSendOptions) string {
+	formatErr := opts.ErrorResult
+	if formatErr == nil {
+		formatErr = func(format string, args ...any) string { return fmt.Sprintf(format, args...) }
+	}
+	if task == nil {
+		return formatErr("Error resolving task: task not found")
+	}
+	if strings.TrimSpace(opts.Message) == "" {
+		return "send_to_task requires message."
+	}
+	activeExec, queueBehindFirstTurn, err := findActiveOrStartingChannelTaskTurn(ctx, opts.ExecRepo, task)
+	if err != nil {
+		if opts.ActiveLookupErrorResult != nil {
+			return opts.ActiveLookupErrorResult(task, err)
+		}
+		return formatErr("Error checking active turn for task %q: %v", task.Title, err)
+	}
+	if activeExec == nil && !queueBehindFirstTurn {
+		activeExec, _, err = findActiveOrStartingChannelTaskTurn(ctx, opts.ExecRepo, task)
+		if err != nil {
+			if opts.ActiveLookupErrorResult != nil {
+				return opts.ActiveLookupErrorResult(task, err)
+			}
+			return formatErr("Error checking active turn for task %q: %v", task.Title, err)
+		}
+	}
+	if activeExec != nil || queueBehindFirstTurn {
+		if opts.ThreadInputRepo == nil {
+			if opts.QueueUnavailableResult != nil {
+				return opts.QueueUnavailableResult(task)
+			}
+			return fmt.Sprintf("Task %q is currently running. Queue is unavailable, so wait for it to finish before sending a message.", task.Title)
+		}
+		agentID := ""
+		if task.AgentID != nil {
+			agentID = *task.AgentID
+		}
+		runExecutionID := ""
+		if activeExec != nil {
+			runExecutionID = activeExec.ID
+		}
+		queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: task.ProjectID, TaskID: task.ID, RunExecutionID: runExecutionID, AgentConfigID: agentID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: opts.Message, Source: opts.Source}
+		if opts.NewQueuedInput != nil {
+			if custom := opts.NewQueuedInput(task, runExecutionID, agentID); custom != nil {
+				queued = custom
+				queued.Scope = models.ThreadInputScopeTask
+				queued.ProjectID = task.ProjectID
+				queued.TaskID = task.ID
+				queued.RunExecutionID = runExecutionID
+				queued.AgentConfigID = agentID
+				queued.InputMode = models.ThreadInputModeQueued
+				queued.InputStatus = models.ThreadInputPending
+				queued.Content = opts.Message
+				queued.Source = opts.Source
+			}
+		}
+		if err := opts.ThreadInputRepo.CreateQueued(ctx, queued); err != nil {
+			if opts.QueueErrorResult != nil {
+				return opts.QueueErrorResult(task, err)
+			}
+			return formatErr("Error queueing message for task %q: %v", task.Title, err)
+		}
+		if queued.RunExecutionID == "" {
+			if err := bindQueuedChannelTaskInputToActiveExecutionIfAvailable(ctx, opts.ExecRepo, opts.ThreadInputRepo, queued); err != nil && opts.OnBindQueuedInputSkipped != nil {
+				opts.OnBindQueuedInputSkipped(ctx, task, queued, err)
+			}
+		}
+		if shouldPromote, promoteErr := shouldPromotePreExecutionChannelTaskInput(ctx, opts.ExecRepo, task, queued); promoteErr != nil {
+			if opts.OnPromotionRecheckSkipped != nil {
+				opts.OnPromotionRecheckSkipped(ctx, task, queued, promoteErr)
+			}
+		} else if shouldPromote && opts.QueuedTaskThreadPromoter != nil {
+			go opts.QueuedTaskThreadPromoter(task.ID)
+		}
+		if opts.QueuedResult != nil {
+			return opts.QueuedResult(task)
+		}
+		return fmt.Sprintf("Queued message to task %q [TASK_ID:%s]. It will run after the active thread turn finishes.", task.Title, task.ID)
+	}
+	agent, err := selectChannelTaskThreadAgent(ctx, opts.LLMConfigRepo, task, opts.Message)
+	if err != nil {
+		if opts.AgentSelectionErrorResult != nil {
+			return opts.AgentSelectionErrorResult(task, err)
+		}
+		return formatErr("Error selecting agent for task %q: %v", task.Title, err)
+	}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: opts.Message, IsFollowup: true}
+	if opts.ExecRepo == nil {
+		return formatErr("Error creating follow-up execution for %q: execution repository not configured", task.Title)
+	}
+	if err := opts.ExecRepo.Create(ctx, exec); err != nil {
+		if opts.ExecutionCreateErrorResult != nil {
+			return opts.ExecutionCreateErrorResult(task, err)
+		}
+		return formatErr("Error creating follow-up execution for %q: %v", task.Title, err)
+	}
+	priorExecs, _ := opts.ExecRepo.ListByTaskChronological(ctx, task.ID)
+	priorHistory := priorExecs
+	if opts.FilterHistory != nil {
+		priorHistory = opts.FilterHistory(priorExecs, exec.ID)
+	}
+	systemContext := buildTelegramTaskChatContext(task.Title, len(priorHistory) > 0)
+	if pCtx := getChannelChatPersonalityContext(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo); pCtx != "" {
+		systemContext += pCtx
+	}
+	if opts.ChannelTaskRunner == nil {
+		msgText := "shared task runner is unavailable"
+		if opts.CompleteExecution != nil {
+			opts.CompleteExecution(ctx, exec.ID, task.ID, "", msgText, 0, 0)
+		}
+		if opts.RunnerUnavailableResult != nil {
+			return opts.RunnerUnavailableResult(task, msgText)
+		}
+		return formatErr("Error sending message to task %q: %s", task.Title, msgText)
+	}
+	if opts.TaskRepo == nil {
+		return formatErr("Error updating task %q: task repository not configured", task.Title)
+	}
+	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
+		if err := opts.TaskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued); err != nil {
+			if opts.CompleteExecution != nil {
+				opts.CompleteExecution(ctx, exec.ID, task.ID, "", err.Error(), 0, 0)
+			}
+			if opts.UpdateStatusErrorResult != nil {
+				return opts.UpdateStatusErrorResult(task, err)
+			}
+			return formatErr("Error updating task %q: %v", task.Title, err)
+		}
+	}
+	if task.Category != models.CategoryActive {
+		if err := opts.TaskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil && opts.OnUpdateCategoryError != nil {
+			opts.OnUpdateCategoryError(ctx, task, err)
+		}
+	}
+	opts.ChannelTaskRunner(context.Background(), ChannelTaskRunRequest{ExecID: exec.ID, TaskID: task.ID, ProjectID: task.ProjectID, Message: opts.Message, Agent: *agent, ChatHistory: priorHistory, SystemContext: systemContext, Surface: opts.Surface, ReplyContext: opts.ReplyContext})
+	if opts.StartedResult != nil {
+		return opts.StartedResult(task)
+	}
+	return fmt.Sprintf("Sent message to task %q [TASK_ID:%s] and started processing.", task.Title, task.ID)
+}
+
+func selectChannelTaskThreadAgent(ctx context.Context, repo *repository.LLMConfigRepo, task *models.Task, message string) (*models.LLMConfig, error) {
+	if task != nil && task.AgentID != nil && repo != nil {
+		if agent, _ := repo.GetByID(ctx, *task.AgentID); agent != nil {
+			return agent, nil
+		}
+	}
+	return selectChannelChatAgent(ctx, repo, message, false)
+}
+
+func findActiveOrStartingChannelTaskTurn(ctx context.Context, execRepo *repository.ExecutionRepo, task *models.Task) (*models.Execution, bool, error) {
+	if task == nil || execRepo == nil {
+		return nil, false, nil
+	}
+	activeExec, err := execRepo.FindActiveTaskExecution(ctx, task.ID, "")
+	if err != nil || activeExec != nil {
+		return activeExec, false, err
+	}
+	starting, err := channelTaskHasStartingFirstTurn(ctx, execRepo, task)
+	return nil, starting, err
+}
+
+func channelTaskHasStartingFirstTurn(ctx context.Context, execRepo *repository.ExecutionRepo, task *models.Task) (bool, error) {
+	if task == nil || task.ID == "" || execRepo == nil {
+		return false, nil
+	}
+	if task.Category != models.CategoryActive || (task.Status != models.StatusPending && task.Status != models.StatusQueued && task.Status != models.StatusRunning) {
+		return false, nil
+	}
+	execs, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	if err != nil {
+		return false, err
+	}
+	return len(execs) == 0, nil
+}
+
+func bindQueuedChannelTaskInputToActiveExecutionIfAvailable(ctx context.Context, execRepo *repository.ExecutionRepo, threadInputRepo *repository.ThreadInputRepo, input *models.ThreadInput) error {
+	if input == nil || input.RunExecutionID != "" || execRepo == nil || threadInputRepo == nil {
+		return nil
+	}
+	active, err := execRepo.FindActiveTaskExecution(ctx, input.TaskID, "")
+	if err != nil || active == nil {
+		return err
+	}
+	if err := threadInputRepo.BindPreExecutionQueuedTaskInputs(ctx, input.TaskID, active.ID); err != nil {
+		return err
+	}
+	input.RunExecutionID = active.ID
+	return nil
+}
+
+func shouldPromotePreExecutionChannelTaskInput(ctx context.Context, execRepo *repository.ExecutionRepo, task *models.Task, input *models.ThreadInput) (bool, error) {
+	if task == nil || input == nil || input.RunExecutionID != "" {
+		return false, nil
+	}
+	starting, err := channelTaskHasStartingFirstTurn(ctx, execRepo, task)
+	if err != nil || starting {
+		return false, err
+	}
+	return true, nil
+}
+
+func channelTaskThreadQueuedResult(task *models.Task) string {
+	return fmt.Sprintf("Queued message to task %q [TASK_ID:%s]. It will run after the active thread turn finishes.", task.Title, task.ID)
+}
+
+func channelTaskThreadStartedResult(task *models.Task) string {
+	return fmt.Sprintf("Sent message to task %q [TASK_ID:%s] and started processing.", task.Title, task.ID)
 }
 
 func channelChatLogPlatform(platform string) string {

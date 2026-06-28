@@ -621,7 +621,7 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 				}
 				return s.emailTaskContextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: taskID, EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey})
 			},
-			CompleteExecution: s.completeExecution,
+			CompleteExecution: channelCompletionFunc("email", s.execRepo, s.taskRepo, s.queuedTurnPromoter),
 			ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
 				return s.execRepo.ListEmailChatHistory(ctx, projectID, sessionKey, emailChatHistoryLimit)
 			},
@@ -720,17 +720,6 @@ func filterEmailChatHistory(history []models.Execution, currentExecID string) []
 		}
 	}
 	return filtered
-}
-
-func (s *EmailService) completeExecution(ctx context.Context, execID, taskID, output, errorMessage string, tokensUsed int, durationMs int64) {
-	if errorMessage != "" {
-		_ = s.execRepo.Complete(ctx, execID, models.ExecFailed, "", errorMessage, 0, durationMs)
-		_ = s.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed)
-	} else {
-		_ = s.execRepo.Complete(ctx, execID, models.ExecCompleted, output, "", tokensUsed, durationMs)
-		_ = s.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted)
-	}
-	promoteQueuedChannelChatAfterCompletion(ctx, s.taskRepo, s.queuedTurnPromoter, taskID)
 }
 
 func (s *EmailService) IsSendResponsesEnabled(ctx context.Context) bool {

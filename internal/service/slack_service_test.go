@@ -738,7 +738,9 @@ func TestSlackService_SendToTaskUsesSharedRunnerAndQueuesActiveTask(t *testing.T
 	})
 	payload := []byte(fmt.Sprintf(`{"task_id":"%s","message":"do more"}`, task.ID))
 	markerCtx := slackMarkerContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
-	result := svc.slackSendToTask(ctx, project.ID, payload, markerCtx)
+	handlers := svc.slackActionHandlers(project.ID, markerCtx, nil)
+	result, err := handlers["send_to_task"](ctx, payload)
+	require.NoError(t, err)
 	require.Contains(t, result, "Sent message to task")
 	require.True(t, runnerCalled, "Slack task follow-ups should use shared runner when wired")
 	require.Equal(t, task.ID, runnerReq.TaskID)
@@ -752,7 +754,8 @@ func TestSlackService_SendToTaskUsesSharedRunnerAndQueuesActiveTask(t *testing.T
 
 	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active", IsFollowup: true}
 	require.NoError(t, execRepo.Create(ctx, active))
-	result = svc.slackSendToTask(ctx, project.ID, payload, markerCtx)
+	result, err = handlers["send_to_task"](ctx, payload)
+	require.NoError(t, err)
 	require.Contains(t, result, "Queued message to task")
 	inputs, err := threadInputRepo.ListPendingForTask(ctx, task.ID)
 	require.NoError(t, err)
@@ -799,7 +802,9 @@ func TestSlackService_SendToTask_QueuesDuringStartingFirstTurnBeforeExecutionExi
 
 	payload := []byte(fmt.Sprintf(`{"task_id":"%s","message":"1+1=?"}`, task.ID))
 	markerCtx := slackMarkerContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
-	result := svc.slackSendToTask(ctx, project.ID, payload, markerCtx)
+	handlers := svc.slackActionHandlers(project.ID, markerCtx, nil)
+	result, err := handlers["send_to_task"](ctx, payload)
+	require.NoError(t, err)
 	require.Contains(t, result, "Queued message to task")
 	require.False(t, runnerCalled, "pre-execution first-turn send must not start a follow-up runner")
 	execs, err := execRepo.ListByTaskChronological(ctx, task.ID)
@@ -821,7 +826,6 @@ func TestSlackService_CompleteExecution_FailurePromotesQueuedChat(t *testing.T) 
 	taskRepo := repository.NewTaskRepo(db, nil)
 	execRepo := repository.NewExecutionRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
 	project := &models.Project{Name: "Slack Failed Promotion Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agents, err := llmConfigRepo.List(ctx)
@@ -833,10 +837,9 @@ func TestSlackService_CompleteExecution_FailurePromotesQueuedChat(t *testing.T) 
 	require.NoError(t, execRepo.Create(ctx, exec))
 
 	promotedProject := ""
-	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, nil, nil, nil, nil, nil, nil, nil)
-	svc.queuedTurnPromoter = func(projectID string) { promotedProject = projectID }
+	completeExecution := channelCompletionFunc("slack", execRepo, taskRepo, func(projectID string) { promotedProject = projectID })
 
-	svc.completeExecution(ctx, exec.ID, task.ID, "", "boom", 0, 10)
+	completeExecution(ctx, exec.ID, task.ID, "", "boom", 0, 10)
 
 	updatedExec, err := execRepo.GetByID(ctx, exec.ID)
 	require.NoError(t, err)

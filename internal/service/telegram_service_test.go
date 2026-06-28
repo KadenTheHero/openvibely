@@ -521,10 +521,7 @@ func TestTelegramService_CompleteExecution_Success(t *testing.T) {
 	projectRepo := repository.NewProjectRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	execRepo := repository.NewExecutionRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	workerSvc := NewWorkerService(nil, 0, projectRepo)
-	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
 	ctx := context.Background()
 	project := &models.Project{
@@ -557,14 +554,9 @@ func TestTelegramService_CompleteExecution_Success(t *testing.T) {
 	}
 	require.NoError(t, execRepo.Create(ctx, exec))
 
-	svc := &TelegramService{
-		taskSvc:      taskSvc,
-		taskRepo:     taskRepo,
-		execRepo:     execRepo,
-		userProjects: make(map[int64]string),
-	}
+	completeExecution := channelCompletionFunc("telegram", execRepo, taskRepo, nil)
 
-	svc.completeExecution(ctx, exec.ID, task.ID, "response output", "", 100, 1000)
+	completeExecution(ctx, exec.ID, task.ID, "response output", "", 100, 1000)
 
 	// Verify execution was completed
 	updatedExec, err := execRepo.GetByID(ctx, exec.ID)
@@ -582,10 +574,7 @@ func TestTelegramService_CompleteExecution_Failure(t *testing.T) {
 	projectRepo := repository.NewProjectRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	execRepo := repository.NewExecutionRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	workerSvc := NewWorkerService(nil, 0, projectRepo)
-	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
 	ctx := context.Background()
 	project := &models.Project{
@@ -619,15 +608,9 @@ func TestTelegramService_CompleteExecution_Failure(t *testing.T) {
 	require.NoError(t, execRepo.Create(ctx, exec))
 
 	promotedProject := ""
-	svc := &TelegramService{
-		taskSvc:            taskSvc,
-		taskRepo:           taskRepo,
-		execRepo:           execRepo,
-		userProjects:       make(map[int64]string),
-		queuedTurnPromoter: func(projectID string) { promotedProject = projectID },
-	}
+	completeExecution := channelCompletionFunc("telegram", execRepo, taskRepo, func(projectID string) { promotedProject = projectID })
 
-	svc.completeExecution(ctx, exec.ID, task.ID, "", "something went wrong", 0, 500)
+	completeExecution(ctx, exec.ID, task.ID, "", "something went wrong", 0, 500)
 
 	// Verify execution was failed
 	updatedExec, err := execRepo.GetByID(ctx, exec.ID)
@@ -1359,7 +1342,8 @@ func TestTelegramService_ProcessSendToTask(t *testing.T) {
 	}
 	require.NoError(t, taskRepo.Create(ctx, task))
 
-	req := SendToTaskRequest{TaskID: task.ID, Message: "Also add error handling for empty passwords"}
+	payload, err := json.Marshal(SendToTaskRequest{TaskID: task.ID, Message: "Also add error handling for empty passwords"})
+	require.NoError(t, err)
 
 	var runnerReq ChannelTaskRunRequest
 	runnerCalled := false
@@ -1368,7 +1352,8 @@ func TestTelegramService_ProcessSendToTask(t *testing.T) {
 		runnerReq = req
 	})
 
-	result, err := svc.executeSendToTask(ctx, project.ID, req, 12345)
+	handlers := svc.telegramActionHandlers(project.ID, 12345, 67890, nil)
+	result, err := handlers["send_to_task"](ctx, payload)
 	require.NoError(t, err)
 
 	// Should contain confirmation message
@@ -1412,8 +1397,10 @@ func TestTelegramService_ProcessSendToTask_QueuesWhenTaskActive(t *testing.T) {
 	require.NoError(t, taskRepo.Create(ctx, task))
 	active := &models.Execution{TaskID: task.ID, AgentConfigID: agents[0].ID, Status: models.ExecRunning, PromptSent: "active", IsFollowup: true}
 	require.NoError(t, svc.execRepo.Create(ctx, active))
-	req := SendToTaskRequest{TaskID: task.ID, Message: "queued follow-up"}
-	result, err := svc.executeSendToTask(ctx, project.ID, req, 12345)
+	payload, err := json.Marshal(SendToTaskRequest{TaskID: task.ID, Message: "queued follow-up"})
+	require.NoError(t, err)
+	handlers := svc.telegramActionHandlers(project.ID, 12345, 67890, nil)
+	result, err := handlers["send_to_task"](ctx, payload)
 	require.NoError(t, err)
 	assert.Contains(t, result, "Queued message to task")
 	inputs, err := svc.threadInputRepo.ListPendingForTask(ctx, task.ID)
@@ -1444,7 +1431,10 @@ func TestTelegramService_ProcessSendToTask_QueuesDuringStartingFirstTurnBeforeEx
 		runnerCalled = true
 	})
 
-	result, err := svc.executeSendToTask(ctx, project.ID, SendToTaskRequest{TaskID: task.ID, Message: "1+1=?"}, 12345)
+	payload, err := json.Marshal(SendToTaskRequest{TaskID: task.ID, Message: "1+1=?"})
+	require.NoError(t, err)
+	handlers := svc.telegramActionHandlers(project.ID, 12345, 67890, nil)
+	result, err := handlers["send_to_task"](ctx, payload)
 	require.NoError(t, err)
 	require.Contains(t, result, "Queued message to task")
 	require.False(t, runnerCalled, "pre-execution first-turn send must not start a follow-up runner")
@@ -1461,7 +1451,7 @@ func TestTelegramService_ProcessSendToTask_QueuesDuringStartingFirstTurnBeforeEx
 }
 
 func TestTelegramService_ResolveTaskReference_ByID(t *testing.T) {
-	svc, projectRepo, taskRepo := newTestTelegramService(t)
+	_, projectRepo, taskRepo := newTestTelegramService(t)
 	ctx := context.Background()
 
 	project := &models.Project{
@@ -1481,14 +1471,14 @@ func TestTelegramService_ResolveTaskReference_ByID(t *testing.T) {
 	require.NoError(t, taskRepo.Create(ctx, task))
 
 	// Resolve by ID
-	found, err := svc.resolveTaskReference(ctx, project.ID, task.ID, "")
+	found, err := resolveChannelTaskReference(ctx, taskRepo, project.ID, task.ID, "")
 	require.NoError(t, err)
 	assert.Equal(t, task.ID, found.ID)
 	assert.Equal(t, "My Task", found.Title)
 }
 
 func TestTelegramService_ResolveTaskReference_ByTitle(t *testing.T) {
-	svc, projectRepo, taskRepo := newTestTelegramService(t)
+	_, projectRepo, taskRepo := newTestTelegramService(t)
 	ctx := context.Background()
 
 	project := &models.Project{
@@ -1508,13 +1498,13 @@ func TestTelegramService_ResolveTaskReference_ByTitle(t *testing.T) {
 	require.NoError(t, taskRepo.Create(ctx, task))
 
 	// Resolve by title search
-	found, err := svc.resolveTaskReference(ctx, project.ID, "", "authentication")
+	found, err := resolveChannelTaskReference(ctx, taskRepo, project.ID, "", "authentication")
 	require.NoError(t, err)
 	assert.Equal(t, task.ID, found.ID)
 }
 
 func TestTelegramService_ResolveTaskReference_NotFound(t *testing.T) {
-	svc, projectRepo, _ := newTestTelegramService(t)
+	_, projectRepo, taskRepo := newTestTelegramService(t)
 	ctx := context.Background()
 
 	project := &models.Project{
@@ -1525,17 +1515,17 @@ func TestTelegramService_ResolveTaskReference_NotFound(t *testing.T) {
 	require.NoError(t, projectRepo.Create(ctx, project))
 
 	// ID not found
-	_, err := svc.resolveTaskReference(ctx, project.ID, "nonexistent", "")
+	_, err := resolveChannelTaskReference(ctx, taskRepo, project.ID, "nonexistent", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 
 	// Title not found
-	_, err = svc.resolveTaskReference(ctx, project.ID, "", "zzz no match zzz")
+	_, err = resolveChannelTaskReference(ctx, taskRepo, project.ID, "", "zzz no match zzz")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no task found")
 
 	// Neither provided
-	_, err = svc.resolveTaskReference(ctx, project.ID, "", "")
+	_, err = resolveChannelTaskReference(ctx, taskRepo, project.ID, "", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no task_id or title provided")
 }
@@ -2400,8 +2390,9 @@ func TestTelegramService_HandleNaturalLanguageProjectCommand_NotHandled(t *testi
 	assert.Equal(t, "", response)
 }
 
-func TestTelegramService_ProcessListProjects_Marker(t *testing.T) {
-	svc, projectRepo, _ := newTestTelegramService(t)
+func TestBuildChannelProjectActionHandlersListProjects(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
 	ctx := context.Background()
 
 	project1 := &models.Project{Name: "Alpha", RepoPath: "/tmp/alpha", IsDefault: true}
@@ -2409,74 +2400,50 @@ func TestTelegramService_ProcessListProjects_Marker(t *testing.T) {
 	project2 := &models.Project{Name: "Beta", RepoPath: "/tmp/beta", Description: "Second project"}
 	require.NoError(t, projectRepo.Create(ctx, project2))
 
-	output := "Here are your projects.\n\n[LIST_PROJECTS]"
-	result := svc.processListProjects(ctx, "exec1", project1.ID, output)
-
+	handlers := buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{ProjectID: project1.ID, ProjectRepo: projectRepo})
+	result, err := handlers["list_projects"](ctx, nil)
+	require.NoError(t, err)
 	assert.Contains(t, result, "Available Projects")
 	assert.Contains(t, result, "Alpha")
 	assert.Contains(t, result, "Beta")
 	assert.Contains(t, result, "Second project")
-	assert.Contains(t, result, "← _current_")
+	assert.Contains(t, result, "<- current")
 }
 
-func TestTelegramService_ProcessListProjects_NoMarker(t *testing.T) {
-	svc, _, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	output := "No marker here."
-	result := svc.processListProjects(ctx, "exec1", "proj1", output)
-	assert.Equal(t, output, result)
-}
-
-func TestTelegramService_ProcessSwitchProject_Marker(t *testing.T) {
+func TestBuildChannelProjectActionHandlersSwitchProjectCallback(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	projectRepo := repository.NewProjectRepo(db)
-	userProjectRepo := repository.NewTelegramUserProjectRepo(db)
-
 	ctx := context.Background()
 	project1 := &models.Project{Name: "Alpha", RepoPath: "/tmp/alpha", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project1))
 	project2 := &models.Project{Name: "Beta", RepoPath: "/tmp/beta"}
 	require.NoError(t, projectRepo.Create(ctx, project2))
 
-	svc := &TelegramService{
-		projectRepo:             projectRepo,
-		telegramUserProjectRepo: userProjectRepo,
-		userProjects:            make(map[int64]string),
-	}
-	svc.userProjects[42] = project1.ID
-
-	output := "I'll switch your project.\n\n[SWITCH_PROJECT]\n{\"project\": \"Beta\"}\n[/SWITCH_PROJECT]"
-	result := svc.processSwitchProject(ctx, "exec1", project1.ID, output, 42)
-
-	assert.Contains(t, result, "Switched to project: **Beta**")
-	assert.Equal(t, project2.ID, svc.userProjects[42])
-
-	// Verify persisted
-	savedID, err := userProjectRepo.GetUserProject(ctx, "42")
+	var switchedProjectID string
+	handlers := buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
+		ProjectID:   project1.ID,
+		ProjectRepo: projectRepo,
+		SwitchProject: func(_ context.Context, project *models.Project) {
+			switchedProjectID = project.ID
+		},
+	})
+	result, err := handlers["switch_project"](ctx, json.RawMessage(`{"project":"Beta"}`))
 	require.NoError(t, err)
-	assert.Equal(t, project2.ID, savedID)
+	assert.Contains(t, result, "Switched to project: Beta")
+	assert.Equal(t, project2.ID, switchedProjectID)
 }
 
-func TestTelegramService_ProcessSwitchProject_InvalidProject(t *testing.T) {
+func TestBuildChannelProjectActionHandlersSwitchProjectInvalidProject(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	projectRepo := repository.NewProjectRepo(db)
-
 	ctx := context.Background()
 	project1 := &models.Project{Name: "Alpha", RepoPath: "/tmp/alpha", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project1))
 
-	svc := &TelegramService{
-		projectRepo:  projectRepo,
-		userProjects: make(map[int64]string),
-	}
-	svc.userProjects[42] = project1.ID
-
-	output := "[SWITCH_PROJECT]\n{\"project\": \"NonExistent\"}\n[/SWITCH_PROJECT]"
-	result := svc.processSwitchProject(ctx, "exec1", project1.ID, output, 42)
-
+	handlers := buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{ProjectID: project1.ID, ProjectRepo: projectRepo})
+	result, err := handlers["switch_project"](ctx, json.RawMessage(`{"project":"NonExistent"}`))
+	require.NoError(t, err)
 	assert.Contains(t, result, "Project not found")
-	assert.Equal(t, project1.ID, svc.userProjects[42], "should remain on original project")
 }
 
 func TestTelegramService_SwitchProjectThenFollowupUsesNewProject(t *testing.T) {

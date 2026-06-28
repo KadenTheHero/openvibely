@@ -270,7 +270,11 @@ func TestDiscordSendToTaskUsesConfiguredChannelTaskRunner(t *testing.T) {
 		gotReq = req
 	})
 
-	result := svc.discordSendToTask(ctx, project.ID, []byte(`{"task_id":"`+task.ID+`","message":"continue from discord"}`), discordMarkerContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"})
+	handlers := svc.discordActionHandlers(project.ID, discordMarkerContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"}, nil)
+	result, err := handlers["send_to_task"](ctx, []byte(`{"task_id":"`+task.ID+`","message":"continue from discord"}`))
+	if err != nil {
+		t.Fatalf("send_to_task: %v", err)
+	}
 	if called != 1 {
 		t.Fatalf("expected channel task runner called once, got %d; result=%q", called, result)
 	}
@@ -318,7 +322,11 @@ func TestDiscordSwitchProjectPersistsForSubsequentMessages(t *testing.T) {
 	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, repository.NewAttachmentRepo(db))
 	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
 
-	result := svc.switchProjectResult(ctx, "1518288288572641398", "openvibely")
+	handlers := svc.discordActionHandlers(defaultProject.ID, discordMarkerContext{ChannelID: "chan-1", MessageID: "msg-1", UserID: "1518288288572641398"}, nil)
+	result, err := handlers["switch_project"](ctx, []byte(`{"project":"openvibely"}`))
+	if err != nil {
+		t.Fatalf("switch project: %v", err)
+	}
 	if !strings.Contains(result, "openvibely") {
 		t.Fatalf("unexpected switch result: %q", result)
 	}

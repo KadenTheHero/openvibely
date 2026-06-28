@@ -1,13 +1,16 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 )
 
 func supportsRuntimeChatActionTools(agent models.LLMConfig) bool {
@@ -26,6 +29,1038 @@ func supportsRuntimeChatActionTools(agent models.LLMConfig) bool {
 type channelActionSummaryCollector struct {
 	createdLines []string
 	editedLines  []string
+}
+
+type channelTaskActionHandlerOptions struct {
+	ProjectID      string
+	TaskSvc        *TaskService
+	LLMConfigRepo  *repository.LLMConfigRepo
+	Collector      *channelActionSummaryCollector
+	OnTasksCreated func(context.Context, []models.Task)
+}
+
+type channelGoalActionHandlerOptions struct {
+	ProjectID   string
+	TaskRepo    *repository.TaskRepo
+	TaskGoalSvc *TaskGoalService
+}
+
+type channelThreadActionHandlerOptions struct {
+	Platform                 string
+	ProjectID                string
+	Surface                  chatcontrol.Surface
+	Source                   string
+	ActorID                  string
+	TaskRepo                 *repository.TaskRepo
+	ExecRepo                 *repository.ExecutionRepo
+	ThreadInputRepo          *repository.ThreadInputRepo
+	LLMConfigRepo            *repository.LLMConfigRepo
+	SettingsRepo             *repository.SettingsRepo
+	CustomPersonalityRepo    *repository.CustomPersonalityRepo
+	ChannelTaskRunner        ChannelTaskRunner
+	QueuedTaskThreadPromoter func(taskID string)
+	CompleteExecution        func(context.Context, string, string, string, string, int, int64)
+	ChannelMessageRouter     *ChannelMessageRouter
+	ReplyContext             ChannelReplyContext
+	NewQueuedInput           func(*models.Task, string, string) *models.ThreadInput
+	FilterHistory            func([]models.Execution, string) []models.Execution
+	ResultAdapter            func(string) (string, error)
+	ConfigureSendOptions     func(*channelTaskThreadSendOptions)
+}
+
+type channelProjectActionHandlerOptions struct {
+	ProjectID     string
+	ProjectRepo   *repository.ProjectRepo
+	SwitchProject func(context.Context, *models.Project)
+}
+
+type channelUtilityActionHandlerOptions struct {
+	ProjectID             string
+	TaskRepo              *repository.TaskRepo
+	ScheduleRepo          *repository.ScheduleRepo
+	LLMConfigRepo         *repository.LLMConfigRepo
+	AgentRepo             *repository.AgentRepo
+	SettingsRepo          *repository.SettingsRepo
+	CustomPersonalityRepo *repository.CustomPersonalityRepo
+	ProjectRepo           *repository.ProjectRepo
+	AlertSvc              *AlertService
+	UnavailableAgentsText string
+}
+
+func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
+	return map[string]chatcontrol.RuntimeActionHandler{
+		"create_task": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req TaskCreationRequest
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Prompt) == "" {
+				return "", fmt.Errorf("create_task requires title and prompt")
+			}
+			if req.Priority == 0 {
+				req.Priority = 2
+			}
+			agents := []models.LLMConfig{}
+			if opts.LLMConfigRepo != nil {
+				agents, _ = opts.LLMConfigRepo.List(ctx)
+			}
+			createdTasks, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{req}, opts.ProjectID, opts.TaskSvc, agents)
+			if opts.OnTasksCreated != nil && len(createdTasks) > 0 {
+				opts.OnTasksCreated(ctx, createdTasks)
+			}
+			if opts.Collector != nil {
+				opts.Collector.addCreated(summary)
+			}
+			return strings.TrimSpace(summary), nil
+		},
+		"edit_task": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req TaskEditRequest
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if strings.TrimSpace(req.ID) == "" {
+				return "", fmt.Errorf("edit_task requires id")
+			}
+			summary := ExecuteTaskEdits(ctx, []TaskEditRequest{req}, opts.ProjectID, opts.TaskSvc, nil, "")
+			if opts.Collector != nil {
+				opts.Collector.addEdited(summary)
+			}
+			return strings.TrimSpace(summary), nil
+		},
+		"execute_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req TaskExecutionRequest
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" && len(req.Tags) == 0 && req.MinPriority == 0 {
+				return "", fmt.Errorf("execute_tasks requires task_id/title or tags/min_priority")
+			}
+			return strings.TrimSpace(ExecuteTaskExecutions(ctx, []TaskExecutionRequest{req}, opts.ProjectID, opts.TaskSvc)), nil
+		},
+	}
+}
+
+func buildChannelGoalActionHandlers(opts channelGoalActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
+	resolveTask := func(ctx context.Context, input json.RawMessage) (*models.Task, channelGoalToolInput, error) {
+		if opts.TaskGoalSvc == nil {
+			return nil, channelGoalToolInput{}, fmt.Errorf("task goal service unavailable")
+		}
+		var req channelGoalToolInput
+		if err := decodeRuntimeToolInput(input, &req); err != nil {
+			return nil, req, err
+		}
+		task, err := resolveChannelTaskReference(ctx, opts.TaskRepo, opts.ProjectID, req.TaskID, req.Title)
+		return task, req, err
+	}
+	return map[string]chatcontrol.RuntimeActionHandler{
+		"set_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			task, req, err := resolveTask(ctx, input)
+			if err != nil {
+				return "", err
+			}
+			goal, err := opts.TaskGoalSvc.SetGoal(ctx, task.ID, req.Goal, GoalOptions{Actor: "assistant"})
+			if err != nil {
+				return "", err
+			}
+			return channelGoalToolJSON(goal)
+		},
+		"clear_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			task, _, err := resolveTask(ctx, input)
+			if err != nil {
+				return "", err
+			}
+			if err := opts.TaskGoalSvc.ClearGoal(ctx, task.ID, "assistant"); err != nil {
+				return "", err
+			}
+			goal, _ := opts.TaskGoalSvc.GetGoal(ctx, task.ID)
+			return channelGoalToolJSON(goal)
+		},
+		"get_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			task, _, err := resolveTask(ctx, input)
+			if err != nil {
+				return "", err
+			}
+			goal, err := opts.TaskGoalSvc.GetGoal(ctx, task.ID)
+			if err != nil {
+				return "", err
+			}
+			return channelGoalToolJSON(goal)
+		},
+		"pause_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			task, _, err := resolveTask(ctx, input)
+			if err != nil {
+				return "", err
+			}
+			if err := opts.TaskGoalSvc.PauseGoal(ctx, task.ID, "assistant"); err != nil {
+				return "", err
+			}
+			goal, _ := opts.TaskGoalSvc.GetGoal(ctx, task.ID)
+			return channelGoalToolJSON(goal)
+		},
+		"resume_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
+			task, _, err := resolveTask(ctx, input)
+			if err != nil {
+				return "", err
+			}
+			if err := opts.TaskGoalSvc.ResumeGoal(ctx, task.ID, "assistant"); err != nil {
+				return "", err
+			}
+			goal, _ := opts.TaskGoalSvc.GetGoal(ctx, task.ID)
+			return channelGoalToolJSON(goal)
+		},
+		"mark_task_goal_achieved": func(ctx context.Context, input json.RawMessage) (string, error) {
+			task, req, err := resolveTask(ctx, input)
+			if err != nil {
+				return "", err
+			}
+			goal, err := opts.TaskGoalSvc.MarkAchieved(ctx, task.ID, req.GoalID, req.Reason)
+			if err != nil {
+				return "", err
+			}
+			return channelGoalToolJSON(goal)
+		},
+		"report_task_goal_blocked": func(ctx context.Context, input json.RawMessage) (string, error) {
+			task, req, err := resolveTask(ctx, input)
+			if err != nil {
+				return "", err
+			}
+			goal, err := opts.TaskGoalSvc.RecordBlockedReport(ctx, task.ID, req.GoalID, req.BlockerKey, req.Reason)
+			if err != nil {
+				return "", err
+			}
+			return channelGoalToolJSON(goal)
+		},
+	}
+}
+
+func buildChannelThreadActionHandlers(opts channelThreadActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
+	handlers := map[string]chatcontrol.RuntimeActionHandler{
+		"view_task_thread": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req ViewThreadRequest
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			return runChannelViewTaskThread(ctx, opts.TaskRepo, opts.ExecRepo, opts.ProjectID, req)
+		},
+		"send_to_task": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req SendToTaskRequest
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			result := runChannelSendToTaskAction(ctx, opts, req)
+			if opts.ResultAdapter != nil {
+				return opts.ResultAdapter(result)
+			}
+			return result, nil
+		},
+		"send_message": func(ctx context.Context, input json.RawMessage) (string, error) {
+			if opts.ChannelMessageRouter == nil {
+				return "", fmt.Errorf("channel message router unavailable")
+			}
+			return ExecuteSendMessageTool(ctx, opts.ChannelMessageRouter.WithAuditContext(string(opts.Surface), opts.ActorID), opts.ProjectID, input)
+		},
+		"list_capabilities": func(_ context.Context, _ json.RawMessage) (string, error) {
+			return formatChannelCapabilities(chatcontrol.ListForContext(models.ChatModeOrchestrate, opts.Surface)), nil
+		},
+	}
+	return handlers
+}
+
+func runChannelViewTaskThread(ctx context.Context, taskRepo *repository.TaskRepo, execRepo *repository.ExecutionRepo, projectID string, req ViewThreadRequest) (string, error) {
+	if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
+		return "", fmt.Errorf("view_task_thread requires task_id or title")
+	}
+	task, err := resolveChannelTaskReference(ctx, taskRepo, projectID, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	if execRepo == nil {
+		return "", fmt.Errorf("execution repository not configured")
+	}
+	executions, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	if err != nil {
+		return "", fmt.Errorf("retrieving thread for %q: %w", task.Title, err)
+	}
+	return strings.TrimSpace(formatThreadTranscript(task, executions, req.Offset, req.Limit)), nil
+}
+
+func runChannelSendToTaskAction(ctx context.Context, opts channelThreadActionHandlerOptions, req SendToTaskRequest) string {
+	if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
+		return "send_to_task requires task_id or title."
+	}
+	task, err := resolveChannelTaskReference(ctx, opts.TaskRepo, opts.ProjectID, req.TaskID, req.Title)
+	if err != nil {
+		return fmt.Sprintf("Error resolving task: %v", err)
+	}
+	sendOpts := channelTaskThreadSendOptions{
+		Platform:                 opts.Platform,
+		ProjectID:                opts.ProjectID,
+		Message:                  req.Message,
+		Source:                   opts.Source,
+		Surface:                  opts.Surface,
+		ReplyContext:             opts.ReplyContext,
+		TaskRepo:                 opts.TaskRepo,
+		ExecRepo:                 opts.ExecRepo,
+		ThreadInputRepo:          opts.ThreadInputRepo,
+		LLMConfigRepo:            opts.LLMConfigRepo,
+		SettingsRepo:             opts.SettingsRepo,
+		CustomPersonalityRepo:    opts.CustomPersonalityRepo,
+		ChannelTaskRunner:        opts.ChannelTaskRunner,
+		QueuedTaskThreadPromoter: opts.QueuedTaskThreadPromoter,
+		CompleteExecution:        opts.CompleteExecution,
+		NewQueuedInput:           opts.NewQueuedInput,
+		FilterHistory:            opts.FilterHistory,
+	}
+	if opts.ConfigureSendOptions != nil {
+		opts.ConfigureSendOptions(&sendOpts)
+	}
+	return runChannelTaskThreadSend(ctx, task, sendOpts)
+}
+
+func buildChannelProjectActionHandlers(opts channelProjectActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
+	return map[string]chatcontrol.RuntimeActionHandler{
+		"list_projects": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return buildChannelProjectListResult(ctx, opts.ProjectRepo, opts.ProjectID), nil
+		},
+		"switch_project": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req SwitchProjectRequest
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			return switchChannelProjectResult(ctx, opts.ProjectRepo, strings.TrimSpace(req.Project), opts.SwitchProject)
+		},
+	}
+}
+
+func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
+	return map[string]chatcontrol.RuntimeActionHandler{
+		"schedule_task": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return runChannelScheduleTask(ctx, opts, input), nil
+		},
+		"delete_schedule": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return runChannelDeleteSchedule(ctx, opts, input), nil
+		},
+		"modify_schedule": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return runChannelModifySchedule(ctx, opts, input), nil
+		},
+		"list_personalities": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return channelListPersonalitiesResult(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo), nil
+		},
+		"set_personality": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return channelSetPersonalityResult(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo, input), nil
+		},
+		"get_personality": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return channelGetPersonalityResult(ctx, opts.SettingsRepo), nil
+		},
+		"list_models": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return channelListModelsResult(ctx, opts.LLMConfigRepo), nil
+		},
+		"get_model": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return channelGetModelResult(ctx, opts.LLMConfigRepo, input), nil
+		},
+		"list_agents": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return channelListAgentsResult(ctx, opts.AgentRepo, opts.UnavailableAgentsText), nil
+		},
+		"view_settings": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return channelViewSettingsResult(ctx, opts.SettingsRepo, opts.LLMConfigRepo, opts.ProjectRepo), nil
+		},
+		"project_info": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return channelProjectInfoResult(ctx, opts.ProjectRepo, opts.TaskRepo, opts.ProjectID), nil
+		},
+		"list_alerts": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return channelListAlertsResult(ctx, opts.AlertSvc, opts.ProjectID), nil
+		},
+		"get_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return channelGetAlertResult(ctx, opts.AlertSvc, input), nil
+		},
+		"create_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return channelCreateAlertResult(ctx, opts.AlertSvc, opts.ProjectID, input), nil
+		},
+		"delete_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return channelDeleteAlertResult(ctx, opts.AlertSvc, input), nil
+		},
+		"toggle_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return channelToggleAlertResult(ctx, opts.AlertSvc, input), nil
+		},
+	}
+}
+
+func buildChannelProjectListResult(ctx context.Context, projectRepo *repository.ProjectRepo, projectID string) string {
+	if projectRepo == nil {
+		return "Error retrieving projects: project repository not configured"
+	}
+	projects, err := projectRepo.List(ctx)
+	if err != nil {
+		return "Error retrieving projects: " + err.Error()
+	}
+	var sb strings.Builder
+	sb.WriteString("Available Projects:\n")
+	if len(projects) == 0 {
+		sb.WriteString("No projects found.")
+		return sb.String()
+	}
+	for _, p := range projects {
+		marker := ""
+		if p.ID == projectID {
+			marker = " <- current"
+		}
+		desc := ""
+		if p.Description != "" {
+			desc = " - " + p.Description
+		}
+		sb.WriteString(fmt.Sprintf("- %s%s%s\n", p.Name, desc, marker))
+	}
+	sb.WriteString("Ask me to switch projects by name when needed.")
+	return strings.TrimSpace(sb.String())
+}
+
+func switchChannelProjectResult(ctx context.Context, projectRepo *repository.ProjectRepo, targetProject string, switchProject func(context.Context, *models.Project)) (string, error) {
+	if targetProject == "" {
+		return "Project switch requires a project name or ID.", nil
+	}
+	if projectRepo == nil {
+		return "Error loading projects: project repository not configured", nil
+	}
+	projects, err := projectRepo.List(ctx)
+	if err != nil {
+		return "Error loading projects: " + err.Error(), nil
+	}
+	var target *models.Project
+	for i := range projects {
+		if strings.EqualFold(projects[i].Name, targetProject) || projects[i].ID == targetProject {
+			target = &projects[i]
+			break
+		}
+	}
+	if target == nil {
+		names := make([]string, 0, len(projects))
+		for _, p := range projects {
+			names = append(names, p.Name)
+		}
+		return fmt.Sprintf("Project not found: %q. Available projects: %s", targetProject, strings.Join(names, ", ")), nil
+	}
+	if switchProject != nil {
+		switchProject(ctx, target)
+	}
+	return fmt.Sprintf("Switched to project: %s", target.Name), nil
+}
+
+func runChannelScheduleTask(ctx context.Context, opts channelUtilityActionHandlerOptions, input json.RawMessage) string {
+	var req ScheduleTaskRequest
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "Invalid input for schedule_task."
+	}
+	if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
+		return "schedule_task requires task_id or title."
+	}
+	if strings.TrimSpace(req.Time) == "" {
+		return "schedule_task requires time."
+	}
+	if opts.ScheduleRepo == nil {
+		return "Error scheduling task: schedule repository not available."
+	}
+	task, err := resolveChannelTaskReference(ctx, opts.TaskRepo, opts.ProjectID, req.TaskID, req.Title)
+	if err != nil {
+		return fmt.Sprintf("Could not find task: %v", err)
+	}
+	hourVal, minuteVal, err := parseChannelScheduleTime(req.Time)
+	if err != nil {
+		return fmt.Sprintf("Invalid time %q (expected HH:MM).", req.Time)
+	}
+	repeatType := channelScheduleRepeatType(req.Repeat)
+	repeatInterval := 1
+	if req.Interval > 0 {
+		repeatInterval = req.Interval
+	}
+	runAt := channelScheduleRunAt(time.Now().Local(), hourVal, minuteVal, repeatType, req.Days)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt.UTC(), RepeatType: repeatType, RepeatInterval: repeatInterval, Enabled: true}
+	if err := opts.ScheduleRepo.Create(ctx, schedule); err != nil {
+		return fmt.Sprintf("Error scheduling task %q: %v", task.Title, err)
+	}
+	if task.Category != models.CategoryScheduled {
+		_ = opts.TaskRepo.UpdateCategory(ctx, task.ID, models.CategoryScheduled)
+		if task.Status != models.StatusPending {
+			_ = opts.TaskRepo.UpdateStatus(ctx, task.ID, models.StatusPending)
+		}
+	}
+	return fmt.Sprintf("Scheduled task %q [TASK_ID:%s] at %s (%s).", task.Title, task.ID, req.Time, channelScheduleRepeatDescription(repeatType, repeatInterval, req.Days))
+}
+
+func runChannelDeleteSchedule(ctx context.Context, opts channelUtilityActionHandlerOptions, input json.RawMessage) string {
+	var req DeleteScheduleRequest
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "Invalid input for delete_schedule."
+	}
+	if strings.TrimSpace(req.ScheduleID) == "" && strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
+		return "delete_schedule requires schedule_id, task_id, or title."
+	}
+	if opts.ScheduleRepo == nil {
+		return "Error deleting schedule: schedule repository not available."
+	}
+	schedule, task, err := resolveChannelScheduleReference(ctx, opts.TaskRepo, opts.ScheduleRepo, opts.ProjectID, req.ScheduleID, req.TaskID, req.Title)
+	if err != nil {
+		return fmt.Sprintf("Could not find schedule: %v", err)
+	}
+	if err := opts.ScheduleRepo.Delete(ctx, schedule.ID); err != nil {
+		return fmt.Sprintf("Error deleting schedule for task %q: %v", task.Title, err)
+	}
+	remaining, _ := opts.ScheduleRepo.ListByTask(ctx, task.ID)
+	if len(remaining) == 0 && task.Category == models.CategoryScheduled {
+		_ = opts.TaskRepo.UpdateCategory(ctx, task.ID, models.CategoryBacklog)
+	}
+	return fmt.Sprintf("Deleted schedule for task %q [TASK_ID:%s].", task.Title, task.ID)
+}
+
+func runChannelModifySchedule(ctx context.Context, opts channelUtilityActionHandlerOptions, input json.RawMessage) string {
+	var req ModifyScheduleRequest
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "Invalid input for modify_schedule."
+	}
+	if strings.TrimSpace(req.ScheduleID) == "" && strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
+		return "modify_schedule requires schedule_id, task_id, or title."
+	}
+	if opts.ScheduleRepo == nil {
+		return "Error modifying schedule: schedule repository not available."
+	}
+	schedule, task, err := resolveChannelScheduleReference(ctx, opts.TaskRepo, opts.ScheduleRepo, opts.ProjectID, req.ScheduleID, req.TaskID, req.Title)
+	if err != nil {
+		return fmt.Sprintf("Could not find schedule: %v", err)
+	}
+	changes, changed, errText := applyChannelScheduleChanges(schedule, req)
+	if errText != "" {
+		return errText
+	}
+	if !changed {
+		return fmt.Sprintf("No changes specified for schedule on task %q.", task.Title)
+	}
+	if err := opts.ScheduleRepo.Update(ctx, schedule); err != nil {
+		return fmt.Sprintf("Error updating schedule for task %q: %v", task.Title, err)
+	}
+	return fmt.Sprintf("Updated schedule for task %q [TASK_ID:%s]: %s.", task.Title, task.ID, strings.Join(changes, ", "))
+}
+
+func parseChannelScheduleTime(raw string) (int, int, error) {
+	var hourVal, minuteVal int
+	if _, err := fmt.Sscanf(raw, "%d:%d", &hourVal, &minuteVal); err != nil || hourVal < 0 || hourVal > 23 || minuteVal < 0 || minuteVal > 59 {
+		return 0, 0, fmt.Errorf("invalid time")
+	}
+	return hourVal, minuteVal, nil
+}
+
+func channelScheduleRepeatType(raw string) models.RepeatType {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "once":
+		return models.RepeatOnce
+	case "weekly":
+		return models.RepeatWeekly
+	case "monthly":
+		return models.RepeatMonthly
+	case "hours", "hourly":
+		return models.RepeatHours
+	case "minutes":
+		return models.RepeatMinutes
+	case "seconds":
+		return models.RepeatSeconds
+	default:
+		return models.RepeatDaily
+	}
+}
+
+func channelScheduleRepeatDescription(repeatType models.RepeatType, interval int, days []string) string {
+	if repeatType == models.RepeatWeekly && len(days) > 0 {
+		if interval > 1 {
+			return fmt.Sprintf("every %d weeks on %s", interval, strings.Join(days, ", "))
+		}
+		return fmt.Sprintf("weekly on %s", strings.Join(days, ", "))
+	}
+	return FormatRepeatPattern(repeatType, interval)
+}
+
+func channelScheduleRunAt(now time.Time, hourVal, minuteVal int, repeatType models.RepeatType, days []string) time.Time {
+	runAt := time.Date(now.Year(), now.Month(), now.Day(), hourVal, minuteVal, 0, 0, time.Local)
+	if repeatType == models.RepeatWeekly && len(days) > 0 {
+		if next := nextChannelScheduleWeekday(runAt, now, days); !next.IsZero() {
+			runAt = next
+		}
+	}
+	return runAt
+}
+
+func nextChannelScheduleWeekday(base, now time.Time, days []string) time.Time {
+	dayMap := map[string]time.Weekday{"sun": time.Sunday, "mon": time.Monday, "tue": time.Tuesday, "wed": time.Wednesday, "thu": time.Thursday, "fri": time.Friday, "sat": time.Saturday}
+	bestOffset := 8
+	for _, d := range days {
+		target, ok := dayMap[strings.ToLower(strings.TrimSpace(d))]
+		if !ok {
+			continue
+		}
+		offset := int(target - base.Weekday())
+		if offset < 0 {
+			offset += 7
+		}
+		if offset == 0 && base.Before(now) {
+			offset = 7
+		}
+		if offset < bestOffset {
+			bestOffset = offset
+		}
+	}
+	if bestOffset >= 8 {
+		return time.Time{}
+	}
+	return base.AddDate(0, 0, bestOffset)
+}
+
+func applyChannelScheduleChanges(schedule *models.Schedule, req ModifyScheduleRequest) ([]string, bool, string) {
+	if schedule == nil {
+		return nil, false, "Error modifying schedule: schedule not found."
+	}
+	changes := []string{}
+	timeChanged := false
+	if req.Time != "" {
+		hourVal, minuteVal, err := parseChannelScheduleTime(req.Time)
+		if err != nil {
+			return nil, false, fmt.Sprintf("Invalid time %q.", req.Time)
+		}
+		oldLocal := schedule.RunAt.Local()
+		schedule.RunAt = time.Date(oldLocal.Year(), oldLocal.Month(), oldLocal.Day(), hourVal, minuteVal, 0, 0, time.Local).UTC()
+		changes = append(changes, fmt.Sprintf("time→%s", req.Time))
+		timeChanged = true
+	}
+	if req.Repeat != "" {
+		switch strings.ToLower(strings.TrimSpace(req.Repeat)) {
+		case "once", "daily", "weekly", "monthly", "hours", "hourly", "minutes", "seconds":
+			schedule.RepeatType = channelScheduleRepeatType(req.Repeat)
+		default:
+			return nil, false, fmt.Sprintf("Unknown repeat type %q.", req.Repeat)
+		}
+		changes = append(changes, fmt.Sprintf("repeat→%s", req.Repeat))
+		timeChanged = true
+	}
+	if req.Interval != nil {
+		if *req.Interval < 1 {
+			return nil, false, fmt.Sprintf("Invalid interval %d.", *req.Interval)
+		}
+		schedule.RepeatInterval = *req.Interval
+		changes = append(changes, fmt.Sprintf("interval→%d", *req.Interval))
+		timeChanged = true
+	}
+	if len(req.Days) > 0 && schedule.RepeatType == models.RepeatWeekly {
+		now := time.Now().Local()
+		runAtLocal := schedule.RunAt.Local()
+		if next := nextChannelScheduleWeekday(runAtLocal, now, req.Days); !next.IsZero() {
+			schedule.RunAt = next.UTC()
+		}
+		changes = append(changes, fmt.Sprintf("days→%s", strings.Join(req.Days, ",")))
+		timeChanged = true
+	}
+	if req.Enabled != nil {
+		schedule.Enabled = *req.Enabled
+		if *req.Enabled {
+			changes = append(changes, "enabled→true")
+		} else {
+			changes = append(changes, "enabled→false")
+		}
+	}
+	if len(changes) == 0 {
+		return changes, false, ""
+	}
+	if timeChanged {
+		schedule.NextRun = schedule.ComputeNextRun(time.Now())
+	} else if req.Enabled != nil && *req.Enabled {
+		now := time.Now()
+		if schedule.NextRun == nil || schedule.NextRun.Before(now) {
+			if next := schedule.ComputeNextRun(now); next != nil {
+				schedule.NextRun = next
+			}
+		}
+	}
+	return changes, true, ""
+}
+
+func channelGetPersonalityResult(ctx context.Context, settingsRepo *repository.SettingsRepo) string {
+	if settingsRepo == nil {
+		return "Current personality: default (no personality set)"
+	}
+	current, err := settingsRepo.Get(ctx, "personality")
+	if err != nil {
+		return "Error retrieving personality setting."
+	}
+	if current == "" {
+		return "Current personality: default (base, no personality modifier active)"
+	}
+	return fmt.Sprintf("Current personality: %s", current)
+}
+
+func channelListPersonalitiesResult(ctx context.Context, settingsRepo *repository.SettingsRepo, customRepo *repository.CustomPersonalityRepo) string {
+	personalities := AllPersonalitiesWithCustom(ctx, customRepo)
+	if len(personalities) == 0 {
+		return "No personalities available."
+	}
+	var sb strings.Builder
+	sb.WriteString("Available Personalities:\n")
+	for _, p := range personalities {
+		if p.Key == "" {
+			sb.WriteString(fmt.Sprintf("- %s (default): %s\n", p.Name, p.Description))
+		} else if p.IsCustom {
+			sb.WriteString(fmt.Sprintf("- %s (key: %s, custom): %s\n", p.Name, p.Key, p.Description))
+		} else {
+			sb.WriteString(fmt.Sprintf("- %s (key: %s): %s\n", p.Name, p.Key, p.Description))
+		}
+	}
+	if settingsRepo != nil {
+		if current, err := settingsRepo.Get(ctx, "personality"); err == nil {
+			if current == "" {
+				current = "default"
+			}
+			sb.WriteString(fmt.Sprintf("\nCurrent personality: %s", current))
+		}
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+func channelSetPersonalityResult(ctx context.Context, settingsRepo *repository.SettingsRepo, customRepo *repository.CustomPersonalityRepo, input json.RawMessage) string {
+	var req struct {
+		Personality string `json:"personality"`
+	}
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "Invalid input for set_personality."
+	}
+	key := strings.TrimSpace(req.Personality)
+	if key == "" {
+		return "set_personality requires personality."
+	}
+	valid := false
+	for _, p := range AllPersonalitiesWithCustom(ctx, customRepo) {
+		if p.Key == key {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return fmt.Sprintf("Unknown personality %q. Use list_personalities to view options.", key)
+	}
+	if settingsRepo == nil {
+		return "Error setting personality: settings repository not configured."
+	}
+	if err := settingsRepo.Set(ctx, "personality", key); err != nil {
+		return fmt.Sprintf("Error setting personality to %q: %v", key, err)
+	}
+	return fmt.Sprintf("Personality changed to %q.", key)
+}
+
+func channelListModelsResult(ctx context.Context, repo *repository.LLMConfigRepo) string {
+	configs, err := repo.List(ctx)
+	if err != nil {
+		return "Error retrieving model configurations."
+	}
+	if len(configs) == 0 {
+		return "No models configured."
+	}
+	var sb strings.Builder
+	sb.WriteString("Configured Models:\n")
+	for _, c := range configs {
+		defaultStr := ""
+		if c.IsDefault {
+			defaultStr = " (default)"
+		}
+		auth := string(c.AuthMethod)
+		if auth == "" {
+			auth = "cli"
+		}
+		sb.WriteString(fmt.Sprintf("- %s%s — provider: %s, model: %s, auth: %s\n", c.Name, defaultStr, c.Provider, c.Model, auth))
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+func channelGetModelResult(ctx context.Context, repo *repository.LLMConfigRepo, input json.RawMessage) string {
+	var req struct {
+		ModelID string `json:"model_id"`
+		Name    string `json:"name"`
+	}
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "Invalid input for get_model."
+	}
+	configs, err := repo.List(ctx)
+	if err != nil {
+		return "Error retrieving model configurations."
+	}
+	for _, c := range configs {
+		if (req.ModelID != "" && c.ID == req.ModelID) || (req.Name != "" && strings.EqualFold(c.Name, req.Name)) {
+			defaultStr := ""
+			if c.IsDefault {
+				defaultStr = " (default)"
+			}
+			return fmt.Sprintf("Model: %s%s\n  Provider: %s\n  Model ID: %s\n  Auth: %s", c.Name, defaultStr, c.Provider, c.Model, c.AuthMethod)
+		}
+	}
+	if req.ModelID != "" {
+		return fmt.Sprintf("Model with id %q not found.", req.ModelID)
+	}
+	return fmt.Sprintf("Model with name %q not found.", req.Name)
+}
+
+func channelListAgentsResult(ctx context.Context, repo *repository.AgentRepo, unavailable string) string {
+	if repo == nil {
+		if strings.TrimSpace(unavailable) != "" {
+			return unavailable
+		}
+		return "Agent definitions not available."
+	}
+	agents, err := repo.List(ctx)
+	if err != nil {
+		return "Error retrieving agent definitions: " + err.Error()
+	}
+	if len(agents) == 0 {
+		return "No agents configured."
+	}
+	var sb strings.Builder
+	sb.WriteString("Configured Agents:\n")
+	for _, a := range agents {
+		modelStr := ""
+		if a.Model != "inherit" {
+			modelStr = fmt.Sprintf(", model: %s", a.Model)
+		}
+		sb.WriteString(fmt.Sprintf("- %s — %s%s, %d skills, %d MCP servers\n", a.Name, a.Description, modelStr, len(a.Skills), len(a.MCPServers)))
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+func channelViewSettingsResult(ctx context.Context, settingsRepo *repository.SettingsRepo, llmRepo *repository.LLMConfigRepo, projectRepo *repository.ProjectRepo) string {
+	var sb strings.Builder
+	sb.WriteString("App Settings:\n")
+	if settingsRepo != nil {
+		personality, err := settingsRepo.Get(ctx, "personality")
+		if err == nil {
+			if personality == "" {
+				personality = "default"
+			}
+			sb.WriteString(fmt.Sprintf("- Personality: %s\n", personality))
+		}
+	}
+	if configs, err := llmRepo.List(ctx); err == nil {
+		sb.WriteString(fmt.Sprintf("- Configured models: %d\n", len(configs)))
+	}
+	if projectRepo != nil {
+		if projects, err := projectRepo.List(ctx); err == nil {
+			sb.WriteString(fmt.Sprintf("- Projects: %d\n", len(projects)))
+		}
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+func channelCurrentProjectResult(ctx context.Context, projectRepo *repository.ProjectRepo, projectID string) string {
+	project, err := projectRepo.GetByID(ctx, projectID)
+	if err != nil || project == nil {
+		return fmt.Sprintf("Current project ID: %s (details unavailable)", projectID)
+	}
+	return fmt.Sprintf("Current project: %s (id: %s)", project.Name, project.ID)
+}
+
+func channelProjectInfoResult(ctx context.Context, projectRepo *repository.ProjectRepo, taskRepo *repository.TaskRepo, projectID string) string {
+	project, err := projectRepo.GetByID(ctx, projectID)
+	if err != nil || project == nil {
+		return "Error retrieving project details."
+	}
+	counts, err := taskRepo.CountByProjectAndCategory(ctx, projectID)
+	if err != nil {
+		counts = map[string]int{}
+	}
+	total := 0
+	for _, c := range counts {
+		total += c
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Project: %s (id: %s)\n", project.Name, project.ID))
+	if project.Description != "" {
+		sb.WriteString(fmt.Sprintf("Description: %s\n", project.Description))
+	}
+	if project.RepoPath != "" {
+		sb.WriteString(fmt.Sprintf("Repository: %s\n", project.RepoPath))
+	}
+	sb.WriteString(fmt.Sprintf("Total tasks: %d\n", total))
+	for category, count := range counts {
+		sb.WriteString(fmt.Sprintf("- %s: %d\n", category, count))
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+func channelListAlertsResult(ctx context.Context, alertSvc *AlertService, projectID string) string {
+	if alertSvc == nil {
+		return "Alert service not available."
+	}
+	alerts, err := alertSvc.ListByProject(ctx, projectID, 50)
+	if err != nil {
+		return "Error retrieving alerts: " + err.Error()
+	}
+	if len(alerts) == 0 {
+		return "No alerts found. You're all clear!"
+	}
+	unreadCount, _ := alertSvc.CountUnread(ctx, projectID)
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Found %d alerts (%d unread):\n", len(alerts), unreadCount))
+	for _, a := range alerts {
+		readStr := "unread"
+		if a.IsRead {
+			readStr = "read"
+		}
+		sb.WriteString(fmt.Sprintf("- %s (id: %s, severity: %s, %s)\n", a.Title, a.ID, a.Severity, readStr))
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+func channelGetAlertResult(ctx context.Context, alertSvc *AlertService, input json.RawMessage) string {
+	var req struct {
+		AlertID string `json:"alert_id"`
+	}
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "Invalid input for get_alert."
+	}
+	if req.AlertID == "" {
+		return "get_alert requires alert_id."
+	}
+	if alertSvc == nil {
+		return "Alert service not available."
+	}
+	alert, err := alertSvc.GetByID(ctx, req.AlertID)
+	if err != nil {
+		return fmt.Sprintf("Error retrieving alert %q: %v", req.AlertID, err)
+	}
+	if alert == nil {
+		return fmt.Sprintf("Alert %q not found.", req.AlertID)
+	}
+	readStr := "unread"
+	if alert.IsRead {
+		readStr = "read"
+	}
+	return fmt.Sprintf("Alert: %s\n  ID: %s\n  Type: %s\n  Severity: %s\n  Status: %s\n  Message: %s", alert.Title, alert.ID, alert.Type, alert.Severity, readStr, alert.Message)
+}
+
+func channelCreateAlertResult(ctx context.Context, alertSvc *AlertService, projectID string, input json.RawMessage) string {
+	var req CreateAlertRequest
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "Invalid input for create_alert."
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		return "create_alert requires title."
+	}
+	if alertSvc == nil {
+		return "Alert service not available."
+	}
+	severity, errText := channelAlertSeverity(req.Severity)
+	if errText != "" {
+		return errText
+	}
+	alertType, errText := channelAlertType(req.Type)
+	if errText != "" {
+		return errText
+	}
+	a := &models.Alert{ProjectID: projectID, Type: alertType, Severity: severity, Title: req.Title, Message: req.Message}
+	if strings.TrimSpace(req.TaskID) != "" {
+		tid := strings.TrimSpace(req.TaskID)
+		a.TaskID = &tid
+	}
+	if err := alertSvc.Create(ctx, a); err != nil {
+		return fmt.Sprintf("Error creating alert %q: %v", req.Title, err)
+	}
+	return fmt.Sprintf("Created alert %q (id: %s, severity: %s)", req.Title, a.ID, severity)
+}
+
+func channelDeleteAlertResult(ctx context.Context, alertSvc *AlertService, input json.RawMessage) string {
+	var req DeleteAlertRequest
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "Invalid input for delete_alert."
+	}
+	if strings.TrimSpace(req.AlertID) == "" {
+		return "delete_alert requires alert_id."
+	}
+	if alertSvc == nil {
+		return "Alert service not available."
+	}
+	if err := alertSvc.Delete(ctx, req.AlertID); err != nil {
+		return fmt.Sprintf("Error deleting alert %q: %v", req.AlertID, err)
+	}
+	return fmt.Sprintf("Deleted alert %s.", req.AlertID)
+}
+
+func channelToggleAlertResult(ctx context.Context, alertSvc *AlertService, input json.RawMessage) string {
+	var req ToggleAlertRequest
+	if err := decodeRuntimeToolInput(input, &req); err != nil {
+		return "Invalid input for toggle_alert."
+	}
+	if strings.TrimSpace(req.AlertID) == "" {
+		return "toggle_alert requires alert_id."
+	}
+	if alertSvc == nil {
+		return "Alert service not available."
+	}
+	if err := alertSvc.MarkRead(ctx, req.AlertID); err != nil {
+		return fmt.Sprintf("Error marking alert %q as read: %v", req.AlertID, err)
+	}
+	return fmt.Sprintf("Marked alert %s as read.", req.AlertID)
+}
+
+func channelAlertSeverity(raw string) (models.AlertSeverity, string) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "warning":
+		return models.SeverityWarning, ""
+	case "error":
+		return models.SeverityError, ""
+	case "", "info":
+		return models.SeverityInfo, ""
+	default:
+		return "", fmt.Sprintf("Invalid severity %q.", raw)
+	}
+}
+
+func channelAlertType(raw string) (models.AlertType, string) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "task_failed":
+		return models.AlertTaskFailed, ""
+	case "task_needs_followup":
+		return models.AlertTaskNeedsFollowup, ""
+	case "", "custom":
+		return models.AlertCustom, ""
+	default:
+		return "", fmt.Sprintf("Invalid alert type %q.", raw)
+	}
+}
+
+func formatChannelCapabilities(summaries []chatcontrol.ActionSummary) string {
+	if len(summaries) == 0 {
+		return "No capabilities available in the current mode."
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Available capabilities (%d actions):\n", len(summaries)))
+	currentDomain := ""
+	for _, s := range summaries {
+		if s.Domain != currentDomain {
+			currentDomain = s.Domain
+			sb.WriteString(fmt.Sprintf("\n[%s]\n", currentDomain))
+		}
+		accessTag := ""
+		if s.Access == "write" {
+			accessTag = " (write)"
+		}
+		sb.WriteString(fmt.Sprintf("  - %s%s: %s\n", s.Name, accessTag, s.Description))
+	}
+	return sb.String()
+}
+
+func channelCompletionFunc(platform string, execRepo *repository.ExecutionRepo, taskRepo *repository.TaskRepo, queuedTurnPromoter func(projectID string)) func(context.Context, string, string, string, string, int, int64) {
+	return func(ctx context.Context, execID, taskID, output, errorMessage string, tokensUsed int, durationMs int64) {
+		completeChannelExecution(ctx, channelExecutionCompletionOptions{Platform: platform, ExecRepo: execRepo, TaskRepo: taskRepo, QueuedTurnPromoter: queuedTurnPromoter, ExecID: execID, TaskID: taskID, Output: output, ErrorMessage: errorMessage, TokensUsed: tokensUsed, DurationMs: durationMs})
+	}
+}
+
+func mergeChannelRuntimeActionHandlers(dst, src map[string]chatcontrol.RuntimeActionHandler) map[string]chatcontrol.RuntimeActionHandler {
+	if dst == nil {
+		dst = map[string]chatcontrol.RuntimeActionHandler{}
+	}
+	for name, handler := range src {
+		dst[name] = handler
+	}
+	return dst
 }
 
 func newChannelActionSummaryCollector() *channelActionSummaryCollector {

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -447,9 +446,8 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 				}
 				return s.discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{TaskID: taskID, DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: msg.MessageID, DiscordUserID: msg.UserID})
 			},
-			CompleteExecution:          s.completeExecution,
-			LinkAttachments:            s.linkAttachmentsToExecution,
-			AttachmentContextAndImages: discordAttachmentContextAndImages,
+			CompleteExecution: channelCompletionFunc("discord", s.execRepo, s.taskRepo, s.queuedTurnPromoter),
+			LinkAttachments:   s.linkAttachmentsToExecution, AttachmentContextAndImages: discordAttachmentContextAndImages,
 			ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
 				return s.execRepo.ListChatHistory(ctx, projectID, discordChatHistoryLimit)
 			},
@@ -532,7 +530,7 @@ func (s *DiscordService) recordQueuedAttachmentFailure(ctx context.Context, proj
 		}
 		return
 	}
-	s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, 0)
+	channelCompletionFunc("discord", s.execRepo, s.taskRepo, s.queuedTurnPromoter)(ctx, exec.ID, task.ID, "", msgText, 0, 0)
 	if s.chatBroadcaster != nil {
 		s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, ExecID: exec.ID, TaskID: task.ID, Message: msg.Text, Source: msg.Source, AgentName: "", HasAttachments: len(msg.Attachments) > 0})
 	}
@@ -587,21 +585,6 @@ func (s *DiscordService) SendChatResponse(ctx context.Context, task models.Task,
 	if err := s.editOrSendDiscordMessage(ctxRecord.DiscordChannelID, ctxRecord.DiscordMessageID, ctxRecord.DiscordMessageID, message); err != nil {
 		applog.Infof("[discord] send chat response failed for task=%s: %v", task.ID, err)
 	}
-}
-
-func (s *DiscordService) completeExecution(ctx context.Context, execID, taskID, output, errorMessage string, tokensUsed int, durationMs int64) {
-	if s.execRepo == nil || s.taskRepo == nil {
-		return
-	}
-	if errorMessage != "" {
-		_ = s.execRepo.Complete(ctx, execID, models.ExecFailed, "", errorMessage, 0, durationMs)
-		_ = s.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed)
-		promoteQueuedChannelChatAfterCompletion(ctx, s.taskRepo, s.queuedTurnPromoter, taskID)
-		return
-	}
-	_ = s.execRepo.Complete(ctx, execID, models.ExecCompleted, output, "", tokensUsed, durationMs)
-	_ = s.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted)
-	promoteQueuedChannelChatAfterCompletion(ctx, s.taskRepo, s.queuedTurnPromoter, taskID)
 }
 
 func (s *DiscordService) checkAuthorization(ctx context.Context, projectID, discordUserID string) bool {
@@ -688,23 +671,12 @@ type discordMarkerContext struct {
 }
 
 func (s *DiscordService) discordActionHandlers(projectID string, markerCtx discordMarkerContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
-	return map[string]chatcontrol.RuntimeActionHandler{
-		"create_task": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req TaskCreationRequest
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Prompt) == "" {
-				return "", fmt.Errorf("create_task requires title and prompt")
-			}
-			if req.Priority == 0 {
-				req.Priority = 2
-			}
-			agents := []models.LLMConfig{}
-			if s.llmConfigRepo != nil {
-				agents, _ = s.llmConfigRepo.List(ctx)
-			}
-			createdTasks, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{req}, projectID, s.taskSvc, agents)
+	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
+		ProjectID:     projectID,
+		TaskSvc:       s.taskSvc,
+		LLMConfigRepo: s.llmConfigRepo,
+		Collector:     collector,
+		OnTasksCreated: func(ctx context.Context, createdTasks []models.Task) {
 			for _, t := range createdTasks {
 				if s.taskRepo != nil {
 					if err := s.taskRepo.UpdateDiscordOrigin(ctx, t.ID); err != nil {
@@ -715,317 +687,39 @@ func (s *DiscordService) discordActionHandlers(projectID string, markerCtx disco
 					_ = s.discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{TaskID: t.ID, DiscordChannelID: markerCtx.ChannelID, DiscordThreadID: markerCtx.ThreadID, DiscordMessageID: markerCtx.MessageID, DiscordUserID: markerCtx.UserID})
 				}
 			}
-			if collector != nil {
-				collector.addCreated(summary)
-			}
-			return strings.TrimSpace(summary), nil
 		},
-		"edit_task": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req TaskEditRequest
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			if strings.TrimSpace(req.ID) == "" {
-				return "", fmt.Errorf("edit_task requires id")
-			}
-			summary := ExecuteTaskEdits(ctx, []TaskEditRequest{req}, projectID, s.taskSvc, nil, "")
-			if collector != nil {
-				collector.addEdited(summary)
-			}
-			return strings.TrimSpace(summary), nil
+	})
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: projectID, TaskRepo: s.taskRepo, TaskGoalSvc: s.taskGoalSvc}))
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelThreadActionHandlers(channelThreadActionHandlerOptions{
+		Platform:                 "discord",
+		ProjectID:                projectID,
+		Surface:                  chatcontrol.SurfaceDiscord,
+		Source:                   models.TaskOriginDiscord,
+		ActorID:                  markerCtx.UserID,
+		TaskRepo:                 s.taskRepo,
+		ExecRepo:                 s.execRepo,
+		ThreadInputRepo:          s.threadInputRepo,
+		LLMConfigRepo:            s.llmConfigRepo,
+		SettingsRepo:             s.settingsRepo,
+		CustomPersonalityRepo:    s.customPersonalityRepo,
+		ChannelTaskRunner:        s.channelTaskRunner,
+		QueuedTaskThreadPromoter: s.queuedTaskThreadPromoter,
+		CompleteExecution:        channelCompletionFunc("discord", s.execRepo, s.taskRepo, s.queuedTurnPromoter),
+		ChannelMessageRouter:     s.channelMessageRouter,
+		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginDiscord, DiscordChannelID: markerCtx.ChannelID, DiscordThreadID: markerCtx.ThreadID, DiscordMessageID: markerCtx.MessageID, DiscordUserID: markerCtx.UserID},
+		NewQueuedInput: func(_ *models.Task, runExecutionID, agentID string) *models.ThreadInput {
+			return &models.ThreadInput{DiscordChannelID: markerCtx.ChannelID, DiscordThreadID: markerCtx.ThreadID, DiscordMessageID: markerCtx.MessageID, DiscordUserID: markerCtx.UserID}
 		},
-		"execute_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req TaskExecutionRequest
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" && len(req.Tags) == 0 && req.MinPriority == 0 {
-				return "", fmt.Errorf("execute_tasks requires task_id/title or tags/min_priority")
-			}
-			return strings.TrimSpace(ExecuteTaskExecutions(ctx, []TaskExecutionRequest{req}, projectID, s.taskSvc)), nil
+		FilterHistory: filterDiscordChatHistory,
+	}))
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
+		ProjectID:   projectID,
+		ProjectRepo: s.projectRepo,
+		SwitchProject: func(ctx context.Context, project *models.Project) {
+			s.setActiveProject(ctx, markerCtx.UserID, project.ID)
 		},
-		"view_task_thread": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return s.discordViewTaskThread(ctx, projectID, input), nil
-		},
-		"send_to_task": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return s.discordSendToTask(ctx, projectID, input, markerCtx), nil
-		},
-		"send_message": func(ctx context.Context, input json.RawMessage) (string, error) {
-			if s.channelMessageRouter == nil {
-				return "", fmt.Errorf("channel message router unavailable")
-			}
-			return ExecuteSendMessageTool(ctx, s.channelMessageRouter.WithAuditContext(string(chatcontrol.SurfaceDiscord), markerCtx.UserID), projectID, input)
-		},
-		"set_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return s.executeChannelSetTaskGoal(ctx, projectID, input)
-		},
-		"clear_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return s.executeChannelClearTaskGoal(ctx, projectID, input)
-		},
-		"get_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return s.executeChannelGetTaskGoal(ctx, projectID, input)
-		},
-		"pause_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return s.executeChannelPauseTaskGoal(ctx, projectID, input)
-		},
-		"resume_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return s.executeChannelResumeTaskGoal(ctx, projectID, input)
-		},
-		"mark_task_goal_achieved": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return s.executeChannelMarkTaskGoalAchieved(ctx, projectID, input)
-		},
-		"report_task_goal_blocked": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return s.executeChannelReportTaskGoalBlocked(ctx, projectID, input)
-		},
-		"list_projects": func(ctx context.Context, _ json.RawMessage) (string, error) {
-			return s.buildProjectListResult(ctx, projectID), nil
-		},
-		"switch_project": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req SwitchProjectRequest
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			return s.switchProjectResult(ctx, markerCtx.UserID, req.Project), nil
-		},
-		"list_capabilities": func(_ context.Context, _ json.RawMessage) (string, error) {
-			return formatChannelCapabilities(chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceDiscord)), nil
-		},
-	}
-}
-
-func (s *DiscordService) discordViewTaskThread(ctx context.Context, projectID string, input json.RawMessage) string {
-	var req ViewThreadRequest
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
-		return "Invalid input for view_task_thread."
-	}
-	if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
-		return "view_task_thread requires task_id or title."
-	}
-	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
-	if err != nil {
-		return fmt.Sprintf("Error resolving task: %v", err)
-	}
-	executions, err := s.execRepo.ListByTaskChronological(ctx, task.ID)
-	if err != nil {
-		return fmt.Sprintf("Error retrieving thread for %q: %v", task.Title, err)
-	}
-	return strings.TrimSpace(formatThreadTranscript(task, executions, req.Offset, req.Limit))
-}
-
-func (s *DiscordService) discordSendToTask(ctx context.Context, projectID string, input json.RawMessage, markerCtx discordMarkerContext) string {
-	var req SendToTaskRequest
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
-		return "Invalid input for send_to_task."
-	}
-	if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
-		return "send_to_task requires task_id or title."
-	}
-	if strings.TrimSpace(req.Message) == "" {
-		return "send_to_task requires message."
-	}
-	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
-	if err != nil {
-		return fmt.Sprintf("Error resolving task: %v", err)
-	}
-	activeExec, queueBehindFirstTurn, activeErr := s.activeOrStartingTaskTurn(ctx, task)
-	if activeErr != nil {
-		return fmt.Sprintf("Error checking active turn for task %q: %v", task.Title, activeErr)
-	}
-	if activeExec != nil || queueBehindFirstTurn {
-		if s.threadInputRepo == nil {
-			return fmt.Sprintf("Task %q is currently running. Queue is unavailable, so wait for it to finish before sending a message.", task.Title)
-		}
-		agentID := ""
-		if task.AgentID != nil {
-			agentID = *task.AgentID
-		}
-		runExecutionID := ""
-		if activeExec != nil {
-			runExecutionID = activeExec.ID
-		}
-		queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: task.ProjectID, TaskID: task.ID, RunExecutionID: runExecutionID, AgentConfigID: agentID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: req.Message, Source: models.TaskOriginDiscord, DiscordChannelID: markerCtx.ChannelID, DiscordThreadID: markerCtx.ThreadID, DiscordMessageID: markerCtx.MessageID, DiscordUserID: markerCtx.UserID}
-		if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
-			return fmt.Sprintf("Error queueing message for task %q: %v", task.Title, err)
-		}
-		if queued.RunExecutionID == "" {
-			_ = s.bindQueuedTaskInputToActiveExecutionIfAvailable(ctx, queued)
-		}
-		if shouldPromote, promoteErr := s.shouldPromotePreExecutionQueuedInput(ctx, task, queued); promoteErr == nil && shouldPromote && s.queuedTaskThreadPromoter != nil {
-			go s.queuedTaskThreadPromoter(task.ID)
-		}
-		return fmt.Sprintf("Queued message to task %q [TASK_ID:%s]. It will run after the active thread turn finishes.", task.Title, task.ID)
-	}
-	agent, err := s.agentForTaskMessage(ctx, task, req.Message)
-	if err != nil {
-		return fmt.Sprintf("Error selecting agent for task %q: %v", task.Title, err)
-	}
-	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: req.Message, IsFollowup: true}
-	if err := s.execRepo.Create(ctx, exec); err != nil {
-		return fmt.Sprintf("Error creating follow-up execution for %q: %v", task.Title, err)
-	}
-	priorExecs, _ := s.execRepo.ListByTaskChronological(ctx, task.ID)
-	priorHistory := filterDiscordChatHistory(priorExecs, exec.ID)
-	systemContext := buildTelegramTaskChatContext(task.Title, len(priorHistory) > 0)
-	if pCtx := getChannelChatPersonalityContext(ctx, s.settingsRepo, s.customPersonalityRepo); pCtx != "" {
-		systemContext += pCtx
-	}
-	if s.channelTaskRunner == nil {
-		msgText := "shared task runner is unavailable"
-		s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, 0)
-		return fmt.Sprintf("Error sending message to task %q: %s", task.Title, msgText)
-	}
-	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
-		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued); err != nil {
-			s.completeExecution(ctx, exec.ID, task.ID, "", err.Error(), 0, 0)
-			return fmt.Sprintf("Error updating task %q: %v", task.Title, err)
-		}
-	}
-	if task.Category != models.CategoryActive {
-		_ = s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive)
-	}
-	s.channelTaskRunner(context.Background(), ChannelTaskRunRequest{ExecID: exec.ID, TaskID: task.ID, ProjectID: task.ProjectID, Message: req.Message, Agent: *agent, ChatHistory: priorHistory, SystemContext: systemContext, Surface: chatcontrol.SurfaceDiscord, ReplyContext: ChannelReplyContext{Source: models.TaskOriginDiscord, DiscordChannelID: markerCtx.ChannelID, DiscordThreadID: markerCtx.ThreadID, DiscordMessageID: markerCtx.MessageID, DiscordUserID: markerCtx.UserID}})
-	return fmt.Sprintf("Sent message to task %q [TASK_ID:%s] and started processing.", task.Title, task.ID)
-}
-
-func (s *DiscordService) taskHasStartingFirstTurn(ctx context.Context, task *models.Task) (bool, error) {
-	if task == nil || task.ID == "" || s.execRepo == nil {
-		return false, nil
-	}
-	if task.Category != models.CategoryActive || (task.Status != models.StatusPending && task.Status != models.StatusQueued && task.Status != models.StatusRunning) {
-		return false, nil
-	}
-	execs, err := s.execRepo.ListByTaskChronological(ctx, task.ID)
-	if err != nil {
-		return false, err
-	}
-	return len(execs) == 0, nil
-}
-func (s *DiscordService) activeOrStartingTaskTurn(ctx context.Context, task *models.Task) (*models.Execution, bool, error) {
-	if s.execRepo == nil {
-		return nil, false, nil
-	}
-	activeExec, err := s.execRepo.FindActiveTaskExecution(ctx, task.ID, "")
-	if err != nil || activeExec != nil {
-		return activeExec, false, err
-	}
-	starting, err := s.taskHasStartingFirstTurn(ctx, task)
-	return nil, starting, err
-}
-func (s *DiscordService) bindQueuedTaskInputToActiveExecutionIfAvailable(ctx context.Context, input *models.ThreadInput) error {
-	if input == nil || input.RunExecutionID != "" || s.execRepo == nil || s.threadInputRepo == nil {
-		return nil
-	}
-	active, err := s.execRepo.FindActiveTaskExecution(ctx, input.TaskID, "")
-	if err != nil || active == nil {
-		return err
-	}
-	if err := s.threadInputRepo.BindPreExecutionQueuedTaskInputs(ctx, input.TaskID, active.ID); err != nil {
-		return err
-	}
-	input.RunExecutionID = active.ID
-	return nil
-}
-func (s *DiscordService) shouldPromotePreExecutionQueuedInput(ctx context.Context, task *models.Task, input *models.ThreadInput) (bool, error) {
-	if task == nil || input == nil || input.RunExecutionID != "" {
-		return false, nil
-	}
-	starting, err := s.taskHasStartingFirstTurn(ctx, task)
-	if err != nil || starting {
-		return false, err
-	}
-	return true, nil
-}
-func (s *DiscordService) resolveTaskReference(ctx context.Context, projectID, taskID, title string) (*models.Task, error) {
-	if s.taskRepo == nil {
-		return nil, fmt.Errorf("task repository not configured")
-	}
-	if strings.TrimSpace(taskID) != "" {
-		task, err := s.taskRepo.GetByID(ctx, strings.TrimSpace(taskID))
-		if err != nil {
-			return nil, err
-		}
-		if task == nil || task.ProjectID != projectID {
-			return nil, fmt.Errorf("task %s not found", taskID)
-		}
-		return task, nil
-	}
-	tasks, err := s.taskSvc.ListByProject(ctx, projectID, "")
-	if err != nil {
-		return nil, err
-	}
-	for i := range tasks {
-		if strings.EqualFold(tasks[i].Title, strings.TrimSpace(title)) {
-			return &tasks[i], nil
-		}
-	}
-	return nil, fmt.Errorf("task %q not found", title)
-}
-
-func (s *DiscordService) agentForTaskMessage(ctx context.Context, task *models.Task, message string) (*models.LLMConfig, error) {
-	if task.AgentID != nil {
-		if agent, _ := s.llmConfigRepo.GetByID(ctx, *task.AgentID); agent != nil {
-			return agent, nil
-		}
-	}
-	return selectChannelChatAgent(ctx, s.llmConfigRepo, message, false)
-}
-
-func (s *DiscordService) buildProjectListResult(ctx context.Context, projectID string) string {
-	if s.projectRepo == nil {
-		return "Error retrieving projects: project repository not configured"
-	}
-	projects, err := s.projectRepo.List(ctx)
-	if err != nil {
-		return "Error retrieving projects: " + err.Error()
-	}
-	var sb strings.Builder
-	sb.WriteString("Available Projects:\n")
-	if len(projects) == 0 {
-		sb.WriteString("No projects found.")
-		return sb.String()
-	}
-	for _, p := range projects {
-		marker := ""
-		if p.ID == projectID {
-			marker = " <- current"
-		}
-		desc := ""
-		if p.Description != "" {
-			desc = " - " + p.Description
-		}
-		sb.WriteString(fmt.Sprintf("- %s%s%s\n", p.Name, desc, marker))
-	}
-	sb.WriteString("Ask me to switch projects by name when needed.")
-	return strings.TrimSpace(sb.String())
-}
-func (s *DiscordService) switchProjectResult(ctx context.Context, userID, targetProject string) string {
-	targetProject = strings.TrimSpace(targetProject)
-	if targetProject == "" {
-		return "Project switch requires a project name or ID."
-	}
-	if s.projectRepo == nil {
-		return "Error loading projects: project repository not configured"
-	}
-	projects, err := s.projectRepo.List(ctx)
-	if err != nil {
-		return "Error loading projects: " + err.Error()
-	}
-	var target *models.Project
-	for i := range projects {
-		if strings.EqualFold(projects[i].Name, targetProject) || projects[i].ID == targetProject {
-			target = &projects[i]
-			break
-		}
-	}
-	if target == nil {
-		names := make([]string, 0, len(projects))
-		for _, p := range projects {
-			names = append(names, p.Name)
-		}
-		return fmt.Sprintf("Project not found: %q. Available projects: %s", targetProject, strings.Join(names, ", "))
-	}
-	s.setActiveProject(ctx, userID, target.ID)
-	return fmt.Sprintf("Switched to project: %s", target.Name)
+	}))
+	return handlers
 }
 
 func (s *DiscordService) setActiveProject(ctx context.Context, userID, projectID string) {
@@ -1038,139 +732,6 @@ func (s *DiscordService) setActiveProject(ctx context.Context, userID, projectID
 			applog.Infof("[discord] persist active project failed for user=%s: %v", key, err)
 		}
 	}
-}
-
-func (s *DiscordService) executeChannelSetTaskGoal(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	if s.taskGoalSvc == nil {
-		return "", fmt.Errorf("task goal service unavailable")
-	}
-	var req channelGoalToolInput
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
-		return "", err
-	}
-	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
-	if err != nil {
-		return "", err
-	}
-	goal, err := s.taskGoalSvc.SetGoal(ctx, task.ID, req.Goal, GoalOptions{Actor: "assistant"})
-	if err != nil {
-		return "", err
-	}
-	return channelGoalToolJSON(goal)
-}
-
-func (s *DiscordService) executeChannelClearTaskGoal(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	if s.taskGoalSvc == nil {
-		return "", fmt.Errorf("task goal service unavailable")
-	}
-	var req channelGoalToolInput
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
-		return "", err
-	}
-	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
-	if err != nil {
-		return "", err
-	}
-	if err := s.taskGoalSvc.ClearGoal(ctx, task.ID, "assistant"); err != nil {
-		return "", err
-	}
-	goal, _ := s.taskGoalSvc.GetGoal(ctx, task.ID)
-	return channelGoalToolJSON(goal)
-}
-
-func (s *DiscordService) executeChannelGetTaskGoal(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	if s.taskGoalSvc == nil {
-		return "", fmt.Errorf("task goal service unavailable")
-	}
-	var req channelGoalToolInput
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
-		return "", err
-	}
-	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
-	if err != nil {
-		return "", err
-	}
-	goal, err := s.taskGoalSvc.GetGoal(ctx, task.ID)
-	if err != nil {
-		return "", err
-	}
-	return channelGoalToolJSON(goal)
-}
-
-func (s *DiscordService) executeChannelPauseTaskGoal(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	if s.taskGoalSvc == nil {
-		return "", fmt.Errorf("task goal service unavailable")
-	}
-	var req channelGoalToolInput
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
-		return "", err
-	}
-	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
-	if err != nil {
-		return "", err
-	}
-	if err := s.taskGoalSvc.PauseGoal(ctx, task.ID, "assistant"); err != nil {
-		return "", err
-	}
-	goal, _ := s.taskGoalSvc.GetGoal(ctx, task.ID)
-	return channelGoalToolJSON(goal)
-}
-
-func (s *DiscordService) executeChannelResumeTaskGoal(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	if s.taskGoalSvc == nil {
-		return "", fmt.Errorf("task goal service unavailable")
-	}
-	var req channelGoalToolInput
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
-		return "", err
-	}
-	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
-	if err != nil {
-		return "", err
-	}
-	if err := s.taskGoalSvc.ResumeGoal(ctx, task.ID, "assistant"); err != nil {
-		return "", err
-	}
-	goal, _ := s.taskGoalSvc.GetGoal(ctx, task.ID)
-	return channelGoalToolJSON(goal)
-}
-
-func (s *DiscordService) executeChannelMarkTaskGoalAchieved(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	if s.taskGoalSvc == nil {
-		return "", fmt.Errorf("task goal service unavailable")
-	}
-	var req channelGoalToolInput
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
-		return "", err
-	}
-	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
-	if err != nil {
-		return "", err
-	}
-	goal, err := s.taskGoalSvc.MarkAchieved(ctx, task.ID, req.GoalID, req.Reason)
-	if err != nil {
-		return "", err
-	}
-	return channelGoalToolJSON(goal)
-}
-
-func (s *DiscordService) executeChannelReportTaskGoalBlocked(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	if s.taskGoalSvc == nil {
-		return "", fmt.Errorf("task goal service unavailable")
-	}
-	var req channelGoalToolInput
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
-		return "", err
-	}
-	task, err := s.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
-	if err != nil {
-		return "", err
-	}
-	goal, err := s.taskGoalSvc.RecordBlockedReport(ctx, task.ID, req.GoalID, req.BlockerKey, req.Reason)
-	if err != nil {
-		return "", err
-	}
-	return channelGoalToolJSON(goal)
 }
 
 func (s *DiscordService) SendOutboundMessage(ctx context.Context, channelID, threadID, text string) SendMessageResult {

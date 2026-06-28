@@ -205,13 +205,12 @@ func TestEmailService_CompleteExecutionUsesSharedChatPromotion(t *testing.T) {
 	nonChatExec := &models.Execution{TaskID: nonChatTask.ID, AgentConfigID: agentID, Status: models.ExecRunning, PromptSent: "task"}
 	require.NoError(t, execRepo.Create(ctx, nonChatExec))
 
-	svc := NewEmailService(repository.NewSettingsRepo(db), repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), taskRepo, execRepo, repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
 	var promoted []string
-	svc.queuedTurnPromoter = func(projectID string) { promoted = append(promoted, projectID) }
+	completeExecution := channelCompletionFunc("email", execRepo, taskRepo, func(projectID string) { promoted = append(promoted, projectID) })
 
-	svc.completeExecution(ctx, nonChatExec.ID, nonChatTask.ID, "done", "", 1, 10)
+	completeExecution(ctx, nonChatExec.ID, nonChatTask.ID, "done", "", 1, 10)
 	require.Empty(t, promoted)
 
-	svc.completeExecution(ctx, chatExec.ID, chatTask.ID, "done", "", 1, 10)
+	completeExecution(ctx, chatExec.ID, chatTask.ID, "done", "", 1, 10)
 	require.Equal(t, []string{project.ID}, promoted)
 }
