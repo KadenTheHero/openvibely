@@ -42,6 +42,11 @@ func agentMCPJSON(mcpServers []models.MCPServerConfig) string {
 	return string(b)
 }
 
+func agentPermissionDefaultsJSON(perms models.AgentPermissionDefaults) string {
+	b, _ := json.Marshal(perms)
+	return string(b)
+}
+
 templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOption) {
 	<div id="agents-container" class="overflow-x-hidden max-w-full min-w-0" data-search-container>
 		<div class="flex items-center justify-between mb-6">
@@ -74,6 +79,13 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							data-agent-plugins={ agentPluginsJSON(agent.Plugins) }
 						data-agent-skills={ agentSkillsJSON(agent.Skills) }
 						data-agent-mcp-servers={ agentMCPJSON(agent.MCPServers) }
+						data-agent-key={ agent.Key }
+						data-agent-scope={ string(agent.Scope) }
+						data-agent-selectable-as-primary={ fmt.Sprintf("%t", agent.SelectableAsPrimary) }
+						data-agent-enabled={ fmt.Sprintf("%t", agent.Enabled) }
+						data-agent-permission-defaults={ agentPermissionDefaultsJSON(agent.PermissionDefaults) }
+						data-agent-source-refs={ agentPluginsJSON(agent.SourceRefs) }
+						data-agent-generated-status={ string(agent.GeneratedStatus) }
 						data-search-card
 						data-search-text={ agent.Name + " " + agent.Description + " " + agent.Model + " " + agent.SystemPrompt }
 						onclick="editAgentFromData(this)"
@@ -468,14 +480,31 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					if (modal) modal.showModal();
 				}
 
-				function confirmDeleteAgent() {
+				async function confirmDeleteAgent() {
 					if (!deleteAgentID) return;
+					var id = deleteAgentID;
 					var modal = document.getElementById('delete_agent_confirm_modal');
 					if (modal) modal.close();
-					htmx.ajax('DELETE', '/agents/' + deleteAgentID, {
-						target: '#agents-container',
-						swap: 'outerHTML'
-					});
+					try {
+						const response = await fetch('/agents/' + encodeURIComponent(id), {
+							method: 'DELETE',
+							headers: { 'HX-Request': 'true' }
+						});
+						if (!response.ok) {
+							throw new Error(await response.text() || 'Delete failed');
+						}
+						const html = await response.text();
+						const container = document.getElementById('agents-container');
+						if (container) {
+							container.outerHTML = html;
+							htmx.process(document.getElementById('agents-container'));
+						}
+						deleteAgentID = '';
+						if (window.showToast) window.showToast('Agent deleted', 'completed');
+					} catch (err) {
+						console.error('confirmDeleteAgent', err);
+						if (window.showToast) window.showToast(String(err.message || 'Could not delete agent'), 'failed');
+					}
 				}
 
 				function setAgentSection(sectionName) {
@@ -1346,6 +1375,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			updateGeneratedSummary();
 
 			resetLifecycleFormFields();
+			populateLifecycleFormFromCardData(el);
 			loadAgentLifecycleFromServer(activeAgentID);
 
 				setAgentSection('details');
@@ -1491,6 +1521,33 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				if (list) list.innerHTML = '';
 				lifecycleHooksState = [];
 			}
+
+				function parseAgentCardJSON(el, name, fallback) {
+					if (!el || !el.dataset) return fallback;
+					try {
+						const raw = el.dataset[name];
+						return raw ? JSON.parse(raw) : fallback;
+					} catch (err) {
+						console.error('parseAgentCardJSON', name, err);
+						return fallback;
+					}
+				}
+
+				function populateLifecycleFormFromCardData(el) {
+					if (!el || !el.dataset) {
+						populateLifecycleFormFromAgent({ enabled: true, selectable_as_primary: true });
+						return;
+					}
+					populateLifecycleFormFromAgent({
+						key: el.dataset.agentKey || '',
+						scope: el.dataset.agentScope || 'global',
+						selectable_as_primary: el.dataset.agentSelectableAsPrimary !== 'false',
+						enabled: el.dataset.agentEnabled !== 'false',
+						permission_defaults: parseAgentCardJSON(el, 'agentPermissionDefaults', {}),
+						source_refs: parseAgentCardJSON(el, 'agentSourceRefs', []),
+						generated_status: el.dataset.agentGeneratedStatus || '',
+					});
+				}
 
 			function populateLifecycleFormFromAgent(data) {
 				const perms = (data && data.permission_defaults) || {};

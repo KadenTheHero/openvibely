@@ -60,7 +60,9 @@ func TestHandler_ListAgents_DeleteConfirmationDialog(t *testing.T) {
 		`class="btn btn-error"`,
 		`onclick="openDeleteAgentConfirm(this)"`,
 		`modal.showModal()`,
-		`htmx.ajax('DELETE', '/agents/' + deleteAgentID`,
+		`async function confirmDeleteAgent()`,
+		`fetch('/agents/' + encodeURIComponent(id)`,
+		`method: 'DELETE'`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected agents delete confirmation markup/script to contain %q", want)
@@ -2349,5 +2351,145 @@ func TestHandler_UpdateAgent_ReconcilesLifecycleHooksFromMainForm(t *testing.T) 
 	}
 	if len(hooks) != 1 || hooks[0].SkillKey != "new_mode" || hooks[0].When != models.LifecycleBeforeRun {
 		t.Fatalf("expected update to reconcile lifecycle hooks, got %+v", hooks)
+	}
+}
+
+func TestHandler_UpdateAgent_PersistsDisabledAdvancedFields(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	agent := &models.Agent{
+		Name:                "Advanced Agent",
+		Key:                 "advanced_agent",
+		Scope:               models.AgentScopeGlobal,
+		Description:         "before",
+		SystemPrompt:        "work",
+		Model:               "inherit",
+		Tools:               []string{"Read"},
+		SelectableAsPrimary: true,
+		Enabled:             true,
+		PermissionDefaults:  models.AgentPermissionDefaults{ReadAgents: true, WriteSkills: true},
+		SourceRefs:          []string{"https://before.example.test"},
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Advanced Agent")
+	form.Set("description", "after")
+	form.Set("system_prompt", "work")
+	form.Set("model", "inherit")
+	form.Set("tools_json", `["Read"]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("key", "advanced_agent")
+	form.Set("scope", "global")
+	form.Set("selectable_as_primary", "false")
+	form.Set("enabled", "false")
+	form.Set("permission_defaults_json", `{"read_agents":false,"write_skills":false,"read_skills":true}`)
+	form.Set("source_refs_json", `["https://after.example.test"]`)
+
+	req := httptest.NewRequest(http.MethodPut, "/agents/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	stored, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("reload agent: %v", err)
+	}
+	if stored == nil {
+		t.Fatal("expected updated agent to exist")
+	}
+	if stored.Enabled || stored.SelectableAsPrimary {
+		t.Fatalf("expected disabled/non-selectable advanced fields to persist, got enabled=%v selectable=%v", stored.Enabled, stored.SelectableAsPrimary)
+	}
+	if stored.PermissionDefaults.ReadAgents || stored.PermissionDefaults.WriteSkills || !stored.PermissionDefaults.ReadSkills {
+		t.Fatalf("permission defaults not updated: %+v", stored.PermissionDefaults)
+	}
+	if len(stored.SourceRefs) != 1 || stored.SourceRefs[0] != "https://after.example.test" {
+		t.Fatalf("source refs not updated: %+v", stored.SourceRefs)
+	}
+}
+
+func TestHandler_ListAgents_RendersAdvancedStateForEditModal(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	agent := &models.Agent{
+		Name:                "Disabled Agent",
+		Key:                 "disabled_agent",
+		Scope:               models.AgentScopeProject,
+		SystemPrompt:        "work",
+		Model:               "inherit",
+		Tools:               []string{},
+		SelectableAsPrimary: false,
+		Enabled:             false,
+		PermissionDefaults:  models.AgentPermissionDefaults{ReadSkills: true},
+		SourceRefs:          []string{"https://source.example.test"},
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/agents", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`data-agent-key="disabled_agent"`,
+		`data-agent-scope="project"`,
+		`data-agent-selectable-as-primary="false"`,
+		`data-agent-enabled="false"`,
+		`data-agent-permission-defaults=`,
+		`read_skills`,
+		`data-agent-source-refs=`,
+		`https://source.example.test`,
+		`populateLifecycleFormFromCardData(el)`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected agents page to contain %q for advanced edit hydration; body:\n%s", want, body)
+		}
+	}
+}
+
+func TestHandler_ListAgents_DeleteUsesDurableDeleteRequest(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	agent := &models.Agent{Name: "Delete Me", Key: "delete_me", Scope: models.AgentScopeGlobal, Model: "inherit", Enabled: true}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/agents", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`onclick="openDeleteAgentConfirm(this)"`,
+		`async function confirmDeleteAgent()`,
+		`fetch('/agents/' + encodeURIComponent(id)`,
+		`method: 'DELETE'`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected durable delete flow markup to contain %q; body:\n%s", want, body)
+		}
 	}
 }
