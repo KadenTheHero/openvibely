@@ -228,6 +228,19 @@ func TestChannelMessageRouter_SavedDiscordTargetTakesPrecedenceOverAuthorizedUse
 	require.Empty(t, discord.userID)
 }
 
+func TestChannelMessageRouter_DiscordUserAuthorizedInOtherProjectDoesNotFallThroughToChannel(t *testing.T) {
+	ctx, _, settingsRepo, _, discordAuthRepo, project, router, _, _, _, discord := setupChannelMessageRouterTest(t)
+	requestProjectID := "other-project"
+	require.NoError(t, discordAuthRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "1518288288572641398", DisplayName: "Discord User", AddedBy: "test"}))
+	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+requestProjectID, "true"))
+
+	res := router.Send(ctx, requestProjectID, SendMessageRequest{Target: "discord:1518288288572641398", Message: "hi"})
+	require.False(t, res.OK)
+	require.Contains(t, res.Error, "not authorized")
+	require.Empty(t, discord.channelID, "known Discord user IDs must not be sent as raw channel IDs when project authorization misses")
+	require.Empty(t, discord.userID)
+}
+
 func TestChannelMessageRouter_ValidationFailures(t *testing.T) {
 	ctx, _, settingsRepo, _, _, project, router, _, _, _, _ := setupChannelMessageRouterTest(t)
 	require.False(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "", Message: "x"}).OK)
