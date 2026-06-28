@@ -35,8 +35,8 @@ func TestRegistry_SendMessageTargetDescriptionMentionsAuthorizedUserDMs(t *testi
 		t.Fatalf("decode send_message schema: %v", err)
 	}
 	desc := schema.Properties["target"].Description
-	if !strings.Contains(desc, "slack:U123") || !strings.Contains(desc, "discord:1518288288572641398") {
-		t.Fatalf("send_message target description should mention authorized user DM targets, got %q", desc)
+	if !strings.Contains(desc, "slack:user:U123") || !strings.Contains(desc, "discord:user:1518288288572641398") {
+		t.Fatalf("send_message target description should mention user DM syntax, got %q", desc)
 	}
 	if !strings.Contains(desc, "discord:channel:<channel_id>") {
 		t.Fatalf("send_message target description should explain explicit Discord channel disambiguation, got %q", desc)

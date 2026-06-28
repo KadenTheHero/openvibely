@@ -1752,9 +1752,27 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					if (modal) modal.close();
 				}
 
+					function outboundTargetKindOnPlatformChange(platformSel) {
+						const platform = platformSel ? platformSel.value : '';
+						const wrapper = document.getElementById('outbound-target-kind-wrapper');
+						if (!wrapper) return;
+						const kindSel = wrapper.querySelector('select[name="target_kind"]');
+						const fixedLabel = document.getElementById('outbound-target-kind-fixed-label');
+						const fixedKind = platform === 'telegram' ? 'Chat' : platform === 'email' ? 'Email' : null;
+						if (fixedKind) {
+							if (kindSel) kindSel.classList.add('hidden');
+							if (fixedLabel) { fixedLabel.textContent = fixedKind; fixedLabel.classList.remove('hidden'); }
+						} else {
+							if (kindSel) kindSel.classList.remove('hidden');
+							if (fixedLabel) fixedLabel.classList.add('hidden');
+						}
+					}
+
 					function resetOutboundTargetAddForm() {
 						const form = document.getElementById('outbound-target-add-form');
 						if (form) form.reset();
+						const platformSel = document.getElementById('outbound-target-platform-select');
+						if (platformSel) outboundTargetKindOnPlatformChange(platformSel);
 					}
 
 					function reloadOutboundTargetsModalDraft() {
@@ -1847,7 +1865,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						const tbody = document.getElementById('outbound-targets-draft-tbody');
 						if (!form || !tbody) return false;
 						const platform = (form.elements.platform.value || '').trim().toLowerCase();
-						const targetKind = (form.elements.target_kind.value || 'channel').trim().toLowerCase();
+						const targetKind = platform === 'telegram' ? 'chat' : platform === 'email' ? 'email' : (form.elements.target_kind.value || 'channel').trim().toLowerCase();
 						const name = (form.elements.name.value || '').trim().replace(/^#+/, '').toLowerCase();
 						const targetID = (form.elements.target_id.value || '').trim();
 						const threadID = (form.elements.thread_id.value || '').trim();
@@ -2109,16 +2127,19 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 				<div class="alert alert-success py-2 text-sm mt-3">{ notice }</div>
 			}
 					<form id="outbound-target-add-form" class="grid gap-3 md:grid-cols-6 mt-4" onclick="event.stopPropagation()" onsubmit="return addOutboundTargetDraft(event)">
-				<select name="platform" class="select select-bordered select-sm" required>
+				<select name="platform" id="outbound-target-platform-select" class="select select-bordered select-sm" required onchange="outboundTargetKindOnPlatformChange(this)">
 					<option value="slack">Slack</option>
 					<option value="telegram">Telegram</option>
 					<option value="email">Email</option>
 					<option value="discord">Discord</option>
 				</select>
-				<select name="target_kind" class="select select-bordered select-sm">
-					<option value="channel">Channel</option>
-					<option value="user">User DM</option>
-				</select>
+				<div id="outbound-target-kind-wrapper">
+					<select name="target_kind" class="select select-bordered select-sm w-full">
+						<option value="channel">Channel</option>
+						<option value="user">User DM</option>
+					</select>
+					<span id="outbound-target-kind-fixed-label" class="hidden select select-bordered select-sm w-full pointer-events-none opacity-60 flex items-center text-sm"></span>
+				</div>
 				<input name="name" class="input input-bordered input-sm" placeholder="name, e.g. ops"/>
 				<input name="target_id" class="input input-bordered input-sm md:col-span-2" placeholder="channel/chat/user ID or email" required/>
 				<input name="thread_id" class="input input-bordered input-sm" placeholder="thread/topic ID"/>
