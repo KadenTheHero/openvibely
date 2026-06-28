@@ -381,19 +381,25 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 	}
 	discordAckID := ""
 	runChannelChatIngress(ctx, channelChatIngressOptions{
-		Platform:        "discord",
-		ProjectID:       projectID,
-		Message:         msg.Text,
-		Source:          msg.Source,
-		Surface:         chatcontrol.SurfaceDiscord,
-		HasAttachments:  len(msg.Attachments) > 0,
-		Start:           start,
-		TaskRepo:        s.taskRepo,
-		ExecRepo:        s.execRepo,
-		ThreadInputRepo: s.threadInputRepo,
-		LLMConfigRepo:   s.llmConfigRepo,
-		ChatBroadcaster: s.chatBroadcaster,
-		UploadsDir:      s.uploadsDir,
+		Platform:              "discord",
+		ProjectID:             projectID,
+		Message:               msg.Text,
+		Source:                msg.Source,
+		Surface:               chatcontrol.SurfaceDiscord,
+		HasAttachments:        len(msg.Attachments) > 0,
+		Start:                 start,
+		TaskRepo:              s.taskRepo,
+		ExecRepo:              s.execRepo,
+		ThreadInputRepo:       s.threadInputRepo,
+		LLMConfigRepo:         s.llmConfigRepo,
+		ChatBroadcaster:       s.chatBroadcaster,
+		UploadsDir:            s.uploadsDir,
+		TaskSvc:               s.taskSvc,
+		ScheduleRepo:          s.scheduleRepo,
+		AgentRepo:             s.agentRepo,
+		SettingsRepo:          s.settingsRepo,
+		CustomPersonalityRepo: s.customPersonalityRepo,
+		ProjectRepo:           s.projectRepo,
 		DownloadAttachments: func(ctx context.Context) (channelChatIngressDownloadResult, error) {
 			if len(msg.Attachments) == 0 {
 				return channelChatIngressDownloadResult{}, nil
@@ -447,10 +453,7 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 			ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
 				return s.execRepo.ListChatHistory(ctx, projectID, discordChatHistoryLimit)
 			},
-			FilterChatHistory:     filterDiscordChatHistory,
-			BuildChatContext:      s.buildChatContext,
-			GetPersonalityContext: s.getPersonalityContext,
-			ResolveWorkDir:        s.resolveWorkDir,
+			FilterChatHistory: filterDiscordChatHistory,
 			OnTaskCreateFailure: func(context.Context) {
 				_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error processing your message. Please try again.")
 			},
@@ -593,79 +596,12 @@ func (s *DiscordService) completeExecution(ctx context.Context, execID, taskID, 
 	if errorMessage != "" {
 		_ = s.execRepo.Complete(ctx, execID, models.ExecFailed, "", errorMessage, 0, durationMs)
 		_ = s.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed)
-		s.promoteQueuedChatAfterCompletion(ctx, taskID)
+		promoteQueuedChannelChatAfterCompletion(ctx, s.taskRepo, s.queuedTurnPromoter, taskID)
 		return
 	}
 	_ = s.execRepo.Complete(ctx, execID, models.ExecCompleted, output, "", tokensUsed, durationMs)
 	_ = s.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted)
-	s.promoteQueuedChatAfterCompletion(ctx, taskID)
-}
-
-func (s *DiscordService) promoteQueuedChatAfterCompletion(ctx context.Context, taskID string) {
-	if s.queuedTurnPromoter == nil || s.taskRepo == nil {
-		return
-	}
-	task, err := s.taskRepo.GetByID(ctx, taskID)
-	if err != nil || task == nil || task.Category != models.CategoryChat {
-		return
-	}
-	s.queuedTurnPromoter(task.ProjectID)
-}
-
-func (s *DiscordService) buildChatContext(ctx context.Context, projectID string) string {
-	existingTasks := []models.Task{}
-	if s.taskSvc != nil {
-		if tasks, err := s.taskSvc.ListByProject(ctx, projectID, ""); err == nil {
-			existingTasks = tasks
-		}
-	}
-	availableModels := []models.LLMConfig{}
-	if s.llmConfigRepo != nil {
-		availableModels, _ = s.llmConfigRepo.List(ctx)
-	}
-	var schedules []models.Schedule
-	if s.scheduleRepo != nil {
-		schedules, _ = s.scheduleRepo.ListByProject(ctx, projectID)
-	}
-	return BuildChatContextWithAgentDefinitions(existingTasks, availableModels, s.listChatAssignableAgentDefinitions(ctx), schedules, time.Now())
-}
-
-func (s *DiscordService) listChatAssignableAgentDefinitions(ctx context.Context) []models.Agent {
-	if s.agentRepo == nil {
-		return nil
-	}
-	agents, err := s.agentRepo.List(ctx)
-	if err != nil {
-		applog.Infof("[discord] error listing agent definitions for context: %v", err)
-		return nil
-	}
-	return UniqueChatAssignableAgentDefinitions(agents)
-}
-
-func (s *DiscordService) resolveWorkDir(ctx context.Context, projectID string) string {
-	if s.projectRepo == nil {
-		return ""
-	}
-	project, err := s.projectRepo.GetByID(ctx, projectID)
-	if err != nil || project == nil {
-		return ""
-	}
-	return project.RepoPath
-}
-
-func (s *DiscordService) getPersonalityContext(ctx context.Context, projectID string) string {
-	if s.settingsRepo == nil {
-		return ""
-	}
-	personality, err := s.settingsRepo.Get(ctx, "personality")
-	if err != nil || personality == "" {
-		return ""
-	}
-	prompt := GetPersonalityPromptWithCustom(ctx, personality, s.customPersonalityRepo)
-	if prompt == "" {
-		return ""
-	}
-	return "\n# Communication Style\n\n" + prompt
+	promoteQueuedChannelChatAfterCompletion(ctx, s.taskRepo, s.queuedTurnPromoter, taskID)
 }
 
 func (s *DiscordService) checkAuthorization(ctx context.Context, projectID, discordUserID string) bool {
@@ -930,7 +866,7 @@ func (s *DiscordService) discordSendToTask(ctx context.Context, projectID string
 	priorExecs, _ := s.execRepo.ListByTaskChronological(ctx, task.ID)
 	priorHistory := filterDiscordChatHistory(priorExecs, exec.ID)
 	systemContext := buildTelegramTaskChatContext(task.Title, len(priorHistory) > 0)
-	if pCtx := s.getPersonalityContext(ctx, task.ProjectID); pCtx != "" {
+	if pCtx := getChannelChatPersonalityContext(ctx, s.settingsRepo, s.customPersonalityRepo); pCtx != "" {
 		systemContext += pCtx
 	}
 	if s.channelTaskRunner == nil {

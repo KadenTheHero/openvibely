@@ -926,19 +926,25 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 
 	msg.Files = s.resolveSlackIncomingFilesForRouting(ctx, msg.Files)
 	runChannelChatIngress(ctx, channelChatIngressOptions{
-		Platform:        "slack",
-		ProjectID:       projectID,
-		Message:         msg.Text,
-		Source:          msg.Source,
-		Surface:         chatcontrol.SurfaceSlack,
-		HasAttachments:  len(msg.Files) > 0,
-		Start:           start,
-		TaskRepo:        s.taskRepo,
-		ExecRepo:        s.execRepo,
-		ThreadInputRepo: s.threadInputRepo,
-		LLMConfigRepo:   s.llmConfigRepo,
-		ChatBroadcaster: s.chatBroadcaster,
-		UploadsDir:      s.uploadsDir,
+		Platform:              "slack",
+		ProjectID:             projectID,
+		Message:               msg.Text,
+		Source:                msg.Source,
+		Surface:               chatcontrol.SurfaceSlack,
+		HasAttachments:        len(msg.Files) > 0,
+		Start:                 start,
+		TaskRepo:              s.taskRepo,
+		ExecRepo:              s.execRepo,
+		ThreadInputRepo:       s.threadInputRepo,
+		LLMConfigRepo:         s.llmConfigRepo,
+		ChatBroadcaster:       s.chatBroadcaster,
+		UploadsDir:            s.uploadsDir,
+		TaskSvc:               s.taskSvc,
+		ScheduleRepo:          s.scheduleRepo,
+		AgentRepo:             s.agentRepo,
+		SettingsRepo:          s.settingsRepo,
+		CustomPersonalityRepo: s.customPersonalityRepo,
+		ProjectRepo:           s.projectRepo,
 		DownloadAttachments: func(ctx context.Context) (channelChatIngressDownloadResult, error) {
 			if len(msg.Files) == 0 {
 				return channelChatIngressDownloadResult{}, nil
@@ -989,10 +995,7 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 			ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
 				return s.execRepo.ListChatHistory(ctx, projectID, slackChatHistoryLimit)
 			},
-			FilterChatHistory:     filterSlackChatHistory,
-			BuildChatContext:      s.buildChatContext,
-			GetPersonalityContext: s.getPersonalityContext,
-			ResolveWorkDir:        s.resolveWorkDir,
+			FilterChatHistory: filterSlackChatHistory,
 			OnTaskCreateFailure: func(context.Context) {
 				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
 			},
@@ -1024,7 +1027,7 @@ func (s *SlackService) completeExecution(ctx context.Context, execID, taskID, ou
 		if err := s.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed); err != nil {
 			applog.Infof("[slack] update failed task status error: %v", err)
 		}
-		s.promoteQueuedChatAfterCompletion(ctx, taskID)
+		promoteQueuedChannelChatAfterCompletion(ctx, s.taskRepo, s.queuedTurnPromoter, taskID)
 		return
 	}
 
@@ -1034,79 +1037,7 @@ func (s *SlackService) completeExecution(ctx context.Context, execID, taskID, ou
 	if err := s.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted); err != nil {
 		applog.Infof("[slack] update task status error: %v", err)
 	}
-	s.promoteQueuedChatAfterCompletion(ctx, taskID)
-}
-
-func (s *SlackService) promoteQueuedChatAfterCompletion(ctx context.Context, taskID string) {
-	if s.queuedTurnPromoter == nil || s.taskRepo == nil {
-		return
-	}
-	task, err := s.taskRepo.GetByID(ctx, taskID)
-	if err != nil || task == nil || task.Category != models.CategoryChat {
-		return
-	}
-	s.queuedTurnPromoter(task.ProjectID)
-}
-
-func (s *SlackService) buildChatContext(ctx context.Context, projectID string) string {
-	existingTasks := []models.Task{}
-	if s.taskSvc != nil {
-		tasks, err := s.taskSvc.ListByProject(ctx, projectID, "")
-		if err == nil {
-			existingTasks = tasks
-		}
-	}
-	availableModels := []models.LLMConfig{}
-	if s.llmConfigRepo != nil {
-		availableModels, _ = s.llmConfigRepo.List(ctx)
-	}
-	var schedules []models.Schedule
-	if s.scheduleRepo != nil {
-		var err error
-		schedules, err = s.scheduleRepo.ListByProject(ctx, projectID)
-		if err != nil {
-			schedules = []models.Schedule{}
-		}
-	}
-	return BuildChatContextWithAgentDefinitions(existingTasks, availableModels, s.listChatAssignableAgentDefinitions(ctx), schedules, time.Now())
-}
-
-func (s *SlackService) listChatAssignableAgentDefinitions(ctx context.Context) []models.Agent {
-	if s.agentRepo == nil {
-		return nil
-	}
-	agents, err := s.agentRepo.List(ctx)
-	if err != nil {
-		applog.Infof("[slack] error listing agent definitions for context: %v", err)
-		return nil
-	}
-	return UniqueChatAssignableAgentDefinitions(agents)
-}
-
-func (s *SlackService) resolveWorkDir(ctx context.Context, projectID string) string {
-	if s.projectRepo == nil {
-		return ""
-	}
-	project, err := s.projectRepo.GetByID(ctx, projectID)
-	if err != nil || project == nil {
-		return ""
-	}
-	return project.RepoPath
-}
-
-func (s *SlackService) getPersonalityContext(ctx context.Context, projectID string) string {
-	if s.settingsRepo == nil {
-		return ""
-	}
-	personality, err := s.settingsRepo.Get(ctx, "personality")
-	if err != nil || personality == "" {
-		return ""
-	}
-	prompt := GetPersonalityPromptWithCustom(ctx, personality, s.customPersonalityRepo)
-	if prompt == "" {
-		return ""
-	}
-	return "\n# Communication Style\n\n" + prompt
+	promoteQueuedChannelChatAfterCompletion(ctx, s.taskRepo, s.queuedTurnPromoter, taskID)
 }
 
 type slackMarkerContext struct {
@@ -1620,7 +1551,7 @@ func (s *SlackService) slackSendToTask(ctx context.Context, projectID string, in
 	priorExecs, _ := s.execRepo.ListByTaskChronological(ctx, task.ID)
 	priorHistory := filterSlackChatHistory(priorExecs, exec.ID)
 	systemContext := buildTelegramTaskChatContext(task.Title, len(priorHistory) > 0)
-	if pCtx := s.getPersonalityContext(ctx, task.ProjectID); pCtx != "" {
+	if pCtx := getChannelChatPersonalityContext(ctx, s.settingsRepo, s.customPersonalityRepo); pCtx != "" {
 		systemContext += pCtx
 	}
 	if s.channelTaskRunner == nil {

@@ -586,17 +586,23 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 	prompt := BuildEmailPrompt(msg)
 	sessionKey := EmailSessionKey(msg.FromAddress, msg.MessageID, msg.References, msg.Subject)
 	runChannelChatIngress(ctx, channelChatIngressOptions{
-		Platform:         "email",
-		ProjectID:        projectID,
-		Message:          prompt,
-		Source:           models.TaskOriginEmail,
-		Surface:          chatcontrol.SurfaceEmail,
-		TaskRepo:         s.taskRepo,
-		ExecRepo:         s.execRepo,
-		ThreadInputRepo:  s.threadInputRepo,
-		LLMConfigRepo:    s.llmConfigRepo,
-		ChatBroadcaster:  s.chatBroadcaster,
-		SelectionMessage: msg.Body,
+		Platform:              "email",
+		ProjectID:             projectID,
+		Message:               prompt,
+		Source:                models.TaskOriginEmail,
+		Surface:               chatcontrol.SurfaceEmail,
+		TaskRepo:              s.taskRepo,
+		ExecRepo:              s.execRepo,
+		ThreadInputRepo:       s.threadInputRepo,
+		LLMConfigRepo:         s.llmConfigRepo,
+		ChatBroadcaster:       s.chatBroadcaster,
+		TaskSvc:               s.taskSvc,
+		ScheduleRepo:          s.scheduleRepo,
+		AgentRepo:             s.agentRepo,
+		SettingsRepo:          s.settingsRepo,
+		CustomPersonalityRepo: s.customPersonalityRepo,
+		ProjectRepo:           s.projectRepo,
+		SelectionMessage:      msg.Body,
 		FindActiveExecution: func(ctx context.Context, projectID string) (*models.Execution, error) {
 			return s.execRepo.FindLatestActiveEmailChatExecution(ctx, projectID, sessionKey)
 		},
@@ -619,10 +625,7 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 			ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
 				return s.execRepo.ListEmailChatHistory(ctx, projectID, sessionKey, emailChatHistoryLimit)
 			},
-			FilterChatHistory:     filterEmailChatHistory,
-			BuildChatContext:      s.buildChatContext,
-			GetPersonalityContext: s.getPersonalityContext,
-			ResolveWorkDir:        s.resolveWorkDir,
+			FilterChatHistory: filterEmailChatHistory,
 		},
 	})
 }
@@ -707,56 +710,6 @@ func EmailSessionKey(sender, messageID, references, subject string) string {
 	}
 	h := sha256.Sum256([]byte(strings.TrimSpace(strings.ToLower(subject))))
 	return "email:" + sender + ":" + hex.EncodeToString(h[:8])
-}
-
-func (s *EmailService) buildChatContext(ctx context.Context, projectID string) string {
-	var tasks []models.Task
-	if s.taskSvc != nil {
-		tasks, _ = s.taskSvc.ListByProject(ctx, projectID, "")
-	}
-	modelsList, _ := s.llmConfigRepo.List(ctx)
-	var schedules []models.Schedule
-	if s.scheduleRepo != nil {
-		schedules, _ = s.scheduleRepo.ListByProject(ctx, projectID)
-	}
-	return BuildChatContextWithAgentDefinitions(tasks, modelsList, s.listChatAssignableAgentDefinitions(ctx), schedules, time.Now())
-}
-
-func (s *EmailService) listChatAssignableAgentDefinitions(ctx context.Context) []models.Agent {
-	if s.agentRepo == nil {
-		return nil
-	}
-	agents, err := s.agentRepo.List(ctx)
-	if err != nil {
-		return nil
-	}
-	return UniqueChatAssignableAgentDefinitions(agents)
-}
-
-func (s *EmailService) resolveWorkDir(ctx context.Context, projectID string) string {
-	if s.projectRepo == nil {
-		return ""
-	}
-	project, err := s.projectRepo.GetByID(ctx, projectID)
-	if err != nil || project == nil {
-		return ""
-	}
-	return project.RepoPath
-}
-
-func (s *EmailService) getPersonalityContext(ctx context.Context, projectID string) string {
-	if s.settingsRepo == nil {
-		return ""
-	}
-	personality, err := s.settingsRepo.Get(ctx, "personality")
-	if err != nil || personality == "" {
-		return ""
-	}
-	prompt := GetPersonalityPromptWithCustom(ctx, personality, s.customPersonalityRepo)
-	if prompt == "" {
-		return ""
-	}
-	return "\n# Communication Style\n\n" + prompt
 }
 
 func filterEmailChatHistory(history []models.Execution, currentExecID string) []models.Execution {

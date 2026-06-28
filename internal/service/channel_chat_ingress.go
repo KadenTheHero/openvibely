@@ -70,9 +70,13 @@ type channelChatIngressFirstTurnOptions struct {
 	AttachmentContextAndImages func([]models.ChatAttachment) (string, []models.Attachment)
 	ListChatHistory            func(context.Context, string) ([]models.Execution, error)
 	FilterChatHistory          func([]models.Execution, string) []models.Execution
-	BuildChatContext           func(context.Context, string) string
-	GetPersonalityContext      func(context.Context, string) string
-	ResolveWorkDir             func(context.Context, string) string
+	TaskSvc                    *TaskService
+	LLMConfigRepo              *repository.LLMConfigRepo
+	ScheduleRepo               *repository.ScheduleRepo
+	AgentRepo                  *repository.AgentRepo
+	SettingsRepo               *repository.SettingsRepo
+	CustomPersonalityRepo      *repository.CustomPersonalityRepo
+	ProjectRepo                *repository.ProjectRepo
 	OnTaskCreateFailure        func(context.Context)
 	OnTaskContextFailure       func(context.Context)
 	OnExecutionCreateFailure   func(context.Context)
@@ -96,12 +100,18 @@ type channelChatIngressOptions struct {
 	HasAttachments bool
 	Start          time.Time
 
-	TaskRepo        *repository.TaskRepo
-	ExecRepo        *repository.ExecutionRepo
-	ThreadInputRepo *repository.ThreadInputRepo
-	LLMConfigRepo   *repository.LLMConfigRepo
-	ChatBroadcaster *events.ChatBroadcaster
-	UploadsDir      string
+	TaskRepo              *repository.TaskRepo
+	ExecRepo              *repository.ExecutionRepo
+	ThreadInputRepo       *repository.ThreadInputRepo
+	LLMConfigRepo         *repository.LLMConfigRepo
+	ScheduleRepo          *repository.ScheduleRepo
+	AgentRepo             *repository.AgentRepo
+	SettingsRepo          *repository.SettingsRepo
+	CustomPersonalityRepo *repository.CustomPersonalityRepo
+	ProjectRepo           *repository.ProjectRepo
+	TaskSvc               *TaskService
+	ChatBroadcaster       *events.ChatBroadcaster
+	UploadsDir            string
 
 	DownloadAttachments                       func(context.Context) (channelChatIngressDownloadResult, error)
 	ContinueWithoutAttachmentsOnDownloadError bool
@@ -150,6 +160,104 @@ func selectChannelChatAgent(ctx context.Context, repo *repository.LLMConfigRepo,
 		}
 	}
 	return &agents[0], nil
+}
+
+type channelChatContextOptions struct {
+	Platform              string
+	ProjectID             string
+	TaskSvc               *TaskService
+	LLMConfigRepo         *repository.LLMConfigRepo
+	ScheduleRepo          *repository.ScheduleRepo
+	AgentRepo             *repository.AgentRepo
+	SettingsRepo          *repository.SettingsRepo
+	CustomPersonalityRepo *repository.CustomPersonalityRepo
+	AttachmentContext     string
+}
+
+func buildChannelChatContext(ctx context.Context, opts channelChatContextOptions) string {
+	existingTasks := []models.Task{}
+	if opts.TaskSvc != nil {
+		if tasks, err := opts.TaskSvc.ListByProject(ctx, opts.ProjectID, ""); err == nil {
+			existingTasks = tasks
+		}
+	}
+	availableModels := []models.LLMConfig{}
+	if opts.LLMConfigRepo != nil {
+		if configs, err := opts.LLMConfigRepo.List(ctx); err == nil {
+			availableModels = configs
+		}
+	}
+	schedules := []models.Schedule{}
+	if opts.ScheduleRepo != nil {
+		if rows, err := opts.ScheduleRepo.ListByProject(ctx, opts.ProjectID); err == nil {
+			schedules = rows
+		}
+	}
+	systemContext := BuildChatContextWithAgentDefinitions(existingTasks, availableModels, listChannelChatAssignableAgentDefinitions(ctx, opts.Platform, opts.AgentRepo), schedules, time.Now())
+	if opts.AttachmentContext != "" {
+		systemContext += opts.AttachmentContext
+	}
+	if personalityPrompt := getChannelChatPersonalityContext(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo); personalityPrompt != "" {
+		systemContext += personalityPrompt
+	}
+	return systemContext
+}
+
+func listChannelChatAssignableAgentDefinitions(ctx context.Context, platform string, repo *repository.AgentRepo) []models.Agent {
+	if repo == nil {
+		return nil
+	}
+	agents, err := repo.List(ctx)
+	if err != nil {
+		applog.Infof("[%s] error listing agent definitions for context: %v", channelChatLogPlatform(platform), err)
+		return nil
+	}
+	return UniqueChatAssignableAgentDefinitions(agents)
+}
+
+func getChannelChatPersonalityContext(ctx context.Context, settingsRepo *repository.SettingsRepo, customRepo *repository.CustomPersonalityRepo) string {
+	if settingsRepo == nil {
+		return ""
+	}
+	personality, err := settingsRepo.Get(ctx, "personality")
+	if err != nil || personality == "" {
+		return ""
+	}
+	prompt := GetPersonalityPromptWithCustom(ctx, personality, customRepo)
+	if prompt == "" {
+		return ""
+	}
+	return "\n# Communication Style\n\n" + prompt
+}
+
+func resolveChannelChatWorkDir(ctx context.Context, projectRepo *repository.ProjectRepo, projectID string) string {
+	if projectRepo == nil {
+		return ""
+	}
+	project, err := projectRepo.GetByID(ctx, projectID)
+	if err != nil || project == nil {
+		return ""
+	}
+	return project.RepoPath
+}
+
+func promoteQueuedChannelChatAfterCompletion(ctx context.Context, taskRepo *repository.TaskRepo, queuedTurnPromoter func(projectID string), taskID string) {
+	if queuedTurnPromoter == nil || taskRepo == nil {
+		return
+	}
+	task, err := taskRepo.GetByID(ctx, taskID)
+	if err != nil || task == nil || task.Category != models.CategoryChat {
+		return
+	}
+	queuedTurnPromoter(task.ProjectID)
+}
+
+func channelChatLogPlatform(platform string) string {
+	platform = strings.TrimSpace(platform)
+	if platform == "" {
+		return "channel"
+	}
+	return platform
 }
 
 func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) bool {
@@ -283,6 +391,27 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 	}
 	if first.ChatBroadcaster == nil {
 		first.ChatBroadcaster = opts.ChatBroadcaster
+	}
+	if first.TaskSvc == nil {
+		first.TaskSvc = opts.TaskSvc
+	}
+	if first.LLMConfigRepo == nil {
+		first.LLMConfigRepo = opts.LLMConfigRepo
+	}
+	if first.ScheduleRepo == nil {
+		first.ScheduleRepo = opts.ScheduleRepo
+	}
+	if first.AgentRepo == nil {
+		first.AgentRepo = opts.AgentRepo
+	}
+	if first.SettingsRepo == nil {
+		first.SettingsRepo = opts.SettingsRepo
+	}
+	if first.CustomPersonalityRepo == nil {
+		first.CustomPersonalityRepo = opts.CustomPersonalityRepo
+	}
+	if first.ProjectRepo == nil {
+		first.ProjectRepo = opts.ProjectRepo
 	}
 	runChannelChatFirstTurn(ctx, first)
 	return true
@@ -442,22 +571,18 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 	if opts.FilterChatHistory != nil {
 		history = opts.FilterChatHistory(history, exec.ID)
 	}
-	systemContext := ""
-	if opts.BuildChatContext != nil {
-		systemContext = opts.BuildChatContext(ctx, opts.ProjectID)
-	}
-	if opts.AttachmentContext != "" {
-		systemContext += opts.AttachmentContext
-	}
-	if opts.GetPersonalityContext != nil {
-		if personalityPrompt := opts.GetPersonalityContext(ctx, opts.ProjectID); personalityPrompt != "" {
-			systemContext += personalityPrompt
-		}
-	}
-	workDir := ""
-	if opts.ResolveWorkDir != nil {
-		workDir = opts.ResolveWorkDir(ctx, opts.ProjectID)
-	}
+	systemContext := buildChannelChatContext(ctx, channelChatContextOptions{
+		Platform:              platform,
+		ProjectID:             opts.ProjectID,
+		TaskSvc:               opts.TaskSvc,
+		LLMConfigRepo:         opts.LLMConfigRepo,
+		ScheduleRepo:          opts.ScheduleRepo,
+		AgentRepo:             opts.AgentRepo,
+		SettingsRepo:          opts.SettingsRepo,
+		CustomPersonalityRepo: opts.CustomPersonalityRepo,
+		AttachmentContext:     opts.AttachmentContext,
+	})
+	workDir := resolveChannelChatWorkDir(ctx, opts.ProjectRepo, opts.ProjectID)
 	initialAckID := opts.InitialAckID
 	if opts.PrepareRunner != nil {
 		initialAckID = opts.PrepareRunner(ctx, opts.Task.ID, exec.ID)

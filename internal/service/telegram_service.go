@@ -503,19 +503,25 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	start := time.Now()
 	var telegramImageAttachments []models.Attachment
 	runChannelChatIngress(ctx, channelChatIngressOptions{
-		Platform:        "telegram",
-		ProjectID:       projectID,
-		Message:         text,
-		Source:          models.TaskOriginTelegram,
-		Surface:         chatcontrol.SurfaceTelegram,
-		HasAttachments:  fileID != "",
-		Start:           start,
-		TaskRepo:        s.taskRepo,
-		ExecRepo:        s.execRepo,
-		ThreadInputRepo: s.threadInputRepo,
-		LLMConfigRepo:   s.llmConfigRepo,
-		ChatBroadcaster: s.chatBroadcaster,
-		UploadsDir:      telegramUploadsDir,
+		Platform:              "telegram",
+		ProjectID:             projectID,
+		Message:               text,
+		Source:                models.TaskOriginTelegram,
+		Surface:               chatcontrol.SurfaceTelegram,
+		HasAttachments:        fileID != "",
+		Start:                 start,
+		TaskRepo:              s.taskRepo,
+		ExecRepo:              s.execRepo,
+		ThreadInputRepo:       s.threadInputRepo,
+		LLMConfigRepo:         s.llmConfigRepo,
+		ChatBroadcaster:       s.chatBroadcaster,
+		UploadsDir:            telegramUploadsDir,
+		TaskSvc:               s.taskSvc,
+		ScheduleRepo:          s.scheduleRepo,
+		AgentRepo:             s.agentRepo,
+		SettingsRepo:          s.settingsRepo,
+		CustomPersonalityRepo: s.customPersonalityRepo,
+		ProjectRepo:           s.projectRepo,
 		DownloadAttachments: func(ctx context.Context) (channelChatIngressDownloadResult, error) {
 			if fileID == "" {
 				return channelChatIngressDownloadResult{}, nil
@@ -567,9 +573,6 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 				return s.execRepo.ListChatHistory(ctx, projectID, telegramChatHistoryLimit)
 			},
 			FilterChatHistory:        filterTelegramChatHistory,
-			BuildChatContext:         s.buildChatContext,
-			GetPersonalityContext:    s.getPersonalityContext,
-			ResolveWorkDir:           s.resolveWorkDir,
 			OnTaskCreateFailure:      func(context.Context) { s.sendMessage(ctx, chatID, "Error processing your message. Please try again.") },
 			OnExecutionCreateFailure: func(context.Context) { s.sendMessage(ctx, chatID, "Error processing your message. Please try again.") },
 			OnAttachmentLinkFailure:  func(_ context.Context, msgText string) { s.sendMessage(ctx, chatID, "⚠️ "+msgText) },
@@ -1086,67 +1089,6 @@ func telegramStreamingDisplay(cleaned string, terminal bool) string {
 	return cleaned + "\n\n⏳ _Generating..._"
 }
 
-// buildChatContext builds context string with task list, model info, and schedule data.
-// Uses the shared BuildChatContext function so Telegram produces identical context to /chat.
-func (s *TelegramService) buildChatContext(ctx context.Context, projectID string) string {
-	existingTasks, err := s.taskSvc.ListByProject(ctx, projectID, "")
-	if err != nil {
-		applog.Infof("[telegram] error listing tasks for context: %v", err)
-		existingTasks = []models.Task{}
-	}
-
-	availableModels, _ := s.llmConfigRepo.List(ctx)
-
-	var schedules []models.Schedule
-	if s.scheduleRepo != nil {
-		schedules, err = s.scheduleRepo.ListByProject(ctx, projectID)
-		if err != nil {
-			applog.Infof("[telegram] error listing schedules for context: %v", err)
-			schedules = []models.Schedule{}
-		}
-	}
-
-	return BuildChatContextWithAgentDefinitions(existingTasks, availableModels, s.listChatAssignableAgentDefinitions(ctx), schedules, time.Now())
-}
-
-func (s *TelegramService) listChatAssignableAgentDefinitions(ctx context.Context) []models.Agent {
-	if s.agentRepo == nil {
-		return nil
-	}
-	agents, err := s.agentRepo.List(ctx)
-	if err != nil {
-		applog.Infof("[telegram] error listing agent definitions for context: %v", err)
-		return nil
-	}
-	return UniqueChatAssignableAgentDefinitions(agents)
-}
-
-// resolveWorkDir gets the repo path for the project
-func (s *TelegramService) resolveWorkDir(ctx context.Context, projectID string) string {
-	project, err := s.projectRepo.GetByID(ctx, projectID)
-	if err == nil && project != nil {
-		return project.RepoPath
-	}
-	return ""
-}
-
-// getPersonalityContext loads the global personality setting and returns the
-// corresponding system prompt modifier. Returns empty string if no personality is set.
-func (s *TelegramService) getPersonalityContext(ctx context.Context, projectID string) string {
-	if s.settingsRepo == nil {
-		return ""
-	}
-	personality, err := s.settingsRepo.Get(ctx, "personality")
-	if err != nil || personality == "" {
-		return ""
-	}
-	prompt := GetPersonalityPromptWithCustom(ctx, personality, s.customPersonalityRepo)
-	if prompt == "" {
-		return ""
-	}
-	return "\n# Communication Style\n\n" + prompt
-}
-
 func (s *TelegramService) buildTelegramActionToolRuntime(projectID string, chatID int64, userID int64, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
 	handlers := s.telegramActionHandlers(projectID, chatID, userID, collector)
 	return &llmcontracts.RuntimeTools{
@@ -1480,7 +1422,7 @@ func (s *TelegramService) executeSendToTask(ctx context.Context, projectID strin
 	priorExecs, _ := s.execRepo.ListByTaskChronological(ctx, task.ID)
 	priorHistory := filterTelegramChatHistory(priorExecs, exec.ID)
 	systemContext := buildTelegramTaskChatContext(task.Title, len(priorHistory) > 0)
-	if pCtx := s.getPersonalityContext(ctx, task.ProjectID); pCtx != "" {
+	if pCtx := getChannelChatPersonalityContext(ctx, s.settingsRepo, s.customPersonalityRepo); pCtx != "" {
 		systemContext += pCtx
 	}
 	if s.channelTaskRunner == nil {
@@ -3178,7 +3120,7 @@ func (s *TelegramService) completeExecution(ctx context.Context, execID, taskID,
 		if err := s.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed); err != nil {
 			applog.Infof("[telegram] error updating task status (failed): %v", err)
 		}
-		s.promoteQueuedChatAfterCompletion(ctx, taskID)
+		promoteQueuedChannelChatAfterCompletion(ctx, s.taskRepo, s.queuedTurnPromoter, taskID)
 		return
 	}
 
@@ -3188,18 +3130,7 @@ func (s *TelegramService) completeExecution(ctx context.Context, execID, taskID,
 	if err := s.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted); err != nil {
 		applog.Infof("[telegram] error updating task status: %v", err)
 	}
-	s.promoteQueuedChatAfterCompletion(ctx, taskID)
-}
-
-func (s *TelegramService) promoteQueuedChatAfterCompletion(ctx context.Context, taskID string) {
-	if s.queuedTurnPromoter == nil || s.taskRepo == nil {
-		return
-	}
-	task, err := s.taskRepo.GetByID(ctx, taskID)
-	if err != nil || task == nil || task.Category != models.CategoryChat {
-		return
-	}
-	s.queuedTurnPromoter(task.ProjectID)
+	promoteQueuedChannelChatAfterCompletion(ctx, s.taskRepo, s.queuedTurnPromoter, taskID)
 }
 
 // filterTelegramChatHistory filters executions to exclude the current one and running ones

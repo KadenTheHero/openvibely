@@ -407,7 +407,13 @@ func TestTelegramService_BuildChatContext(t *testing.T) {
 		userProjects:  make(map[int64]string),
 	}
 
-	context_ := svc.buildChatContext(ctx, project.ID)
+	context_ := buildChannelChatContext(ctx, channelChatContextOptions{
+		Platform:      "telegram",
+		ProjectID:     project.ID,
+		TaskSvc:       svc.taskSvc,
+		LLMConfigRepo: svc.llmConfigRepo,
+		AgentRepo:     svc.agentRepo,
+	})
 	assert.Contains(t, context_, "Fix login bug")
 	assert.NotContains(t, context_, "Chat message")
 	assert.Contains(t, context_, "Available Agent definitions")
@@ -648,16 +654,11 @@ func TestTelegramService_ResolveWorkDir(t *testing.T) {
 	}
 	require.NoError(t, projectRepo.Create(ctx, project))
 
-	svc := &TelegramService{
-		projectRepo:  projectRepo,
-		userProjects: make(map[int64]string),
-	}
-
-	workDir := svc.resolveWorkDir(ctx, project.ID)
+	workDir := resolveChannelChatWorkDir(ctx, projectRepo, project.ID)
 	assert.Equal(t, "/tmp/test/repo", workDir)
 
 	// Non-existent project
-	workDir = svc.resolveWorkDir(ctx, "nonexistent")
+	workDir = resolveChannelChatWorkDir(ctx, projectRepo, "nonexistent")
 	assert.Equal(t, "", workDir)
 }
 
