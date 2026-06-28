@@ -486,62 +486,6 @@ func (m discordIncomingMessage) replyChannelID() string {
 	return m.ChannelID
 }
 
-func (s *DiscordService) queueChatInput(ctx context.Context, projectID, activeExecID string, msg discordIncomingMessage) bool {
-	return runChannelChatIngress(ctx, channelChatIngressOptions{
-		Platform:        "discord",
-		ProjectID:       projectID,
-		Message:         msg.Text,
-		Source:          msg.Source,
-		Surface:         chatcontrol.SurfaceDiscord,
-		HasAttachments:  len(msg.Attachments) > 0,
-		ThreadInputRepo: s.threadInputRepo,
-		LLMConfigRepo:   s.llmConfigRepo,
-		ChatBroadcaster: s.chatBroadcaster,
-		UploadsDir:      s.uploadsDir,
-		DownloadAttachments: func(ctx context.Context) (channelChatIngressDownloadResult, error) {
-			if len(msg.Attachments) == 0 {
-				return channelChatIngressDownloadResult{}, nil
-			}
-			chatAtts, err := s.downloadDiscordFiles(ctx, msg.Attachments)
-			if err != nil {
-				applog.Infof("[discord] queue chat attachment download failed: %v", err)
-				return channelChatIngressDownloadResult{}, err
-			}
-			attCtx, imgAtts := discordAttachmentContextAndImages(chatAtts)
-			return channelChatIngressDownloadResult{AttachmentContext: attCtx, ImageAttachments: imgAtts, ChatAttachments: chatAtts}, nil
-		},
-		IncomingAttachmentsNeedVision: func() bool { return discordIncomingAttachmentsRequireVision(msg.Attachments) },
-		AttachmentDownloadFailureMessage: func(error, bool) string {
-			return "Failed to process attachment: unable to download attachment. Please try again."
-		},
-		SavePendingAttachments: s.saveChatAttachmentsToPendingSession,
-		FindActiveExecution: func(context.Context, string) (*models.Execution, error) {
-			return &models.Execution{ID: activeExecID}, nil
-		},
-		RecordAttachmentFailure: func(ctx context.Context, agentID, msgText string) {
-			s.recordQueuedAttachmentFailure(ctx, projectID, agentID, msg, msgText)
-		},
-		NewQueuedInput: func() *models.ThreadInput {
-			return &models.ThreadInput{DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: msg.MessageID, DiscordUserID: msg.UserID}
-		},
-		OnQueuedAttachmentDownloadFailed: func(_ context.Context, msgText string) {
-			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
-		},
-		OnAttachmentStoreFailed: func(_ context.Context, msgText string) {
-			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
-		},
-		OnModelSelectionFailed: func(_ context.Context, err error) {
-			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, fmt.Sprintf("Error selecting model: %v", err))
-		},
-		OnQueueFailure: func(context.Context) {
-			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error queueing your message. Please try again.")
-		},
-		OnQueued: func(context.Context) {
-			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Queued. I'll send this after the current response finishes.")
-		},
-	})
-}
-
 func (s *DiscordService) recordQueuedAttachmentFailure(ctx context.Context, projectID, agentID string, msg discordIncomingMessage, msgText string) {
 	if s.taskRepo == nil || s.execRepo == nil {
 		if s.chatBroadcaster != nil {

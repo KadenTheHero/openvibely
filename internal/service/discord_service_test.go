@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -870,6 +871,61 @@ func TestDiscordLinkAttachmentsCleansUpMovedFileWhenPersistFails(t *testing.T) {
 	}
 }
 
+func runDiscordQueueChatIngressForTest(ctx context.Context, svc *DiscordService, projectID, activeExecID string, msg discordIncomingMessage) bool {
+	return runChannelChatIngress(ctx, channelChatIngressOptions{
+		Platform:        "discord",
+		ProjectID:       projectID,
+		Message:         msg.Text,
+		Source:          msg.Source,
+		Surface:         chatcontrol.SurfaceDiscord,
+		HasAttachments:  len(msg.Attachments) > 0,
+		ThreadInputRepo: svc.threadInputRepo,
+		LLMConfigRepo:   svc.llmConfigRepo,
+		ChatBroadcaster: svc.chatBroadcaster,
+		UploadsDir:      svc.uploadsDir,
+		DownloadAttachments: func(ctx context.Context) (channelChatIngressDownloadResult, error) {
+			if len(msg.Attachments) == 0 {
+				return channelChatIngressDownloadResult{}, nil
+			}
+			chatAtts, err := svc.downloadDiscordFiles(ctx, msg.Attachments)
+			if err != nil {
+				return channelChatIngressDownloadResult{}, err
+			}
+			attCtx, imgAtts := discordAttachmentContextAndImages(chatAtts)
+			return channelChatIngressDownloadResult{AttachmentContext: attCtx, ImageAttachments: imgAtts, ChatAttachments: chatAtts}, nil
+		},
+		IncomingAttachmentsNeedVision: func() bool { return discordIncomingAttachmentsRequireVision(msg.Attachments) },
+		AttachmentDownloadFailureMessage: func(error, bool) string {
+			return "Failed to process attachment: unable to download attachment. Please try again."
+		},
+		SavePendingAttachments: svc.saveChatAttachmentsToPendingSession,
+		FindActiveExecution: func(context.Context, string) (*models.Execution, error) {
+			return &models.Execution{ID: activeExecID}, nil
+		},
+		RecordAttachmentFailure: func(ctx context.Context, agentID, msgText string) {
+			svc.recordQueuedAttachmentFailure(ctx, projectID, agentID, msg, msgText)
+		},
+		NewQueuedInput: func() *models.ThreadInput {
+			return &models.ThreadInput{DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: msg.MessageID, DiscordUserID: msg.UserID}
+		},
+		OnQueuedAttachmentDownloadFailed: func(_ context.Context, msgText string) {
+			_ = svc.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
+		},
+		OnAttachmentStoreFailed: func(_ context.Context, msgText string) {
+			_ = svc.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
+		},
+		OnModelSelectionFailed: func(_ context.Context, err error) {
+			_ = svc.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, fmt.Sprintf("Error selecting model: %v", err))
+		},
+		OnQueueFailure: func(context.Context) {
+			_ = svc.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error queueing your message. Please try again.")
+		},
+		OnQueued: func(context.Context) {
+			_ = svc.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Queued. I'll send this after the current response finishes.")
+		},
+	})
+}
+
 func TestDiscordQueueChatInputSelectsVisionAgentFromDownloadedAttachment(t *testing.T) {
 	svc, db, _, projectRepo, taskRepo, _, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()
@@ -913,7 +969,7 @@ func TestDiscordQueueChatInputSelectsVisionAgentFromDownloadedAttachment(t *test
 		return "ack-1", nil
 	}
 
-	handled := svc.queueChatInput(ctx, project.ID, activeExec.ID, discordIncomingMessage{
+	handled := runDiscordQueueChatIngressForTest(ctx, svc, project.ID, activeExec.ID, discordIncomingMessage{
 		ChannelID: "chan-1",
 		MessageID: "msg-1",
 		UserID:    "user-1",
@@ -986,7 +1042,7 @@ func TestDiscordQueueChatInputCleansPendingAttachmentsWhenQueueInsertFails(t *te
 		return "ack-1", nil
 	}
 
-	handled := svc.queueChatInput(context.Background(), "project-1", "exec-1", discordIncomingMessage{
+	handled := runDiscordQueueChatIngressForTest(context.Background(), svc, "project-1", "exec-1", discordIncomingMessage{
 		ChannelID: "chan-1",
 		MessageID: "msg-1",
 		UserID:    "user-1",
@@ -1045,7 +1101,7 @@ func TestDiscordQueueChatInputUsesGenericDownloadError(t *testing.T) {
 		return "ack-1", nil
 	}
 
-	handled := svc.queueChatInput(ctx, project.ID, "exec-1", discordIncomingMessage{
+	handled := runDiscordQueueChatIngressForTest(ctx, svc, project.ID, "exec-1", discordIncomingMessage{
 		ChannelID: "chan-1",
 		MessageID: "msg-1",
 		UserID:    "user-1",
@@ -1128,7 +1184,7 @@ func TestDiscordQueueChatInputRecordsFailedMessageWhenAttachmentStagingFails(t *
 		return "ack-1", nil
 	}
 
-	handled := svc.queueChatInput(ctx, project.ID, "exec-1", discordIncomingMessage{
+	handled := runDiscordQueueChatIngressForTest(ctx, svc, project.ID, "exec-1", discordIncomingMessage{
 		ChannelID: "chan-1",
 		MessageID: "msg-1",
 		UserID:    "user-1",

@@ -465,37 +465,6 @@ func (s *TelegramService) handleProject(userID int64, args string) string {
 }
 
 // handleChatMessage forwards a Telegram message to the chat orchestrator
-func (s *TelegramService) queueChatInput(ctx context.Context, projectID, activeExecID, text string, chatID int64, chatAttachments []models.ChatAttachment) bool {
-	return runChannelChatIngress(ctx, channelChatIngressOptions{
-		Platform:        "telegram",
-		ProjectID:       projectID,
-		Message:         text,
-		Source:          models.TaskOriginTelegram,
-		Surface:         chatcontrol.SurfaceTelegram,
-		HasAttachments:  len(chatAttachments) > 0,
-		ThreadInputRepo: s.threadInputRepo,
-		LLMConfigRepo:   s.llmConfigRepo,
-		ChatBroadcaster: s.chatBroadcaster,
-		UploadsDir:      telegramUploadsDir,
-		DownloadAttachments: func(context.Context) (channelChatIngressDownloadResult, error) {
-			attCtx, imgAtts := channelChatAttachmentContextAndImages(chatAttachments, telegramMaxTextFileSize)
-			return channelChatIngressDownloadResult{AttachmentContext: attCtx, ImageAttachments: imgAtts, ChatAttachments: chatAttachments}, nil
-		},
-		SavePendingAttachments: s.saveChatAttachmentsToPendingSession,
-		FindActiveExecution: func(context.Context, string) (*models.Execution, error) {
-			return &models.Execution{ID: activeExecID}, nil
-		},
-		NewQueuedInput: func() *models.ThreadInput { return &models.ThreadInput{TelegramChatID: chatID} },
-		OnAttachmentStoreFailed: func(context.Context, string) {
-			s.sendMessage(ctx, chatID, "Error queueing your attachment. Please try again.")
-		},
-		OnQueueFailure: func(context.Context) { s.sendMessage(ctx, chatID, "Error queueing your message. Please try again.") },
-		OnQueued: func(context.Context) {
-			s.sendMessage(ctx, chatID, "Queued. I'll send this after the current response finishes.")
-		},
-	})
-}
-
 func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	userID := message.From.ID
 	chatID := message.Chat.ID

@@ -2600,6 +2600,37 @@ func TestTelegramService_ProcessIncomingMessage_QueuesWhenChatActive(t *testing.
 	require.Len(t, tasks, 1, "queued channel follow-up must not create a second chat task immediately")
 }
 
+func runTelegramQueueChatIngressForTest(ctx context.Context, svc *TelegramService, projectID, activeExecID, text string, chatID int64, chatAttachments []models.ChatAttachment) bool {
+	return runChannelChatIngress(ctx, channelChatIngressOptions{
+		Platform:        "telegram",
+		ProjectID:       projectID,
+		Message:         text,
+		Source:          models.TaskOriginTelegram,
+		Surface:         chatcontrol.SurfaceTelegram,
+		HasAttachments:  len(chatAttachments) > 0,
+		ThreadInputRepo: svc.threadInputRepo,
+		LLMConfigRepo:   svc.llmConfigRepo,
+		ChatBroadcaster: svc.chatBroadcaster,
+		UploadsDir:      telegramUploadsDir,
+		DownloadAttachments: func(context.Context) (channelChatIngressDownloadResult, error) {
+			attCtx, imgAtts := channelChatAttachmentContextAndImages(chatAttachments, telegramMaxTextFileSize)
+			return channelChatIngressDownloadResult{AttachmentContext: attCtx, ImageAttachments: imgAtts, ChatAttachments: chatAttachments}, nil
+		},
+		SavePendingAttachments: svc.saveChatAttachmentsToPendingSession,
+		FindActiveExecution: func(context.Context, string) (*models.Execution, error) {
+			return &models.Execution{ID: activeExecID}, nil
+		},
+		NewQueuedInput: func() *models.ThreadInput { return &models.ThreadInput{TelegramChatID: chatID} },
+		OnAttachmentStoreFailed: func(context.Context, string) {
+			svc.sendMessage(ctx, chatID, "Error queueing your attachment. Please try again.")
+		},
+		OnQueueFailure: func(context.Context) { svc.sendMessage(ctx, chatID, "Error queueing your message. Please try again.") },
+		OnQueued: func(context.Context) {
+			svc.sendMessage(ctx, chatID, "Queued. I'll send this after the current response finishes.")
+		},
+	})
+}
+
 func TestTelegramService_ProcessIncomingMessage_QueuesTelegramAttachmentWhenChatActive(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -2639,7 +2670,7 @@ func TestTelegramService_ProcessIncomingMessage_QueuesTelegramAttachmentWhenChat
 		userProjects:    map[int64]string{7: project.ID},
 	}
 
-	require.True(t, svc.queueChatInput(ctx, project.ID, activeExec.ID, "follow up with attachment", 42, []models.ChatAttachment{{
+	require.True(t, runTelegramQueueChatIngressForTest(ctx, svc, project.ID, activeExec.ID, "follow up with attachment", 42, []models.ChatAttachment{{
 		FileName:  "test.txt",
 		FilePath:  sourcePath,
 		MediaType: "text/plain",
@@ -2687,7 +2718,7 @@ func TestTelegramService_QueueChatInputCleansPendingAttachmentsWhenQueueInsertFa
 		sendMessageFunc: func(chatID int64, text string) { sent = append(sent, text) },
 	}
 
-	require.True(t, svc.queueChatInput(ctx, "project-1", "exec-1", "follow up with attachment", 42, []models.ChatAttachment{{
+	require.True(t, runTelegramQueueChatIngressForTest(ctx, svc, "project-1", "exec-1", "follow up with attachment", 42, []models.ChatAttachment{{
 		FileName:  "test.txt",
 		FilePath:  sourcePath,
 		MediaType: "text/plain",
