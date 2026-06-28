@@ -142,16 +142,23 @@ func TestChannelsPageRendersCardLayout(t *testing.T) {
 		!strings.Contains(body, `resetSecretInputVisibility('discord_bot_token')`) {
 		t.Error("expected Discord configuration modal to reset unsaved edits and masked token state on close/reopen")
 	}
-	if strings.Contains(body, `hx-on::after-request="if (event.detail.successful) closeDiscordConfigModal()"`) {
-		t.Error("did not expect Discord config form to close on bubbled authorized-user HTMX requests")
+	discordFormIdx := strings.Index(body, `id="discord_config_form"`)
+	if discordFormIdx == -1 {
+		t.Fatal("expected Discord config form")
 	}
-	if !strings.Contains(body, `event.detail && event.detail.elt === this && event.detail.successful`) {
-		t.Error("expected Discord config form save-close hook to be guarded to the form's own HTMX request")
+	discordFormTagEnd := strings.Index(body[discordFormIdx:], `>`)
+	if discordFormTagEnd == -1 {
+		t.Fatal("expected Discord config form opening tag to close")
 	}
-	if !strings.Contains(body, `var rp = (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || ''`) ||
+	discordFormTag := body[discordFormIdx : discordFormIdx+discordFormTagEnd]
+	if strings.Contains(discordFormTag, `hx-on::after-request`) {
+		t.Error("did not expect Discord config form to have a parent after-request close hook that can catch authorized-user HTMX requests")
+	}
+	if !strings.Contains(body, `var requestConfig = detail.requestConfig || {}`) ||
+		!strings.Contains(body, `var rp = requestConfig.path || (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || ''`) ||
 		!strings.Contains(body, `rp === '/channels/discord/configure' && detail.successful`) ||
 		!strings.Contains(body, `document.getElementById('discord_config_modal')`) {
-		t.Error("expected Discord configuration modal to also close after successful configure save without brittle pathInfo access")
+		t.Error("expected Discord configuration modal to close after successful configure save using robust HTMX request path detection")
 	}
 	if !strings.Contains(body, `hx-post="/channels/discord/authorized-users"`) ||
 		!strings.Contains(body, `hx-target="#discord-authorized-users"`) ||
@@ -319,7 +326,7 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if strings.Contains(body, "// Close webhook modal after successful save\t") || strings.Contains(body, "// Close webhook modal after successful save var rp") {
 		t.Fatal("expected rp declaration to be executable, not commented out")
 	}
-	assertIndexOrder(t, body, "var rp = (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || '';", "// Close webhook modal after successful save", "expected request path declaration before webhook modal branch")
+	assertIndexOrder(t, body, "var rp = requestConfig.path || (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || '';", "// Close webhook modal after successful save", "expected request path declaration before webhook modal branch")
 
 	cardReq := httptest.NewRequest(http.MethodGet, "/channels/outbound-targets/card?project_id=default", nil)
 	cardRec := httptest.NewRecorder()
