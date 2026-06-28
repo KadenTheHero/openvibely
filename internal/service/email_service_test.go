@@ -182,3 +182,36 @@ func TestEmailService_SendOutboundMessage_ValidationAndMissingConfig(t *testing.
 	require.False(t, missing.OK)
 	require.Contains(t, missing.Error, "email channel is not fully configured")
 }
+
+func TestEmailService_CompleteExecutionUsesSharedChatPromotion(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	project := &models.Project{Name: "Email Promotion Project"}
+	require.NoError(t, repository.NewProjectRepo(db).Create(ctx, project))
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "Email Promotion Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	agentID := agent.ID
+
+	chatTask := &models.Task{ProjectID: project.ID, Title: "Email Chat", Prompt: "chat", Category: models.CategoryChat, Status: models.StatusRunning, CreatedVia: models.TaskOriginEmail, AgentID: &agentID}
+	require.NoError(t, taskRepo.Create(ctx, chatTask))
+	chatExec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agentID, Status: models.ExecRunning, PromptSent: "chat"}
+	require.NoError(t, execRepo.Create(ctx, chatExec))
+
+	nonChatTask := &models.Task{ProjectID: project.ID, Title: "Email Task", Prompt: "task", Category: models.CategoryActive, Status: models.StatusRunning, CreatedVia: models.TaskOriginEmail, AgentID: &agentID}
+	require.NoError(t, taskRepo.Create(ctx, nonChatTask))
+	nonChatExec := &models.Execution{TaskID: nonChatTask.ID, AgentConfigID: agentID, Status: models.ExecRunning, PromptSent: "task"}
+	require.NoError(t, execRepo.Create(ctx, nonChatExec))
+
+	svc := NewEmailService(repository.NewSettingsRepo(db), repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), taskRepo, execRepo, repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	var promoted []string
+	svc.queuedTurnPromoter = func(projectID string) { promoted = append(promoted, projectID) }
+
+	svc.completeExecution(ctx, nonChatExec.ID, nonChatTask.ID, "done", "", 1, 10)
+	require.Empty(t, promoted)
+
+	svc.completeExecution(ctx, chatExec.ID, chatTask.ID, "done", "", 1, 10)
+	require.Equal(t, []string{project.ID}, promoted)
+}

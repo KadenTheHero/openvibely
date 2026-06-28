@@ -730,11 +730,7 @@ func (s *EmailService) completeExecution(ctx context.Context, execID, taskID, ou
 		_ = s.execRepo.Complete(ctx, execID, models.ExecCompleted, output, "", tokensUsed, durationMs)
 		_ = s.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted)
 	}
-	if s.queuedTurnPromoter != nil {
-		if task, err := s.taskRepo.GetByID(ctx, taskID); err == nil && task != nil {
-			s.queuedTurnPromoter(task.ProjectID)
-		}
-	}
+	promoteQueuedChannelChatAfterCompletion(ctx, s.taskRepo, s.queuedTurnPromoter, taskID)
 }
 
 func (s *EmailService) IsSendResponsesEnabled(ctx context.Context) bool {
