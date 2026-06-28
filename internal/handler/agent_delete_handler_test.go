@@ -485,6 +485,132 @@ func truncateBody(s string, max int) string {
 	return s[:max] + "...[truncated]"
 }
 
+// TestHandler_DeleteAgent_ProjectScopedRemovesCorrectProjectDirectory is the
+// key two-project regression test for Bug 1. It creates two projects, places a
+// project-scoped agent in the second project, sends
+// DELETE /agents/:id?project_id=<proj2-id>, and asserts that:
+//   - the DB row is gone
+//   - the proj2 agent directory is gone
+//   - proj2's AGENTS.md no longer has ## <key>
+//   - GET /agents?project_id=<proj2-id> does not recreate the agent via SyncRootDeclarations
+//   - proj1 is untouched
+func TestHandler_DeleteAgent_ProjectScopedRemovesCorrectProjectDirectory(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+
+	globalRoot := t.TempDir()
+
+	maintenanceSvc := service.NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
+	maintenanceSvc.SetLifecycleRepo(lifecycleRepo)
+	maintenanceSvc.SetAgentsRootPath(globalRoot)
+
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+	h.SetAgentSkillRoot(globalRoot)
+	h.SetAgentLibraryMaintenanceService(maintenanceSvc)
+
+	// Two projects with distinct temp directories.
+	proj1RepoDir := t.TempDir()
+	proj1 := &models.Project{Name: "Project One", RepoPath: proj1RepoDir}
+	if err := h.projectSvc.Create(t.Context(), proj1); err != nil {
+		t.Fatalf("create proj1: %v", err)
+	}
+
+	proj2RepoDir := t.TempDir()
+	proj2 := &models.Project{Name: "Project Two", RepoPath: proj2RepoDir}
+	if err := h.projectSvc.Create(t.Context(), proj2); err != nil {
+		t.Fatalf("create proj2: %v", err)
+	}
+
+	// Write the agent SKILLS.md inside proj2's .openvibely root.
+	proj2Root := filepath.Join(proj2RepoDir, ".openvibely")
+	writeAgentRootSKILLSmd(t, proj2Root, "proj-agent", "Proj Agent", "project two agent")
+
+	agentDir := filepath.Join(proj2Root, "agents", "proj-agent")
+	if _, err := os.Stat(agentDir); err != nil {
+		t.Fatalf("expected agent dir to exist before delete: %v", err)
+	}
+
+	agentsIndexPath := filepath.Join(proj2Root, "agents", "AGENTS.md")
+	before, err := os.ReadFile(agentsIndexPath)
+	if err != nil {
+		t.Fatalf("read proj2 AGENTS.md before delete: %v", err)
+	}
+	if !strings.Contains(string(before), "## proj-agent") {
+		t.Fatalf("expected ## proj-agent in proj2 AGENTS.md before delete:\n%s", before)
+	}
+
+	// Create the project-scoped agent in the DB with ProjectID = proj2.ID.
+	agent := &models.Agent{
+		Name:      "Proj Agent",
+		Key:       "proj-agent",
+		Scope:     models.AgentScopeProject,
+		ProjectID: proj2.ID,
+		Model:     "inherit",
+		Tools:     []string{},
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	// DELETE with explicit ?project_id=<proj2-id>.
+	req := httptest.NewRequest(http.MethodDelete, "/agents/"+agent.ID+"?project_id="+proj2.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// DB row must be gone.
+	gone, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("GetByID after delete: %v", err)
+	}
+	if gone != nil {
+		t.Fatalf("expected agent deleted from DB, got %+v", gone)
+	}
+
+	// proj2 agent directory must be removed.
+	if _, err := os.Stat(agentDir); !os.IsNotExist(err) {
+		t.Fatalf("expected proj2 agent directory removed, stat err=%v", err)
+	}
+
+	// proj2 AGENTS.md must no longer have ## proj-agent.
+	after, readErr := os.ReadFile(agentsIndexPath)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatalf("read proj2 AGENTS.md after delete: %v", readErr)
+	}
+	if strings.Contains(string(after), "## proj-agent") {
+		t.Fatalf("expected ## proj-agent removed from proj2 AGENTS.md:\n%s", after)
+	}
+
+	// GET /agents?project_id=<proj2-id> must not recreate the agent via
+	// SyncRootDeclarations (which would re-scan the project root if the
+	// directory was not actually removed).
+	req2 := httptest.NewRequest(http.MethodGet, "/agents?project_id="+proj2.ID, nil)
+	req2.Header.Set("HX-Request", "true")
+	rec2 := httptest.NewRecorder()
+	e.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("GET /agents expected 200, got %d", rec2.Code)
+	}
+	if strings.Contains(rec2.Body.String(), `data-agent-name="Proj Agent"`) {
+		t.Fatal("agent reappeared after GET /agents?project_id=...; SyncRootDeclarations re-created it from a directory that should have been removed")
+	}
+
+	// proj1 must not have gained an agent directory — wrong-project isolation.
+	proj1AgentDir := filepath.Join(proj1RepoDir, ".openvibely", "agents", "proj-agent")
+	if _, err := os.Stat(proj1AgentDir); !os.IsNotExist(err) {
+		t.Fatalf("expected proj1 to NOT have an agent dir, but one was found: stat err=%v", err)
+	}
+}
+
 // TestHandler_DeleteAgent_ProjectScopedUsesAgentProjectID verifies that when a
 // project-scoped agent has ProjectID set, deleting it without supplying a
 // ?project_id query string still removes the agent directory from the correct

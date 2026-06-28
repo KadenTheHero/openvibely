@@ -16,6 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -2418,6 +2419,140 @@ func TestHandler_UpdateAgent_PersistsDisabledAdvancedFields(t *testing.T) {
 	}
 	if len(stored.SourceRefs) != 1 || stored.SourceRefs[0] != "https://after.example.test" {
 		t.Fatalf("source refs not updated: %+v", stored.SourceRefs)
+	}
+}
+
+// TestHandler_UpdateAgent_ProjectScopedWritesCorrectProjectDirectory is the
+// runbook-required "Project Save Writes Correct Project Directory" test.
+// It creates two projects, saves a project-scoped agent in project 2 with
+// enabled=false, and asserts:
+//   - proj2 SKILLS.md contains "enabled: false"
+//   - proj1 does not get a copied or rewritten agent directory
+//   - DB row remains disabled after a fresh ListAgents call
+func TestHandler_UpdateAgent_ProjectScopedWritesCorrectProjectDirectory(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+
+	globalRoot := t.TempDir()
+
+	maintenanceSvc := service.NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
+	maintenanceSvc.SetLifecycleRepo(lifecycleRepo)
+	maintenanceSvc.SetAgentsRootPath(globalRoot)
+
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+	h.SetAgentSkillRoot(globalRoot)
+	h.SetAgentLibraryMaintenanceService(maintenanceSvc)
+
+	// Two projects with distinct temp directories so cross-project isolation
+	// can be asserted.
+	proj1RepoDir := t.TempDir()
+	proj1 := &models.Project{Name: "Project One", RepoPath: proj1RepoDir}
+	if err := h.projectSvc.Create(t.Context(), proj1); err != nil {
+		t.Fatalf("create proj1: %v", err)
+	}
+
+	proj2RepoDir := t.TempDir()
+	proj2 := &models.Project{Name: "Project Two", RepoPath: proj2RepoDir}
+	if err := h.projectSvc.Create(t.Context(), proj2); err != nil {
+		t.Fatalf("create proj2: %v", err)
+	}
+
+	// Create a project-scoped agent in proj2, initially enabled.
+	agent := &models.Agent{
+		Name:                "Proj2 Agent",
+		Key:                 "proj2-agent",
+		Scope:               models.AgentScopeProject,
+		ProjectID:           proj2.ID,
+		Model:               "inherit",
+		Enabled:             true,
+		SelectableAsPrimary: true,
+		Tools:               []string{},
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	// PUT /agents/:id?project_id=<proj2-id> with enabled=false and scope=project.
+	form := url.Values{}
+	form.Set("name", "Proj2 Agent")
+	form.Set("description", "project two agent")
+	form.Set("system_prompt", "do something")
+	form.Set("model", "inherit")
+	form.Set("tools_json", `[]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("key", "proj2-agent")
+	form.Set("scope", "project")
+	form.Set("project_id", proj2.ID)
+	form.Set("selectable_as_primary", "false")
+	form.Set("enabled", "false")
+	form.Set("permission_defaults_json", `{}`)
+	form.Set("source_refs_json", `[]`)
+
+	req := httptest.NewRequest(http.MethodPut, "/agents/"+agent.ID+"?project_id="+proj2.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// DB row must now be disabled.
+	stored, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("reload agent after PUT: %v", err)
+	}
+	if stored == nil {
+		t.Fatal("expected updated agent to exist")
+	}
+	if stored.Enabled {
+		t.Fatalf("expected Enabled=false after PUT, got Enabled=true")
+	}
+
+	// proj2 SKILLS.md must contain "enabled: false".
+	proj2SkillsPath := filepath.Join(proj2RepoDir, ".openvibely", "agents", "proj2-agent", "SKILLS.md")
+	data, readErr := os.ReadFile(proj2SkillsPath)
+	if readErr != nil {
+		t.Fatalf("read proj2 SKILLS.md after PUT: %v", readErr)
+	}
+	if !strings.Contains(string(data), "enabled: false") {
+		t.Fatalf("expected proj2 SKILLS.md to contain 'enabled: false', got:\n%s", data)
+	}
+
+	// proj1 must NOT have gained an agent directory — cross-project isolation.
+	proj1AgentDir := filepath.Join(proj1RepoDir, ".openvibely", "agents", "proj2-agent")
+	if _, err := os.Stat(proj1AgentDir); !os.IsNotExist(err) {
+		t.Fatalf("expected proj1 to NOT have a proj2-agent directory, but found one: stat err=%v", err)
+	}
+
+	// DB row must remain disabled after a fresh ListAgents call.
+	// GET /agents?project_id=<proj2-id> triggers SyncRootDeclarations on the
+	// proj2 root. Before the Bug 2 fix, SyncRootDeclarations would re-read
+	// proj2's SKILLS.md and silently flip Enabled back to true.
+	req2 := httptest.NewRequest(http.MethodGet, "/agents?project_id="+proj2.ID, nil)
+	req2.Header.Set("HX-Request", "true")
+	rec2 := httptest.NewRecorder()
+	e.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("GET /agents expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+
+	stored2, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("reload agent after ListAgents: %v", err)
+	}
+	if stored2 == nil {
+		t.Fatal("expected agent to still exist after ListAgents")
+	}
+	if stored2.Enabled {
+		t.Fatalf("expected agent to remain Enabled=false after ListAgents (SyncRootDeclarations), but got Enabled=true")
 	}
 }
 
