@@ -8,6 +8,41 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestLLMConfigRepo_MixtureConfigJSONPersists(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	mixtureJSON := `{"enabled":true,"reference_models":[{"agent_config_id":"ref"}],"aggregator":{"agent_config_id":"agg"}}`
+	cfg := &models.LLMConfig{
+		Name:              "Research Mixture",
+		Provider:          models.ProviderMixture,
+		Model:             "research-heavy",
+		MixtureConfigJSON: mixtureJSON,
+	}
+	if err := repo.Create(ctx, cfg); err != nil {
+		t.Fatalf("Create mixture: %v", err)
+	}
+	got, err := repo.GetByID(ctx, cfg.ID)
+	if err != nil {
+		t.Fatalf("GetByID mixture: %v", err)
+	}
+	if got == nil || got.Provider != models.ProviderMixture || got.MixtureConfigJSON != mixtureJSON {
+		t.Fatalf("mixture fields not persisted: %+v", got)
+	}
+	got.MixtureConfigJSON = `{"enabled":false,"aggregator":{"agent_config_id":"agg"}}`
+	if err := repo.Update(ctx, got); err != nil {
+		t.Fatalf("Update mixture: %v", err)
+	}
+	updated, err := repo.GetByID(ctx, cfg.ID)
+	if err != nil {
+		t.Fatalf("GetByID updated mixture: %v", err)
+	}
+	if updated.MixtureConfigJSON != got.MixtureConfigJSON {
+		t.Fatalf("updated mixture_config_json = %q", updated.MixtureConfigJSON)
+	}
+}
+
 func TestLLMConfigRepo_OpenAICompatibleFieldsDoNotBleedAcrossRows(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)

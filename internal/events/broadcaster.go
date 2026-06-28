@@ -30,29 +30,33 @@ const (
 	TaskGoalCleared            TaskEventType = "task_goal_cleared"
 	TaskGoalEvaluated          TaskEventType = "task_goal_evaluated"
 	TaskGoalFollowupQueued     TaskEventType = "task_goal_followup_queued"
+	MixtureProgress            TaskEventType = "mixture_progress"
 	AlertCreated               TaskEventType = "alert_created"
 )
 
 // TaskEvent represents a task state change event
 type TaskEvent struct {
-	Type           TaskEventType `json:"type"`
-	TaskID         string        `json:"task_id"`
-	TaskName       string        `json:"task_name,omitempty"`
-	ProjectID      string        `json:"project_id,omitempty"`
-	Status         string        `json:"status,omitempty"`
-	Category       string        `json:"category,omitempty"`
-	OldStatus      string        `json:"old_status,omitempty"`
-	OldCategory    string        `json:"old_category,omitempty"`
-	AlertID        string        `json:"alert_id,omitempty"`
-	ExecID         string        `json:"exec_id,omitempty"`
-	Message        string        `json:"message,omitempty"`
-	PendingInputID string        `json:"pending_input_id,omitempty"`
-	GoalID         string        `json:"goal_id,omitempty"`
-	GoalStatus     string        `json:"goal_status,omitempty"`
-	GoalObjective  string        `json:"goal_objective,omitempty"`
-	GoalReason     string        `json:"goal_reason,omitempty"`
-	BlockerKey     string        `json:"blocker_key,omitempty"`
-	BlockerCount   int           `json:"blocker_count,omitempty"`
+	Type                TaskEventType `json:"type"`
+	TaskID              string        `json:"task_id"`
+	TaskName            string        `json:"task_name,omitempty"`
+	ProjectID           string        `json:"project_id,omitempty"`
+	Status              string        `json:"status,omitempty"`
+	Category            string        `json:"category,omitempty"`
+	OldStatus           string        `json:"old_status,omitempty"`
+	OldCategory         string        `json:"old_category,omitempty"`
+	AlertID             string        `json:"alert_id,omitempty"`
+	ExecID              string        `json:"exec_id,omitempty"`
+	Message             string        `json:"message,omitempty"`
+	PendingInputID      string        `json:"pending_input_id,omitempty"`
+	Phase               string        `json:"phase,omitempty"`
+	TotalReferences     int           `json:"total_references,omitempty"`
+	CompletedReferences int           `json:"completed_references,omitempty"`
+	GoalID              string        `json:"goal_id,omitempty"`
+	GoalStatus          string        `json:"goal_status,omitempty"`
+	GoalObjective       string        `json:"goal_objective,omitempty"`
+	GoalReason          string        `json:"goal_reason,omitempty"`
+	BlockerKey          string        `json:"blocker_key,omitempty"`
+	BlockerCount        int           `json:"blocker_count,omitempty"`
 }
 
 // Subscriber is a channel that receives task events

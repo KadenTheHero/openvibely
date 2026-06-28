@@ -888,6 +888,40 @@ func TestHandler_ListModels_DeleteConfirmationDialog(t *testing.T) {
 	}
 }
 
+func TestHandler_ListModels_MixtureUI(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agg := &models.LLMConfig{Name: "Aggregator", Provider: models.ProviderTest, Model: "agg"}
+	ref := &models.LLMConfig{Name: "Reference", Provider: models.ProviderTest, Model: "ref"}
+	for _, cfg := range []*models.LLMConfig{agg, ref} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+	mixture := &models.LLMConfig{Name: "Research Mixture", Provider: models.ProviderMixture, Model: "default", MixtureConfigJSON: `{"enabled":true,"reference_models":[{"agent_config_id":"` + ref.ID + `","provider":"test","model":"ref","label":"Reference"}],"aggregator":{"agent_config_id":"` + agg.ID + `","provider":"test","model":"agg","label":"Aggregator"}}`}
+	if err := llmConfigRepo.Create(ctx, mixture); err != nil {
+		t.Fatalf("create mixture: %v", err)
+	}
+	rec := htmxGet(e, "/models")
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+	for _, want := range []string{
+		`<option value="mixture">Mixture of Models</option>`,
+		`id="mixture_fields"`,
+		`id="model_mixture_aggregator"`,
+		`id="model_mixture_references"`,
+		`This mixture calls`,
+		`Mixture of Models / default`,
+		`Aggregator: Aggregator`,
+		`References: 1`,
+		`data-model-mixture-config-json=`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected models UI to contain %q", want)
+		}
+	}
+}
+
 func TestHandler_ListModels_DefaultBadgeUsesCanonicalClass(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 	req := httptest.NewRequest(http.MethodGet, "/models", nil)

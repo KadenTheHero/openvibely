@@ -28,7 +28,7 @@ If a task is complex enough that `high` is producing shallow plans or missing ed
 2. Click `+ Add Model`.
 3. Fill:
    - `Name`
-   - `Provider` (`Anthropic`, `OpenAI`, `Ollama`, or an OpenAI-compatible preset such as `OpenRouter`, `Groq`, `LM Studio`, or `Custom OpenAI-Compatible`)
+   - `Provider` (`Anthropic`, `OpenAI`, `Ollama`, `Mixture of Models`, or an OpenAI-compatible preset such as `OpenRouter`, `Groq`, `LM Studio`, or `Custom OpenAI-Compatible`)
    - `Authentication` / `Connection Method` (provider-dependent)
    - `Model`
    - Optional runtime settings (`Temperature`, worker pool settings, etc.)
@@ -93,6 +93,15 @@ Where a low-level provider API still requires an output limit, OpenVibely choose
 
 - Set `Base URL` (default `http://localhost:11434`).
 - Use a listed model or enter `Custom Model Name`.
+
+### Mixture of Models
+
+- A Mixture of Models is a virtual model config composed from existing non-mixture model configs.
+- Choose one `Aggregator Model` and one or more `Reference Models` in the model dialog.
+- On each turn, reference models run first as private advisory calls with tools disabled. Their outputs are not shown as separate chat/task messages.
+- The aggregator then runs as the acting model with normal OpenVibely behavior, including tools, streaming, attachments, task updates, and channel replies.
+- The dialog shows the cost warning `This mixture calls N reference models plus 1 aggregator model per turn.`
+- You cannot delete a model config while a mixture uses it as an aggregator or reference; remove it from the mixture first.
 
 ## Default Model Behavior
 

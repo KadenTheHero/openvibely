@@ -71,6 +71,15 @@ func WithRuntimeTools(ctx context.Context, tools *RuntimeTools) context.Context 
 	return context.WithValue(ctx, runtimeToolsContextKey{}, tools)
 }
 
+// WithoutRuntimeTools returns a child context that masks any inherited runtime tools
+// while preserving cancellation, deadlines, and other context values.
+func WithoutRuntimeTools(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, runtimeToolsContextKey{}, (*RuntimeTools)(nil))
+}
+
 // RuntimeToolsFromContext returns request-scoped runtime tools, if present.
 func RuntimeToolsFromContext(ctx context.Context) *RuntimeTools {
 	if ctx == nil {

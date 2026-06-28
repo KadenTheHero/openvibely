@@ -238,6 +238,289 @@ func TestListOpenAICompatibleAvailableModelsFallsBackToV1Models(t *testing.T) {
 	}
 }
 
+func TestCreateModel_Mixture(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agg := &models.LLMConfig{Name: "Aggregator", Provider: models.ProviderTest, Model: "agg"}
+	ref := &models.LLMConfig{Name: "Reference", Provider: models.ProviderTest, Model: "ref"}
+	if err := llmConfigRepo.Create(ctx, agg); err != nil {
+		t.Fatalf("create aggregator: %v", err)
+	}
+	if err := llmConfigRepo.Create(ctx, ref); err != nil {
+		t.Fatalf("create reference: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Research Mixture")
+	form.Set("provider", "mixture")
+	form.Set("model", "research-heavy")
+	form.Set("mixture_enabled", "on")
+	form.Set("mixture_aggregator_id", agg.ID)
+	form.Add("mixture_reference_ids", ref.ID)
+	form.Set("mixture_reference_timeout_seconds", "45")
+	form.Set("mixture_max_reference_workers", "4")
+	form.Set("mixture_reference_temperature", "0.7")
+	form.Set("mixture_aggregator_temperature", "0.2")
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+	configs, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var created *models.LLMConfig
+	for i := range configs {
+		if configs[i].Name == "Research Mixture" {
+			created = &configs[i]
+			break
+		}
+	}
+	if created == nil {
+		t.Fatal("created mixture not found")
+	}
+	if created.Provider != models.ProviderMixture || created.AuthMethod != models.AuthMethodAPIKey || created.APIKey != "" {
+		t.Fatalf("unexpected mixture provider/auth: %+v", created)
+	}
+	var cfg struct {
+		Enabled         bool `json:"enabled"`
+		ReferenceModels []struct {
+			AgentConfigID string `json:"agent_config_id"`
+			Provider      string `json:"provider"`
+			Model         string `json:"model"`
+			Label         string `json:"label"`
+		} `json:"reference_models"`
+		Aggregator struct {
+			AgentConfigID string `json:"agent_config_id"`
+			Provider      string `json:"provider"`
+			Model         string `json:"model"`
+			Label         string `json:"label"`
+		} `json:"aggregator"`
+		ReferenceTimeoutSeconds int `json:"reference_timeout_seconds"`
+		MaxReferenceWorkers     int `json:"max_reference_workers"`
+	}
+	if err := json.Unmarshal([]byte(created.MixtureConfigJSON), &cfg); err != nil {
+		t.Fatalf("unmarshal mixture config: %v", err)
+	}
+	if !cfg.Enabled || cfg.Aggregator.AgentConfigID != agg.ID || cfg.Aggregator.Label != "Aggregator" || len(cfg.ReferenceModels) != 1 || cfg.ReferenceModels[0].AgentConfigID != ref.ID || cfg.ReferenceTimeoutSeconds != 45 || cfg.MaxReferenceWorkers != 4 {
+		t.Fatalf("unexpected mixture config: %s", created.MixtureConfigJSON)
+	}
+}
+
+func TestCreateModel_MixtureCommaSeparatedReferenceOrder(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agg := &models.LLMConfig{Name: "Aggregator", Provider: models.ProviderTest, Model: "agg"}
+	refA := &models.LLMConfig{Name: "Reference A", Provider: models.ProviderTest, Model: "ref-a"}
+	refB := &models.LLMConfig{Name: "Reference B", Provider: models.ProviderTest, Model: "ref-b"}
+	for _, cfg := range []*models.LLMConfig{agg, refA, refB} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	form := url.Values{}
+	form.Set("name", "Ordered Mixture")
+	form.Set("provider", "mixture")
+	form.Set("model", "ordered")
+	form.Set("mixture_enabled", "on")
+	form.Set("mixture_aggregator_id", agg.ID)
+	form.Set("mixture_reference_ids", refB.ID+","+refA.ID)
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	configs, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var created *models.LLMConfig
+	for i := range configs {
+		if configs[i].Name == "Ordered Mixture" {
+			created = &configs[i]
+			break
+		}
+	}
+	if created == nil {
+		t.Fatal("created mixture not found")
+	}
+	var cfg struct {
+		ReferenceModels []struct {
+			AgentConfigID string `json:"agent_config_id"`
+		} `json:"reference_models"`
+	}
+	if err := json.Unmarshal([]byte(created.MixtureConfigJSON), &cfg); err != nil {
+		t.Fatalf("unmarshal mixture config: %v", err)
+	}
+	if len(cfg.ReferenceModels) != 2 || cfg.ReferenceModels[0].AgentConfigID != refB.ID || cfg.ReferenceModels[1].AgentConfigID != refA.ID {
+		t.Fatalf("expected comma-separated fallback reference order [%s %s], got %+v in %s", refB.ID, refA.ID, cfg.ReferenceModels, created.MixtureConfigJSON)
+	}
+}
+
+func TestUpdateModel_Mixture(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agg := &models.LLMConfig{Name: "Aggregator", Provider: models.ProviderTest, Model: "agg"}
+	ref := &models.LLMConfig{Name: "Reference", Provider: models.ProviderTest, Model: "ref"}
+	mixture := &models.LLMConfig{Name: "Old Mixture", Provider: models.ProviderMixture, Model: "default", MixtureConfigJSON: `{"enabled":false,"aggregator":{"agent_config_id":"placeholder"}}`}
+	for _, cfg := range []*models.LLMConfig{agg, ref, mixture} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+	form := url.Values{}
+	form.Set("name", "Edited Mixture")
+	form.Set("provider", "mixture")
+	form.Set("model", "edited")
+	form.Set("mixture_enabled", "on")
+	form.Set("mixture_aggregator_id", agg.ID)
+	form.Add("mixture_reference_ids", ref.ID)
+	form.Set("temperature", "0")
+	req := httptest.NewRequest(http.MethodPut, "/models/"+mixture.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+	updated, err := llmConfigRepo.GetByID(ctx, mixture.ID)
+	if err != nil {
+		t.Fatalf("get updated: %v", err)
+	}
+	if updated.Name != "Edited Mixture" || !strings.Contains(updated.MixtureConfigJSON, ref.ID) {
+		t.Fatalf("mixture not updated: %+v", updated)
+	}
+}
+
+func TestCreateModel_MixtureRejectsMissingAggregator(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	form := url.Values{}
+	form.Set("name", "Bad Mixture")
+	form.Set("provider", "mixture")
+	form.Set("mixture_enabled", "on")
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "aggregator") {
+		t.Fatalf("expected missing aggregator 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateModel_MixtureRejectsRecursiveAndDuplicateSlots(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agg := &models.LLMConfig{Name: "Aggregator", Provider: models.ProviderTest, Model: "agg"}
+	ref := &models.LLMConfig{Name: "Reference", Provider: models.ProviderTest, Model: "ref"}
+	recursive := &models.LLMConfig{Name: "Recursive", Provider: models.ProviderMixture, Model: "recursive", MixtureConfigJSON: `{"enabled":false,"aggregator":{"agent_config_id":"placeholder"}}`}
+	for _, cfg := range []*models.LLMConfig{agg, ref, recursive} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+	cases := []struct {
+		name string
+		refs []string
+		want string
+	}{
+		{name: "recursive", refs: []string{recursive.ID}, want: "mixture model"},
+		{name: "duplicate", refs: []string{ref.ID, ref.ID}, want: "duplicate reference"},
+		{name: "aggregator as reference", refs: []string{agg.ID}, want: "aggregator cannot also be a reference"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			form := url.Values{}
+			form.Set("name", "Bad Mixture "+tc.name)
+			form.Set("provider", "mixture")
+			form.Set("mixture_enabled", "on")
+			form.Set("mixture_aggregator_id", agg.ID)
+			for _, id := range tc.refs {
+				form.Add("mixture_reference_ids", id)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), tc.want) {
+				t.Fatalf("expected %q 400, got %d: %s", tc.want, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestCreateModel_MixtureRejectsNonCallableSlots(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	callable := &models.LLMConfig{Name: "Callable API", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5"}
+	cliOpenAI := &models.LLMConfig{Name: "Codex CLI", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodCLI, Model: "gpt-5-codex"}
+	cliAnthropic := &models.LLMConfig{Name: "Claude CLI", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodCLI, Model: "claude-sonnet"}
+	for _, cfg := range []*models.LLMConfig{callable, cliOpenAI, cliAnthropic} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	cases := []struct {
+		name         string
+		aggregatorID string
+		refs         []string
+		want         string
+	}{
+		{name: "cli aggregator", aggregatorID: cliOpenAI.ID, refs: []string{callable.ID}, want: "Codex CLI"},
+		{name: "cli reference", aggregatorID: callable.ID, refs: []string{cliAnthropic.ID}, want: "Claude CLI"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			form := url.Values{}
+			form.Set("name", "Bad Mixture "+tc.name)
+			form.Set("provider", "mixture")
+			form.Set("mixture_enabled", "on")
+			form.Set("mixture_aggregator_id", tc.aggregatorID)
+			for _, id := range tc.refs {
+				form.Add("mixture_reference_ids", id)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), tc.want) {
+				t.Fatalf("expected %q 400, got %d: %s", tc.want, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestDeleteModel_UsedByMixtureBlockedWithNames(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agg := &models.LLMConfig{Name: "Aggregator", Provider: models.ProviderTest, Model: "agg"}
+	ref := &models.LLMConfig{Name: "Reference", Provider: models.ProviderTest, Model: "ref"}
+	for _, cfg := range []*models.LLMConfig{agg, ref} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+	mixture := &models.LLMConfig{Name: "Research Mixture", Provider: models.ProviderMixture, Model: "default", MixtureConfigJSON: `{"enabled":true,"reference_models":[{"agent_config_id":"` + ref.ID + `"}],"aggregator":{"agent_config_id":"` + agg.ID + `"}}`}
+	if err := llmConfigRepo.Create(ctx, mixture); err != nil {
+		t.Fatalf("create mixture: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/models/"+ref.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Research Mixture") || !strings.Contains(rec.Body.String(), "Remove it from those mixtures") {
+		t.Fatalf("expected mixture delete block, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestCreateModel_OpenAICompatible(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
@@ -1846,10 +2129,10 @@ func TestUpdateModel_PreservesProjectIDInRedirect(t *testing.T) {
 
 	// Create a model to update.
 	agent := &models.LLMConfig{
-		Name:     "Update Redirect Model",
-		Provider: models.ProviderAnthropic,
-		Model:    "claude-sonnet-4-5-20250929",
-		APIKey:   "sk-ant-update-key",
+		Name:      "Update Redirect Model",
+		Provider:  models.ProviderAnthropic,
+		Model:     "claude-sonnet-4-5-20250929",
+		APIKey:    "sk-ant-update-key",
 		IsDefault: false,
 	}
 	if err := llmConfigRepo.Create(context.Background(), agent); err != nil {

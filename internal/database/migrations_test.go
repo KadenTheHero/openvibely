@@ -87,8 +87,39 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 104 {
-		t.Fatalf("max goose version = %d, want 104", maxVersion)
+	if maxVersion != 105 {
+		t.Fatalf("max goose version = %d, want 105", maxVersion)
+	}
+}
+
+func TestMigration105_AllowsMixtureProviderAndConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "mixture-105.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("failed to set dialect: %v", err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("failed to run migrations: %v", err)
+	}
+	if !tableHasColumn(t, db, "agent_configs", "mixture_config_json") {
+		t.Fatal("expected agent_configs.mixture_config_json column")
+	}
+	if _, err := db.Exec(`INSERT INTO agent_configs (id, name, provider, model, auth_method, mixture_config_json) VALUES ('mixture-105', 'Mixture', 'mixture', 'default', 'api_key', '{"enabled":false}')`); err != nil {
+		t.Fatalf("expected mixture provider row to insert: %v", err)
+	}
+	var raw string
+	if err := db.QueryRow(`SELECT mixture_config_json FROM agent_configs WHERE id = 'mixture-105'`).Scan(&raw); err != nil {
+		t.Fatalf("failed to read mixture config: %v", err)
+	}
+	if raw != `{"enabled":false}` {
+		t.Fatalf("mixture_config_json = %q", raw)
 	}
 }
 
@@ -526,8 +557,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 104 {
-		t.Fatalf("max goose version = %d, want 104", maxVersion)
+	if maxVersion != 105 {
+		t.Fatalf("max goose version = %d, want 105", maxVersion)
 	}
 }
 
@@ -878,8 +909,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 104 {
-		t.Fatalf("max goose version = %d, want 104", maxVersion)
+	if maxVersion != 105 {
+		t.Fatalf("max goose version = %d, want 105", maxVersion)
 	}
 }
 

@@ -1,0 +1,172 @@
+-- +goose Up
+-- +goose NO TRANSACTION
+
+PRAGMA foreign_keys=OFF;
+
+DROP TRIGGER IF EXISTS update_agent_configs_timestamp;
+
+CREATE TABLE agent_configs_new (
+    id                       TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    name                     TEXT NOT NULL,
+    provider                 TEXT NOT NULL DEFAULT 'anthropic'
+                             CHECK (provider IN ('anthropic', 'openai', 'openai_compatible', 'ollama', 'test', 'mixture')),
+    model                    TEXT NOT NULL DEFAULT 'claude-sonnet-4-5-20250929',
+    api_key                  TEXT NOT NULL DEFAULT '',
+    max_tokens               INTEGER NOT NULL DEFAULT 4096,
+    temperature              REAL NOT NULL DEFAULT 0.0,
+    is_default               INTEGER NOT NULL DEFAULT 0,
+    created_at               DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at               DATETIME NOT NULL DEFAULT (datetime('now')),
+    auth_method              TEXT NOT NULL DEFAULT 'cli'
+                             CHECK (auth_method IN ('cli', 'oauth', 'api_key')),
+    oauth_access_token       TEXT NOT NULL DEFAULT '',
+    oauth_refresh_token      TEXT NOT NULL DEFAULT '',
+    oauth_expires_at         INTEGER NOT NULL DEFAULT 0,
+    reasoning_effort         TEXT NOT NULL DEFAULT ''
+                             CHECK (reasoning_effort IN ('', 'low', 'medium', 'high', 'xhigh', 'max')),
+    max_workers              INTEGER NOT NULL DEFAULT 0,
+    worker_timeout           INTEGER NOT NULL DEFAULT 0,
+    oauth_client_id          TEXT NOT NULL DEFAULT '',
+    oauth_client_secret      TEXT NOT NULL DEFAULT '',
+    oauth_authorize_url      TEXT NOT NULL DEFAULT '',
+    oauth_token_url          TEXT NOT NULL DEFAULT '',
+    oauth_scopes             TEXT NOT NULL DEFAULT '',
+    ollama_base_url          TEXT NOT NULL DEFAULT '',
+    oauth_account_id         TEXT NOT NULL DEFAULT '',
+    auto_start_tasks         INTEGER NOT NULL DEFAULT 0,
+    base_url                 TEXT NOT NULL DEFAULT '',
+    transport                TEXT NOT NULL DEFAULT '',
+    preset_slug              TEXT NOT NULL DEFAULT '',
+    models_url               TEXT NOT NULL DEFAULT '',
+    auth_header_name         TEXT NOT NULL DEFAULT '',
+    auth_header_value_prefix TEXT NOT NULL DEFAULT '',
+    extra_headers_json       TEXT NOT NULL DEFAULT '',
+    extra_body_json          TEXT NOT NULL DEFAULT '',
+    default_max_tokens       INTEGER NOT NULL DEFAULT 0,
+    token_exchange_format    TEXT NOT NULL DEFAULT '',
+    token_refresh_format     TEXT NOT NULL DEFAULT '',
+    mixture_config_json      TEXT NOT NULL DEFAULT ''
+);
+
+INSERT INTO agent_configs_new (
+    id, name, provider, model, api_key, max_tokens, temperature, is_default,
+    created_at, updated_at, auth_method, oauth_access_token, oauth_refresh_token,
+    oauth_expires_at, reasoning_effort, max_workers, worker_timeout,
+    oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url,
+    oauth_scopes, ollama_base_url, oauth_account_id, auto_start_tasks,
+    base_url, transport, preset_slug, models_url, auth_header_name,
+    auth_header_value_prefix, extra_headers_json, extra_body_json,
+    default_max_tokens, token_exchange_format, token_refresh_format
+)
+SELECT
+    id, name, provider, model, api_key, max_tokens, temperature, is_default,
+    created_at, updated_at, auth_method, oauth_access_token, oauth_refresh_token,
+    oauth_expires_at, reasoning_effort, max_workers, worker_timeout,
+    oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url,
+    oauth_scopes, ollama_base_url, oauth_account_id, auto_start_tasks,
+    base_url, transport, preset_slug, models_url, auth_header_name,
+    auth_header_value_prefix, extra_headers_json, extra_body_json,
+    default_max_tokens, token_exchange_format, token_refresh_format
+FROM agent_configs;
+
+DROP TABLE agent_configs;
+ALTER TABLE agent_configs_new RENAME TO agent_configs;
+
+-- +goose StatementBegin
+CREATE TRIGGER update_agent_configs_timestamp
+AFTER UPDATE ON agent_configs
+FOR EACH ROW
+BEGIN
+    UPDATE agent_configs SET updated_at = datetime('now') WHERE id = OLD.id;
+END;
+-- +goose StatementEnd
+
+PRAGMA foreign_key_check;
+PRAGMA foreign_keys=ON;
+
+-- +goose Down
+-- +goose NO TRANSACTION
+
+PRAGMA foreign_keys=OFF;
+
+DROP TRIGGER IF EXISTS update_agent_configs_timestamp;
+
+CREATE TABLE agent_configs_old (
+    id                       TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    name                     TEXT NOT NULL,
+    provider                 TEXT NOT NULL DEFAULT 'anthropic'
+                             CHECK (provider IN ('anthropic', 'openai', 'openai_compatible', 'ollama', 'test')),
+    model                    TEXT NOT NULL DEFAULT 'claude-sonnet-4-5-20250929',
+    api_key                  TEXT NOT NULL DEFAULT '',
+    max_tokens               INTEGER NOT NULL DEFAULT 4096,
+    temperature              REAL NOT NULL DEFAULT 0.0,
+    is_default               INTEGER NOT NULL DEFAULT 0,
+    created_at               DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at               DATETIME NOT NULL DEFAULT (datetime('now')),
+    auth_method              TEXT NOT NULL DEFAULT 'cli'
+                             CHECK (auth_method IN ('cli', 'oauth', 'api_key')),
+    oauth_access_token       TEXT NOT NULL DEFAULT '',
+    oauth_refresh_token      TEXT NOT NULL DEFAULT '',
+    oauth_expires_at         INTEGER NOT NULL DEFAULT 0,
+    reasoning_effort         TEXT NOT NULL DEFAULT ''
+                             CHECK (reasoning_effort IN ('', 'low', 'medium', 'high', 'xhigh', 'max')),
+    max_workers              INTEGER NOT NULL DEFAULT 0,
+    worker_timeout           INTEGER NOT NULL DEFAULT 0,
+    oauth_client_id          TEXT NOT NULL DEFAULT '',
+    oauth_client_secret      TEXT NOT NULL DEFAULT '',
+    oauth_authorize_url      TEXT NOT NULL DEFAULT '',
+    oauth_token_url          TEXT NOT NULL DEFAULT '',
+    oauth_scopes             TEXT NOT NULL DEFAULT '',
+    ollama_base_url          TEXT NOT NULL DEFAULT '',
+    oauth_account_id         TEXT NOT NULL DEFAULT '',
+    auto_start_tasks         INTEGER NOT NULL DEFAULT 0,
+    base_url                 TEXT NOT NULL DEFAULT '',
+    transport                TEXT NOT NULL DEFAULT '',
+    preset_slug              TEXT NOT NULL DEFAULT '',
+    models_url               TEXT NOT NULL DEFAULT '',
+    auth_header_name         TEXT NOT NULL DEFAULT '',
+    auth_header_value_prefix TEXT NOT NULL DEFAULT '',
+    extra_headers_json       TEXT NOT NULL DEFAULT '',
+    extra_body_json          TEXT NOT NULL DEFAULT '',
+    default_max_tokens       INTEGER NOT NULL DEFAULT 0,
+    token_exchange_format    TEXT NOT NULL DEFAULT '',
+    token_refresh_format     TEXT NOT NULL DEFAULT ''
+);
+
+INSERT INTO agent_configs_old (
+    id, name, provider, model, api_key, max_tokens, temperature, is_default,
+    created_at, updated_at, auth_method, oauth_access_token, oauth_refresh_token,
+    oauth_expires_at, reasoning_effort, max_workers, worker_timeout,
+    oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url,
+    oauth_scopes, ollama_base_url, oauth_account_id, auto_start_tasks,
+    base_url, transport, preset_slug, models_url, auth_header_name,
+    auth_header_value_prefix, extra_headers_json, extra_body_json,
+    default_max_tokens, token_exchange_format, token_refresh_format
+)
+SELECT
+    id, name,
+    CASE WHEN provider = 'mixture' THEN 'openai_compatible' ELSE provider END,
+    model, api_key, max_tokens, temperature, is_default,
+    created_at, updated_at, auth_method, oauth_access_token, oauth_refresh_token,
+    oauth_expires_at, reasoning_effort, max_workers, worker_timeout,
+    oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url,
+    oauth_scopes, ollama_base_url, oauth_account_id, auto_start_tasks,
+    base_url, transport, preset_slug, models_url, auth_header_name,
+    auth_header_value_prefix, extra_headers_json, extra_body_json,
+    default_max_tokens, token_exchange_format, token_refresh_format
+FROM agent_configs;
+
+DROP TABLE agent_configs;
+ALTER TABLE agent_configs_old RENAME TO agent_configs;
+
+-- +goose StatementBegin
+CREATE TRIGGER update_agent_configs_timestamp
+AFTER UPDATE ON agent_configs
+FOR EACH ROW
+BEGIN
+    UPDATE agent_configs SET updated_at = datetime('now') WHERE id = OLD.id;
+END;
+-- +goose StatementEnd
+
+PRAGMA foreign_key_check;
+PRAGMA foreign_keys=ON;

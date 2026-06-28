@@ -226,6 +226,123 @@ func TestModelsContent_ModelModalJavaScriptShape(t *testing.T) {
 	}
 }
 
+func TestModelsContent_MixtureReferenceOrderingControls(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+	out := buf.String()
+
+	for _, want := range []string{
+		`id="model_mixture_reference_available"`,
+		`id="model_mixture_references"`,
+		`id="model_mixture_reference_ids_order"`,
+		`onclick="addMixtureReference()"`,
+		`onclick="moveMixtureReference(-1)"`,
+		`onclick="moveMixtureReference(1)"`,
+		`onclick="removeMixtureReference()"`,
+		"Add Reference",
+		"Move Up",
+		"Move Down",
+		"select one in the ordered list",
+		"function renderMixtureReferenceOptions(selectedIDs)",
+		"function addMixtureReference()",
+		"function removeMixtureReference()",
+		"function moveMixtureReference(direction)",
+		"var index = select.selectedIndex;",
+		"select.insertBefore(option, select.options[index - 1]);",
+		"select.insertBefore(select.options[index + 1], option);",
+		"syncMixtureReferenceOrderInput();",
+		"selectedMixtureReferenceIDs().map(function(id)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected mixture reference ordering UI/script to contain %q", want)
+		}
+	}
+
+	for _, broken := range []string{
+		"Reference order follows the selected model list order",
+		"function moveMixtureReferences(direction)",
+		"opt.selected && !prev.selected",
+		"current.selected && !next.selected",
+	} {
+		if strings.Contains(out, broken) {
+			t.Fatalf("rendered mixture reference ordering still contains broken fixed-order behavior: %q", broken)
+		}
+	}
+}
+
+func TestModelsContent_MixtureEditHydratesSavedReferenceOrder(t *testing.T) {
+	agents := []models.LLMConfig{
+		{ID: "ref-a", Name: "Reference A", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-a"},
+		{ID: "ref-b", Name: "Reference B", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-b"},
+		{ID: "mix", Name: "Ordered Mix", Provider: models.ProviderMixture, Model: "mixture", MixtureConfigJSON: `{"enabled":true,"reference_models":[{"agent_config_id":"ref-b"},{"agent_config_id":"ref-a"}],"aggregator":{"agent_config_id":"ref-a"}}`},
+	}
+	var buf bytes.Buffer
+	if err := ModelsContent(agents, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+	out := buf.String()
+
+	cardStart := strings.Index(out, `data-model-id="mix"`)
+	if cardStart < 0 {
+		t.Fatal("expected rendered mixture model card")
+	}
+	cardMarkup := out[cardStart:]
+	if nextCard := strings.Index(cardMarkup[1:], `data-model-id=`); nextCard > 0 {
+		cardMarkup = cardMarkup[:nextCard+1]
+	}
+	if !strings.Contains(cardMarkup, `data-model-mixture-config-json=`) {
+		t.Fatal("expected mixture edit card to carry saved mixture config JSON")
+	}
+	refB := strings.Index(cardMarkup, `agent_config_id`)
+	refA := strings.LastIndex(cardMarkup, `agent_config_id`)
+	if refB < 0 || refA < 0 || refB == refA {
+		t.Fatalf("expected saved mixture config data to include ordered reference model IDs")
+	}
+	if strings.Index(cardMarkup, `ref-b`) < 0 || strings.Index(cardMarkup, `ref-a`) < 0 || strings.Index(cardMarkup, `ref-b`) > strings.Index(cardMarkup, `ref-a`) {
+		t.Fatalf("expected saved mixture config data to preserve reference order ref-b before ref-a")
+	}
+	if !strings.Contains(out, "renderMixtureReferenceOptions(selectedIDs);") {
+		t.Fatal("expected edit hydration to rebuild reference selector in saved order")
+	}
+}
+
+func TestModelsContent_MixturePickerFiltersNonCallableModels(t *testing.T) {
+	agents := []models.LLMConfig{
+		{ID: "api-openai", Name: "OpenAI API", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5"},
+		{ID: "oauth-anthropic", Name: "Claude OAuth", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token", OAuthExpiresAt: 9999999999999, Model: "claude-sonnet"},
+		{ID: "cli-openai", Name: "Codex CLI", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodCLI, Model: "gpt-5-codex"},
+		{ID: "cli-anthropic", Name: "Claude CLI", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodCLI, Model: "claude-sonnet"},
+		{ID: "mixture", Name: "Existing Mixture", Provider: models.ProviderMixture, Model: "default"},
+		{ID: "internal", Name: "Internal", Provider: models.LLMProvider("internal"), AuthMethod: models.AuthMethodAPIKey, Model: "internal"},
+	}
+	var buf bytes.Buffer
+	if err := ModelsContent(agents, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+	out := buf.String()
+	start := strings.Index(out, `id="mixture_fields"`)
+	if start < 0 {
+		t.Fatal("expected rendered mixture fields")
+	}
+	pickerMarkup := out[start:]
+	if end := strings.Index(pickerMarkup, `>`); end >= 0 {
+		pickerMarkup = pickerMarkup[:end]
+	}
+
+	for _, allowed := range []string{"api-openai", "oauth-anthropic", "OpenAI API", "Claude OAuth"} {
+		if !strings.Contains(pickerMarkup, allowed) {
+			t.Fatalf("expected callable mixture option %q in rendered picker data: %s", allowed, pickerMarkup)
+		}
+	}
+	for _, blocked := range []string{"cli-openai", "cli-anthropic", "Codex CLI", "Claude CLI", "Existing Mixture", "internal"} {
+		if strings.Contains(pickerMarkup, blocked) {
+			t.Fatalf("expected non-callable mixture option %q to be omitted from picker data: %s", blocked, pickerMarkup)
+		}
+	}
+}
+
 func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {

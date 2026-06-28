@@ -4,11 +4,16 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/events"
 	llmanthropic "github.com/openvibely/openvibely/internal/llm/anthropic"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	llmopenai_compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
@@ -35,6 +40,7 @@ func (s *LLMService) initProviderAdapters() {
 		models.ProviderOpenAI:           &openAIProviderAdapter{svc: s, adapter: openaiAdapter},
 		models.ProviderOpenAICompatible: &openAICompatibleProviderAdapter{svc: s, adapter: openaiCompatibleAdapter},
 		models.ProviderOllama:           &ollamaProviderAdapter{svc: s, adapter: ollamaAdapter},
+		models.ProviderMixture:          &mixtureProviderAdapter{svc: s},
 		models.ProviderTest:             &testProviderAdapter{svc: s},
 	}
 }
@@ -323,6 +329,205 @@ func (a *ollamaProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 	return callWithRetry(req, func() (llmcontracts.AgentResult, error) {
 		return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
 	})
+}
+
+type mixtureProviderAdapter struct {
+	svc *LLMService
+}
+
+func (a *mixtureProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	cfg, err := llmmixture.ParseConfig(req.Agent.MixtureConfigJSON)
+	if err != nil {
+		return llmcontracts.AgentResult{}, err
+	}
+	aggregator, err := a.resolveMixtureSlot(req.Ctx, cfg.Aggregator)
+	if err != nil {
+		return llmcontracts.AgentResult{}, fmt.Errorf("mixture aggregator: %w", err)
+	}
+	if aggregator.Provider == models.ProviderMixture {
+		return llmcontracts.AgentResult{}, fmt.Errorf("mixture aggregator cannot use provider %s", aggregator.Provider)
+	}
+	if !cfg.Enabled {
+		aggReq := req
+		aggReq.Agent = aggregator
+		aggReq.Agent.Temperature = cfg.AggregatorTemperature
+		return a.callAggregator(aggReq)
+	}
+
+	a.publishMixtureProgress(req, "running_references", 0, len(cfg.ReferenceModels), fmt.Sprintf("Running %d reference models...", len(cfg.ReferenceModels)))
+	results := a.runMixtureReferences(req, cfg)
+	completed := 0
+	for _, result := range results {
+		if result.Err == "" {
+			completed++
+		}
+	}
+	a.publishMixtureProgress(req, "references_complete", len(results), len(cfg.ReferenceModels), "Reference models complete")
+	if err := contextErr(req.Ctx); err != nil {
+		return llmcontracts.AgentResult{}, err
+	}
+	contextBlock := llmmixture.PrivateContext(results)
+	aggReq := llmmixture.AppendPrivateContext(req, contextBlock)
+	aggReq.Agent = aggregator
+	aggReq.Agent.Temperature = cfg.AggregatorTemperature
+	a.publishMixtureProgress(req, "aggregator_starting", len(results), len(cfg.ReferenceModels), "Aggregator starting...")
+	res, err := a.callAggregator(aggReq)
+	res.Usage = mergeMixtureUsage(results, res.Usage)
+	return res, err
+}
+
+func (a *mixtureProviderAdapter) resolveMixtureSlot(ctx context.Context, slot llmmixture.ModelSlot) (models.LLMConfig, error) {
+	id := strings.TrimSpace(slot.AgentConfigID)
+	if id == "" {
+		return models.LLMConfig{}, fmt.Errorf("model config id is required")
+	}
+	if a.svc == nil || a.svc.llmConfigRepo == nil {
+		return models.LLMConfig{}, fmt.Errorf("model config repository is unavailable")
+	}
+	cfg, err := a.svc.llmConfigRepo.GetByID(ctx, id)
+	if err != nil {
+		return models.LLMConfig{}, err
+	}
+	if cfg == nil {
+		return models.LLMConfig{}, fmt.Errorf("model config not found")
+	}
+	return *cfg, nil
+}
+
+func (a *mixtureProviderAdapter) runMixtureReferences(req llmcontracts.AgentRequest, cfg llmmixture.Config) []llmmixture.ReferenceResult {
+	results := make([]llmmixture.ReferenceResult, len(cfg.ReferenceModels))
+	if len(cfg.ReferenceModels) == 0 {
+		return results
+	}
+	limit := cfg.MaxReferenceWorkers
+	if limit <= 0 || limit > len(cfg.ReferenceModels) {
+		limit = len(cfg.ReferenceModels)
+	}
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	var finishedReferences atomic.Int64
+	for i, slot := range cfg.ReferenceModels {
+		i, slot := i, slot
+		results[i] = llmmixture.ReferenceResult{
+			Index:    i,
+			Label:    llmmixture.SlotLabel(slot, ""),
+			Provider: strings.TrimSpace(slot.Provider),
+			Model:    strings.TrimSpace(slot.Model),
+		}
+		if err := contextErr(req.Ctx); err != nil {
+			results[i].Err = err.Error()
+			continue
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[i] = a.callMixtureReference(req, cfg, slot, i)
+			completed := int(finishedReferences.Add(1))
+			a.publishMixtureProgress(req, "reference_complete", completed, len(cfg.ReferenceModels), fmt.Sprintf("Reference model %d complete", i+1))
+		}()
+	}
+	wg.Wait()
+	return results
+}
+
+func (a *mixtureProviderAdapter) callMixtureReference(req llmcontracts.AgentRequest, cfg llmmixture.Config, slot llmmixture.ModelSlot, index int) llmmixture.ReferenceResult {
+	result := llmmixture.ReferenceResult{Index: index, Label: llmmixture.SlotLabel(slot, ""), Provider: strings.TrimSpace(slot.Provider), Model: strings.TrimSpace(slot.Model)}
+	resolved, err := a.resolveMixtureSlot(req.Ctx, slot)
+	if err != nil {
+		result.Err = "model config not found"
+		return result
+	}
+	result.Label = llmmixture.SlotLabel(slot, resolved.Name)
+	result.Provider = string(resolved.Provider)
+	result.Model = resolved.Model
+	if resolved.Provider == models.ProviderMixture {
+		result.Err = "recursive mixture model is not allowed"
+		return result
+	}
+	adapter, ok := a.svc.adapterFor(resolved.Provider)
+	if !ok {
+		result.Err = fmt.Sprintf("no adapter for provider %s", resolved.Provider)
+		return result
+	}
+	refCtx := llmcontracts.WithoutRuntimeTools(req.Ctx)
+	refCtx, cancel := context.WithTimeout(refCtx, time.Duration(cfg.ReferenceTimeoutSeconds)*time.Second)
+	defer cancel()
+	refReq := req
+	refReq.Ctx = refCtx
+	refReq.Agent = resolved
+	refReq.Agent.Temperature = cfg.ReferenceTemperature
+	refReq.Operation = llmcontracts.OperationDirect
+	refReq.DisableTools = true
+	refReq.RawDirectPrompt = true
+	refReq.ExecID = ""
+	refReq.AgentDefinition = nil
+	refReq.PluginDirs = nil
+	refReq.ProjectInstructions = ""
+	refReq.ChatSystemContext = ""
+	refReq.Attachments = nil
+	refReq.Message = llmmixture.ReferencePrompt(req.Message, req.ChatHistory)
+	res, err := adapter.Call(refReq)
+	if err != nil {
+		result.Err = err.Error()
+		if refCtx.Err() != nil {
+			result.Err = refCtx.Err().Error()
+		}
+		return result
+	}
+	result.Output = res.TextOnlyOutput
+	if result.Output == "" {
+		result.Output = res.Output
+	}
+	result.Usage = res.Usage
+	return result
+}
+
+func (a *mixtureProviderAdapter) callAggregator(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	adapter, ok := a.svc.adapterFor(req.Agent.Provider)
+	if !ok {
+		return llmcontracts.AgentResult{}, fmt.Errorf("no adapter for mixture aggregator provider %s", req.Agent.Provider)
+	}
+	return adapter.Call(req)
+}
+
+func (a *mixtureProviderAdapter) publishMixtureProgress(req llmcontracts.AgentRequest, phase string, completed, total int, message string) {
+	if a == nil || a.svc == nil || a.svc.broadcaster == nil || strings.TrimSpace(req.ExecID) == "" {
+		return
+	}
+	a.svc.broadcaster.Publish(events.TaskEvent{
+		Type:                events.MixtureProgress,
+		ExecID:              req.ExecID,
+		Phase:               phase,
+		TotalReferences:     total,
+		CompletedReferences: completed,
+		Message:             message,
+	})
+}
+
+func mergeMixtureUsage(results []llmmixture.ReferenceResult, aggregator llmcontracts.Usage) llmcontracts.Usage {
+	merged := aggregator
+	if merged.ProviderRaw == nil {
+		merged.ProviderRaw = map[string]int{}
+	}
+	merged.ProviderRaw["aggregator_total_tokens"] = aggregator.TotalTokens
+	for i, result := range results {
+		merged.InputTokens += result.Usage.InputTokens
+		merged.OutputTokens += result.Usage.OutputTokens
+		merged.CachedInputTokens += result.Usage.CachedInputTokens
+		merged.ReasoningTokens += result.Usage.ReasoningTokens
+		merged.TotalTokens += result.Usage.TotalTokens
+		merged.ProviderRaw[fmt.Sprintf("reference_%d_total_tokens", i+1)] = result.Usage.TotalTokens
+	}
+	return merged
+}
+
+func contextErr(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
 }
 
 type testProviderAdapter struct {

@@ -175,6 +175,26 @@ func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testin
 	if !strings.Contains(bubbleSection, "contentDiv.id = 'streaming-message-' + execId;") {
 		t.Fatal("live-created assistant stream node must use the same stable id as server-rendered streaming bubbles")
 	}
+	if !strings.Contains(bubbleSection, "progressDiv.id = 'mixture-progress-' + execId;") || !strings.Contains(bubbleSection, "innerDiv.appendChild(progressDiv);") {
+		t.Fatal("live-created assistant bubble must include the mixture progress status slot before stream content")
+	}
+	if !strings.Contains(bubbleSection, "window.hideMixtureProgress(execId)") {
+		t.Fatal("live-created assistant bubble must hide mixture progress when aggregator output or terminal stream events arrive")
+	}
+}
+
+func TestChatContent_HandlesMixtureProgressLiveEvents(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, "if (eventType === 'mixture_progress')") || !strings.Contains(content, "window.applyMixtureProgress(data)") {
+		t.Fatal("Chat live event handler must render mixture_progress into the pending assistant status area")
+	}
 }
 
 func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {

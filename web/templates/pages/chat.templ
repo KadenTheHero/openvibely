@@ -854,11 +854,18 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					var innerDiv = document.createElement('div');
 					innerDiv.className = 'chat-bubble-inner';
 
-					var thinking = document.createElement('div');
-					thinking.className = 'flex flex-col items-start gap-1';
-					thinking.innerHTML = '<span class="block h-5" aria-hidden="true"></span><span class="ov-loading-dots ov-loading-dots-sm" aria-hidden="true"><span class="ov-loading-dot"></span><span class="ov-loading-dot"></span><span class="ov-loading-dot"></span></span>';
+						var thinking = document.createElement('div');
+						thinking.className = 'flex flex-col items-start gap-1';
+						thinking.innerHTML = '<span class="block h-5" aria-hidden="true"></span><span class="ov-loading-dots ov-loading-dots-sm" aria-hidden="true"><span class="ov-loading-dot"></span><span class="ov-loading-dot"></span><span class="ov-loading-dot"></span></span>';
 
-						var contentDiv = document.createElement('div');
+						var progressDiv = document.createElement('div');
+						progressDiv.id = 'mixture-progress-' + execId;
+						progressDiv.className = 'mixture-progress hidden mb-2 text-xs opacity-70';
+						progressDiv.setAttribute('data-exec-id', execId);
+						progressDiv.setAttribute('role', 'status');
+						progressDiv.setAttribute('aria-live', 'polite');
+
+							var contentDiv = document.createElement('div');
 						contentDiv.id = 'streaming-message-' + execId;
 						contentDiv.className = 'whitespace-pre-wrap leading-relaxed text-sm hidden';
 						contentDiv.style.wordWrap = 'break-word';
@@ -867,9 +874,10 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					dots.className = 'hidden flex items-center gap-1 mt-2 opacity-40';
 					dots.innerHTML = '<span class="loading loading-dots loading-xs"></span>';
 
-					innerDiv.appendChild(thinking);
-					innerDiv.appendChild(contentDiv);
-					innerDiv.appendChild(dots);
+						innerDiv.appendChild(thinking);
+						innerDiv.appendChild(progressDiv);
+						innerDiv.appendChild(contentDiv);
+						innerDiv.appendChild(dots);
 					bubble.appendChild(roleDiv);
 					bubble.appendChild(innerDiv);
 
@@ -915,8 +923,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							window.registerChatStreamEventSource(execId, eventSource);
 						}
 
-					eventSource.onmessage = function(event) {
-						if (!thinking.classList.contains('hidden')) {
+						eventSource.onmessage = function(event) {
+							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+							if (!thinking.classList.contains('hidden')) {
 							thinking.classList.add('hidden');
 							contentDiv.classList.remove('hidden');
 							dots.classList.remove('hidden');
@@ -927,8 +936,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						renderBufferedOutput(false);
 					};
 
-					eventSource.addEventListener('done', function() {
-						renderBufferedOutput(true);
+						eventSource.addEventListener('done', function() {
+							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+							renderBufferedOutput(true);
 						dots.classList.add('hidden');
 						eventSource.close();
 						if (window.unregisterChatStreamEventSource) {
@@ -953,8 +963,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						}
 					});
 
-					eventSource.addEventListener('error', function(event) {
-						var retryableEarlyError = textBuffer === '' && event.data === 'execution not found' && streamRetryCount < 5;
+						eventSource.addEventListener('error', function(event) {
+							var retryableEarlyError = textBuffer === '' && event.data === 'execution not found' && streamRetryCount < 5;
+							if (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);
 						eventSource.close();
 						if (window.unregisterChatStreamEventSource) {
 							window.unregisterChatStreamEventSource(execId, eventSource);
@@ -976,17 +987,18 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 					});
 
-					eventSource.onerror = function() {
-						eventSource.close();
-						if (window.unregisterChatStreamEventSource) {
-							window.unregisterChatStreamEventSource(execId, eventSource);
-						}
-						if (textBuffer === '' && streamRetryCount < 5) {
-							streamRetryCount++;
-							setTimeout(connectChatExecutionStream, 150 * streamRetryCount);
-							return;
-						}
-						thinking.classList.add('hidden');
+							eventSource.onerror = function() {
+								eventSource.close();
+								if (window.unregisterChatStreamEventSource) {
+									window.unregisterChatStreamEventSource(execId, eventSource);
+								}
+								if (textBuffer === '' && streamRetryCount < 5) {
+									streamRetryCount++;
+									setTimeout(connectChatExecutionStream, 150 * streamRetryCount);
+									return;
+								}
+								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+								thinking.classList.add('hidden');
 						dots.classList.add('hidden');
 						contentDiv.classList.remove('hidden');
 						window._chatStreamInProgress = false;
@@ -1077,7 +1089,12 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							return;
 						}
 
-						if (eventType === 'chat_turn_steered') {
+								if (eventType === 'mixture_progress') {
+									if (window.applyMixtureProgress) window.applyMixtureProgress(data);
+									return;
+								}
+
+								if (eventType === 'chat_turn_steered') {
 							if (document.querySelector('[data-thread-input-id="' + data.exec_id + '"]')) return;
 							if (data.source === 'web' && window._chatWebSendInProgress) return;
 							if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();

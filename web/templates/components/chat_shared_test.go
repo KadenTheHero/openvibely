@@ -35,6 +35,17 @@ func TestChatAutoScrollScript(t *testing.T) {
 		t.Error("Missing scrollToBottom function")
 	}
 
+	for _, snippet := range []string{
+		"window.applyMixtureProgress = function(data)",
+		"document.getElementById('streaming-message-' + data.exec_id)",
+		"progress.textContent = message",
+		"window.hideMixtureProgress = function(execId)",
+	} {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("missing mixture progress helper snippet: %s", snippet)
+		}
+	}
+
 	// Verify the threshold is reasonable (100px for "near bottom")
 	if !strings.Contains(content, "100") {
 		t.Error("Expected to find threshold value in script")
@@ -1769,6 +1780,49 @@ func extractAttr(html, attr string) string {
 // TestChatBubbleStreamingResume_EmptyContentShowsThinkingIndicator verifies that
 // when partialContent is empty, the streaming container is hidden and the
 // thinking indicator is shown.
+func TestTaskThreadLiveEventsScript_HandlesMixtureProgressWithoutTaskID(t *testing.T) {
+	var buf bytes.Buffer
+	if err := TaskThreadLiveEventsScript("task-1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render TaskThreadLiveEventsScript: %v", err)
+	}
+	html := buf.String()
+	if !strings.Contains(html, "if (data.type !== 'mixture_progress' && data.task_id !== taskId) return;") {
+		t.Fatal("task-thread live handler must not drop mixture_progress events that are keyed only by execution ID")
+	}
+	if !strings.Contains(html, "if (data.type === 'mixture_progress')") || !strings.Contains(html, "window.applyMixtureProgress(data)") {
+		t.Fatal("task-thread live handler must render mixture_progress into the pending assistant status area")
+	}
+}
+
+func TestChatBubbleStreaming_RendersMixtureProgressStatusSlot(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatBubbleStreaming("Assistant", "exec-mix", "chat-messages", "", false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatBubbleStreaming: %v", err)
+	}
+	html := buf.String()
+	if !strings.Contains(html, `id="mixture-progress-exec-mix"`) || !strings.Contains(html, `role="status"`) || !strings.Contains(html, `aria-live="polite"`) {
+		t.Fatalf("streaming bubble must include an accessible mixture progress status slot, got: %s", html)
+	}
+	for _, snippet := range []string{
+		"window.hideMixtureProgress(execId)",
+	} {
+		if !strings.Contains(html, snippet) {
+			t.Fatalf("streaming bubble/shared script missing mixture progress snippet: %s", snippet)
+		}
+	}
+}
+
+func TestChatBubbleStreamingResume_RendersMixtureProgressStatusSlot(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatBubbleStreamingResume("Assistant", "", "exec-1", "chat-messages", "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatBubbleStreamingResume: %v", err)
+	}
+	html := buf.String()
+	if !strings.Contains(html, `id="mixture-progress-exec-1"`) || !strings.Contains(html, `role="status"`) || !strings.Contains(html, `aria-live="polite"`) {
+		t.Fatal("streaming resume bubble must include an accessible mixture progress status slot")
+	}
+}
+
 func TestChatBubbleStreamingResume_EmptyContentShowsThinkingIndicator(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatBubbleStreamingResume("Assistant", "", "exec-1", "chat-messages", "").Render(context.Background(), &buf)

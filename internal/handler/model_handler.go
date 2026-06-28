@@ -14,6 +14,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
+	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -50,6 +51,9 @@ func (h *Handler) ListModels(c echo.Context) error {
 // The UI shows "Anthropic" and "OpenAI" as single providers with auth type sub-selection,
 // while the DB stores provider and auth_method separately.
 func resolveProviderAndAuth(provider, anthropicAuthType, openaiAuthType, authMethod string) (models.LLMProvider, models.AuthMethod) {
+	if provider == string(models.ProviderMixture) {
+		return models.ProviderMixture, models.AuthMethodAPIKey
+	}
 	if provider == string(models.ProviderOpenAICompatible) || isKnownOpenAICompatibleUIProvider(provider) {
 		return models.ProviderOpenAICompatible, models.AuthMethodAPIKey
 	}
@@ -223,6 +227,160 @@ func clearOpenAICompatibleFields(agent *models.LLMConfig) {
 	agent.TokenRefreshFormat = ""
 }
 
+func parseMixtureConfigForm(c echo.Context) (llmmixture.Config, error) {
+	raw := strings.TrimSpace(c.FormValue("mixture_config_json"))
+	if raw != "" {
+		return llmmixture.ParseConfig(raw)
+	}
+	cfg := llmmixture.Config{
+		Enabled:    c.FormValue("mixture_enabled") != "" && c.FormValue("mixture_enabled") != "false" && c.FormValue("mixture_enabled") != "0",
+		Aggregator: llmmixture.ModelSlot{AgentConfigID: strings.TrimSpace(c.FormValue("mixture_aggregator_id"))},
+	}
+	if cfg.Enabled == false && c.FormValue("mixture_enabled") == "" {
+		cfg.Enabled = true
+	}
+	for _, rawID := range c.Request().Form["mixture_reference_ids"] {
+		for _, id := range strings.Split(rawID, ",") {
+			id = strings.TrimSpace(id)
+			if id != "" {
+				cfg.ReferenceModels = append(cfg.ReferenceModels, llmmixture.ModelSlot{AgentConfigID: id})
+			}
+		}
+	}
+	if v, err := strconv.ParseFloat(c.FormValue("mixture_reference_temperature"), 64); err == nil {
+		cfg.ReferenceTemperature = v
+	}
+	if v, err := strconv.ParseFloat(c.FormValue("mixture_aggregator_temperature"), 64); err == nil {
+		cfg.AggregatorTemperature = v
+	}
+	if v, err := strconv.Atoi(c.FormValue("mixture_reference_timeout_seconds")); err == nil {
+		cfg.ReferenceTimeoutSeconds = v
+	}
+	if v, err := strconv.Atoi(c.FormValue("mixture_max_reference_workers")); err == nil {
+		cfg.MaxReferenceWorkers = v
+	}
+	return llmmixture.NormalizeConfig(cfg)
+}
+
+func (h *Handler) applyAndValidateMixtureForm(ctx context.Context, c echo.Context, agent *models.LLMConfig) error {
+	cfg, err := parseMixtureConfigForm(c)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(cfg.Aggregator.AgentConfigID) == "" {
+		return fmt.Errorf("mixture aggregator is required")
+	}
+	if cfg.Enabled && len(cfg.ReferenceModels) == 0 {
+		return fmt.Errorf("at least one reference model is required when mixture is enabled")
+	}
+	slots := make([]llmmixture.ModelSlot, 0, len(cfg.ReferenceModels)+1)
+	slots = append(slots, cfg.Aggregator)
+	slots = append(slots, cfg.ReferenceModels...)
+	ids := make(map[string]struct{}, len(slots))
+	for _, slot := range slots {
+		id := strings.TrimSpace(slot.AgentConfigID)
+		if id == "" {
+			return fmt.Errorf("mixture model slot is missing a model")
+		}
+		ids[id] = struct{}{}
+	}
+	configs, err := h.llmConfigRepo.GetByIDs(ctx, keysOfStringSet(ids))
+	if err != nil {
+		return err
+	}
+	populateSlot := func(slot *llmmixture.ModelSlot, role string) error {
+		id := strings.TrimSpace(slot.AgentConfigID)
+		cfg, ok := configs[id]
+		if !ok || cfg == nil {
+			return fmt.Errorf("%s model config not found", role)
+		}
+		if cfg.Provider == models.ProviderMixture {
+			return fmt.Errorf("%s cannot use a mixture model", role)
+		}
+		if !isCallableMixtureSlot(*cfg) {
+			return fmt.Errorf("%s model %q is not callable as a mixture slot", role, cfg.Name)
+		}
+		slot.Provider = string(cfg.Provider)
+		slot.Model = cfg.Model
+		if strings.TrimSpace(slot.Label) == "" {
+			slot.Label = cfg.Name
+		}
+		return nil
+	}
+	if err := populateSlot(&cfg.Aggregator, "aggregator"); err != nil {
+		return err
+	}
+	seenRefs := map[string]struct{}{}
+	for i := range cfg.ReferenceModels {
+		if err := populateSlot(&cfg.ReferenceModels[i], "reference"); err != nil {
+			return err
+		}
+		id := strings.TrimSpace(cfg.ReferenceModels[i].AgentConfigID)
+		if _, ok := seenRefs[id]; ok {
+			return fmt.Errorf("duplicate reference model %q", cfg.ReferenceModels[i].Label)
+		}
+		seenRefs[id] = struct{}{}
+		if id == strings.TrimSpace(cfg.Aggregator.AgentConfigID) {
+			return fmt.Errorf("aggregator cannot also be a reference model")
+		}
+	}
+	normalized, err := llmmixture.NormalizeConfig(cfg)
+	if err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return err
+	}
+	agent.MixtureConfigJSON = string(encoded)
+	if strings.TrimSpace(agent.Model) == "" {
+		agent.Model = "default"
+	}
+	agent.AuthMethod = models.AuthMethodAPIKey
+	agent.APIKey = ""
+	return nil
+}
+
+func isCallableMixtureSlot(cfg models.LLMConfig) bool {
+	return cfg.IsCallableMixtureSlot()
+}
+
+func keysOfStringSet(values map[string]struct{}) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func (h *Handler) mixturesUsingModel(ctx context.Context, modelID string) ([]string, error) {
+	agents, err := h.llmConfigRepo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, agent := range agents {
+		if agent.Provider != models.ProviderMixture || strings.TrimSpace(agent.MixtureConfigJSON) == "" {
+			continue
+		}
+		cfg, err := llmmixture.ParseConfig(agent.MixtureConfigJSON)
+		if err != nil {
+			continue
+		}
+		if cfg.Aggregator.AgentConfigID == modelID {
+			names = append(names, agent.Name)
+			continue
+		}
+		for _, ref := range cfg.ReferenceModels {
+			if ref.AgentConfigID == modelID {
+				names = append(names, agent.Name)
+				break
+			}
+		}
+	}
+	return names, nil
+}
+
 func (h *Handler) CreateModel(c echo.Context) error {
 	temp, _ := strconv.ParseFloat(c.FormValue("temperature"), 64)
 	isDefault := c.FormValue("is_default") == "on"
@@ -281,6 +439,13 @@ func (h *Handler) CreateModel(c echo.Context) error {
 		if err := applyOpenAICompatibleForm(c, a); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+	}
+	if a.Provider == models.ProviderMixture {
+		if err := h.applyAndValidateMixtureForm(c.Request().Context(), c, a); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+	} else {
+		a.MixtureConfigJSON = ""
 	}
 	if a.Provider == "" {
 		a.Provider = models.ProviderAnthropic
@@ -403,6 +568,14 @@ func (h *Handler) UpdateModel(c echo.Context) error {
 	} else {
 		clearOpenAICompatibleFields(agent)
 	}
+	if agent.Provider == models.ProviderMixture {
+		agent.OllamaBaseURL = ""
+		if err := h.applyAndValidateMixtureForm(c.Request().Context(), c, agent); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+	} else {
+		agent.MixtureConfigJSON = ""
+	}
 	if mw, err := strconv.Atoi(c.FormValue("model_max_workers")); err == nil {
 		if mw < 0 {
 			mw = 0
@@ -487,6 +660,13 @@ func (h *Handler) DeleteModel(c echo.Context) error {
 	if agent == nil {
 		applog.Infof("[handler] DeleteModel not found id=%s", id)
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
+	}
+
+	if mixtures, err := h.mixturesUsingModel(ctx, id); err != nil {
+		return err
+	} else if len(mixtures) > 0 {
+		msg := fmt.Sprintf("This model is used by %d mixtures: %s. Remove it from those mixtures before deleting.", len(mixtures), strings.Join(mixtures, ", "))
+		return echo.NewHTTPError(http.StatusBadRequest, msg)
 	}
 
 	if agent.IsDefault {

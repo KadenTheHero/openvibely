@@ -12,6 +12,7 @@ const (
 	ProviderOpenAI           LLMProvider = "openai"
 	ProviderOpenAICompatible LLMProvider = "openai_compatible"
 	ProviderOllama           LLMProvider = "ollama"
+	ProviderMixture          LLMProvider = "mixture"
 	ProviderTest             LLMProvider = "test"
 )
 
@@ -70,6 +71,7 @@ type LLMConfig struct {
 	DefaultMaxTokens      int    `json:"default_max_tokens,omitempty"`
 	TokenExchangeFormat   string `json:"token_exchange_format,omitempty"`
 	TokenRefreshFormat    string `json:"token_refresh_format,omitempty"`
+	MixtureConfigJSON     string `json:"mixture_config_json,omitempty"`
 
 	// Auto-start configuration
 	AutoStartTasks bool `json:"auto_start_tasks"` // When enabled, tasks created with this model start immediately
@@ -119,6 +121,24 @@ func (c *LLMConfig) GetOllamaBaseURL() string {
 // IsOpenAICompatibleAPIKey returns true if this config uses an OpenAI-compatible Chat Completions endpoint.
 func (c *LLMConfig) IsOpenAICompatibleAPIKey() bool {
 	return c.Provider == ProviderOpenAICompatible && c.AuthMethod == AuthMethodAPIKey
+}
+
+// IsCallableMixtureSlot returns true when this config can be used as a non-mixture
+// aggregator/reference slot. Reference calls use direct no-tools requests, so
+// CLI-backed provider rows are intentionally excluded.
+func (c *LLMConfig) IsCallableMixtureSlot() bool {
+	switch c.Provider {
+	case ProviderOpenAI:
+		return c.IsOpenAIAPIKey() || c.IsOpenAIOAuth()
+	case ProviderAnthropic:
+		return c.IsAnthropicAPIKey() || c.IsOAuth()
+	case ProviderOpenAICompatible:
+		return c.IsOpenAICompatibleAPIKey()
+	case ProviderOllama, ProviderTest:
+		return true
+	default:
+		return false
+	}
 }
 
 // GetTransport returns the API transport for generic provider configs.

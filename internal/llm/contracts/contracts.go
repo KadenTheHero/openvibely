@@ -32,6 +32,7 @@ type AgentRequest struct {
 	AgentDefinition     *models.Agent // Optional agent definition (system prompt, skills, MCP)
 	PluginDirs          []string      // Optional plugin directories for CLI sessions (--plugin-dir)
 	DisableTools        bool          // Optional: suppress tool/plugin execution for this request
+	RawDirectPrompt     bool          // Optional: direct request message is already fully composed; skip OpenVibely task/system prompt wrapping
 }
 
 // Usage tracks provider usage in a canonical shape.

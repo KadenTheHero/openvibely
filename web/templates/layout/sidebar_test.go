@@ -101,6 +101,26 @@ func TestSidebar_NavigationHeadingHiddenAndLinksPreserved(t *testing.T) {
 	}
 }
 
+func TestSidebar_DispatchesMixtureProgressToChatAndTaskListeners(t *testing.T) {
+	projects := []models.Project{{ID: "p1", Name: "Test"}}
+
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "p1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+
+	html := buf.String()
+	if !strings.Contains(html, `'mixture_progress': handleLiveEvent`) {
+		t.Fatal("shared live SSE listener map must subscribe to mixture_progress")
+	}
+	if !strings.Contains(html, "eventType === 'chat_thread_input_cancelled' || eventType === 'mixture_progress'") {
+		t.Fatal("shared live SSE dispatch must route mixture_progress through chat live events")
+	}
+	if !strings.Contains(html, "window._tabVisibility.dispatchSSEEvent('sse-task-event', data)") || !strings.Contains(html, "if (eventType === 'mixture_progress')") {
+		t.Fatal("shared live SSE dispatch must also route mixture_progress to task listeners")
+	}
+}
+
 func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 	projects := []models.Project{{ID: "p1", Name: "Test"}}
 

@@ -297,21 +297,22 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 		<div class="text-xs font-semibold opacity-50 mb-2">
 			{ role }
 		</div>
-		<div class="chat-bubble-inner">
-			<div id={ "streaming-thinking-" + execID } class="flex flex-col items-start gap-1">
-				<span class="block h-5" aria-hidden="true"></span>
-				@ChatLoadingDots("sm")
-			</div>
-			<div
-				id={ "streaming-message-" + execID }
-				class="whitespace-pre-wrap leading-relaxed text-sm hidden"
-				data-exec-id={ execID }
-				data-messages-container={ messagesContainerID }
-				data-pause-polling-target={ pausePollingTargetID }
-				data-is-thread={ boolStr(isThread) }
-				style="word-wrap: break-word;"
-			></div>
-			<div id={ "streaming-dots-" + execID } class="hidden flex items-center gap-1 mt-2 opacity-40">
+			<div class="chat-bubble-inner">
+				<div id={ "streaming-thinking-" + execID } class="flex flex-col items-start gap-1">
+					<span class="block h-5" aria-hidden="true"></span>
+					@ChatLoadingDots("sm")
+				</div>
+				<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
+				<div
+					id={ "streaming-message-" + execID }
+					class="whitespace-pre-wrap leading-relaxed text-sm hidden"
+					data-exec-id={ execID }
+					data-messages-container={ messagesContainerID }
+					data-pause-polling-target={ pausePollingTargetID }
+					data-is-thread={ boolStr(isThread) }
+					style="word-wrap: break-word;"
+				></div>
+				<div id={ "streaming-dots-" + execID } class="hidden flex items-center gap-1 mt-2 opacity-40">
 				@ChatLoadingDots("xs")
 			</div>
 			<script type="text/javascript">
@@ -493,24 +494,26 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						window._threadEventSources.push(eventSource);
 					}
 
-					eventSource.onmessage = function(event) {
-						// Hide thinking indicator and show content on first message
-						if (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {
-							thinkingIndicator.classList.add('hidden');
-							container.classList.remove('hidden');
-							streamingDots.classList.remove('hidden');
-						}
-						
-						// Append to buffer and re-render
+						eventSource.onmessage = function(event) {
+							// Hide thinking/progress indicators and show content on first aggregator token
+							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+							if (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {
+								thinkingIndicator.classList.add('hidden');
+								container.classList.remove('hidden');
+								streamingDots.classList.remove('hidden');
+							}
+
+							// Append to buffer and re-render
 						textBuffer += event.data;
 						// Persist normalized render content for completion fallback logic
 						container.setAttribute('data-raw-content', window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer);
 						renderBufferedOutput(false);
 					};
 
-						eventSource.addEventListener('done', function(event) {
-							var terminalStatus = event && event.data ? event.data : 'completed';
-							renderBufferedOutput(true);
+							eventSource.addEventListener('done', function(event) {
+								var terminalStatus = event && event.data ? event.data : 'completed';
+								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+								renderBufferedOutput(true);
 							finalizeEmptyTerminalBubble(terminalStatus);
 							// Hide streaming dots
 							if (streamingDots) streamingDots.classList.add('hidden');
@@ -553,8 +556,9 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 					});
 
-					eventSource.addEventListener('error', function(event) {
-						var retryableEarlyError = textBuffer === '' && event.data === 'execution not found' && streamRetryCount < 5;
+						eventSource.addEventListener('error', function(event) {
+							var retryableEarlyError = textBuffer === '' && event.data === 'execution not found' && streamRetryCount < 5;
+							if (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);
 						eventSource.close();
 						removeThreadEventSource(eventSource);
 						removeChatEventSource(execId, eventSource);
@@ -582,17 +586,18 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 					});
 
-					eventSource.onerror = function(error) {
-						console.error('EventSource failed:', error);
-						eventSource.close();
-						removeThreadEventSource(eventSource);
-						removeChatEventSource(execId, eventSource);
-						if (textBuffer === '' && streamRetryCount < 5) {
-							streamRetryCount++;
-							setTimeout(connectExecutionStream, 150 * streamRetryCount);
-							return;
-						}
-						// Hide thinking indicator and streaming dots, ensure content shows
+						eventSource.onerror = function(error) {
+							console.error('EventSource failed:', error);
+							eventSource.close();
+							removeThreadEventSource(eventSource);
+							removeChatEventSource(execId, eventSource);
+							if (textBuffer === '' && streamRetryCount < 5) {
+								streamRetryCount++;
+								setTimeout(connectExecutionStream, 150 * streamRetryCount);
+								return;
+							}
+							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+							// Hide thinking indicator and streaming dots, ensure content shows
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 						if (streamingDots) streamingDots.classList.add('hidden');
 						container.classList.remove('hidden');
@@ -623,14 +628,15 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 		<div class="text-xs font-semibold opacity-50 mb-2">
 			{ role }
 		</div>
-		<div class="chat-bubble-inner">
-			if partialContent == "" {
-				<div id={ "streaming-thinking-resume-" + execID } class="flex flex-col items-start gap-1">
-					<span class="block h-5" aria-hidden="true"></span>
-					@ChatLoadingDots("sm")
-				</div>
-			}
-			<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-length={ fmt.Sprintf("%d", jsStringLength(NormalizeDisplayMarkers(partialContent))) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
+			<div class="chat-bubble-inner">
+				if partialContent == "" {
+					<div id={ "streaming-thinking-resume-" + execID } class="flex flex-col items-start gap-1">
+						<span class="block h-5" aria-hidden="true"></span>
+						@ChatLoadingDots("sm")
+					</div>
+				}
+				<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
+				<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-length={ fmt.Sprintf("%d", jsStringLength(NormalizeDisplayMarkers(partialContent))) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
 			<script>
 				(function() {
 					var el = document.currentScript.previousElementSibling;
@@ -844,10 +850,11 @@ templ _initThreadStreamingScript() {
 					if (!window._threadEventSources) window._threadEventSources = [];
 					window._threadEventSources.push(eventSource);
 
-				eventSource.onmessage = function(event) {
-					cumulativeContent += event.data;
-					if (cumulativeContent.length >= initialLength) {
-						if (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {
+					eventSource.onmessage = function(event) {
+						cumulativeContent += event.data;
+						if (cumulativeContent.length >= initialLength) {
+							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+							if (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {
 							thinkingIndicator.classList.add('hidden');
 							container.classList.remove('hidden');
 							if (streamingDots) streamingDots.classList.remove('hidden');
@@ -856,9 +863,10 @@ templ _initThreadStreamingScript() {
 					}
 				};
 
-					eventSource.addEventListener('done', function(event) {
-						var terminalStatus = event && event.data ? event.data : 'completed';
-						renderCumulativeContent(true);
+						eventSource.addEventListener('done', function(event) {
+							var terminalStatus = event && event.data ? event.data : 'completed';
+							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+							renderCumulativeContent(true);
 						finalizeEmptyTerminalBubble(terminalStatus);
 					if (streamingDots) streamingDots.classList.add('hidden');
 					eventSource.close();
@@ -881,8 +889,9 @@ templ _initThreadStreamingScript() {
 					}
 				});
 
-				eventSource.addEventListener('error', function(event) {
-					var retryableEarlyError = cumulativeContent === '' && event.data === 'execution not found' && streamRetryCount < 5;
+					eventSource.addEventListener('error', function(event) {
+						var retryableEarlyError = cumulativeContent === '' && event.data === 'execution not found' && streamRetryCount < 5;
+						if (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);
 					eventSource.close();
 					removeThreadEventSource(eventSource);
 					if (retryableEarlyError) {
@@ -900,16 +909,17 @@ templ _initThreadStreamingScript() {
 					}
 				});
 
-				eventSource.onerror = function(error) {
-					console.error('EventSource failed:', error);
-					eventSource.close();
-					removeThreadEventSource(eventSource);
-					if (cumulativeContent === '' && streamRetryCount < 5) {
-						streamRetryCount++;
-						setTimeout(connectResumeExecutionStream, 150 * streamRetryCount);
-						return;
-					}
-					if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
+					eventSource.onerror = function(error) {
+						console.error('EventSource failed:', error);
+						eventSource.close();
+						removeThreadEventSource(eventSource);
+						if (cumulativeContent === '' && streamRetryCount < 5) {
+							streamRetryCount++;
+							setTimeout(connectResumeExecutionStream, 150 * streamRetryCount);
+							return;
+						}
+						if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 					if (streamingDots) streamingDots.classList.add('hidden');
 					container.classList.remove('hidden');
 					window._taskThreadStreamingActive = false;
@@ -2129,10 +2139,37 @@ templ ChatAutoScrollScript() {
 				}
 			}
 		};
-		// Alias for backward compatibility (task thread used a separate namespace)
-		window.threadAutoScroll = window.chatAutoScroll;
+			// Alias for backward compatibility (task thread used a separate namespace)
+			window.threadAutoScroll = window.chatAutoScroll;
 
-		// ChatScrollTracker tracks whether the user has scrolled away from the bottom
+			window.hideMixtureProgress = function(execId) {
+				if (!execId) return;
+				var progress = document.getElementById('mixture-progress-' + execId);
+				if (progress) progress.classList.add('hidden');
+			};
+
+			window.applyMixtureProgress = function(data) {
+				if (!data || !data.exec_id) return false;
+				var container = document.getElementById('streaming-message-' + data.exec_id);
+				if (!container) return false;
+				var progress = document.getElementById('mixture-progress-' + data.exec_id);
+				if (!progress) {
+					progress = document.createElement('div');
+					progress.id = 'mixture-progress-' + data.exec_id;
+					progress.className = 'mixture-progress hidden mb-2 text-xs opacity-70';
+					progress.setAttribute('data-exec-id', data.exec_id);
+					progress.setAttribute('role', 'status');
+					progress.setAttribute('aria-live', 'polite');
+					container.parentNode.insertBefore(progress, container);
+				}
+				var message = data.message || '';
+				if (!message) return false;
+				progress.textContent = message;
+				progress.classList.remove('hidden');
+				return true;
+			};
+
+			// ChatScrollTracker tracks whether the user has scrolled away from the bottom
 		// using REAL user-interaction signals (wheel/touchmove/keydown/pointerdown).
 		// This is critical for very large conversations during streaming because:
 		//   - renderStreamingContent() does `container.innerHTML = ''` on every chunk.

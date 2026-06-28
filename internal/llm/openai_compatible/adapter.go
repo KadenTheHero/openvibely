@@ -78,11 +78,15 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
+	systemPrompt := ""
+	if !req.RawDirectPrompt {
+		systemPrompt = llmprompt.BuildAgentSystemPrompt("", effectiveWorkDir(workDir))
+	}
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
 		MaxOutputTokens:  req.Agent.GetDefaultMaxTokens(defaultOutputBudget),
 		Temperature:      req.Agent.Temperature,
-		System:           llmprompt.BuildAgentSystemPrompt("", effectiveWorkDir(workDir)),
+		System:           systemPrompt,
 		WorkDir:          effectiveWorkDir(workDir),
 		DisableTools:     req.DisableTools,
 		SkipDefaultTools: runtimeSkipDefaultTools(ctx),

@@ -110,3 +110,30 @@ func TestLLMConfig_HasValidOAuthToken(t *testing.T) {
 		})
 	}
 }
+func TestLLMConfigIsCallableMixtureSlot(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  LLMConfig
+		want bool
+	}{
+		{name: "openai api key", cfg: LLMConfig{Provider: ProviderOpenAI, AuthMethod: AuthMethodAPIKey}, want: true},
+		{name: "openai oauth", cfg: LLMConfig{Provider: ProviderOpenAI, AuthMethod: AuthMethodOAuth}, want: true},
+		{name: "openai cli", cfg: LLMConfig{Provider: ProviderOpenAI, AuthMethod: AuthMethodCLI}, want: false},
+		{name: "anthropic api key", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: AuthMethodAPIKey}, want: true},
+		{name: "anthropic oauth", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: AuthMethodOAuth}, want: true},
+		{name: "anthropic cli", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: AuthMethodCLI}, want: false},
+		{name: "openai compatible api key", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: AuthMethodAPIKey}, want: true},
+		{name: "openai compatible cli", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: AuthMethodCLI}, want: false},
+		{name: "ollama", cfg: LLMConfig{Provider: ProviderOllama}, want: true},
+		{name: "test", cfg: LLMConfig{Provider: ProviderTest}, want: true},
+		{name: "mixture", cfg: LLMConfig{Provider: ProviderMixture}, want: false},
+		{name: "unknown", cfg: LLMConfig{Provider: LLMProvider("internal"), AuthMethod: AuthMethodAPIKey}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.IsCallableMixtureSlot(); got != tt.want {
+				t.Fatalf("IsCallableMixtureSlot() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

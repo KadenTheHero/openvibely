@@ -3,9 +3,11 @@ package openai_compatible
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -76,6 +78,61 @@ func TestAdapterCallDirectUsesConfiguredChatCompletionsEndpoint(t *testing.T) {
 	}
 	if res.Output != "Hello" || res.Usage.InputTokens != 8 || res.Usage.OutputTokens != 2 || res.Usage.TotalTokens != 11 || res.Usage.CachedInputTokens != 3 {
 		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+func TestAdapterCallDirectRawPromptOmitsOpenVibelySystemPrompt(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"Advice\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2,\"total_tokens\":6}}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	adapter := New(nil)
+	res, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation:       llmcontracts.OperationDirect,
+		Message:         "REFERENCE PROMPT",
+		DisableTools:    true,
+		RawDirectPrompt: true,
+		WorkDir:         "/secret/workdir",
+		Agent: models.LLMConfig{
+			Name:       "Compatible",
+			Provider:   models.ProviderOpenAICompatible,
+			AuthMethod: models.AuthMethodAPIKey,
+			Model:      "provider/model",
+			APIKey:     "sk-compatible",
+			BaseURL:    srv.URL + "/v1/",
+			Transport:  "chat_completions",
+		},
+	}, "/secret/workdir")
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if res.Output != "Advice" {
+		t.Fatalf("output = %q", res.Output)
+	}
+	messages, ok := gotBody["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages = %#v", gotBody["messages"])
+	}
+	msg, _ := messages[0].(map[string]any)
+	if msg["role"] != "user" || msg["content"] != "REFERENCE PROMPT" {
+		t.Fatalf("message = %#v", msg)
+	}
+	if _, ok := gotBody["tools"]; ok {
+		t.Fatalf("raw direct request should omit tools, got %#v", gotBody["tools"])
+	}
+	if strings.Contains(fmt.Sprint(gotBody), "OpenVibely") || strings.Contains(fmt.Sprint(gotBody), "/secret/workdir") {
+		t.Fatalf("raw direct payload contains OpenVibely/workdir framing: %#v", gotBody)
 	}
 }
 

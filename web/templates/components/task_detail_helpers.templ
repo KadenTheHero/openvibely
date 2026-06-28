@@ -840,10 +840,14 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							}
 						});
 					}
-				var handler = function(event) {
-					var data = event.detail || {};
-					if (data.task_id !== taskId) return;
-					if (data.type === 'task_status_changed' || data.type === 'task_category_changed') {
+					var handler = function(event) {
+						var data = event.detail || {};
+						if (data.type !== 'mixture_progress' && data.task_id !== taskId) return;
+						if (data.type === 'mixture_progress') {
+							if (window.applyMixtureProgress) window.applyMixtureProgress(data);
+							return;
+						}
+						if (data.type === 'task_status_changed' || data.type === 'task_category_changed') {
 						refreshPendingInputsIfVisible();
 						return;
 					}

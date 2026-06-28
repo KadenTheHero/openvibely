@@ -461,7 +461,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 			req.DisableTools = false
 		}
 		skipDefaultTools := agentSkipDefaultTools(req.AgentDefinition) || runtimeSkipDefaultTools(rt)
-		output, usage, err := a.callDirect(ctx, req.Message, req.Attachments, agent, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter, req.DisableTools, skipDefaultTools)
+		output, usage, err := a.callDirect(ctx, req.Message, req.Attachments, agent, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter, req.DisableTools, skipDefaultTools, req.RawDirectPrompt)
 		return llmcontracts.AgentResult{
 			Output:     output,
 			Usage:      usage,
@@ -474,7 +474,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 }
 
 // callDirect calls the Anthropic API using OAuth tokens.
-func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, disableTools bool, skipDefaultTools bool) (string, llmcontracts.Usage, error) {
+func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, disableTools bool, skipDefaultTools bool, rawDirectPrompt bool) (string, llmcontracts.Usage, error) {
 	maxTokens := claudeCodeMaxOutputTokens(agent.Model)
 	applog.Infof("[anthropic] callDirect model=%s max_tokens=%d workDir=%s attachments=%d disable_tools=%v", agent.Model, maxTokens, workDir, len(attachments), disableTools)
 
@@ -488,17 +488,24 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
 
-	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
+	fullPrompt := prompt
+	systemPrompt := ""
+	webSearchEnabled := false
+	if !rawDirectPrompt {
+		fullPrompt = llmprompt.BuildTaskPromptHeader() + prompt
+		systemPrompt = llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir)
+		webSearchEnabled = true
+	}
 	opts := &anthropicclient.AgenticOptions{
 		Model:                  agent.Model,
 		MaxTokens:              maxTokens,
-		System:                 llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
+		System:                 systemPrompt,
 		WorkDir:                workDir,
 		Attachments:            mcAttachments,
 		DisableTools:           disableTools,
 		SkipDefaultTools:       skipDefaultTools,
 		AutoCompaction:         true,
-		WebSearchEnabled:       true,
+		WebSearchEnabled:       webSearchEnabled,
 		ExtraTools:             extraTools,
 		ToolExecutor:           toolExecutor,
 		ToolFilter:             toolFilter,

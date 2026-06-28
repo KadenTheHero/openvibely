@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,7 +44,7 @@ func TestCallDirectReturnsErrorOnRefusalStopReason(t *testing.T) {
 		Model:      "claude-fable-5",
 		AuthMethod: models.AuthMethodAPIKey,
 		APIKey:     "test-key",
-	}, ".", "", nil, nil, nil, true, true)
+	}, ".", "", nil, nil, nil, true, true, false)
 	if err == nil {
 		t.Fatal("expected refusal stop_reason to return an error")
 	}
@@ -55,6 +56,66 @@ func TestCallDirectReturnsErrorOnRefusalStopReason(t *testing.T) {
 	}
 	if usage.OutputTokens != 6 {
 		t.Fatalf("output tokens = %d, want 6", usage.OutputTokens)
+	}
+}
+
+func TestCallDirectRawPromptOmitsOpenVibelySystemTaskPromptAndTools(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-test","usage":{"input_tokens":4}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"advice"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = origHost }()
+
+	adapter := New(nil, nil)
+	output, _, err := adapter.callDirect(context.Background(), "REFERENCE PROMPT", nil, models.LLMConfig{
+		Name:       "Claude API",
+		Provider:   models.ProviderAnthropic,
+		Model:      "claude-test",
+		AuthMethod: models.AuthMethodAPIKey,
+		APIKey:     "test-key",
+	}, "/secret/workdir", "project instructions", nil, nil, nil, true, true, true)
+	if err != nil {
+		t.Fatalf("callDirect: %v", err)
+	}
+	if output != "advice" {
+		t.Fatalf("output = %q", output)
+	}
+	if _, ok := gotBody["system"]; ok {
+		t.Fatalf("raw direct request should omit system prompt, got %#v", gotBody["system"])
+	}
+	if _, ok := gotBody["tools"]; ok {
+		t.Fatalf("raw direct request should omit tools, got %#v", gotBody["tools"])
+	}
+	messages, ok := gotBody["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages = %#v", gotBody["messages"])
+	}
+	msg, _ := messages[0].(map[string]any)
+	if msg["role"] != "user" || msg["content"] != "REFERENCE PROMPT" {
+		t.Fatalf("message = %#v", msg)
+	}
+	if strings.Contains(fmt.Sprint(gotBody), "OpenVibely") || strings.Contains(fmt.Sprint(gotBody), "Task:") || strings.Contains(fmt.Sprint(gotBody), "/secret/workdir") {
+		t.Fatalf("raw direct payload contains OpenVibely/task/workdir framing: %#v", gotBody)
 	}
 }
 

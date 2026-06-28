@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestRuntimeToolsContextRoundTrip(t *testing.T) {
@@ -37,6 +38,23 @@ func TestRuntimeToolsContextNilSafe(t *testing.T) {
 	}
 	if got := RuntimeToolsFromContext(ctx); got != nil {
 		t.Fatalf("expected nil runtime tools when none set")
+	}
+}
+
+func TestWithoutRuntimeToolsMasksInheritedToolsAndPreservesCancellation(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	parent = WithRuntimeTools(parent, &RuntimeTools{Definitions: []RuntimeToolDefinition{{Name: "send_message"}}})
+
+	masked := WithoutRuntimeTools(parent)
+	if got := RuntimeToolsFromContext(masked); got != nil {
+		t.Fatalf("expected runtime tools to be masked, got %#v", got)
+	}
+
+	cancel()
+	select {
+	case <-masked.Done():
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("masked context did not preserve parent cancellation")
 	}
 }
 

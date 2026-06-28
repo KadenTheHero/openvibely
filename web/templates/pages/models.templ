@@ -1,9 +1,11 @@
 package pages
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -77,6 +79,70 @@ func modelWorkerRunning(stats map[string]int, id string) int {
 	return stats[id]
 }
 
+func callableMixtureModels(agents []models.LLMConfig) []models.LLMConfig {
+	out := make([]models.LLMConfig, 0, len(agents))
+	for _, agent := range agents {
+		if agent.IsCallableMixtureSlot() {
+			out = append(out, agent)
+		}
+	}
+	return out
+}
+
+func mixtureModelOptionsJSON(agents []models.LLMConfig) string {
+	type modelOption struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	callable := callableMixtureModels(agents)
+	data := make([]modelOption, 0, len(callable))
+	for _, agent := range callable {
+		data = append(data, modelOption{ID: agent.ID, Name: agent.Name, Provider: string(agent.Provider), Model: agent.Model})
+	}
+	b, err := json.Marshal(data)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
+
+func mixtureConfigAttr(agent models.LLMConfig) string {
+	b, err := json.Marshal(agent.MixtureConfigJSON)
+	if err != nil {
+		return "\"\""
+	}
+	return string(b)
+}
+
+func mixtureAggregatorSummary(agent models.LLMConfig, agents []models.LLMConfig) string {
+	cfg, err := llmmixture.ParseConfig(agent.MixtureConfigJSON)
+	if err != nil {
+		return "Not configured"
+	}
+	names := map[string]string{}
+	for _, option := range agents {
+		names[option.ID] = option.Name
+	}
+	agg := cfg.Aggregator.Label
+	if agg == "" {
+		agg = names[cfg.Aggregator.AgentConfigID]
+	}
+	if agg == "" {
+		agg = "Missing aggregator"
+	}
+	return agg
+}
+
+func mixtureReferenceCount(agent models.LLMConfig) int {
+	cfg, err := llmmixture.ParseConfig(agent.MixtureConfigJSON)
+	if err != nil {
+		return 0
+	}
+	return len(cfg.ReferenceModels)
+}
+
 func maskedSecret(secret string) string {
 	if secret != "" {
 		return "***"
@@ -127,7 +193,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							Configure Model
 						</button>
 					</div>
-				} else {
+				}
+				if len(agents) > 0 {
 					if showOAuthLocalhostFallback() {
 						<div class="alert mb-4">
 							<div class="flex-1">
@@ -169,8 +236,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							data-model-models-url={ agent.ModelsURL }
 							data-model-auth-header-name={ agent.AuthHeaderName }
 							data-model-auth-header-value-prefix={ agent.AuthHeaderValuePrefix }
-							data-model-auto-start-tasks={ fmt.Sprintf("%t", agent.AutoStartTasks) }						onclick="editModelFromData(this)"
-					>
+								data-model-auto-start-tasks={ fmt.Sprintf("%t", agent.AutoStartTasks) }
+								data-model-mixture-config-json={ mixtureConfigAttr(agent) }						onclick="editModelFromData(this)"					>
 						<div class="card-body relative">
 							<!-- Kebab menu in top right -->
 							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
@@ -220,40 +287,47 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 										<span class="badge badge-sm ov-badge-default">Default</span>
 									}
 								</h3>
-								<p class="text-sm opacity-60">
-									if agent.Provider == models.ProviderAnthropic {
-										if agent.AuthMethod == models.AuthMethodOAuth {
-											Anthropic (OAuth - API) / { agent.Model }
-										} else if agent.AuthMethod == models.AuthMethodCLI && agent.APIKey == "" {
-											Anthropic (OAuth - CLI) / { agent.Model }
-										} else {
-											Anthropic (API Key) / { agent.Model }
-										}
-									} else if agent.Provider == models.ProviderOpenAI {
-										if agent.AuthMethod == models.AuthMethodAPIKey {
-											OpenAI (API Key) / { agent.Model }
-										} else if agent.AuthMethod == models.AuthMethodOAuth {
-											OpenAI (OAuth - API) / { agent.Model }
-										} else {
-											OpenAI (OAuth - CLI) / { agent.Model }
-										}
+									<p class="text-sm opacity-60">
+										if agent.Provider == models.ProviderAnthropic {
+											if agent.AuthMethod == models.AuthMethodOAuth {
+												Anthropic (OAuth - API) / { agent.Model }
+											} else if agent.AuthMethod == models.AuthMethodCLI && agent.APIKey == "" {
+												Anthropic (OAuth - CLI) / { agent.Model }
+											} else {
+												Anthropic (API Key) / { agent.Model }
+											}
+										} else if agent.Provider == models.ProviderMixture {
+											Mixture of Models / { agent.Model }
+										} else if agent.Provider == models.ProviderOpenAI {
+											if agent.AuthMethod == models.AuthMethodAPIKey {
+												OpenAI (API Key) / { agent.Model }
+											} else if agent.AuthMethod == models.AuthMethodOAuth {
+												OpenAI (OAuth - API) / { agent.Model }
+											} else {
+												OpenAI (OAuth - CLI) / { agent.Model }
+											}
 										} else if agent.Provider == models.ProviderOpenAICompatible {
 											OpenAI-Compatible (API Key) / { agent.Model }
 											if agent.BaseURL != "" {
 												<span class="text-xs opacity-40">({ agent.BaseURL })</span>
 											}
 										} else if agent.Provider == models.ProviderOllama {
-											Ollama / { agent.Model }										if agent.OllamaBaseURL != "" && agent.OllamaBaseURL != "http://localhost:11434" {
-											<span class="text-xs opacity-40">({ agent.OllamaBaseURL })</span>
+											Ollama / { agent.Model }
+											if agent.OllamaBaseURL != "" && agent.OllamaBaseURL != "http://localhost:11434" {
+												<span class="text-xs opacity-40">({ agent.OllamaBaseURL })</span>
+											}
+										} else {
+											{ string(agent.Provider) } / { agent.Model }
 										}
+									</p>
+									if agent.Provider == models.ProviderMixture {
+										<p class="text-sm opacity-60">Aggregator: { mixtureAggregatorSummary(agent, agents) }</p>
+										<p class="text-sm opacity-60">References: { fmt.Sprintf("%d", mixtureReferenceCount(agent)) }</p>
 									} else {
-										{ string(agent.Provider) } / { agent.Model }
-									}
-								</p>
-								<p class="text-sm opacity-60">
-									{ fmt.Sprintf("Temperature: %.1f", agent.Temperature) }
-								</p>
-								if agent.Provider == models.ProviderOpenAI && agent.ReasoningEffort != "" {
+										<p class="text-sm opacity-60">
+											{ fmt.Sprintf("Temperature: %.1f", agent.Temperature) }
+										</p>
+									}								if agent.Provider == models.ProviderOpenAI && agent.ReasoningEffort != "" {
 									<p class="text-sm opacity-60">
 										Reasoning effort: { agent.ReasoningEffort }
 									</p>
@@ -382,9 +456,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 									<option value="openai_compatible_xiaomi_mimo">Xiaomi MiMo</option>
 									<option value="openai_compatible_inferrs">Inferrs Local</option>
 									<option value="openai_compatible_ds4">ds4 Local</option>
-									<option value="openai_compatible_custom">Custom OpenAI-Compatible</option>
-									<option value="ollama">Ollama</option>
-								</select>					</div>
+								<option value="openai_compatible_custom">Custom OpenAI-Compatible</option>
+								<option value="ollama">Ollama</option>
+								<option value="mixture">Mixture of Models</option>								</select>					</div>
 					<!-- Auth type selector for Anthropic -->
 					<div id="anthropic_auth_type_field" class="form-control mb-3">
 						<label class="label"><span class="label-text">Authentication</span></label>
@@ -531,9 +605,69 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 								<span class="label-text-alt opacity-70">Enter any model name from <code>ollama list</code>, or select from common ones above</span>
 							</label>
 						</div>
-					</div>
-						<div id="openai_compatible_info" class="mb-3 hidden">
-							<div class="alert alert-info">
+						</div>
+						<div id="mixture_fields" class="hidden" data-options={ mixtureModelOptionsJSON(agents) }>
+							<input type="hidden" id="model_mixture_config_json" name="mixture_config_json" value=""/>
+							<div class="alert alert-info mb-3">
+								<div>
+									<p class="font-semibold">Mixture of Models</p>
+									<p class="text-sm">Compose an aggregator model with one or more advisory reference models. Need another model? Add a model first.</p>
+								</div>
+							</div>
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Aggregator Model</span></label>
+								<select id="model_mixture_aggregator" name="mixture_aggregator_id" class="select select-bordered" onchange="updateMixtureCostWarning()">
+									<option value="">Select aggregator</option>
+									for _, option := range callableMixtureModels(agents) {
+										<option value={ option.ID }>{ option.Name } ({ string(option.Provider) }/{ option.Model })</option>
+									}
+								</select>
+							</div>
+									<div class="form-control mb-3">
+										<label class="label"><span class="label-text">Reference Models</span></label>
+										<input type="hidden" id="model_mixture_reference_ids_order" name="mixture_reference_ids" value=""/>
+										<div class="flex flex-col gap-2 sm:flex-row">
+											<select id="model_mixture_reference_available" class="select select-bordered flex-1" aria-label="Available reference models">
+												<option value="">Select reference to add</option>
+												for _, option := range callableMixtureModels(agents) {
+													<option value={ option.ID }>{ option.Name } ({ string(option.Provider) }/{ option.Model })</option>
+												}
+											</select>
+											<button type="button" class="btn btn-outline" onclick="addMixtureReference()">Add Reference</button>
+										</div>
+										<select id="model_mixture_references" class="select select-bordered min-h-32 mt-2" size="5" onchange="updateMixtureCostWarning()" aria-describedby="model_mixture_reference_order_help" aria-label="Selected reference model order"></select>
+										<div class="flex flex-wrap gap-2 mt-2">
+											<button type="button" class="btn btn-xs btn-outline" onclick="moveMixtureReference(-1)">Move Up</button>
+											<button type="button" class="btn btn-xs btn-outline" onclick="moveMixtureReference(1)">Move Down</button>
+											<button type="button" class="btn btn-xs btn-outline" onclick="removeMixtureReference()">Remove</button>
+										</div>
+										<label class="label"><span id="model_mixture_reference_order_help" class="label-text-alt opacity-70">Add reference models, select one in the ordered list, then use Move Up and Move Down to place it before or after other selected references.</span></label>
+									</div>							<div class="grid grid-cols-2 gap-3">								<div class="form-control mb-3">
+									<label class="label"><span class="label-text">Max Reference Workers</span></label>
+									<input type="text" inputmode="numeric" pattern="[0-9]*" id="model_mixture_max_workers" name="mixture_max_reference_workers" class="input input-bordered" value="8" oninput="updateMixtureCostWarning()"/>
+								</div>
+								<div class="form-control mb-3">
+									<label class="label"><span class="label-text">Reference Timeout</span></label>
+									<input type="text" inputmode="numeric" pattern="[0-9]*" id="model_mixture_timeout" name="mixture_reference_timeout_seconds" class="input input-bordered" value="90"/>
+								</div>
+								<div class="form-control mb-3">
+									<label class="label"><span class="label-text">Reference Temperature</span></label>
+									<input type="text" inputmode="decimal" pattern="[0-9]*.?[0-9]*" id="model_mixture_reference_temperature" name="mixture_reference_temperature" class="input input-bordered" value="0.6"/>
+								</div>
+								<div class="form-control mb-3">
+									<label class="label"><span class="label-text">Aggregator Temperature</span></label>
+									<input type="text" inputmode="decimal" pattern="[0-9]*.?[0-9]*" id="model_mixture_aggregator_temperature" name="mixture_aggregator_temperature" class="input input-bordered" value="0.4"/>
+								</div>
+							</div>
+							<div class="form-control mt-2">
+								<label class="label cursor-pointer justify-start gap-2">
+									<input type="checkbox" id="model_mixture_enabled" name="mixture_enabled" class="checkbox checkbox-sm" checked onchange="updateMixtureCostWarning()"/>
+									<span class="label-text">Enable reference fan-out</span>
+								</label>
+							</div>
+							<p id="model_mixture_cost_warning" class="text-sm text-warning mt-2">This mixture calls 0 reference models plus 1 aggregator model per turn.</p>
+						</div>
+							<div id="openai_compatible_info" class="mb-3 hidden">							<div class="alert alert-info">
 								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
 								<div>
 									<p class="font-semibold">OpenAI-Compatible Chat Completions</p>
@@ -1069,13 +1203,160 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 									runAutoDiscoverOpenAICompatibleModels();
 								} else if (status) {								status.textContent = 'Enter the model ID manually for local or custom endpoints.';
 								}						}
+						function readMixtureModelOptions() {
+							var el = document.getElementById('mixture_fields');
+							if (!el) return [];
+							try { return JSON.parse(el.dataset.options || '[]'); } catch(e) { return []; }
+						}
+						var mixtureModelOptions = readMixtureModelOptions();
+
+								function selectedMixtureReferenceIDs() {
+									var select = document.getElementById('model_mixture_references');
+									var ids = [];
+									if (!select) return ids;
+									for (var i = 0; i < select.options.length; i++) {
+										ids.push(select.options[i].value);
+									}
+									return ids;
+								}
+
+								function syncMixtureReferenceOrderInput() {
+									var input = document.getElementById('model_mixture_reference_ids_order');
+									if (input) input.value = selectedMixtureReferenceIDs().join(',');
+								}
+
+								function mixtureReferenceOptionLabel(option) {
+									if (!option) return '';
+									return option.name + ' (' + option.provider + '/' + option.model + ')';
+								}
+
+								function appendMixtureReferenceOption(select, option) {
+									if (!select || !option) return null;
+									var opt = document.createElement('option');
+									opt.value = option.id;
+									opt.textContent = mixtureReferenceOptionLabel(option);
+									select.appendChild(opt);
+									return opt;
+								}
+
+								function renderMixtureReferenceOptions(selectedIDs) {
+									var selectedSelect = document.getElementById('model_mixture_references');
+									var availableSelect = document.getElementById('model_mixture_reference_available');
+									if (!selectedSelect || !availableSelect) return;
+									var selected = {};
+									selectedSelect.innerHTML = '';
+									availableSelect.innerHTML = '<option value="">Select reference to add</option>';
+									for (var i = 0; i < (selectedIDs || []).length; i++) {
+										var id = selectedIDs[i];
+										var option = mixtureOptionByID(id);
+										if (!option || selected[id]) continue;
+										selected[id] = true;
+										appendMixtureReferenceOption(selectedSelect, option);
+									}
+									for (var k = 0; k < mixtureModelOptions.length; k++) {
+										if (selected[mixtureModelOptions[k].id]) continue;
+										appendMixtureReferenceOption(availableSelect, mixtureModelOptions[k]);
+									}
+									syncMixtureReferenceOrderInput();
+								}
+
+								function addMixtureReference() {
+									var availableSelect = document.getElementById('model_mixture_reference_available');
+									var selectedSelect = document.getElementById('model_mixture_references');
+									if (!availableSelect || !selectedSelect || !availableSelect.value) return;
+									var option = mixtureOptionByID(availableSelect.value);
+									if (!option) return;
+									var added = appendMixtureReferenceOption(selectedSelect, option);
+									if (added) added.selected = true;
+									availableSelect.remove(availableSelect.selectedIndex);
+									availableSelect.value = '';
+									syncMixtureReferenceOrderInput();
+									updateMixtureCostWarning();
+								}
+
+								function removeMixtureReference() {
+									var selectedSelect = document.getElementById('model_mixture_references');
+									if (!selectedSelect || selectedSelect.selectedIndex < 0) return;
+									var removedID = selectedSelect.value;
+									selectedSelect.remove(selectedSelect.selectedIndex);
+									var ids = selectedMixtureReferenceIDs();
+									renderMixtureReferenceOptions(ids);
+									var availableSelect = document.getElementById('model_mixture_reference_available');
+									if (availableSelect) availableSelect.value = removedID;
+									updateMixtureCostWarning();
+								}
+
+								function moveMixtureReference(direction) {
+									var select = document.getElementById('model_mixture_references');
+									if (!select || !direction || select.selectedIndex < 0) return;
+									var index = select.selectedIndex;
+									var option = select.options[index];
+									if (direction < 0 && index > 0) {
+										select.insertBefore(option, select.options[index - 1]);
+									} else if (direction > 0 && index < select.options.length - 1) {
+										select.insertBefore(select.options[index + 1], option);
+									}
+									option.selected = true;
+									syncMixtureReferenceOrderInput();
+									updateMixtureCostWarning();
+									select.focus();
+								}
+
+							function mixtureOptionByID(id) {							for (var i = 0; i < mixtureModelOptions.length; i++) {
+								if (mixtureModelOptions[i].id === id) return mixtureModelOptions[i];
+							}
+							return null;
+						}
+
+						function updateMixtureCostWarning() {
+							var refs = selectedMixtureReferenceIDs();
+							var workers = document.getElementById('model_mixture_max_workers');
+							if (workers && (!workers.value || workers.value === '0')) workers.value = Math.min(8, Math.max(1, refs.length)).toString();
+							var warning = document.getElementById('model_mixture_cost_warning');
+							if (warning) warning.textContent = 'This mixture calls ' + refs.length + ' reference model' + (refs.length === 1 ? '' : 's') + ' plus 1 aggregator model per turn.';
+						}
+
+						function buildMixtureConfigJSON() {
+							var aggregatorID = document.getElementById('model_mixture_aggregator').value;
+							var aggregator = mixtureOptionByID(aggregatorID) || {id: aggregatorID, provider: '', model: '', name: ''};
+							var refs = selectedMixtureReferenceIDs().map(function(id) {
+								var option = mixtureOptionByID(id) || {id: id, provider: '', model: '', name: ''};
+								return {agent_config_id: id, provider: option.provider, model: option.model, label: option.name};
+							});
+							return JSON.stringify({
+								enabled: document.getElementById('model_mixture_enabled').checked,
+								reference_models: refs,
+								aggregator: {agent_config_id: aggregatorID, provider: aggregator.provider, model: aggregator.model, label: aggregator.name},
+								reference_temperature: parseFloat(document.getElementById('model_mixture_reference_temperature').value || '0.6'),
+								aggregator_temperature: parseFloat(document.getElementById('model_mixture_aggregator_temperature').value || '0.4'),
+								reference_timeout_seconds: parseInt(document.getElementById('model_mixture_timeout').value || '90'),
+								max_reference_workers: parseInt(document.getElementById('model_mixture_max_workers').value || '8')
+							});
+						}
+
+							function applyMixtureConfig(raw) {
+								var cfg = {};
+								try { cfg = raw ? JSON.parse(raw) : {}; } catch(e) { cfg = {}; }
+								document.getElementById('model_mixture_enabled').checked = cfg.enabled !== false;
+								document.getElementById('model_mixture_aggregator').value = (cfg.aggregator && cfg.aggregator.agent_config_id) || '';
+								var selectedIDs = [];
+								(cfg.reference_models || []).forEach(function(ref) { if (ref.agent_config_id) selectedIDs.push(ref.agent_config_id); });
+								renderMixtureReferenceOptions(selectedIDs);
+								document.getElementById('model_mixture_reference_temperature').value = (cfg.reference_temperature || 0.6).toString();							document.getElementById('model_mixture_aggregator_temperature').value = (cfg.aggregator_temperature || 0.4).toString();
+							document.getElementById('model_mixture_timeout').value = (cfg.reference_timeout_seconds || 90).toString();
+							document.getElementById('model_mixture_max_workers').value = (cfg.max_reference_workers || Math.min(8, Math.max(1, (cfg.reference_models || []).length))).toString();
+							updateMixtureCostWarning();
+						}
+
 						function normalizeModelFormBeforeSubmit() {
 							syncModelAPIKeySubmitValue();
 							var provider = document.getElementById('model_provider').value;
 							var providerValue = document.getElementById('model_provider_value');
-							if (isOpenAICompatibleProvider(provider)) {
-								var presetInput = document.getElementById('model_openai_compatible_preset');
-								var currentPreset = presetInput.value || 'custom';
+								if (provider === 'mixture') {
+									providerValue.value = 'mixture';
+									document.getElementById('model_mixture_config_json').value = buildMixtureConfigJSON();
+								} else if (isOpenAICompatibleProvider(provider)) {
+									var presetInput = document.getElementById('model_openai_compatible_preset');								var currentPreset = presetInput.value || 'custom';
 								var nextPreset = openAICompatiblePresetForProvider(provider);
 								if (provider === 'openai_compatible_custom' && currentPreset !== 'custom' && !openAICompatiblePresetDefaults[currentPreset]) nextPreset = currentPreset;
 								presetInput.value = nextPreset;
@@ -1149,10 +1430,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					document.getElementById('subscription_info_codex').classList.add('hidden');
 						document.getElementById('ollama_info').classList.add('hidden');
 						document.getElementById('ollama_fields').classList.add('hidden');
-						document.getElementById('openai_compatible_info').classList.add('hidden');
-						document.getElementById('openai_compatible_fields').classList.add('hidden');
-						document.getElementById('openai_api_key_info').classList.add('hidden');					document.getElementById('openai_subscription_info_cli').classList.add('hidden');
-					document.getElementById('openai_subscription_info_oauth').classList.add('hidden');
+								document.getElementById('openai_compatible_info').classList.add('hidden');
+								document.getElementById('openai_compatible_fields').classList.add('hidden');
+								document.getElementById('mixture_fields').classList.add('hidden');
+								document.getElementById('openai_api_key_info').classList.add('hidden');					document.getElementById('openai_subscription_info_cli').classList.add('hidden');					document.getElementById('openai_subscription_info_oauth').classList.add('hidden');
 				}
 
 				var _deleteModelId = '';
@@ -1236,10 +1517,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					var modelsUrl = button.dataset.modelModelsUrl || '';
 					var authHeaderName = button.dataset.modelAuthHeaderName || '';
 					var authHeaderValuePrefix = button.dataset.modelAuthHeaderValuePrefix || '';
-					var autoStartTasks = button.dataset.modelAutoStartTasks === 'true';
+						var autoStartTasks = button.dataset.modelAutoStartTasks === 'true';
+						var mixtureConfigJSON = button.dataset.modelMixtureConfigJson || '';
 
-				// Map DB provider values to UI values
-				var uiProvider = dbProvider;
+					// Map DB provider values to UI values				var uiProvider = dbProvider;
 				var anthropicAuthType = 'api_key';
 				var openaiAuthType = 'api_key';
 				var openaiConnectionMethod = 'oauth';
@@ -1256,6 +1537,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							} else {
 								uiProvider = 'openai_compatible_custom';
 							}
+						} else if (dbProvider === 'mixture') {
+							uiProvider = 'mixture';
 						} else if (dbProvider === 'openai') {					if (authMethod === 'api_key') {
 						openaiAuthType = 'api_key';
 					} else {
@@ -1290,9 +1573,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					document.getElementById('model_base_url').value = baseUrl;
 					document.getElementById('model_openai_compatible_transport').value = transport || 'chat_completions';
 					document.getElementById('model_openai_compatible_preset').value = presetSlug || 'custom';
-					document.getElementById('model_openai_compatible_custom_model').value = dbProvider === 'openai_compatible' ? model : '';
-					document.getElementById('model_auto_start_tasks').checked = autoStartTasks;
-				document.getElementById('model_submit_btn').textContent = 'Save';
+						document.getElementById('model_openai_compatible_custom_model').value = dbProvider === 'openai_compatible' ? model : '';
+						applyMixtureConfig(dbProvider === 'mixture' ? mixtureConfigJSON : '');
+						document.getElementById('model_auto_start_tasks').checked = autoStartTasks;				document.getElementById('model_submit_btn').textContent = 'Save';
 				toggleProviderFields(model, reasoningEffort);
 				resetSecretInputVisibility('model_api_key');
 				new_model_modal.showModal();
@@ -1335,7 +1618,18 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							document.getElementById('openai_compatible_fields').classList.remove('hidden');
 							document.getElementById('model_auth_method').disabled = true;
 							document.getElementById('model_openai_connection_method').disabled = true;
-								applyOpenAICompatiblePreset(forcePresetDefaults);							document.getElementById('model_openai_compatible_custom_model').value = activeModel || '';					} else if (provider === 'ollama') {
+								applyOpenAICompatiblePreset(forcePresetDefaults);							document.getElementById('model_openai_compatible_custom_model').value = activeModel || '';					} else if (provider === 'mixture') {
+							anthropicAuthTypeField.classList.add('hidden');
+							openaiAuthTypeField.classList.add('hidden');
+							openaiConnectionMethodField.classList.add('hidden');
+							authMethodField.classList.add('hidden');
+							apiKeyField.classList.add('hidden');
+							apiKeyInput.required = false;
+							document.getElementById('mixture_fields').classList.remove('hidden');
+							document.getElementById('model_auth_method').disabled = true;
+							document.getElementById('model_openai_connection_method').disabled = true;
+							updateMixtureCostWarning();
+					} else if (provider === 'ollama') {
 						anthropicAuthTypeField.classList.add('hidden');					openaiAuthTypeField.classList.add('hidden');
 					openaiConnectionMethodField.classList.add('hidden');
 					authMethodField.classList.add('hidden');
@@ -1471,9 +1765,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					document.getElementById('model_openai_compatible_preset').value = 'openrouter';
 					document.getElementById('model_openai_compatible_transport').value = 'chat_completions';
 					document.getElementById('model_base_url').value = '';
-					document.getElementById('model_openai_compatible_custom_model').value = '';
-					document.getElementById('model_auto_start_tasks').checked = false;
-				document.getElementById('model_submit_btn').textContent = 'Create';
+						document.getElementById('model_openai_compatible_custom_model').value = '';
+						applyMixtureConfig('');
+						document.getElementById('model_auto_start_tasks').checked = false;				document.getElementById('model_submit_btn').textContent = 'Create';
 				toggleProviderFields('', '');
 				resetSecretInputVisibility('model_api_key');
 				new_model_modal.showModal();
