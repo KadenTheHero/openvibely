@@ -870,13 +870,107 @@ func TestDiscordLinkAttachmentsCleansUpMovedFileWhenPersistFails(t *testing.T) {
 	}
 }
 
+func TestDiscordQueueChatInputSelectsVisionAgentFromDownloadedAttachment(t *testing.T) {
+	svc, db, _, projectRepo, taskRepo, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Discord Queued Attachment Chat", IsDefault: true}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	defaultAgent := &models.LLMConfig{Name: "text-cli", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodCLI, Model: "claude-sonnet-4-5", IsDefault: true}
+	if err := agentRepo.Create(ctx, defaultAgent); err != nil {
+		t.Fatalf("create default agent: %v", err)
+	}
+	visionAgent := &models.LLMConfig{Name: "vision", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-3-5-sonnet-20241022", APIKey: "key"}
+	if err := agentRepo.Create(ctx, visionAgent); err != nil {
+		t.Fatalf("create vision agent: %v", err)
+	}
+	svc.llmConfigRepo = agentRepo
+	svc.SetUploadsDir(t.TempDir())
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	svc.SetThreadInputRepo(threadInputRepo)
+
+	activeTask := &models.Task{ProjectID: project.ID, Title: "Active chat", Prompt: "active", Status: models.StatusRunning, Category: models.CategoryChat, AgentID: &defaultAgent.ID, CreatedVia: models.TaskOriginDiscord}
+	if err := taskRepo.Create(ctx, activeTask); err != nil {
+		t.Fatalf("create active chat task: %v", err)
+	}
+	activeExec := &models.Execution{TaskID: activeTask.ID, AgentConfigID: defaultAgent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := repository.NewExecutionRepo(db).Create(ctx, activeExec); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+
+	fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write(slackTestPNGBytes)
+	}))
+	defer fileServer.Close()
+	useDiscordFileServers(t, svc, map[string]*httptest.Server{"cdn.discordapp.com": fileServer})
+
+	var sentMessages []string
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) {
+		sentMessages = append(sentMessages, text)
+		return "ack-1", nil
+	}
+
+	handled := svc.queueChatInput(ctx, project.ID, activeExec.ID, discordIncomingMessage{
+		ChannelID: "chan-1",
+		MessageID: "msg-1",
+		UserID:    "user-1",
+		Text:      "queue this screenshot",
+		Source:    "discord",
+		Attachments: []discordIncomingAttachment{{
+			ID:          "att-1",
+			FileName:    "queued.bin",
+			ContentType: "application/octet-stream",
+			Size:        len(slackTestPNGBytes),
+			URL:         "https://cdn.discordapp.com/attachments/chan/msg/queued.bin",
+		}},
+	})
+	if !handled {
+		t.Fatal("expected queued input to be handled")
+	}
+	if len(sentMessages) != 1 || !strings.Contains(sentMessages[0], "Queued") {
+		t.Fatalf("expected queued acknowledgement, got %#v", sentMessages)
+	}
+	pending, err := threadInputRepo.ListPendingForChat(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("list pending chat inputs: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected one queued chat input, got %#v", pending)
+	}
+	if pending[0].AgentConfigID != visionAgent.ID {
+		t.Fatalf("expected queued input to use vision agent %q, got %#v", visionAgent.ID, pending[0])
+	}
+	if pending[0].AttachmentSessionID == "" {
+		t.Fatalf("expected queued input to reference pending attachment session: %#v", pending[0])
+	}
+	pendingDir := filepath.Join(svc.uploadsDir, "chat", "pending", pending[0].AttachmentSessionID)
+	entries, err := os.ReadDir(pendingDir)
+	if err != nil {
+		t.Fatalf("read pending attachment dir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected one staged attachment, got %d", len(entries))
+	}
+}
+
 func TestDiscordQueueChatInputCleansPendingAttachmentsWhenQueueInsertFails(t *testing.T) {
 	svc, db, _, _, _, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	svc.llmConfigRepo = agentRepo
 	uploadRoot := t.TempDir()
 	svc.SetUploadsDir(uploadRoot)
-	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
-	if err := db.Close(); err != nil {
-		t.Fatalf("close db: %v", err)
+	queueDB := testutil.NewTestDB(t)
+	svc.SetThreadInputRepo(repository.NewThreadInputRepo(queueDB))
+	if err := queueDB.Close(); err != nil {
+		t.Fatalf("close queue db: %v", err)
 	}
 
 	fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -892,7 +986,7 @@ func TestDiscordQueueChatInputCleansPendingAttachmentsWhenQueueInsertFails(t *te
 		return "ack-1", nil
 	}
 
-	handled := svc.queueChatInput(context.Background(), "project-1", "exec-1", "agent-1", discordIncomingMessage{
+	handled := svc.queueChatInput(context.Background(), "project-1", "exec-1", discordIncomingMessage{
 		ChannelID: "chan-1",
 		MessageID: "msg-1",
 		UserID:    "user-1",
@@ -936,6 +1030,7 @@ func TestDiscordQueueChatInputUsesGenericDownloadError(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 	execRepo := repository.NewExecutionRepo(db)
+	svc.llmConfigRepo = agentRepo
 	svc.execRepo = execRepo
 	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 	svc.SetChatBroadcaster(events.NewChatBroadcaster())
@@ -950,7 +1045,7 @@ func TestDiscordQueueChatInputUsesGenericDownloadError(t *testing.T) {
 		return "ack-1", nil
 	}
 
-	handled := svc.queueChatInput(ctx, project.ID, "exec-1", agent.ID, discordIncomingMessage{
+	handled := svc.queueChatInput(ctx, project.ID, "exec-1", discordIncomingMessage{
 		ChannelID: "chan-1",
 		MessageID: "msg-1",
 		UserID:    "user-1",
@@ -1005,6 +1100,7 @@ func TestDiscordQueueChatInputRecordsFailedMessageWhenAttachmentStagingFails(t *
 		t.Fatalf("create agent: %v", err)
 	}
 	execRepo := repository.NewExecutionRepo(db)
+	svc.llmConfigRepo = agentRepo
 	svc.execRepo = execRepo
 	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 	uploadRootFile := filepath.Join(t.TempDir(), "uploads-file")
@@ -1032,7 +1128,7 @@ func TestDiscordQueueChatInputRecordsFailedMessageWhenAttachmentStagingFails(t *
 		return "ack-1", nil
 	}
 
-	handled := svc.queueChatInput(ctx, project.ID, "exec-1", agent.ID, discordIncomingMessage{
+	handled := svc.queueChatInput(ctx, project.ID, "exec-1", discordIncomingMessage{
 		ChannelID: "chan-1",
 		MessageID: "msg-1",
 		UserID:    "user-1",

@@ -384,12 +384,7 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 		_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error checking active chat response. Please try again.")
 		return
 	} else if activeChatExec != nil {
-		agent, err := s.autoSelectAgent(ctx, msg.Text, discordIncomingAttachmentsRequireVision(msg.Attachments))
-		if err != nil {
-			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, fmt.Sprintf("Error selecting model: %v", err))
-			return
-		}
-		if s.queueChatInput(ctx, projectID, activeChatExec.ID, agent.ID, msg) {
+		if s.queueChatInput(ctx, projectID, activeChatExec.ID, msg) {
 			return
 		}
 	}
@@ -544,34 +539,55 @@ func (m discordIncomingMessage) replyChannelID() string {
 	return m.ChannelID
 }
 
-func (s *DiscordService) queueChatInput(ctx context.Context, projectID, activeExecID, agentID string, msg discordIncomingMessage) bool {
+func (s *DiscordService) queueChatInput(ctx context.Context, projectID, activeExecID string, msg discordIncomingMessage) bool {
 	if s.threadInputRepo == nil {
 		return false
 	}
 	attachmentSessionID := ""
+	hasImages := false
 	if len(msg.Attachments) > 0 {
 		chatAttachments, err := s.downloadDiscordFiles(ctx, msg.Attachments)
 		if err != nil {
 			applog.Infof("[discord] queue chat attachment download failed: %v", err)
 			msgText := "Failed to process attachment: unable to download attachment. Please try again."
-			s.recordQueuedAttachmentFailure(ctx, projectID, agentID, msg, msgText)
+			agent, agentErr := s.autoSelectAgent(ctx, msg.Text, discordIncomingAttachmentsRequireVision(msg.Attachments))
+			if agentErr != nil {
+				_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, fmt.Sprintf("Error selecting model: %v", agentErr))
+				return true
+			}
+			s.recordQueuedAttachmentFailure(ctx, projectID, agent.ID, msg, msgText)
 			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
 			return true
 		}
+		_, imageAttachments := discordAttachmentContextAndImages(chatAttachments)
+		hasImages = len(imageAttachments) > 0
 		attachmentSessionID, err = s.saveChatAttachmentsToPendingSession(chatAttachments)
 		if err != nil {
 			applog.Infof("[discord] queue chat attachment staging failed: %v", err)
 			msgText := "Failed to process attachment: unable to store attachment. Please try again."
-			s.recordQueuedAttachmentFailure(ctx, projectID, agentID, msg, msgText)
+			agent, agentErr := s.autoSelectAgent(ctx, msg.Text, hasImages)
+			if agentErr != nil {
+				_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, fmt.Sprintf("Error selecting model: %v", agentErr))
+				return true
+			}
+			s.recordQueuedAttachmentFailure(ctx, projectID, agent.ID, msg, msgText)
 			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
 			return true
 		}
+	}
+	agent, err := s.autoSelectAgent(ctx, msg.Text, hasImages)
+	if err != nil {
+		if attachmentSessionID != "" {
+			_ = os.RemoveAll(filepath.Join(s.uploadsDir, "chat", "pending", attachmentSessionID))
+		}
+		_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, fmt.Sprintf("Error selecting model: %v", err))
+		return true
 	}
 	queued := &models.ThreadInput{
 		Scope:               models.ThreadInputScopeChat,
 		ProjectID:           projectID,
 		RunExecutionID:      activeExecID,
-		AgentConfigID:       agentID,
+		AgentConfigID:       agent.ID,
 		InputMode:           models.ThreadInputModeQueued,
 		InputStatus:         models.ThreadInputPending,
 		Content:             msg.Text,
