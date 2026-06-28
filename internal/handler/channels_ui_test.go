@@ -142,9 +142,11 @@ func TestChannelsPageRendersCardLayout(t *testing.T) {
 		!strings.Contains(body, `resetSecretInputVisibility('discord_bot_token')`) {
 		t.Error("expected Discord configuration modal to reset unsaved edits and masked token state on close/reopen")
 	}
-	if !strings.Contains(body, `event.detail.pathInfo.requestPath === '/channels/discord/configure' && event.detail.successful`) ||
+	if !strings.Contains(body, `hx-on::after-request="if (event.detail.successful) closeDiscordConfigModal()"`) ||
+		!strings.Contains(body, `var rp = (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || ''`) ||
+		!strings.Contains(body, `rp === '/channels/discord/configure' && detail.successful`) ||
 		!strings.Contains(body, `document.getElementById('discord_config_modal')`) {
-		t.Error("expected Discord configuration modal to close after successful HTMX save")
+		t.Error("expected Discord configuration modal to close after successful HTMX save without brittle pathInfo access")
 	}
 }
 
@@ -296,7 +298,7 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if strings.Contains(body, "// Close webhook modal after successful save\t") || strings.Contains(body, "// Close webhook modal after successful save var rp") {
 		t.Fatal("expected rp declaration to be executable, not commented out")
 	}
-	assertIndexOrder(t, body, "// Close webhook modal after successful save", "var rp = event.detail.pathInfo.requestPath || '';", "expected rp declaration after webhook modal comment")
+	assertIndexOrder(t, body, "var rp = (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || '';", "// Close webhook modal after successful save", "expected request path declaration before webhook modal branch")
 
 	cardReq := httptest.NewRequest(http.MethodGet, "/channels/outbound-targets/card?project_id=default", nil)
 	cardRec := httptest.NewRecorder()

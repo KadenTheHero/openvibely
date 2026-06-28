@@ -51,6 +51,9 @@ func TestChannelsPage_RendersDiscordCardWhenConfigured(t *testing.T) {
 	if strings.Contains(body, "Discord Bot Coming Soon") {
 		t.Fatal("did not expect discord coming soon placeholder")
 	}
+	if !strings.Contains(body, "/channels/discord/remove?project_id="+project.ID) {
+		t.Fatal("expected discord delete action to preserve project context for auth cleanup")
+	}
 }
 
 func TestChannelsDiscordConfigure(t *testing.T) {
@@ -114,6 +117,14 @@ func TestChannelsDiscordConfigureRequiresToken(t *testing.T) {
 
 func TestChannelsDiscordRemoveClearsSettings(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Discord Remove Project")
+	otherProject := createProject(t, h, "Other Discord Remove Project")
+	if err := h.discordAuthRepo.Create(context.Background(), &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "12345", DisplayName: "Alice", AddedBy: "test"}); err != nil {
+		t.Fatalf("seed discord auth user: %v", err)
+	}
+	if err := h.discordAuthRepo.Create(context.Background(), &models.DiscordAuthorizedUser{ProjectID: otherProject.ID, DiscordUserID: "67890", DisplayName: "Bob", AddedBy: "test"}); err != nil {
+		t.Fatalf("seed other discord auth user: %v", err)
+	}
 	var disconnected bool
 	h.SetDiscordService(&fakeDiscordService{
 		disconnectFn: func(ctx context.Context) error {
@@ -127,7 +138,7 @@ func TestChannelsDiscordRemoveClearsSettings(t *testing.T) {
 		}
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/channels/discord/remove", nil)
+	req := httptest.NewRequest(http.MethodPost, "/channels/discord/remove?project_id="+project.ID, nil)
 	req.Header.Set("HX-Request", "true")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -140,6 +151,14 @@ func TestChannelsDiscordRemoveClearsSettings(t *testing.T) {
 	}
 	if !disconnected {
 		t.Fatalf("expected discord service disconnect")
+	}
+	users, err := h.discordAuthRepo.ListByProject(context.Background(), project.ID)
+	if err != nil || len(users) != 0 {
+		t.Fatalf("expected discord authorized users cleared for deleted project, got %d err=%v", len(users), err)
+	}
+	otherUsers, err := h.discordAuthRepo.ListByProject(context.Background(), otherProject.ID)
+	if err != nil || len(otherUsers) != 1 {
+		t.Fatalf("expected other project discord users preserved, got %d err=%v", len(otherUsers), err)
 	}
 }
 

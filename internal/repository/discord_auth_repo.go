@@ -101,6 +101,17 @@ func (r *DiscordAuthRepo) Create(ctx context.Context, u *models.DiscordAuthorize
 		Scan(&u.ID, &u.AddedAt)
 }
 
+// DeleteByProject removes all authorized Discord users for a project.
+func (r *DiscordAuthRepo) DeleteByProject(ctx context.Context, projectID string) error {
+	if strings.TrimSpace(projectID) == "" {
+		return nil
+	}
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM discord_authorized_users WHERE project_id = ?`, projectID); err != nil {
+		return fmt.Errorf("delete discord auth users for project: %w", err)
+	}
+	return nil
+}
+
 // Delete removes an authorized Discord user by ID.
 func (r *DiscordAuthRepo) Delete(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx,

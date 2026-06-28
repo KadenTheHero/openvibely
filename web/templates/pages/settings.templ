@@ -465,7 +465,18 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
 										<li><button type="button" onclick="openDiscordConfigModal()">Edit</button></li>
 										<li><button type="button" hx-post="/channels/discord/test" hx-target="#test-result-discord" hx-swap="innerHTML">Test Connection</button></li>
-										<li><button type="button" class="text-error" onclick="openDeleteChannelConfirm('Discord', '/channels/discord/remove', 'POST')">Delete</button></li>
+										<li>
+											<button
+												type="button"
+												class="text-error"
+												data-channel-delete-name="Discord"
+												data-channel-delete-url={ "/channels/discord/remove?project_id=" + currentProjectID }
+												data-channel-delete-method="POST"
+												onclick="openDeleteChannelConfirmFromButton(this)"
+											>
+												Delete
+											</button>
+										</li>
 									</ul>
 								</div>
 							</div>
@@ -977,8 +988,8 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 			<div class="modal-box max-w-2xl">
 				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeDiscordConfigModal()" aria-label="Close Discord configuration" title="Close Discord configuration">×</button>
 				<h3 class="font-bold text-lg mb-4 pr-10">Configure Discord</h3>
-				<form id="discord_config_form" method="post" action="/channels/discord/configure" hx-post="/channels/discord/configure" hx-swap="none">
-					<div class="alert alert-info mb-4 text-sm">
+					<form id="discord_config_form" method="post" action="/channels/discord/configure" hx-post="/channels/discord/configure" hx-swap="none" hx-on::after-request="if (event.detail.successful) closeDiscordConfigModal()">
+						<div class="alert alert-info mb-4 text-sm">
 						<div>
 							<p class="font-semibold">Use a Discord bot token</p>
 							<p class="mt-1 opacity-80">Create a Discord application bot, enable message content intent, invite it to your server, then add its token here.</p>
@@ -1931,45 +1942,46 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 
 			// Close modal and refresh after successful save
 			document.body.addEventListener('htmx:afterRequest', function(event) {
-				if (event.detail.pathInfo.requestPath === '/channels/telegram' && event.detail.successful) {
+				var detail = event.detail || {};
+				var rp = (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || '';
+				if (rp === '/channels/telegram' && detail.successful) {
 					const modal = document.getElementById('channel_modal');
 					if (modal && modal.open) {
 						modal.close();
 					}
 				}
-				if (event.detail.pathInfo.requestPath === '/channels/github/configure' && event.detail.successful) {
+				if (rp === '/channels/github/configure' && detail.successful) {
 					const modal = document.getElementById('github_config_modal');
 					if (modal && modal.open) {
 						modal.close();
 					}
 				}
-					if (event.detail.pathInfo.requestPath === '/channels/slack/configure' && event.detail.successful) {
+					if (rp === '/channels/slack/configure' && detail.successful) {
 						const modal = document.getElementById('slack_config_modal');
 						if (modal && modal.open) {
 							modal.close();
 						}
 					}
-					if (event.detail.pathInfo.requestPath === '/channels/email/configure' && event.detail.successful) {
+					if (rp === '/channels/email/configure' && detail.successful) {
 						const modal = document.getElementById('email_config_modal');
 						if (modal && modal.open) {
 							modal.close();
 						}
 					}
-					if (event.detail.pathInfo.requestPath === '/channels/discord/configure' && event.detail.successful) {
+					if (rp === '/channels/discord/configure' && detail.successful) {
 						const modal = document.getElementById('discord_config_modal');
 						if (modal && modal.open) {
 							modal.close();
 						}
 					}
-					// Close webhook modal after successful save
-					var rp = event.detail.pathInfo.requestPath || '';
-					if (rp.startsWith('/channels/webhooks') && event.detail.successful) {
-						var whModal = document.getElementById('webhook_modal');
+						// Close webhook modal after successful save
+						if (rp.startsWith('/channels/webhooks') && detail.successful) {
+							var whModal = document.getElementById('webhook_modal');
 						if (whModal && whModal.open) {
 							whModal.close();
 						}
 					}
-					if (rp === '/channels/send-message-explicit-targets' && event.detail.successful) {
+					if (rp === '/channels/send-message-explicit-targets' && detail.successful) {
 						const xhr = event.detail.xhr;
 						const triggerHeader = xhr && typeof xhr.getResponseHeader === 'function' ? (xhr.getResponseHeader('HX-Trigger') || '') : '';
 						if (triggerHeader.indexOf('outbound-targets-card-refresh') !== -1) {

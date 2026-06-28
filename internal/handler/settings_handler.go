@@ -775,6 +775,7 @@ func (h *Handler) handleDiscordRemove(c echo.Context) error {
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
+	projectID, _ := h.getCurrentProjectID(c)
 	if h.discordSvc != nil {
 		_ = h.discordSvc.Disconnect(c.Request().Context())
 	} else {
@@ -784,6 +785,9 @@ func (h *Handler) handleDiscordRemove(c echo.Context) error {
 		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingSendResponses, "")
 		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingRequireMention, "")
 		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingFreeResponseChannels, "")
+	}
+	if h.discordAuthRepo != nil && projectID != "" {
+		_ = h.discordAuthRepo.DeleteByProject(c.Request().Context(), projectID)
 	}
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Refresh", "true")

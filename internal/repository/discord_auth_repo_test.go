@@ -51,6 +51,31 @@ func TestDiscordAuthRepo_CRUD(t *testing.T) {
 	require.Error(t, repo.Delete(ctx, "missing-id"))
 }
 
+func TestDiscordAuthRepo_DeleteByProject(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewDiscordAuthRepo(db)
+	projectRepo := NewProjectRepo(db)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Discord Delete Project"}
+	otherProject := &models.Project{Name: "Discord Keep Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, otherProject))
+
+	require.NoError(t, repo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "111", DisplayName: "A", AddedBy: "test"}))
+	require.NoError(t, repo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "222", DisplayName: "B", AddedBy: "test"}))
+	require.NoError(t, repo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: otherProject.ID, DiscordUserID: "333", DisplayName: "C", AddedBy: "test"}))
+
+	require.NoError(t, repo.DeleteByProject(ctx, project.ID))
+
+	users, err := repo.ListByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Len(t, users, 0)
+	otherUsers, err := repo.ListByProject(ctx, otherProject.ID)
+	require.NoError(t, err)
+	assert.Len(t, otherUsers, 1)
+}
+
 func TestDiscordAuthRepo_AuthorizationChecks(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewDiscordAuthRepo(db)
