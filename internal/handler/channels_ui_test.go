@@ -142,11 +142,21 @@ func TestChannelsPageRendersCardLayout(t *testing.T) {
 		!strings.Contains(body, `resetSecretInputVisibility('discord_bot_token')`) {
 		t.Error("expected Discord configuration modal to reset unsaved edits and masked token state on close/reopen")
 	}
-	if !strings.Contains(body, `hx-on::after-request="if (event.detail.successful) closeDiscordConfigModal()"`) ||
-		!strings.Contains(body, `var rp = (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || ''`) ||
+	if strings.Contains(body, `hx-on::after-request="if (event.detail.successful) closeDiscordConfigModal()"`) {
+		t.Error("did not expect Discord config form to close on bubbled authorized-user HTMX requests")
+	}
+	if !strings.Contains(body, `event.detail && event.detail.elt === this && event.detail.successful`) {
+		t.Error("expected Discord config form save-close hook to be guarded to the form's own HTMX request")
+	}
+	if !strings.Contains(body, `var rp = (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || ''`) ||
 		!strings.Contains(body, `rp === '/channels/discord/configure' && detail.successful`) ||
 		!strings.Contains(body, `document.getElementById('discord_config_modal')`) {
-		t.Error("expected Discord configuration modal to close after successful HTMX save without brittle pathInfo access")
+		t.Error("expected Discord configuration modal to also close after successful configure save without brittle pathInfo access")
+	}
+	if !strings.Contains(body, `hx-post="/channels/discord/authorized-users"`) ||
+		!strings.Contains(body, `hx-target="#discord-authorized-users"`) ||
+		!strings.Contains(body, `hx-include="#discord-authorized-users-add-controls"`) {
+		t.Error("expected Discord authorized-user Add to update the allowlist fragment without closing the config modal")
 	}
 }
 

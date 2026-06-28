@@ -988,7 +988,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 			<div class="modal-box max-w-2xl">
 				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeDiscordConfigModal()" aria-label="Close Discord configuration" title="Close Discord configuration">×</button>
 				<h3 class="font-bold text-lg mb-4 pr-10">Configure Discord</h3>
-					<form id="discord_config_form" method="post" action="/channels/discord/configure" hx-post="/channels/discord/configure" hx-swap="none" hx-on::after-request="if (event.detail.successful) closeDiscordConfigModal()">
+					<form id="discord_config_form" method="post" action="/channels/discord/configure" hx-post="/channels/discord/configure" hx-swap="none" hx-on::after-request="if (event.detail && event.detail.elt === this && event.detail.successful) closeDiscordConfigModal()">
 						<div class="alert alert-info mb-4 text-sm">
 						<div>
 							<p class="font-semibold">Use a Discord bot token</p>
