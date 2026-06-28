@@ -4,6 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -31,6 +36,10 @@ const (
 	discordProcessTimeout   = 5 * time.Minute
 	discordChatHistoryLimit = 50
 	discordMessageLimit     = 2000
+	discordMaxFileSize      = 10 << 20
+	discordMaxTextFileSize  = 100 * 1024
+	discordMaxFilesPerMsg   = 3
+	discordMaxRedirects     = 10
 )
 
 var discordMentionRegex = regexp.MustCompile(`<@!?[0-9]+>`)
@@ -61,6 +70,7 @@ type DiscordService struct {
 	llmSvc                   *LLMService
 	workerSvc                *WorkerService
 	threadInputRepo          *repository.ThreadInputRepo
+	chatAttachmentRepo       *repository.ChatAttachmentRepo
 	customPersonalityRepo    *repository.CustomPersonalityRepo
 	agentRepo                *repository.AgentRepo
 	alertSvc                 *AlertService
@@ -71,6 +81,8 @@ type DiscordService struct {
 	channelTaskRunner        ChannelTaskRunner
 	channelMessageRouter     *ChannelMessageRouter
 	userProjects             map[string]string
+	uploadsDir               string
+	httpClient               *http.Client
 
 	mu                       sync.RWMutex
 	running                  bool
@@ -106,10 +118,24 @@ func NewDiscordService(
 		discordAuthRepo:        discordAuthRepo,
 		discordTaskContextRepo: discordTaskContextRepo,
 		userProjects:           make(map[string]string),
+		uploadsDir:             "uploads",
+		httpClient:             &http.Client{Timeout: 20 * time.Second},
 	}
 }
 
 func (s *DiscordService) SetChatBroadcaster(cb *events.ChatBroadcaster) { s.chatBroadcaster = cb }
+func (s *DiscordService) SetChatAttachmentRepo(repo *repository.ChatAttachmentRepo) {
+	s.chatAttachmentRepo = repo
+}
+func (s *DiscordService) SetUploadsDir(dir string) {
+	if strings.TrimSpace(dir) == "" {
+		return
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	s.uploadsDir = dir
+}
 func (s *DiscordService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
 	s.threadInputRepo = repo
 }
@@ -277,6 +303,7 @@ func (s *DiscordService) handleMessageCreate(ctx context.Context, sess *discordg
 		Text:            strings.TrimSpace(msg.Content),
 		IsDM:            discordIsDM(sess, msg.ChannelID, msg.GuildID),
 		Source:          "discord",
+		Attachments:     discordIncomingAttachmentsFromMessage(msg.Attachments),
 	}
 	if strings.TrimSpace(incoming.Text) == "" && len(msg.Attachments) > 0 {
 		incoming.Text = discordAttachmentPrompt(msg.Attachments)
@@ -288,6 +315,9 @@ func (s *DiscordService) handleMessageCreate(ctx context.Context, sess *discordg
 		return
 	}
 	incoming.Text = sanitizeDiscordText(incoming.Text, botID)
+	if strings.TrimSpace(incoming.Text) == "" && len(msg.Attachments) > 0 {
+		incoming.Text = discordAttachmentPrompt(msg.Attachments)
+	}
 	if strings.TrimSpace(incoming.Text) == "" {
 		return
 	}
@@ -309,6 +339,16 @@ type discordIncomingMessage struct {
 	Text            string
 	IsDM            bool
 	Source          string
+	Attachments     []discordIncomingAttachment
+}
+
+type discordIncomingAttachment struct {
+	ID          string
+	FileName    string
+	ContentType string
+	Size        int
+	URL         string
+	ProxyURL    string
 }
 
 func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
@@ -387,8 +427,40 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 		_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error processing your message. Please try again.")
 		return
 	}
+
+	var attachmentContext string
+	var imageAttachments []models.Attachment
+	hasLinkedAttachments := false
+	if len(msg.Attachments) > 0 {
+		_, _, chatAtts, err := s.downloadDiscordAttachments(ctx, msg.Attachments)
+		if err != nil {
+			applog.Infof("[discord] attachment download error: %v", err)
+			msgText := "Failed to process attachment: unable to download attachment. Please try again."
+			s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, time.Since(start).Milliseconds())
+			if s.chatBroadcaster != nil {
+				s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, ExecID: exec.ID, TaskID: task.ID, Message: msg.Text, Source: msg.Source, AgentName: agent.Name, HasAttachments: len(msg.Attachments) > 0})
+			}
+			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
+			return
+		}
+		if len(chatAtts) > 0 {
+			chatAtts, err = s.linkAttachmentsToExecution(ctx, exec.ID, chatAtts)
+			if err != nil {
+				applog.Infof("[discord] attachment link error: %v", err)
+				msgText := "Failed to process attachment: unable to store attachment. Please try again."
+				s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, time.Since(start).Milliseconds())
+				if s.chatBroadcaster != nil {
+					s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, ExecID: exec.ID, TaskID: task.ID, Message: msg.Text, Source: msg.Source, AgentName: agent.Name, HasAttachments: len(msg.Attachments) > 0})
+				}
+				_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
+				return
+			}
+			attachmentContext, imageAttachments = discordAttachmentContextAndImages(chatAtts)
+			hasLinkedAttachments = len(chatAtts) > 0
+		}
+	}
 	if s.chatBroadcaster != nil {
-		s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, ExecID: exec.ID, TaskID: task.ID, Message: msg.Text, Source: msg.Source, AgentName: agent.Name})
+		s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, ExecID: exec.ID, TaskID: task.ID, Message: msg.Text, Source: msg.Source, AgentName: agent.Name, HasAttachments: hasLinkedAttachments})
 	}
 	ackID, _ := s.sendDiscordMessageWithID(msg.replyChannelID(), msg.MessageID, "Thinking...")
 	if ackID != "" && s.discordTaskContextRepo != nil {
@@ -407,6 +479,9 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 		history = []models.Execution{}
 	}
 	systemContext := s.buildChatContext(ctx, projectID)
+	if attachmentContext != "" {
+		systemContext += attachmentContext
+	}
 	if personalityPrompt := s.getPersonalityContext(ctx, projectID); personalityPrompt != "" {
 		systemContext += personalityPrompt
 	}
@@ -417,15 +492,16 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 		return
 	}
 	s.channelChatRunner(context.Background(), ChannelChatRunRequest{
-		ExecID:        exec.ID,
-		TaskID:        task.ID,
-		ProjectID:     projectID,
-		Message:       msg.Text,
-		Agent:         *agent,
-		ChatHistory:   filterDiscordChatHistory(history, exec.ID),
-		SystemContext: systemContext,
-		WorkDir:       s.resolveWorkDir(ctx, projectID),
-		Surface:       chatcontrol.SurfaceDiscord,
+		ExecID:           exec.ID,
+		TaskID:           task.ID,
+		ProjectID:        projectID,
+		Message:          msg.Text,
+		Agent:            *agent,
+		ChatHistory:      filterDiscordChatHistory(history, exec.ID),
+		SystemContext:    systemContext,
+		WorkDir:          s.resolveWorkDir(ctx, projectID),
+		ImageAttachments: imageAttachments,
+		Surface:          chatcontrol.SurfaceDiscord,
 		ReplyContext: ChannelReplyContext{
 			Source:           models.TaskOriginDiscord,
 			DiscordChannelID: msg.replyChannelID(),
@@ -447,31 +523,103 @@ func (s *DiscordService) queueChatInput(ctx context.Context, projectID, activeEx
 	if s.threadInputRepo == nil {
 		return false
 	}
+	attachmentSessionID := ""
+	if len(msg.Attachments) > 0 {
+		chatAttachments, err := s.downloadDiscordFiles(ctx, msg.Attachments)
+		if err != nil {
+			applog.Infof("[discord] queue chat attachment download failed: %v", err)
+			msgText := "Failed to process attachment: unable to download attachment. Please try again."
+			s.recordQueuedAttachmentFailure(ctx, projectID, agentID, msg, msgText)
+			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
+			return true
+		}
+		attachmentSessionID, err = s.saveChatAttachmentsToPendingSession(chatAttachments)
+		if err != nil {
+			applog.Infof("[discord] queue chat attachment staging failed: %v", err)
+			msgText := "Failed to process attachment: unable to store attachment. Please try again."
+			s.recordQueuedAttachmentFailure(ctx, projectID, agentID, msg, msgText)
+			_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "⚠️ "+msgText)
+			return true
+		}
+	}
 	queued := &models.ThreadInput{
-		Scope:            models.ThreadInputScopeChat,
-		ProjectID:        projectID,
-		RunExecutionID:   activeExecID,
-		AgentConfigID:    agentID,
-		InputMode:        models.ThreadInputModeQueued,
-		InputStatus:      models.ThreadInputPending,
-		Content:          msg.Text,
-		ChatMode:         models.ChatModeOrchestrate,
-		Source:           models.TaskOriginDiscord,
-		DiscordChannelID: msg.replyChannelID(),
-		DiscordThreadID:  msg.ThreadID,
-		DiscordMessageID: msg.MessageID,
-		DiscordUserID:    msg.UserID,
+		Scope:               models.ThreadInputScopeChat,
+		ProjectID:           projectID,
+		RunExecutionID:      activeExecID,
+		AgentConfigID:       agentID,
+		InputMode:           models.ThreadInputModeQueued,
+		InputStatus:         models.ThreadInputPending,
+		Content:             msg.Text,
+		AttachmentSessionID: attachmentSessionID,
+		ChatMode:            models.ChatModeOrchestrate,
+		Source:              models.TaskOriginDiscord,
+		DiscordChannelID:    msg.replyChannelID(),
+		DiscordThreadID:     msg.ThreadID,
+		DiscordMessageID:    msg.MessageID,
+		DiscordUserID:       msg.UserID,
 	}
 	if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
 		applog.Infof("[discord] queue chat input failed: %v", err)
+		if attachmentSessionID != "" {
+			_ = os.RemoveAll(filepath.Join(s.uploadsDir, "chat", "pending", attachmentSessionID))
+		}
 		_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Error queueing your message. Please try again.")
 		return true
 	}
 	if s.chatBroadcaster != nil {
-		s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, ExecID: queued.ID, Message: msg.Text, Source: msg.Source, Queued: true})
+		s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, ExecID: queued.ID, Message: msg.Text, Source: msg.Source, Queued: true, HasAttachments: attachmentSessionID != ""})
 	}
 	_ = s.sendDiscordMessage(msg.replyChannelID(), msg.MessageID, "Queued. I'll send this after the current response finishes.")
 	return true
+}
+
+func (s *DiscordService) recordQueuedAttachmentFailure(ctx context.Context, projectID, agentID string, msg discordIncomingMessage, msgText string) {
+	if s.taskRepo == nil || s.execRepo == nil {
+		if s.chatBroadcaster != nil {
+			s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, Message: msg.Text, Source: msg.Source, Queued: true, HasAttachments: len(msg.Attachments) > 0})
+		}
+		return
+	}
+	task := &models.Task{
+		ProjectID:  projectID,
+		Title:      fmt.Sprintf("Discord %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)),
+		Prompt:     msg.Text,
+		Status:     models.StatusPending,
+		Category:   models.CategoryChat,
+		AgentID:    &agentID,
+		CreatedVia: models.TaskOriginDiscord,
+	}
+	if err := s.taskRepo.Create(ctx, task); err != nil {
+		applog.Infof("[discord] create queued attachment failure task failed: %v", err)
+		if s.chatBroadcaster != nil {
+			s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, Message: msg.Text, Source: msg.Source, Queued: true, HasAttachments: len(msg.Attachments) > 0})
+		}
+		return
+	}
+	if s.discordTaskContextRepo != nil {
+		if err := s.discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{
+			TaskID:           task.ID,
+			DiscordChannelID: msg.replyChannelID(),
+			DiscordThreadID:  msg.ThreadID,
+			DiscordMessageID: msg.MessageID,
+			DiscordUserID:    msg.UserID,
+		}); err != nil {
+			applog.Infof("[discord] create queued attachment failure context failed task=%s: %v", task.ID, err)
+		}
+	}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agentID, Status: models.ExecRunning, PromptSent: msg.Text}
+	if err := s.execRepo.Create(ctx, exec); err != nil {
+		applog.Infof("[discord] create queued attachment failure execution failed task=%s: %v", task.ID, err)
+		_ = s.taskRepo.Delete(ctx, task.ID)
+		if s.chatBroadcaster != nil {
+			s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, Message: msg.Text, Source: msg.Source, Queued: true, HasAttachments: len(msg.Attachments) > 0})
+		}
+		return
+	}
+	s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, 0)
+	if s.chatBroadcaster != nil {
+		s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, ExecID: exec.ID, TaskID: task.ID, Message: msg.Text, Source: msg.Source, AgentName: "", HasAttachments: len(msg.Attachments) > 0})
+	}
 }
 
 func (s *DiscordService) SendTaskCompletionToThread(ctx context.Context, channelID, threadID, messageID, taskTitle, output, errMsg, userID string) {
@@ -1314,6 +1462,28 @@ func discordDisplayName(user *discordgo.User) string {
 	}
 	return user.Username
 }
+
+func discordIncomingAttachmentsFromMessage(attachments []*discordgo.MessageAttachment) []discordIncomingAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	out := make([]discordIncomingAttachment, 0, len(attachments))
+	for _, att := range attachments {
+		if att == nil {
+			continue
+		}
+		out = append(out, discordIncomingAttachment{
+			ID:          strings.TrimSpace(att.ID),
+			FileName:    strings.TrimSpace(att.Filename),
+			ContentType: strings.TrimSpace(att.ContentType),
+			Size:        att.Size,
+			URL:         strings.TrimSpace(att.URL),
+			ProxyURL:    strings.TrimSpace(att.ProxyURL),
+		})
+	}
+	return out
+}
+
 func discordAttachmentPrompt(attachments []*discordgo.MessageAttachment) string {
 	names := make([]string, 0, len(attachments))
 	for _, att := range attachments {
@@ -1326,6 +1496,378 @@ func discordAttachmentPrompt(attachments []*discordgo.MessageAttachment) string 
 	}
 	return "User sent attachment(s): " + strings.Join(names, ", ")
 }
+
+func (s *DiscordService) downloadDiscordAttachments(ctx context.Context, files []discordIncomingAttachment) (string, []models.Attachment, []models.ChatAttachment, error) {
+	chatAttachments, err := s.downloadDiscordFiles(ctx, files)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	attachmentContext, imageAttachments := discordAttachmentContextAndImages(chatAttachments)
+	return attachmentContext, imageAttachments, chatAttachments, nil
+}
+
+func discordAttachmentContextAndImages(chatAttachments []models.ChatAttachment) (string, []models.Attachment) {
+	var imageAttachments []models.Attachment
+	var attachmentContents []string
+	for _, att := range chatAttachments {
+		if isSlackImageFile(att.MediaType) {
+			imageAttachments = append(imageAttachments, models.Attachment{
+				FileName:  att.FileName,
+				FilePath:  att.FilePath,
+				MediaType: att.MediaType,
+				FileSize:  att.FileSize,
+			})
+			continue
+		}
+		if att.FileSize <= discordMaxTextFileSize {
+			content, readErr := os.ReadFile(att.FilePath)
+			if readErr == nil {
+				attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", att.FileName, string(content)))
+				continue
+			}
+		}
+		attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", att.FileName, att.FileSize))
+	}
+	attachmentContext := ""
+	if len(attachmentContents) > 0 {
+		attachmentContext = "\n\n--- Attached Files ---\n" + strings.Join(attachmentContents, "")
+	}
+	return attachmentContext, imageAttachments
+}
+
+func (s *DiscordService) downloadDiscordFiles(ctx context.Context, files []discordIncomingAttachment) ([]models.ChatAttachment, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	if len(files) > discordMaxFilesPerMsg {
+		return nil, fmt.Errorf("too many files (%d, max %d)", len(files), discordMaxFilesPerMsg)
+	}
+	tmpDir, err := os.MkdirTemp("", "discord-attachment-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.RemoveAll(tmpDir)
+		}
+	}()
+	attachments := make([]models.ChatAttachment, 0, len(files))
+	for _, f := range files {
+		if f.Size > discordMaxFileSize {
+			return nil, fmt.Errorf("file %q too large (%d bytes, max %d)", discordFileDisplayName(f), f.Size, discordMaxFileSize)
+		}
+		fileName := discordSafeFileName(f)
+		mediaType := discordIncomingFileMediaType(f, fileName)
+		destPath, mediaType, err := s.downloadDiscordFileCandidate(ctx, tmpDir, fileName, mediaType, f)
+		if err != nil {
+			return nil, err
+		}
+		info, err := os.Stat(destPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to stat file %q: %w", fileName, err)
+		}
+		absPath, err := filepath.Abs(destPath)
+		if err != nil {
+			absPath = destPath
+		}
+		attachments = append(attachments, models.ChatAttachment{
+			FileName:  fileName,
+			FilePath:  absPath,
+			MediaType: mediaType,
+			FileSize:  info.Size(),
+		})
+		applog.Infof("[discord] downloaded attachment file=%s size=%d mime=%s path=%s", fileName, info.Size(), mediaType, absPath)
+	}
+	cleanup = false
+	return attachments, nil
+}
+
+func (s *DiscordService) downloadDiscordFileCandidate(ctx context.Context, tmpDir, fileName, mediaType string, f discordIncomingAttachment) (string, string, error) {
+	candidates := discordAttachmentDownloadURLs(f)
+	if len(candidates) == 0 {
+		return "", "", fmt.Errorf("file %q has no download URL", discordFileDisplayName(f))
+	}
+	var lastErr error
+	for _, candidateURL := range candidates {
+		destPath := filepath.Join(tmpDir, uniqueSlackTempFilename(tmpDir, fileName))
+		dest, err := os.Create(destPath)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to create file: %w", err)
+		}
+		err = s.downloadDiscordFile(ctx, candidateURL, dest)
+		closeErr := dest.Close()
+		if err != nil {
+			_ = os.Remove(destPath)
+			lastErr = fmt.Errorf("failed to download file %q: %w", fileName, err)
+			continue
+		}
+		if closeErr != nil {
+			_ = os.Remove(destPath)
+			return "", "", fmt.Errorf("failed to save file %q: %w", fileName, closeErr)
+		}
+		normalizedMediaType, err := validateSlackDownloadedFile(destPath, fileName, mediaType)
+		if err == nil {
+			if normalizedMediaType != "" {
+				mediaType = normalizedMediaType
+			}
+			return destPath, mediaType, nil
+		}
+		_ = os.Remove(destPath)
+		lastErr = err
+		if !isSlackImageFile(mediaType) {
+			break
+		}
+	}
+	if lastErr != nil {
+		return "", "", lastErr
+	}
+	return "", "", fmt.Errorf("failed to download file %q", fileName)
+}
+
+func (s *DiscordService) downloadDiscordFile(ctx context.Context, downloadURL string, writer io.Writer) error {
+	parsed, err := url.Parse(strings.TrimSpace(downloadURL))
+	if err != nil {
+		return err
+	}
+	if err := validateDiscordAttachmentURL(parsed); err != nil {
+		return err
+	}
+	client := s.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	downloadClient := *client
+	downloadClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	currentURL := parsed
+	for redirects := 0; redirects <= discordMaxRedirects; redirects++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, currentURL.String(), nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("User-Agent", "OpenVibely Discord file downloader")
+		resp, err := downloadClient.Do(req)
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			nextURL, err := discordRedirectLocation(currentURL.String(), resp.Header.Get("Location"))
+			_ = resp.Body.Close()
+			if err != nil {
+				return err
+			}
+			if err := validateDiscordAttachmentURL(nextURL); err != nil {
+				return fmt.Errorf("discord attachment download redirected to invalid target: %w", err)
+			}
+			currentURL = nextURL
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return fmt.Errorf("discord attachment download returned HTTP %d", resp.StatusCode)
+		}
+		n, err := io.Copy(writer, io.LimitReader(resp.Body, discordMaxFileSize+1))
+		if err != nil {
+			return err
+		}
+		if n > discordMaxFileSize {
+			return fmt.Errorf("discord attachment download exceeded max size %d bytes", discordMaxFileSize)
+		}
+		return nil
+	}
+	return fmt.Errorf("discord attachment download exceeded redirect limit")
+}
+
+func discordRedirectLocation(currentURL, location string) (*url.URL, error) {
+	if strings.TrimSpace(location) == "" {
+		return nil, fmt.Errorf("discord attachment download redirect missing Location header")
+	}
+	base, err := url.Parse(currentURL)
+	if err != nil {
+		return nil, err
+	}
+	next, err := url.Parse(location)
+	if err != nil {
+		return nil, err
+	}
+	return base.ResolveReference(next), nil
+}
+
+func validateDiscordAttachmentURL(parsed *url.URL) error {
+	if parsed == nil {
+		return fmt.Errorf("discord attachment URL is empty")
+	}
+	if !strings.EqualFold(parsed.Scheme, "https") {
+		return fmt.Errorf("discord attachment URL scheme %q is not allowed", parsed.Scheme)
+	}
+	if !discordTrustedAttachmentHost(parsed.Hostname()) {
+		return fmt.Errorf("discord attachment URL host %q is not trusted", parsed.Host)
+	}
+	return nil
+}
+
+func discordAttachmentDownloadURLs(f discordIncomingAttachment) []string {
+	seen := make(map[string]bool)
+	var urls []string
+	add := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" || seen[raw] {
+			return
+		}
+		seen[raw] = true
+		urls = append(urls, raw)
+	}
+	add(f.URL)
+	add(f.ProxyURL)
+	return urls
+}
+
+func discordTrustedAttachmentHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	return host == "cdn.discordapp.com" || host == "media.discordapp.net"
+}
+
+func (s *DiscordService) saveChatAttachmentsToPendingSession(attachments []models.ChatAttachment) (string, error) {
+	if len(attachments) == 0 {
+		return "", nil
+	}
+	sessionID := generateSlackPendingSessionID()
+	sessionDir := filepath.Join(s.uploadsDir, "chat", "pending", sessionID)
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		return "", fmt.Errorf("creating pending upload directory: %w", err)
+	}
+	cleanupDirs := make(map[string]struct{})
+	for _, att := range attachments {
+		fileName := filepath.Base(att.FileName)
+		if fileName == "." || fileName == string(filepath.Separator) || fileName == "" {
+			fileName = "discord-attachment"
+		}
+		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
+		destPath := filepath.Join(sessionDir, fmt.Sprintf("%s_%s", generateSlackPendingSessionID()[:8], fileName))
+		if err := moveOrCopyFile(att.FilePath, destPath); err != nil {
+			_ = os.RemoveAll(sessionDir)
+			for dir := range cleanupDirs {
+				_ = os.RemoveAll(dir)
+			}
+			return "", fmt.Errorf("staging %s: %w", fileName, err)
+		}
+	}
+	for dir := range cleanupDirs {
+		_ = os.RemoveAll(dir)
+	}
+	return sessionID, nil
+}
+
+func (s *DiscordService) linkAttachmentsToExecution(ctx context.Context, execID string, attachments []models.ChatAttachment) ([]models.ChatAttachment, error) {
+	if len(attachments) == 0 {
+		return nil, nil
+	}
+	if s.chatAttachmentRepo == nil {
+		cleanupDiscordAttachmentSourceDirs(attachments)
+		return nil, fmt.Errorf("chat attachment repository is unavailable")
+	}
+	execDir := filepath.Join(s.uploadsDir, "chat", execID)
+	if err := os.MkdirAll(execDir, 0755); err != nil {
+		applog.Infof("[discord] error creating exec dir %s: %v", execDir, err)
+		cleanupDiscordAttachmentSourceDirs(attachments)
+		return nil, fmt.Errorf("storing Discord attachment: %w", err)
+	}
+	cleanupDirs := make(map[string]struct{})
+	linked := make([]models.ChatAttachment, 0, len(attachments))
+	var linkErrs []string
+	for i := range attachments {
+		att := &attachments[i]
+		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
+		destPath := filepath.Join(execDir, uniqueSlackTempFilename(execDir, filepath.Base(att.FileName)))
+		if err := moveOrCopyFile(att.FilePath, destPath); err != nil {
+			applog.Infof("[discord] error moving attachment file=%s: %v", att.FileName, err)
+			linkErrs = append(linkErrs, fmt.Sprintf("%s: %v", att.FileName, err))
+			continue
+		}
+		absPath, err := filepath.Abs(destPath)
+		if err != nil {
+			absPath = destPath
+		}
+		att.FilePath = absPath
+		att.ExecutionID = execID
+		if err := s.chatAttachmentRepo.Create(ctx, att); err != nil {
+			applog.Infof("[discord] error creating chat attachment record: %v", err)
+			_ = os.Remove(destPath)
+			linkErrs = append(linkErrs, fmt.Sprintf("%s: %v", att.FileName, err))
+		} else {
+			linked = append(linked, *att)
+			applog.Infof("[discord] linked attachment id=%s file=%s to exec=%s", att.ID, att.FileName, execID)
+		}
+	}
+	for dir := range cleanupDirs {
+		_ = os.RemoveAll(dir)
+	}
+	if len(linkErrs) > 0 {
+		return linked, fmt.Errorf("storing Discord attachment failed for %d of %d file(s): %s", len(linkErrs), len(attachments), strings.Join(linkErrs, "; "))
+	}
+	return linked, nil
+}
+
+func cleanupDiscordAttachmentSourceDirs(attachments []models.ChatAttachment) {
+	cleanupDirs := make(map[string]struct{})
+	for _, att := range attachments {
+		if strings.TrimSpace(att.FilePath) == "" {
+			continue
+		}
+		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
+	}
+	for dir := range cleanupDirs {
+		_ = os.RemoveAll(dir)
+	}
+}
+
+func discordImageAttachmentsFromChatAttachments(chatAttachments []models.ChatAttachment) []models.Attachment {
+	if len(chatAttachments) == 0 {
+		return nil
+	}
+	imageAttachments := make([]models.Attachment, 0, len(chatAttachments))
+	for _, att := range chatAttachments {
+		if !isSlackImageFile(att.MediaType) {
+			continue
+		}
+		imageAttachments = append(imageAttachments, models.Attachment{
+			FileName:  att.FileName,
+			FilePath:  att.FilePath,
+			MediaType: att.MediaType,
+			FileSize:  att.FileSize,
+		})
+	}
+	return imageAttachments
+}
+
+func discordSafeFileName(f discordIncomingAttachment) string {
+	name := strings.TrimSpace(f.FileName)
+	name = filepath.Base(name)
+	if name == "." || name == string(filepath.Separator) || name == "" {
+		if strings.TrimSpace(f.ID) != "" {
+			name = "discord-" + strings.TrimSpace(f.ID)
+		} else {
+			name = "discord-attachment"
+		}
+	}
+	return name
+}
+
+func discordFileDisplayName(f discordIncomingAttachment) string {
+	return discordSafeFileName(f)
+}
+
+func discordIncomingFileMediaType(f discordIncomingAttachment, fileName string) string {
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(f.ContentType, ";")[0]))
+	if mediaType == "" || mediaType == "application/octet-stream" {
+		return mediaTypeFromSlackFilename(fileName)
+	}
+	return mediaType
+}
+
 func discordIsDM(sess *discordgo.Session, channelID, guildID string) bool {
 	if guildID == "" {
 		return true

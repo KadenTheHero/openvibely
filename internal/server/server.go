@@ -585,6 +585,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		discordTaskContextRepo,
 	)
 	discordSvc.SetCustomPersonalityRepo(customPersonalityRepo)
+	discordSvc.SetUploadsDir(uploadsPath)
+	discordSvc.SetChatAttachmentRepo(chatAttachmentRepo)
 	discordSvc.SetChatBroadcaster(chatBroadcaster)
 	discordSvc.SetAlertService(alertSvc)
 	discordSvc.SetTaskGoalService(taskGoalSvc)

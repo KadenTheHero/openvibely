@@ -1,14 +1,22 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -117,6 +125,45 @@ func TestDiscordHandleMessageCreateRequiresMentionInGuildAndStripsMention(t *tes
 	}
 	if got[0].Text != "please help" {
 		t.Fatalf("expected mention stripped, got %q", got[0].Text)
+	}
+}
+
+func TestDiscordHandleMessageCreatePreservesMentionOnlyAttachmentPrompt(t *testing.T) {
+	svc, _, settingsRepo, _, _, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, DiscordSettingBotUserID, "bot-1"); err != nil {
+		t.Fatalf("set bot id: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingRequireMention, "true"); err != nil {
+		t.Fatalf("set require mention: %v", err)
+	}
+	var got []discordIncomingMessage
+	svc.processIncomingMessageFn = func(msg discordIncomingMessage) { got = append(got, msg) }
+
+	svc.handleMessageCreate(ctx, nil, &discordgo.MessageCreate{Message: &discordgo.Message{
+		ID:        "m-attach",
+		ChannelID: "c1",
+		GuildID:   "g1",
+		Content:   "<@bot-1>",
+		Author:    &discordgo.User{ID: "u1"},
+		Mentions:  []*discordgo.User{{ID: "bot-1"}},
+		Attachments: []*discordgo.MessageAttachment{{
+			ID:          "att-1",
+			Filename:    "screenshot.png",
+			ContentType: "image/png",
+			Size:        len(slackTestPNGBytes),
+			URL:         "https://cdn.discordapp.com/attachments/chan/msg/screenshot.png",
+		}},
+	}})
+
+	if len(got) != 1 {
+		t.Fatalf("expected mention-only attachment message processed, got %#v", got)
+	}
+	if got[0].Text != "User sent attachment(s): screenshot.png" {
+		t.Fatalf("unexpected attachment prompt: %q", got[0].Text)
+	}
+	if len(got[0].Attachments) != 1 || got[0].Attachments[0].FileName != "screenshot.png" {
+		t.Fatalf("expected attachment metadata preserved, got %#v", got[0].Attachments)
 	}
 }
 
@@ -236,6 +283,816 @@ func TestDiscordProcessIncomingMessagePassesReplyContextToSharedChatRunner(t *te
 	if task, err := taskRepo.GetByID(ctx, got.TaskID); err != nil || task == nil || task.CreatedVia != models.TaskOriginDiscord {
 		t.Fatalf("expected Discord chat task, task=%#v err=%v", task, err)
 	}
+}
+
+func TestDiscordProcessIncomingMessageDownloadsPersistsAndPassesImageAttachment(t *testing.T) {
+	svc, db, settingsRepo, projectRepo, taskRepo, authRepo, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Discord Attachment Chat", IsDefault: true}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "user-1", DisplayName: "User", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize user: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
+		t.Fatalf("set responses: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "vision", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	svc.llmConfigRepo = agentRepo
+	svc.execRepo = execRepo
+	svc.scheduleRepo = scheduleRepo
+	svc.taskSvc = NewTaskService(taskRepo, attachmentRepo, nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetChatAttachmentRepo(chatAttachmentRepo)
+	uploadRoot := t.TempDir()
+	svc.SetUploadsDir(uploadRoot)
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
+
+	fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(slackTestPNGBytes)
+	}))
+	defer fileServer.Close()
+	useDiscordFileServers(t, svc, map[string]*httptest.Server{"cdn.discordapp.com": fileServer})
+
+	var got ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
+	svc.processIncomingMessage(discordIncomingMessage{
+		ChannelID: "chan-1",
+		MessageID: "msg-1",
+		UserID:    "user-1",
+		Username:  "User",
+		Text:      "what is in this screenshot?",
+		Source:    "discord",
+		Attachments: []discordIncomingAttachment{{
+			ID:          "att-1",
+			FileName:    "screenshot.png",
+			ContentType: "image/png",
+			Size:        len(slackTestPNGBytes),
+			URL:         "https://cdn.discordapp.com/attachments/chan/msg/screenshot.png",
+		}},
+	})
+
+	if got.ExecID == "" {
+		t.Fatal("expected channel chat runner to be called")
+	}
+	if len(got.ImageAttachments) != 1 {
+		t.Fatalf("expected one image attachment, got %#v", got.ImageAttachments)
+	}
+	if got.ImageAttachments[0].FileName != "screenshot.png" || got.ImageAttachments[0].MediaType != "image/png" {
+		t.Fatalf("unexpected image attachment: %#v", got.ImageAttachments[0])
+	}
+	savedImage, err := os.ReadFile(got.ImageAttachments[0].FilePath)
+	if err != nil {
+		t.Fatalf("read saved image: %v", err)
+	}
+	if string(savedImage) != string(slackTestPNGBytes) {
+		t.Fatalf("saved image mismatch")
+	}
+	persisted, err := chatAttachmentRepo.ListByExecution(ctx, got.ExecID)
+	if err != nil {
+		t.Fatalf("list persisted attachments: %v", err)
+	}
+	if len(persisted) != 1 || persisted[0].FilePath != got.ImageAttachments[0].FilePath {
+		t.Fatalf("unexpected persisted attachments: %#v", persisted)
+	}
+}
+
+func TestDiscordProcessIncomingMessageKeepsDuplicateAttachmentFilenamesDistinct(t *testing.T) {
+	svc, db, settingsRepo, projectRepo, taskRepo, authRepo, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Discord Duplicate Attachment Chat", IsDefault: true}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "user-1", DisplayName: "User", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize user: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
+		t.Fatalf("set responses: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "vision", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	svc.llmConfigRepo = agentRepo
+	svc.execRepo = execRepo
+	svc.scheduleRepo = scheduleRepo
+	svc.taskSvc = NewTaskService(taskRepo, attachmentRepo, nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetChatAttachmentRepo(chatAttachmentRepo)
+	svc.SetUploadsDir(t.TempDir())
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
+
+	fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(slackTestPNGBytes)
+	}))
+	defer fileServer.Close()
+	useDiscordFileServers(t, svc, map[string]*httptest.Server{"cdn.discordapp.com": fileServer})
+
+	var got ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
+	svc.processIncomingMessage(discordIncomingMessage{
+		ChannelID: "chan-1",
+		MessageID: "msg-1",
+		UserID:    "user-1",
+		Username:  "User",
+		Text:      "compare these",
+		Source:    "discord",
+		Attachments: []discordIncomingAttachment{
+			{ID: "att-1", FileName: "screenshot.png", ContentType: "image/png", Size: len(slackTestPNGBytes), URL: "https://cdn.discordapp.com/attachments/chan/msg/one.png"},
+			{ID: "att-2", FileName: "screenshot.png", ContentType: "image/png", Size: len(slackTestPNGBytes), URL: "https://cdn.discordapp.com/attachments/chan/msg/two.png"},
+		},
+	})
+
+	if len(got.ImageAttachments) != 2 {
+		t.Fatalf("expected two image attachments, got %#v", got.ImageAttachments)
+	}
+	if got.ImageAttachments[0].FilePath == got.ImageAttachments[1].FilePath {
+		t.Fatalf("expected duplicate filenames to get distinct paths, got %q", got.ImageAttachments[0].FilePath)
+	}
+	if filepath.Base(got.ImageAttachments[0].FilePath) != "screenshot.png" || filepath.Base(got.ImageAttachments[1].FilePath) != "screenshot-1.png" {
+		t.Fatalf("unexpected final filenames: %q %q", filepath.Base(got.ImageAttachments[0].FilePath), filepath.Base(got.ImageAttachments[1].FilePath))
+	}
+	persisted, err := chatAttachmentRepo.ListByExecution(ctx, got.ExecID)
+	if err != nil {
+		t.Fatalf("list persisted attachments: %v", err)
+	}
+	if len(persisted) != 2 || persisted[0].FilePath == persisted[1].FilePath {
+		t.Fatalf("unexpected persisted duplicate attachments: %#v", persisted)
+	}
+}
+
+func TestDiscordProcessIncomingMessageFailsWhenAttachmentLinkFails(t *testing.T) {
+	svc, db, settingsRepo, projectRepo, taskRepo, authRepo, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Discord Text Link Failure", IsDefault: true}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "user-1", DisplayName: "User", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize user: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
+		t.Fatalf("set responses: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	svc.llmConfigRepo = agentRepo
+	svc.execRepo = execRepo
+	svc.scheduleRepo = scheduleRepo
+	svc.taskSvc = NewTaskService(taskRepo, attachmentRepo, nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetChatAttachmentRepo(repository.NewChatAttachmentRepo(testutil.NewTestDB(t)))
+	svc.SetUploadsDir(t.TempDir())
+	var sentMessages []string
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) {
+		sentMessages = append(sentMessages, text)
+		return "ack-1", nil
+	}
+
+	fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("secret text should not leak"))
+	}))
+	defer fileServer.Close()
+	useDiscordFileServers(t, svc, map[string]*httptest.Server{"cdn.discordapp.com": fileServer})
+
+	runnerCalled := false
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runnerCalled = true })
+	svc.processIncomingMessage(discordIncomingMessage{
+		ChannelID: "chan-1",
+		MessageID: "msg-1",
+		UserID:    "user-1",
+		Username:  "User",
+		Text:      "read this",
+		Source:    "discord",
+		Attachments: []discordIncomingAttachment{{
+			ID:          "att-text",
+			FileName:    "note.txt",
+			ContentType: "text/plain",
+			Size:        len("secret text should not leak"),
+			URL:         "https://cdn.discordapp.com/attachments/chan/msg/note.txt",
+		}},
+	})
+
+	if runnerCalled {
+		t.Fatal("expected channel chat runner not to be called when attachment linking fails")
+	}
+	if len(sentMessages) != 1 || !strings.Contains(sentMessages[0], "Failed to process attachment") {
+		t.Fatalf("expected attachment failure warning, got %#v", sentMessages)
+	}
+	if strings.Contains(sentMessages[0], "FOREIGN KEY") || strings.Contains(sentMessages[0], "constraint failed") || strings.Contains(sentMessages[0], "note.txt") {
+		t.Fatalf("expected generic user-facing attachment warning, got %q", sentMessages[0])
+	}
+	var status, errorMessage string
+	if err := db.QueryRowContext(ctx, `SELECT status, error_message FROM executions ORDER BY started_at DESC, rowid DESC LIMIT 1`).Scan(&status, &errorMessage); err != nil {
+		t.Fatalf("get latest execution: %v", err)
+	}
+	if status != string(models.ExecFailed) || !strings.Contains(errorMessage, "Failed to process attachment") {
+		t.Fatalf("expected failed execution for attachment link error, status=%q error=%q", status, errorMessage)
+	}
+}
+
+func TestDiscordDownloadRejectsBodyLargerThanLimit(t *testing.T) {
+	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
+	fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write(make([]byte, discordMaxFileSize+1))
+	}))
+	defer fileServer.Close()
+	useDiscordFileServers(t, svc, map[string]*httptest.Server{"cdn.discordapp.com": fileServer})
+
+	_, err := svc.downloadDiscordFiles(context.Background(), []discordIncomingAttachment{{
+		ID:          "att-big",
+		FileName:    "big.txt",
+		ContentType: "text/plain",
+		Size:        1,
+		URL:         "https://cdn.discordapp.com/attachments/chan/msg/big.txt",
+	}})
+	if err == nil || !strings.Contains(err.Error(), "exceeded max size") {
+		t.Fatalf("expected max size error, got %v", err)
+	}
+}
+
+func TestDiscordProcessIncomingMessageUsesGenericDownloadError(t *testing.T) {
+	svc, db, settingsRepo, projectRepo, taskRepo, authRepo, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Discord Download Failure", IsDefault: true}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "user-1", DisplayName: "User", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize user: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
+		t.Fatalf("set responses: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	svc.llmConfigRepo = agentRepo
+	svc.execRepo = execRepo
+	svc.scheduleRepo = scheduleRepo
+	svc.taskSvc = NewTaskService(taskRepo, attachmentRepo, nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetChatAttachmentRepo(chatAttachmentRepo)
+	svc.SetUploadsDir(t.TempDir())
+	var sentMessages []string
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) {
+		sentMessages = append(sentMessages, text)
+		return "ack-1", nil
+	}
+
+	svc.processIncomingMessage(discordIncomingMessage{
+		ChannelID: "chan-1",
+		MessageID: "msg-1",
+		UserID:    "user-1",
+		Username:  "User",
+		Text:      "read this",
+		Source:    "discord",
+		Attachments: []discordIncomingAttachment{{
+			ID:          "att-bad",
+			FileName:    "bad.png",
+			ContentType: "image/png",
+			Size:        1,
+			URL:         "https://example.com/attachments/bad.png",
+		}},
+	})
+
+	if len(sentMessages) != 1 || !strings.Contains(sentMessages[0], "unable to download attachment") {
+		t.Fatalf("expected generic download failure warning, got %#v", sentMessages)
+	}
+	if strings.Contains(sentMessages[0], "example.com") || strings.Contains(sentMessages[0], "not trusted") || strings.Contains(sentMessages[0], "bad.png") {
+		t.Fatalf("expected generic user-facing download warning, got %q", sentMessages[0])
+	}
+}
+
+func TestDiscordLinkAttachmentsReturnsOnlySuccessfullyPersistedAttachments(t *testing.T) {
+	svc, db, _, projectRepo, taskRepo, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	svc.SetChatAttachmentRepo(repository.NewChatAttachmentRepo(db))
+	uploadRoot := t.TempDir()
+	svc.SetUploadsDir(uploadRoot)
+	project := &models.Project{Name: "Discord Link Attachments"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Discord Link", Category: models.CategoryChat, Status: models.StatusPending, Prompt: "attach", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "attach"}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	goodPath := filepath.Join(tmpDir, "ok.png")
+	if err := os.WriteFile(goodPath, slackTestPNGBytes, 0644); err != nil {
+		t.Fatalf("write good attachment: %v", err)
+	}
+	missingPath := filepath.Join(tmpDir, "missing.png")
+
+	linked, err := svc.linkAttachmentsToExecution(ctx, exec.ID, []models.ChatAttachment{
+		{FileName: "ok.png", FilePath: goodPath, MediaType: "image/png", FileSize: int64(len(slackTestPNGBytes))},
+		{FileName: "missing.png", FilePath: missingPath, MediaType: "image/png", FileSize: int64(len(slackTestPNGBytes))},
+	})
+
+	if err == nil || !strings.Contains(err.Error(), "storing Discord attachment failed") {
+		t.Fatalf("expected partial link error, got %v", err)
+	}
+	if len(linked) != 1 {
+		t.Fatalf("expected one linked attachment, got %#v", linked)
+	}
+	if linked[0].FileName != "ok.png" || linked[0].FilePath == goodPath {
+		t.Fatalf("unexpected linked attachment: %#v", linked[0])
+	}
+	if _, err := os.Stat(linked[0].FilePath); err != nil {
+		t.Fatalf("linked file missing: %v", err)
+	}
+	images := discordImageAttachmentsFromChatAttachments(linked)
+	if len(images) != 1 || images[0].FilePath != linked[0].FilePath {
+		t.Fatalf("expected images to include only linked attachment, got %#v", images)
+	}
+}
+
+func TestDiscordLinkAttachmentsFailsWhenAttachmentRepoMissing(t *testing.T) {
+	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	svc.SetUploadsDir(t.TempDir())
+
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "orphan.png")
+	if err := os.WriteFile(srcPath, slackTestPNGBytes, 0644); err != nil {
+		t.Fatalf("write attachment: %v", err)
+	}
+
+	linked, err := svc.linkAttachmentsToExecution(ctx, "exec-1", []models.ChatAttachment{{
+		FileName:  "orphan.png",
+		FilePath:  srcPath,
+		MediaType: "image/png",
+		FileSize:  int64(len(slackTestPNGBytes)),
+	}})
+
+	if err == nil || !strings.Contains(err.Error(), "repository is unavailable") {
+		t.Fatalf("expected missing repo error, got linked=%#v err=%v", linked, err)
+	}
+	if len(linked) != 0 {
+		t.Fatalf("expected no linked attachments, got %#v", linked)
+	}
+	if _, err := os.Stat(tmpDir); !os.IsNotExist(err) {
+		t.Fatalf("expected source temp dir cleanup after missing repo error, stat err=%v", err)
+	}
+}
+
+func TestDiscordLinkAttachmentsCleansUpSourceWhenExecDirCreateFails(t *testing.T) {
+	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	svc.SetChatAttachmentRepo(repository.NewChatAttachmentRepo(testutil.NewTestDB(t)))
+	uploadRootFile := filepath.Join(t.TempDir(), "uploads-file")
+	if err := os.WriteFile(uploadRootFile, []byte("not a directory"), 0644); err != nil {
+		t.Fatalf("write upload root file: %v", err)
+	}
+	svc.SetUploadsDir(uploadRootFile)
+
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "orphan.png")
+	if err := os.WriteFile(srcPath, slackTestPNGBytes, 0644); err != nil {
+		t.Fatalf("write attachment: %v", err)
+	}
+
+	linked, err := svc.linkAttachmentsToExecution(ctx, "exec-1", []models.ChatAttachment{{
+		FileName:  "orphan.png",
+		FilePath:  srcPath,
+		MediaType: "image/png",
+		FileSize:  int64(len(slackTestPNGBytes)),
+	}})
+
+	if err == nil || !strings.Contains(err.Error(), "storing Discord attachment") {
+		t.Fatalf("expected exec dir create error, got linked=%#v err=%v", linked, err)
+	}
+	if len(linked) != 0 {
+		t.Fatalf("expected no linked attachments, got %#v", linked)
+	}
+	if _, err := os.Stat(tmpDir); !os.IsNotExist(err) {
+		t.Fatalf("expected source temp dir cleanup after exec dir create error, stat err=%v", err)
+	}
+}
+
+func TestDiscordLinkAttachmentsCleansUpMovedFileWhenPersistFails(t *testing.T) {
+	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	svc.SetChatAttachmentRepo(repository.NewChatAttachmentRepo(testutil.NewTestDB(t)))
+	uploadRoot := t.TempDir()
+	svc.SetUploadsDir(uploadRoot)
+
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "orphan.png")
+	if err := os.WriteFile(srcPath, slackTestPNGBytes, 0644); err != nil {
+		t.Fatalf("write attachment: %v", err)
+	}
+
+	linked, err := svc.linkAttachmentsToExecution(ctx, "missing-exec", []models.ChatAttachment{{
+		FileName:  "orphan.png",
+		FilePath:  srcPath,
+		MediaType: "image/png",
+		FileSize:  int64(len(slackTestPNGBytes)),
+	}})
+
+	if err == nil || !strings.Contains(err.Error(), "storing Discord attachment failed") {
+		t.Fatalf("expected persist error, got %v", err)
+	}
+	if len(linked) != 0 {
+		t.Fatalf("expected no linked attachments, got %#v", linked)
+	}
+	destPath := filepath.Join(uploadRoot, "chat", "missing-exec", "orphan.png")
+	if _, err := os.Stat(destPath); !os.IsNotExist(err) {
+		t.Fatalf("expected moved file to be removed after persist failure, stat err=%v", err)
+	}
+}
+
+func TestDiscordQueueChatInputCleansPendingAttachmentsWhenQueueInsertFails(t *testing.T) {
+	svc, db, _, _, _, _, _ := newDiscordServiceForTest(t)
+	uploadRoot := t.TempDir()
+	svc.SetUploadsDir(uploadRoot)
+	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(slackTestPNGBytes)
+	}))
+	defer fileServer.Close()
+	useDiscordFileServers(t, svc, map[string]*httptest.Server{"cdn.discordapp.com": fileServer})
+
+	var sentMessages []string
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) {
+		sentMessages = append(sentMessages, text)
+		return "ack-1", nil
+	}
+
+	handled := svc.queueChatInput(context.Background(), "project-1", "exec-1", "agent-1", discordIncomingMessage{
+		ChannelID: "chan-1",
+		MessageID: "msg-1",
+		UserID:    "user-1",
+		Text:      "queue this",
+		Source:    "discord",
+		Attachments: []discordIncomingAttachment{{
+			ID:          "att-1",
+			FileName:    "queued.png",
+			ContentType: "image/png",
+			Size:        len(slackTestPNGBytes),
+			URL:         "https://cdn.discordapp.com/attachments/chan/msg/queued.png",
+		}},
+	})
+
+	if !handled {
+		t.Fatal("expected queue input failure to be handled")
+	}
+	if len(sentMessages) != 1 || !strings.Contains(sentMessages[0], "Error queueing your message") {
+		t.Fatalf("expected queue failure warning, got %#v", sentMessages)
+	}
+	pendingRoot := filepath.Join(uploadRoot, "chat", "pending")
+	entries, err := os.ReadDir(pendingRoot)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read pending root: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected staged pending attachments to be cleaned up after queue insert failure, got %d entries", len(entries))
+	}
+}
+
+func TestDiscordQueueChatInputUsesGenericDownloadError(t *testing.T) {
+	svc, db, _, projectRepo, _, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Discord Queued Download Failure"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	svc.execRepo = execRepo
+	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	svc.SetChatBroadcaster(events.NewChatBroadcaster())
+	sub, err := svc.chatBroadcaster.Subscribe()
+	if err != nil {
+		t.Fatalf("subscribe chat broadcaster: %v", err)
+	}
+	defer svc.chatBroadcaster.Unsubscribe(sub)
+	var sentMessages []string
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) {
+		sentMessages = append(sentMessages, text)
+		return "ack-1", nil
+	}
+
+	handled := svc.queueChatInput(ctx, project.ID, "exec-1", agent.ID, discordIncomingMessage{
+		ChannelID: "chan-1",
+		MessageID: "msg-1",
+		UserID:    "user-1",
+		Text:      "queue this",
+		Source:    "discord",
+		Attachments: []discordIncomingAttachment{{
+			ID:          "att-bad",
+			FileName:    "bad.png",
+			ContentType: "image/png",
+			Size:        1,
+			URL:         "https://example.com/attachments/bad.png",
+		}},
+	})
+
+	if !handled {
+		t.Fatal("expected queue download failure to be handled")
+	}
+	if len(sentMessages) != 1 || !strings.Contains(sentMessages[0], "unable to download attachment") {
+		t.Fatalf("expected generic queued download warning, got %#v", sentMessages)
+	}
+	if strings.Contains(sentMessages[0], "example.com") || strings.Contains(sentMessages[0], "not trusted") || strings.Contains(sentMessages[0], "bad.png") {
+		t.Fatalf("expected generic user-facing queued download warning, got %q", sentMessages[0])
+	}
+	var evt events.ChatEvent
+	select {
+	case evt = <-sub:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued download failure chat event")
+	}
+	if evt.Type != events.ChatNewMessage || evt.ProjectID != project.ID || evt.ExecID == "" || evt.Queued || !evt.HasAttachments {
+		t.Fatalf("expected persisted failed chat event with attachments, got %#v", evt)
+	}
+	exec, err := execRepo.GetByID(ctx, evt.ExecID)
+	if err != nil {
+		t.Fatalf("get failed execution: %v", err)
+	}
+	if exec == nil || exec.Status != models.ExecFailed || !strings.Contains(exec.ErrorMessage, "unable to download attachment") {
+		t.Fatalf("expected failed queued attachment execution, got %#v", exec)
+	}
+}
+
+func TestDiscordQueueChatInputRecordsFailedMessageWhenAttachmentStagingFails(t *testing.T) {
+	svc, db, _, projectRepo, _, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Discord Queued Staging Failure"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	svc.execRepo = execRepo
+	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	uploadRootFile := filepath.Join(t.TempDir(), "uploads-file")
+	if err := os.WriteFile(uploadRootFile, []byte("not a directory"), 0644); err != nil {
+		t.Fatalf("write upload root file: %v", err)
+	}
+	svc.SetUploadsDir(uploadRootFile)
+	svc.SetChatBroadcaster(events.NewChatBroadcaster())
+	sub, err := svc.chatBroadcaster.Subscribe()
+	if err != nil {
+		t.Fatalf("subscribe chat broadcaster: %v", err)
+	}
+	defer svc.chatBroadcaster.Unsubscribe(sub)
+
+	fileServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(slackTestPNGBytes)
+	}))
+	defer fileServer.Close()
+	useDiscordFileServers(t, svc, map[string]*httptest.Server{"cdn.discordapp.com": fileServer})
+
+	var sentMessages []string
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) {
+		sentMessages = append(sentMessages, text)
+		return "ack-1", nil
+	}
+
+	handled := svc.queueChatInput(ctx, project.ID, "exec-1", agent.ID, discordIncomingMessage{
+		ChannelID: "chan-1",
+		MessageID: "msg-1",
+		UserID:    "user-1",
+		Text:      "queue this",
+		Source:    "discord",
+		Attachments: []discordIncomingAttachment{{
+			ID:          "att-1",
+			FileName:    "queued.png",
+			ContentType: "image/png",
+			Size:        len(slackTestPNGBytes),
+			URL:         "https://cdn.discordapp.com/attachments/chan/msg/queued.png",
+		}},
+	})
+
+	if !handled {
+		t.Fatal("expected queued staging failure to be handled")
+	}
+	if len(sentMessages) != 1 || !strings.Contains(sentMessages[0], "unable to store attachment") {
+		t.Fatalf("expected generic queued staging warning, got %#v", sentMessages)
+	}
+	var evt events.ChatEvent
+	select {
+	case evt = <-sub:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued staging failure chat event")
+	}
+	if evt.Type != events.ChatNewMessage || evt.ProjectID != project.ID || evt.ExecID == "" || evt.Queued || !evt.HasAttachments {
+		t.Fatalf("expected persisted failed chat event with attachments, got %#v", evt)
+	}
+	exec, err := execRepo.GetByID(ctx, evt.ExecID)
+	if err != nil {
+		t.Fatalf("get failed execution: %v", err)
+	}
+	if exec == nil || exec.Status != models.ExecFailed || !strings.Contains(exec.ErrorMessage, "unable to store attachment") {
+		t.Fatalf("expected failed queued attachment execution, got %#v", exec)
+	}
+}
+
+func TestDiscordSaveChatAttachmentsToPendingSessionCleansUpSourceOnStageFailure(t *testing.T) {
+	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
+	uploadRoot := t.TempDir()
+	svc.SetUploadsDir(uploadRoot)
+
+	tmpDir := t.TempDir()
+	okPath := filepath.Join(tmpDir, "ok.png")
+	if err := os.WriteFile(okPath, slackTestPNGBytes, 0644); err != nil {
+		t.Fatalf("write attachment: %v", err)
+	}
+	missingPath := filepath.Join(tmpDir, "missing.png")
+
+	sessionID, err := svc.saveChatAttachmentsToPendingSession([]models.ChatAttachment{
+		{FileName: "ok.png", FilePath: okPath, MediaType: "image/png", FileSize: int64(len(slackTestPNGBytes))},
+		{FileName: "missing.png", FilePath: missingPath, MediaType: "image/png", FileSize: int64(len(slackTestPNGBytes))},
+	})
+
+	if err == nil || sessionID != "" {
+		t.Fatalf("expected staging error with no session, session=%q err=%v", sessionID, err)
+	}
+	if _, err := os.Stat(tmpDir); !os.IsNotExist(err) {
+		t.Fatalf("expected source temp dir cleanup after staging failure, stat err=%v", err)
+	}
+	pendingRoot := filepath.Join(uploadRoot, "chat", "pending")
+	entries, err := os.ReadDir(pendingRoot)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read pending root: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no pending session dirs after staging failure, got %d", len(entries))
+	}
+}
+
+func TestDiscordDownloadFollowsTrustedRedirect(t *testing.T) {
+	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
+	svc.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Hostname() {
+		case "cdn.discordapp.com":
+			return &http.Response{
+				StatusCode: http.StatusFound,
+				Header:     http.Header{"Location": []string{"https://media.discordapp.net/attachments/file.txt"}},
+				Body:       io.NopCloser(strings.NewReader("")),
+				Request:    req,
+			}, nil
+		case "media.discordapp.net":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/plain"}},
+				Body:       io.NopCloser(strings.NewReader("redirected")),
+				Request:    req,
+			}, nil
+		default:
+			t.Fatalf("unexpected host requested: %s", req.URL.Host)
+			return nil, nil
+		}
+	})}
+
+	var got bytes.Buffer
+	if err := svc.downloadDiscordFile(context.Background(), "https://cdn.discordapp.com/attachments/file.txt", &got); err != nil {
+		t.Fatalf("download with trusted redirect failed: %v", err)
+	}
+	if got.String() != "redirected" {
+		t.Fatalf("unexpected redirected body: %q", got.String())
+	}
+}
+
+func TestDiscordDownloadRejectsHTTPInitialURL(t *testing.T) {
+	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
+	var got bytes.Buffer
+	err := svc.downloadDiscordFile(context.Background(), "http://cdn.discordapp.com/attachments/file.txt", &got)
+	if err == nil || !strings.Contains(err.Error(), "scheme") {
+		t.Fatalf("expected scheme error, got %v", err)
+	}
+}
+
+func TestDiscordDownloadRejectsHTTPRedirectToTrustedHost(t *testing.T) {
+	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
+	svc.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Hostname() != "cdn.discordapp.com" {
+			t.Fatalf("http redirect target should not be requested: %s", req.URL.Host)
+		}
+		return &http.Response{
+			StatusCode: http.StatusFound,
+			Header:     http.Header{"Location": []string{"http://media.discordapp.net/attachments/file.txt"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+			Request:    req,
+		}, nil
+	})}
+
+	var got bytes.Buffer
+	err := svc.downloadDiscordFile(context.Background(), "https://cdn.discordapp.com/attachments/file.txt", &got)
+	if err == nil || !strings.Contains(err.Error(), "scheme") {
+		t.Fatalf("expected scheme error, got %v", err)
+	}
+}
+
+func TestDiscordDownloadRejectsUntrustedRedirect(t *testing.T) {
+	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
+	svc.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Hostname() != "cdn.discordapp.com" {
+			t.Fatalf("untrusted redirect target should not be requested: %s", req.URL.Host)
+		}
+		return &http.Response{
+			StatusCode: http.StatusFound,
+			Header:     http.Header{"Location": []string{"https://example.com/file.txt"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+			Request:    req,
+		}, nil
+	})}
+
+	var got bytes.Buffer
+	err := svc.downloadDiscordFile(context.Background(), "https://cdn.discordapp.com/attachments/file.txt", &got)
+	if err == nil || !strings.Contains(err.Error(), "not trusted") {
+		t.Fatalf("expected untrusted redirect error, got %v", err)
+	}
+}
+
+func TestDiscordDownloadRejectsSuffixMatchingDiscordHost(t *testing.T) {
+	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
+	var got bytes.Buffer
+	err := svc.downloadDiscordFile(context.Background(), "https://example.discordapp.com/attachments/file.txt", &got)
+	if err == nil || !strings.Contains(err.Error(), "not trusted") {
+		t.Fatalf("expected untrusted suffix host error, got %v", err)
+	}
+}
+
+func useDiscordFileServers(t *testing.T, svc *DiscordService, servers map[string]*httptest.Server) {
+	t.Helper()
+	serverURLs := make(map[string]*url.URL, len(servers))
+	for host, server := range servers {
+		serverURL, err := url.Parse(server.URL)
+		if err != nil {
+			t.Fatalf("parse test server URL: %v", err)
+		}
+		serverURLs[host] = serverURL
+	}
+	transport := http.DefaultTransport
+	svc.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if serverURL := serverURLs[req.URL.Hostname()]; serverURL != nil {
+			rewritten := req.Clone(req.Context())
+			rewritten.URL = cloneURL(req.URL)
+			rewritten.URL.Scheme = serverURL.Scheme
+			rewritten.URL.Host = serverURL.Host
+			return transport.RoundTrip(rewritten)
+		}
+		return transport.RoundTrip(req)
+	})}
 }
 
 func TestDiscordRequiresMentionAllowsParentFreeResponseThread(t *testing.T) {
