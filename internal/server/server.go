@@ -492,6 +492,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		slackAuthRepo,
 	)
 	slackSvc.SetCustomPersonalityRepo(customPersonalityRepo)
+	slackSvc.SetUploadsDir(uploadsPath)
 	slackSvc.SetChatAttachmentRepo(chatAttachmentRepo)
 	slackSvc.SetChatBroadcaster(chatBroadcaster)
 	slackSvc.SetAlertService(alertSvc)

@@ -1011,12 +1011,12 @@ func TestSlackService_ProcessIncomingMessage_DownloadsPersistsAndPassesImageAtta
 		_, _ = w.Write([]byte("pngdata"))
 	}))
 	defer fileServer.Close()
-	uploadRoot := useTempSlackUploadsDir(t)
 
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
+	uploadRoot := useTempSlackUploadsDir(t, svc)
 	svc.SetChatAttachmentRepo(chatAttachmentRepo)
 	svc.setActiveProject(ctx, "T1", "U1", project.ID)
 
@@ -1050,6 +1050,15 @@ func TestSlackService_ProcessIncomingMessage_DownloadsPersistsAndPassesImageAtta
 	require.Equal(t, got.ImageAttachments[0].FilePath, persisted[0].FilePath)
 }
 
+func TestSlackService_SetUploadsDir_NormalizesConfiguredRoot(t *testing.T) {
+	svc := NewSlackService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	relativeRoot := filepath.Join(".", "configured-slack-uploads")
+	expected, err := filepath.Abs(relativeRoot)
+	require.NoError(t, err)
+	svc.SetUploadsDir(relativeRoot)
+	require.Equal(t, expected, svc.uploadsDir)
+}
+
 func TestSlackService_ProcessIncomingMessage_QueuesSlackFilesInAttachmentSession(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -1072,12 +1081,12 @@ func TestSlackService_ProcessIncomingMessage_QueuesSlackFilesInAttachmentSession
 		_, _ = w.Write([]byte("queued-png"))
 	}))
 	defer fileServer.Close()
-	uploadRoot := useTempSlackUploadsDir(t)
 
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
+	uploadRoot := useTempSlackUploadsDir(t, svc)
 	svc.SetThreadInputRepo(threadInputRepo)
 	svc.setActiveProject(ctx, "T1", "U1", project.ID)
 	svc.postMessageFn = func(channelID, threadTS, text string) (string, error) { return "", nil }
@@ -1128,11 +1137,9 @@ func newSlackAttachmentTestRepos(t *testing.T, db interface{}) (*repository.Proj
 	return projectRepo, taskRepo, llmConfigRepo, execRepo, scheduleRepo, attachmentRepo, chatAttachmentRepo, settingsRepo, slackUserProjectRepo, slackTaskContextRepo
 }
 
-func useTempSlackUploadsDir(t *testing.T) string {
+func useTempSlackUploadsDir(t *testing.T, svc *SlackService) string {
 	t.Helper()
-	old := slackUploadsDir
 	dir := t.TempDir()
-	slackUploadsDir = dir
-	t.Cleanup(func() { slackUploadsDir = old })
+	svc.SetUploadsDir(dir)
 	return dir
 }

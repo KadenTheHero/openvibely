@@ -55,7 +55,6 @@ const (
 )
 
 var slackMentionRegex = regexp.MustCompile(`<@[^>]+>`)
-var slackUploadsDir = "uploads"
 
 type SlackConnectionStatus struct {
 	Configured bool
@@ -101,6 +100,7 @@ type SlackService struct {
 	channelTaskRunner        ChannelTaskRunner
 	alertSvc                 *AlertService
 	channelMessageRouter     *ChannelMessageRouter
+	uploadsDir               string
 
 	httpClient   *http.Client
 	oauthBaseURL string
@@ -147,6 +147,7 @@ func NewSlackService(
 			Timeout: 20 * time.Second,
 		},
 		oauthBaseURL: defaultSlackAPIBaseURL,
+		uploadsDir:   "uploads",
 		userProjects: make(map[string]string),
 	}
 }
@@ -165,6 +166,16 @@ func (s *SlackService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
 
 func (s *SlackService) SetChatAttachmentRepo(repo *repository.ChatAttachmentRepo) {
 	s.chatAttachmentRepo = repo
+}
+
+func (s *SlackService) SetUploadsDir(dir string) {
+	if strings.TrimSpace(dir) == "" {
+		return
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	s.uploadsDir = dir
 }
 
 func (s *SlackService) SetAgentRepo(repo *repository.AgentRepo) {
@@ -2451,7 +2462,7 @@ func (s *SlackService) saveChatAttachmentsToPendingSession(attachments []models.
 		return "", nil
 	}
 	sessionID := generateSlackPendingSessionID()
-	sessionDir := filepath.Join(slackUploadsDir, "chat", "pending", sessionID)
+	sessionDir := filepath.Join(s.uploadsDir, "chat", "pending", sessionID)
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		return "", fmt.Errorf("creating pending upload directory: %w", err)
 	}
@@ -2474,7 +2485,7 @@ func (s *SlackService) linkAttachmentsToExecution(ctx context.Context, execID st
 	if s.chatAttachmentRepo == nil || len(attachments) == 0 {
 		return
 	}
-	execDir := filepath.Join(slackUploadsDir, "chat", execID)
+	execDir := filepath.Join(s.uploadsDir, "chat", execID)
 	if err := os.MkdirAll(execDir, 0755); err != nil {
 		applog.Infof("[slack] error creating exec dir %s: %v", execDir, err)
 		return
