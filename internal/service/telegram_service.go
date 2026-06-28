@@ -643,7 +643,15 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 
 	// Link chat attachments to this execution and move files
 	if len(chatAttachments) > 0 {
-		s.linkAttachmentsToExecution(ctx, exec.ID, chatAttachments)
+		var err error
+		chatAttachments, err = s.linkAttachmentsToExecution(ctx, exec.ID, chatAttachments)
+		if err != nil {
+			applog.Infof("[telegram] attachment link error: %v", err)
+			msgText := "Failed to process attachment: unable to store attachment. Please try again."
+			s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, 0)
+			s.sendMessage(ctx, chatID, "⚠️ "+msgText)
+			return
+		}
 		// Update imageAttachments file paths to match the moved file locations.
 		// linkAttachmentsToExecution moves files from the temp directory to
 		// uploads/chat/{execID}/ and updates chatAttachments paths, but
@@ -934,48 +942,13 @@ func (s *TelegramService) saveChatAttachmentsToPendingSession(attachments []mode
 	return sessionID, nil
 }
 
-func (s *TelegramService) linkAttachmentsToExecution(ctx context.Context, execID string, attachments []models.ChatAttachment) {
-	if s.chatAttachmentRepo == nil {
-		return
-	}
-
-	execDir := filepath.Join(telegramUploadsDir, "chat", execID)
-	if err := os.MkdirAll(execDir, 0755); err != nil {
-		applog.Infof("[telegram] error creating exec dir %s: %v", execDir, err)
-		return
-	}
-
-	for i := range attachments {
-		att := &attachments[i]
-
-		// Move file from temp directory to execution directory
-		destPath := filepath.Join(execDir, filepath.Base(att.FileName))
-		if err := moveOrCopyFile(att.FilePath, destPath); err != nil {
-			applog.Infof("[telegram] error moving attachment file=%s: %v", att.FileName, err)
-			continue
-		}
-
-		// Make the new path absolute
-		absPath, err := filepath.Abs(destPath)
-		if err != nil {
-			absPath = destPath
-		}
-
-		// Clean up original temp directory
-		tmpDir := filepath.Dir(att.FilePath)
-		os.RemoveAll(tmpDir)
-
-		// Update the attachment's file path
-		att.FilePath = absPath
-		att.ExecutionID = execID
-
-		// Create database record
-		if err := s.chatAttachmentRepo.Create(ctx, att); err != nil {
-			applog.Infof("[telegram] error creating chat attachment record: %v", err)
-		} else {
-			applog.Infof("[telegram] linked attachment id=%s file=%s to exec=%s", att.ID, att.FileName, execID)
-		}
-	}
+func (s *TelegramService) linkAttachmentsToExecution(ctx context.Context, execID string, attachments []models.ChatAttachment) ([]models.ChatAttachment, error) {
+	return linkChannelChatAttachmentsToExecution(ctx, execID, attachments, channelChatAttachmentLinkOptions{
+		Platform:     "telegram",
+		UploadsDir:   telegramUploadsDir,
+		Repo:         s.chatAttachmentRepo,
+		FallbackName: "telegram-attachment",
+	})
 }
 
 // isTelegramImageFile checks if a MIME type is an image type supported by Anthropic's API

@@ -1032,7 +1032,9 @@ func TestTelegramService_LinkAttachmentsToExecution(t *testing.T) {
 		},
 	}
 
-	svc.linkAttachmentsToExecution(ctx, exec.ID, attachments)
+	linked, err := svc.linkAttachmentsToExecution(ctx, exec.ID, attachments)
+	require.NoError(t, err)
+	require.Len(t, linked, 1)
 
 	// Verify attachment record was created in DB
 	dbAttachments, err := svc.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
@@ -1109,7 +1111,10 @@ func TestTelegramService_LinkAttachments_UpdatesImagePaths(t *testing.T) {
 	}
 
 	// linkAttachmentsToExecution moves files and updates chatAttachments paths
-	svc.linkAttachmentsToExecution(ctx, exec.ID, chatAttachments)
+	linked, err := svc.linkAttachmentsToExecution(ctx, exec.ID, chatAttachments)
+	require.NoError(t, err)
+	require.Len(t, linked, 1)
+	chatAttachments = linked
 
 	// chatAttachments should now have the new path
 	assert.NotEqual(t, absPath, chatAttachments[0].FilePath, "chatAttachments path should be updated after link")
@@ -1136,6 +1141,62 @@ func TestTelegramService_LinkAttachments_UpdatesImagePaths(t *testing.T) {
 	data, readErr := os.ReadFile(imageAttachments[0].FilePath)
 	assert.NoError(t, readErr, "image file should be readable at the updated path")
 	assert.Equal(t, testImageData, data, "file content should match original")
+}
+
+func TestTelegramService_LinkAttachments_RollsBackPartialLinksOnFailure(t *testing.T) {
+	svc, projectRepo, _ := newTestTelegramService(t)
+	ctx := context.Background()
+
+	project := &models.Project{
+		Name:      "Test Project",
+		RepoPath:  "/tmp/test",
+		IsDefault: true,
+	}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	agents, err := svc.llmConfigRepo.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, agents)
+
+	task := &models.Task{
+		Title:     "Test rollback task",
+		Prompt:    "Test",
+		Category:  models.CategoryChat,
+		Status:    models.StatusPending,
+		ProjectID: project.ID,
+	}
+	require.NoError(t, svc.taskRepo.Create(ctx, task))
+
+	exec := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: agents[0].ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "test",
+	}
+	require.NoError(t, svc.execRepo.Create(ctx, exec))
+
+	firstDir := t.TempDir()
+	firstPath := filepath.Join(firstDir, "first.txt")
+	require.NoError(t, os.WriteFile(firstPath, []byte("first"), 0644))
+	missingPath := filepath.Join(t.TempDir(), "missing.txt")
+
+	linked, err := svc.linkAttachmentsToExecution(ctx, exec.ID, []models.ChatAttachment{
+		{FileName: "first.txt", FilePath: firstPath, MediaType: "text/plain", FileSize: 5},
+		{FileName: "missing.txt", FilePath: missingPath, MediaType: "text/plain", FileSize: 7},
+	})
+	require.Error(t, err)
+	require.Nil(t, linked)
+
+	dbAttachments, err := svc.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Empty(t, dbAttachments, "partial attachment DB rows should be rolled back")
+
+	execDir := filepath.Join(telegramUploadsDir, "chat", exec.ID)
+	entries, readErr := os.ReadDir(execDir)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		require.NoError(t, readErr)
+	}
+	require.Empty(t, entries, "partial attachment files should be removed after rollback")
 }
 
 func TestTelegramService_AutoSelectAgent_WithImages(t *testing.T) {
