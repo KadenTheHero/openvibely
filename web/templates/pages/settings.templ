@@ -1946,58 +1946,59 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				appSection.style.display = isAppMode ? '' : 'none';
 			}
 
-			// Close modal and refresh after successful save
-			document.body.addEventListener('htmx:afterRequest', function(event) {
-				var detail = event.detail || {};
-				var requestConfig = detail.requestConfig || {};
-				var rp = requestConfig.path || (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || '';
-				if (rp === '/channels/telegram' && detail.successful) {
-					const modal = document.getElementById('channel_modal');
-					if (modal && modal.open) {
-						modal.close();
+				// Close modal and refresh after successful save
+				document.body.addEventListener('htmx:afterRequest', function(event) {
+					var detail = event.detail || {};
+					var requestConfig = detail.requestConfig || {};
+					var rawPath = requestConfig.path || (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || '';
+					var rp = String(rawPath).split('?')[0];
+					if (rp === '/channels/telegram' && detail.successful) {
+						const modal = document.getElementById('channel_modal');
+						if (modal && modal.open) {
+							modal.close();
+						}
 					}
-				}
-				if (rp === '/channels/github/configure' && detail.successful) {
-					const modal = document.getElementById('github_config_modal');
-					if (modal && modal.open) {
-						modal.close();
+					if (rp === '/channels/github/configure' && detail.successful) {
+						const modal = document.getElementById('github_config_modal');
+						if (modal && modal.open) {
+							modal.close();
+						}
 					}
-				}
-				if (rp === '/channels/slack/configure' && detail.successful) {
-					const modal = document.getElementById('slack_config_modal');
-					if (modal && modal.open) {
-						modal.close();
+					if (rp === '/channels/slack/configure' && detail.successful) {
+						const modal = document.getElementById('slack_config_modal');
+						if (modal && modal.open) {
+							modal.close();
+						}
 					}
-				}
-				if (rp === '/channels/email/configure' && detail.successful) {
-					const modal = document.getElementById('email_config_modal');
-					if (modal && modal.open) {
-						modal.close();
+					if (rp === '/channels/email/configure' && detail.successful) {
+						const modal = document.getElementById('email_config_modal');
+						if (modal && modal.open) {
+							modal.close();
+						}
 					}
-				}
-				if (rp === '/channels/discord/configure' && detail.successful) {
-					const modal = document.getElementById('discord_config_modal');
-					if (modal && modal.open) {
-						modal.close();
+					if (rp === '/channels/discord/configure' && detail.successful) {
+						const modal = document.getElementById('discord_config_modal');
+						if (modal && modal.open) {
+							modal.close();
+						}
 					}
-				}
-				// Close webhook modal after successful save
-				if (rp.startsWith('/channels/webhooks') && detail.successful) {
-					var whModal = document.getElementById('webhook_modal');
-					if (whModal && whModal.open) {
-						whModal.close();
+					// Close webhook modal after successful save
+					if (rp.startsWith('/channels/webhooks') && detail.successful) {
+						var whModal = document.getElementById('webhook_modal');
+						if (whModal && whModal.open) {
+							whModal.close();
+						}
 					}
-				}
-				if (rp === '/channels/send-message-explicit-targets' && detail.successful) {
-					const xhr = event.detail.xhr;
-					const triggerHeader = xhr && typeof xhr.getResponseHeader === 'function' ? (xhr.getResponseHeader('HX-Trigger') || '') : '';
-					if (triggerHeader.indexOf('outbound-targets-card-refresh') !== -1) {
-						const modal = document.getElementById('outbound_targets_modal');
-						if (modal) modal.close();
-						resetOutboundTargetAddForm();
+					if (rp === '/channels/send-message-explicit-targets' && detail.successful) {
+						const xhr = event.detail.xhr;
+						const triggerHeader = xhr && typeof xhr.getResponseHeader === 'function' ? (xhr.getResponseHeader('HX-Trigger') || '') : '';
+						if (triggerHeader.indexOf('outbound-targets-card-refresh') !== -1) {
+							const modal = document.getElementById('outbound_targets_modal');
+							if (modal) modal.close();
+							resetOutboundTargetAddForm();
+						}
 					}
-				}
-			});
+				});
 
 				document.body.addEventListener('htmx:configRequest', function(event) {
 					if (!event || !event.detail || !event.detail.path) return;

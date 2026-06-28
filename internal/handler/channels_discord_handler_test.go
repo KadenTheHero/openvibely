@@ -102,6 +102,33 @@ func TestChannelsDiscordConfigure(t *testing.T) {
 	}
 }
 
+func TestChannelsDiscordConfigureReturnsSuccessWhenReloadFailsAfterSave(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetDiscordService(&fakeDiscordService{
+		reloadFn: func(ctx context.Context) error { return errors.New("gateway unavailable") },
+	})
+
+	form := url.Values{}
+	form.Set("discord_bot_token", "bot-token")
+
+	req := httptest.NewRequest(http.MethodPost, "/channels/discord/configure", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 after saving settings despite reload failure, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("HX-Refresh") != "true" {
+		t.Fatalf("expected HX-Refresh header")
+	}
+	got, err := h.settingsRepo.Get(context.Background(), service.DiscordSettingBotToken)
+	if err != nil || got != "bot-token" {
+		t.Fatalf("expected saved bot token despite reload failure, got %q err=%v", got, err)
+	}
+}
+
 func TestChannelsDiscordConfigureRequiresToken(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 

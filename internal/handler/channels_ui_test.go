@@ -155,7 +155,8 @@ func TestChannelsPageRendersCardLayout(t *testing.T) {
 		t.Error("did not expect Discord config form to have a parent after-request close hook that can catch authorized-user HTMX requests")
 	}
 	if !strings.Contains(body, `var requestConfig = detail.requestConfig || {}`) ||
-		!strings.Contains(body, `var rp = requestConfig.path || (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || ''`) ||
+		!strings.Contains(body, `var rawPath = requestConfig.path || (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || ''`) ||
+		!strings.Contains(body, `var rp = String(rawPath).split('?')[0]`) ||
 		!strings.Contains(body, `rp === '/channels/discord/configure' && detail.successful`) ||
 		!strings.Contains(body, `document.getElementById('discord_config_modal')`) {
 		t.Error("expected Discord configuration modal to close after successful configure save using robust HTMX request path detection")
@@ -326,7 +327,7 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if strings.Contains(body, "// Close webhook modal after successful save\t") || strings.Contains(body, "// Close webhook modal after successful save var rp") {
 		t.Fatal("expected rp declaration to be executable, not commented out")
 	}
-	assertIndexOrder(t, body, "var rp = requestConfig.path || (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || '';", "// Close webhook modal after successful save", "expected request path declaration before webhook modal branch")
+	assertIndexOrder(t, body, "var rp = String(rawPath).split('?')[0];", "// Close webhook modal after successful save", "expected normalized request path declaration before webhook modal branch")
 
 	cardReq := httptest.NewRequest(http.MethodGet, "/channels/outbound-targets/card?project_id=default", nil)
 	cardRec := httptest.NewRecorder()

@@ -760,9 +760,7 @@ func (h *Handler) handleDiscordConfigure(c echo.Context) error {
 		}
 	}
 	if h.discordSvc != nil {
-		if err := h.discordSvc.ReloadFromSettings(c.Request().Context()); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to start Discord bot: "+err.Error())
-		}
+		_ = h.discordSvc.ReloadFromSettings(c.Request().Context())
 	}
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Refresh", "true")
