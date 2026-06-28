@@ -235,3 +235,54 @@ func TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure(t *testing.T) {
 		}
 	})
 }
+
+// TestWebAPISwitchProject_IsInformationalOnly is the non-regression guard ensuring that
+// the web/API switch_project tool never writes to any channel-specific persistence
+// table (discord_user_projects, slack_user_projects, telegram_user_projects,
+// email_sender_projects). The web/API path is informational: the frontend manages
+// the active project_id, so the handler must not touch channel tables.
+func TestWebAPISwitchProject_IsInformationalOnly(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+
+	project1 := createProject(t, h, "Alpha")
+	project2 := createProject(t, h, "Beta")
+	_ = project1
+
+	handlers := h.chatActionHandlers(
+		streamingResponseParams{ExecID: "e1", ProjectID: project2.ID},
+		nil,
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)
+
+	switchHandler, ok := handlers["switch_project"]
+	if !ok {
+		t.Fatal("switch_project handler missing from web surface handlers")
+	}
+
+	result, err := switchHandler(ctx, json.RawMessage(`{"project":"Alpha"}`))
+	if err != nil {
+		t.Fatalf("switch_project returned unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Alpha") {
+		t.Fatalf("expected informational response mentioning Alpha, got: %q", result)
+	}
+
+	// Assert no channel-specific persistence rows were written.
+	channelTables := []string{
+		"discord_user_projects",
+		"slack_user_projects",
+		"telegram_user_projects",
+		"email_sender_projects",
+	}
+	for _, table := range channelTables {
+		var count int
+		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
+			t.Fatalf("count(%s): %v", table, err)
+		}
+		if count != 0 {
+			t.Errorf("web/API switch_project must not write to %s: found %d row(s)", table, count)
+		}
+	}
+}

@@ -3796,3 +3796,67 @@ func TestTelegramService_SendOutboundMessage_AppliesThreadIDAndSplits(t *testing
 		require.Equal(t, "-100123", params["chat_id"])
 	}
 }
+
+func TestTelegramService_RuntimeSwitchProject_PersistsToRepo(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	telegramUserProjectRepo := repository.NewTelegramUserProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+
+	ctx := context.Background()
+
+	project1 := &models.Project{Name: "Alpha", RepoPath: "/tmp/alpha", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, project1))
+	project2 := &models.Project{Name: "Beta", RepoPath: "/tmp/beta"}
+	require.NoError(t, projectRepo.Create(ctx, project2))
+
+	workerSvc := NewWorkerService(nil, 0, projectRepo)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+
+	// telegramAuthRepo=nil means checkAuthorization always returns true.
+	svc := &TelegramService{
+		taskSvc:                 taskSvc,
+		projectRepo:             projectRepo,
+		llmConfigRepo:           llmConfigRepo,
+		taskRepo:                taskRepo,
+		execRepo:                execRepo,
+		chatAttachmentRepo:      chatAttachmentRepo,
+		settingsRepo:            settingsRepo,
+		scheduleRepo:            scheduleRepo,
+		threadInputRepo:         repository.NewThreadInputRepo(db),
+		telegramUserProjectRepo: telegramUserProjectRepo,
+		userProjects:            make(map[int64]string),
+	}
+
+	const userID = int64(12345)
+
+	rt := svc.buildTelegramActionToolRuntime(project1.ID, userID, userID, nil)
+	require.NotNil(t, rt)
+
+	// Execute switch_project via the runtime tool executor.
+	output, handled, isErr, err := rt.Executor(ctx, "switch_project", json.RawMessage(`{"project":"Beta"}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, output, "Beta")
+
+	// Assert persistence: the repo row must exist for userID → project2.
+	savedID, err := telegramUserProjectRepo.GetUserProject(ctx, "12345")
+	require.NoError(t, err)
+	require.Equal(t, project2.ID, savedID, "switch_project must persist selection to telegram_user_projects")
+
+	// Assert getActiveProject reflects the change after a simulated restart (empty in-memory cache).
+	svc2 := &TelegramService{
+		projectRepo:             projectRepo,
+		telegramUserProjectRepo: telegramUserProjectRepo,
+		userProjects:            make(map[int64]string),
+	}
+	require.Equal(t, project2.ID, svc2.getActiveProject(userID),
+		"getActiveProject must return the newly-persisted project on next session")
+}

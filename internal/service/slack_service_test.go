@@ -2467,3 +2467,52 @@ func useTempSlackUploadsDir(t *testing.T, svc *SlackService) string {
 	svc.SetUploadsDir(dir)
 	return dir
 }
+
+func TestSlackService_RuntimeSwitchProject_PersistsToRepo(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	slackUserProjectRepo := repository.NewSlackUserProjectRepo(db)
+	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
+
+	project1 := &models.Project{Name: "Alpha", RepoPath: "/tmp/alpha", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, project1))
+	project2 := &models.Project{Name: "Beta", RepoPath: "/tmp/beta"}
+	require.NoError(t, projectRepo.Create(ctx, project2))
+
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	workerSvc := NewWorkerService(llmSvc, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+
+	// nil slackAuthRepo means checkAuthorization always returns true.
+	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
+
+	markerCtx := slackMarkerContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
+	rt := svc.buildSlackActionToolRuntime(project1.ID, markerCtx, nil)
+	require.NotNil(t, rt)
+
+	// Execute switch_project via the runtime tool executor.
+	output, handled, isErr, err := rt.Executor(ctx, "switch_project", json.RawMessage(`{"project":"Beta"}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, output, "Beta")
+
+	// Assert persistence: the repo row must exist for (T1, U1) → project2.
+	savedID, err := slackUserProjectRepo.GetUserProject(ctx, "T1", "U1")
+	require.NoError(t, err)
+	require.Equal(t, project2.ID, savedID, "switch_project must persist selection to slack_user_projects")
+
+	// Assert getActiveProject reflects the change (loads from DB when cache is cold after the switch).
+	svc2 := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
+	require.Equal(t, project2.ID, svc2.getActiveProject(ctx, "T1", "U1"),
+		"getActiveProject must return the newly-persisted project on next session")
+}
