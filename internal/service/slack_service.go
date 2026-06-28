@@ -887,22 +887,6 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		}
 	}
 
-	var attachmentContext string
-	var imageAttachments []models.Attachment
-	var chatAttachments []models.ChatAttachment
-	if len(msg.Files) > 0 {
-		attCtx, imgAtts, chatAtts, err := s.downloadSlackAttachments(ctx, msg.Files)
-		if err != nil {
-			applog.Infof("[slack] attachment download error: %v", err)
-			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, fmt.Sprintf("⚠️ Failed to process attachment: %v", err))
-			return
-		} else {
-			attachmentContext = attCtx
-			imageAttachments = imgAtts
-			chatAttachments = chatAtts
-		}
-	}
-
 	selectedAgentID := agent.ID
 	chatTitle := fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47))
 	task := &models.Task{
@@ -951,15 +935,43 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		return
 	}
 
-	if len(chatAttachments) > 0 {
-		s.linkAttachmentsToExecution(ctx, exec.ID, chatAttachments)
-		for i := range imageAttachments {
-			for _, ca := range chatAttachments {
-				if ca.FileName == imageAttachments[i].FileName {
-					imageAttachments[i].FilePath = ca.FilePath
-					break
+	var attachmentContext string
+	var imageAttachments []models.Attachment
+	hasLinkedAttachments := false
+	if len(msg.Files) > 0 {
+		attCtx, imgAtts, chatAtts, err := s.downloadSlackAttachments(ctx, msg.Files)
+		if err != nil {
+			applog.Infof("[slack] attachment download error: %v", err)
+			msgText := fmt.Sprintf("Failed to process attachment: %v", err)
+			s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, time.Since(start).Milliseconds())
+			if s.chatBroadcaster != nil {
+				s.chatBroadcaster.Publish(events.ChatEvent{
+					Type:           events.ChatNewMessage,
+					ProjectID:      projectID,
+					ExecID:         exec.ID,
+					TaskID:         task.ID,
+					Message:        msg.Text,
+					Source:         msg.Source,
+					AgentName:      agent.Name,
+					HasAttachments: len(msg.Files) > 0,
+				})
+			}
+			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
+			return
+		}
+		attachmentContext = attCtx
+		imageAttachments = imgAtts
+		if len(chatAtts) > 0 {
+			s.linkAttachmentsToExecution(ctx, exec.ID, chatAtts)
+			for i := range imageAttachments {
+				for _, ca := range chatAtts {
+					if ca.FileName == imageAttachments[i].FileName {
+						imageAttachments[i].FilePath = ca.FilePath
+						break
+					}
 				}
 			}
+			hasLinkedAttachments = true
 		}
 	}
 
@@ -972,7 +984,7 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 			Message:        msg.Text,
 			Source:         msg.Source,
 			AgentName:      agent.Name,
-			HasAttachments: len(chatAttachments) > 0,
+			HasAttachments: hasLinkedAttachments,
 		})
 	}
 
@@ -1008,6 +1020,13 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,
 		Surface:          chatcontrol.SurfaceSlack,
+		ReplyContext: ChannelReplyContext{
+			Source:         models.TaskOriginSlack,
+			SlackTeamID:    msg.TeamID,
+			SlackChannelID: msg.ChannelID,
+			SlackThreadTS:  msg.ThreadTS,
+			SlackUserID:    msg.UserID,
+		},
 	})
 	return
 }
@@ -2583,19 +2602,33 @@ func (s *SlackService) downloadSlackFiles(ctx context.Context, files []slackInco
 }
 
 func (s *SlackService) resolveSlackFileInfo(ctx context.Context, f slackIncomingFile) (slackIncomingFile, error) {
-	needsInfo := strings.TrimSpace(f.ID) != "" && (strings.EqualFold(strings.TrimSpace(f.FileAccess), "check_file_info") || !slackIncomingFileHasDownloadURL(f))
+	mediaType := slackIncomingFileMediaType(f, slackSafeFileName(f))
+	forceInfo := strings.EqualFold(strings.TrimSpace(f.FileAccess), "check_file_info") || !slackIncomingFileHasDownloadURL(f)
+	optionalInfo := isSlackImageFile(mediaType) && strings.TrimSpace(f.URLPrivateDownload) == "" && strings.TrimSpace(f.URLPrivate) != ""
+	needsInfo := strings.TrimSpace(f.ID) != "" && (forceInfo || optionalInfo)
 	if !needsInfo {
 		return f, nil
 	}
 	client := s.slackClientForFiles()
 	if client == nil {
+		if optionalInfo && !forceInfo {
+			return f, nil
+		}
 		return f, fmt.Errorf("slack bot token is not configured")
 	}
 	info, _, _, err := client.GetFileInfoContext(ctx, strings.TrimSpace(f.ID), 0, 0)
 	if err != nil {
+		if optionalInfo && !forceInfo {
+			applog.Infof("[slack] optional file info refresh failed for %s; using event file URL: %v", strings.TrimSpace(f.ID), err)
+			return f, nil
+		}
 		return f, fmt.Errorf("failed to fetch Slack file info for %s: %w", strings.TrimSpace(f.ID), err)
 	}
 	if info == nil || strings.TrimSpace(info.ID) == "" {
+		if optionalInfo && !forceInfo {
+			applog.Infof("[slack] optional file info refresh returned empty file for %s; using event file URL", strings.TrimSpace(f.ID))
+			return f, nil
+		}
 		return f, fmt.Errorf("Slack file info for %s was empty", strings.TrimSpace(f.ID))
 	}
 	resolved := slackIncomingFileFromSlackFile(*info)
