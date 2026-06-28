@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -111,6 +112,48 @@ func TestDiscordService_SendOutboundDirectMessage_CreatesDMBeforeSending(t *test
 	}
 	if gotUserID != "1518288288572641398" || gotChannelID != "dm-channel-1" || gotMessageID != "" || gotText != "hi" {
 		t.Fatalf("unexpected dm send user=%q channel=%q message=%q text=%q", gotUserID, gotChannelID, gotMessageID, gotText)
+	}
+}
+
+func TestDiscordActionHandlersCoverAdvertisedRuntimeTools(t *testing.T) {
+	svc, db, _, projectRepo, taskRepo, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Discord Full Runtime", IsDefault: true}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
+	taskSvc.SetAgentRepo(repository.NewAgentRepo(db))
+	svc.llmConfigRepo = llmConfigRepo
+	svc.execRepo = execRepo
+	svc.scheduleRepo = scheduleRepo
+	svc.taskSvc = taskSvc
+	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	svc.SetAgentRepo(repository.NewAgentRepo(db))
+	svc.SetAlertService(NewAlertService(repository.NewAlertRepo(db), nil))
+
+	rt := svc.buildDiscordActionToolRuntime(project.ID, discordMarkerContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"}, nil)
+	if rt == nil {
+		t.Fatal("expected runtime tools")
+	}
+	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceDiscord, true)
+	if len(defs) == 0 {
+		t.Fatal("expected Discord runtime definitions")
+	}
+	for _, d := range defs {
+		_, handled, _, _ := rt.Executor(ctx, d.Name, json.RawMessage(`{}`))
+		if !handled {
+			t.Fatalf("tool should be handled by discord runtime executor: %s", d.Name)
+		}
+	}
+
+	handlers := svc.discordActionHandlers(project.ID, discordMarkerContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"}, nil)
+	if err := chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceDiscord, true, handlers); err != nil {
+		t.Fatalf("discord handler coverage: %v", err)
 	}
 }
 

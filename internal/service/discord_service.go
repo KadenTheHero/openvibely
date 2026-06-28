@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -712,6 +713,17 @@ func (s *DiscordService) discordActionHandlers(projectID string, markerCtx disco
 		},
 		FilterHistory: filterDiscordChatHistory,
 	}))
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		ProjectID:             projectID,
+		TaskRepo:              s.taskRepo,
+		ScheduleRepo:          s.scheduleRepo,
+		LLMConfigRepo:         s.llmConfigRepo,
+		AgentRepo:             s.agentRepo,
+		SettingsRepo:          s.settingsRepo,
+		CustomPersonalityRepo: s.customPersonalityRepo,
+		ProjectRepo:           s.projectRepo,
+		AlertSvc:              s.alertSvc,
+	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 		ProjectID:   projectID,
 		ProjectRepo: s.projectRepo,
@@ -719,6 +731,15 @@ func (s *DiscordService) discordActionHandlers(projectID string, markerCtx disco
 			s.setActiveProject(ctx, markerCtx.UserID, project.ID)
 		},
 	}))
+	handlers["get_current_project"] = func(ctx context.Context, _ json.RawMessage) (string, error) {
+		return channelCurrentProjectResult(ctx, s.projectRepo, projectID), nil
+	}
+	handlers["get_chat_mode"] = func(_ context.Context, _ json.RawMessage) (string, error) {
+		return "Current chat mode: orchestrate", nil
+	}
+	handlers["set_chat_mode"] = func(_ context.Context, _ json.RawMessage) (string, error) {
+		return "Chat mode changes are not supported on Discord. Discord always uses orchestrate mode.", nil
+	}
 	return handlers
 }
 
