@@ -154,7 +154,7 @@ func outboundTargetSummary(targets []models.ChannelTarget) string {
 	return strings.Join(parts, " • ")
 }
 
-func SettingsPage(telegramToken string, isBotRunning bool, projects []models.Project, currentProjectID string, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordDefaultChannelID string, discordFreeResponseChannels string, discordSendResponses bool, discordRequireMention bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) templ.Component {
+func SettingsPage(telegramToken string, isBotRunning bool, projects []models.Project, currentProjectID string, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -187,7 +187,7 @@ func SettingsPage(telegramToken string, isBotRunning bool, projects []models.Pro
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordDefaultChannelID, discordFreeResponseChannels, discordSendResponses, discordRequireMention, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -202,7 +202,7 @@ func SettingsPage(telegramToken string, isBotRunning bool, projects []models.Pro
 }
 
 // SettingsContent renders just the settings content for HTMX requests
-func SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordDefaultChannelID string, discordFreeResponseChannels string, discordSendResponses bool, discordRequireMention bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) templ.Component {
+func SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -223,7 +223,7 @@ func SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			templ_7745c5c3_Var3 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordDefaultChannelID, discordFreeResponseChannels, discordSendResponses, discordRequireMention, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -231,7 +231,7 @@ func SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 	})
 }
 
-func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordDefaultChannelID string, discordFreeResponseChannels string, discordSendResponses bool, discordRequireMention bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) templ.Component {
+func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -679,7 +679,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "\" data-channel-delete-method=\"POST\" onclick=\"openDeleteChannelConfirmFromButton(this)\">Delete</button></li></ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\">Discord</h3><p class=\"text-sm opacity-60\">Chat with OpenVibely from Discord DMs, mentioned server channels, or configured free-response channels.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "\" data-channel-delete-method=\"POST\" onclick=\"openDeleteChannelConfirmFromButton(this)\">Delete</button></li></ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\">Discord</h3><p class=\"text-sm opacity-60\">Chat with OpenVibely from Discord DMs and mentioned server channels.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1457,7 +1457,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 139, "> <span class=\"label-text\">Send task completion/failure notifications for Slack-created tasks</span></label></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeSlackConfigModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save Slack Settings</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> <dialog id=\"discord_config_modal\" class=\"modal\" onclose=\"resetDiscordConfigForm()\"><div class=\"modal-box max-w-2xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeDiscordConfigModal()\" aria-label=\"Close Discord configuration\" title=\"Close Discord configuration\">×</button><h3 class=\"font-bold text-lg mb-4 pr-10\">Configure Discord</h3><form id=\"discord_config_form\" method=\"post\" action=\"/channels/discord/configure\" hx-post=\"/channels/discord/configure\" hx-swap=\"none\"><div class=\"alert alert-info mb-4 text-sm\"><div><p class=\"font-semibold\">Use a Discord bot token</p><p class=\"mt-1 opacity-80\">Create a Discord application bot, enable message content intent, invite it to your server, then add its token here.</p><p class=\"mt-1 opacity-80\">DMs are supported. In guild channels, users must mention the bot unless the channel is listed as a free-response channel.</p></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Bot Token</span></label>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 139, "> <span class=\"label-text\">Send task completion/failure notifications for Slack-created tasks</span></label></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeSlackConfigModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save Slack Settings</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> <dialog id=\"discord_config_modal\" class=\"modal\" onclose=\"resetDiscordConfigForm()\"><div class=\"modal-box max-w-2xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeDiscordConfigModal()\" aria-label=\"Close Discord configuration\" title=\"Close Discord configuration\">×</button><h3 class=\"font-bold text-lg mb-4 pr-10\">Configure Discord</h3><form id=\"discord_config_form\" method=\"post\" action=\"/channels/discord/configure\" hx-post=\"/channels/discord/configure\" hx-swap=\"none\"><div class=\"alert alert-info mb-4 text-sm\"><div><p class=\"font-semibold\">Use a Discord bot token</p><p class=\"mt-1 opacity-80\">Create a Discord application bot, enable message content intent, invite it to your server, then add its token here.</p><p class=\"mt-1 opacity-80\">DMs are supported. In guild channels, users must mention the bot.</p></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Bot Token</span></label>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1473,38 +1473,12 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 140, "</div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Default Channel ID</span></label> <input type=\"text\" name=\"discord_default_channel_id\" class=\"input input-bordered font-mono text-xs\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var60 string
-		templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.ResolveAttributeValue(discordDefaultChannelID)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1018, Col: 137}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var60)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 141, "\" placeholder=\"Optional channel ID for default posting\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Free-Response Channel IDs</span></label> <textarea name=\"discord_free_response_channels\" class=\"textarea textarea-bordered h-20 font-mono text-xs\" placeholder=\"One channel ID per line, or comma-separated\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var61 string
-		templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.JoinStringErrs(discordFreeResponseChannels)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1022, Col: 199}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var61))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 142, "</textarea> <label class=\"label\"><span class=\"label-text-alt opacity-70\">In these channels, OpenVibely responds without requiring a mention.</span></label></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 140, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if currentProjectID != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 143, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2\">Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Restrict Discord access to specific users for this project. If no users are configured, access is denied until authorized users are added.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 141, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2\">Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Restrict Discord access to specific users for this project. If no users are configured, access is denied until authorized users are added.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1513,151 +1487,141 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 144, "<div class=\"divider\"></div><label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" class=\"checkbox checkbox-primary\" name=\"discord_send_responses\" value=\"true\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 142, "<div class=\"divider\"></div><label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" class=\"checkbox checkbox-primary\" name=\"discord_send_responses\" value=\"true\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if discordSendResponses {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 145, " checked")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 143, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 146, "> <span class=\"label-text\">Send task completion/failure notifications for Discord-created tasks</span></label> <label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" class=\"checkbox checkbox-primary\" name=\"discord_require_mention\" value=\"true\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if discordRequireMention {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 147, " checked")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 148, "> <span class=\"label-text\">Require bot mention in non-DM channels unless free-response is configured</span></label><div class=\"modal-action\"><button type=\"button\" class=\"btn btn-ghost\" onclick=\"closeDiscordConfigModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save Discord</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button onclick=\"closeDiscordConfigModal()\">close</button></form></dialog> <dialog id=\"email_config_modal\" class=\"modal\"><div class=\"modal-box max-w-2xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeEmailConfigModal()\" aria-label=\"Close Email configuration\" title=\"Close Email configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 class=\"font-bold text-lg mb-4 pr-10\">Configure Email</h3><form id=\"email_config_form\" method=\"post\" action=\"/channels/email/configure\" hx-post=\"/channels/email/configure\" hx-swap=\"none\"><div class=\"alert alert-info mb-4 text-sm\"><div><p class=\"font-semibold\">Use a dedicated inbox</p><p class=\"mt-1 opacity-80\" id=\"email_provider_help\">Use an app password where your email provider requires one. Inbound messages are accepted only from authorized senders.</p></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Provider</span></label> <select id=\"email_provider\" name=\"email_provider\" class=\"select select-bordered w-full\" onchange=\"setEmailProviderPreset(this.value, false)\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 144, "> <span class=\"label-text\">Send task completion/failure notifications for Discord-created tasks</span></label><div class=\"modal-action\"><button type=\"button\" class=\"btn btn-ghost\" onclick=\"closeDiscordConfigModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save Discord</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button onclick=\"closeDiscordConfigModal()\">close</button></form></dialog> <dialog id=\"email_config_modal\" class=\"modal\"><div class=\"modal-box max-w-2xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeEmailConfigModal()\" aria-label=\"Close Email configuration\" title=\"Close Email configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 class=\"font-bold text-lg mb-4 pr-10\">Configure Email</h3><form id=\"email_config_form\" method=\"post\" action=\"/channels/email/configure\" hx-post=\"/channels/email/configure\" hx-swap=\"none\"><div class=\"alert alert-info mb-4 text-sm\"><div><p class=\"font-semibold\">Use a dedicated inbox</p><p class=\"mt-1 opacity-80\" id=\"email_provider_help\">Use an app password where your email provider requires one. Inbound messages are accepted only from authorized senders.</p></div></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Provider</span></label> <select id=\"email_provider\" name=\"email_provider\" class=\"select select-bordered w-full\" onchange=\"setEmailProviderPreset(this.value, false)\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, preset := range service.EmailProviderPresets() {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 149, "<option value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 145, "<option value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var60 string
+			templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.ResolveAttributeValue(preset.Key)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1053, Col: 35}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var60)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 146, "\" data-imap-host=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var61 string
+			templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.ResolveAttributeValue(preset.IMAPHost)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1053, Col: 70}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var61)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 147, "\" data-imap-port=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var62 string
-			templ_7745c5c3_Var62, templ_7745c5c3_Err = templ.ResolveAttributeValue(preset.Key)
+			templ_7745c5c3_Var62, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", preset.IMAPPort))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1066, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1053, Col: 124}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var62)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 150, "\" data-imap-host=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 148, "\" data-smtp-host=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var63 string
-			templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.ResolveAttributeValue(preset.IMAPHost)
+			templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.ResolveAttributeValue(preset.SMTPHost)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1066, Col: 70}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1053, Col: 159}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var63)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 151, "\" data-imap-port=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 149, "\" data-smtp-port=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var64 string
-			templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", preset.IMAPPort))
+			templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", preset.SMTPPort))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1066, Col: 124}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1053, Col: 213}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var64)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 152, "\" data-smtp-host=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 150, "\" data-help=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var65 string
-			templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.ResolveAttributeValue(preset.SMTPHost)
+			templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.ResolveAttributeValue(preset.HelpText)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1066, Col: 159}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1053, Col: 243}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var65)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 153, "\" data-smtp-port=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var66 string
-			templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", preset.SMTPPort))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1066, Col: 213}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var66)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 154, "\" data-help=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var67 string
-			templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.ResolveAttributeValue(preset.HelpText)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1066, Col: 243}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var67)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 155, "\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 151, "\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if emailStatus.Provider == preset.Key {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 156, " selected")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 152, " selected")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 157, ">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 153, ">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var68 string
-			templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.JoinStringErrs(preset.Label)
+			var templ_7745c5c3_Var66 string
+			templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.JoinStringErrs(preset.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1066, Col: 311}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1053, Col: 311}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var68))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var66))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 158, "</option>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 154, "</option>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, "</select></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Email Address</span></label> <input type=\"email\" name=\"email_address\" class=\"input input-bordered\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 155, "</select></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Email Address</span></label> <input type=\"email\" name=\"email_address\" class=\"input input-bordered\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var69 string
-		templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailStatus.Address)
+		var templ_7745c5c3_Var67 string
+		templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailStatus.Address)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1072, Col: 104}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1059, Col: 104}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var69)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var67)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 160, "\" placeholder=\"bot@example.com\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">App Password</span></label>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 156, "\" placeholder=\"bot@example.com\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">App Password</span></label>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1665,87 +1629,87 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, "</div><details id=\"email_advanced_details\" class=\"collapse collapse-arrow bg-base-200 mb-3\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 157, "</div><details id=\"email_advanced_details\" class=\"collapse collapse-arrow bg-base-200 mb-3\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if emailStatus.Provider == service.EmailProviderCustom {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 162, " open")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 158, " open")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 163, "><summary class=\"collapse-title text-sm font-medium\">Advanced IMAP/SMTP settings</summary><div class=\"collapse-content grid grid-cols-1 md:grid-cols-2 gap-3\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">IMAP Host</span></label> <input id=\"email_imap_host\" type=\"text\" name=\"email_imap_host\" class=\"input input-bordered\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, "><summary class=\"collapse-title text-sm font-medium\">Advanced IMAP/SMTP settings</summary><div class=\"collapse-content grid grid-cols-1 md:grid-cols-2 gap-3\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">IMAP Host</span></label> <input id=\"email_imap_host\" type=\"text\" name=\"email_imap_host\" class=\"input input-bordered\" value=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var68 string
+		templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailStatus.IMAPHost)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1070, Col: 129}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var68)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 160, "\" oninput=\"markEmailProviderCustom()\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">IMAP Port</span></label> <input id=\"email_imap_port\" type=\"number\" name=\"email_imap_port\" class=\"input input-bordered\" value=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var69 string
+		templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", emailStatus.IMAPPort))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1074, Col: 150}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var69)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, "\" oninput=\"markEmailProviderCustom()\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">SMTP Host</span></label> <input id=\"email_smtp_host\" type=\"text\" name=\"email_smtp_host\" class=\"input input-bordered\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var70 string
-		templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailStatus.IMAPHost)
+		templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailStatus.SMTPHost)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1083, Col: 129}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1078, Col: 129}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var70)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 164, "\" oninput=\"markEmailProviderCustom()\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">IMAP Port</span></label> <input id=\"email_imap_port\" type=\"number\" name=\"email_imap_port\" class=\"input input-bordered\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 162, "\" oninput=\"markEmailProviderCustom()\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">SMTP Port</span></label> <input id=\"email_smtp_port\" type=\"number\" name=\"email_smtp_port\" class=\"input input-bordered\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var71 string
-		templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", emailStatus.IMAPPort))
+		templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", emailStatus.SMTPPort))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1087, Col: 150}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1082, Col: 150}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var71)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 165, "\" oninput=\"markEmailProviderCustom()\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">SMTP Host</span></label> <input id=\"email_smtp_host\" type=\"text\" name=\"email_smtp_host\" class=\"input input-bordered\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 163, "\" oninput=\"markEmailProviderCustom()\"></div></div></details><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Poll interval seconds</span></label> <input type=\"number\" min=\"5\" name=\"email_poll_interval_seconds\" class=\"input input-bordered\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var72 string
-		templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailStatus.SMTPHost)
+		templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailPollIntervalSeconds)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1091, Col: 129}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1088, Col: 132}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var72)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 166, "\" oninput=\"markEmailProviderCustom()\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">SMTP Port</span></label> <input id=\"email_smtp_port\" type=\"number\" name=\"email_smtp_port\" class=\"input input-bordered\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var73 string
-		templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", emailStatus.SMTPPort))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1095, Col: 150}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var73)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 167, "\" oninput=\"markEmailProviderCustom()\"></div></div></details><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Poll interval seconds</span></label> <input type=\"number\" min=\"5\" name=\"email_poll_interval_seconds\" class=\"input input-bordered\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var74 string
-		templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailPollIntervalSeconds)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1101, Col: 132}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var74)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "\"></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 164, "\"></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if currentProjectID != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 169, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\">Authorized Senders</h4><p class=\"text-xs opacity-50 mb-3\">Restrict Email access to specific senders for this project. If no senders are configured, access is denied until authorized senders are added.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 165, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\">Authorized Senders</h4><p class=\"text-xs opacity-50 mb-3\">Restrict Email access to specific senders for this project. If no senders are configured, access is denied until authorized senders are added.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1754,76 +1718,76 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 170, "<div class=\"divider\"></div><div class=\"space-y-2 mb-4\"><label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" class=\"toggle toggle-primary\" name=\"email_send_responses\" value=\"true\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 166, "<div class=\"divider\"></div><div class=\"space-y-2 mb-4\"><label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" class=\"toggle toggle-primary\" name=\"email_send_responses\" value=\"true\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if emailSendResponses {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 167, " checked")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "> <span class=\"label-text\">Send task completion/failure replies by email</span></label> <label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" class=\"toggle toggle-primary\" name=\"email_skip_attachments\" value=\"true\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if emailSkipAttachments {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 169, " checked")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 170, "> <span class=\"label-text\">Skip incoming attachments</span></label> <label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" class=\"toggle toggle-primary\" name=\"email_mark_existing_seen_on_start\" value=\"true\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if emailMarkExistingSeenOnStart {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 171, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 172, "> <span class=\"label-text\">Send task completion/failure replies by email</span></label> <label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" class=\"toggle toggle-primary\" name=\"email_skip_attachments\" value=\"true\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 172, "> <span class=\"label-text\">Mark existing unread messages seen on start</span></label></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeEmailConfigModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save Email Settings</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><!-- Webhook Configuration Modal --><dialog id=\"webhook_modal\" class=\"modal\"><div class=\"modal-box max-w-4xl p-0 overflow-hidden\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeWebhookModal()\" aria-label=\"Close webhook configuration\" title=\"Close webhook configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><div class=\"px-6 pt-6 pb-2 pr-14\"><h3 id=\"webhook_modal_title\" class=\"font-bold text-lg\">Add Webhook</h3></div><form id=\"webhook_form\" hx-post=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if emailSkipAttachments {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 173, " checked")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
+		var templ_7745c5c3_Var73 string
+		templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks?project_id=" + currentProjectID)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1128, Col: 89}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 174, "> <span class=\"label-text\">Skip incoming attachments</span></label> <label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" class=\"toggle toggle-primary\" name=\"email_mark_existing_seen_on_start\" value=\"true\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var73)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if emailMarkExistingSeenOnStart {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 175, " checked")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 173, "\" hx-swap=\"none\" data-project-id=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 176, "> <span class=\"label-text\">Mark existing unread messages seen on start</span></label></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeEmailConfigModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save Email Settings</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><!-- Webhook Configuration Modal --><dialog id=\"webhook_modal\" class=\"modal\"><div class=\"modal-box max-w-4xl p-0 overflow-hidden\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeWebhookModal()\" aria-label=\"Close webhook configuration\" title=\"Close webhook configuration\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><div class=\"px-6 pt-6 pb-2 pr-14\"><h3 id=\"webhook_modal_title\" class=\"font-bold text-lg\">Add Webhook</h3></div><form id=\"webhook_form\" hx-post=\"")
+		var templ_7745c5c3_Var74 string
+		templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1128, Col: 141}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var74)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 174, "\" class=\"flex flex-col h-[78vh]\"><input type=\"hidden\" name=\"project_id\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var75 string
-		templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks?project_id=" + currentProjectID)
+		templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1141, Col: 89}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1129, Col: 68}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var75)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 177, "\" hx-swap=\"none\" data-project-id=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var76 string
-		templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1141, Col: 141}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var76)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 178, "\" class=\"flex flex-col h-[78vh]\"><input type=\"hidden\" name=\"project_id\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var77 string
-		templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1142, Col: 68}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var77)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "\"><div class=\"px-6 pb-3 border-b border-base-300\"><div role=\"tablist\" class=\"tabs tabs-bordered tabs-sm w-full overflow-x-auto flex-nowrap\"><button type=\"button\" role=\"tab\" class=\"tab tab-active\" data-webhook-section-tab=\"config\" aria-selected=\"true\" onclick=\"setWebhookSection('config')\">Webhook Config</button> <button type=\"button\" role=\"tab\" class=\"tab\" data-webhook-section-tab=\"agents\" aria-selected=\"false\" onclick=\"setWebhookSection('agents')\">Agents</button></div></div><div class=\"flex-1 min-h-0 px-6 py-3\"><div data-webhook-section-panel=\"config\" class=\"h-full overflow-y-auto pr-1\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" id=\"webhook_name\" name=\"name\" class=\"input input-bordered w-full\" placeholder=\"e.g. PagerDuty Alerts\" required></div><div class=\"form-control mb-3\"><label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" id=\"webhook_enabled\" name=\"enabled\" value=\"true\" class=\"toggle toggle-primary\" checked> <span class=\"label-text\">Enabled</span></label></div><div class=\"form-control mb-3\" id=\"webhook_url_row\" style=\"display:none\"><label class=\"label\"><span class=\"label-text\">Webhook URL</span></label><div class=\"join w-full\"><div class=\"text-sm font-mono bg-base-200 p-2 rounded-l break-all join-item flex-1\" id=\"webhook_url_display\">(Save first to generate URL)</div><button type=\"button\" class=\"btn btn-sm join-item\" id=\"webhook_url_copy_btn\" onclick=\"copyWebhookAbsoluteUrl('webhook_url_display', this)\">Copy</button></div></div><div class=\"form-control mb-3\" id=\"webhook_secret_row\" style=\"display:none\"><label class=\"label\"><span class=\"label-text\">Secret</span></label>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 175, "\"><div class=\"px-6 pb-3 border-b border-base-300\"><div role=\"tablist\" class=\"tabs tabs-bordered tabs-sm w-full overflow-x-auto flex-nowrap\"><button type=\"button\" role=\"tab\" class=\"tab tab-active\" data-webhook-section-tab=\"config\" aria-selected=\"true\" onclick=\"setWebhookSection('config')\">Webhook Config</button> <button type=\"button\" role=\"tab\" class=\"tab\" data-webhook-section-tab=\"agents\" aria-selected=\"false\" onclick=\"setWebhookSection('agents')\">Agents</button></div></div><div class=\"flex-1 min-h-0 px-6 py-3\"><div data-webhook-section-panel=\"config\" class=\"h-full overflow-y-auto pr-1\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" id=\"webhook_name\" name=\"name\" class=\"input input-bordered w-full\" placeholder=\"e.g. PagerDuty Alerts\" required></div><div class=\"form-control mb-3\"><label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" id=\"webhook_enabled\" name=\"enabled\" value=\"true\" class=\"toggle toggle-primary\" checked> <span class=\"label-text\">Enabled</span></label></div><div class=\"form-control mb-3\" id=\"webhook_url_row\" style=\"display:none\"><label class=\"label\"><span class=\"label-text\">Webhook URL</span></label><div class=\"join w-full\"><div class=\"text-sm font-mono bg-base-200 p-2 rounded-l break-all join-item flex-1\" id=\"webhook_url_display\">(Save first to generate URL)</div><button type=\"button\" class=\"btn btn-sm join-item\" id=\"webhook_url_copy_btn\" onclick=\"copyWebhookAbsoluteUrl('webhook_url_display', this)\">Copy</button></div></div><div class=\"form-control mb-3\" id=\"webhook_secret_row\" style=\"display:none\"><label class=\"label\"><span class=\"label-text\">Secret</span></label>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1838,20 +1802,20 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 180, "</div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">System Instructions</span></label> <textarea id=\"webhook_system_instructions\" name=\"system_instructions\" class=\"textarea textarea-bordered w-full h-20\" placeholder=\"Optional system context for the agent...\"></textarea></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Default Priority</span></label> <select id=\"webhook_default_priority\" name=\"default_priority\" class=\"select select-bordered w-full\"><option value=\"0\">Urgent (0)</option> <option value=\"1\">High (1)</option> <option value=\"2\" selected>Medium (2)</option> <option value=\"3\">Low (3)</option> <option value=\"4\">Backlog (4)</option></select></div></div><div data-webhook-section-panel=\"agents\" class=\"h-full overflow-y-auto pr-1 hidden\"><div class=\"space-y-3\"><div class=\"border border-base-300 rounded-lg p-3\"><div class=\"flex items-center justify-between mb-2\"><p class=\"text-sm font-medium\">Agents</p><p id=\"webhook_agent_selected_count\" class=\"text-xs opacity-60\">No agents selected</p></div><div class=\"mb-2\"><input type=\"text\" id=\"webhook_agent_search_input\" class=\"input input-bordered input-sm w-full\" placeholder=\"Search agents by name\" oninput=\"renderWebhookAgentList()\"></div><div id=\"webhook_agent_list\" class=\"space-y-2 max-h-[500px] overflow-auto\"></div></div></div></div></div><input type=\"hidden\" id=\"webhook_agent_ids_hidden\" name=\"agent_ids\"><div class=\"modal-action mt-0 sticky bottom-0 z-10 border-t border-base-300 bg-base-100 px-6 py-3\"><form method=\"dialog\" class=\"inline\"><button type=\"button\" class=\"btn\" onclick=\"closeWebhookModal()\">Cancel</button></form><button type=\"submit\" class=\"btn btn-primary\" onclick=\"serializeWebhookAgentData()\">Save Webhook</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><!-- Webhook available agents data for JavaScript --><div id=\"webhook_agents_data\" data-agents=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 176, "</div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">System Instructions</span></label> <textarea id=\"webhook_system_instructions\" name=\"system_instructions\" class=\"textarea textarea-bordered w-full h-20\" placeholder=\"Optional system context for the agent...\"></textarea></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Default Priority</span></label> <select id=\"webhook_default_priority\" name=\"default_priority\" class=\"select select-bordered w-full\"><option value=\"0\">Urgent (0)</option> <option value=\"1\">High (1)</option> <option value=\"2\" selected>Medium (2)</option> <option value=\"3\">Low (3)</option> <option value=\"4\">Backlog (4)</option></select></div></div><div data-webhook-section-panel=\"agents\" class=\"h-full overflow-y-auto pr-1 hidden\"><div class=\"space-y-3\"><div class=\"border border-base-300 rounded-lg p-3\"><div class=\"flex items-center justify-between mb-2\"><p class=\"text-sm font-medium\">Agents</p><p id=\"webhook_agent_selected_count\" class=\"text-xs opacity-60\">No agents selected</p></div><div class=\"mb-2\"><input type=\"text\" id=\"webhook_agent_search_input\" class=\"input input-bordered input-sm w-full\" placeholder=\"Search agents by name\" oninput=\"renderWebhookAgentList()\"></div><div id=\"webhook_agent_list\" class=\"space-y-2 max-h-[500px] overflow-auto\"></div></div></div></div></div><input type=\"hidden\" id=\"webhook_agent_ids_hidden\" name=\"agent_ids\"><div class=\"modal-action mt-0 sticky bottom-0 z-10 border-t border-base-300 bg-base-100 px-6 py-3\"><form method=\"dialog\" class=\"inline\"><button type=\"button\" class=\"btn\" onclick=\"closeWebhookModal()\">Cancel</button></form><button type=\"submit\" class=\"btn btn-primary\" onclick=\"serializeWebhookAgentData()\">Save Webhook</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><!-- Webhook available agents data for JavaScript --><div id=\"webhook_agents_data\" data-agents=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var78 string
-		templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.ResolveAttributeValue(agentsJSON(agents))
+		var templ_7745c5c3_Var76 string
+		templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.ResolveAttributeValue(agentsJSON(agents))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1234, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1221, Col: 63}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var78)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var76)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 181, "\" style=\"display:none\"></div><style>\n\t\t.dropdown-content {\n\t\t\tdisplay: none;\n\t\t}\t\t\t.dropdown-content.show {\n\t\t\t\tdisplay: block;\n\t\t\t}\n\t\t\t/* Keep password toggle button fixed inside input across press/focus states */\n\t\t\t.password-toggle-btn:active,\n\t\t\t.password-toggle-btn:focus,\n\t\t\t.password-toggle-btn:focus-visible {\n\t\t\t\ttransform: translate(0, -50%) !important;\n\t\t\t}\n\t\t\t.password-toggle-btn.top-2:active,\n\t\t\t.password-toggle-btn.top-2:focus,\n\t\t\t.password-toggle-btn.top-2:focus-visible {\n\t\t\t\ttransform: translate(0, 0) !important;\n\t\t\t}\n\t\t\t.secret-textarea-masked {\n\t\t\t\t-webkit-text-security: disc;\n\t\t\t}\n\t\t</style><script>\n\t\t\t\tvar pendingDeleteChannelURL = '';\n\t\t\t\tvar pendingDeleteChannelMethod = 'POST';\n\n\t\t\t\tfunction openDeleteChannelConfirm(name, url, method) {\n\t\t\t\t\tpendingDeleteChannelURL = url || '';\n\t\t\t\t\tpendingDeleteChannelMethod = method || 'POST';\n\t\t\t\t\tvar nameEl = document.getElementById('delete_channel_name');\n\t\t\t\t\tif (nameEl) nameEl.textContent = name || 'this channel';\n\t\t\t\t\tdocument.getElementById('delete_channel_confirm_modal')?.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openDeleteChannelConfirmFromButton(button) {\n\t\t\t\t\tif (!button) return;\n\t\t\t\t\topenDeleteChannelConfirm(button.dataset.channelDeleteName, button.dataset.channelDeleteUrl, button.dataset.channelDeleteMethod);\n\t\t\t\t}\n\n\t\t\t\tfunction closeDeleteChannelConfirm() {\n\t\t\t\t\tdocument.getElementById('delete_channel_confirm_modal')?.close();\n\t\t\t\t}\n\n\t\t\t\tfunction confirmDeleteChannel() {\n\t\t\t\t\tif (!pendingDeleteChannelURL) return;\n\t\t\t\t\thtmx.ajax(pendingDeleteChannelMethod, pendingDeleteChannelURL, { swap: 'none' });\n\t\t\t\t\tcloseDeleteChannelConfirm();\n\t\t\t\t}\n\n\t\t\t\t// Webhook agent state\n\t\t\t\tlet webhookAvailableAgents = [];\n\t\t\t\tlet selectedWebhookAgentIDs = [];\n\t\t\t\tlet activeWebhookSection = 'config';\n\t\t\tfunction setWebhookSection(sectionName) {\n\t\t\t\tconst sectionNameMap = {\n\t\t\t\t\tconfig: 'config',\n\t\t\t\t\tagents: 'agents'\n\t\t\t\t};\n\t\t\t\tconst nextSection = sectionNameMap[sectionName] || 'config';\n\t\t\t\tactiveWebhookSection = nextSection;\n\t\t\t\tdocument.querySelectorAll('[data-webhook-section-tab]').forEach(tab => {\n\t\t\t\t\tconst isActive = tab.dataset.webhookSectionTab === nextSection;\n\t\t\t\t\ttab.classList.toggle('tab-active', isActive);\n\t\t\t\t\ttab.setAttribute('aria-selected', isActive ? 'true' : 'false');\n\t\t\t\t});\n\t\t\t\tdocument.querySelectorAll('[data-webhook-section-panel]').forEach(panel => {\n\t\t\t\t\tpanel.classList.toggle('hidden', panel.dataset.webhookSectionPanel !== nextSection);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction renderWebhookAgentList() {\n\t\t\t\tconst root = document.getElementById('webhook_agent_list');\n\t\t\t\tif (!root) return;\n\n\t\t\t\tconst searchTerm = (document.getElementById('webhook_agent_search_input')?.value || '').toLowerCase();\n\t\t\t\tconst filteredAgents = webhookAvailableAgents.filter(agent => {\n\t\t\t\t\tif (!searchTerm) return true;\n\t\t\t\t\treturn (agent.name || '').toLowerCase().includes(searchTerm) ||\n\t\t\t\t\t\t(agent.id || '').toLowerCase().includes(searchTerm);\n\t\t\t\t});\n\n\t\t\t\tlet html = '';\n\t\t\t\tif (filteredAgents.length === 0) {\n\t\t\t\t\thtml = '<p class=\"text-xs opacity-60 py-2\">No agents found.</p>';\n\t\t\t\t} else {\n\t\t\t\t\thtml = filteredAgents.map(agent => {\n\t\t\t\t\t\tconst checked = selectedWebhookAgentIDs.includes(agent.id) ? 'checked' : '';\n\t\t\t\t\t\treturn `\n\t\t\t\t\t\t\t<div class=\"border border-base-300 rounded-lg px-3 py-2 mb-2\">\n\t\t\t\t\t\t\t\t<div class=\"flex items-center justify-between gap-3\">\n\t\t\t\t\t\t\t\t\t<div class=\"flex items-center gap-2 min-w-0 flex-1\">\n\t\t\t\t\t\t\t\t\t\t<span class=\"font-medium text-sm truncate\" title=\"${escapeHtml(agent.id)}\">${escapeHtml(agent.name)}</span>\n\t\t\t\t\t\t\t\t\t\t<span class=\"text-[11px] opacity-60 truncate\">${escapeHtml(agent.id)}</span>\n\t\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t\t<input\n\t\t\t\t\t\t\t\t\t\ttype=\"checkbox\"\n\t\t\t\t\t\t\t\t\t\tclass=\"toggle toggle-sm toggle-primary webhook-agent-checkbox\"\n\t\t\t\t\t\t\t\t\t\tvalue=\"${escapeHtml(agent.id)}\"\n\t\t\t\t\t\t\t\t\t\taria-label=\"Enable ${escapeHtml(agent.name)}\"\n\t\t\t\t\t\t\t\t\t\t${checked}\n\t\t\t\t\t\t\t\t\t\tonchange=\"refreshSelectedWebhookAgentsFromDOM()\"\n\t\t\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t</div>`;\n\t\t\t\t\t}).join('');\n\t\t\t\t}\n\n\t\t\t\troot.innerHTML = html;\n\t\t\t\trenderWebhookSelectedAgentCount();\n\t\t\t}\n\n\t\t\tfunction refreshSelectedWebhookAgentsFromDOM() {\n\t\t\t\tconst checkboxes = document.querySelectorAll('.webhook-agent-checkbox');\n\t\t\t\tselectedWebhookAgentIDs = Array.from(checkboxes)\n\t\t\t\t\t.filter(cb => cb.checked)\n\t\t\t\t\t.map(cb => cb.value);\n\t\t\t\trenderWebhookSelectedAgentCount();\n\t\t\t}\n\n\t\t\tfunction renderWebhookSelectedAgentCount() {\n\t\t\t\tconst countEl = document.getElementById('webhook_agent_selected_count');\n\t\t\t\tif (!countEl) return;\n\t\t\t\tconst count = selectedWebhookAgentIDs.length;\n\t\t\t\tif (count === 0) {\n\t\t\t\t\tcountEl.textContent = 'No agents selected';\n\t\t\t\t} else if (count === 1) {\n\t\t\t\t\tcountEl.textContent = '1 agent selected';\n\t\t\t\t} else {\n\t\t\t\t\tcountEl.textContent = count + ' agents selected';\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction serializeWebhookAgentData() {\n\t\t\t\t// Collect selected agent IDs from toggles and put into hidden field\n\t\t\t\tconst hiddenField = document.getElementById('webhook_agent_ids_hidden');\n\t\t\t\tif (hiddenField) {\n\t\t\t\t\thiddenField.value = selectedWebhookAgentIDs.join(',');\n\t\t\t\t}\n\t\t\t}\n\n\t\tfunction escapeHtml(text) {\n\t\t\tconst div = document.createElement('div');\n\t\t\tdiv.textContent = text || '';\n\t\t\treturn div.innerHTML;\n\t\t}\n\n\t\tfunction initializeWebhookAgents() {\n\t\t\tif (webhookAvailableAgents.length > 0) return; // Already initialized\n\t\t\tconst dataEl = document.getElementById('webhook_agents_data');\n\t\t\tif (!dataEl) return;\n\t\t\ttry {\n\t\t\t\tconst agentsJSON = dataEl.getAttribute('data-agents');\n\t\t\t\twebhookAvailableAgents = JSON.parse(agentsJSON || '[]');\n\t\t\t} catch (e) {\n\t\t\t\tconsole.error('Failed to parse webhook agents data:', e);\n\t\t\t\twebhookAvailableAgents = [];\n\t\t\t}\n\t\t}\n\t\t\tfunction togglePasswordVisibility(inputId, button) {\n\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\tif (!input || !button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tconst willReveal = input.type === 'password';\n\t\t\t\tinput.type = willReveal ? 'text' : 'password';\n\t\t\t\tif (eyeOpen) eyeOpen.classList.toggle('hidden', willReveal);\n\t\t\t\tif (eyeClosed) eyeClosed.classList.toggle('hidden', !willReveal);\n\t\t\t\tbutton.setAttribute('aria-pressed', willReveal ? 'true' : 'false');\n\t\t\t}\n\n\t\t\tfunction resetSecretInputVisibility(inputId) {\n\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\tif (!input) return;\n\t\t\t\tinput.type = 'password';\n\t\t\t\tconst button = document.querySelector(\"button[onclick=\\\"togglePasswordVisibility('\" + inputId + \"', this)\\\"]\");\n\t\t\t\tif (!button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tif (eyeOpen) eyeOpen.classList.remove('hidden');\n\t\t\t\tif (eyeClosed) eyeClosed.classList.add('hidden');\n\t\t\t\tbutton.setAttribute('aria-pressed', 'false');\n\t\t\t}\n\n\t\t\tfunction handleDropdownToggle(event) {\n\t\t\t\tevent.stopPropagation();\n\t\t\t\tconst dropdown = event.currentTarget.parentElement;\n\t\t\t\tconst menu = dropdown.querySelector('ul');\n\t\t\t\tconst wasOpen = menu.classList.contains('show');\n\t\t\t\t\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\n\t\t\t\t// Toggle this dropdown\n\t\t\t\tif (!wasOpen) {\n\t\t\t\t\tmenu.classList.add('show');\n\t\t\t\t\t// Close when clicking outside\n\t\t\t\t\tsetTimeout(() => {\n\t\t\t\t\t\tdocument.addEventListener('click', function closeDropdown(e) {\n\t\t\t\t\t\t\tif (!dropdown.contains(e.target)) {\n\t\t\t\t\t\t\t\tmenu.classList.remove('show');\n\t\t\t\t\t\t\t\tdocument.removeEventListener('click', closeDropdown);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\t\t\t\t\t}, 0);\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction toggleSecretTextareaVisibility(textareaId, button) {\n\t\t\t\tconst textarea = document.getElementById(textareaId);\n\t\t\t\tif (!textarea) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tconst isMasked = textarea.classList.contains('secret-textarea-masked');\n\t\t\t\tif (isMasked) {\n\t\t\t\t\ttextarea.classList.remove('secret-textarea-masked');\n\t\t\t\t\tif (eyeOpen) eyeOpen.classList.remove('hidden');\n\t\t\t\t\tif (eyeClosed) eyeClosed.classList.add('hidden');\n\t\t\t\t\tbutton.setAttribute('aria-pressed', 'true');\n\t\t\t\t} else {\n\t\t\t\t\ttextarea.classList.add('secret-textarea-masked');\n\t\t\t\t\tif (eyeOpen) eyeOpen.classList.add('hidden');\n\t\t\t\t\tif (eyeClosed) eyeClosed.classList.remove('hidden');\n\t\t\t\t\tbutton.setAttribute('aria-pressed', 'false');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction resetSecretTextareaVisibility(textareaId) {\n\t\t\t\tconst textarea = document.getElementById(textareaId);\n\t\t\t\tif (!textarea) return;\n\t\t\t\ttextarea.classList.add('secret-textarea-masked');\n\t\t\t\tconst button = document.querySelector(\"button[onclick=\\\"toggleSecretTextareaVisibility('\" + textareaId + \"', this)\\\"]\");\n\t\t\t\tif (!button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tif (eyeOpen) eyeOpen.classList.add('hidden');\n\t\t\t\tif (eyeClosed) eyeClosed.classList.remove('hidden');\n\t\t\t\tbutton.setAttribute('aria-pressed', 'false');\n\t\t\t}\n\n\t\t\t\tfunction openWebhookCreateModal(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tdocument.getElementById('webhook_modal_title').textContent = 'Add Webhook';\n\t\t\t\t\tvar form = document.getElementById('webhook_form');\n\t\t\t\t\tvar pid = form.getAttribute('data-project-id') || '';\n\t\t\t\t\tform.setAttribute('hx-post', '/channels/webhooks?project_id=' + encodeURIComponent(pid));\n\t\t\t\t\tform.removeAttribute('hx-put');\n\t\t\t\t\tdocument.getElementById('webhook_name').value = '';\n\t\t\t\t\tdocument.getElementById('webhook_enabled').checked = true;\n\t\t\t\t\tdocument.getElementById('webhook_system_instructions').value = '';\n\t\t\t\t\tdocument.getElementById('webhook_default_priority').value = '2';\n\t\t\t\t\tdocument.getElementById('webhook_url_display').textContent = '(Save first to generate URL)';\n\t\t\t\t\tdocument.getElementById('webhook_secret_display').value = '';\n\t\t\t\t\tresetSecretInputVisibility('webhook_secret_display');\n\t\t\t\t\tvar secretRow = document.getElementById('webhook_secret_row');\n\t\t\t\t\tif (secretRow) secretRow.style.display = 'none';\n\t\t\t\t\tvar urlRow = document.getElementById('webhook_url_row');\n\t\t\t\t\tif (urlRow) urlRow.style.display = 'none';\n\t\t\t\t\t\n\t\t\t\t\t// Initialize webhook agents from page data\n\t\t\t\t\tinitializeWebhookAgents();\n\t\t\t\t\tselectedWebhookAgentIDs = [];\n\t\t\t\t\trenderWebhookAgentList();\n\t\t\t\t\tsetWebhookSection('config');\n\t\t\t\t\t\n\t\t\t\t\thtmx.process(form);\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openWebhookEditModal(id) {\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tdocument.getElementById('webhook_modal_title').textContent = 'Edit Webhook';\n\t\t\t\t\tvar form = document.getElementById('webhook_form');\n\t\t\t\t\tvar pid = form.getAttribute('data-project-id') || '';\n\t\t\t\t\tform.removeAttribute('hx-post');\n\t\t\t\t\tform.setAttribute('hx-put', '/channels/webhooks/' + id + '?project_id=' + encodeURIComponent(pid));\n\t\t\t\t\tvar card = document.querySelector('[data-webhook-id=\"' + id + '\"]');\n\t\t\t\t\tif (card) {\n\t\t\t\t\t\tdocument.getElementById('webhook_name').value = card.getAttribute('data-webhook-name') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_enabled').checked = (card.getAttribute('data-webhook-enabled') || '') === 'true';\n\t\t\t\t\t\tdocument.getElementById('webhook_system_instructions').value = card.getAttribute('data-webhook-system') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_default_priority').value = card.getAttribute('data-webhook-default-priority') || '2';\n\t\t\t\t\t\tdocument.getElementById('webhook_secret_display').value = card.getAttribute('data-webhook-secret') || '';\n\t\t\t\t\t\tresetSecretInputVisibility('webhook_secret_display');\n\t\t\t\t\t\tvar token = card.getAttribute('data-webhook-token') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_url_display').textContent = token ? (window.location.origin + '/webhooks/inbound/' + token) : '(Not available)';\n\t\t\t\t\t\t\n\t\t\t\t\t\t// Load selected agents from card data\n\t\t\t\t\t\tvar agentIDsCSV = card.getAttribute('data-webhook-agent-ids') || '';\n\t\t\t\t\t\tselectedWebhookAgentIDs = agentIDsCSV.split(',').map(id => id.trim()).filter(id => id !== '');\n\t\t\t\t\t}\n\t\t\t\t\tvar secretRow = document.getElementById('webhook_secret_row');\n\t\t\t\t\tif (secretRow) secretRow.style.display = '';\n\t\t\t\t\tvar urlRow = document.getElementById('webhook_url_row');\n\t\t\t\t\tif (urlRow) urlRow.style.display = '';\n\t\t\t\t\t\n\t\t\t\t\t// Initialize webhook agents and render\n\t\t\t\t\tinitializeWebhookAgents();\n\t\t\t\t\trenderWebhookAgentList();\n\t\t\t\t\tsetWebhookSection('config');\n\t\t\t\t\t\n\t\t\t\t\thtmx.process(form);\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction writeToClipboardWithFeedback(text, button, successMessage, failureMessage) {\n\t\t\t\t\t\tif (!text) {\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(failureMessage || 'Nothing to copy', 'failed');\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction onCopySuccess() {\n\t\t\t\t\t\t\tif (button) {\n\t\t\t\t\t\t\t\tvar original = button.textContent;\n\t\t\t\t\t\t\t\tbutton.textContent = 'Copied';\n\t\t\t\t\t\t\t\tsetTimeout(function() { button.textContent = original; }, 1000);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(successMessage || 'Copied to clipboard', 'completed');\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction onCopyFailure() {\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(failureMessage || 'Failed to copy to clipboard', 'failed');\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tif (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {\n\t\t\t\t\t\t\tnavigator.clipboard.writeText(text).then(onCopySuccess).catch(function() {\n\t\t\t\t\t\t\t\tvar textarea = document.createElement('textarea');\n\t\t\t\t\t\t\t\ttextarea.value = text;\n\t\t\t\t\t\t\t\ttextarea.setAttribute('readonly', '');\n\t\t\t\t\t\t\t\ttextarea.style.position = 'fixed';\n\t\t\t\t\t\t\t\ttextarea.style.opacity = '0';\n\t\t\t\t\t\t\t\tdocument.body.appendChild(textarea);\n\t\t\t\t\t\t\t\ttextarea.select();\n\t\t\t\t\t\t\t\ttextarea.setSelectionRange(0, textarea.value.length);\n\t\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\t\tif (document.execCommand('copy')) {\n\t\t\t\t\t\t\t\t\t\tonCopySuccess();\n\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\t\t\tdocument.body.removeChild(textarea);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tvar fallbackTextarea = document.createElement('textarea');\n\t\t\t\t\t\tfallbackTextarea.value = text;\n\t\t\t\t\t\tfallbackTextarea.setAttribute('readonly', '');\n\t\t\t\t\t\tfallbackTextarea.style.position = 'fixed';\n\t\t\t\t\t\tfallbackTextarea.style.opacity = '0';\n\t\t\t\t\t\tdocument.body.appendChild(fallbackTextarea);\n\t\t\t\t\t\tfallbackTextarea.select();\n\t\t\t\t\t\tfallbackTextarea.setSelectionRange(0, fallbackTextarea.value.length);\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tif (document.execCommand('copy')) {\n\t\t\t\t\t\t\t\tonCopySuccess();\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\tdocument.body.removeChild(fallbackTextarea);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\tfunction copyWebhookEndpointUrl(webhookID, button) {\n\t\t\t\t\tvar card = document.querySelector('[data-webhook-id=\"' + webhookID + '\"]');\n\t\t\t\t\tif (!card) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar token = (card.getAttribute('data-webhook-token') || '').trim();\n\t\t\t\t\tif (!token) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar url = window.location.origin + '/webhooks/inbound/' + token;\n\t\t\t\t\twriteToClipboardWithFeedback(url, button, 'Webhook URL copied', 'Failed to copy webhook URL');\n\t\t\t\t}\n\n\t\t\t\tfunction copyWebhookAbsoluteUrl(elementId, button) {\n\t\t\t\t\tvar el = document.getElementById(elementId);\n\t\t\t\t\tif (!el) return;\n\t\t\t\t\tvar val = (el.textContent || '').trim();\n\t\t\t\t\tif (!val || val.indexOf('(Save first') === 0 || val.indexOf('(Not available') === 0) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\twriteToClipboardWithFeedback(val, button, 'Webhook URL copied', 'Failed to copy webhook URL');\n\t\t\t\t}\n\n\t\t\t\tfunction closeWebhookModal() {\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\tfunction editChannelFromData(card) {\n\t\t\t\t\tconst type = card.dataset.channelType;\n\t\t\t\t\tif (type === 'telegram') {\n\t\t\t\t\t\tconst token = card.dataset.channelToken || '';\n\t\t\t\t\t\tdocument.getElementById('channel_telegram_token').value = token;\n\t\t\t\t\t\tvar richToggle = document.getElementById('channel_telegram_rich_messages_v2');\n\t\t\t\t\t\tif (richToggle) richToggle.checked = richToggle.defaultChecked;\n\t\t\t\t\t\tdocument.getElementById('channel_modal_title').textContent = 'Configure Telegram Bot';\n\t\t\t\t\t\tresetSecretInputVisibility('channel_telegram_token');\n\t\t\t\t\t\tchannel_modal.showModal();\n\t\t\t\t} else if (type === 'github') {\n\t\t\t\t\topenGitHubConfigModal();\n\t\t\t\t} else if (type === 'slack') {\n\t\t\t\t\topenSlackConfigModal();\n\t\t\t\t} else if (type === 'discord') {\n\t\t\t\t\topenDiscordConfigModal();\n\t\t\t\t} else if (type === 'email') {\n\t\t\t\t\topenEmailConfigModal();\n\t\t\t\t}\n\t\t\t}\n\t\t\tfunction closeAllDropdownMenus() {\n\t\t\t\tdocument.querySelectorAll('.dropdown ul').forEach(m => m.classList.remove('show'));\n\t\t\t}\n\n\t\t\tfunction openTelegramChannelFromMenu(event) {\n\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\tdocument.getElementById('channel_telegram_token').value = '';\n\t\t\t\tvar richToggle = document.getElementById('channel_telegram_rich_messages_v2');\n\t\t\t\tif (richToggle) richToggle.checked = true;\n\t\t\t\tdocument.getElementById('channel_modal_title').textContent = 'Add Telegram Bot';\n\t\t\t\tresetSecretInputVisibility('channel_telegram_token');\n\t\t\t\tchannel_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction openGitHubChannelFromMenu(event) {\n\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\topenGitHubConfigModal();\n\t\t\t}\n\n\t\t\t\tfunction openSlackChannelFromMenu(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\topenSlackConfigModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openDiscordChannelFromMenu(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\topenDiscordConfigModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openEmailChannelFromMenu(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\topenEmailConfigModal();\n\t\t\t\t}\n\n\t\t\t\tfunction closeChannelModal() {\t\t\t\tchannel_modal.close();\n\t\t\t}\n\n\t\t\tfunction openGitHubConfigModal() {\n\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\tif (!modal) return;\n\t\t\t\tconst modeSelect = document.getElementById('github_auth_mode');\n\t\t\t\t\tif (modeSelect) {\n\t\t\t\t\t\ttoggleGitHubAuthMode(modeSelect.value);\n\t\t\t\t\t}\n\t\t\t\t\tresetSecretInputVisibility('github_pat');\n\t\t\t\t\tresetSecretTextareaVisibility('github_app_private_key');\n\t\t\t\t\tmodal.showModal();\n\t\t\t}\n\n\t\t\tfunction closeGitHubConfigModal() {\n\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\tif (modal) modal.close();\n\t\t\t}\n\n\t\t\tfunction openSlackConfigModal() {\n\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\tif (!modal) return;\n\t\t\t\tconst modeSelect = document.getElementById('slack_bot_token_mode');\n\t\t\t\t\tif (modeSelect) {\n\t\t\t\t\t\ttoggleSlackBotTokenMode(modeSelect.value);\n\t\t\t\t\t}\n\t\t\t\t\tresetSecretInputVisibility('slack_client_secret');\n\t\t\t\t\tresetSecretInputVisibility('slack_app_token');\n\t\t\t\t\tresetSecretInputVisibility('slack_bot_token');\n\t\t\t\t\tmodal.showModal();\n\t\t\t}\n\n\t\t\t\tfunction closeSlackConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\tfunction resetDiscordConfigForm() {\n\t\t\t\t\tconst form = document.getElementById('discord_config_form');\n\t\t\t\t\tif (form) form.reset();\n\t\t\t\t\tresetSecretInputVisibility('discord_bot_token');\n\t\t\t\t}\n\n\t\t\t\tfunction openDiscordConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('discord_config_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tresetDiscordConfigForm();\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction closeDiscordConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('discord_config_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\tfunction openEmailConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('email_config_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tconst provider = document.getElementById('email_provider');\n\t\t\t\t\tif (provider) setEmailProviderPreset(provider.value, true);\n\t\t\t\t\tresetSecretInputVisibility('email_password');\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction closeEmailConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('email_config_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\t\tfunction resetOutboundTargetAddForm() {\n\t\t\t\t\t\tconst form = document.getElementById('outbound-target-add-form');\n\t\t\t\t\t\tif (form) form.reset();\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction reloadOutboundTargetsModalDraft() {\n\t\t\t\t\t\tconst section = document.getElementById('outbound-targets-section');\n\t\t\t\t\t\tif (!section || !window.htmx) return;\n\t\t\t\t\t\tconst projectID = section.getAttribute('data-project-id') || '';\n\t\t\t\t\t\twindow.htmx.ajax('GET', '/channels/outbound-targets?project_id=' + encodeURIComponent(projectID), {\n\t\t\t\t\t\t\ttarget: '#outbound-targets-section',\n\t\t\t\t\t\t\tswap: 'outerHTML'\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction openOutboundTargetsModal() {\n\t\t\t\t\t\tconst modal = document.getElementById('outbound_targets_modal');\n\t\t\t\t\t\tresetOutboundTargetAddForm();\n\t\t\t\t\t\treloadOutboundTargetsModalDraft();\n\t\t\t\t\t\tif (modal) modal.showModal();\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction closeOutboundTargetsModal() {\n\t\t\t\t\t\tconst modal = document.getElementById('outbound_targets_modal');\n\t\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction handleOutboundTargetsModalClose() {\n\t\t\t\t\t\tresetOutboundTargetAddForm();\n\t\t\t\t\t\treloadOutboundTargetsModalDraft();\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction outboundTargetsDraftInput(name, value) {\n\t\t\t\t\t\tconst input = document.createElement('input');\n\t\t\t\t\t\tinput.type = 'hidden';\n\t\t\t\t\t\tinput.name = name;\n\t\t\t\t\t\tinput.value = value || '';\n\t\t\t\t\t\treturn input;\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction outboundTargetsAppendDraftFields(rowKey, id, platform, name, targetID, threadID, isHome, defaultSubject) {\n\t\t\t\t\t\tconst fields = document.getElementById('outbound-targets-draft-fields');\n\t\t\t\t\t\tif (!fields) return;\n\t\t\t\t\t\tconst group = document.createElement('div');\n\t\t\t\t\t\tgroup.id = 'outbound-target-draft-fields-' + rowKey;\n\t\t\t\t\t\tgroup.setAttribute('data-outbound-target-draft-key', rowKey);\n\t\t\t\t\t\tgroup.appendChild(outboundTargetsDraftInput('target_row_id', id));\n\t\t\t\t\t\tgroup.appendChild(outboundTargetsDraftInput('target_platform', platform));\n\t\t\t\t\t\tgroup.appendChild(outboundTargetsDraftInput('target_name', name));\n\t\t\t\t\t\tgroup.appendChild(outboundTargetsDraftInput('target_target_id', targetID));\n\t\t\t\t\t\tgroup.appendChild(outboundTargetsDraftInput('target_thread_id', threadID));\n\t\t\t\t\t\tgroup.appendChild(outboundTargetsDraftInput('target_is_home', isHome ? 'true' : 'false'));\n\t\t\t\t\t\tgroup.appendChild(outboundTargetsDraftInput('target_default_subject', defaultSubject));\n\t\t\t\t\t\tfields.appendChild(group);\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction outboundTargetsEscape(value) {\n\t\t\t\t\t\tconst div = document.createElement('div');\n\t\t\t\t\t\tdiv.textContent = value || '';\n\t\t\t\t\t\treturn div.innerHTML;\n\t\t\t\t\t}\n\n\t\t\t\t\t\t\tfunction outboundTargetTestTestingHTML() {\n\t\t\t\t\t\t\t\treturn '<span class=\"inline-flex items-center gap-1\"><span class=\"loading loading-spinner loading-xs\" aria-hidden=\"true\"></span><span>Testing...</span></span>';\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tfunction outboundTargetTestFailedHTML() {\n\t\t\t\t\t\t\t\treturn '<span class=\"inline-flex items-center gap-1 text-error\" title=\"Test failed.\"><span aria-hidden=\"true\">✕</span><span>Failed</span></span>';\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tfunction outboundTargetTestBefore(button) {\n\t\t\t\t\t\t\t\tif (!button) return;\n\t\t\t\t\t\t\t\tbutton.disabled = true;\n\t\t\t\t\t\t\t\tbutton.setAttribute('aria-busy', 'true');\n\t\t\t\t\t\t\t\tconst label = button.querySelector('[data-outbound-target-test-label]');\n\t\t\t\t\t\t\t\tif (label) label.innerHTML = outboundTargetTestTestingHTML();\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tfunction outboundTargetTestAfter(button, event) {\n\t\t\t\t\t\t\t\tif (!button) return;\n\t\t\t\t\t\t\t\tbutton.disabled = false;\n\t\t\t\t\t\t\t\tbutton.removeAttribute('aria-busy');\n\t\t\t\t\t\t\t\tif (event && event.detail && event.detail.successful === false) {\n\t\t\t\t\t\t\t\t\tconst label = button.querySelector('[data-outbound-target-test-label]');\n\t\t\t\t\t\t\t\t\tif (label) label.innerHTML = outboundTargetTestFailedHTML();\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction addOutboundTargetDraft(event) {\n\t\t\t\t\t\tif (event) event.preventDefault();\n\t\t\t\t\t\tconst form = document.getElementById('outbound-target-add-form');\n\t\t\t\t\t\tconst tbody = document.getElementById('outbound-targets-draft-tbody');\n\t\t\t\t\t\tif (!form || !tbody) return false;\n\t\t\t\t\t\tconst platform = (form.elements.platform.value || '').trim().toLowerCase();\n\t\t\t\t\t\tconst name = (form.elements.name.value || '').trim().replace(/^#+/, '').toLowerCase();\n\t\t\t\t\t\tconst targetID = (form.elements.target_id.value || '').trim();\n\t\t\t\t\t\tconst threadID = (form.elements.thread_id.value || '').trim();\n\t\t\t\t\t\tconst isHome = !!form.elements.is_home.checked;\n\t\t\t\t\t\tconst defaultSubject = (form.elements.default_subject.value || '').trim();\n\t\t\t\t\t\tif (!platform || !targetID) return false;\n\t\t\t\t\t\tif (isHome) {\n\t\t\t\t\t\t\tdocument.querySelectorAll('#outbound-targets-draft-tbody tr[data-platform=\"' + platform + '\"] .outbound-target-home-cell').forEach(function(cell) {\n\t\t\t\t\t\t\t\tcell.innerHTML = '';\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tdocument.querySelectorAll('#outbound-targets-draft-fields [data-outbound-target-draft-key]').forEach(function(group) {\n\t\t\t\t\t\t\t\tconst platformInput = group.querySelector('input[name=\"target_platform\"]');\n\t\t\t\t\t\t\t\tconst homeInput = group.querySelector('input[name=\"target_is_home\"]');\n\t\t\t\t\t\t\t\tif (platformInput && homeInput && platformInput.value === platform) homeInput.value = 'false';\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\tconst rowKey = 'draft-' + Date.now() + '-' + Math.random().toString(36).slice(2);\n\t\t\t\t\t\tconst emptyRow = document.getElementById('outbound-targets-empty-row');\n\t\t\t\t\t\tif (emptyRow) emptyRow.remove();\n\t\t\t\t\t\tconst row = document.createElement('tr');\n\t\t\t\t\t\trow.setAttribute('data-outbound-target-draft-key', rowKey);\n\t\t\t\t\t\trow.setAttribute('data-platform', platform);\n\t\t\t\t\t\trow.innerHTML = '<td>' + outboundTargetsEscape(platform) + '</td>' +\n\t\t\t\t\t\t\t'<td>' + (name ? '<span>#' + outboundTargetsEscape(name) + '</span>' : '<span class=\"opacity-50\">unnamed</span>') + '</td>' +\n\t\t\t\t\t\t\t'<td class=\"font-mono text-xs break-all\">' + outboundTargetsEscape(targetID) + '</td>' +\n\t\t\t\t\t\t\t'<td class=\"font-mono text-xs\">' + outboundTargetsEscape(threadID) + '</td>' +\n\t\t\t\t\t\t\t'<td class=\"outbound-target-home-cell\">' + (isHome ? '<span class=\"badge badge-sm badge-primary\">Home</span>' : '') + '</td>' +\n\t\t\t\t\t\t\t\t'<td class=\"text-right whitespace-nowrap\"><span class=\"badge badge-sm badge-ghost mr-2\">Unsaved</span><button type=\"button\" class=\"btn btn-xs mr-1\" hx-post=\"/channels/outbound-targets/test-draft\" hx-include=\"#outbound-target-draft-fields-' + rowKey + ', #outbound-targets-policy-form input[name=project_id]\" hx-target=\"#outbound-target-test-label-' + rowKey + '\" hx-swap=\"innerHTML\" hx-on::before-request=\"outboundTargetTestBefore(this)\" hx-on::after-request=\"outboundTargetTestAfter(this, event)\"><span id=\"outbound-target-test-label-' + rowKey + '\" data-outbound-target-test-label aria-live=\"polite\">Test</span></button><button type=\"button\" class=\"btn btn-xs btn-error\" onclick=\"removeOutboundTargetDraft(this)\">Delete</button></td>';\t\t\t\t\t\ttbody.appendChild(row);\n\t\t\t\t\t\toutboundTargetsAppendDraftFields(rowKey, '', platform, name, targetID, threadID, isHome, defaultSubject);\n\t\t\t\t\t\tif (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(row);\n\t\t\t\t\t\tresetOutboundTargetAddForm();\n\t\t\t\t\t\treturn false;\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction removeOutboundTargetDraft(button) {\n\t\t\t\t\t\tconst row = button ? button.closest('tr[data-outbound-target-draft-key]') : null;\n\t\t\t\t\t\tif (!row) return;\n\t\t\t\t\t\tconst rowKey = row.getAttribute('data-outbound-target-draft-key');\n\t\t\t\t\t\trow.remove();\n\t\t\t\t\t\tconst group = document.querySelector('#outbound-targets-draft-fields [data-outbound-target-draft-key=\"' + rowKey + '\"]');\n\t\t\t\t\t\tif (group) group.remove();\n\t\t\t\t\t\tconst tbody = document.getElementById('outbound-targets-draft-tbody');\n\t\t\t\t\t\tif (tbody && !tbody.querySelector('tr[data-outbound-target-draft-key]')) {\n\t\t\t\t\t\t\tconst empty = document.createElement('tr');\n\t\t\t\t\t\t\tempty.id = 'outbound-targets-empty-row';\n\t\t\t\t\t\t\tempty.innerHTML = '<td colspan=\"6\" class=\"opacity-60\">No outbound targets saved yet.</td>';\n\t\t\t\t\t\t\ttbody.appendChild(empty);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\tfunction setEmailProviderPreset(providerKey, preserveValues) {\n\t\t\t\t\tconst provider = document.getElementById('email_provider');\n\t\t\t\t\tif (!provider) return;\n\t\t\t\t\tconst option = provider.options[provider.selectedIndex];\n\t\t\t\t\tconst isCustom = (providerKey || '').toLowerCase() === 'custom';\n\t\t\t\t\tconst advanced = document.getElementById('email_advanced_details');\n\t\t\t\t\tif (advanced) advanced.open = isCustom;\n\t\t\t\t\tconst help = document.getElementById('email_provider_help');\n\t\t\t\t\tif (help && option) help.textContent = option.getAttribute('data-help') || help.textContent;\n\t\t\t\t\tif (!isCustom && option && !preserveValues) {\n\t\t\t\t\t\tdocument.getElementById('email_imap_host').value = option.getAttribute('data-imap-host') || '';\n\t\t\t\t\t\tdocument.getElementById('email_imap_port').value = option.getAttribute('data-imap-port') || '993';\n\t\t\t\t\t\tdocument.getElementById('email_smtp_host').value = option.getAttribute('data-smtp-host') || '';\n\t\t\t\t\t\tdocument.getElementById('email_smtp_port').value = option.getAttribute('data-smtp-port') || '587';\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction markEmailProviderCustom() {\n\t\t\t\t\tconst provider = document.getElementById('email_provider');\n\t\t\t\t\tif (provider) provider.value = 'custom';\n\t\t\t\t}\n\n\t\t\t\t\tfunction toggleSlackBotTokenMode(mode) {\n\t\t\t\t\t\tconst section = document.getElementById('slack_bot_token_override_section');\t\t\t\tif (!section) {\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tconst normalized = (mode || '').toLowerCase();\n\t\t\t\tsection.style.display = normalized === 'manual' ? '' : 'none';\n\t\t\t}\n\n\t\t\tfunction toggleGitHubAuthMode(mode) {\n\t\t\t\tconst normalized = (mode || '').toLowerCase();\n\t\t\t\tconst patSection = document.getElementById('github_pat_section');\n\t\t\t\tconst appSection = document.getElementById('github_app_section');\n\t\t\t\tif (!patSection || !appSection) {\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tconst isAppMode = normalized === 'app';\n\t\t\t\tpatSection.style.display = isAppMode ? 'none' : '';\n\t\t\t\tappSection.style.display = isAppMode ? '' : 'none';\n\t\t\t}\n\n\t\t\t\t// Close modal and refresh after successful save\n\t\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\t\tvar detail = event.detail || {};\n\t\t\t\t\tvar requestConfig = detail.requestConfig || {};\n\t\t\t\t\tvar rawPath = requestConfig.path || (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || '';\n\t\t\t\t\tvar rp = String(rawPath).split('?')[0];\n\t\t\t\t\tif (rp === '/channels/telegram' && detail.successful) {\n\t\t\t\t\t\tconst modal = document.getElementById('channel_modal');\n\t\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif (rp === '/channels/github/configure' && detail.successful) {\n\t\t\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif (rp === '/channels/slack/configure' && detail.successful) {\n\t\t\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif (rp === '/channels/email/configure' && detail.successful) {\n\t\t\t\t\t\tconst modal = document.getElementById('email_config_modal');\n\t\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif (rp === '/channels/discord/configure' && detail.successful) {\n\t\t\t\t\t\tconst modal = document.getElementById('discord_config_modal');\n\t\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t// Close webhook modal after successful save\n\t\t\t\t\tif (rp.startsWith('/channels/webhooks') && detail.successful) {\n\t\t\t\t\t\tvar whModal = document.getElementById('webhook_modal');\n\t\t\t\t\t\tif (whModal && whModal.open) {\n\t\t\t\t\t\t\twhModal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif (rp === '/channels/send-message-explicit-targets' && detail.successful) {\n\t\t\t\t\t\tconst xhr = event.detail.xhr;\n\t\t\t\t\t\tconst triggerHeader = xhr && typeof xhr.getResponseHeader === 'function' ? (xhr.getResponseHeader('HX-Trigger') || '') : '';\n\t\t\t\t\t\tif (triggerHeader.indexOf('outbound-targets-card-refresh') !== -1) {\n\t\t\t\t\t\t\tconst modal = document.getElementById('outbound_targets_modal');\n\t\t\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t\t\t\tresetOutboundTargetAddForm();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t});\n\n\t\t\t\tdocument.body.addEventListener('htmx:configRequest', function(event) {\n\t\t\t\t\tif (!event || !event.detail || !event.detail.path) return;\n\t\t\t\t\tif (event.detail.path.indexOf('/channels/webhooks') !== 0) return;\n\t\t\t\t\tvar params = event.detail.parameters || {};\n\t\t\t\t\tparams.agent_ids = selectedWebhookAgentIDsCSV('webhook_agent_ids');\n\t\t\t\t\tevent.detail.parameters = params;\n\t\t\t\t});\n\n\t\t\tsetTimeout(function() {\n\t\t\t\tconst modeSelect = document.getElementById('github_auth_mode');\n\t\t\t\tif (modeSelect) {\n\t\t\t\t\ttoggleGitHubAuthMode(modeSelect.value);\n\t\t\t\t}\n\t\t\t\t\tconst slackModeSelect = document.getElementById('slack_bot_token_mode');\n\t\t\t\t\tif (slackModeSelect) {\n\t\t\t\t\t\ttoggleSlackBotTokenMode(slackModeSelect.value);\n\t\t\t\t\t}\n\t\t\t\t\tconst emailProviderSelect = document.getElementById('email_provider');\n\t\t\t\t\tif (emailProviderSelect) {\n\t\t\t\t\t\tsetEmailProviderPreset(emailProviderSelect.value, true);\n\t\t\t\t\t}\n\t\t\t\t}, 0);\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 177, "\" style=\"display:none\"></div><style>\n\t\t.dropdown-content {\n\t\t\tdisplay: none;\n\t\t}\t\t\t.dropdown-content.show {\n\t\t\t\tdisplay: block;\n\t\t\t}\n\t\t\t/* Keep password toggle button fixed inside input across press/focus states */\n\t\t\t.password-toggle-btn:active,\n\t\t\t.password-toggle-btn:focus,\n\t\t\t.password-toggle-btn:focus-visible {\n\t\t\t\ttransform: translate(0, -50%) !important;\n\t\t\t}\n\t\t\t.password-toggle-btn.top-2:active,\n\t\t\t.password-toggle-btn.top-2:focus,\n\t\t\t.password-toggle-btn.top-2:focus-visible {\n\t\t\t\ttransform: translate(0, 0) !important;\n\t\t\t}\n\t\t\t.secret-textarea-masked {\n\t\t\t\t-webkit-text-security: disc;\n\t\t\t}\n\t\t</style><script>\n\t\t\t\tvar pendingDeleteChannelURL = '';\n\t\t\t\tvar pendingDeleteChannelMethod = 'POST';\n\n\t\t\t\tfunction openDeleteChannelConfirm(name, url, method) {\n\t\t\t\t\tpendingDeleteChannelURL = url || '';\n\t\t\t\t\tpendingDeleteChannelMethod = method || 'POST';\n\t\t\t\t\tvar nameEl = document.getElementById('delete_channel_name');\n\t\t\t\t\tif (nameEl) nameEl.textContent = name || 'this channel';\n\t\t\t\t\tdocument.getElementById('delete_channel_confirm_modal')?.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openDeleteChannelConfirmFromButton(button) {\n\t\t\t\t\tif (!button) return;\n\t\t\t\t\topenDeleteChannelConfirm(button.dataset.channelDeleteName, button.dataset.channelDeleteUrl, button.dataset.channelDeleteMethod);\n\t\t\t\t}\n\n\t\t\t\tfunction closeDeleteChannelConfirm() {\n\t\t\t\t\tdocument.getElementById('delete_channel_confirm_modal')?.close();\n\t\t\t\t}\n\n\t\t\t\tfunction confirmDeleteChannel() {\n\t\t\t\t\tif (!pendingDeleteChannelURL) return;\n\t\t\t\t\thtmx.ajax(pendingDeleteChannelMethod, pendingDeleteChannelURL, { swap: 'none' });\n\t\t\t\t\tcloseDeleteChannelConfirm();\n\t\t\t\t}\n\n\t\t\t\t// Webhook agent state\n\t\t\t\tlet webhookAvailableAgents = [];\n\t\t\t\tlet selectedWebhookAgentIDs = [];\n\t\t\t\tlet activeWebhookSection = 'config';\n\t\t\tfunction setWebhookSection(sectionName) {\n\t\t\t\tconst sectionNameMap = {\n\t\t\t\t\tconfig: 'config',\n\t\t\t\t\tagents: 'agents'\n\t\t\t\t};\n\t\t\t\tconst nextSection = sectionNameMap[sectionName] || 'config';\n\t\t\t\tactiveWebhookSection = nextSection;\n\t\t\t\tdocument.querySelectorAll('[data-webhook-section-tab]').forEach(tab => {\n\t\t\t\t\tconst isActive = tab.dataset.webhookSectionTab === nextSection;\n\t\t\t\t\ttab.classList.toggle('tab-active', isActive);\n\t\t\t\t\ttab.setAttribute('aria-selected', isActive ? 'true' : 'false');\n\t\t\t\t});\n\t\t\t\tdocument.querySelectorAll('[data-webhook-section-panel]').forEach(panel => {\n\t\t\t\t\tpanel.classList.toggle('hidden', panel.dataset.webhookSectionPanel !== nextSection);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction renderWebhookAgentList() {\n\t\t\t\tconst root = document.getElementById('webhook_agent_list');\n\t\t\t\tif (!root) return;\n\n\t\t\t\tconst searchTerm = (document.getElementById('webhook_agent_search_input')?.value || '').toLowerCase();\n\t\t\t\tconst filteredAgents = webhookAvailableAgents.filter(agent => {\n\t\t\t\t\tif (!searchTerm) return true;\n\t\t\t\t\treturn (agent.name || '').toLowerCase().includes(searchTerm) ||\n\t\t\t\t\t\t(agent.id || '').toLowerCase().includes(searchTerm);\n\t\t\t\t});\n\n\t\t\t\tlet html = '';\n\t\t\t\tif (filteredAgents.length === 0) {\n\t\t\t\t\thtml = '<p class=\"text-xs opacity-60 py-2\">No agents found.</p>';\n\t\t\t\t} else {\n\t\t\t\t\thtml = filteredAgents.map(agent => {\n\t\t\t\t\t\tconst checked = selectedWebhookAgentIDs.includes(agent.id) ? 'checked' : '';\n\t\t\t\t\t\treturn `\n\t\t\t\t\t\t\t<div class=\"border border-base-300 rounded-lg px-3 py-2 mb-2\">\n\t\t\t\t\t\t\t\t<div class=\"flex items-center justify-between gap-3\">\n\t\t\t\t\t\t\t\t\t<div class=\"flex items-center gap-2 min-w-0 flex-1\">\n\t\t\t\t\t\t\t\t\t\t<span class=\"font-medium text-sm truncate\" title=\"${escapeHtml(agent.id)}\">${escapeHtml(agent.name)}</span>\n\t\t\t\t\t\t\t\t\t\t<span class=\"text-[11px] opacity-60 truncate\">${escapeHtml(agent.id)}</span>\n\t\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t\t<input\n\t\t\t\t\t\t\t\t\t\ttype=\"checkbox\"\n\t\t\t\t\t\t\t\t\t\tclass=\"toggle toggle-sm toggle-primary webhook-agent-checkbox\"\n\t\t\t\t\t\t\t\t\t\tvalue=\"${escapeHtml(agent.id)}\"\n\t\t\t\t\t\t\t\t\t\taria-label=\"Enable ${escapeHtml(agent.name)}\"\n\t\t\t\t\t\t\t\t\t\t${checked}\n\t\t\t\t\t\t\t\t\t\tonchange=\"refreshSelectedWebhookAgentsFromDOM()\"\n\t\t\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t</div>`;\n\t\t\t\t\t}).join('');\n\t\t\t\t}\n\n\t\t\t\troot.innerHTML = html;\n\t\t\t\trenderWebhookSelectedAgentCount();\n\t\t\t}\n\n\t\t\tfunction refreshSelectedWebhookAgentsFromDOM() {\n\t\t\t\tconst checkboxes = document.querySelectorAll('.webhook-agent-checkbox');\n\t\t\t\tselectedWebhookAgentIDs = Array.from(checkboxes)\n\t\t\t\t\t.filter(cb => cb.checked)\n\t\t\t\t\t.map(cb => cb.value);\n\t\t\t\trenderWebhookSelectedAgentCount();\n\t\t\t}\n\n\t\t\tfunction renderWebhookSelectedAgentCount() {\n\t\t\t\tconst countEl = document.getElementById('webhook_agent_selected_count');\n\t\t\t\tif (!countEl) return;\n\t\t\t\tconst count = selectedWebhookAgentIDs.length;\n\t\t\t\tif (count === 0) {\n\t\t\t\t\tcountEl.textContent = 'No agents selected';\n\t\t\t\t} else if (count === 1) {\n\t\t\t\t\tcountEl.textContent = '1 agent selected';\n\t\t\t\t} else {\n\t\t\t\t\tcountEl.textContent = count + ' agents selected';\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction serializeWebhookAgentData() {\n\t\t\t\t// Collect selected agent IDs from toggles and put into hidden field\n\t\t\t\tconst hiddenField = document.getElementById('webhook_agent_ids_hidden');\n\t\t\t\tif (hiddenField) {\n\t\t\t\t\thiddenField.value = selectedWebhookAgentIDs.join(',');\n\t\t\t\t}\n\t\t\t}\n\n\t\tfunction escapeHtml(text) {\n\t\t\tconst div = document.createElement('div');\n\t\t\tdiv.textContent = text || '';\n\t\t\treturn div.innerHTML;\n\t\t}\n\n\t\tfunction initializeWebhookAgents() {\n\t\t\tif (webhookAvailableAgents.length > 0) return; // Already initialized\n\t\t\tconst dataEl = document.getElementById('webhook_agents_data');\n\t\t\tif (!dataEl) return;\n\t\t\ttry {\n\t\t\t\tconst agentsJSON = dataEl.getAttribute('data-agents');\n\t\t\t\twebhookAvailableAgents = JSON.parse(agentsJSON || '[]');\n\t\t\t} catch (e) {\n\t\t\t\tconsole.error('Failed to parse webhook agents data:', e);\n\t\t\t\twebhookAvailableAgents = [];\n\t\t\t}\n\t\t}\n\t\t\tfunction togglePasswordVisibility(inputId, button) {\n\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\tif (!input || !button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tconst willReveal = input.type === 'password';\n\t\t\t\tinput.type = willReveal ? 'text' : 'password';\n\t\t\t\tif (eyeOpen) eyeOpen.classList.toggle('hidden', willReveal);\n\t\t\t\tif (eyeClosed) eyeClosed.classList.toggle('hidden', !willReveal);\n\t\t\t\tbutton.setAttribute('aria-pressed', willReveal ? 'true' : 'false');\n\t\t\t}\n\n\t\t\tfunction resetSecretInputVisibility(inputId) {\n\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\tif (!input) return;\n\t\t\t\tinput.type = 'password';\n\t\t\t\tconst button = document.querySelector(\"button[onclick=\\\"togglePasswordVisibility('\" + inputId + \"', this)\\\"]\");\n\t\t\t\tif (!button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tif (eyeOpen) eyeOpen.classList.remove('hidden');\n\t\t\t\tif (eyeClosed) eyeClosed.classList.add('hidden');\n\t\t\t\tbutton.setAttribute('aria-pressed', 'false');\n\t\t\t}\n\n\t\t\tfunction handleDropdownToggle(event) {\n\t\t\t\tevent.stopPropagation();\n\t\t\t\tconst dropdown = event.currentTarget.parentElement;\n\t\t\t\tconst menu = dropdown.querySelector('ul');\n\t\t\t\tconst wasOpen = menu.classList.contains('show');\n\t\t\t\t\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\n\t\t\t\t// Toggle this dropdown\n\t\t\t\tif (!wasOpen) {\n\t\t\t\t\tmenu.classList.add('show');\n\t\t\t\t\t// Close when clicking outside\n\t\t\t\t\tsetTimeout(() => {\n\t\t\t\t\t\tdocument.addEventListener('click', function closeDropdown(e) {\n\t\t\t\t\t\t\tif (!dropdown.contains(e.target)) {\n\t\t\t\t\t\t\t\tmenu.classList.remove('show');\n\t\t\t\t\t\t\t\tdocument.removeEventListener('click', closeDropdown);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\t\t\t\t\t}, 0);\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction toggleSecretTextareaVisibility(textareaId, button) {\n\t\t\t\tconst textarea = document.getElementById(textareaId);\n\t\t\t\tif (!textarea) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tconst isMasked = textarea.classList.contains('secret-textarea-masked');\n\t\t\t\tif (isMasked) {\n\t\t\t\t\ttextarea.classList.remove('secret-textarea-masked');\n\t\t\t\t\tif (eyeOpen) eyeOpen.classList.remove('hidden');\n\t\t\t\t\tif (eyeClosed) eyeClosed.classList.add('hidden');\n\t\t\t\t\tbutton.setAttribute('aria-pressed', 'true');\n\t\t\t\t} else {\n\t\t\t\t\ttextarea.classList.add('secret-textarea-masked');\n\t\t\t\t\tif (eyeOpen) eyeOpen.classList.add('hidden');\n\t\t\t\t\tif (eyeClosed) eyeClosed.classList.remove('hidden');\n\t\t\t\t\tbutton.setAttribute('aria-pressed', 'false');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction resetSecretTextareaVisibility(textareaId) {\n\t\t\t\tconst textarea = document.getElementById(textareaId);\n\t\t\t\tif (!textarea) return;\n\t\t\t\ttextarea.classList.add('secret-textarea-masked');\n\t\t\t\tconst button = document.querySelector(\"button[onclick=\\\"toggleSecretTextareaVisibility('\" + textareaId + \"', this)\\\"]\");\n\t\t\t\tif (!button) return;\n\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\tif (eyeOpen) eyeOpen.classList.add('hidden');\n\t\t\t\tif (eyeClosed) eyeClosed.classList.remove('hidden');\n\t\t\t\tbutton.setAttribute('aria-pressed', 'false');\n\t\t\t}\n\n\t\t\t\tfunction openWebhookCreateModal(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tdocument.getElementById('webhook_modal_title').textContent = 'Add Webhook';\n\t\t\t\t\tvar form = document.getElementById('webhook_form');\n\t\t\t\t\tvar pid = form.getAttribute('data-project-id') || '';\n\t\t\t\t\tform.setAttribute('hx-post', '/channels/webhooks?project_id=' + encodeURIComponent(pid));\n\t\t\t\t\tform.removeAttribute('hx-put');\n\t\t\t\t\tdocument.getElementById('webhook_name').value = '';\n\t\t\t\t\tdocument.getElementById('webhook_enabled').checked = true;\n\t\t\t\t\tdocument.getElementById('webhook_system_instructions').value = '';\n\t\t\t\t\tdocument.getElementById('webhook_default_priority').value = '2';\n\t\t\t\t\tdocument.getElementById('webhook_url_display').textContent = '(Save first to generate URL)';\n\t\t\t\t\tdocument.getElementById('webhook_secret_display').value = '';\n\t\t\t\t\tresetSecretInputVisibility('webhook_secret_display');\n\t\t\t\t\tvar secretRow = document.getElementById('webhook_secret_row');\n\t\t\t\t\tif (secretRow) secretRow.style.display = 'none';\n\t\t\t\t\tvar urlRow = document.getElementById('webhook_url_row');\n\t\t\t\t\tif (urlRow) urlRow.style.display = 'none';\n\t\t\t\t\t\n\t\t\t\t\t// Initialize webhook agents from page data\n\t\t\t\t\tinitializeWebhookAgents();\n\t\t\t\t\tselectedWebhookAgentIDs = [];\n\t\t\t\t\trenderWebhookAgentList();\n\t\t\t\t\tsetWebhookSection('config');\n\t\t\t\t\t\n\t\t\t\t\thtmx.process(form);\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openWebhookEditModal(id) {\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tdocument.getElementById('webhook_modal_title').textContent = 'Edit Webhook';\n\t\t\t\t\tvar form = document.getElementById('webhook_form');\n\t\t\t\t\tvar pid = form.getAttribute('data-project-id') || '';\n\t\t\t\t\tform.removeAttribute('hx-post');\n\t\t\t\t\tform.setAttribute('hx-put', '/channels/webhooks/' + id + '?project_id=' + encodeURIComponent(pid));\n\t\t\t\t\tvar card = document.querySelector('[data-webhook-id=\"' + id + '\"]');\n\t\t\t\t\tif (card) {\n\t\t\t\t\t\tdocument.getElementById('webhook_name').value = card.getAttribute('data-webhook-name') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_enabled').checked = (card.getAttribute('data-webhook-enabled') || '') === 'true';\n\t\t\t\t\t\tdocument.getElementById('webhook_system_instructions').value = card.getAttribute('data-webhook-system') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_default_priority').value = card.getAttribute('data-webhook-default-priority') || '2';\n\t\t\t\t\t\tdocument.getElementById('webhook_secret_display').value = card.getAttribute('data-webhook-secret') || '';\n\t\t\t\t\t\tresetSecretInputVisibility('webhook_secret_display');\n\t\t\t\t\t\tvar token = card.getAttribute('data-webhook-token') || '';\n\t\t\t\t\t\tdocument.getElementById('webhook_url_display').textContent = token ? (window.location.origin + '/webhooks/inbound/' + token) : '(Not available)';\n\t\t\t\t\t\t\n\t\t\t\t\t\t// Load selected agents from card data\n\t\t\t\t\t\tvar agentIDsCSV = card.getAttribute('data-webhook-agent-ids') || '';\n\t\t\t\t\t\tselectedWebhookAgentIDs = agentIDsCSV.split(',').map(id => id.trim()).filter(id => id !== '');\n\t\t\t\t\t}\n\t\t\t\t\tvar secretRow = document.getElementById('webhook_secret_row');\n\t\t\t\t\tif (secretRow) secretRow.style.display = '';\n\t\t\t\t\tvar urlRow = document.getElementById('webhook_url_row');\n\t\t\t\t\tif (urlRow) urlRow.style.display = '';\n\t\t\t\t\t\n\t\t\t\t\t// Initialize webhook agents and render\n\t\t\t\t\tinitializeWebhookAgents();\n\t\t\t\t\trenderWebhookAgentList();\n\t\t\t\t\tsetWebhookSection('config');\n\t\t\t\t\t\n\t\t\t\t\thtmx.process(form);\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction writeToClipboardWithFeedback(text, button, successMessage, failureMessage) {\n\t\t\t\t\t\tif (!text) {\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(failureMessage || 'Nothing to copy', 'failed');\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction onCopySuccess() {\n\t\t\t\t\t\t\tif (button) {\n\t\t\t\t\t\t\t\tvar original = button.textContent;\n\t\t\t\t\t\t\t\tbutton.textContent = 'Copied';\n\t\t\t\t\t\t\t\tsetTimeout(function() { button.textContent = original; }, 1000);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(successMessage || 'Copied to clipboard', 'completed');\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction onCopyFailure() {\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(failureMessage || 'Failed to copy to clipboard', 'failed');\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tif (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {\n\t\t\t\t\t\t\tnavigator.clipboard.writeText(text).then(onCopySuccess).catch(function() {\n\t\t\t\t\t\t\t\tvar textarea = document.createElement('textarea');\n\t\t\t\t\t\t\t\ttextarea.value = text;\n\t\t\t\t\t\t\t\ttextarea.setAttribute('readonly', '');\n\t\t\t\t\t\t\t\ttextarea.style.position = 'fixed';\n\t\t\t\t\t\t\t\ttextarea.style.opacity = '0';\n\t\t\t\t\t\t\t\tdocument.body.appendChild(textarea);\n\t\t\t\t\t\t\t\ttextarea.select();\n\t\t\t\t\t\t\t\ttextarea.setSelectionRange(0, textarea.value.length);\n\t\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\t\tif (document.execCommand('copy')) {\n\t\t\t\t\t\t\t\t\t\tonCopySuccess();\n\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\t\t\tdocument.body.removeChild(textarea);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tvar fallbackTextarea = document.createElement('textarea');\n\t\t\t\t\t\tfallbackTextarea.value = text;\n\t\t\t\t\t\tfallbackTextarea.setAttribute('readonly', '');\n\t\t\t\t\t\tfallbackTextarea.style.position = 'fixed';\n\t\t\t\t\t\tfallbackTextarea.style.opacity = '0';\n\t\t\t\t\t\tdocument.body.appendChild(fallbackTextarea);\n\t\t\t\t\t\tfallbackTextarea.select();\n\t\t\t\t\t\tfallbackTextarea.setSelectionRange(0, fallbackTextarea.value.length);\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tif (document.execCommand('copy')) {\n\t\t\t\t\t\t\t\tonCopySuccess();\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t\t} finally {\n\t\t\t\t\t\t\tdocument.body.removeChild(fallbackTextarea);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\tfunction copyWebhookEndpointUrl(webhookID, button) {\n\t\t\t\t\tvar card = document.querySelector('[data-webhook-id=\"' + webhookID + '\"]');\n\t\t\t\t\tif (!card) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar token = (card.getAttribute('data-webhook-token') || '').trim();\n\t\t\t\t\tif (!token) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar url = window.location.origin + '/webhooks/inbound/' + token;\n\t\t\t\t\twriteToClipboardWithFeedback(url, button, 'Webhook URL copied', 'Failed to copy webhook URL');\n\t\t\t\t}\n\n\t\t\t\tfunction copyWebhookAbsoluteUrl(elementId, button) {\n\t\t\t\t\tvar el = document.getElementById(elementId);\n\t\t\t\t\tif (!el) return;\n\t\t\t\t\tvar val = (el.textContent || '').trim();\n\t\t\t\t\tif (!val || val.indexOf('(Save first') === 0 || val.indexOf('(Not available') === 0) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Webhook URL not available', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\twriteToClipboardWithFeedback(val, button, 'Webhook URL copied', 'Failed to copy webhook URL');\n\t\t\t\t}\n\n\t\t\t\tfunction closeWebhookModal() {\n\t\t\t\t\tvar modal = document.getElementById('webhook_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\tfunction editChannelFromData(card) {\n\t\t\t\t\tconst type = card.dataset.channelType;\n\t\t\t\t\tif (type === 'telegram') {\n\t\t\t\t\t\tconst token = card.dataset.channelToken || '';\n\t\t\t\t\t\tdocument.getElementById('channel_telegram_token').value = token;\n\t\t\t\t\t\tvar richToggle = document.getElementById('channel_telegram_rich_messages_v2');\n\t\t\t\t\t\tif (richToggle) richToggle.checked = richToggle.defaultChecked;\n\t\t\t\t\t\tdocument.getElementById('channel_modal_title').textContent = 'Configure Telegram Bot';\n\t\t\t\t\t\tresetSecretInputVisibility('channel_telegram_token');\n\t\t\t\t\t\tchannel_modal.showModal();\n\t\t\t\t} else if (type === 'github') {\n\t\t\t\t\topenGitHubConfigModal();\n\t\t\t\t} else if (type === 'slack') {\n\t\t\t\t\topenSlackConfigModal();\n\t\t\t\t} else if (type === 'discord') {\n\t\t\t\t\topenDiscordConfigModal();\n\t\t\t\t} else if (type === 'email') {\n\t\t\t\t\topenEmailConfigModal();\n\t\t\t\t}\n\t\t\t}\n\t\t\tfunction closeAllDropdownMenus() {\n\t\t\t\tdocument.querySelectorAll('.dropdown ul').forEach(m => m.classList.remove('show'));\n\t\t\t}\n\n\t\t\tfunction openTelegramChannelFromMenu(event) {\n\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\tdocument.getElementById('channel_telegram_token').value = '';\n\t\t\t\tvar richToggle = document.getElementById('channel_telegram_rich_messages_v2');\n\t\t\t\tif (richToggle) richToggle.checked = true;\n\t\t\t\tdocument.getElementById('channel_modal_title').textContent = 'Add Telegram Bot';\n\t\t\t\tresetSecretInputVisibility('channel_telegram_token');\n\t\t\t\tchannel_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction openGitHubChannelFromMenu(event) {\n\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\topenGitHubConfigModal();\n\t\t\t}\n\n\t\t\t\tfunction openSlackChannelFromMenu(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\topenSlackConfigModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openDiscordChannelFromMenu(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\topenDiscordConfigModal();\n\t\t\t\t}\n\n\t\t\t\tfunction openEmailChannelFromMenu(event) {\n\t\t\t\t\tif (event) event.stopPropagation();\n\t\t\t\t\tcloseAllDropdownMenus();\n\t\t\t\t\topenEmailConfigModal();\n\t\t\t\t}\n\n\t\t\t\tfunction closeChannelModal() {\t\t\t\tchannel_modal.close();\n\t\t\t}\n\n\t\t\tfunction openGitHubConfigModal() {\n\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\tif (!modal) return;\n\t\t\t\tconst modeSelect = document.getElementById('github_auth_mode');\n\t\t\t\t\tif (modeSelect) {\n\t\t\t\t\t\ttoggleGitHubAuthMode(modeSelect.value);\n\t\t\t\t\t}\n\t\t\t\t\tresetSecretInputVisibility('github_pat');\n\t\t\t\t\tresetSecretTextareaVisibility('github_app_private_key');\n\t\t\t\t\tmodal.showModal();\n\t\t\t}\n\n\t\t\tfunction closeGitHubConfigModal() {\n\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\tif (modal) modal.close();\n\t\t\t}\n\n\t\t\tfunction openSlackConfigModal() {\n\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\tif (!modal) return;\n\t\t\t\tconst modeSelect = document.getElementById('slack_bot_token_mode');\n\t\t\t\t\tif (modeSelect) {\n\t\t\t\t\t\ttoggleSlackBotTokenMode(modeSelect.value);\n\t\t\t\t\t}\n\t\t\t\t\tresetSecretInputVisibility('slack_client_secret');\n\t\t\t\t\tresetSecretInputVisibility('slack_app_token');\n\t\t\t\t\tresetSecretInputVisibility('slack_bot_token');\n\t\t\t\t\tmodal.showModal();\n\t\t\t}\n\n\t\t\t\tfunction closeSlackConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\tfunction resetDiscordConfigForm() {\n\t\t\t\t\tconst form = document.getElementById('discord_config_form');\n\t\t\t\t\tif (form) form.reset();\n\t\t\t\t\tresetSecretInputVisibility('discord_bot_token');\n\t\t\t\t}\n\n\t\t\t\tfunction openDiscordConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('discord_config_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tresetDiscordConfigForm();\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction closeDiscordConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('discord_config_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\tfunction openEmailConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('email_config_modal');\n\t\t\t\t\tif (!modal) return;\n\t\t\t\t\tconst provider = document.getElementById('email_provider');\n\t\t\t\t\tif (provider) setEmailProviderPreset(provider.value, true);\n\t\t\t\t\tresetSecretInputVisibility('email_password');\n\t\t\t\t\tmodal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction closeEmailConfigModal() {\n\t\t\t\t\tconst modal = document.getElementById('email_config_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t}\n\n\t\t\t\t\tfunction resetOutboundTargetAddForm() {\n\t\t\t\t\t\tconst form = document.getElementById('outbound-target-add-form');\n\t\t\t\t\t\tif (form) form.reset();\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction reloadOutboundTargetsModalDraft() {\n\t\t\t\t\t\tconst section = document.getElementById('outbound-targets-section');\n\t\t\t\t\t\tif (!section || !window.htmx) return;\n\t\t\t\t\t\tconst projectID = section.getAttribute('data-project-id') || '';\n\t\t\t\t\t\twindow.htmx.ajax('GET', '/channels/outbound-targets?project_id=' + encodeURIComponent(projectID), {\n\t\t\t\t\t\t\ttarget: '#outbound-targets-section',\n\t\t\t\t\t\t\tswap: 'outerHTML'\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction openOutboundTargetsModal() {\n\t\t\t\t\t\tconst modal = document.getElementById('outbound_targets_modal');\n\t\t\t\t\t\tresetOutboundTargetAddForm();\n\t\t\t\t\t\treloadOutboundTargetsModalDraft();\n\t\t\t\t\t\tif (modal) modal.showModal();\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction closeOutboundTargetsModal() {\n\t\t\t\t\t\tconst modal = document.getElementById('outbound_targets_modal');\n\t\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction handleOutboundTargetsModalClose() {\n\t\t\t\t\t\tresetOutboundTargetAddForm();\n\t\t\t\t\t\treloadOutboundTargetsModalDraft();\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction outboundTargetsDraftInput(name, value) {\n\t\t\t\t\t\tconst input = document.createElement('input');\n\t\t\t\t\t\tinput.type = 'hidden';\n\t\t\t\t\t\tinput.name = name;\n\t\t\t\t\t\tinput.value = value || '';\n\t\t\t\t\t\treturn input;\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction outboundTargetsAppendDraftFields(rowKey, id, platform, name, targetID, threadID, isHome, defaultSubject) {\n\t\t\t\t\t\tconst fields = document.getElementById('outbound-targets-draft-fields');\n\t\t\t\t\t\tif (!fields) return;\n\t\t\t\t\t\tconst group = document.createElement('div');\n\t\t\t\t\t\tgroup.id = 'outbound-target-draft-fields-' + rowKey;\n\t\t\t\t\t\tgroup.setAttribute('data-outbound-target-draft-key', rowKey);\n\t\t\t\t\t\tgroup.appendChild(outboundTargetsDraftInput('target_row_id', id));\n\t\t\t\t\t\tgroup.appendChild(outboundTargetsDraftInput('target_platform', platform));\n\t\t\t\t\t\tgroup.appendChild(outboundTargetsDraftInput('target_name', name));\n\t\t\t\t\t\tgroup.appendChild(outboundTargetsDraftInput('target_target_id', targetID));\n\t\t\t\t\t\tgroup.appendChild(outboundTargetsDraftInput('target_thread_id', threadID));\n\t\t\t\t\t\tgroup.appendChild(outboundTargetsDraftInput('target_is_home', isHome ? 'true' : 'false'));\n\t\t\t\t\t\tgroup.appendChild(outboundTargetsDraftInput('target_default_subject', defaultSubject));\n\t\t\t\t\t\tfields.appendChild(group);\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction outboundTargetsEscape(value) {\n\t\t\t\t\t\tconst div = document.createElement('div');\n\t\t\t\t\t\tdiv.textContent = value || '';\n\t\t\t\t\t\treturn div.innerHTML;\n\t\t\t\t\t}\n\n\t\t\t\t\t\t\tfunction outboundTargetTestTestingHTML() {\n\t\t\t\t\t\t\t\treturn '<span class=\"inline-flex items-center gap-1\"><span class=\"loading loading-spinner loading-xs\" aria-hidden=\"true\"></span><span>Testing...</span></span>';\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tfunction outboundTargetTestFailedHTML() {\n\t\t\t\t\t\t\t\treturn '<span class=\"inline-flex items-center gap-1 text-error\" title=\"Test failed.\"><span aria-hidden=\"true\">✕</span><span>Failed</span></span>';\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tfunction outboundTargetTestBefore(button) {\n\t\t\t\t\t\t\t\tif (!button) return;\n\t\t\t\t\t\t\t\tbutton.disabled = true;\n\t\t\t\t\t\t\t\tbutton.setAttribute('aria-busy', 'true');\n\t\t\t\t\t\t\t\tconst label = button.querySelector('[data-outbound-target-test-label]');\n\t\t\t\t\t\t\t\tif (label) label.innerHTML = outboundTargetTestTestingHTML();\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\tfunction outboundTargetTestAfter(button, event) {\n\t\t\t\t\t\t\t\tif (!button) return;\n\t\t\t\t\t\t\t\tbutton.disabled = false;\n\t\t\t\t\t\t\t\tbutton.removeAttribute('aria-busy');\n\t\t\t\t\t\t\t\tif (event && event.detail && event.detail.successful === false) {\n\t\t\t\t\t\t\t\t\tconst label = button.querySelector('[data-outbound-target-test-label]');\n\t\t\t\t\t\t\t\t\tif (label) label.innerHTML = outboundTargetTestFailedHTML();\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction addOutboundTargetDraft(event) {\n\t\t\t\t\t\tif (event) event.preventDefault();\n\t\t\t\t\t\tconst form = document.getElementById('outbound-target-add-form');\n\t\t\t\t\t\tconst tbody = document.getElementById('outbound-targets-draft-tbody');\n\t\t\t\t\t\tif (!form || !tbody) return false;\n\t\t\t\t\t\tconst platform = (form.elements.platform.value || '').trim().toLowerCase();\n\t\t\t\t\t\tconst name = (form.elements.name.value || '').trim().replace(/^#+/, '').toLowerCase();\n\t\t\t\t\t\tconst targetID = (form.elements.target_id.value || '').trim();\n\t\t\t\t\t\tconst threadID = (form.elements.thread_id.value || '').trim();\n\t\t\t\t\t\tconst isHome = !!form.elements.is_home.checked;\n\t\t\t\t\t\tconst defaultSubject = (form.elements.default_subject.value || '').trim();\n\t\t\t\t\t\tif (!platform || !targetID) return false;\n\t\t\t\t\t\tif (isHome) {\n\t\t\t\t\t\t\tdocument.querySelectorAll('#outbound-targets-draft-tbody tr[data-platform=\"' + platform + '\"] .outbound-target-home-cell').forEach(function(cell) {\n\t\t\t\t\t\t\t\tcell.innerHTML = '';\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tdocument.querySelectorAll('#outbound-targets-draft-fields [data-outbound-target-draft-key]').forEach(function(group) {\n\t\t\t\t\t\t\t\tconst platformInput = group.querySelector('input[name=\"target_platform\"]');\n\t\t\t\t\t\t\t\tconst homeInput = group.querySelector('input[name=\"target_is_home\"]');\n\t\t\t\t\t\t\t\tif (platformInput && homeInput && platformInput.value === platform) homeInput.value = 'false';\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\tconst rowKey = 'draft-' + Date.now() + '-' + Math.random().toString(36).slice(2);\n\t\t\t\t\t\tconst emptyRow = document.getElementById('outbound-targets-empty-row');\n\t\t\t\t\t\tif (emptyRow) emptyRow.remove();\n\t\t\t\t\t\tconst row = document.createElement('tr');\n\t\t\t\t\t\trow.setAttribute('data-outbound-target-draft-key', rowKey);\n\t\t\t\t\t\trow.setAttribute('data-platform', platform);\n\t\t\t\t\t\trow.innerHTML = '<td>' + outboundTargetsEscape(platform) + '</td>' +\n\t\t\t\t\t\t\t'<td>' + (name ? '<span>#' + outboundTargetsEscape(name) + '</span>' : '<span class=\"opacity-50\">unnamed</span>') + '</td>' +\n\t\t\t\t\t\t\t'<td class=\"font-mono text-xs break-all\">' + outboundTargetsEscape(targetID) + '</td>' +\n\t\t\t\t\t\t\t'<td class=\"font-mono text-xs\">' + outboundTargetsEscape(threadID) + '</td>' +\n\t\t\t\t\t\t\t'<td class=\"outbound-target-home-cell\">' + (isHome ? '<span class=\"badge badge-sm badge-primary\">Home</span>' : '') + '</td>' +\n\t\t\t\t\t\t\t\t'<td class=\"text-right whitespace-nowrap\"><span class=\"badge badge-sm badge-ghost mr-2\">Unsaved</span><button type=\"button\" class=\"btn btn-xs mr-1\" hx-post=\"/channels/outbound-targets/test-draft\" hx-include=\"#outbound-target-draft-fields-' + rowKey + ', #outbound-targets-policy-form input[name=project_id]\" hx-target=\"#outbound-target-test-label-' + rowKey + '\" hx-swap=\"innerHTML\" hx-on::before-request=\"outboundTargetTestBefore(this)\" hx-on::after-request=\"outboundTargetTestAfter(this, event)\"><span id=\"outbound-target-test-label-' + rowKey + '\" data-outbound-target-test-label aria-live=\"polite\">Test</span></button><button type=\"button\" class=\"btn btn-xs btn-error\" onclick=\"removeOutboundTargetDraft(this)\">Delete</button></td>';\t\t\t\t\t\ttbody.appendChild(row);\n\t\t\t\t\t\toutboundTargetsAppendDraftFields(rowKey, '', platform, name, targetID, threadID, isHome, defaultSubject);\n\t\t\t\t\t\tif (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(row);\n\t\t\t\t\t\tresetOutboundTargetAddForm();\n\t\t\t\t\t\treturn false;\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction removeOutboundTargetDraft(button) {\n\t\t\t\t\t\tconst row = button ? button.closest('tr[data-outbound-target-draft-key]') : null;\n\t\t\t\t\t\tif (!row) return;\n\t\t\t\t\t\tconst rowKey = row.getAttribute('data-outbound-target-draft-key');\n\t\t\t\t\t\trow.remove();\n\t\t\t\t\t\tconst group = document.querySelector('#outbound-targets-draft-fields [data-outbound-target-draft-key=\"' + rowKey + '\"]');\n\t\t\t\t\t\tif (group) group.remove();\n\t\t\t\t\t\tconst tbody = document.getElementById('outbound-targets-draft-tbody');\n\t\t\t\t\t\tif (tbody && !tbody.querySelector('tr[data-outbound-target-draft-key]')) {\n\t\t\t\t\t\t\tconst empty = document.createElement('tr');\n\t\t\t\t\t\t\tempty.id = 'outbound-targets-empty-row';\n\t\t\t\t\t\t\tempty.innerHTML = '<td colspan=\"6\" class=\"opacity-60\">No outbound targets saved yet.</td>';\n\t\t\t\t\t\t\ttbody.appendChild(empty);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\tfunction setEmailProviderPreset(providerKey, preserveValues) {\n\t\t\t\t\tconst provider = document.getElementById('email_provider');\n\t\t\t\t\tif (!provider) return;\n\t\t\t\t\tconst option = provider.options[provider.selectedIndex];\n\t\t\t\t\tconst isCustom = (providerKey || '').toLowerCase() === 'custom';\n\t\t\t\t\tconst advanced = document.getElementById('email_advanced_details');\n\t\t\t\t\tif (advanced) advanced.open = isCustom;\n\t\t\t\t\tconst help = document.getElementById('email_provider_help');\n\t\t\t\t\tif (help && option) help.textContent = option.getAttribute('data-help') || help.textContent;\n\t\t\t\t\tif (!isCustom && option && !preserveValues) {\n\t\t\t\t\t\tdocument.getElementById('email_imap_host').value = option.getAttribute('data-imap-host') || '';\n\t\t\t\t\t\tdocument.getElementById('email_imap_port').value = option.getAttribute('data-imap-port') || '993';\n\t\t\t\t\t\tdocument.getElementById('email_smtp_host').value = option.getAttribute('data-smtp-host') || '';\n\t\t\t\t\t\tdocument.getElementById('email_smtp_port').value = option.getAttribute('data-smtp-port') || '587';\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction markEmailProviderCustom() {\n\t\t\t\t\tconst provider = document.getElementById('email_provider');\n\t\t\t\t\tif (provider) provider.value = 'custom';\n\t\t\t\t}\n\n\t\t\t\t\tfunction toggleSlackBotTokenMode(mode) {\n\t\t\t\t\t\tconst section = document.getElementById('slack_bot_token_override_section');\t\t\t\tif (!section) {\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tconst normalized = (mode || '').toLowerCase();\n\t\t\t\tsection.style.display = normalized === 'manual' ? '' : 'none';\n\t\t\t}\n\n\t\t\tfunction toggleGitHubAuthMode(mode) {\n\t\t\t\tconst normalized = (mode || '').toLowerCase();\n\t\t\t\tconst patSection = document.getElementById('github_pat_section');\n\t\t\t\tconst appSection = document.getElementById('github_app_section');\n\t\t\t\tif (!patSection || !appSection) {\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tconst isAppMode = normalized === 'app';\n\t\t\t\tpatSection.style.display = isAppMode ? 'none' : '';\n\t\t\t\tappSection.style.display = isAppMode ? '' : 'none';\n\t\t\t}\n\n\t\t\t\t// Close modal and refresh after successful save\n\t\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\t\tvar detail = event.detail || {};\n\t\t\t\t\tvar requestConfig = detail.requestConfig || {};\n\t\t\t\t\tvar rawPath = requestConfig.path || (detail.pathInfo && detail.pathInfo.requestPath) || detail.path || '';\n\t\t\t\t\tvar rp = String(rawPath).split('?')[0];\n\t\t\t\t\tif (rp === '/channels/telegram' && detail.successful) {\n\t\t\t\t\t\tconst modal = document.getElementById('channel_modal');\n\t\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif (rp === '/channels/github/configure' && detail.successful) {\n\t\t\t\t\t\tconst modal = document.getElementById('github_config_modal');\n\t\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif (rp === '/channels/slack/configure' && detail.successful) {\n\t\t\t\t\t\tconst modal = document.getElementById('slack_config_modal');\n\t\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif (rp === '/channels/email/configure' && detail.successful) {\n\t\t\t\t\t\tconst modal = document.getElementById('email_config_modal');\n\t\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif (rp === '/channels/discord/configure' && detail.successful) {\n\t\t\t\t\t\tconst modal = document.getElementById('discord_config_modal');\n\t\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t// Close webhook modal after successful save\n\t\t\t\t\tif (rp.startsWith('/channels/webhooks') && detail.successful) {\n\t\t\t\t\t\tvar whModal = document.getElementById('webhook_modal');\n\t\t\t\t\t\tif (whModal && whModal.open) {\n\t\t\t\t\t\t\twhModal.close();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif (rp === '/channels/send-message-explicit-targets' && detail.successful) {\n\t\t\t\t\t\tconst xhr = event.detail.xhr;\n\t\t\t\t\t\tconst triggerHeader = xhr && typeof xhr.getResponseHeader === 'function' ? (xhr.getResponseHeader('HX-Trigger') || '') : '';\n\t\t\t\t\t\tif (triggerHeader.indexOf('outbound-targets-card-refresh') !== -1) {\n\t\t\t\t\t\t\tconst modal = document.getElementById('outbound_targets_modal');\n\t\t\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t\t\t\tresetOutboundTargetAddForm();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t});\n\n\t\t\t\tdocument.body.addEventListener('htmx:configRequest', function(event) {\n\t\t\t\t\tif (!event || !event.detail || !event.detail.path) return;\n\t\t\t\t\tif (event.detail.path.indexOf('/channels/webhooks') !== 0) return;\n\t\t\t\t\tvar params = event.detail.parameters || {};\n\t\t\t\t\tparams.agent_ids = selectedWebhookAgentIDsCSV('webhook_agent_ids');\n\t\t\t\t\tevent.detail.parameters = params;\n\t\t\t\t});\n\n\t\t\tsetTimeout(function() {\n\t\t\t\tconst modeSelect = document.getElementById('github_auth_mode');\n\t\t\t\tif (modeSelect) {\n\t\t\t\t\ttoggleGitHubAuthMode(modeSelect.value);\n\t\t\t\t}\n\t\t\t\t\tconst slackModeSelect = document.getElementById('slack_bot_token_mode');\n\t\t\t\t\tif (slackModeSelect) {\n\t\t\t\t\t\ttoggleSlackBotTokenMode(slackModeSelect.value);\n\t\t\t\t\t}\n\t\t\t\t\tconst emailProviderSelect = document.getElementById('email_provider');\n\t\t\t\t\tif (emailProviderSelect) {\n\t\t\t\t\t\tsetEmailProviderPreset(emailProviderSelect.value, true);\n\t\t\t\t\t}\n\t\t\t\t}, 0);\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1875,53 +1839,53 @@ func OutboundTargetsCard(currentProjectID string, targets []models.ChannelTarget
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var79 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var79 == nil {
-			templ_7745c5c3_Var79 = templ.NopComponent
+		templ_7745c5c3_Var77 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var77 == nil {
+			templ_7745c5c3_Var77 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 182, "<div id=\"outbound-targets-card\" class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-channel-type=\"outbound-targets\" data-search-card data-search-text=\"Outbound Message Targets send_message Slack Telegram Email Discord\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 178, "<div id=\"outbound-targets-card\" class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-channel-type=\"outbound-targets\" data-search-card data-search-text=\"Outbound Message Targets send_message Slack Telegram Email Discord\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var80 string
-		templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/outbound-targets/card?project_id=" + currentProjectID)
+		var templ_7745c5c3_Var78 string
+		templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/outbound-targets/card?project_id=" + currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2040, Col: 75}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2027, Col: 75}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var80)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 183, "\" hx-trigger=\"outbound-targets-card-refresh from:body\" hx-target=\"this\" hx-swap=\"outerHTML\" onclick=\"openOutboundTargetsModal()\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\"><li><button type=\"button\" onclick=\"openOutboundTargetsModal()\">Edit</button></li></ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.031 9-11.622 0-1.042-.133-2.052-.382-3.016z\"></path></svg> Outbound Message Targets</h3><p class=\"text-sm opacity-60\">Safety controls for where the `send_message` chat tool can send.</p><div class=\"mt-2 flex flex-wrap items-center gap-2\"><span class=\"badge badge-sm badge-ghost\">")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var78)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var81 string
-		templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.JoinStringErrs(outboundTargetSummary(targets))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2068, Col: 78}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var81))
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "\" hx-trigger=\"outbound-targets-card-refresh from:body\" hx-target=\"this\" hx-swap=\"outerHTML\" onclick=\"openOutboundTargetsModal()\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\"><li><button type=\"button\" onclick=\"openOutboundTargetsModal()\">Edit</button></li></ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.031 9-11.622 0-1.042-.133-2.052-.382-3.016z\"></path></svg> Outbound Message Targets</h3><p class=\"text-sm opacity-60\">Safety controls for where the `send_message` chat tool can send.</p><div class=\"mt-2 flex flex-wrap items-center gap-2\"><span class=\"badge badge-sm badge-ghost\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 184, "</span> ")
+		var templ_7745c5c3_Var79 string
+		templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.JoinStringErrs(outboundTargetSummary(targets))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2055, Col: 78}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var79))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 180, "</span> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if explicitAllowed {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 185, "<span class=\"badge badge-sm badge-warning\">Explicit targets allowed</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 181, "<span class=\"badge badge-sm badge-warning\">Explicit targets allowed</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 186, "<span class=\"badge badge-sm badge-success\">Saved targets only</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 182, "<span class=\"badge badge-sm badge-success\">Saved targets only</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 187, "</div></div></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 183, "</div></div></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1945,12 +1909,12 @@ func OutboundTargetsModal(currentProjectID string, targets []models.ChannelTarge
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var82 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var82 == nil {
-			templ_7745c5c3_Var82 = templ.NopComponent
+		templ_7745c5c3_Var80 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var80 == nil {
+			templ_7745c5c3_Var80 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 188, "<dialog id=\"outbound_targets_modal\" class=\"modal\" onclose=\"handleOutboundTargetsModalClose()\"><div class=\"modal-box max-w-5xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeOutboundTargetsModal()\" aria-label=\"Close outbound message targets\" title=\"Close outbound message targets\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 184, "<dialog id=\"outbound_targets_modal\" class=\"modal\" onclose=\"handleOutboundTargetsModalClose()\"><div class=\"modal-box max-w-5xl\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closeOutboundTargetsModal()\" aria-label=\"Close outbound message targets\" title=\"Close outbound message targets\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1958,7 +1922,7 @@ func OutboundTargetsModal(currentProjectID string, targets []models.ChannelTarge
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 189, "</div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 185, "</div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1982,9 +1946,9 @@ func OutboundTargetsFragment(currentProjectID string, targets []models.ChannelTa
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var83 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var83 == nil {
-			templ_7745c5c3_Var83 = templ.NopComponent
+		templ_7745c5c3_Var81 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var81 == nil {
+			templ_7745c5c3_Var81 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = OutboundTargetsSection(currentProjectID, targets, explicitAllowed, notice).Render(ctx, templ_7745c5c3_Buffer)
@@ -2011,9 +1975,9 @@ func OutboundTargetsCardFragment(currentProjectID string, targets []models.Chann
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var84 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var84 == nil {
-			templ_7745c5c3_Var84 = templ.NopComponent
+		templ_7745c5c3_Var82 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var82 == nil {
+			templ_7745c5c3_Var82 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = OutboundTargetsCard(currentProjectID, targets, explicitAllowed).Render(ctx, templ_7745c5c3_Buffer)
@@ -2040,356 +2004,356 @@ func OutboundTargetsSection(currentProjectID string, targets []models.ChannelTar
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var85 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var85 == nil {
-			templ_7745c5c3_Var85 = templ.NopComponent
+		templ_7745c5c3_Var83 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var83 == nil {
+			templ_7745c5c3_Var83 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 190, "<div id=\"outbound-targets-section\" data-project-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 186, "<div id=\"outbound-targets-section\" data-project-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var86 string
-		templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
+		var templ_7745c5c3_Var84 string
+		templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2103, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2090, Col: 71}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var86)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var84)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 191, "\"><div><div class=\"pr-10\"><h3 class=\"card-title\">Outbound Message Targets</h3></div><div class=\"alert alert-info mt-3 mb-4 text-sm\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-5 h-5\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">Saved destinations for send_message</p><p class=\"text-xs opacity-80 mt-1\">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, `discord:#ops`, or `email:#client`.</p></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 187, "\"><div><div class=\"pr-10\"><h3 class=\"card-title\">Outbound Message Targets</h3></div><div class=\"alert alert-info mt-3 mb-4 text-sm\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-5 h-5\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">Saved destinations for send_message</p><p class=\"text-xs opacity-80 mt-1\">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, `discord:#ops`, or `email:#client`.</p></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if notice != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 192, "<div class=\"alert alert-success py-2 text-sm mt-3\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 188, "<div class=\"alert alert-success py-2 text-sm mt-3\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var87 string
-			templ_7745c5c3_Var87, templ_7745c5c3_Err = templ.JoinStringErrs(notice)
+			var templ_7745c5c3_Var85 string
+			templ_7745c5c3_Var85, templ_7745c5c3_Err = templ.JoinStringErrs(notice)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2117, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2104, Col: 63}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var87))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var85))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 193, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 189, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 194, "<form id=\"outbound-target-add-form\" class=\"grid gap-3 md:grid-cols-6 mt-4\" onclick=\"event.stopPropagation()\" onsubmit=\"return addOutboundTargetDraft(event)\"><select name=\"platform\" class=\"select select-bordered select-sm\" required><option value=\"slack\">Slack</option> <option value=\"telegram\">Telegram</option> <option value=\"email\">Email</option> <option value=\"discord\">Discord</option></select> <input name=\"name\" class=\"input input-bordered input-sm\" placeholder=\"name, e.g. ops\"> <input name=\"target_id\" class=\"input input-bordered input-sm md:col-span-2\" placeholder=\"channel/chat ID or email\" required> <input name=\"thread_id\" class=\"input input-bordered input-sm\" placeholder=\"thread/topic ID\"> <label class=\"label cursor-pointer justify-start gap-2 py-0\"><input type=\"checkbox\" name=\"is_home\" value=\"true\" class=\"checkbox checkbox-sm\"> <span class=\"label-text text-sm\">Home</span></label> <input name=\"default_subject\" class=\"input input-bordered input-sm md:col-span-5\" placeholder=\"default email subject (optional)\"> <button type=\"submit\" class=\"btn btn-primary btn-sm\">Add Target</button></form><div class=\"overflow-x-auto mt-4\"><table class=\"table table-sm\"><thead><tr><th>Platform</th><th>Name</th><th>Target</th><th>Thread/Topic</th><th>Home</th><th></th></tr></thead> <tbody id=\"outbound-targets-draft-tbody\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 190, "<form id=\"outbound-target-add-form\" class=\"grid gap-3 md:grid-cols-6 mt-4\" onclick=\"event.stopPropagation()\" onsubmit=\"return addOutboundTargetDraft(event)\"><select name=\"platform\" class=\"select select-bordered select-sm\" required><option value=\"slack\">Slack</option> <option value=\"telegram\">Telegram</option> <option value=\"email\">Email</option> <option value=\"discord\">Discord</option></select> <input name=\"name\" class=\"input input-bordered input-sm\" placeholder=\"name, e.g. ops\"> <input name=\"target_id\" class=\"input input-bordered input-sm md:col-span-2\" placeholder=\"channel/chat ID or email\" required> <input name=\"thread_id\" class=\"input input-bordered input-sm\" placeholder=\"thread/topic ID\"> <label class=\"label cursor-pointer justify-start gap-2 py-0\"><input type=\"checkbox\" name=\"is_home\" value=\"true\" class=\"checkbox checkbox-sm\"> <span class=\"label-text text-sm\">Home</span></label> <input name=\"default_subject\" class=\"input input-bordered input-sm md:col-span-5\" placeholder=\"default email subject (optional)\"> <button type=\"submit\" class=\"btn btn-primary btn-sm\">Add Target</button></form><div class=\"overflow-x-auto mt-4\"><table class=\"table table-sm\"><thead><tr><th>Platform</th><th>Name</th><th>Target</th><th>Thread/Topic</th><th>Home</th><th></th></tr></thead> <tbody id=\"outbound-targets-draft-tbody\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(targets) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 195, "<tr id=\"outbound-targets-empty-row\"><td colspan=\"6\" class=\"opacity-60\">No outbound targets saved yet.</td></tr>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 191, "<tr id=\"outbound-targets-empty-row\"><td colspan=\"6\" class=\"opacity-60\">No outbound targets saved yet.</td></tr>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		for _, target := range targets {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 196, "<tr data-outbound-target-draft-key=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 192, "<tr data-outbound-target-draft-key=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var86 string
+			templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.ID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2140, Col: 55}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var86)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 193, "\" data-platform=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var87 string
+			templ_7745c5c3_Var87, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.Platform)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2140, Col: 89}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var87)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 194, "\"><td>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var88 string
-			templ_7745c5c3_Var88, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.ID)
+			templ_7745c5c3_Var88, templ_7745c5c3_Err = templ.JoinStringErrs(target.Platform)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2153, Col: 55}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2141, Col: 30}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var88)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 197, "\" data-platform=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var88))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var89 string
-			templ_7745c5c3_Var89, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.Platform)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2153, Col: 89}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var89)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 195, "</td><td>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 198, "\"><td>")
+			if target.Name != "" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 196, "<span>#")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var89 string
+				templ_7745c5c3_Var89, templ_7745c5c3_Err = templ.JoinStringErrs(target.Name)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2144, Col: 31}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var89))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 197, "</span>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			} else {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 198, "<span class=\"opacity-50\">unnamed</span>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 199, "</td><td class=\"font-mono text-xs break-all\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var90 string
-			templ_7745c5c3_Var90, templ_7745c5c3_Err = templ.JoinStringErrs(target.Platform)
+			templ_7745c5c3_Var90, templ_7745c5c3_Err = templ.JoinStringErrs(target.TargetID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2154, Col: 30}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2149, Col: 66}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var90))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 199, "</td><td>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 200, "</td><td class=\"font-mono text-xs\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if target.Name != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 200, "<span>#")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var91 string
-				templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.JoinStringErrs(target.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2157, Col: 31}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var91))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 201, "</span>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 202, "<span class=\"opacity-50\">unnamed</span>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
+			var templ_7745c5c3_Var91 string
+			templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.JoinStringErrs(target.ThreadID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2150, Col: 56}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 203, "</td><td class=\"font-mono text-xs break-all\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var91))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var92 string
-			templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.JoinStringErrs(target.TargetID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2162, Col: 66}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var92))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 204, "</td><td class=\"font-mono text-xs\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var93 string
-			templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.JoinStringErrs(target.ThreadID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2163, Col: 56}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var93))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 205, "</td><td class=\"outbound-target-home-cell\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 201, "</td><td class=\"outbound-target-home-cell\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if target.Home {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 206, "<span class=\"badge badge-sm badge-primary\">Home</span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 202, "<span class=\"badge badge-sm badge-primary\">Home</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 207, "</td><td class=\"text-right whitespace-nowrap\"><button type=\"button\" class=\"btn btn-xs mr-1\" hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 203, "</td><td class=\"text-right whitespace-nowrap\"><button type=\"button\" class=\"btn btn-xs mr-1\" hx-post=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var92 string
+			templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/outbound-targets/" + target.ID + "/test?project_id=" + currentProjectID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2157, Col: 150}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var92)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 204, "\" hx-target=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var93 string
+			templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.ResolveAttributeValue("#outbound-target-test-label-" + target.ID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2157, Col: 207}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var93)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 205, "\" hx-swap=\"innerHTML\" hx-on::before-request=\"outboundTargetTestBefore(this)\" hx-on::after-request=\"outboundTargetTestAfter(this, event)\"><span id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var94 string
-			templ_7745c5c3_Var94, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/outbound-targets/" + target.ID + "/test?project_id=" + currentProjectID)
+			templ_7745c5c3_Var94, templ_7745c5c3_Err = templ.ResolveAttributeValue("outbound-target-test-label-" + target.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2170, Col: 150}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2157, Col: 397}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var94)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 208, "\" hx-target=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 206, "\" data-outbound-target-test-label aria-live=\"polite\">Test</span></button> <button type=\"button\" class=\"btn btn-xs btn-error\" onclick=\"removeOutboundTargetDraft(this)\">Delete</button></td></tr>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var95 string
-			templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.ResolveAttributeValue("#outbound-target-test-label-" + target.ID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2170, Col: 207}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var95)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 209, "\" hx-swap=\"innerHTML\" hx-on::before-request=\"outboundTargetTestBefore(this)\" hx-on::after-request=\"outboundTargetTestAfter(this, event)\"><span id=\"")
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 207, "</tbody></table></div><form id=\"outbound-targets-policy-form\" method=\"post\" hx-post=\"/channels/send-message-explicit-targets\" hx-target=\"#outbound-targets-section\" hx-swap=\"outerHTML\" class=\"modal-action flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between\" onclick=\"event.stopPropagation()\"><input type=\"hidden\" name=\"project_id\" value=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var95 string
+		templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2165, Col: 70}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var95)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 208, "\"><div id=\"outbound-targets-draft-fields\" class=\"hidden\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		for _, target := range targets {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 209, "<div id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var96 string
-			templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.ResolveAttributeValue("outbound-target-test-label-" + target.ID)
+			templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.ResolveAttributeValue("outbound-target-draft-fields-" + target.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2170, Col: 397}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2168, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var96)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 210, "\" data-outbound-target-test-label aria-live=\"polite\">Test</span></button> <button type=\"button\" class=\"btn btn-xs btn-error\" onclick=\"removeOutboundTargetDraft(this)\">Delete</button></td></tr>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 210, "\" data-outbound-target-draft-key=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 211, "</tbody></table></div><form id=\"outbound-targets-policy-form\" method=\"post\" hx-post=\"/channels/send-message-explicit-targets\" hx-target=\"#outbound-targets-section\" hx-swap=\"outerHTML\" class=\"modal-action flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between\" onclick=\"event.stopPropagation()\"><input type=\"hidden\" name=\"project_id\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var97 string
-		templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2178, Col: 70}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var97)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 212, "\"><div id=\"outbound-targets-draft-fields\" class=\"hidden\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		for _, target := range targets {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 213, "<div id=\"")
+			var templ_7745c5c3_Var97 string
+			templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.ID)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2168, Col: 108}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var97)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 211, "\"><input type=\"hidden\" name=\"target_row_id\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var98 string
-			templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.ResolveAttributeValue("outbound-target-draft-fields-" + target.ID)
+			templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2181, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2169, Col: 69}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var98)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 214, "\" data-outbound-target-draft-key=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 212, "\"> <input type=\"hidden\" name=\"target_platform\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var99 string
-			templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.ID)
+			templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.Platform)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2181, Col: 108}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2170, Col: 77}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var99)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 215, "\"><input type=\"hidden\" name=\"target_row_id\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 213, "\"> <input type=\"hidden\" name=\"target_name\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var100 string
-			templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.ID)
+			templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2182, Col: 69}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2171, Col: 69}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var100)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 216, "\"> <input type=\"hidden\" name=\"target_platform\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 214, "\"> <input type=\"hidden\" name=\"target_target_id\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var101 string
-			templ_7745c5c3_Var101, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.Platform)
+			templ_7745c5c3_Var101, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.TargetID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2183, Col: 77}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2172, Col: 78}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var101)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 217, "\"> <input type=\"hidden\" name=\"target_name\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 215, "\"> <input type=\"hidden\" name=\"target_thread_id\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var102 string
-			templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.Name)
+			templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.ThreadID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2184, Col: 69}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2173, Col: 78}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var102)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 218, "\"> <input type=\"hidden\" name=\"target_target_id\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 216, "\"> <input type=\"hidden\" name=\"target_is_home\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var103 string
-			templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.TargetID)
+			templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%t", target.Home))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2185, Col: 78}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2174, Col: 91}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var103)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 219, "\"> <input type=\"hidden\" name=\"target_thread_id\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 217, "\"> <input type=\"hidden\" name=\"target_default_subject\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var104 string
-			templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.ThreadID)
+			templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.DefaultSubject)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2186, Col: 78}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2175, Col: 90}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var104)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 220, "\"> <input type=\"hidden\" name=\"target_is_home\" value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var105 string
-			templ_7745c5c3_Var105, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%t", target.Home))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2187, Col: 91}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var105)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 221, "\"> <input type=\"hidden\" name=\"target_default_subject\" value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var106 string
-			templ_7745c5c3_Var106, templ_7745c5c3_Err = templ.ResolveAttributeValue(target.DefaultSubject)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2188, Col: 90}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var106)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 222, "\"></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 218, "\"></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 223, "</div><div class=\"form-control\"><label class=\"label cursor-pointer gap-3 justify-start px-0\"><input type=\"checkbox\" name=\"enabled\" value=\"true\" class=\"toggle toggle-primary toggle-sm\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 219, "</div><div class=\"form-control\"><label class=\"label cursor-pointer gap-3 justify-start px-0\"><input type=\"checkbox\" name=\"enabled\" value=\"true\" class=\"toggle toggle-primary toggle-sm\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if explicitAllowed {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 224, " checked")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 220, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 225, "><div><span class=\"label-text text-sm font-semibold\">Allow explicit unsaved targets</span><p class=\"text-xs opacity-50 mt-1\">Permit send_message to use direct destinations that are not saved here.</p></div></label></div><div class=\"flex justify-end gap-2\"><button type=\"button\" class=\"btn\" onclick=\"closeOutboundTargetsModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save Settings</button></div></form></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 221, "><div><span class=\"label-text text-sm font-semibold\">Allow explicit unsaved targets</span><p class=\"text-xs opacity-50 mt-1\">Permit send_message to use direct destinations that are not saved here.</p></div></label></div><div class=\"flex justify-end gap-2\"><button type=\"button\" class=\"btn\" onclick=\"closeOutboundTargetsModal()\">Cancel</button> <button type=\"submit\" class=\"btn btn-primary\">Save Settings</button></div></form></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

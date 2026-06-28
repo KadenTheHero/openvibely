@@ -99,10 +99,10 @@ func TestChannelsDiscordConfigure(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("discord_bot_token", "bot-token")
-	form.Set("discord_default_channel_id", "chan-1")
-	form.Set("discord_free_response_channels", "chan-2\nchan-3")
+	form.Set("discord_default_channel_id", "legacy-ignored")
+	form.Set("discord_free_response_channels", "legacy-ignored")
 	form.Set("discord_send_responses", "true")
-	form.Set("discord_require_mention", "true")
+	form.Set("discord_require_mention", "false")
 
 	req := httptest.NewRequest(http.MethodPost, "/channels/discord/configure", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -120,15 +120,21 @@ func TestChannelsDiscordConfigure(t *testing.T) {
 		t.Fatalf("expected discord service reload")
 	}
 	for key, want := range map[string]string{
-		service.DiscordSettingBotToken:             "bot-token",
-		service.DiscordSettingDefaultChannelID:     "chan-1",
-		service.DiscordSettingFreeResponseChannels: "chan-2\nchan-3",
-		service.DiscordSettingSendResponses:        "true",
-		service.DiscordSettingRequireMention:       "true",
+		service.DiscordSettingBotToken:      "bot-token",
+		service.DiscordSettingSendResponses: "true",
 	} {
 		got, err := h.settingsRepo.Get(context.Background(), key)
 		if err != nil || got != want {
 			t.Fatalf("setting %s = %q, %v; want %q", key, got, err, want)
+		}
+	}
+	for _, key := range []string{"discord_default_channel_id", "discord_free_response_channels", "discord_require_mention"} {
+		got, err := h.settingsRepo.Get(context.Background(), key)
+		if err != nil {
+			t.Fatalf("get legacy setting %s: %v", key, err)
+		}
+		if got != "" {
+			t.Fatalf("expected legacy setting %s not to be saved, got %q", key, got)
 		}
 	}
 }
@@ -193,7 +199,7 @@ func TestChannelsDiscordRemoveClearsSettings(t *testing.T) {
 			return nil
 		},
 	})
-	for _, key := range []string{service.DiscordSettingBotToken, service.DiscordSettingDefaultChannelID, service.DiscordSettingFreeResponseChannels} {
+	for _, key := range []string{service.DiscordSettingBotToken, service.DiscordSettingSendResponses} {
 		if err := h.settingsRepo.Set(context.Background(), key, "value"); err != nil {
 			t.Fatalf("seed setting: %v", err)
 		}

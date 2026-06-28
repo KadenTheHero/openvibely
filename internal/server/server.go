@@ -527,9 +527,6 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	if val, _ := settingsRepo.Get(context.Background(), service.DiscordSettingSendResponses); val == "" {
 		_ = settingsRepo.Set(context.Background(), service.DiscordSettingSendResponses, "true")
 	}
-	if val, _ := settingsRepo.Get(context.Background(), service.DiscordSettingRequireMention); val == "" {
-		_ = settingsRepo.Set(context.Background(), service.DiscordSettingRequireMention, "true")
-	}
 
 	githubSvc := service.NewGitHubService(
 		settingsRepo,

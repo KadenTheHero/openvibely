@@ -166,6 +166,14 @@ func TestChannelsPageRendersCardLayout(t *testing.T) {
 		!strings.Contains(body, `hx-include="#discord-authorized-users-add-controls"`) {
 		t.Error("expected Discord authorized-user Add to update the allowlist fragment without closing the config modal")
 	}
+	for _, removed := range []string{`name="discord_default_channel_id"`, `name="discord_free_response_channels"`, `name="discord_require_mention"`, "Default Channel ID", "Free-Response Channel IDs", "Require bot mention"} {
+		if strings.Contains(body, removed) {
+			t.Fatalf("did not expect removed Discord free-response/default-channel setting %q in Channels page", removed)
+		}
+	}
+	if !strings.Contains(body, "DMs are supported. In guild channels, users must mention the bot.") {
+		t.Fatal("expected Discord modal copy to state guild messages require bot mention")
+	}
 }
 
 func TestChannelsPageTelegramRichMessagesToggleDefaultsCheckedAndHonorsSavedFalse(t *testing.T) {

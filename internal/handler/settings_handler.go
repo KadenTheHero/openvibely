@@ -119,12 +119,9 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	slackHasBotToken := false
 	slackHasOAuthBotToken := false
 	slackSendResponses := true
-	discordStatus := service.DiscordConnectionStatus{SendResponses: true, RequireMention: true}
+	discordStatus := service.DiscordConnectionStatus{SendResponses: true}
 	discordBotToken := ""
-	discordDefaultChannelID := ""
-	discordFreeResponseChannels := ""
 	discordSendResponses := true
-	discordRequireMention := true
 	emailStatus := service.EmailConnectionStatus{Provider: service.EmailProviderCustom, IMAPPort: 993, SMTPPort: 587}
 	emailPasswordValue := ""
 	emailHasPassword := false
@@ -180,13 +177,8 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		slackHasBotToken = strings.TrimSpace(slackBotToken) != ""
 
 		discordBotToken, _ = h.settingsRepo.Get(c.Request().Context(), service.DiscordSettingBotToken)
-		discordDefaultChannelID, _ = h.settingsRepo.Get(c.Request().Context(), service.DiscordSettingDefaultChannelID)
-		discordFreeResponseChannels, _ = h.settingsRepo.Get(c.Request().Context(), service.DiscordSettingFreeResponseChannels)
 		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.DiscordSettingSendResponses); strings.TrimSpace(strings.ToLower(val)) == "false" {
 			discordSendResponses = false
-		}
-		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.DiscordSettingRequireMention); strings.TrimSpace(strings.ToLower(val)) == "false" {
-			discordRequireMention = false
 		}
 
 		emailProvider, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingProvider)
@@ -273,9 +265,9 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	}
 
 	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, resolvedProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordDefaultChannelID, discordFreeResponseChannels, discordSendResponses, discordRequireMention, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))
+		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, resolvedProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))
 	}
-	return render(c, http.StatusOK, pages.SettingsPage(token, isBotRunning, projects, resolvedProjectID, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordDefaultChannelID, discordFreeResponseChannels, discordSendResponses, discordRequireMention, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))
+	return render(c, http.StatusOK, pages.SettingsPage(token, isBotRunning, projects, resolvedProjectID, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))
 }
 
 // handleAppSettings renders the application settings page (personality, etc.)
@@ -728,10 +720,7 @@ func (h *Handler) handleDiscordConfigure(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
 	botToken := strings.TrimSpace(c.FormValue("discord_bot_token"))
-	defaultChannelID := strings.TrimSpace(c.FormValue("discord_default_channel_id"))
-	freeResponseChannels := strings.TrimSpace(c.FormValue("discord_free_response_channels"))
 	sendResponses := strings.TrimSpace(strings.ToLower(c.FormValue("discord_send_responses")))
-	requireMention := strings.TrimSpace(strings.ToLower(c.FormValue("discord_require_mention")))
 	if botToken == "" {
 		existing, _ := h.settingsRepo.Get(c.Request().Context(), service.DiscordSettingBotToken)
 		botToken = strings.TrimSpace(existing)
@@ -742,22 +731,12 @@ func (h *Handler) handleDiscordConfigure(c echo.Context) error {
 	if err := h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingBotToken, botToken); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save Discord bot token")
 	}
-	_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingDefaultChannelID, defaultChannelID)
-	_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingFreeResponseChannels, freeResponseChannels)
 	if sendResponses == "true" || sendResponses == "false" {
 		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingSendResponses, sendResponses)
 	} else {
 		current, _ := h.settingsRepo.Get(c.Request().Context(), service.DiscordSettingSendResponses)
 		if strings.TrimSpace(current) == "" {
 			_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingSendResponses, "true")
-		}
-	}
-	if requireMention == "true" || requireMention == "false" {
-		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingRequireMention, requireMention)
-	} else {
-		current, _ := h.settingsRepo.Get(c.Request().Context(), service.DiscordSettingRequireMention)
-		if strings.TrimSpace(current) == "" {
-			_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingRequireMention, "true")
 		}
 	}
 	if h.discordSvc != nil {
@@ -782,10 +761,7 @@ func (h *Handler) handleDiscordRemove(c echo.Context) error {
 	} else {
 		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingBotToken, "")
 		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingBotUserID, "")
-		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingDefaultChannelID, "")
 		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingSendResponses, "")
-		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingRequireMention, "")
-		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingFreeResponseChannels, "")
 	}
 	if h.discordAuthRepo != nil && projectID != "" {
 		_ = h.discordAuthRepo.DeleteByProject(c.Request().Context(), projectID)

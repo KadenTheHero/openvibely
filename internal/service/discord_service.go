@@ -26,12 +26,9 @@ import (
 )
 
 const (
-	DiscordSettingBotToken             = "discord_bot_token"
-	DiscordSettingBotUserID            = "discord_bot_user_id"
-	DiscordSettingDefaultChannelID     = "discord_default_channel_id"
-	DiscordSettingSendResponses        = "discord_send_responses"
-	DiscordSettingRequireMention       = "discord_require_mention"
-	DiscordSettingFreeResponseChannels = "discord_free_response_channels"
+	DiscordSettingBotToken      = "discord_bot_token"
+	DiscordSettingBotUserID     = "discord_bot_user_id"
+	DiscordSettingSendResponses = "discord_send_responses"
 
 	discordProcessTimeout   = 5 * time.Minute
 	discordChatHistoryLimit = 50
@@ -45,15 +42,13 @@ const (
 var discordMentionRegex = regexp.MustCompile(`<@!?[0-9]+>`)
 
 type DiscordConnectionStatus struct {
-	Configured       bool
-	Connected        bool
-	Running          bool
-	BotUserID        string
-	DefaultChannelID string
-	SendResponses    bool
-	RequireMention   bool
-	HasBotToken      bool
-	LastError        string
+	Configured    bool
+	Connected     bool
+	Running       bool
+	BotUserID     string
+	SendResponses bool
+	HasBotToken   bool
+	LastError     string
 }
 
 type DiscordService struct {
@@ -245,10 +240,7 @@ func (s *DiscordService) Disconnect(ctx context.Context) error {
 	s.Stop()
 	_ = s.setSetting(ctx, DiscordSettingBotToken, "")
 	_ = s.setSetting(ctx, DiscordSettingBotUserID, "")
-	_ = s.setSetting(ctx, DiscordSettingDefaultChannelID, "")
 	_ = s.setSetting(ctx, DiscordSettingSendResponses, "")
-	_ = s.setSetting(ctx, DiscordSettingRequireMention, "")
-	_ = s.setSetting(ctx, DiscordSettingFreeResponseChannels, "")
 	return nil
 }
 
@@ -256,13 +248,11 @@ func (s *DiscordService) GetConnectionStatus(ctx context.Context) (DiscordConnec
 	botToken := strings.TrimSpace(s.getSetting(ctx, DiscordSettingBotToken))
 	running, lastErr := s.runtimeStatus()
 	status := DiscordConnectionStatus{
-		HasBotToken:      botToken != "",
-		BotUserID:        strings.TrimSpace(s.getSetting(ctx, DiscordSettingBotUserID)),
-		DefaultChannelID: strings.TrimSpace(s.getSetting(ctx, DiscordSettingDefaultChannelID)),
-		SendResponses:    s.IsSendResponsesEnabled(ctx),
-		RequireMention:   s.IsRequireMentionEnabled(ctx),
-		Running:          running,
-		LastError:        lastErr,
+		HasBotToken:   botToken != "",
+		BotUserID:     strings.TrimSpace(s.getSetting(ctx, DiscordSettingBotUserID)),
+		SendResponses: s.IsSendResponsesEnabled(ctx),
+		Running:       running,
+		LastError:     lastErr,
 	}
 	status.Configured = status.HasBotToken
 	status.Connected = status.Configured && status.Running
@@ -290,14 +280,6 @@ func (s *DiscordService) TestConnection(ctx context.Context) error {
 
 func (s *DiscordService) IsSendResponsesEnabled(ctx context.Context) bool {
 	val := strings.TrimSpace(strings.ToLower(s.getSetting(ctx, DiscordSettingSendResponses)))
-	if val == "" {
-		return true
-	}
-	return val != "false"
-}
-
-func (s *DiscordService) IsRequireMentionEnabled(ctx context.Context) bool {
-	val := strings.TrimSpace(strings.ToLower(s.getSetting(ctx, DiscordSettingRequireMention)))
 	if val == "" {
 		return true
 	}
@@ -1915,24 +1897,7 @@ func discordParentChannelID(sess *discordgo.Session, channelID string) string {
 	return strings.TrimSpace(ch.ParentID)
 }
 func (s *DiscordService) requiresMentionForMessage(ctx context.Context, msg discordIncomingMessage) bool {
-	if msg.IsDM {
-		return false
-	}
-	free := parseDiscordChannelList(s.getSetting(ctx, DiscordSettingFreeResponseChannels))
-	if free[msg.ChannelID] || (msg.ThreadID != "" && free[msg.ThreadID]) || (msg.ParentChannelID != "" && free[msg.ParentChannelID]) {
-		return false
-	}
-	return s.IsRequireMentionEnabled(ctx)
-}
-func parseDiscordChannelList(value string) map[string]bool {
-	out := map[string]bool{}
-	for _, part := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '\n' || r == ' ' || r == '\t' }) {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out[part] = true
-		}
-	}
-	return out
+	return !msg.IsDM
 }
 func (s *DiscordService) botUserID(ctx context.Context, sess *discordgo.Session) string {
 	if sess != nil && sess.State != nil && sess.State.User != nil && sess.State.User.ID != "" {

@@ -149,9 +149,6 @@ func TestDiscordHandleMessageCreateRequiresMentionInGuildAndStripsMention(t *tes
 	if err := settingsRepo.Set(ctx, DiscordSettingBotUserID, "bot-1"); err != nil {
 		t.Fatalf("set bot id: %v", err)
 	}
-	if err := settingsRepo.Set(ctx, DiscordSettingRequireMention, "true"); err != nil {
-		t.Fatalf("set require mention: %v", err)
-	}
 	var got []discordIncomingMessage
 	svc.processIncomingMessageFn = func(msg discordIncomingMessage) { got = append(got, msg) }
 
@@ -174,9 +171,6 @@ func TestDiscordHandleMessageCreatePreservesMentionOnlyAttachmentPrompt(t *testi
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, DiscordSettingBotUserID, "bot-1"); err != nil {
 		t.Fatalf("set bot id: %v", err)
-	}
-	if err := settingsRepo.Set(ctx, DiscordSettingRequireMention, "true"); err != nil {
-		t.Fatalf("set require mention: %v", err)
 	}
 	var got []discordIncomingMessage
 	svc.processIncomingMessageFn = func(msg discordIncomingMessage) { got = append(got, msg) }
@@ -208,24 +202,21 @@ func TestDiscordHandleMessageCreatePreservesMentionOnlyAttachmentPrompt(t *testi
 	}
 }
 
-func TestDiscordHandleMessageCreateAllowsFreeResponseChannelWithoutMention(t *testing.T) {
+func TestDiscordHandleMessageCreateIgnoresUnmentionedGuildMessageEvenWithLegacyFreeResponseSetting(t *testing.T) {
 	svc, _, settingsRepo, _, _, _, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()
 	if err := settingsRepo.Set(ctx, DiscordSettingBotUserID, "bot-1"); err != nil {
 		t.Fatalf("set bot id: %v", err)
 	}
-	if err := settingsRepo.Set(ctx, DiscordSettingRequireMention, "true"); err != nil {
-		t.Fatalf("set require mention: %v", err)
-	}
-	if err := settingsRepo.Set(ctx, DiscordSettingFreeResponseChannels, "c-free, c-other"); err != nil {
-		t.Fatalf("set free channels: %v", err)
+	if err := settingsRepo.Set(ctx, "discord_free_response_channels", "c-free, c-other"); err != nil {
+		t.Fatalf("set legacy free channels: %v", err)
 	}
 	var got []discordIncomingMessage
 	svc.processIncomingMessageFn = func(msg discordIncomingMessage) { got = append(got, msg) }
 
 	svc.handleMessageCreate(ctx, nil, &discordgo.MessageCreate{Message: &discordgo.Message{ID: "m1", ChannelID: "c-free", GuildID: "g1", Content: "no mention", Author: &discordgo.User{ID: "u1"}}})
-	if len(got) != 1 || got[0].Text != "no mention" {
-		t.Fatalf("expected free-response guild message processed, got %#v", got)
+	if len(got) != 0 {
+		t.Fatalf("expected unmentioned guild message ignored despite legacy free-response setting, got %#v", got)
 	}
 }
 
@@ -1136,18 +1127,15 @@ func useDiscordFileServers(t *testing.T, svc *DiscordService, servers map[string
 	})}
 }
 
-func TestDiscordRequiresMentionAllowsParentFreeResponseThread(t *testing.T) {
+func TestDiscordRequiresMentionForGuildThreadsEvenWithLegacyFreeResponseSetting(t *testing.T) {
 	svc, _, settingsRepo, _, _, _, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()
-	if err := settingsRepo.Set(ctx, DiscordSettingRequireMention, "true"); err != nil {
-		t.Fatalf("set require mention: %v", err)
-	}
-	if err := settingsRepo.Set(ctx, DiscordSettingFreeResponseChannels, "parent-1"); err != nil {
-		t.Fatalf("set free channels: %v", err)
+	if err := settingsRepo.Set(ctx, "discord_free_response_channels", "parent-1"); err != nil {
+		t.Fatalf("set legacy free channels: %v", err)
 	}
 
-	if svc.requiresMentionForMessage(ctx, discordIncomingMessage{ChannelID: "thread-1", ParentChannelID: "parent-1"}) {
-		t.Fatalf("expected parent free-response thread to not require a mention")
+	if !svc.requiresMentionForMessage(ctx, discordIncomingMessage{ChannelID: "thread-1", ParentChannelID: "parent-1"}) {
+		t.Fatalf("expected guild thread to require a mention despite legacy free-response setting")
 	}
 }
 
