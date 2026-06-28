@@ -598,50 +598,14 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 			return
 		}
 	}
-	selectedAgentID := agent.ID
-	task := &models.Task{ProjectID: projectID, Title: fmt.Sprintf("Email %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Subject, 47)), Prompt: prompt, Status: models.StatusPending, Category: models.CategoryChat, AgentID: &selectedAgentID, CreatedVia: models.TaskOriginEmail}
-	if err := s.taskRepo.Create(ctx, task); err != nil {
-		applog.Infof("[email] create chat task failed: %v", err)
-		return
-	}
-	if s.emailTaskContextRepo != nil {
-		if err := s.emailTaskContextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: task.ID, EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey}); err != nil {
-			applog.Infof("[email] create task context failed task=%s: %v", task.ID, err)
-			_ = s.taskRepo.Delete(ctx, task.ID)
-			return
-		}
-	}
-	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: prompt}
-	if err := s.execRepo.Create(ctx, exec); err != nil {
-		applog.Infof("[email] create execution failed: %v", err)
-		_ = s.taskRepo.Delete(ctx, task.ID)
-		return
-	}
-	if s.chatBroadcaster != nil {
-		s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, ExecID: exec.ID, TaskID: task.ID, Message: prompt, Source: models.TaskOriginEmail, AgentName: agent.Name})
-	}
-	history, err := s.execRepo.ListEmailChatHistory(ctx, projectID, sessionKey, emailChatHistoryLimit)
-	if err != nil {
-		history = []models.Execution{}
-	}
-	systemContext := s.buildChatContext(ctx, projectID)
-	if personalityPrompt := s.getPersonalityContext(ctx, projectID); personalityPrompt != "" {
-		systemContext += personalityPrompt
-	}
-	if s.channelChatRunner == nil {
-		s.completeExecution(ctx, exec.ID, task.ID, "", "Email chat runner is unavailable", 0, 0)
-		return
-	}
-	s.channelChatRunner(context.Background(), ChannelChatRunRequest{
-		ExecID:        exec.ID,
-		TaskID:        task.ID,
-		ProjectID:     projectID,
-		Message:       prompt,
-		Agent:         *agent,
-		ChatHistory:   filterEmailChatHistory(history, exec.ID),
-		SystemContext: systemContext,
-		WorkDir:       s.resolveWorkDir(ctx, projectID),
-		Surface:       chatcontrol.SurfaceEmail,
+	runChannelChatFirstTurn(ctx, channelChatIngressFirstTurnOptions{
+		Platform:  "email",
+		ProjectID: projectID,
+		Message:   prompt,
+		Source:    models.TaskOriginEmail,
+		Task:      &models.Task{Title: fmt.Sprintf("Email %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Subject, 47)), CreatedVia: models.TaskOriginEmail},
+		Agent:     agent,
+		Surface:   chatcontrol.SurfaceEmail,
 		ReplyContext: ChannelReplyContext{
 			Source:          models.TaskOriginEmail,
 			EmailFrom:       msg.FromAddress,
@@ -650,22 +614,41 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 			EmailSubject:    msg.Subject,
 			EmailSessionKey: sessionKey,
 		},
+		TaskRepo:          s.taskRepo,
+		ExecRepo:          s.execRepo,
+		ChatBroadcaster:   s.chatBroadcaster,
+		ChannelChatRunner: s.channelChatRunner,
+		CreateTaskContext: func(ctx context.Context, taskID string) error {
+			if s.emailTaskContextRepo == nil {
+				return nil
+			}
+			return s.emailTaskContextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: taskID, EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey})
+		},
+		CompleteExecution: s.completeExecution,
+		ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
+			return s.execRepo.ListEmailChatHistory(ctx, projectID, sessionKey, emailChatHistoryLimit)
+		},
+		FilterChatHistory:     filterEmailChatHistory,
+		BuildChatContext:      s.buildChatContext,
+		GetPersonalityContext: s.getPersonalityContext,
+		ResolveWorkDir:        s.resolveWorkDir,
 	})
 }
 
 func (s *EmailService) queueChatInput(ctx context.Context, projectID, activeExecID, agentID, prompt string, msg EmailInboundMessage, sessionKey string) bool {
-	if s.threadInputRepo == nil {
-		return false
-	}
-	queued := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: projectID, RunExecutionID: activeExecID, AgentConfigID: agentID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: prompt, ChatMode: models.ChatModeOrchestrate, Source: models.TaskOriginEmail, EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey}
-	if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
-		applog.Infof("[email] queue chat input failed: %v", err)
-		return true
-	}
-	if s.chatBroadcaster != nil {
-		s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, ExecID: queued.ID, Message: prompt, Source: models.TaskOriginEmail, Queued: true})
-	}
-	return true
+	return runChannelChatQueuedInput(ctx, channelChatIngressQueueOptions{
+		Platform:        "email",
+		ProjectID:       projectID,
+		ActiveExecID:    activeExecID,
+		AgentID:         agentID,
+		Message:         prompt,
+		Source:          models.TaskOriginEmail,
+		ThreadInputRepo: s.threadInputRepo,
+		ChatBroadcaster: s.chatBroadcaster,
+		NewThreadInput: func() *models.ThreadInput {
+			return &models.ThreadInput{EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey}
+		},
+	})
 }
 
 func (s *EmailService) resolveAuthorizedProject(ctx context.Context, sender string) string {

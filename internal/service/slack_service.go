@@ -893,43 +893,27 @@ func (s *SlackService) queueChatInput(ctx context.Context, projectID, activeExec
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, fmt.Sprintf("Error selecting model: %v", err))
 		return true
 	}
-	queued := &models.ThreadInput{
-		Scope:               models.ThreadInputScopeChat,
+	return runChannelChatQueuedInput(ctx, channelChatIngressQueueOptions{
+		Platform:            "slack",
 		ProjectID:           projectID,
-		RunExecutionID:      activeExecID,
-		AgentConfigID:       agent.ID,
-		InputMode:           models.ThreadInputModeQueued,
-		InputStatus:         models.ThreadInputPending,
-		Content:             msg.Text,
+		ActiveExecID:        activeExecID,
+		AgentID:             agent.ID,
+		Message:             msg.Text,
+		Source:              msg.Source,
 		AttachmentSessionID: attachmentSessionID,
-		ChatMode:            models.ChatModeOrchestrate,
-		Source:              models.TaskOriginSlack,
-		SlackTeamID:         msg.TeamID,
-		SlackChannelID:      msg.ChannelID,
-		SlackThreadTS:       msg.ThreadTS,
-		SlackUserID:         msg.UserID,
-	}
-	if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
-		applog.Infof("[slack] queue chat input failed: %v", err)
-		if attachmentSessionID != "" {
-			_ = os.RemoveAll(filepath.Join(s.uploadsDir, "chat", "pending", attachmentSessionID))
-		}
-		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error queueing your message. Please try again.")
-		return true
-	}
-	if s.chatBroadcaster != nil {
-		s.chatBroadcaster.Publish(events.ChatEvent{
-			Type:           events.ChatNewMessage,
-			ProjectID:      projectID,
-			ExecID:         queued.ID,
-			Message:        msg.Text,
-			Source:         msg.Source,
-			Queued:         true,
-			HasAttachments: attachmentSessionID != "",
-		})
-	}
-	_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Queued. I'll send this after the current response finishes.")
-	return true
+		UploadsDir:          s.uploadsDir,
+		ThreadInputRepo:     s.threadInputRepo,
+		ChatBroadcaster:     s.chatBroadcaster,
+		NewThreadInput: func() *models.ThreadInput {
+			return &models.ThreadInput{SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID}
+		},
+		OnQueueFailure: func(context.Context) {
+			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error queueing your message. Please try again.")
+		},
+		OnQueued: func(context.Context) {
+			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Queued. I'll send this after the current response finishes.")
+		},
+	})
 }
 
 func (s *SlackService) recordQueuedAttachmentFailure(ctx context.Context, projectID, agentID string, msg slackIncomingMessage, msgText string) {
@@ -1045,135 +1029,60 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, fmt.Sprintf("Error selecting model: %v", err))
 		return
 	}
-	selectedAgentID := agent.ID
-	chatTitle := fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47))
-	task := &models.Task{
-		ProjectID:  projectID,
-		Title:      chatTitle,
-		Prompt:     msg.Text,
-		Status:     models.StatusPending,
-		Category:   models.CategoryChat,
-		AgentID:    &selectedAgentID,
-		CreatedVia: models.TaskOriginSlack,
-	}
-	if err := s.taskRepo.Create(ctx, task); err != nil {
-		applog.Infof("[slack] create chat task failed: %v", err)
-		cleanupSlackAttachmentSourceDirs(chatAtts)
-		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
-		return
-	}
-
-	if s.slackTaskContextRepo != nil {
-		if err := s.slackTaskContextRepo.Upsert(ctx, &models.SlackTaskContext{
-			TaskID:         task.ID,
-			SlackTeamID:    msg.TeamID,
-			SlackChannelID: msg.ChannelID,
-			SlackThreadTS:  msg.ThreadTS,
-			SlackUserID:    msg.UserID,
-		}); err != nil {
-			applog.Infof("[slack] create chat context failed task=%s: %v", task.ID, err)
-			cleanupSlackAttachmentSourceDirs(chatAtts)
-			if delErr := s.taskRepo.Delete(ctx, task.ID); delErr != nil {
-				applog.Infof("[slack] cleanup chat task failed task=%s: %v", task.ID, delErr)
-			}
-			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
-			return
-		}
-	}
-	exec := &models.Execution{
-		TaskID:        task.ID,
-		AgentConfigID: agent.ID,
-		Status:        models.ExecRunning,
-		PromptSent:    msg.Text,
-	}
-	if err := s.execRepo.Create(ctx, exec); err != nil {
-		applog.Infof("[slack] create execution failed: %v", err)
-		cleanupSlackAttachmentSourceDirs(chatAtts)
-		if delErr := s.taskRepo.Delete(ctx, task.ID); delErr != nil {
-			applog.Infof("[slack] cleanup chat task failed task=%s after execution create failure: %v", task.ID, delErr)
-		}
-		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
-		return
-	}
-
-	hasLinkedAttachments := false
-	if len(chatAtts) > 0 {
-		var err error
-		chatAtts, err = s.linkAttachmentsToExecution(ctx, exec.ID, chatAtts)
-		if err != nil {
-			applog.Infof("[slack] attachment link error: %v", err)
-			msgText := "Failed to process attachment: unable to store attachment. Please try again."
-			s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, time.Since(start).Milliseconds())
-			if s.chatBroadcaster != nil {
-				s.chatBroadcaster.Publish(events.ChatEvent{
-					Type:           events.ChatNewMessage,
-					ProjectID:      projectID,
-					ExecID:         exec.ID,
-					TaskID:         task.ID,
-					Message:        msg.Text,
-					Source:         msg.Source,
-					AgentName:      agent.Name,
-					HasAttachments: len(msg.Files) > 0,
-				})
-			}
-			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
-			return
-		}
-		attachmentContext, imageAttachments = slackAttachmentContextAndImages(chatAtts)
-		hasLinkedAttachments = true
-	}
-
-	if s.chatBroadcaster != nil {
-		s.chatBroadcaster.Publish(events.ChatEvent{
-			Type:           events.ChatNewMessage,
-			ProjectID:      projectID,
-			ExecID:         exec.ID,
-			TaskID:         task.ID,
-			Message:        msg.Text,
-			Source:         msg.Source,
-			AgentName:      agent.Name,
-			HasAttachments: hasLinkedAttachments,
-		})
-	}
-
-	chatHistory, err := s.execRepo.ListChatHistory(ctx, projectID, slackChatHistoryLimit)
-	if err != nil {
-		chatHistory = []models.Execution{}
-	}
-	priorHistory := filterSlackChatHistory(chatHistory, exec.ID)
-
-	systemContext := s.buildChatContext(ctx, projectID)
-	if attachmentContext != "" {
-		systemContext = systemContext + attachmentContext
-	}
-	if personalityPrompt := s.getPersonalityContext(ctx, projectID); personalityPrompt != "" {
-		systemContext = systemContext + personalityPrompt
-	}
-	workDir := s.resolveWorkDir(ctx, projectID)
-
-	if s.channelChatRunner == nil {
-		msgText := "Slack chat runner is unavailable. Please restart OpenVibely and try again."
-		s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, time.Since(start).Milliseconds())
-		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, msgText)
-		return
-	}
-	s.channelChatRunner(context.Background(), ChannelChatRunRequest{
-		ExecID:           exec.ID,
-		TaskID:           task.ID,
-		ProjectID:        projectID,
-		Message:          msg.Text,
-		Agent:            *agent,
-		ChatHistory:      priorHistory,
-		SystemContext:    systemContext,
-		WorkDir:          workDir,
-		ImageAttachments: imageAttachments,
-		Surface:          chatcontrol.SurfaceSlack,
+	runChannelChatFirstTurn(ctx, channelChatIngressFirstTurnOptions{
+		Platform:          "slack",
+		ProjectID:         projectID,
+		Message:           msg.Text,
+		Source:            msg.Source,
+		Task:              &models.Task{Title: fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginSlack},
+		Agent:             agent,
+		Attachments:       chatAtts,
+		AttachmentContext: attachmentContext,
+		ImageAttachments:  imageAttachments,
+		HasAttachments:    len(msg.Files) > 0,
+		Surface:           chatcontrol.SurfaceSlack,
 		ReplyContext: ChannelReplyContext{
 			Source:         models.TaskOriginSlack,
 			SlackTeamID:    msg.TeamID,
 			SlackChannelID: msg.ChannelID,
 			SlackThreadTS:  msg.ThreadTS,
 			SlackUserID:    msg.UserID,
+		},
+		Start:             start,
+		TaskRepo:          s.taskRepo,
+		ExecRepo:          s.execRepo,
+		ChatBroadcaster:   s.chatBroadcaster,
+		ChannelChatRunner: s.channelChatRunner,
+		CreateTaskContext: func(ctx context.Context, taskID string) error {
+			if s.slackTaskContextRepo == nil {
+				return nil
+			}
+			return s.slackTaskContextRepo.Upsert(ctx, &models.SlackTaskContext{TaskID: taskID, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID})
+		},
+		CompleteExecution:          s.completeExecution,
+		LinkAttachments:            s.linkAttachmentsToExecution,
+		AttachmentContextAndImages: slackAttachmentContextAndImages,
+		ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
+			return s.execRepo.ListChatHistory(ctx, projectID, slackChatHistoryLimit)
+		},
+		FilterChatHistory:     filterSlackChatHistory,
+		BuildChatContext:      s.buildChatContext,
+		GetPersonalityContext: s.getPersonalityContext,
+		ResolveWorkDir:        s.resolveWorkDir,
+		OnTaskCreateFailure: func(context.Context) {
+			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+		},
+		OnTaskContextFailure: func(context.Context) {
+			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+		},
+		OnExecutionCreateFailure: func(context.Context) {
+			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+		},
+		OnAttachmentLinkFailure: func(_ context.Context, msgText string) {
+			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
+		},
+		OnRunnerUnavailable: func(_ context.Context, msgText string, _ int) {
+			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, msgText)
 		},
 	})
 	return

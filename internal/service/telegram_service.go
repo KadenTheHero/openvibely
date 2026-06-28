@@ -479,39 +479,23 @@ func (s *TelegramService) queueChatInput(ctx context.Context, projectID, activeE
 			return true
 		}
 	}
-	queued := &models.ThreadInput{
-		Scope:               models.ThreadInputScopeChat,
+	return runChannelChatQueuedInput(ctx, channelChatIngressQueueOptions{
+		Platform:            "telegram",
 		ProjectID:           projectID,
-		RunExecutionID:      activeExecID,
-		AgentConfigID:       agentID,
-		InputMode:           models.ThreadInputModeQueued,
-		InputStatus:         models.ThreadInputPending,
-		Content:             text,
-		AttachmentSessionID: attachmentSessionID,
-		ChatMode:            models.ChatModeOrchestrate,
+		ActiveExecID:        activeExecID,
+		AgentID:             agentID,
+		Message:             text,
 		Source:              models.TaskOriginTelegram,
-		TelegramChatID:      chatID,
-	}
-	if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
-		if attachmentSessionID != "" {
-			_ = os.RemoveAll(filepath.Join(telegramUploadsDir, "chat", "pending", attachmentSessionID))
-		}
-		applog.Infof("[telegram] queue chat input failed: %v", err)
-		s.sendMessage(ctx, chatID, "Error queueing your message. Please try again.")
-		return true
-	}
-	if s.chatBroadcaster != nil {
-		s.chatBroadcaster.Publish(events.ChatEvent{
-			Type:      events.ChatNewMessage,
-			ProjectID: projectID,
-			ExecID:    queued.ID,
-			Message:   text,
-			Source:    "telegram",
-			Queued:    true,
-		})
-	}
-	s.sendMessage(ctx, chatID, "Queued. I'll send this after the current response finishes.")
-	return true
+		AttachmentSessionID: attachmentSessionID,
+		UploadsDir:          telegramUploadsDir,
+		ThreadInputRepo:     s.threadInputRepo,
+		ChatBroadcaster:     s.chatBroadcaster,
+		NewThreadInput:      func() *models.ThreadInput { return &models.ThreadInput{TelegramChatID: chatID} },
+		OnQueueFailure:      func(context.Context) { s.sendMessage(ctx, chatID, "Error queueing your message. Please try again.") },
+		OnQueued: func(context.Context) {
+			s.sendMessage(ctx, chatID, "Queued. I'll send this after the current response finishes.")
+		},
+	})
 }
 
 func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
@@ -593,150 +577,74 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 		}
 	}
 
-	// Create chat task (same as ChatSend handler)
-	selectedAgentID := agent.ID
-	chatTitle := fmt.Sprintf("Telegram %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(text, 47))
-	task := &models.Task{
-		ProjectID:      projectID,
-		Title:          chatTitle,
-		Prompt:         text,
-		Status:         models.StatusPending,
-		Category:       models.CategoryChat,
-		AgentID:        &selectedAgentID,
-		CreatedVia:     models.TaskOriginTelegram,
-		TelegramChatID: chatID,
-	}
-	if err := s.taskRepo.Create(ctx, task); err != nil {
-		applog.Infof("[telegram] error creating task: %v", err)
-		cleanupChannelChatAttachmentSourceDirs(chatAttachments)
-		s.sendMessage(ctx, chatID, "Error processing your message. Please try again.")
-		return
-	}
-
-	// Create execution record
-	exec := &models.Execution{
-		TaskID:        task.ID,
-		AgentConfigID: agent.ID,
-		Status:        models.ExecRunning,
-		PromptSent:    text,
-	}
-	if err := s.execRepo.Create(ctx, exec); err != nil {
-		applog.Infof("[telegram] error creating execution: %v", err)
-		cleanupChannelChatAttachmentSourceDirs(chatAttachments)
-		if delErr := s.taskRepo.Delete(ctx, task.ID); delErr != nil {
-			applog.Infof("[telegram] cleanup chat task failed task=%s after execution create failure: %v", task.ID, delErr)
-		}
-		s.sendMessage(ctx, chatID, "Error processing your message. Please try again.")
-		return
-	}
-
-	applog.Infof("[telegram] created exec=%s task=%s for user=%d", exec.ID, task.ID, userID)
-
-	// Broadcast new message event so /chat page updates in real-time
-	if s.chatBroadcaster != nil {
-		s.chatBroadcaster.Publish(events.ChatEvent{
-			Type:      events.ChatNewMessage,
-			ProjectID: projectID,
-			ExecID:    exec.ID,
-			TaskID:    task.ID,
-			Message:   text,
-			Source:    "telegram",
-			AgentName: agent.Name,
-		})
-	}
-
-	// Link chat attachments to this execution and move files
-	if len(chatAttachments) > 0 {
-		var err error
-		chatAttachments, err = s.linkAttachmentsToExecution(ctx, exec.ID, chatAttachments)
-		if err != nil {
-			applog.Infof("[telegram] attachment link error: %v", err)
-			msgText := "Failed to process attachment: unable to store attachment. Please try again."
-			s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, 0)
-			s.sendMessage(ctx, chatID, "⚠️ "+msgText)
-			return
-		}
-		// Update imageAttachments file paths to match the moved file locations.
-		// linkAttachmentsToExecution moves files from the temp directory to
-		// uploads/chat/{execID}/ and updates chatAttachments paths, but
-		// imageAttachments still has the old temp dir paths (now deleted).
-		// Without this, callAnthropicChat tries to read from a nonexistent
-		// temp path and silently skips the image.
-		for i := range imageAttachments {
-			for _, ca := range chatAttachments {
-				if ca.FileName == imageAttachments[i].FileName {
-					imageAttachments[i].FilePath = ca.FilePath
-					break
+	start := time.Now()
+	runChannelChatFirstTurn(ctx, channelChatIngressFirstTurnOptions{
+		Platform:  "telegram",
+		ProjectID: projectID,
+		Message:   text,
+		Source:    models.TaskOriginTelegram,
+		Task: &models.Task{
+			Title:          fmt.Sprintf("Telegram %s: %s", start.Format("15:04:05.000"), util.Truncate(text, 47)),
+			CreatedVia:     models.TaskOriginTelegram,
+			TelegramChatID: chatID,
+		},
+		Agent: agent, Attachments: chatAttachments,
+		AttachmentContext: attachmentContext,
+		ImageAttachments:  imageAttachments,
+		HasAttachments:    len(chatAttachments) > 0,
+		Surface:           chatcontrol.SurfaceTelegram,
+		Start:             start, TaskRepo: s.taskRepo,
+		ExecRepo:          s.execRepo,
+		ChatBroadcaster:   s.chatBroadcaster,
+		ChannelChatRunner: s.channelChatRunner,
+		CompleteExecution: s.completeExecution,
+		LinkAttachments: func(ctx context.Context, execID string, atts []models.ChatAttachment) ([]models.ChatAttachment, error) {
+			linked, err := s.linkAttachmentsToExecution(ctx, execID, atts)
+			if err != nil {
+				return nil, err
+			}
+			imageAttachments = updateChannelChatImageAttachmentPaths(imageAttachments, linked)
+			return linked, nil
+		},
+		ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
+			return s.execRepo.ListChatHistory(ctx, projectID, telegramChatHistoryLimit)
+		},
+		FilterChatHistory:        filterTelegramChatHistory,
+		BuildChatContext:         s.buildChatContext,
+		GetPersonalityContext:    s.getPersonalityContext,
+		ResolveWorkDir:           s.resolveWorkDir,
+		OnTaskCreateFailure:      func(context.Context) { s.sendMessage(ctx, chatID, "Error processing your message. Please try again.") },
+		OnExecutionCreateFailure: func(context.Context) { s.sendMessage(ctx, chatID, "Error processing your message. Please try again.") },
+		OnAttachmentLinkFailure:  func(_ context.Context, msgText string) { s.sendMessage(ctx, chatID, "⚠️ "+msgText) },
+		PrepareRunner: func(ctx context.Context, taskID, execID string) int {
+			applog.Infof("[telegram] created exec=%s task=%s for user=%d", execID, taskID, userID)
+			var sentMsg tgbotapi.Message
+			if s.bot != nil || s.sendConfigFunc != nil {
+				thinkingMsg := tgbotapi.NewMessage(chatID, "⏳ Thinking...")
+				var err error
+				sentMsg, err = s.sendConfig(thinkingMsg)
+				if err != nil {
+					applog.Infof("[telegram] error sending thinking message: %v", err)
 				}
 			}
-		}
-	}
-
-	// Send initial "thinking" message that we'll edit later when a real bot is configured.
-	var sentMsg tgbotapi.Message
-	if s.bot != nil || s.sendConfigFunc != nil {
-		thinkingMsg := tgbotapi.NewMessage(chatID, "⏳ Thinking...")
-		var err error
-		sentMsg, err = s.sendConfig(thinkingMsg)
-		if err != nil {
-			applog.Infof("[telegram] error sending thinking message: %v", err)
-		}
-	}
-
-	// Load chat history
-	chatHistory, err := s.execRepo.ListChatHistory(ctx, projectID, telegramChatHistoryLimit)
-	if err != nil {
-		applog.Infof("[telegram] error loading chat history: %v", err)
-		chatHistory = []models.Execution{}
-	}
-	priorHistory := filterTelegramChatHistory(chatHistory, exec.ID)
-
-	// Build context (task list + model info + attachment context + personality)
-	systemContext := s.buildChatContext(ctx, projectID)
-	if attachmentContext != "" {
-		systemContext = systemContext + attachmentContext
-	}
-	if personalityPrompt := s.getPersonalityContext(ctx, projectID); personalityPrompt != "" {
-		systemContext = systemContext + personalityPrompt
-	}
-
-	// Resolve work directory
-	workDir := s.resolveWorkDir(ctx, projectID)
-
-	// Start streaming updates to Telegram in background. Final response delivery
-	// stops this preview before editing/sending the completed response.
-	if sentMsg.MessageID != 0 {
-		previewDone := s.beginTelegramPreview(chatID, sentMsg.MessageID)
-		go func(done <-chan struct{}) {
-			streamCtx, streamCancel := context.WithTimeout(context.Background(), telegramProcessTimeout)
-			defer streamCancel()
-			defer s.clearTelegramPreview(chatID, sentMsg.MessageID, done)
-			s.streamUpdatesToTelegram(streamCtx, chatID, sentMsg.MessageID, exec.ID, done)
-		}(previewDone)
-	}
-
-	if s.channelChatRunner == nil {
-		msgText := "Telegram chat runner is unavailable. Please restart OpenVibely and try again."
-		s.completeExecution(ctx, exec.ID, task.ID, "", msgText, 0, 0)
-		if sentMsg.MessageID != 0 {
-			s.editMessage(ctx, chatID, sentMsg.MessageID, "❌ "+msgText)
-		} else {
-			s.sendMessage(ctx, chatID, "❌ "+msgText)
-		}
-		return
-	}
-	s.channelChatRunner(context.Background(), ChannelChatRunRequest{
-		ExecID:              exec.ID,
-		TaskID:              task.ID,
-		ProjectID:           projectID,
-		Message:             text,
-		Agent:               *agent,
-		ChatHistory:         priorHistory,
-		SystemContext:       systemContext,
-		WorkDir:             workDir,
-		ImageAttachments:    imageAttachments,
-		Surface:             chatcontrol.SurfaceTelegram,
-		InitialAckMessageID: sentMsg.MessageID,
+			if sentMsg.MessageID != 0 {
+				previewDone := s.beginTelegramPreview(chatID, sentMsg.MessageID)
+				go func(done <-chan struct{}) {
+					streamCtx, streamCancel := context.WithTimeout(context.Background(), telegramProcessTimeout)
+					defer streamCancel()
+					defer s.clearTelegramPreview(chatID, sentMsg.MessageID, done)
+					s.streamUpdatesToTelegram(streamCtx, chatID, sentMsg.MessageID, execID, done)
+				}(previewDone)
+			}
+			return sentMsg.MessageID
+		},
+		OnRunnerUnavailable: func(ctx context.Context, msgText string, ackID int) {
+			if ackID != 0 {
+				s.editMessage(ctx, chatID, ackID, "❌ "+msgText)
+			} else {
+				s.sendMessage(ctx, chatID, "❌ "+msgText)
+			}
+		},
 	})
 	return
 }
