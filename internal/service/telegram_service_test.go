@@ -2892,6 +2892,117 @@ func TestTelegramService_HandleChatMessage_UsesSharedChannelChatRunner(t *testin
 	require.Equal(t, models.ExecRunning, createdExec.Status)
 }
 
+func TestTelegramService_HandleChatMessageSniffsOctetStreamImageForVisionModel(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, attachmentRepo)
+	workerSvc := NewWorkerService(llmSvc, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+
+	project := &models.Project{Name: "Telegram Octet Image Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	defaultAgent, err := llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, defaultAgent)
+	defaultAgent.Provider = models.ProviderAnthropic
+	defaultAgent.AuthMethod = models.AuthMethodCLI
+	defaultAgent.Model = "claude-sonnet-4-5"
+	defaultAgent.IsDefault = true
+	require.NoError(t, llmConfigRepo.Update(ctx, defaultAgent))
+	visionAgent := &models.LLMConfig{
+		Name:       "Vision Sonnet",
+		Provider:   models.ProviderAnthropic,
+		AuthMethod: models.AuthMethodAPIKey,
+		APIKey:     "test-key",
+		Model:      "claude-3-5-sonnet-20241022",
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, visionAgent))
+
+	oldUploadsDir := telegramUploadsDir
+	telegramUploadsDir = t.TempDir()
+	t.Cleanup(func() { telegramUploadsDir = oldUploadsDir })
+
+	var got *ChannelChatRunRequest
+	svc := &TelegramService{
+		projectRepo:        projectRepo,
+		llmConfigRepo:      llmConfigRepo,
+		taskSvc:            taskSvc,
+		taskRepo:           taskRepo,
+		execRepo:           execRepo,
+		chatAttachmentRepo: chatAttachmentRepo,
+		sendMessageFunc:    func(chatID int64, text string) {},
+		userProjects:       map[int64]string{7: project.ID},
+	}
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) {
+		got = &req
+	})
+
+	var apiServer *httptest.Server
+	apiServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/botTESTTOKEN/getMe":
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"id":123,"is_bot":true,"first_name":"TestBot","username":"test_bot"}}`))
+		case "/botTESTTOKEN/getFile":
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"file_id":"file-1","file_unique_id":"unique-1","file_path":"documents/screenshot.bin"}}`))
+		case "/file/botTESTTOKEN/documents/screenshot.bin":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(slackTestPNGBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer apiServer.Close()
+
+	bot, err := tgbotapi.NewBotAPIWithAPIEndpoint("TESTTOKEN", apiServer.URL+"/bot%s/%s")
+	require.NoError(t, err)
+	svc.bot = bot
+
+	oldTransport := http.DefaultTransport
+	apiServerURL := apiServer.URL
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host == "api.telegram.org" && strings.HasPrefix(req.URL.Path, "/file/botTESTTOKEN/") {
+			rewritten := req.Clone(req.Context())
+			rewritten.URL.Scheme = "http"
+			rewritten.URL.Host = strings.TrimPrefix(apiServerURL, "http://")
+			return oldTransport.RoundTrip(rewritten)
+		}
+		return oldTransport.RoundTrip(req)
+	})
+	t.Cleanup(func() { http.DefaultTransport = oldTransport })
+
+	svc.handleChatMessage(&tgbotapi.Message{
+		From:    &tgbotapi.User{ID: 7},
+		Chat:    &tgbotapi.Chat{ID: 42},
+		Caption: "what is this screenshot?",
+		Document: &tgbotapi.Document{
+			FileID:   "file-1",
+			FileName: "screenshot.bin",
+			FileSize: len(slackTestPNGBytes),
+			MimeType: "application/octet-stream",
+		},
+	})
+
+	require.NotNil(t, got, "Telegram chat should invoke the shared runner")
+	require.Len(t, got.ImageAttachments, 1)
+	require.Equal(t, "image/png", got.ImageAttachments[0].MediaType)
+	require.Equal(t, visionAgent.ID, got.Agent.ID)
+	require.NotContains(t, got.SystemContext, string(slackTestPNGBytes), "sniffed image bytes must not be embedded as text context")
+	persistedExec, err := execRepo.GetByID(ctx, got.ExecID)
+	require.NoError(t, err)
+	require.NotNil(t, persistedExec)
+	require.Equal(t, visionAgent.ID, persistedExec.AgentConfigID)
+	persistedAttachments, err := chatAttachmentRepo.ListByExecution(ctx, got.ExecID)
+	require.NoError(t, err)
+	require.Len(t, persistedAttachments, 1)
+	require.Equal(t, "image/png", persistedAttachments[0].MediaType)
+}
+
 func TestTelegramService_IsRichMessagesV2EnabledDefaultsTrueAndFalseOnlyExplicit(t *testing.T) {
 	ctx := context.Background()
 	svc := &TelegramService{}

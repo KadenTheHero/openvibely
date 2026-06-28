@@ -875,41 +875,56 @@ func (s *TelegramService) downloadAndSaveTelegramAttachment(
 		absPath = destPath
 	}
 
+	mediaType := detectTelegramDownloadedAttachmentMediaType(absPath, mimeType)
+	if mediaType != mimeType {
+		applog.Infof("[telegram] attachment file=%s declared mime=%s but detected mime=%s; using detected mime", fileName, mimeType, mediaType)
+	}
+
 	// Build attachment data
 	chatAtt := models.ChatAttachment{
 		FileName:  fileName,
 		FilePath:  absPath,
-		MediaType: mimeType,
+		MediaType: mediaType,
 		FileSize:  written,
 	}
 	chatAttachments := []models.ChatAttachment{chatAtt}
 
-	var imageAttachments []models.Attachment
-	var attachmentContext string
-
-	if isTelegramImageFile(mimeType) {
-		// Image files: pass as multimodal attachments
-		imageAttachments = append(imageAttachments, models.Attachment{
-			FileName:  fileName,
-			FilePath:  absPath,
-			MediaType: mimeType,
-			FileSize:  written,
-		})
+	attachmentContext, imageAttachments := channelChatAttachmentContextAndImages(chatAttachments, telegramMaxTextFileSize)
+	if len(imageAttachments) > 0 {
 		applog.Infof("[telegram] image attachment file=%s size=%d", fileName, written)
-	} else if written <= telegramMaxTextFileSize {
-		// Small text/document files: read content and include in context
-		content, readErr := os.ReadFile(absPath)
-		if readErr == nil {
-			attachmentContext = fmt.Sprintf("\n\n--- Attached Files ---\n\nFile: %s\n```\n%s\n```\n", fileName, string(content))
-			applog.Infof("[telegram] text attachment file=%s size=%d", fileName, written)
-		}
-	} else {
-		// Large files: mention but don't include content
-		attachmentContext = fmt.Sprintf("\n\n--- Attached Files ---\n\nFile: %s (attached, %d bytes - too large to include inline)\n", fileName, written)
-		applog.Infof("[telegram] large file attachment file=%s size=%d (content not included)", fileName, written)
+	} else if attachmentContext != "" {
+		applog.Infof("[telegram] non-image attachment file=%s size=%d", fileName, written)
 	}
 
 	return attachmentContext, imageAttachments, chatAttachments, nil
+}
+
+func detectTelegramDownloadedAttachmentMediaType(path, declaredMediaType string) string {
+	declaredMediaType = strings.ToLower(strings.TrimSpace(strings.Split(declaredMediaType, ";")[0]))
+	if declaredMediaType == "" {
+		declaredMediaType = "application/octet-stream"
+	}
+	if declaredMediaType != "application/octet-stream" && !isTelegramImageFile(declaredMediaType) {
+		return declaredMediaType
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return declaredMediaType
+	}
+	defer file.Close()
+	head := make([]byte, 512)
+	n, readErr := io.ReadFull(file, head)
+	if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+		return declaredMediaType
+	}
+	sniffedMediaType := strings.ToLower(strings.TrimSpace(http.DetectContentType(head[:n])))
+	if slackLooksLikeWebP(head[:n]) {
+		sniffedMediaType = "image/webp"
+	}
+	if isTelegramImageFile(sniffedMediaType) {
+		return sniffedMediaType
+	}
+	return declaredMediaType
 }
 
 // linkAttachmentsToExecution creates database records for chat attachments and moves files
