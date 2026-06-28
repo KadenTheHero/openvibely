@@ -33,6 +33,7 @@ type ChatEvent struct {
 	CompletedOutput string        `json:"completed_output,omitempty"` // Final assistant output for ChatResponseDone; enables plan-completion prompt without DOM scan
 	Queued          bool          `json:"queued,omitempty"`
 	Steering        bool          `json:"steering,omitempty"`
+	HasAttachments  bool          `json:"has_attachments,omitempty"`
 	PendingInputID  string        `json:"pending_input_id,omitempty"`
 }
 

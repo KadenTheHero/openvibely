@@ -1131,8 +1131,16 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									}
 									return;
 								}
-								if (eventType === 'chat_new_message') {
-								// Queued events use durable pending-input IDs, not execution IDs.
+									if (eventType === 'chat_new_message') {
+									if (data.has_attachments) {
+										var chatContainer = document.getElementById('chat-page-root');
+										var pid = chatContainer ? chatContainer.getAttribute('data-project-id') : projectId;
+										if (chatContainer && pid && typeof htmx !== 'undefined') {
+											htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: chatContainer, swap: 'outerHTML'});
+										}
+										return;
+									}
+									// Queued events use durable pending-input IDs, not execution IDs.
 								// Dedupe them by composer DOM row so recovered queued rows can reappear
 								// after a queued-to-steer provider failure.
 								if (data.queued) {

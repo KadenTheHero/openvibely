@@ -564,7 +564,7 @@ func (s *SlackService) handleAppMention(ctx context.Context, teamID string, even
 		UserID:    strings.TrimSpace(event.User),
 		Text:      text,
 		Source:    "slack",
-		Files:     slackIncomingFilesFromEventFiles(event.Files),
+		Files:     slackIncomingFilesFromAppMention(event),
 	})
 }
 
@@ -625,6 +625,7 @@ type slackIncomingFile struct {
 	Size               int
 	URLPrivate         string
 	URLPrivateDownload string
+	FileAccess         string
 	Thumb360           string
 	Thumb480           string
 	Thumb720           string
@@ -640,35 +641,154 @@ func (s *SlackService) processIncoming(msg slackIncomingMessage) {
 	s.processIncomingMessage(msg)
 }
 
-func slackIncomingFilesFromEventFiles(files []slack.File) []slackIncomingFile {
+func slackIncomingFilesFromAppMention(event slackevents.AppMentionEvent) []slackIncomingFile {
+	files := slackIncomingFilesFromSlackFiles(event.Files)
+	files = append(files, slackIncomingFilesFromAttachments(event.Attachments)...)
+	files = append(files, slackIncomingFilesFromBlocks(event.Blocks)...)
+	return dedupeSlackIncomingFiles(files)
+}
+
+func slackIncomingFilesFromSlackFiles(files []slack.File) []slackIncomingFile {
 	if len(files) == 0 {
 		return nil
 	}
 	out := make([]slackIncomingFile, 0, len(files))
 	for _, f := range files {
-		out = append(out, slackIncomingFile{
-			ID:                 f.ID,
-			Name:               f.Name,
-			Title:              f.Title,
-			Mimetype:           f.Mimetype,
-			Size:               f.Size,
-			URLPrivate:         f.URLPrivate,
-			URLPrivateDownload: f.URLPrivateDownload,
-			Thumb360:           f.Thumb360,
-			Thumb480:           f.Thumb480,
-			Thumb720:           f.Thumb720,
-			Thumb960:           f.Thumb960,
-			Thumb1024:          f.Thumb1024,
-		})
+		out = append(out, slackIncomingFileFromSlackFile(f))
 	}
 	return out
 }
 
+func slackIncomingFileFromSlackFile(f slack.File) slackIncomingFile {
+	return slackIncomingFile{
+		ID:                 f.ID,
+		Name:               f.Name,
+		Title:              f.Title,
+		Mimetype:           f.Mimetype,
+		Size:               f.Size,
+		URLPrivate:         f.URLPrivate,
+		URLPrivateDownload: f.URLPrivateDownload,
+		Thumb360:           f.Thumb360,
+		Thumb480:           f.Thumb480,
+		Thumb720:           f.Thumb720,
+		Thumb960:           f.Thumb960,
+		Thumb1024:          f.Thumb1024,
+	}
+}
+
 func slackIncomingFilesFromMessage(msg *slack.Msg) []slackIncomingFile {
-	if msg == nil || len(msg.Files) == 0 {
+	if msg == nil {
 		return nil
 	}
-	return slackIncomingFilesFromEventFiles(msg.Files)
+	files := slackIncomingFilesFromSlackFiles(msg.Files)
+	files = append(files, slackIncomingFilesFromAttachments(msg.Attachments)...)
+	files = append(files, slackIncomingFilesFromBlocks(msg.Blocks)...)
+	return dedupeSlackIncomingFiles(files)
+}
+
+func slackIncomingFilesFromAttachments(attachments []slack.Attachment) []slackIncomingFile {
+	if len(attachments) == 0 {
+		return nil
+	}
+	var files []slackIncomingFile
+	for _, att := range attachments {
+		name := strings.TrimSpace(att.Title)
+		if name == "" {
+			name = strings.TrimSpace(att.Fallback)
+		}
+		if slackIsTrustedFileURL(att.ImageURL) {
+			files = append(files, slackIncomingFile{
+				Name:       name,
+				Title:      att.Title,
+				Mimetype:   mediaTypeFromSlackFilename(name),
+				Size:       att.ImageBytes,
+				URLPrivate: att.ImageURL,
+			})
+		}
+		if slackIsTrustedFileURL(att.ThumbURL) {
+			files = append(files, slackIncomingFile{
+				Name:       name,
+				Title:      att.Title,
+				Mimetype:   mediaTypeFromSlackFilename(name),
+				Size:       att.ImageBytes,
+				URLPrivate: att.ThumbURL,
+			})
+		}
+		files = append(files, slackIncomingFilesFromBlocks(att.Blocks)...)
+	}
+	return files
+}
+
+func slackIncomingFilesFromBlocks(blocks slack.Blocks) []slackIncomingFile {
+	if len(blocks.BlockSet) == 0 {
+		return nil
+	}
+	var files []slackIncomingFile
+	for _, block := range blocks.BlockSet {
+		imageBlock, ok := block.(*slack.ImageBlock)
+		if !ok || imageBlock == nil {
+			continue
+		}
+		name := ""
+		if imageBlock.Title != nil {
+			name = strings.TrimSpace(imageBlock.Title.Text)
+		}
+		if name == "" {
+			name = strings.TrimSpace(imageBlock.AltText)
+		}
+		if imageBlock.SlackFile != nil {
+			file := slackIncomingFile{
+				ID:       strings.TrimSpace(imageBlock.SlackFile.ID),
+				Name:     name,
+				Title:    name,
+				Mimetype: mediaTypeFromSlackFilename(name),
+			}
+			if slackIsTrustedFileURL(imageBlock.SlackFile.URL) {
+				file.URLPrivate = strings.TrimSpace(imageBlock.SlackFile.URL)
+			}
+			if file.ID != "" || file.URLPrivate != "" {
+				files = append(files, file)
+			}
+			continue
+		}
+		if slackIsTrustedFileURL(imageBlock.ImageURL) {
+			files = append(files, slackIncomingFile{
+				Name:       name,
+				Title:      name,
+				Mimetype:   mediaTypeFromSlackFilename(name),
+				URLPrivate: strings.TrimSpace(imageBlock.ImageURL),
+			})
+		}
+	}
+	return files
+}
+
+func dedupeSlackIncomingFiles(files []slackIncomingFile) []slackIncomingFile {
+	if len(files) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(files))
+	out := make([]slackIncomingFile, 0, len(files))
+	for _, f := range files {
+		key := strings.TrimSpace(f.ID)
+		if key == "" {
+			key = strings.TrimSpace(f.URLPrivateDownload)
+		}
+		if key == "" {
+			key = strings.TrimSpace(f.URLPrivate)
+		}
+		if key == "" {
+			key = strings.TrimSpace(f.Name) + "|" + strings.TrimSpace(f.Title)
+		}
+		if key != "" && seen[key] {
+			continue
+		}
+		if key != "" {
+			seen[key] = true
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 func (s *SlackService) queueChatInput(ctx context.Context, projectID, activeExecID, agentID string, msg slackIncomingMessage) bool {
@@ -713,12 +833,13 @@ func (s *SlackService) queueChatInput(ctx context.Context, projectID, activeExec
 	}
 	if s.chatBroadcaster != nil {
 		s.chatBroadcaster.Publish(events.ChatEvent{
-			Type:      events.ChatNewMessage,
-			ProjectID: projectID,
-			ExecID:    queued.ID,
-			Message:   msg.Text,
-			Source:    msg.Source,
-			Queued:    true,
+			Type:           events.ChatNewMessage,
+			ProjectID:      projectID,
+			ExecID:         queued.ID,
+			Message:        msg.Text,
+			Source:         msg.Source,
+			Queued:         true,
+			HasAttachments: attachmentSessionID != "",
 		})
 	}
 	_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Queued. I'll send this after the current response finishes.")
@@ -829,18 +950,6 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		return
 	}
 
-	if s.chatBroadcaster != nil {
-		s.chatBroadcaster.Publish(events.ChatEvent{
-			Type:      events.ChatNewMessage,
-			ProjectID: projectID,
-			ExecID:    exec.ID,
-			TaskID:    task.ID,
-			Message:   msg.Text,
-			Source:    msg.Source,
-			AgentName: agent.Name,
-		})
-	}
-
 	if len(chatAttachments) > 0 {
 		s.linkAttachmentsToExecution(ctx, exec.ID, chatAttachments)
 		for i := range imageAttachments {
@@ -851,6 +960,19 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 				}
 			}
 		}
+	}
+
+	if s.chatBroadcaster != nil {
+		s.chatBroadcaster.Publish(events.ChatEvent{
+			Type:           events.ChatNewMessage,
+			ProjectID:      projectID,
+			ExecID:         exec.ID,
+			TaskID:         task.ID,
+			Message:        msg.Text,
+			Source:         msg.Source,
+			AgentName:      agent.Name,
+			HasAttachments: len(chatAttachments) > 0,
+		})
 	}
 
 	chatHistory, err := s.execRepo.ListChatHistory(ctx, projectID, slackChatHistoryLimit)
@@ -2410,14 +2532,16 @@ func (s *SlackService) downloadSlackFiles(ctx context.Context, files []slackInco
 	}()
 	attachments := make([]models.ChatAttachment, 0, len(files))
 	for _, f := range files {
+		var err error
+		f, err = s.resolveSlackFileInfo(ctx, f)
+		if err != nil {
+			return nil, err
+		}
 		if f.Size > slackMaxFileSize {
 			return nil, fmt.Errorf("file %q too large (%d bytes, max %d)", slackFileDisplayName(f), f.Size, slackMaxFileSize)
 		}
 		fileName := slackSafeFileName(f)
-		mediaType := strings.TrimSpace(f.Mimetype)
-		if mediaType == "" {
-			mediaType = mediaTypeFromSlackFilename(fileName)
-		}
+		mediaType := slackIncomingFileMediaType(f, fileName)
 		destPath, mediaType, err := s.downloadSlackFileCandidate(ctx, botToken, tmpDir, fileName, mediaType, f)
 		if err != nil {
 			return nil, err
@@ -2440,6 +2564,75 @@ func (s *SlackService) downloadSlackFiles(ctx context.Context, files []slackInco
 	}
 	cleanup = false
 	return attachments, nil
+}
+
+func (s *SlackService) resolveSlackFileInfo(ctx context.Context, f slackIncomingFile) (slackIncomingFile, error) {
+	needsInfo := strings.TrimSpace(f.ID) != "" && (strings.EqualFold(strings.TrimSpace(f.FileAccess), "check_file_info") || !slackIncomingFileHasDownloadURL(f))
+	if !needsInfo {
+		return f, nil
+	}
+	client := s.slackClientForFiles()
+	if client == nil {
+		return f, fmt.Errorf("slack bot token is not configured")
+	}
+	info, _, _, err := client.GetFileInfoContext(ctx, strings.TrimSpace(f.ID), 0, 0)
+	if err != nil {
+		return f, fmt.Errorf("failed to fetch Slack file info for %s: %w", strings.TrimSpace(f.ID), err)
+	}
+	if info == nil || strings.TrimSpace(info.ID) == "" {
+		return f, fmt.Errorf("Slack file info for %s was empty", strings.TrimSpace(f.ID))
+	}
+	resolved := slackIncomingFileFromSlackFile(*info)
+	return mergeSlackIncomingFile(f, resolved), nil
+}
+
+func slackIncomingFileHasDownloadURL(f slackIncomingFile) bool {
+	return strings.TrimSpace(f.URLPrivateDownload) != "" || strings.TrimSpace(f.URLPrivate) != "" || strings.TrimSpace(f.Thumb1024) != "" || strings.TrimSpace(f.Thumb960) != "" || strings.TrimSpace(f.Thumb720) != "" || strings.TrimSpace(f.Thumb480) != "" || strings.TrimSpace(f.Thumb360) != ""
+}
+
+func mergeSlackIncomingFile(original, resolved slackIncomingFile) slackIncomingFile {
+	if strings.TrimSpace(resolved.ID) == "" {
+		resolved.ID = original.ID
+	}
+	if strings.TrimSpace(resolved.Name) == "" {
+		resolved.Name = original.Name
+	}
+	if strings.TrimSpace(resolved.Title) == "" {
+		resolved.Title = original.Title
+	}
+	if strings.TrimSpace(resolved.Mimetype) == "" || strings.TrimSpace(resolved.Mimetype) == "application/octet-stream" {
+		if mt := strings.TrimSpace(original.Mimetype); mt != "" && mt != "application/octet-stream" {
+			resolved.Mimetype = mt
+		}
+	}
+	if resolved.Size == 0 {
+		resolved.Size = original.Size
+	}
+	if strings.TrimSpace(resolved.URLPrivate) == "" {
+		resolved.URLPrivate = original.URLPrivate
+	}
+	if strings.TrimSpace(resolved.URLPrivateDownload) == "" {
+		resolved.URLPrivateDownload = original.URLPrivateDownload
+	}
+	if strings.TrimSpace(resolved.FileAccess) == "" {
+		resolved.FileAccess = original.FileAccess
+	}
+	if strings.TrimSpace(resolved.Thumb360) == "" {
+		resolved.Thumb360 = original.Thumb360
+	}
+	if strings.TrimSpace(resolved.Thumb480) == "" {
+		resolved.Thumb480 = original.Thumb480
+	}
+	if strings.TrimSpace(resolved.Thumb720) == "" {
+		resolved.Thumb720 = original.Thumb720
+	}
+	if strings.TrimSpace(resolved.Thumb960) == "" {
+		resolved.Thumb960 = original.Thumb960
+	}
+	if strings.TrimSpace(resolved.Thumb1024) == "" {
+		resolved.Thumb1024 = original.Thumb1024
+	}
+	return resolved
 }
 
 func (s *SlackService) downloadSlackFileCandidate(ctx context.Context, botToken, tmpDir, fileName, mediaType string, f slackIncomingFile) (string, string, error) {
@@ -2526,6 +2719,14 @@ func (s *SlackService) downloadSlackPrivateFile(ctx context.Context, botToken, d
 		return http.ErrUseLastResponse
 	}
 
+	parsedDownloadURL, err := url.Parse(downloadURL)
+	if err != nil {
+		return err
+	}
+	if !slackTrustedOriginalFileDownloadHost(parsedDownloadURL.Hostname()) {
+		return fmt.Errorf("slack file download URL host %q is not trusted", parsedDownloadURL.Host)
+	}
+
 	currentURL := downloadURL
 	for redirects := 0; redirects <= 10; redirects++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, currentURL, nil)
@@ -2587,6 +2788,35 @@ func slackCanForwardFileAuth(originalURL string, nextURL *url.URL) bool {
 		return false
 	}
 	return slackTrustedFileDownloadHost(original.Hostname(), nextURL.Hostname())
+}
+
+func slackIsTrustedFileURL(rawURL string) bool {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return false
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return slackTrustedOriginalFileDownloadHost(parsed.Hostname())
+}
+
+func slackTrustedOriginalFileDownloadHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return false
+	}
+	if slackIsLocalhost(host) {
+		return true
+	}
+	if host == "slack.com" || strings.HasSuffix(host, ".slack.com") {
+		return true
+	}
+	if host == "slack-files.com" || strings.HasSuffix(host, ".slack-files.com") {
+		return true
+	}
+	return false
 }
 
 func slackTrustedFileDownloadHost(originalHost, nextHost string) bool {
@@ -2725,6 +2955,15 @@ func uniqueSlackTempFilename(dir, filename string) string {
 		}
 		candidate = fmt.Sprintf("%s-%d%s", base, i, ext)
 	}
+}
+
+func slackIncomingFileMediaType(f slackIncomingFile, fileName string) string {
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(f.Mimetype, ";")[0]))
+	filenameMediaType := mediaTypeFromSlackFilename(fileName)
+	if mediaType == "" || mediaType == "application/octet-stream" {
+		return filenameMediaType
+	}
+	return mediaType
 }
 
 func mediaTypeFromSlackFilename(filename string) string {
