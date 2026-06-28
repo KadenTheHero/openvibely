@@ -265,8 +265,8 @@ func TestOutboundTargetDraftTestSendsWithoutPersisting(t *testing.T) {
 		t.Fatalf("draft test must not persist targets, targets=%+v err=%v", targets, err)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "Test sent.") || strings.Contains(body, "&#34;ok&#34;") || strings.Contains(body, `{"ok"`) {
-		t.Fatalf("expected polished success result without raw JSON, got %q", body)
+	if !strings.Contains(body, `>Sent</span>`) || strings.Contains(body, "&#34;ok&#34;") || strings.Contains(body, `{"ok"`) || strings.Contains(body, `alert alert-success`) {
+		t.Fatalf("expected compact button-local success result without raw JSON or banner, got %q", body)
 	}
 }
 
@@ -290,8 +290,8 @@ func TestOutboundTargetDraftTestRendersCleanFailure(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "Test failed:") || strings.Contains(body, `{"ok"`) || strings.Contains(body, "&#34;ok&#34;") {
-		t.Fatalf("expected polished failure result without raw JSON, got %q", body)
+	if !strings.Contains(body, `>Failed</span>`) || !strings.Contains(body, `title="Test failed:`) || strings.Contains(body, `{"ok"`) || strings.Contains(body, "&#34;ok&#34;") || strings.Contains(body, `alert alert-error`) {
+		t.Fatalf("expected compact button-local failure result without raw JSON or banner, got %q", body)
 	}
 }
 
@@ -330,10 +330,10 @@ func TestOutboundTargetTestPreservesThreadIDAndEscapesResult(t *testing.T) {
 		t.Fatalf("unexpected message %q", slack.text)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "Test sent.") {
+	if !strings.Contains(body, `>Sent</span>`) {
 		t.Fatalf("unexpected body %q", body)
 	}
-	if strings.Contains(body, "slack:C123:1690000000.000000") || strings.Contains(body, `{"ok":true`) || strings.Contains(body, "&#34;ok&#34;") {
-		t.Fatalf("expected polished success result without transport JSON, got %q", body)
+	if strings.Contains(body, "slack:C123:1690000000.000000") || strings.Contains(body, `{"ok":true`) || strings.Contains(body, "&#34;ok&#34;") || strings.Contains(body, `alert alert-success`) {
+		t.Fatalf("expected compact button-local success result without transport JSON or banner, got %q", body)
 	}
 }

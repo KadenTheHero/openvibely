@@ -281,8 +281,11 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if !strings.Contains(body, `/channels/outbound-targets/test-draft`) || !strings.Contains(body, `window.htmx.process(row)`) {
 		t.Fatal("expected draft-added target rows to include an immediately usable Test button")
 	}
-	if !strings.Contains(body, `hx-indicator="#outbound-target-test-indicator-`) || !strings.Contains(body, `Testing...`) {
-		t.Fatal("expected draft target Test buttons to show a loading indicator")
+	if !strings.Contains(body, `data-outbound-target-test-label`) || !strings.Contains(body, `outboundTargetTestBefore(this)`) || !strings.Contains(body, `outboundTargetTestAfter(this, event)`) || !strings.Contains(body, `classList.add('loading')`) {
+		t.Fatal("expected draft target Test buttons to show progress and completion inside the button")
+	}
+	if strings.Contains(body, `id="outbound-target-test-draft-`) || strings.Contains(body, `hx-indicator="#outbound-target-test-indicator-`) {
+		t.Fatal("expected draft target Test status to avoid separate banner/indicator elements")
 	}
 	if !strings.Contains(body, "resetOutboundTargetAddForm") || !strings.Contains(body, "reloadOutboundTargetsModalDraft") || !strings.Contains(body, "rp === '/channels/send-message-explicit-targets'") {
 		t.Fatal("expected outbound modal close/reset/reload hooks")
@@ -337,8 +340,11 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if !strings.Contains(policyBody, "Saved outbound message targets.") || !strings.Contains(policyBody, "billing@example.com") {
 		t.Fatalf("expected saved draft target to appear in refreshed modal fragment, got %q", policyBody)
 	}
-	if !strings.Contains(policyBody, `hx-indicator="#outbound-target-test-indicator-`) || !strings.Contains(policyBody, `Testing...`) {
-		t.Fatalf("expected saved target Test buttons to show a loading indicator, got %q", policyBody)
+	if !strings.Contains(policyBody, `data-outbound-target-test-label`) || !strings.Contains(policyBody, `outboundTargetTestBefore(this)`) || !strings.Contains(policyBody, `outboundTargetTestAfter(this, event)`) {
+		t.Fatalf("expected saved target Test status to stay inside the button, got %q", policyBody)
+	}
+	if strings.Contains(policyBody, `hx-indicator="#outbound-target-test-indicator-`) || strings.Contains(policyBody, `<div id="outbound-target-test-`) {
+		t.Fatalf("expected saved target Test status to avoid separate banner/indicator elements, got %q", policyBody)
 	}
 	if strings.Contains(policyBody, `data-channel-type="outbound-targets"`) || strings.Contains(policyBody, `hx-swap-oob`) {
 		t.Fatal("save response must not include card markup or OOB swaps")

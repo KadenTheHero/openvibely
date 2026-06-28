@@ -568,7 +568,10 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			return nil
 		})
 	}
-	taskActionTools := s.taskSendMessageRuntimeTools(task)
+	var taskActionTools *llmcontracts.RuntimeTools
+	if supportsRuntimeChatActionTools(agent) {
+		taskActionTools = s.taskSendMessageRuntimeTools(task)
+	}
 	runtimeToolsActive := false
 	if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil || taskActionTools != nil {
 		mergedTools := llmcontracts.CompositeRuntimeTools(runtimeTools, ctxTools, taskActionTools)
