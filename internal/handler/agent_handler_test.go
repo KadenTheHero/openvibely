@@ -27,7 +27,22 @@ func (f llmCallerFunc) CallModel(ctx context.Context, prompt string, attachments
 
 func TestHandler_ListAgents_DeleteConfirmationDialog(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(repository.NewAgentRepo(db))
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	// Create a non-protected user agent so the working Delete button is rendered.
+	// Protected agents (e.g. the Skill Curator seeded by migrations) show a
+	// disabled "Delete (protected)" button instead of openDeleteAgentConfirm.
+	userAgent := &models.Agent{
+		Name:  "Test User Agent",
+		Key:   "test_user_agent",
+		Scope: models.AgentScopeGlobal,
+		Model: "inherit",
+		Tools: []string{},
+	}
+	if err := agentRepo.Create(t.Context(), userAgent); err != nil {
+		t.Fatalf("create test agent: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/agents?project_id=default", nil)
 	rec := httptest.NewRecorder()

@@ -1666,6 +1666,49 @@ func (h *Handler) DeleteAgent(c echo.Context) error {
 	id := c.Param("id")
 	applog.Infof("[handler] DeleteAgent id=%s", id)
 
+	if h.agentRepo == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "agent repository unavailable")
+	}
+
+	agent, err := h.agentRepo.GetByID(c.Request().Context(), id)
+	if err != nil {
+		applog.Infof("[handler] DeleteAgent lookup error: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if agent == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "Agent not found")
+	}
+	if agent.GeneratedStatus == models.AgentStatusProtected {
+		return echo.NewHTTPError(http.StatusForbidden, "protected system agents cannot be deleted")
+	}
+
+	// Remove the on-disk agent directory so that SyncRootDeclarations does not
+	// re-create the agent from the stale SKILLS.md on the next ListAgents call.
+	if key := strings.TrimSpace(agent.Key); key != "" && h.agentSkillRoot != "" {
+		scope := string(agent.Scope)
+		if scope != "project" {
+			scope = "global"
+		}
+		var agentDir string
+		switch scope {
+		case "project":
+			if projectRoot := h.currentProjectSkillRoot(c); projectRoot != "" {
+				agentDir = filepath.Join(projectRoot, "agents", key)
+			}
+		default:
+			agentDir = filepath.Join(h.agentSkillRoot, "agents", key)
+		}
+		if agentDir != "" {
+			if stat, statErr := os.Stat(agentDir); statErr == nil && stat.IsDir() {
+				if removeErr := os.RemoveAll(agentDir); removeErr != nil {
+					applog.Infof("[handler] DeleteAgent remove on-disk dir warning key=%q path=%q: %v", key, agentDir, removeErr)
+				} else {
+					applog.Infof("[handler] DeleteAgent removed on-disk agent dir key=%q path=%q", key, agentDir)
+				}
+			}
+		}
+	}
+
 	if err := h.agentRepo.Delete(c.Request().Context(), id); err != nil {
 		applog.Infof("[handler] DeleteAgent error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())

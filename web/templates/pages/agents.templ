@@ -90,16 +90,22 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 										<li>
 											<button onclick="editAgentFromData(this.closest('[data-agent-id]'))">Edit</button>
 										</li>
-										<li>
-											<button
-												class="text-error"
-												data-agent-id={ agent.ID }
-												data-agent-name={ agent.Name }
-												onclick="openDeleteAgentConfirm(this)"
-											>
-												Delete
-											</button>
-										</li>
+										if agent.GeneratedStatus == models.AgentStatusProtected {
+											<li>
+												<button class="opacity-40 cursor-not-allowed" disabled title="Protected system agents cannot be deleted">Delete (protected)</button>
+											</li>
+										} else {
+											<li>
+												<button
+													class="text-error"
+													data-agent-id={ agent.ID }
+													data-agent-name={ agent.Name }
+													onclick="openDeleteAgentConfirm(this)"
+												>
+													Delete
+												</button>
+											</li>
+										}
 									</ul>
 								</div>
 							</div>
