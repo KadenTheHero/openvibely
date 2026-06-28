@@ -264,7 +264,7 @@ func TestMigrateLegacyStorageMovesDefaultDatabaseSidecarsAndRepos(t *testing.T) 
 	}
 }
 
-func TestMigrateLegacyStorageBacksUpFreshTargetDatabaseAndRepos(t *testing.T) {
+func TestMigrateLegacyStoragePreservesExistingTargetDatabaseAndRepos(t *testing.T) {
 	t.Setenv("DATABASE_PATH", "")
 	t.Setenv("PROJECT_REPO_ROOT", "")
 	t.Setenv("OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION", "")
@@ -289,13 +289,30 @@ func TestMigrateLegacyStorageBacksUpFreshTargetDatabaseAndRepos(t *testing.T) {
 	if err := os.WriteFile(filepath.Join("repos", "real-project", "README.md"), []byte("legacy repo"), 0o644); err != nil {
 		t.Fatalf("write legacy repo file: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join("uploads", "chat", "legacy-exec"), 0o755); err != nil {
+		t.Fatalf("mkdir legacy uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join("uploads", "chat", "legacy-exec", "image.png"), []byte("legacy upload"), 0o644); err != nil {
+		t.Fatalf("write legacy upload file: %v", err)
+	}
 
 	appDataDir := filepath.Join(tmpDir, "appdata")
 	if err := os.MkdirAll(filepath.Join(appDataDir, "repos", "empty-project"), 0o755); err != nil {
 		t.Fatalf("mkdir target repos: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(appDataDir, "uploads", "chat", "target-exec"), 0o755); err != nil {
+		t.Fatalf("mkdir target uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(appDataDir, "uploads", "chat", "target-exec", "image.png"), []byte("target upload"), 0o644); err != nil {
+		t.Fatalf("write target upload file: %v", err)
+	}
+	freshDB := "SQLite format 3\x00fresh-db"
 	for _, name := range []string{"openvibely.db", "openvibely.db-wal", "openvibely.db-shm", "openvibely.db-journal"} {
-		if err := os.WriteFile(filepath.Join(appDataDir, name), []byte("fresh-"+name), 0o644); err != nil {
+		content := "fresh-" + name
+		if name == "openvibely.db" {
+			content = freshDB
+		}
+		if err := os.WriteFile(filepath.Join(appDataDir, name), []byte(content), 0o644); err != nil {
 			t.Fatalf("write fresh target %s: %v", name, err)
 		}
 	}
@@ -312,24 +329,115 @@ func TestMigrateLegacyStorageBacksUpFreshTargetDatabaseAndRepos(t *testing.T) {
 		t.Fatalf("migrateLegacyStorage: %v", err)
 	}
 
-	for _, name := range []string{"openvibely.db", "openvibely.db-shm", "openvibely.db-journal"} {
-		if data, err := os.ReadFile(filepath.Join(appDataDir, name)); err != nil || string(data) != "legacy-"+name {
-			t.Fatalf("expected legacy target %s content, data=%q err=%v", name, string(data), err)
+	for _, name := range []string{"openvibely.db", "openvibely.db-wal", "openvibely.db-shm", "openvibely.db-journal"} {
+		want := "fresh-" + name
+		if name == "openvibely.db" {
+			want = freshDB
+		}
+		if data, err := os.ReadFile(filepath.Join(appDataDir, name)); err != nil || string(data) != want {
+			t.Fatalf("expected fresh target %s content to be preserved, data=%q err=%v", name, string(data), err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(appDataDir, "openvibely.db-wal")); !os.IsNotExist(err) {
-		t.Fatalf("expected stale target wal sidecar to be backed up without replacement, stat err=%v", err)
+	for _, name := range []string{"openvibely.db", "openvibely.db-shm", "openvibely.db-journal"} {
+		if data, err := os.ReadFile(name); err != nil || string(data) != "legacy-"+name {
+			t.Fatalf("expected legacy %s to be left in place, data=%q err=%v", name, string(data), err)
+		}
+	}
+	if _, err := os.Stat("openvibely.db-wal"); !os.IsNotExist(err) {
+		t.Fatalf("expected missing legacy wal to remain absent, stat err=%v", err)
 	}
 	for _, name := range []string{"openvibely.db", "openvibely.db-wal", "openvibely.db-shm", "openvibely.db-journal"} {
-		if data, err := os.ReadFile(filepath.Join(appDataDir, name+".pre-appdata-migration-backup")); err != nil || string(data) != "fresh-"+name {
-			t.Fatalf("expected backed up fresh %s content, data=%q err=%v", name, string(data), err)
+		if _, err := os.Stat(filepath.Join(appDataDir, name+".pre-appdata-migration-backup")); !os.IsNotExist(err) {
+			t.Fatalf("expected no database backup for preserved target %s, stat err=%v", name, err)
 		}
 	}
-	if data, err := os.ReadFile(filepath.Join(appDataDir, "repos", "real-project", "README.md")); err != nil || string(data) != "legacy repo" {
-		t.Fatalf("expected migrated legacy repo, data=%q err=%v", string(data), err)
+	if _, err := os.Stat(filepath.Join(appDataDir, "repos", "empty-project")); err != nil {
+		t.Fatalf("expected existing target repos to be preserved: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(appDataDir, "repos.pre-appdata-migration-backup", "empty-project")); err != nil {
-		t.Fatalf("expected target repos backup: %v", err)
+	if data, err := os.ReadFile(filepath.Join("repos", "real-project", "README.md")); err != nil || string(data) != "legacy repo" {
+		t.Fatalf("expected legacy repo to be left in place, data=%q err=%v", string(data), err)
+	}
+	if _, err := os.Stat(filepath.Join(appDataDir, "repos.pre-appdata-migration-backup")); !os.IsNotExist(err) {
+		t.Fatalf("expected no repos backup for preserved target, stat err=%v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(appDataDir, "uploads", "chat", "target-exec", "image.png")); err != nil || string(data) != "target upload" {
+		t.Fatalf("expected existing target upload to be preserved, data=%q err=%v", string(data), err)
+	}
+	if data, err := os.ReadFile(filepath.Join("uploads", "chat", "legacy-exec", "image.png")); err != nil || string(data) != "legacy upload" {
+		t.Fatalf("expected legacy upload to be left in place, data=%q err=%v", string(data), err)
+	}
+	if _, err := os.Stat(filepath.Join(appDataDir, "uploads.pre-appdata-migration-backup")); !os.IsNotExist(err) {
+		t.Fatalf("expected no uploads backup for preserved target, stat err=%v", err)
+	}
+}
+
+func TestMigrateLegacyStorageMigratesOverEmptyOrInvalidTargets(t *testing.T) {
+	t.Setenv("DATABASE_PATH", "")
+	t.Setenv("PROJECT_REPO_ROOT", "")
+	t.Setenv("OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION", "")
+	tmpDir := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+
+	if err := os.WriteFile("openvibely.db", []byte("legacy-db"), 0o644); err != nil {
+		t.Fatalf("write legacy db: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join("repos", "real-project"), 0o755); err != nil {
+		t.Fatalf("mkdir legacy repos: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join("repos", "real-project", "README.md"), []byte("legacy repo"), 0o644); err != nil {
+		t.Fatalf("write legacy repo file: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join("uploads", "chat", "exec-1"), 0o755); err != nil {
+		t.Fatalf("mkdir legacy uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join("uploads", "chat", "exec-1", "image.png"), []byte("legacy upload"), 0o644); err != nil {
+		t.Fatalf("write legacy upload file: %v", err)
+	}
+
+	appDataDir := filepath.Join(tmpDir, "appdata")
+	if err := os.MkdirAll(filepath.Join(appDataDir, "repos"), 0o755); err != nil {
+		t.Fatalf("mkdir empty target repos: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(appDataDir, "uploads"), 0o755); err != nil {
+		t.Fatalf("mkdir empty target uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(appDataDir, "openvibely.db"), []byte("not a sqlite database"), 0o644); err != nil {
+		t.Fatalf("write invalid target db: %v", err)
+	}
+
+	cfg := &config.Config{
+		AppDataDir:      appDataDir,
+		DatabasePath:    filepath.Join(appDataDir, "openvibely.db"),
+		ProjectRepoRoot: filepath.Join(appDataDir, "repos"),
+	}
+	if err := migrateLegacyStorage(cfg); err != nil {
+		t.Fatalf("migrateLegacyStorage: %v", err)
+	}
+
+	if data, err := os.ReadFile(filepath.Join(appDataDir, "openvibely.db")); err != nil || string(data) != "legacy-db" {
+		t.Fatalf("expected legacy db migrated over empty target, data=%q err=%v", string(data), err)
+	}
+	if data, err := os.ReadFile(filepath.Join(appDataDir, "repos", "real-project", "README.md")); err != nil || string(data) != "legacy repo" {
+		t.Fatalf("expected legacy repo migrated over empty target, data=%q err=%v", string(data), err)
+	}
+	if data, err := os.ReadFile(filepath.Join(appDataDir, "uploads", "chat", "exec-1", "image.png")); err != nil || string(data) != "legacy upload" {
+		t.Fatalf("expected legacy upload migrated over empty target, data=%q err=%v", string(data), err)
+	}
+	if _, err := os.Stat(filepath.Join(appDataDir, "openvibely.db.pre-appdata-migration-backup")); err != nil {
+		t.Fatalf("expected invalid target db backup: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(appDataDir, "repos.pre-appdata-migration-backup")); err != nil {
+		t.Fatalf("expected empty target repos backup: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(appDataDir, "uploads.pre-appdata-migration-backup")); err != nil {
+		t.Fatalf("expected empty target uploads backup: %v", err)
 	}
 }
 
@@ -354,9 +462,6 @@ func TestMigrateLegacyStorageMovesUploadsIntoAppData(t *testing.T) {
 		t.Fatalf("write upload: %v", err)
 	}
 	appDataDir := filepath.Join(tmpDir, "appdata")
-	if err := os.MkdirAll(filepath.Join(appDataDir, "uploads", "empty"), 0o755); err != nil {
-		t.Fatalf("mkdir target uploads: %v", err)
-	}
 
 	cfg := &config.Config{
 		AppDataDir:      appDataDir,
@@ -369,8 +474,8 @@ func TestMigrateLegacyStorageMovesUploadsIntoAppData(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(appDataDir, "uploads", "chat", "exec-1", "image.png")); err != nil || string(data) != "image" {
 		t.Fatalf("expected migrated upload, data=%q err=%v", string(data), err)
 	}
-	if _, err := os.Stat(filepath.Join(appDataDir, "uploads.pre-appdata-migration-backup", "empty")); err != nil {
-		t.Fatalf("expected target uploads backup: %v", err)
+	if _, err := os.Stat(filepath.Join(appDataDir, "uploads.pre-appdata-migration-backup")); !os.IsNotExist(err) {
+		t.Fatalf("expected no target uploads backup when target was absent, stat err=%v", err)
 	}
 }
 

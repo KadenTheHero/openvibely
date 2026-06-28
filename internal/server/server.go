@@ -85,6 +85,18 @@ func migrateLegacyDatabaseFiles(databasePath string) error {
 	if legacyAbs == "" {
 		return nil
 	}
+	if info, err := os.Stat(targetAbs); err == nil {
+		if info.IsDir() {
+			return fmt.Errorf("target database path %s exists and is a directory", targetAbs)
+		}
+		if info.Size() > 0 && isSQLiteDatabaseFile(targetAbs) {
+			applog.Infof("[storage] skipped legacy database migration from %s because target database already exists at %s", legacyAbs, targetAbs)
+			return nil
+		}
+		applog.Infof("[storage] migrating legacy database from %s over empty or invalid target database at %s", legacyAbs, targetAbs)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking target database path %s: %w", targetAbs, err)
+	}
 	if err := os.MkdirAll(filepath.Dir(targetAbs), 0o755); err != nil {
 		return fmt.Errorf("creating database directory %s: %w", filepath.Dir(targetAbs), err)
 	}
@@ -134,6 +146,22 @@ func migrateLegacyDirectory(name, targetPath string) error {
 	}
 	if !info.IsDir() {
 		return nil
+	}
+	if targetInfo, err := os.Stat(targetAbs); err == nil {
+		if !targetInfo.IsDir() {
+			return fmt.Errorf("target %s path %s exists and is not a directory", name, targetAbs)
+		}
+		empty, emptyErr := isDirEmpty(targetAbs)
+		if emptyErr != nil {
+			return fmt.Errorf("checking target %s directory %s: %w", name, targetAbs, emptyErr)
+		}
+		if !empty {
+			applog.Infof("[storage] skipped legacy %s migration from %s because target already exists at %s", name, legacyAbs, targetAbs)
+			return nil
+		}
+		applog.Infof("[storage] migrating legacy %s from %s over empty target at %s", name, legacyAbs, targetAbs)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking target %s path %s: %w", name, targetAbs, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(targetAbs), 0o755); err != nil {
 		return fmt.Errorf("creating %s parent %s: %w", name, filepath.Dir(targetAbs), err)
@@ -202,6 +230,28 @@ func backupExistingPath(path string) error {
 			return fmt.Errorf("checking backup path %s: %w", candidate, err)
 		}
 	}
+}
+
+func isDirEmpty(path string) (bool, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return false, err
+	}
+	return len(entries) == 0, nil
+}
+
+func isSQLiteDatabaseFile(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	header := make([]byte, 16)
+	if _, err := io.ReadFull(f, header); err != nil {
+		return false
+	}
+	return string(header) == "SQLite format 3\x00"
 }
 
 func moveOrCopyPath(from, to string) error {
