@@ -268,6 +268,9 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if !strings.Contains(body, `modal-action flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between`) || !strings.Contains(body, `toggle toggle-primary toggle-sm`) {
 		t.Fatal("expected outbound targets footer to split toggle on the left and save actions on the right")
 	}
+	if !strings.Contains(body, `id="outbound-targets-draft-fields" class="hidden"`) {
+		t.Fatal("expected hidden outbound target draft fields to stay out of the footer flex layout")
+	}
 	if strings.Contains(body, `onchange="this.form.requestSubmit()"`) {
 		t.Fatal("explicit-target toggle should not autosubmit and append refreshed cards into the modal")
 	}
