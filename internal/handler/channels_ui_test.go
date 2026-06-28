@@ -136,6 +136,16 @@ func TestChannelsPageRendersCardLayout(t *testing.T) {
 	if !strings.Contains(body, `id="discord_config_modal"`) || !strings.Contains(body, `hx-post="/channels/discord/configure"`) {
 		t.Error("expected Discord configuration modal")
 	}
+	if !strings.Contains(body, `id="discord_config_modal" class="modal" onclose="resetDiscordConfigForm()"`) ||
+		!strings.Contains(body, `function resetDiscordConfigForm()`) ||
+		!strings.Contains(body, `form.reset();`) ||
+		!strings.Contains(body, `resetSecretInputVisibility('discord_bot_token')`) {
+		t.Error("expected Discord configuration modal to reset unsaved edits and masked token state on close/reopen")
+	}
+	if !strings.Contains(body, `event.detail.pathInfo.requestPath === '/channels/discord/configure' && event.detail.successful`) ||
+		!strings.Contains(body, `document.getElementById('discord_config_modal')`) {
+		t.Error("expected Discord configuration modal to close after successful HTMX save")
+	}
 }
 
 func TestChannelsPageTelegramRichMessagesToggleDefaultsCheckedAndHonorsSavedFalse(t *testing.T) {

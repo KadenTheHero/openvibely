@@ -973,7 +973,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 			</form>
 			</dialog>
 
-		<dialog id="discord_config_modal" class="modal">
+		<dialog id="discord_config_modal" class="modal" onclose="resetDiscordConfigForm()">
 			<div class="modal-box max-w-2xl">
 				<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeDiscordConfigModal()" aria-label="Close Discord configuration" title="Close Discord configuration">×</button>
 				<h3 class="font-bold text-lg mb-4 pr-10">Configure Discord</h3>
@@ -1717,9 +1717,17 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					if (modal) modal.close();
 				}
 
+				function resetDiscordConfigForm() {
+					const form = document.getElementById('discord_config_form');
+					if (form) form.reset();
+					resetSecretInputVisibility('discord_bot_token');
+				}
+
 				function openDiscordConfigModal() {
 					const modal = document.getElementById('discord_config_modal');
-					if (modal) modal.showModal();
+					if (!modal) return;
+					resetDiscordConfigForm();
+					modal.showModal();
 				}
 
 				function closeDiscordConfigModal() {
@@ -1924,6 +1932,12 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					}
 					if (event.detail.pathInfo.requestPath === '/channels/email/configure' && event.detail.successful) {
 						const modal = document.getElementById('email_config_modal');
+						if (modal && modal.open) {
+							modal.close();
+						}
+					}
+					if (event.detail.pathInfo.requestPath === '/channels/discord/configure' && event.detail.successful) {
+						const modal = document.getElementById('discord_config_modal');
 						if (modal && modal.open) {
 							modal.close();
 						}
