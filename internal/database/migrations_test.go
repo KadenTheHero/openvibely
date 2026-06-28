@@ -69,7 +69,7 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 		t.Fatalf("failed to run pending migrations after stale 099: %v", err)
 	}
 
-	for _, table := range []string{"channel_targets", "channel_message_sends", "discord_authorized_users", "discord_task_context"} {
+	for _, table := range []string{"channel_targets", "channel_message_sends", "discord_authorized_users", "discord_task_context", "discord_user_projects"} {
 		var count int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil {
 			t.Fatalf("failed to inspect table %s: %v", table, err)
@@ -87,8 +87,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 101 {
-		t.Fatalf("max goose version = %d, want 101", maxVersion)
+	if maxVersion != 102 {
+		t.Fatalf("max goose version = %d, want 102", maxVersion)
 	}
 }
 
@@ -526,8 +526,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 101 {
-		t.Fatalf("max goose version = %d, want 101", maxVersion)
+	if maxVersion != 102 {
+		t.Fatalf("max goose version = %d, want 102", maxVersion)
 	}
 }
 
@@ -878,8 +878,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 101 {
-		t.Fatalf("max goose version = %d, want 101", maxVersion)
+	if maxVersion != 102 {
+		t.Fatalf("max goose version = %d, want 102", maxVersion)
 	}
 }
 

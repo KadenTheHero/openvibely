@@ -284,6 +284,63 @@ func TestDiscordSendToTaskUsesConfiguredChannelTaskRunner(t *testing.T) {
 	}
 }
 
+func TestDiscordSwitchProjectPersistsForSubsequentMessages(t *testing.T) {
+	svc, db, settingsRepo, projectRepo, taskRepo, authRepo, discordTaskContextRepo := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	defaultProject := &models.Project{Name: "Default", IsDefault: true}
+	if err := projectRepo.Create(ctx, defaultProject); err != nil {
+		t.Fatalf("create default project: %v", err)
+	}
+	targetProject := &models.Project{Name: "openvibely"}
+	if err := projectRepo.Create(ctx, targetProject); err != nil {
+		t.Fatalf("create target project: %v", err)
+	}
+	userProjectRepo := repository.NewDiscordUserProjectRepo(db)
+	svc.SetDiscordUserProjectRepo(userProjectRepo)
+	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: targetProject.ID, DiscordUserID: "1518288288572641398", DisplayName: "James", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize user: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
+		t.Fatalf("set responses: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	svc.llmConfigRepo = agentRepo
+	svc.execRepo = execRepo
+	svc.scheduleRepo = scheduleRepo
+	svc.taskSvc = NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, repository.NewAttachmentRepo(db))
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
+
+	result := svc.switchProjectResult(ctx, "1518288288572641398", "openvibely")
+	if !strings.Contains(result, "openvibely") {
+		t.Fatalf("unexpected switch result: %q", result)
+	}
+	saved, err := userProjectRepo.GetUserProject(ctx, "1518288288572641398")
+	if err != nil {
+		t.Fatalf("load saved project: %v", err)
+	}
+	if saved != targetProject.ID {
+		t.Fatalf("saved project = %q, want %q", saved, targetProject.ID)
+	}
+
+	fresh := NewDiscordService(settingsRepo, projectRepo, agentRepo, taskRepo, execRepo, scheduleRepo, svc.taskSvc, svc.llmSvc, nil, authRepo, discordTaskContextRepo)
+	fresh.SetDiscordUserProjectRepo(userProjectRepo)
+	fresh.sendMessageFunc = svc.sendMessageFunc
+	var got ChannelChatRunRequest
+	fresh.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
+
+	fresh.processIncomingMessage(discordIncomingMessage{ChannelID: "chan-1", MessageID: "msg-1", UserID: "1518288288572641398", Username: "James", Text: "what project are you in", Source: "discord"})
+	if got.ProjectID != targetProject.ID {
+		t.Fatalf("subsequent Discord message used project %q, want %q", got.ProjectID, targetProject.ID)
+	}
+}
+
 func TestDiscordProcessIncomingMessagePassesReplyContextToSharedChatRunner(t *testing.T) {
 	svc, db, settingsRepo, projectRepo, taskRepo, authRepo, discordTaskContextRepo := newDiscordServiceForTest(t)
 	ctx := context.Background()

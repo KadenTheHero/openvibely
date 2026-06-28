@@ -56,6 +56,7 @@ type DiscordService struct {
 	settingsRepo             *repository.SettingsRepo
 	discordAuthRepo          *repository.DiscordAuthRepo
 	discordTaskContextRepo   *repository.DiscordTaskContextRepo
+	discordUserProjectRepo   *repository.DiscordUserProjectRepo
 	projectRepo              *repository.ProjectRepo
 	llmConfigRepo            *repository.LLMConfigRepo
 	taskRepo                 *repository.TaskRepo
@@ -153,6 +154,9 @@ func (s *DiscordService) SetChannelChatRunner(runner ChannelChatRunner) { s.chan
 func (s *DiscordService) SetChannelTaskRunner(runner ChannelTaskRunner) { s.channelTaskRunner = runner }
 func (s *DiscordService) SetChannelMessageRouter(router *ChannelMessageRouter) {
 	s.channelMessageRouter = router
+}
+func (s *DiscordService) SetDiscordUserProjectRepo(repo *repository.DiscordUserProjectRepo) {
+	s.discordUserProjectRepo = repo
 }
 
 func (s *DiscordService) IsRunning() bool {
@@ -817,6 +821,18 @@ func (s *DiscordService) getActiveProject(ctx context.Context, userID string) st
 		return projectID
 	}
 	s.mu.RUnlock()
+
+	if s.discordUserProjectRepo != nil {
+		if saved, err := s.discordUserProjectRepo.GetUserProject(ctx, key); err == nil && saved != "" {
+			s.mu.Lock()
+			s.userProjects[key] = saved
+			s.mu.Unlock()
+			return saved
+		} else if err != nil {
+			applog.Infof("[discord] error loading persisted project for user=%s: %v", key, err)
+		}
+	}
+
 	if s.projectRepo == nil {
 		return ""
 	}
@@ -1189,10 +1205,20 @@ func (s *DiscordService) switchProjectResult(ctx context.Context, userID, target
 		}
 		return fmt.Sprintf("Project not found: %q. Available projects: %s", targetProject, strings.Join(names, ", "))
 	}
-	s.mu.Lock()
-	s.userProjects[strings.TrimSpace(userID)] = target.ID
-	s.mu.Unlock()
+	s.setActiveProject(ctx, userID, target.ID)
 	return fmt.Sprintf("Switched to project: %s", target.Name)
+}
+
+func (s *DiscordService) setActiveProject(ctx context.Context, userID, projectID string) {
+	key := strings.TrimSpace(userID)
+	s.mu.Lock()
+	s.userProjects[key] = projectID
+	s.mu.Unlock()
+	if s.discordUserProjectRepo != nil {
+		if err := s.discordUserProjectRepo.SetUserProject(ctx, key, projectID); err != nil {
+			applog.Infof("[discord] persist active project failed for user=%s: %v", key, err)
+		}
+	}
 }
 
 func (s *DiscordService) executeChannelSetTaskGoal(ctx context.Context, projectID string, input json.RawMessage) (string, error) {

@@ -492,6 +492,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
 	discordAuthRepo := repository.NewDiscordAuthRepo(db)
 	discordTaskContextRepo := repository.NewDiscordTaskContextRepo(db)
+	discordUserProjectRepo := repository.NewDiscordUserProjectRepo(db)
 	channelTargetRepo := repository.NewChannelTargetRepo(db)
 
 	// Custom personalities
@@ -591,6 +592,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	discordSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 	discordSvc.SetAgentRepo(agentRepo)
 	discordSvc.SetChannelMessageRouter(channelMessageRouter)
+	discordSvc.SetDiscordUserProjectRepo(discordUserProjectRepo)
 	channelMessageRouter.SetDiscordService(discordSvc)
 	channelMessageRouter.SetDiscordAuthStore(discordAuthRepo)
 
