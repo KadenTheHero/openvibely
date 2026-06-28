@@ -2598,6 +2598,49 @@ func TestTelegramService_ProcessIncomingMessage_QueuesTelegramAttachmentWhenChat
 	require.Contains(t, strings.Join(sent, "\n"), "Queued")
 }
 
+func TestTelegramService_QueueChatInputCleansPendingAttachmentsWhenQueueInsertFails(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	oldUploadsDir := telegramUploadsDir
+	telegramUploadsDir = t.TempDir()
+	t.Cleanup(func() { telegramUploadsDir = oldUploadsDir })
+
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, agent)
+
+	queueDB := testutil.NewTestDB(t)
+	threadInputRepo := repository.NewThreadInputRepo(queueDB)
+	require.NoError(t, queueDB.Close())
+
+	fileBody := "queued telegram attachment"
+	tmpDir := t.TempDir()
+	sourcePath := filepath.Join(tmpDir, "test.txt")
+	require.NoError(t, os.WriteFile(sourcePath, []byte(fileBody), 0644))
+
+	var sent []string
+	svc := &TelegramService{
+		threadInputRepo: threadInputRepo,
+		sendMessageFunc: func(chatID int64, text string) { sent = append(sent, text) },
+	}
+
+	require.True(t, svc.queueChatInput(ctx, "project-1", "exec-1", agent.ID, "follow up with attachment", 42, []models.ChatAttachment{{
+		FileName:  "test.txt",
+		FilePath:  sourcePath,
+		MediaType: "text/plain",
+		FileSize:  int64(len(fileBody)),
+	}}))
+
+	pendingRoot := filepath.Join(telegramUploadsDir, "chat", "pending")
+	entries, err := os.ReadDir(pendingRoot)
+	if err != nil && !os.IsNotExist(err) {
+		require.NoError(t, err)
+	}
+	require.Empty(t, entries, "expected staged pending attachments to be cleaned up after queue insert failure")
+	require.Contains(t, strings.Join(sent, "\n"), "Error queueing your message")
+}
+
 func TestTelegramService_HandleChatMessage_UsesSharedChannelChatRunner(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

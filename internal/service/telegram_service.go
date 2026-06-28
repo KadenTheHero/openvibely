@@ -493,6 +493,9 @@ func (s *TelegramService) queueChatInput(ctx context.Context, projectID, activeE
 		TelegramChatID:      chatID,
 	}
 	if err := s.threadInputRepo.CreateQueued(ctx, queued); err != nil {
+		if attachmentSessionID != "" {
+			_ = os.RemoveAll(filepath.Join(telegramUploadsDir, "chat", "pending", attachmentSessionID))
+		}
 		applog.Infof("[telegram] queue chat input failed: %v", err)
 		s.sendMessage(ctx, chatID, "Error queueing your message. Please try again.")
 		return true
