@@ -53,6 +53,7 @@ type DiscordConnectionStatus struct {
 	SendResponses    bool
 	RequireMention   bool
 	HasBotToken      bool
+	LastError        string
 }
 
 type DiscordService struct {
@@ -86,6 +87,7 @@ type DiscordService struct {
 
 	mu                       sync.RWMutex
 	running                  bool
+	lastStartError           string
 	ctx                      context.Context
 	cancel                   context.CancelFunc
 	sendMessageFunc          func(channelID, messageID, text string) (string, error)
@@ -163,6 +165,12 @@ func (s *DiscordService) IsRunning() bool {
 	return s.running
 }
 
+func (s *DiscordService) runtimeStatus() (bool, string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.running, s.lastStartError
+}
+
 func (s *DiscordService) Start() error {
 	botToken := strings.TrimSpace(s.getSetting(context.Background(), DiscordSettingBotToken))
 	if botToken == "" {
@@ -175,7 +183,9 @@ func (s *DiscordService) Start() error {
 	}
 	session, err := discordgo.New("Bot " + botToken)
 	if err != nil {
-		return fmt.Errorf("create discord session: %w", err)
+		wrapped := fmt.Errorf("create discord session: %w", err)
+		s.lastStartError = wrapped.Error()
+		return wrapped
 	}
 	session.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsDirectMessages | discordgo.IntentsMessageContent
 	session.AddHandler(func(sess *discordgo.Session, msg *discordgo.MessageCreate) {
@@ -188,12 +198,18 @@ func (s *DiscordService) Start() error {
 	if err := session.Open(); err != nil {
 		cancel()
 		s.session = nil
-		return fmt.Errorf("open discord gateway: %w", err)
+		s.ctx = nil
+		s.cancel = nil
+		s.running = false
+		wrapped := fmt.Errorf("open discord gateway: %w", err)
+		s.lastStartError = wrapped.Error()
+		return wrapped
 	}
 	if session.State != nil && session.State.User != nil && strings.TrimSpace(session.State.User.ID) != "" {
 		_ = s.setSetting(context.Background(), DiscordSettingBotUserID, session.State.User.ID)
 	}
 	s.running = true
+	s.lastStartError = ""
 	applog.Infof("[discord] gateway started")
 	go func() {
 		<-ctx.Done()
@@ -215,6 +231,8 @@ func (s *DiscordService) Stop() {
 	}
 	s.running = false
 	s.session = nil
+	s.ctx = nil
+	s.cancel = nil
 	applog.Infof("[discord] gateway stopped")
 }
 
@@ -236,16 +254,18 @@ func (s *DiscordService) Disconnect(ctx context.Context) error {
 
 func (s *DiscordService) GetConnectionStatus(ctx context.Context) (DiscordConnectionStatus, error) {
 	botToken := strings.TrimSpace(s.getSetting(ctx, DiscordSettingBotToken))
+	running, lastErr := s.runtimeStatus()
 	status := DiscordConnectionStatus{
 		HasBotToken:      botToken != "",
 		BotUserID:        strings.TrimSpace(s.getSetting(ctx, DiscordSettingBotUserID)),
 		DefaultChannelID: strings.TrimSpace(s.getSetting(ctx, DiscordSettingDefaultChannelID)),
 		SendResponses:    s.IsSendResponsesEnabled(ctx),
 		RequireMention:   s.IsRequireMentionEnabled(ctx),
-		Running:          s.IsRunning(),
+		Running:          running,
+		LastError:        lastErr,
 	}
 	status.Configured = status.HasBotToken
-	status.Connected = status.HasBotToken
+	status.Connected = status.Configured && status.Running
 	return status, nil
 }
 

@@ -75,7 +75,7 @@ func discordConnectionBadgeClass(status service.DiscordConnectionStatus) string 
 	if !status.Configured {
 		return "badge-ghost"
 	}
-	if status.Connected {
+	if status.Running {
 		return "badge-success"
 	}
 	return "badge-warning"
@@ -85,10 +85,10 @@ func discordConnectionLabel(status service.DiscordConnectionStatus) string {
 	if !status.Configured {
 		return "Not Configured"
 	}
-	if status.Connected {
+	if status.Running {
 		return "Connected"
 	}
-	return "Not Connected"
+	return "Gateway Offline"
 }
 
 func telegramChannelStatusText(isBotRunning bool) string {
@@ -493,8 +493,13 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 									<span class={ "badge badge-sm", discordConnectionBadgeClass(discordStatus) }>{ discordConnectionLabel(discordStatus) }</span>
 									if discordStatus.Running {
 										<span class="badge badge-sm badge-success">Gateway running</span>
+									} else if discordStatus.Configured {
+										<span class="badge badge-sm badge-warning">Gateway offline</span>
 									}
 								</div>
+								if discordStatus.Configured && !discordStatus.Running && discordStatus.LastError != "" {
+									<p class="mt-2 text-xs text-warning">Gateway failed to start: { discordStatus.LastError }</p>
+								}
 								<div id="test-result-discord" class="mt-2"></div>
 							</div>
 						</div>

@@ -2,40 +2,93 @@
 
 This guide covers Discord setup for the OpenVibely `/channels` integration.
 
-## Required Discord Bot Values
+## What You Need
 
-From your Discord Developer Portal application, you need:
+From Discord, you need:
 
-- Bot token
-- Bot user ID is discovered automatically after connection
-- Optional default channel ID
-- Optional free-response channel IDs
+- A Discord application with a bot user.
+- The bot token copied from the Discord Developer Portal.
+- The bot invited to the server where you want to use OpenVibely.
+- Numeric Discord user IDs for every OpenVibely user allowed to interact with the bot.
 
 You can also seed the bot token with `DISCORD_BOT_TOKEN`; saved channel settings take over after configuration in the UI.
 
-## Discord App Configuration
+## Create The Discord Bot
 
-In the Discord Developer Portal:
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications).
+2. Click **New Application**, name it, and create it.
+3. Open **Bot** in the left sidebar.
+4. Click **Add Bot** if Discord has not already created one.
+5. Under the token section, click **Reset Token** or **Copy Token**.
+6. Save that token somewhere temporary and private so you can paste it into OpenVibely.
 
-1. Create an application and add a bot.
-2. Enable the bot's `Message Content Intent`.
-3. Invite the bot to the server with permissions to view channels, read message history, read messages, and send messages in the channels you want to use.
-4. Copy the bot token into `System` -> `Channels` -> `Discord`.
-5. Save and use `Test Connection` to verify bot authentication.
+Never commit or paste the bot token into logs, issues, screenshots, or shared chat.
 
-## Access Control
+## Enable Bot Intents
 
-Discord access is project-scoped and deny-by-default.
+In the Developer Portal **Bot** page, enable:
 
-Add authorized Discord user IDs in the Discord channel modal. If no users are configured for a project, Discord messages are rejected until at least one authorized user is added.
+- **Message Content Intent** so OpenVibely can read normal Discord message text.
+
+You usually do not need **Presence Intent**. Enable **Server Members Intent** only if your deployment later needs member lookup behavior.
+
+## Invite The Bot To A Server
+
+1. In the Developer Portal, open **OAuth2** -> **URL Generator**.
+2. Select the `bot` scope.
+3. Optionally select `applications.commands` if you plan to add slash-command support later.
+4. Select bot permissions:
+   - `View Channels`
+   - `Send Messages`
+   - `Read Message History`
+   - `Create Public Threads` if you want thread support
+   - `Send Messages in Threads` if you want thread support
+5. Copy the generated URL, open it in your browser, and invite the bot to your server.
+
+You need **Manage Server** permission in the Discord server to invite the bot.
+
+## Configure OpenVibely
+
+1. Start OpenVibely.
+2. Open **Channels** from the System section of the sidebar.
+3. Choose **Discord**.
+4. Paste the bot token.
+5. Click **Save Discord Settings**.
+6. Use **Test Connection** to verify the saved token is valid.
+
+`Test Connection` verifies Discord REST authentication. The bot showing online also requires the Discord Gateway websocket to be running. If the token was wrong when OpenVibely started, save the corrected Discord settings again or restart OpenVibely so the gateway reconnects.
+
+## Add Authorized Users
+
+Discord access is project-scoped and deny-by-default. Messages are rejected until at least one authorized Discord user is added for the selected OpenVibely project.
+
+Use numeric Discord user IDs, not usernames or display names:
+
+1. In Discord, open **User Settings** -> **Advanced**.
+2. Enable **Developer Mode**.
+3. Right-click the user and choose **Copy User ID**.
+4. Paste that numeric ID into the OpenVibely Discord authorized-users list.
+
+A value like `jamesdubee_53308` is a username/display handle and will not authorize inbound Discord messages. The expected value looks like a long number, for example `123456789012345678`.
+
+## Test The Interaction
+
+Start with a direct message because it avoids server-channel mention rules:
+
+1. Confirm the bot appears online in Discord.
+2. DM the bot: `hello, can you see this?`
+3. Expect a short `Thinking...` acknowledgement followed by a final OpenVibely response.
+4. In a server channel, mention the bot explicitly: `@YourBot hello from this channel`.
+5. Reply to a bot/task message to test task-thread follow-up behavior.
+
+Normal server-channel and thread messages are ignored unless they mention the bot.
 
 ## Message Behavior
 
 OpenVibely handles Discord messages through the same shared chat/task lifecycle used by Slack and Telegram:
 
 - DMs to the bot can start project chat turns.
-- Guild channel messages require a bot mention by default.
-- Configured free-response channels allow messages without a bot mention.
+- Guild channel and thread messages require a bot mention.
 - Bot mentions are stripped before the prompt is sent to the chat runner.
 - If a chat turn is already active, additional Discord messages are queued and promoted FIFO through the shared queued-turn path.
 
@@ -62,10 +115,18 @@ Discord-origin task-thread replies use the shared task-thread queueing and steer
 
 ## Troubleshooting
 
-If the bot connects but does not respond:
+If the bot is offline:
+
+1. Verify the saved bot token is current. Regenerate and save a new token if Discord reports authentication failure.
+2. Save the Discord channel settings again or restart OpenVibely after correcting the token.
+3. Check logs for `[discord] gateway started`.
+4. A log error like `websocket: close 4004: Authentication failed` means Discord rejected the token used for the Gateway session.
+5. Remember that **Test Connection** can pass for the currently saved token even if the Gateway is still offline from an earlier failed startup.
+
+If the bot is online but does not respond:
 
 1. Verify `Message Content Intent` is enabled.
-2. Verify the bot has channel permissions to read and send messages.
-3. Verify the Discord user ID is authorized for the selected OpenVibely project.
-4. In guild channels, mention the bot unless the channel is configured as free-response.
-5. Restart or save the Discord channel settings again if the bot token was rotated.
+2. Verify the bot has `View Channels`, `Send Messages`, and `Read Message History` in the target channel.
+3. Verify the Discord user is authorized with the numeric user ID for the selected OpenVibely project.
+4. In guild channels and threads, mention the bot explicitly.
+5. Confirm the OpenVibely Channels card shows the Discord Gateway as running, not only that a token is configured.

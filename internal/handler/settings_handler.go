@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -760,7 +761,9 @@ func (h *Handler) handleDiscordConfigure(c echo.Context) error {
 		}
 	}
 	if h.discordSvc != nil {
-		_ = h.discordSvc.ReloadFromSettings(c.Request().Context())
+		if err := h.discordSvc.ReloadFromSettings(c.Request().Context()); err != nil {
+			applog.Infof("warning: failed to reload discord gateway after settings save: %v", err)
+		}
 	}
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Refresh", "true")

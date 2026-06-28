@@ -56,6 +56,37 @@ func TestChannelsPage_RendersDiscordCardWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestChannelsPage_RendersDiscordGatewayOfflineWhenConfiguredButNotRunning(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetDiscordService(&fakeDiscordService{
+		statusFn: func(ctx context.Context) (service.DiscordConnectionStatus, error) {
+			return service.DiscordConnectionStatus{
+				Configured:  true,
+				Connected:   false,
+				Running:     false,
+				HasBotToken: true,
+				BotUserID:   "bot-1",
+				LastError:   "open discord gateway: websocket: close 4004: Authentication failed",
+			}, nil
+		},
+	})
+	project := createProject(t, h, "Discord Offline Project")
+
+	req := httptest.NewRequest(http.MethodGet, "/channels?project_id="+project.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Gateway Offline") || !strings.Contains(body, "Gateway failed to start") || !strings.Contains(body, "Authentication failed") {
+		t.Fatalf("expected Discord offline gateway status with error, got %q", body)
+	}
+	if strings.Contains(body, `badge-success badge-sm">Connected`) || strings.Contains(body, "Gateway running") {
+		t.Fatalf("did not expect Discord card to claim connected/running when gateway is offline: %q", body)
+	}
+}
+
 func TestChannelsDiscordConfigure(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	var reloaded bool
@@ -106,6 +137,9 @@ func TestChannelsDiscordConfigureReturnsSuccessWhenReloadFailsAfterSave(t *testi
 	h, e, _ := setupTestHandler(t)
 	h.SetDiscordService(&fakeDiscordService{
 		reloadFn: func(ctx context.Context) error { return errors.New("gateway unavailable") },
+		statusFn: func(ctx context.Context) (service.DiscordConnectionStatus, error) {
+			return service.DiscordConnectionStatus{Configured: true, HasBotToken: true, Running: false, Connected: false, LastError: "gateway unavailable"}, nil
+		},
 	})
 
 	form := url.Values{}
@@ -229,6 +263,17 @@ func TestDiscordAuthorizedUsersHandlers(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "Alice") || !strings.Contains(rec.Body.String(), "12345") {
 		t.Fatalf("expected added user in response: %q", rec.Body.String())
+	}
+
+	invalidForm := url.Values{}
+	invalidForm.Set("project_id", project.ID)
+	invalidForm.Set("discord_user_id", "jamesdubee_53308")
+	invalidReq := httptest.NewRequest(http.MethodPost, "/channels/discord/authorized-users", strings.NewReader(invalidForm.Encode()))
+	invalidReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	invalidRec := httptest.NewRecorder()
+	e.ServeHTTP(invalidRec, invalidReq)
+	if invalidRec.Code != http.StatusBadRequest || !strings.Contains(invalidRec.Body.String(), "numeric ID") {
+		t.Fatalf("expected non-numeric Discord ID rejected with numeric guidance, got %d %q", invalidRec.Code, invalidRec.Body.String())
 	}
 
 	users, err := h.discordAuthRepo.ListByProject(context.Background(), project.ID)

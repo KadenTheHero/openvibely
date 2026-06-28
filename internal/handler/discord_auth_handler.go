@@ -2,12 +2,15 @@ package handler
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
+
+var discordNumericUserIDPattern = regexp.MustCompile(`^[0-9]+$`)
 
 // ListDiscordAuthorizedUsers returns the authorized Discord users list for a project.
 func (h *Handler) ListDiscordAuthorizedUsers(c echo.Context) error {
@@ -38,6 +41,9 @@ func (h *Handler) AddDiscordAuthorizedUser(c echo.Context) error {
 	displayName := strings.TrimSpace(c.FormValue("display_name"))
 	if discordUserID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Discord user ID is required")
+	}
+	if !discordNumericUserIDPattern.MatchString(discordUserID) {
+		return echo.NewHTTPError(http.StatusBadRequest, "Discord user ID must be the numeric ID copied from Discord Developer Mode")
 	}
 	user := &models.DiscordAuthorizedUser{ProjectID: projectID, DiscordUserID: discordUserID, DisplayName: displayName, AddedBy: "web"}
 	if user.DisplayName == "" {

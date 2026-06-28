@@ -34,6 +34,47 @@ func newDiscordServiceForTest(t *testing.T) (*DiscordService, *sql.DB, *reposito
 	return svc, db, settingsRepo, projectRepo, taskRepo, discordAuthRepo, discordTaskContextRepo
 }
 
+func TestDiscordService_GetConnectionStatusRequiresRunningGateway(t *testing.T) {
+	svc, _, settingsRepo, _, _, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, DiscordSettingBotToken, "saved-token"); err != nil {
+		t.Fatalf("set token: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingBotUserID, "bot-1"); err != nil {
+		t.Fatalf("set bot user: %v", err)
+	}
+	svc.mu.Lock()
+	svc.running = false
+	svc.lastStartError = "open discord gateway: websocket: close 4004: Authentication failed"
+	svc.mu.Unlock()
+
+	status, err := svc.GetConnectionStatus(ctx)
+	if err != nil {
+		t.Fatalf("status failed: %v", err)
+	}
+	if !status.Configured || !status.HasBotToken {
+		t.Fatalf("expected saved token to make Discord configured, got %#v", status)
+	}
+	if status.Connected || status.Running {
+		t.Fatalf("expected saved token without running gateway to be offline, got %#v", status)
+	}
+	if !strings.Contains(status.LastError, "Authentication failed") {
+		t.Fatalf("expected last gateway error surfaced, got %#v", status)
+	}
+
+	svc.mu.Lock()
+	svc.running = true
+	svc.lastStartError = ""
+	svc.mu.Unlock()
+	status, err = svc.GetConnectionStatus(ctx)
+	if err != nil {
+		t.Fatalf("status after running failed: %v", err)
+	}
+	if !status.Connected || !status.Running || status.LastError != "" {
+		t.Fatalf("expected running gateway to be connected, got %#v", status)
+	}
+}
+
 func TestDiscordService_SendOutboundMessageUsesChannelAndThread(t *testing.T) {
 	svc, _, _, _, _, _, _ := newDiscordServiceForTest(t)
 	var gotChannelID, gotMessageID, gotText string
