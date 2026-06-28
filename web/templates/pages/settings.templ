@@ -1792,7 +1792,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						return input;
 					}
 
-					function outboundTargetsAppendDraftFields(rowKey, id, platform, name, targetID, threadID, isHome, defaultSubject) {
+					function outboundTargetsAppendDraftFields(rowKey, id, platform, targetKind, name, targetID, threadID, isHome, defaultSubject) {
 						const fields = document.getElementById('outbound-targets-draft-fields');
 						if (!fields) return;
 						const group = document.createElement('div');
@@ -1800,6 +1800,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						group.setAttribute('data-outbound-target-draft-key', rowKey);
 						group.appendChild(outboundTargetsDraftInput('target_row_id', id));
 						group.appendChild(outboundTargetsDraftInput('target_platform', platform));
+						group.appendChild(outboundTargetsDraftInput('target_kind', targetKind));
 						group.appendChild(outboundTargetsDraftInput('target_name', name));
 						group.appendChild(outboundTargetsDraftInput('target_target_id', targetID));
 						group.appendChild(outboundTargetsDraftInput('target_thread_id', threadID));
@@ -1846,6 +1847,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						const tbody = document.getElementById('outbound-targets-draft-tbody');
 						if (!form || !tbody) return false;
 						const platform = (form.elements.platform.value || '').trim().toLowerCase();
+						const targetKind = (form.elements.target_kind.value || 'channel').trim().toLowerCase();
 						const name = (form.elements.name.value || '').trim().replace(/^#+/, '').toLowerCase();
 						const targetID = (form.elements.target_id.value || '').trim();
 						const threadID = (form.elements.thread_id.value || '').trim();
@@ -1868,13 +1870,15 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						const row = document.createElement('tr');
 						row.setAttribute('data-outbound-target-draft-key', rowKey);
 						row.setAttribute('data-platform', platform);
+						const typeCell = targetKind === 'user' ? '<span class="badge badge-sm badge-outline">User DM</span>' : '<span class="opacity-60 text-xs">' + outboundTargetsEscape(targetKind) + '</span>';
 						row.innerHTML = '<td>' + outboundTargetsEscape(platform) + '</td>' +
+							'<td>' + typeCell + '</td>' +
 							'<td>' + (name ? '<span>#' + outboundTargetsEscape(name) + '</span>' : '<span class="opacity-50">unnamed</span>') + '</td>' +
 							'<td class="font-mono text-xs break-all">' + outboundTargetsEscape(targetID) + '</td>' +
 							'<td class="font-mono text-xs">' + outboundTargetsEscape(threadID) + '</td>' +
 							'<td class="outbound-target-home-cell">' + (isHome ? '<span class="badge badge-sm badge-primary">Home</span>' : '') + '</td>' +
 								'<td class="text-right whitespace-nowrap"><span class="badge badge-sm badge-ghost mr-2">Unsaved</span><button type="button" class="btn btn-xs mr-1" hx-post="/channels/outbound-targets/test-draft" hx-include="#outbound-target-draft-fields-' + rowKey + ', #outbound-targets-policy-form input[name=project_id]" hx-target="#outbound-target-test-label-' + rowKey + '" hx-swap="innerHTML" hx-on::before-request="outboundTargetTestBefore(this)" hx-on::after-request="outboundTargetTestAfter(this, event)"><span id="outbound-target-test-label-' + rowKey + '" data-outbound-target-test-label aria-live="polite">Test</span></button><button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button></td>';						tbody.appendChild(row);
-						outboundTargetsAppendDraftFields(rowKey, '', platform, name, targetID, threadID, isHome, defaultSubject);
+						outboundTargetsAppendDraftFields(rowKey, '', platform, targetKind, name, targetID, threadID, isHome, defaultSubject);
 						if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(row);
 						resetOutboundTargetAddForm();
 						return false;
@@ -1891,7 +1895,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						if (tbody && !tbody.querySelector('tr[data-outbound-target-draft-key]')) {
 							const empty = document.createElement('tr');
 							empty.id = 'outbound-targets-empty-row';
-							empty.innerHTML = '<td colspan="6" class="opacity-60">No outbound targets saved yet.</td>';
+							empty.innerHTML = '<td colspan="7" class="opacity-60">No outbound targets saved yet.</td>';
 							tbody.appendChild(empty);
 						}
 					}
@@ -2098,7 +2102,8 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 					</svg>
 					<div>
 						<p class="font-semibold">Saved destinations for send_message</p>
-						<p class="text-xs opacity-80 mt-1">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, `discord:#ops`, or `email:#client`.</p>
+						<p class="text-xs opacity-80 mt-1">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, `discord:#ops`, or `email:#client`. For Slack and Discord user DMs, add a User DM target here — that is separate from Authorized Users (who can control OpenVibely).</p>
+						<p class="text-xs opacity-70 mt-1">Authorized Users control who can talk to OpenVibely. Outbound targets control where agents may send messages. Adding someone as an outbound DM target does not let them control OpenVibely.</p>
 					</div>
 				</div>			if notice != "" {
 				<div class="alert alert-success py-2 text-sm mt-3">{ notice }</div>
@@ -2110,8 +2115,12 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 					<option value="email">Email</option>
 					<option value="discord">Discord</option>
 				</select>
+				<select name="target_kind" class="select select-bordered select-sm">
+					<option value="channel">Channel</option>
+					<option value="user">User DM</option>
+				</select>
 				<input name="name" class="input input-bordered input-sm" placeholder="name, e.g. ops"/>
-				<input name="target_id" class="input input-bordered input-sm md:col-span-2" placeholder="channel/chat ID or email" required/>
+				<input name="target_id" class="input input-bordered input-sm md:col-span-2" placeholder="channel/chat/user ID or email" required/>
 				<input name="thread_id" class="input input-bordered input-sm" placeholder="thread/topic ID"/>
 				<label class="label cursor-pointer justify-start gap-2 py-0">
 					<input type="checkbox" name="is_home" value="true" class="checkbox checkbox-sm"/>
@@ -2125,6 +2134,7 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 						<thead>
 							<tr>
 								<th>Platform</th>
+								<th>Type</th>
 								<th>Name</th>
 								<th>Target</th>
 								<th>Thread/Topic</th>
@@ -2134,11 +2144,18 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 						</thead>
 							<tbody id="outbound-targets-draft-tbody">
 								if len(targets) == 0 {
-									<tr id="outbound-targets-empty-row"><td colspan="6" class="opacity-60">No outbound targets saved yet.</td></tr>
+									<tr id="outbound-targets-empty-row"><td colspan="7" class="opacity-60">No outbound targets saved yet.</td></tr>
 								}
 								for _, target := range targets {
 									<tr data-outbound-target-draft-key={ target.ID } data-platform={ target.Platform }>
 									<td>{ target.Platform }</td>
+									<td>
+										if target.TargetKind == "user" {
+											<span class="badge badge-sm badge-outline">User DM</span>
+										} else {
+											<span class="opacity-60 text-xs">{ target.TargetKind }</span>
+										}
+									</td>
 									<td>
 										if target.Name != "" {
 											<span>#{ target.Name }</span>
@@ -2168,6 +2185,7 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 										<div id={ "outbound-target-draft-fields-" + target.ID } data-outbound-target-draft-key={ target.ID }>
 										<input type="hidden" name="target_row_id" value={ target.ID }/>
 										<input type="hidden" name="target_platform" value={ target.Platform }/>
+										<input type="hidden" name="target_kind" value={ target.TargetKind }/>
 										<input type="hidden" name="target_name" value={ target.Name }/>
 										<input type="hidden" name="target_target_id" value={ target.TargetID }/>
 										<input type="hidden" name="target_thread_id" value={ target.ThreadID }/>

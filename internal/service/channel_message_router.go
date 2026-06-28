@@ -20,6 +20,7 @@ type channelTargetStore interface {
 	FindHome(ctx context.Context, projectID, platform string) (*models.ChannelTarget, error)
 	FindByName(ctx context.Context, projectID, platform, name string) (*models.ChannelTarget, error)
 	FindByTarget(ctx context.Context, projectID, platform, targetID, threadID string) (*models.ChannelTarget, error)
+	FindByTargetAndKind(ctx context.Context, projectID, platform, targetID, threadID, targetKind string) (*models.ChannelTarget, error)
 	RecordSend(ctx context.Context, send models.ChannelMessageSend) error
 }
 
@@ -69,9 +70,11 @@ type ChannelMessageRouter struct {
 	auditUser    string
 }
 
+// ChannelTarget is the send_message tool view of a saved outbound target.
 type ChannelTarget struct {
 	ProjectID      string `json:"project_id"`
 	Platform       string `json:"platform"`
+	TargetKind     string `json:"target_kind,omitempty"`
 	Name           string `json:"name,omitempty"`
 	TargetID       string `json:"target_id"`
 	ThreadID       string `json:"thread_id,omitempty"`
@@ -132,7 +135,7 @@ func (r *ChannelMessageRouter) ListTargets(ctx context.Context, projectID string
 	}
 	out := make([]ChannelTarget, 0, len(stored))
 	for _, t := range stored {
-		out = append(out, ChannelTarget{ProjectID: t.ProjectID, Platform: t.Platform, Name: t.Name, TargetID: t.TargetID, ThreadID: t.ThreadID, Home: t.Home, DefaultSubject: t.DefaultSubject})
+		out = append(out, ChannelTarget{ProjectID: t.ProjectID, Platform: t.Platform, TargetKind: t.TargetKind, Name: t.Name, TargetID: t.TargetID, ThreadID: t.ThreadID, Home: t.Home, DefaultSubject: t.DefaultSubject})
 	}
 	return out, nil
 }
@@ -158,20 +161,20 @@ func (r *ChannelMessageRouter) Send(ctx context.Context, projectID string, req S
 		return SendMessageResult{OK: true, MessageID: string(b)}
 	}
 	if action != "send" {
-		return r.auditAndReturn(ctx, projectID, "", "", "", req.Message, sendMessageError("unsupported send_message action"))
+		return r.auditAndReturn(ctx, projectID, "", "", "", "", req.Message, sendMessageError("unsupported send_message action"))
 	}
 	if strings.TrimSpace(req.Target) == "" {
-		return r.auditAndReturn(ctx, projectID, "", "", "", req.Message, sendMessageError("send_message requires target; call send_message with action=list to see configured targets"))
+		return r.auditAndReturn(ctx, projectID, "", "", "", "", req.Message, sendMessageError("send_message requires target; call send_message with action=list to see configured targets"))
 	}
 	if strings.TrimSpace(req.Message) == "" {
-		return r.auditAndReturn(ctx, projectID, "", "", "", req.Message, sendMessageError("send_message requires message"))
+		return r.auditAndReturn(ctx, projectID, "", "", "", "", req.Message, sendMessageError("send_message requires message"))
 	}
 	resolved, err := r.resolveTarget(ctx, projectID, req.Target)
 	if err != nil {
-		return r.auditAndReturn(ctx, projectID, "", "", "", req.Message, sendMessageError(err.Error()))
+		return r.auditAndReturn(ctx, projectID, "", "", "", "", req.Message, sendMessageError(err.Error()))
 	}
 	result := r.dispatch(ctx, req, resolved)
-	return r.auditAndReturn(ctx, projectID, resolved.Platform, resolved.TargetID, resolved.ThreadID, req.Message, result)
+	return r.auditAndReturn(ctx, projectID, resolved.Platform, resolved.TargetKind, resolved.TargetID, resolved.ThreadID, req.Message, result)
 }
 
 func (r *ChannelMessageRouter) SendDirectTarget(ctx context.Context, projectID string, target ChannelTarget, req SendMessageRequest) SendMessageResult {
@@ -183,35 +186,47 @@ func (r *ChannelMessageRouter) SendDirectTarget(ctx context.Context, projectID s
 		return sendMessageError("project id is required")
 	}
 	if strings.TrimSpace(req.Message) == "" {
-		return r.auditAndReturn(ctx, projectID, "", "", "", req.Message, sendMessageError("send_message requires message"))
+		return r.auditAndReturn(ctx, projectID, "", "", "", "", req.Message, sendMessageError("send_message requires message"))
 	}
 	platform := strings.ToLower(strings.TrimSpace(target.Platform))
 	targetID := strings.TrimSpace(target.TargetID)
 	threadID := strings.TrimSpace(target.ThreadID)
+	targetKind := strings.ToLower(strings.TrimSpace(target.TargetKind))
 	if platform != "slack" && platform != "telegram" && platform != "email" && platform != "discord" {
-		return r.auditAndReturn(ctx, projectID, "", "", "", req.Message, sendMessageError("Unsupported platform"))
+		return r.auditAndReturn(ctx, projectID, "", "", "", "", req.Message, sendMessageError("Unsupported platform"))
 	}
 	if targetID == "" {
-		return r.auditAndReturn(ctx, projectID, platform, "", "", req.Message, sendMessageError("Target ID is required"))
+		return r.auditAndReturn(ctx, projectID, platform, "", "", "", req.Message, sendMessageError("Target ID is required"))
 	}
-	if platform == "email" {
-		normalized, err := NormalizeOutboundEmailForTarget(targetID)
-		if err != nil {
-			return r.auditAndReturn(ctx, projectID, platform, targetID, threadID, req.Message, sendMessageError(err.Error()))
+	directUser := targetKind == "user" && (platform == "slack" || platform == "discord")
+	if directUser {
+		// For user DM draft tests, validate the user ID format.
+		if platform == "slack" && !slackUserTargetPattern.MatchString(targetID) {
+			return r.auditAndReturn(ctx, projectID, platform, targetKind, targetID, threadID, req.Message, sendMessageError(fmt.Sprintf("Invalid Slack user ID %q; expected format U...", targetID)))
 		}
-		targetID = normalized
-	}
-	if !isNativeTarget(platform, targetID) {
-		return r.auditAndReturn(ctx, projectID, platform, targetID, threadID, req.Message, sendMessageError(fmt.Sprintf("Invalid %s target %q", platform, targetID)))
-	}
-	if platform == "telegram" && threadID != "" {
-		if _, err := strconv.Atoi(threadID); err != nil {
-			return r.auditAndReturn(ctx, projectID, platform, targetID, threadID, req.Message, sendMessageError("telegram thread id must be an integer"))
+		if platform == "discord" && !discordUserTargetPattern.MatchString(targetID) {
+			return r.auditAndReturn(ctx, projectID, platform, targetKind, targetID, threadID, req.Message, sendMessageError(fmt.Sprintf("Invalid Discord user ID %q; expected a numeric snowflake", targetID)))
+		}
+	} else {
+		if platform == "email" {
+			normalized, err := NormalizeOutboundEmailForTarget(targetID)
+			if err != nil {
+				return r.auditAndReturn(ctx, projectID, platform, targetKind, targetID, threadID, req.Message, sendMessageError(err.Error()))
+			}
+			targetID = normalized
+		}
+		if !isNativeTarget(platform, targetID) {
+			return r.auditAndReturn(ctx, projectID, platform, targetKind, targetID, threadID, req.Message, sendMessageError(fmt.Sprintf("Invalid %s target %q", platform, targetID)))
+		}
+		if platform == "telegram" && threadID != "" {
+			if _, err := strconv.Atoi(threadID); err != nil {
+				return r.auditAndReturn(ctx, projectID, platform, targetKind, targetID, threadID, req.Message, sendMessageError("telegram thread id must be an integer"))
+			}
 		}
 	}
-	resolved := resolvedMessageTarget{Platform: platform, TargetID: targetID, ThreadID: threadID, DefaultSubject: strings.TrimSpace(target.DefaultSubject)}
+	resolved := resolvedMessageTarget{Platform: platform, TargetKind: targetKind, TargetID: targetID, ThreadID: threadID, DefaultSubject: strings.TrimSpace(target.DefaultSubject), DirectUser: directUser}
 	result := r.dispatch(ctx, req, resolved)
-	return r.auditAndReturn(ctx, projectID, resolved.Platform, resolved.TargetID, resolved.ThreadID, req.Message, result)
+	return r.auditAndReturn(ctx, projectID, resolved.Platform, resolved.TargetKind, resolved.TargetID, resolved.ThreadID, req.Message, result)
 }
 
 func ExecuteSendMessageTool(ctx context.Context, router *ChannelMessageRouter, projectID string, input json.RawMessage) (string, error) {
@@ -229,6 +244,7 @@ func ExecuteSendMessageTool(ctx context.Context, router *ChannelMessageRouter, p
 
 type resolvedMessageTarget struct {
 	Platform       string
+	TargetKind     string
 	TargetID       string
 	ThreadID       string
 	DefaultSubject string
@@ -264,6 +280,35 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 		}
 		return fromStoredTarget(*target), nil
 	}
+
+	// Handle explicit user DM syntax: slack:user:<user_id> and discord:user:<user_id>.
+	// These bypass the authorized-user requirement; a saved user-kind target is preferred,
+	// and an explicit DM is allowed when send_message_allow_explicit_targets is enabled.
+	if (platform == "slack" || platform == "discord") && ref == "user" {
+		userID := strings.TrimSpace(threadID)
+		if userID == "" {
+			return resolvedMessageTarget{}, fmt.Errorf("%s user DM target requires %s:user:<user_id>", platform, platform)
+		}
+		// Validate user ID format.
+		if platform == "slack" && !slackUserTargetPattern.MatchString(userID) {
+			return resolvedMessageTarget{}, fmt.Errorf("invalid Slack user ID %q; expected format U...", userID)
+		}
+		if platform == "discord" && !discordUserTargetPattern.MatchString(userID) {
+			return resolvedMessageTarget{}, fmt.Errorf("invalid Discord user ID %q; expected a numeric snowflake", userID)
+		}
+		// Prefer a saved user-kind target.
+		if saved, err := r.targets.FindByTargetAndKind(ctx, projectID, platform, userID, "", "user"); err != nil {
+			return resolvedMessageTarget{}, err
+		} else if saved != nil {
+			return fromStoredTarget(*saved), nil
+		}
+		// Not saved; require explicit-targets setting.
+		if !r.allowExplicitTargets(ctx, projectID) {
+			return resolvedMessageTarget{}, fmt.Errorf("No saved %s user DM target for %s; add it in Outbound Message Targets or call send_message with action=list", platform, userID)
+		}
+		return resolvedMessageTarget{Platform: platform, TargetKind: "user", TargetID: userID, DirectUser: true}, nil
+	}
+
 	if platform == "email" {
 		normalized, err := NormalizeOutboundEmailForTarget(ref)
 		if err != nil {
@@ -273,6 +318,13 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 	}
 	if !isNativeTarget(platform, ref) {
 		if isOutboundDirectUserTarget(platform, ref) {
+			// Check saved targets first before falling back to the auth store.
+			// A saved user-kind target routes as a DM; a saved channel-kind target routes as a channel.
+			if saved, err := r.targets.FindByTarget(ctx, projectID, platform, ref, ""); err != nil {
+				return resolvedMessageTarget{}, err
+			} else if saved != nil {
+				return fromStoredTarget(*saved), nil
+			}
 			dmTarget, dmErr := r.resolveAuthorizedDirectUserTarget(ctx, projectID, platform, ref)
 			if dmErr == nil {
 				return dmTarget, nil
@@ -306,7 +358,7 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 		if !r.allowExplicitTargets(ctx, projectID) {
 			return resolvedMessageTarget{}, fmt.Errorf("Explicit discord channel target is not saved for this project; call send_message with action=list")
 		}
-		return resolvedMessageTarget{Platform: platform, TargetID: channelID, ThreadID: channelThreadID}, nil
+		return resolvedMessageTarget{Platform: platform, TargetKind: "channel", TargetID: channelID, ThreadID: channelThreadID}, nil
 	}
 	if saved, err := r.targets.FindByTarget(ctx, projectID, platform, ref, threadID); err != nil {
 		return resolvedMessageTarget{}, err
@@ -329,7 +381,7 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 	if !r.allowExplicitTargets(ctx, projectID) {
 		return resolvedMessageTarget{}, fmt.Errorf("Explicit %s target is not saved for this project; call send_message with action=list", platform)
 	}
-	return resolvedMessageTarget{Platform: platform, TargetID: ref, ThreadID: threadID}, nil
+	return resolvedMessageTarget{Platform: platform, TargetKind: "channel", TargetID: ref, ThreadID: threadID}, nil
 }
 
 func (r *ChannelMessageRouter) dispatch(ctx context.Context, req SendMessageRequest, target resolvedMessageTarget) SendMessageResult {
@@ -388,7 +440,7 @@ func (r *ChannelMessageRouter) dispatch(ctx context.Context, req SendMessageRequ
 	}
 }
 
-func (r *ChannelMessageRouter) auditAndReturn(ctx context.Context, projectID, platform, targetID, threadID, message string, result SendMessageResult) SendMessageResult {
+func (r *ChannelMessageRouter) auditAndReturn(ctx context.Context, projectID, platform, targetKind, targetID, threadID, message string, result SendMessageResult) SendMessageResult {
 	if result.Platform == "" {
 		result.Platform = platform
 	}
@@ -406,6 +458,7 @@ func (r *ChannelMessageRouter) auditAndReturn(ctx context.Context, projectID, pl
 		ID:                 id,
 		ProjectID:          projectID,
 		Platform:           firstNonEmptyMessageString(platform, result.Platform),
+		TargetKind:         targetKind,
 		TargetID:           targetID,
 		ThreadID:           threadID,
 		RequestedBySurface: r.auditSurface,
@@ -443,7 +496,16 @@ func parseSendMessageTarget(raw string) (platform, ref, threadID string, err err
 }
 
 func fromStoredTarget(target models.ChannelTarget) resolvedMessageTarget {
-	return resolvedMessageTarget{Platform: strings.ToLower(strings.TrimSpace(target.Platform)), TargetID: strings.TrimSpace(target.TargetID), ThreadID: strings.TrimSpace(target.ThreadID), DefaultSubject: strings.TrimSpace(target.DefaultSubject)}
+	kind := strings.ToLower(strings.TrimSpace(target.TargetKind))
+	directUser := kind == "user"
+	return resolvedMessageTarget{
+		Platform:       strings.ToLower(strings.TrimSpace(target.Platform)),
+		TargetKind:     kind,
+		TargetID:       strings.TrimSpace(target.TargetID),
+		ThreadID:       strings.TrimSpace(target.ThreadID),
+		DefaultSubject: strings.TrimSpace(target.DefaultSubject),
+		DirectUser:     directUser,
+	}
 }
 
 var slackNativeTargetPattern = regexp.MustCompile(`^[CGD][A-Z0-9]+$`)
@@ -492,7 +554,7 @@ func (r *ChannelMessageRouter) resolveAuthorizedDirectUserTarget(ctx context.Con
 	if !allowed {
 		return resolvedMessageTarget{}, fmt.Errorf("%s user is not authorized for outbound direct messages in this project", platform)
 	}
-	return resolvedMessageTarget{Platform: platform, TargetID: userID, DirectUser: true}, nil
+	return resolvedMessageTarget{Platform: platform, TargetKind: "user", TargetID: userID, DirectUser: true}, nil
 }
 
 func (r *ChannelMessageRouter) authorizedUserStore(platform string) outboundAuthorizedUserStore {
@@ -564,3 +626,5 @@ func firstNonEmptyMessageString(values ...string) string {
 	}
 	return ""
 }
+
+

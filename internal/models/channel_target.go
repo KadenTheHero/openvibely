@@ -7,6 +7,7 @@ type ChannelTarget struct {
 	ID             string    `json:"id"`
 	ProjectID      string    `json:"project_id"`
 	Platform       string    `json:"platform"`
+	TargetKind     string    `json:"target_kind"`
 	Name           string    `json:"name,omitempty"`
 	TargetID       string    `json:"target_id"`
 	ThreadID       string    `json:"thread_id,omitempty"`
@@ -21,6 +22,7 @@ type ChannelMessageSend struct {
 	ID                 string    `json:"id"`
 	ProjectID          string    `json:"project_id"`
 	Platform           string    `json:"platform"`
+	TargetKind         string    `json:"target_kind,omitempty"`
 	TargetID           string    `json:"target_id"`
 	ThreadID           string    `json:"thread_id,omitempty"`
 	RequestedBySurface string    `json:"requested_by_surface,omitempty"`

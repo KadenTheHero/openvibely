@@ -71,6 +71,17 @@ Use numeric Discord user IDs, not usernames or display names:
 
 A value like `jamesdubee_53308` is a username/display handle and will not authorize inbound Discord messages. The expected value looks like a long number, for example `123456789012345678`.
 
+## Outbound Targets
+
+Chat can send outbound Discord messages through the `send_message` tool when you save Discord destinations in `Channels` -> `Outbound Message Targets`. There are two types of outbound targets:
+
+- **Channel** – paste the Discord channel ID (a long numeric snowflake) and optionally a thread ID, then give it a friendly name such as `ops` so Chat can target `discord:#ops`. For explicit channel references use `discord:channel:<channel_id>` or `discord:channel:<channel_id>:<thread_id>`.
+- **User DM** – paste a Discord user ID (the same long numeric snowflake) to allow agents to send direct messages to that user. User DM targets **do not** require the user to be in Authorized Users; Authorized Users control who can give instructions to OpenVibely, while Outbound Targets control where agents may send messages. To reference a saved user DM target explicitly, use `discord:user:<user_id>`.
+
+The bot must have the **Direct Messages** intent and `dm_channel` write permission to send DMs. These sends reuse the configured Discord bot token and permissions.
+
+**Important distinction:** Adding a Discord user ID as an Authorized User allows them to control OpenVibely by DMing the bot. Adding the same ID as a User DM Outbound Target allows agents to send proactive messages to them. These are independent settings.
+
 ## Test The Interaction
 
 Start with a direct message because it avoids server-channel mention rules:

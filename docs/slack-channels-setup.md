@@ -93,7 +93,12 @@ Important: OpenVibely's `Test` button validates bot auth/token health. It does n
 
 ## Outbound Targets
 
-Chat can send outbound Slack messages through the `send_message` tool when you save Slack destinations in `Channels` -> `Outbound Message Targets`. Paste the Slack channel ID, optionally add a thread timestamp, and give it a friendly name such as `ops` so Chat can target `slack:#ops`. These sends reuse the configured Slack bot token and permissions.
+Chat can send outbound Slack messages through the `send_message` tool when you save Slack destinations in `Channels` -> `Outbound Message Targets`. There are two types of outbound targets:
+
+- **Channel** – paste the Slack channel ID (e.g. `C0123ABC`), optionally add a thread timestamp, and give it a friendly name such as `ops` so Chat can target `slack:#ops`.
+- **User DM** – paste a Slack user ID (e.g. `U0AQYLJR14Y`) to allow agents to send direct messages to that user. User DM targets **do not** require the user to be in Authorized Users; Authorized Users control who can give instructions to OpenVibely, while Outbound Targets control where agents may send messages. To reference a saved user DM target explicitly, use `slack:user:<user_id>`.
+
+These sends reuse the configured Slack bot token and permissions. The bot must have `im:write` to open DM channels when using User DM targets.
 
 ## Task Follow-Ups
 

@@ -87,10 +87,13 @@ func setupChannelMessageRouterTest(t *testing.T) (context.Context, *repository.C
 func TestChannelMessageRouter_ListTargets(t *testing.T) {
 	ctx, targetRepo, _, _, _, project, router, _, _, _, _ := setupChannelMessageRouterTest(t)
 	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "t1", ProjectID: project.ID, Platform: "slack", Name: "ops", TargetID: "C123", Home: true}))
+	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "t2", ProjectID: project.ID, Platform: "slack", TargetKind: "user", TargetID: "U0AQYLJR14Y"}))
 	out, err := ExecuteSendMessageTool(ctx, router, project.ID, json.RawMessage(`{"action":"list"}`))
 	require.NoError(t, err)
 	require.Contains(t, out, `"ok":true`)
 	require.Contains(t, out, `"name":"ops"`)
+	require.Contains(t, out, `"target_kind":"channel"`, "list output must include target_kind for channel targets")
+	require.Contains(t, out, `"target_kind":"user"`, "list output must include target_kind for user DM targets")
 }
 
 func TestChannelMessageRouter_ResolvesHomeTargets(t *testing.T) {
@@ -266,4 +269,136 @@ func TestChannelMessageRouter_ValidationFailures(t *testing.T) {
 	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting, "true"))
 	require.False(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "email:not-an-email", Message: "x"}).OK)
 	require.False(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "telegram:-100:abc", Message: "x"}).OK)
+}
+
+// TestChannelMessageRouter_UserDMSyntaxDoesNotRequireAuthorizedUsers verifies that
+// platform:user:<id> sends DMs without requiring the user to be in authorized users.
+func TestChannelMessageRouter_UserDMSyntaxDoesNotRequireAuthorizedUsers(t *testing.T) {
+	ctx, targetRepo, settingsRepo, _, _, project, router, slack, _, _, discord := setupChannelMessageRouterTest(t)
+
+	// slack:user:U... is rejected when the target is not saved and explicit targets are off.
+	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:user:U0AQYLJR14Y", Message: "hi"})
+	require.False(t, res.OK)
+	require.Contains(t, res.Error, "No saved slack user DM target")
+	require.Empty(t, slack.userID, "slack:user:<id> must not dispatch until saved or explicit targets are enabled")
+
+	// Enabling explicit targets allows unsaved slack:user:<id> sends without authorized users.
+	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"))
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:user:U0AQYLJR14Y", Message: "hi"})
+	require.True(t, res.OK, "slack:user:<id> with explicit targets enabled must send as DM: %#v", res)
+	require.Equal(t, "U0AQYLJR14Y", slack.userID)
+	require.Empty(t, slack.channelID, "slack:user:<id> must not be treated as a channel ID")
+
+	// Reset explicit targets for discord test.
+	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+project.ID, "false"))
+
+	// discord:user:<id> is rejected when the target is not saved and explicit targets are off.
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:user:1518288288572641398", Message: "hi"})
+	require.False(t, res.OK)
+	require.Contains(t, res.Error, "No saved discord user DM target")
+	require.Empty(t, discord.userID)
+
+	// Enabling explicit targets allows unsaved discord:user:<id> sends without authorized users.
+	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"))
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:user:1518288288572641398", Message: "hi"})
+	require.True(t, res.OK, "discord:user:<id> with explicit targets enabled must send as DM: %#v", res)
+	require.Equal(t, "1518288288572641398", discord.userID)
+	require.Empty(t, discord.channelID, "discord:user:<id> must not be treated as a channel ID")
+
+	// Neither user appeared in inbound authorized users; verify no targets were saved.
+	targets, err := targetRepo.ListByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Empty(t, targets, "explicit DM sends must not create saved targets")
+}
+
+// TestChannelMessageRouter_SavedUserKindTargetRoutesAsDM verifies that saved targets with
+// target_kind='user' dispatch as direct messages without requiring the auth store.
+func TestChannelMessageRouter_SavedUserKindTargetRoutesAsDM(t *testing.T) {
+	ctx, targetRepo, _, _, _, project, router, slack, _, _, discord := setupChannelMessageRouterTest(t)
+
+	// Save a Slack user-kind target (no auth store entry needed).
+	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "slack-user-dm", ProjectID: project.ID, Platform: "slack", TargetKind: "user", TargetID: "U0AQYLJR14Y"}))
+
+	// Bare slack:U... reference finds saved user-kind target and dispatches as DM.
+	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:U0AQYLJR14Y", Message: "hi"})
+	require.True(t, res.OK, "saved user-kind Slack target must send as DM via bare reference: %#v", res)
+	require.Equal(t, "U0AQYLJR14Y", slack.userID)
+	require.Empty(t, slack.channelID)
+
+	// Explicit slack:user:<id> reference also finds the saved user-kind target.
+	slack.userID = ""
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:user:U0AQYLJR14Y", Message: "hi again"})
+	require.True(t, res.OK, "saved user-kind Slack target must send as DM via user syntax: %#v", res)
+	require.Equal(t, "U0AQYLJR14Y", slack.userID)
+
+	// Save a Discord user-kind target (no auth store entry needed).
+	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-user-dm", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "1518288288572641398"}))
+
+	// Explicit discord:user:<id> reference finds saved user-kind target and dispatches as DM.
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:user:1518288288572641398", Message: "hi"})
+	require.True(t, res.OK, "saved user-kind Discord target must send as DM via user syntax: %#v", res)
+	require.Equal(t, "1518288288572641398", discord.userID)
+	require.Empty(t, discord.channelID)
+}
+
+// TestChannelMessageRouter_DiscordChannelSyntaxSendsToChannel verifies that
+// discord:channel:<id> routes as a channel send, not a DM.
+func TestChannelMessageRouter_DiscordChannelSyntaxSendsToChannel(t *testing.T) {
+	ctx, _, settingsRepo, _, _, project, router, _, _, _, discord := setupChannelMessageRouterTest(t)
+	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"))
+
+	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:channel:123456789012345678", Message: "hello"})
+	require.True(t, res.OK, "discord:channel:<id> must route as channel send: %#v", res)
+	require.Equal(t, "123456789012345678", discord.channelID)
+	require.Empty(t, discord.userID, "discord:channel:<id> must not dispatch as a DM")
+}
+
+// TestChannelMessageRouter_UserDMSyntaxInvalidIDRejected verifies that malformed user IDs
+// with the platform:user:<id> syntax are rejected cleanly.
+func TestChannelMessageRouter_UserDMSyntaxInvalidIDRejected(t *testing.T) {
+	ctx, _, settingsRepo, _, _, project, router, slack, _, _, discord := setupChannelMessageRouterTest(t)
+	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"))
+
+	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:user:", Message: "hi"})
+	require.False(t, res.OK)
+	require.Contains(t, res.Error, "slack:user:<user_id>")
+	require.Empty(t, slack.userID)
+
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:user:", Message: "hi"})
+	require.False(t, res.OK)
+	require.Contains(t, res.Error, "discord:user:<user_id>")
+	require.Empty(t, discord.userID)
+}
+
+// TestChannelMessageRouter_AuditRowIncludesTargetKind verifies that send audit rows
+// record target_kind for both channel and user DM sends.
+func TestChannelMessageRouter_AuditRowIncludesTargetKind(t *testing.T) {
+	ctx, targetRepo, _, _, _, project, router, slack, _, _, discord := setupChannelMessageRouterTest(t)
+
+	// Saved channel target send — audit row should record target_kind 'channel'.
+	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "slack-ch", ProjectID: project.ID, Platform: "slack", TargetKind: "channel", TargetID: "C123", Home: true}))
+	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "slack", Message: "channel msg"}).OK)
+	require.Equal(t, "C123", slack.channelID)
+
+	// Saved user-kind DM target send — audit row should record target_kind 'user'.
+	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-dm", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "1518288288572641398"}))
+	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:user:1518288288572641398", Message: "dm msg"}).OK)
+	require.Equal(t, "1518288288572641398", discord.userID)
+
+	sends, err := targetRepo.ListSendsByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, sends, 2)
+	var sawChannel, sawUser bool
+	for _, s := range sends {
+		if s.TargetID == "C123" {
+			sawChannel = true
+			require.Equal(t, "channel", s.TargetKind, "channel send audit must record target_kind=channel")
+		}
+		if s.TargetID == "1518288288572641398" {
+			sawUser = true
+			require.Equal(t, "user", s.TargetKind, "user DM send audit must record target_kind=user")
+		}
+	}
+	require.True(t, sawChannel, "expected channel send audit row")
+	require.True(t, sawUser, "expected user DM send audit row")
 }

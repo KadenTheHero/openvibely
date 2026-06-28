@@ -16,6 +16,7 @@ import (
 type outboundTargetTestSlack struct {
 	channelID string
 	threadTS  string
+	userID    string
 	text      string
 }
 
@@ -25,6 +26,12 @@ func (s *outboundTargetTestSlack) SendOutboundMessage(ctx context.Context, chann
 	s.threadTS = threadTS
 	s.text = text
 	return service.SendMessageResult{OK: true, Platform: "slack", Target: "slack:" + channelID + ":" + threadTS, MessageID: "123.456"}
+}
+
+func (s *outboundTargetTestSlack) SendOutboundDirectMessage(_ context.Context, userID, text string) service.SendMessageResult {
+	s.userID = userID
+	s.text = text
+	return service.SendMessageResult{OK: true, Platform: "slack", Target: "slack:" + userID, MessageID: "dm.1"}
 }
 
 func TestOutboundTargetHandlersDenyCrossProjectTargetIDs(t *testing.T) {
@@ -335,5 +342,100 @@ func TestOutboundTargetTestPreservesThreadIDAndEscapesResult(t *testing.T) {
 	}
 	if strings.Contains(body, "slack:C123:1690000000.000000") || strings.Contains(body, `{"ok":true`) || strings.Contains(body, "&#34;ok&#34;") || strings.Contains(body, `alert alert-success`) {
 		t.Fatalf("expected compact button-local success result with green check and without transport JSON or banner, got %q", body)
+	}
+}
+
+// TestSavingUserDMOutboundTargetPersistsTargetKind verifies that posting target_kind=user
+// saves the target with target_kind 'user' and the test button dispatches as a direct message.
+func TestSavingUserDMOutboundTargetPersistsTargetKind(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("User DM Target Project").Build()
+	targetRepo := repository.NewChannelTargetRepo(tc.db)
+	slack := &outboundTargetTestSlack{}
+	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
+	router.SetSlackService(slack)
+	tc.handler.SetChannelTargetRepo(targetRepo)
+	tc.handler.SetChannelMessageRouter(router)
+
+	// POST a single Slack user DM target with target_kind=user.
+	form := url.Values{}
+	form.Set("project_id", project.ID)
+	form.Add("target_row_id", "")
+	form.Add("target_platform", "slack")
+	form.Add("target_kind", "user")
+	form.Add("target_name", "")
+	form.Add("target_target_id", "U0AQYLJR14Y")
+	form.Add("target_thread_id", "")
+	form.Add("target_is_home", "false")
+	form.Add("target_default_subject", "")
+	form.Set("enabled", "false")
+
+	rec := tc.HTMX().Post("/channels/send-message-explicit-targets").WithForm(form).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// Verify the target was saved with target_kind='user'.
+	targets, err := targetRepo.ListByProject(context.Background(), project.ID)
+	if err != nil {
+		t.Fatalf("list targets: %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 target, got %d", len(targets))
+	}
+	if targets[0].TargetKind != "user" {
+		t.Fatalf("expected target_kind=user, got %q", targets[0].TargetKind)
+	}
+	if targets[0].TargetID != "U0AQYLJR14Y" {
+		t.Fatalf("expected target_id=U0AQYLJR14Y, got %q", targets[0].TargetID)
+	}
+
+	// Test button for the saved user-kind target must dispatch as a direct message, not a channel.
+	path := "/channels/outbound-targets/" + targets[0].ID + "/test?project_id=" + url.QueryEscape(project.ID)
+	rec2 := tc.HTMX().Post(path).Execute()
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("test status=%d body=%s", rec2.Code, rec2.Body.String())
+	}
+	if slack.userID != "U0AQYLJR14Y" {
+		t.Fatalf("expected DM to U0AQYLJR14Y, got channelID=%q userID=%q", slack.channelID, slack.userID)
+	}
+	if slack.channelID != "" {
+		t.Fatalf("user DM target must not dispatch to a Slack channel, got channelID=%q", slack.channelID)
+	}
+}
+
+// TestOutboundTargetDraftTestUserDMDispatchesAsDM verifies that a draft test for a Slack
+// user DM target (target_kind=user) dispatches via SendOutboundDirectMessage.
+func TestOutboundTargetDraftTestUserDMDispatchesAsDM(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Draft DM Project").Build()
+	targetRepo := repository.NewChannelTargetRepo(tc.db)
+	slack := &outboundTargetTestSlack{}
+	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
+	router.SetSlackService(slack)
+	tc.handler.SetChannelTargetRepo(targetRepo)
+	tc.handler.SetChannelMessageRouter(router)
+
+	form := url.Values{}
+	form.Set("project_id", project.ID)
+	form.Set("target_platform", "slack")
+	form.Set("target_kind", "user")
+	form.Set("target_target_id", "U0AQYLJR14Y")
+	form.Set("target_thread_id", "")
+	form.Set("target_default_subject", "")
+
+	rec := tc.HTMX().Post("/channels/outbound-targets/test-draft").WithForm(form).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if slack.userID != "U0AQYLJR14Y" {
+		t.Fatalf("expected DM to U0AQYLJR14Y, got channelID=%q userID=%q", slack.channelID, slack.userID)
+	}
+	if slack.channelID != "" {
+		t.Fatalf("draft user DM test must not dispatch to a channel, got channelID=%q", slack.channelID)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Sent") || !strings.Contains(body, "text-success") {
+		t.Fatalf("expected success response, got %q", body)
 	}
 }

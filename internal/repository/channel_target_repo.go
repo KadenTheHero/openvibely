@@ -18,7 +18,7 @@ func NewChannelTargetRepo(db *sql.DB) *ChannelTargetRepo { return &ChannelTarget
 
 func (r *ChannelTargetRepo) ListByProject(ctx context.Context, projectID string) ([]models.ChannelTarget, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, project_id, platform, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
+		SELECT id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
 		FROM channel_targets
 		WHERE project_id = ?
 		ORDER BY platform ASC, is_home DESC, name ASC, target_id ASC`, projectID)
@@ -39,14 +39,14 @@ func (r *ChannelTargetRepo) ListByProject(ctx context.Context, projectID string)
 
 func (r *ChannelTargetRepo) GetByID(ctx context.Context, id string) (*models.ChannelTarget, error) {
 	return r.findOne(ctx, `
-		SELECT id, project_id, platform, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
+		SELECT id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
 		FROM channel_targets
 		WHERE id = ?`, id)
 }
 
 func (r *ChannelTargetRepo) FindHome(ctx context.Context, projectID, platform string) (*models.ChannelTarget, error) {
 	return r.findOne(ctx, `
-		SELECT id, project_id, platform, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
+		SELECT id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
 		FROM channel_targets
 		WHERE project_id = ? AND platform = ? AND is_home = 1
 		ORDER BY updated_at DESC LIMIT 1`, projectID, normalizeChannelTargetField(platform))
@@ -54,16 +54,24 @@ func (r *ChannelTargetRepo) FindHome(ctx context.Context, projectID, platform st
 
 func (r *ChannelTargetRepo) FindByName(ctx context.Context, projectID, platform, name string) (*models.ChannelTarget, error) {
 	return r.findOne(ctx, `
-		SELECT id, project_id, platform, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
+		SELECT id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
 		FROM channel_targets
 		WHERE project_id = ? AND platform = ? AND name = ?`, projectID, normalizeChannelTargetField(platform), normalizeChannelTargetField(name))
 }
 
 func (r *ChannelTargetRepo) FindByTarget(ctx context.Context, projectID, platform, targetID, threadID string) (*models.ChannelTarget, error) {
 	return r.findOne(ctx, `
-		SELECT id, project_id, platform, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
+		SELECT id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
 		FROM channel_targets
 		WHERE project_id = ? AND platform = ? AND target_id = ? AND thread_id = ?`, projectID, normalizeChannelTargetField(platform), strings.TrimSpace(targetID), strings.TrimSpace(threadID))
+}
+
+func (r *ChannelTargetRepo) FindByTargetAndKind(ctx context.Context, projectID, platform, targetID, threadID, targetKind string) (*models.ChannelTarget, error) {
+	return r.findOne(ctx, `
+		SELECT id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
+		FROM channel_targets
+		WHERE project_id = ? AND platform = ? AND target_id = ? AND thread_id = ? AND target_kind = ?`,
+		projectID, normalizeChannelTargetField(platform), strings.TrimSpace(targetID), strings.TrimSpace(threadID), strings.TrimSpace(targetKind))
 }
 
 func (r *ChannelTargetRepo) Upsert(ctx context.Context, target models.ChannelTarget) error {
@@ -72,24 +80,26 @@ func (r *ChannelTargetRepo) Upsert(ctx context.Context, target models.ChannelTar
 	}
 	platform := normalizeChannelTargetField(target.Platform)
 	name := normalizeChannelTargetField(target.Name)
+	targetKind := defaultChannelTargetKind(target.TargetKind, platform)
 	if target.Home {
 		if _, err := r.db.ExecContext(ctx, `UPDATE channel_targets SET is_home = 0, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND platform = ?`, target.ProjectID, platform); err != nil {
 			return fmt.Errorf("clear channel home target: %w", err)
 		}
 	}
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO channel_targets (id, project_id, platform, name, target_id, thread_id, is_home, default_subject, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		INSERT INTO channel_targets (id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(id) DO UPDATE SET
 			project_id = excluded.project_id,
 			platform = excluded.platform,
+			target_kind = excluded.target_kind,
 			name = excluded.name,
 			target_id = excluded.target_id,
 			thread_id = excluded.thread_id,
 			is_home = excluded.is_home,
 			default_subject = excluded.default_subject,
 			updated_at = CURRENT_TIMESTAMP`,
-		target.ID, target.ProjectID, platform, name, strings.TrimSpace(target.TargetID), strings.TrimSpace(target.ThreadID), target.Home, strings.TrimSpace(target.DefaultSubject))
+		target.ID, target.ProjectID, platform, targetKind, name, strings.TrimSpace(target.TargetID), strings.TrimSpace(target.ThreadID), target.Home, strings.TrimSpace(target.DefaultSubject))
 	if err != nil {
 		return fmt.Errorf("upsert channel target: %w", err)
 	}
@@ -175,24 +185,26 @@ func (r *ChannelTargetRepo) ReplaceProjectTargets(ctx context.Context, projectID
 		target.ProjectID = projectID
 		platform := normalizeChannelTargetField(target.Platform)
 		name := normalizeChannelTargetField(target.Name)
+		targetKind := defaultChannelTargetKind(target.TargetKind, platform)
 		if target.Home {
 			if _, err := tx.ExecContext(ctx, `UPDATE channel_targets SET is_home = 0, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND platform = ?`, projectID, platform); err != nil {
 				return fmt.Errorf("clear channel home target: %w", err)
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO channel_targets (id, project_id, platform, name, target_id, thread_id, is_home, default_subject, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			INSERT INTO channel_targets (id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 			ON CONFLICT(id) DO UPDATE SET
 				project_id = excluded.project_id,
 				platform = excluded.platform,
+				target_kind = excluded.target_kind,
 				name = excluded.name,
 				target_id = excluded.target_id,
 				thread_id = excluded.thread_id,
 				is_home = excluded.is_home,
 				default_subject = excluded.default_subject,
 				updated_at = CURRENT_TIMESTAMP`,
-			target.ID, projectID, platform, name, strings.TrimSpace(target.TargetID), strings.TrimSpace(target.ThreadID), target.Home, strings.TrimSpace(target.DefaultSubject)); err != nil {
+			target.ID, projectID, platform, targetKind, name, strings.TrimSpace(target.TargetID), strings.TrimSpace(target.ThreadID), target.Home, strings.TrimSpace(target.DefaultSubject)); err != nil {
 			return fmt.Errorf("upsert channel target: %w", err)
 		}
 	}
@@ -207,9 +219,9 @@ func (r *ChannelTargetRepo) RecordSend(ctx context.Context, send models.ChannelM
 		return fmt.Errorf("channel message send id is required")
 	}
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO channel_message_sends (id, project_id, platform, target_id, thread_id, requested_by_surface, requested_by_user, message_preview, success, error)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		send.ID, send.ProjectID, normalizeChannelTargetField(send.Platform), strings.TrimSpace(send.TargetID), strings.TrimSpace(send.ThreadID), strings.TrimSpace(send.RequestedBySurface), strings.TrimSpace(send.RequestedByUser), strings.TrimSpace(send.MessagePreview), send.Success, strings.TrimSpace(send.Error))
+		INSERT INTO channel_message_sends (id, project_id, platform, target_kind, target_id, thread_id, requested_by_surface, requested_by_user, message_preview, success, error)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		send.ID, send.ProjectID, normalizeChannelTargetField(send.Platform), strings.TrimSpace(send.TargetKind), strings.TrimSpace(send.TargetID), strings.TrimSpace(send.ThreadID), strings.TrimSpace(send.RequestedBySurface), strings.TrimSpace(send.RequestedByUser), strings.TrimSpace(send.MessagePreview), send.Success, strings.TrimSpace(send.Error))
 	if err != nil {
 		return fmt.Errorf("record channel message send: %w", err)
 	}
@@ -218,7 +230,7 @@ func (r *ChannelTargetRepo) RecordSend(ctx context.Context, send models.ChannelM
 
 func (r *ChannelTargetRepo) ListSendsByProject(ctx context.Context, projectID string) ([]models.ChannelMessageSend, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, project_id, platform, target_id, thread_id, requested_by_surface, requested_by_user, message_preview, success, error, created_at
+		SELECT id, project_id, platform, target_kind, target_id, thread_id, requested_by_surface, requested_by_user, message_preview, success, error, created_at
 		FROM channel_message_sends
 		WHERE project_id = ?
 		ORDER BY created_at DESC`, projectID)
@@ -229,7 +241,7 @@ func (r *ChannelTargetRepo) ListSendsByProject(ctx context.Context, projectID st
 	var sends []models.ChannelMessageSend
 	for rows.Next() {
 		var s models.ChannelMessageSend
-		if err := rows.Scan(&s.ID, &s.ProjectID, &s.Platform, &s.TargetID, &s.ThreadID, &s.RequestedBySurface, &s.RequestedByUser, &s.MessagePreview, &s.Success, &s.Error, &s.CreatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.ProjectID, &s.Platform, &s.TargetKind, &s.TargetID, &s.ThreadID, &s.RequestedBySurface, &s.RequestedByUser, &s.MessagePreview, &s.Success, &s.Error, &s.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan channel message send: %w", err)
 		}
 		sends = append(sends, s)
@@ -255,7 +267,7 @@ type channelTargetScanner interface {
 
 func scanChannelTarget(row channelTargetScanner) (models.ChannelTarget, error) {
 	var t models.ChannelTarget
-	if err := row.Scan(&t.ID, &t.ProjectID, &t.Platform, &t.Name, &t.TargetID, &t.ThreadID, &t.Home, &t.DefaultSubject, &t.CreatedAt, &t.UpdatedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.ProjectID, &t.Platform, &t.TargetKind, &t.Name, &t.TargetID, &t.ThreadID, &t.Home, &t.DefaultSubject, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return t, err
 		}
@@ -266,4 +278,21 @@ func scanChannelTarget(row channelTargetScanner) (models.ChannelTarget, error) {
 
 func normalizeChannelTargetField(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+// defaultChannelTargetKind returns a sensible default target_kind when none is set.
+// Telegram targets use 'chat', email targets use 'email', and everything else defaults to 'channel'.
+func defaultChannelTargetKind(kind, platform string) string {
+	kind = strings.TrimSpace(kind)
+	if kind != "" {
+		return strings.ToLower(kind)
+	}
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "telegram":
+		return "chat"
+	case "email":
+		return "email"
+	default:
+		return "channel"
+	}
 }
