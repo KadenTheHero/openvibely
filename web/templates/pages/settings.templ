@@ -1822,25 +1822,31 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						return div.innerHTML;
 					}
 
-						function outboundTargetTestBefore(button) {
-							if (!button) return;
-							button.disabled = true;
-							button.setAttribute('aria-busy', 'true');
-							button.classList.add('loading');
-							const label = button.querySelector('[data-outbound-target-test-label]');
-							if (label) label.textContent = 'Testing...';
-						}
-
-						function outboundTargetTestAfter(button, event) {
-							if (!button) return;
-							button.disabled = false;
-							button.removeAttribute('aria-busy');
-							button.classList.remove('loading');
-							if (event && event.detail && event.detail.successful === false) {
-								const label = button.querySelector('[data-outbound-target-test-label]');
-								if (label) label.textContent = 'Failed';
+							function outboundTargetTestTestingHTML() {
+								return '<span class="inline-flex items-center gap-1"><span class="loading loading-spinner loading-xs" aria-hidden="true"></span><span>Testing...</span></span>';
 							}
-						}
+
+							function outboundTargetTestFailedHTML() {
+								return '<span class="inline-flex items-center gap-1 text-error" title="Test failed."><span aria-hidden="true">✕</span><span>Failed</span></span>';
+							}
+
+							function outboundTargetTestBefore(button) {
+								if (!button) return;
+								button.disabled = true;
+								button.setAttribute('aria-busy', 'true');
+								const label = button.querySelector('[data-outbound-target-test-label]');
+								if (label) label.innerHTML = outboundTargetTestTestingHTML();
+							}
+
+							function outboundTargetTestAfter(button, event) {
+								if (!button) return;
+								button.disabled = false;
+								button.removeAttribute('aria-busy');
+								if (event && event.detail && event.detail.successful === false) {
+									const label = button.querySelector('[data-outbound-target-test-label]');
+									if (label) label.innerHTML = outboundTargetTestFailedHTML();
+								}
+							}
 
 						function addOutboundTargetDraft(event) {
 						if (event) event.preventDefault();

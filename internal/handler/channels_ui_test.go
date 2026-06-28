@@ -283,8 +283,8 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	if !strings.Contains(body, `/channels/outbound-targets/test-draft`) || !strings.Contains(body, `window.htmx.process(row)`) {
 		t.Fatal("expected draft-added target rows to include an immediately usable Test button")
 	}
-	if !strings.Contains(body, `data-outbound-target-test-label`) || !strings.Contains(body, `outboundTargetTestBefore(this)`) || !strings.Contains(body, `outboundTargetTestAfter(this, event)`) || !strings.Contains(body, `classList.add('loading')`) {
-		t.Fatal("expected draft target Test buttons to show progress and completion inside the button")
+	if !strings.Contains(body, `data-outbound-target-test-label`) || !strings.Contains(body, `outboundTargetTestBefore(this)`) || !strings.Contains(body, `outboundTargetTestAfter(this, event)`) || !strings.Contains(body, `loading loading-spinner loading-xs`) || !strings.Contains(body, `<span>Testing...</span>`) {
+		t.Fatal("expected draft target Test buttons to show spinner progress and completion inside the button")
 	}
 	if strings.Contains(body, `id="outbound-target-test-draft-`) || strings.Contains(body, `hx-indicator="#outbound-target-test-indicator-`) {
 		t.Fatal("expected draft target Test status to avoid separate banner/indicator elements")

@@ -92,13 +92,13 @@ func (h *Handler) handleOutboundTargetDraftTest(c echo.Context) error {
 
 func outboundTargetTestResultHTML(c echo.Context, result service.SendMessageResult) error {
 	if result.OK {
-		return c.HTML(http.StatusOK, `<span class="text-success font-semibold" title="Test sent.">Sent</span>`)
+		return c.HTML(http.StatusOK, `<span class="inline-flex items-center gap-1 text-success font-semibold" title="Test sent."><span aria-hidden="true">✓</span><span>Sent</span></span>`)
 	}
 	message := strings.TrimSpace(result.Error)
 	if message == "" {
 		message = "Provider did not accept the test message"
 	}
-	return c.HTML(http.StatusOK, `<span class="text-error font-semibold" title="Test failed: `+html.EscapeString(message)+`">Failed</span>`)
+	return c.HTML(http.StatusOK, `<span class="inline-flex items-center gap-1 text-error font-semibold" title="Test failed: `+html.EscapeString(message)+`"><span aria-hidden="true">✕</span><span>Failed</span></span>`)
 }
 
 func (h *Handler) outboundTargetForRequestProject(c echo.Context) (string, *models.ChannelTarget, error) {
