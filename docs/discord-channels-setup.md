@@ -19,7 +19,7 @@ In the Discord Developer Portal:
 
 1. Create an application and add a bot.
 2. Enable the bot's `Message Content Intent`.
-3. Invite the bot to the server with permissions to read messages and send messages in the channels you want to use.
+3. Invite the bot to the server with permissions to view channels, read message history, read messages, and send messages in the channels you want to use.
 4. Copy the bot token into `System` -> `Channels` -> `Discord`.
 5. Save and use `Test Connection` to verify bot authentication.
 
@@ -38,6 +38,18 @@ OpenVibely handles Discord messages through the same shared chat/task lifecycle 
 - Configured free-response channels allow messages without a bot mention.
 - Bot mentions are stripped before the prompt is sent to the chat runner.
 - If a chat turn is already active, additional Discord messages are queued and promoted FIFO through the shared queued-turn path.
+
+## Attachments
+
+Discord chat messages can include attachments. OpenVibely downloads Discord CDN attachment URLs directly, stores them with the chat turn, shows them on the Chat page, and passes supported images to the chat runner for vision-capable models.
+
+- Up to 3 files are processed per message.
+- Each file must be 10 MB or smaller.
+- Images are passed as image attachments.
+- Small non-image files up to 100 KB are included inline as text context.
+- Larger non-image files are stored with the chat turn but are not inlined.
+
+Attachment reading requires the same Discord gateway access as normal messages: `Message Content Intent` enabled, plus channel permissions to view the channel and read message history.
 
 ## Task Follow-Ups
 
