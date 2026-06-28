@@ -288,18 +288,42 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 			return resolvedMessageTarget{}, fmt.Errorf("telegram thread id must be an integer")
 		}
 	}
+	if platform == "discord" && ref == "channel" {
+		channelID := strings.TrimSpace(threadID)
+		if channelID == "" {
+			return resolvedMessageTarget{}, fmt.Errorf("discord channel target requires discord:channel:<channel_id>")
+		}
+		channelThreadID := ""
+		if idx := strings.Index(channelID, ":"); idx >= 0 {
+			channelThreadID = strings.TrimSpace(channelID[idx+1:])
+			channelID = strings.TrimSpace(channelID[:idx])
+		}
+		if saved, err := r.targets.FindByTarget(ctx, projectID, platform, channelID, channelThreadID); err != nil {
+			return resolvedMessageTarget{}, err
+		} else if saved != nil {
+			return fromStoredTarget(*saved), nil
+		}
+		if !r.allowExplicitTargets(ctx, projectID) {
+			return resolvedMessageTarget{}, fmt.Errorf("Explicit discord channel target is not saved for this project; call send_message with action=list")
+		}
+		return resolvedMessageTarget{Platform: platform, TargetID: channelID, ThreadID: channelThreadID}, nil
+	}
 	if saved, err := r.targets.FindByTarget(ctx, projectID, platform, ref, threadID); err != nil {
 		return resolvedMessageTarget{}, err
 	} else if saved != nil {
 		return fromStoredTarget(*saved), nil
 	}
-	if threadID == "" && isOutboundDirectUserTarget(platform, ref) {
-		dmTarget, dmErr := r.resolveAuthorizedDirectUserTarget(ctx, projectID, platform, ref)
-		if dmErr == nil {
-			return dmTarget, nil
-		}
-		if r.isAuthorizedDirectUserTargetAnywhere(ctx, platform, ref) {
-			return resolvedMessageTarget{}, dmErr
+	if isOutboundDirectUserTarget(platform, ref) {
+		if threadID == "" {
+			dmTarget, dmErr := r.resolveAuthorizedDirectUserTarget(ctx, projectID, platform, ref)
+			if dmErr == nil {
+				return dmTarget, nil
+			}
+			if platform == "discord" || r.isAuthorizedDirectUserTargetAnywhere(ctx, platform, ref) {
+				return resolvedMessageTarget{}, dmErr
+			}
+		} else if platform == "discord" {
+			return resolvedMessageTarget{}, fmt.Errorf("Bare Discord snowflake targets are ambiguous; save the channel target or use discord:channel:<channel_id>:<thread_id>")
 		}
 	}
 	if !r.allowExplicitTargets(ctx, projectID) {

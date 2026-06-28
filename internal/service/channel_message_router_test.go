@@ -176,7 +176,7 @@ func TestChannelMessageRouter_ExplicitTargetsRequireSetting(t *testing.T) {
 	require.False(t, sends[1].Success)
 }
 
-func TestChannelMessageRouter_ExplicitSlackAndTelegramTargets(t *testing.T) {
+func TestChannelMessageRouter_ExplicitSlackTelegramAndDiscordChannelTargets(t *testing.T) {
 	ctx, _, settingsRepo, _, _, project, router, slack, telegram, _, discord := setupChannelMessageRouterTest(t)
 	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting, "true"))
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:C123:169.1", Message: "slack"}).OK)
@@ -185,7 +185,13 @@ func TestChannelMessageRouter_ExplicitSlackAndTelegramTargets(t *testing.T) {
 	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "telegram:-100123:7", Message: "telegram"}).OK)
 	require.Equal(t, int64(-100123), telegram.chatID)
 	require.Equal(t, 7, telegram.threadID)
-	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:123456789:987654321", Message: "discord"}).OK)
+
+	bareDiscord := router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:123456789:987654321", Message: "discord"})
+	require.False(t, bareDiscord.OK)
+	require.Contains(t, bareDiscord.Error, "ambiguous")
+	require.Empty(t, discord.channelID, "bare Discord snowflakes must not be sent as raw channel IDs")
+
+	require.True(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:channel:123456789:987654321", Message: "discord"}).OK)
 	require.Equal(t, "123456789", discord.channelID)
 	require.Equal(t, "987654321", discord.threadID)
 }
@@ -206,7 +212,7 @@ func TestChannelMessageRouter_AuthorizedUserIDsResolveToDirectMessages(t *testin
 
 	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:1518288288572641398", Message: "hi"})
 	require.False(t, res.OK)
-	require.Contains(t, res.Error, "not saved")
+	require.Contains(t, res.Error, "not authorized")
 
 	require.NoError(t, discordAuthRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "1518288288572641398", DisplayName: "Discord User", AddedBy: "test"}))
 	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:1518288288572641398", Message: "hi"})
@@ -238,6 +244,17 @@ func TestChannelMessageRouter_DiscordUserAuthorizedInOtherProjectDoesNotFallThro
 	require.False(t, res.OK)
 	require.Contains(t, res.Error, "not authorized")
 	require.Empty(t, discord.channelID, "known Discord user IDs must not be sent as raw channel IDs when project authorization misses")
+	require.Empty(t, discord.userID)
+}
+
+func TestChannelMessageRouter_BareDiscordSnowflakeDoesNotFallThroughToChannel(t *testing.T) {
+	ctx, _, settingsRepo, _, _, project, router, _, _, _, discord := setupChannelMessageRouterTest(t)
+	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"))
+
+	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:1518288288572641398", Message: "hi"})
+	require.False(t, res.OK)
+	require.Contains(t, res.Error, "not authorized")
+	require.Empty(t, discord.channelID, "bare Discord user-shaped targets must not be sent as raw channel IDs")
 	require.Empty(t, discord.userID)
 }
 

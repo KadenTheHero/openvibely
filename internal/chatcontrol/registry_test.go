@@ -38,6 +38,9 @@ func TestRegistry_SendMessageTargetDescriptionMentionsAuthorizedUserDMs(t *testi
 	if !strings.Contains(desc, "slack:U123") || !strings.Contains(desc, "discord:1518288288572641398") {
 		t.Fatalf("send_message target description should mention authorized user DM targets, got %q", desc)
 	}
+	if !strings.Contains(desc, "discord:channel:<channel_id>") {
+		t.Fatalf("send_message target description should explain explicit Discord channel disambiguation, got %q", desc)
+	}
 }
 
 func TestRegistry_NoDuplicateNames(t *testing.T) {
