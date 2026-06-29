@@ -414,7 +414,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
 					<h3 id="model_modal_title" class="font-bold text-lg mb-4 pr-10">New Model Configuration</h3>
-						<form id="model_form" method="post" action="/models" hx-post="/models" hx-target="#models-container" hx-swap="outerHTML" onsubmit="normalizeModelFormBeforeSubmit()">					<div class="form-control mb-3">						<label class="label"><span class="label-text">Name</span></label>
+						<form id="model_form" method="post" action="/models" hx-post="/models" hx-target="#models-container" hx-swap="outerHTML" onsubmit="return normalizeModelFormBeforeSubmit()">					<div class="form-control mb-3">						<label class="label"><span class="label-text">Name</span></label>
 						<input type="text" id="model_name" name="name" class="input input-bordered" required placeholder="My Model"/>
 					</div>
 					<div class="form-control mb-3">
@@ -616,7 +616,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							</div>
 							<div class="form-control mb-3">
 								<label class="label"><span class="label-text">Aggregator Model</span></label>
-								<select id="model_mixture_aggregator" name="mixture_aggregator_id" class="select select-bordered" onchange="updateMixtureCostWarning()">
+								<select id="model_mixture_aggregator" name="mixture_aggregator_id" class="select select-bordered" onchange="renderMixtureReferenceOptions(selectedMixtureReferenceIDs()); updateMixtureCostWarning()">
 									<option value="">Select aggregator</option>
 									for _, option := range callableMixtureModels(agents) {
 										<option value={ option.ID }>{ option.Name } ({ string(option.Provider) }/{ option.Model })</option>
@@ -666,6 +666,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 								</label>
 							</div>
 							<p id="model_mixture_cost_warning" class="text-sm text-warning mt-2">This mixture calls 0 reference models plus 1 aggregator model per turn.</p>
+							<p id="model_mixture_validation_error" class="text-sm text-error mt-2 hidden" role="alert"></p>
 						</div>
 							<div id="openai_compatible_info" class="mb-3 hidden">							<div class="alert alert-info">
 								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -1239,27 +1240,27 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 									return opt;
 								}
 
-								function renderMixtureReferenceOptions(selectedIDs) {
-									var selectedSelect = document.getElementById('model_mixture_references');
-									var availableSelect = document.getElementById('model_mixture_reference_available');
-									if (!selectedSelect || !availableSelect) return;
-									var selected = {};
-									selectedSelect.innerHTML = '';
-									availableSelect.innerHTML = '<option value="">Select reference to add</option>';
-									for (var i = 0; i < (selectedIDs || []).length; i++) {
-										var id = selectedIDs[i];
-										var option = mixtureOptionByID(id);
-										if (!option || selected[id]) continue;
-										selected[id] = true;
-										appendMixtureReferenceOption(selectedSelect, option);
+									function renderMixtureReferenceOptions(selectedIDs) {
+										var selectedSelect = document.getElementById('model_mixture_references');
+										var availableSelect = document.getElementById('model_mixture_reference_available');
+										if (!selectedSelect || !availableSelect) return;
+										var aggregatorID = document.getElementById('model_mixture_aggregator') ? document.getElementById('model_mixture_aggregator').value : '';
+										var selected = {};
+										selectedSelect.innerHTML = '';
+										availableSelect.innerHTML = '<option value="">Select reference to add</option>';
+										for (var i = 0; i < (selectedIDs || []).length; i++) {
+											var id = selectedIDs[i];
+											var option = mixtureOptionByID(id);
+											if (!option || selected[id] || id === aggregatorID) continue;
+											selected[id] = true;
+											appendMixtureReferenceOption(selectedSelect, option);
+										}
+										for (var k = 0; k < mixtureModelOptions.length; k++) {
+											if (selected[mixtureModelOptions[k].id] || mixtureModelOptions[k].id === aggregatorID) continue;
+											appendMixtureReferenceOption(availableSelect, mixtureModelOptions[k]);
+										}
+										syncMixtureReferenceOrderInput();
 									}
-									for (var k = 0; k < mixtureModelOptions.length; k++) {
-										if (selected[mixtureModelOptions[k].id]) continue;
-										appendMixtureReferenceOption(availableSelect, mixtureModelOptions[k]);
-									}
-									syncMixtureReferenceOrderInput();
-								}
-
 								function addMixtureReference() {
 									var availableSelect = document.getElementById('model_mixture_reference_available');
 									var selectedSelect = document.getElementById('model_mixture_references');
@@ -1308,14 +1309,26 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							return null;
 						}
 
-						function updateMixtureCostWarning() {
-							var refs = selectedMixtureReferenceIDs();
-							var workers = document.getElementById('model_mixture_max_workers');
-							if (workers && (!workers.value || workers.value === '0')) workers.value = Math.min(8, Math.max(1, refs.length)).toString();
-							var warning = document.getElementById('model_mixture_cost_warning');
-							if (warning) warning.textContent = 'This mixture calls ' + refs.length + ' reference model' + (refs.length === 1 ? '' : 's') + ' plus 1 aggregator model per turn.';
-						}
+								function setMixtureValidationError(message) {
+									var error = document.getElementById('model_mixture_validation_error');
+									if (!error) return;
+									error.textContent = message || '';
+									error.classList.toggle('hidden', !message);
+								}
 
+								function updateMixtureCostWarning() {
+									var refs = selectedMixtureReferenceIDs();
+									var aggregatorID = document.getElementById('model_mixture_aggregator') ? document.getElementById('model_mixture_aggregator').value : '';
+									if (aggregatorID && refs.indexOf(aggregatorID) >= 0) {
+										renderMixtureReferenceOptions(refs);
+										refs = selectedMixtureReferenceIDs();
+									}
+									var workers = document.getElementById('model_mixture_max_workers');
+									if (workers && (!workers.value || workers.value === '0')) workers.value = Math.min(8, Math.max(1, refs.length)).toString();
+									var warning = document.getElementById('model_mixture_cost_warning');
+									if (warning) warning.textContent = 'This mixture calls ' + refs.length + ' reference model' + (refs.length === 1 ? '' : 's') + ' plus 1 aggregator model per turn.';
+									setMixtureValidationError('');
+								}
 						function buildMixtureConfigJSON() {
 							var aggregatorID = document.getElementById('model_mixture_aggregator').value;
 							var aggregator = mixtureOptionByID(aggregatorID) || {id: aggregatorID, provider: '', model: '', name: ''};
@@ -1354,7 +1367,29 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							var providerValue = document.getElementById('model_provider_value');
 								if (provider === 'mixture') {
 									providerValue.value = 'mixture';
+									var aggregatorID = document.getElementById('model_mixture_aggregator').value;
+									var refs = selectedMixtureReferenceIDs();
+									if (!aggregatorID) {
+										setMixtureValidationError('Choose an aggregator model.');
+										return false;
+									}
+									if (refs.length === 0 && document.getElementById('model_mixture_enabled').checked) {
+										setMixtureValidationError('Add at least one reference model, or disable reference fan-out.');
+										return false;
+									}
+									if (refs.indexOf(aggregatorID) >= 0) {
+										renderMixtureReferenceOptions(refs);
+										setMixtureValidationError('The aggregator cannot also be a reference model.');
+										return false;
+									}
+									var modelSelect = document.getElementById('model_id');
+									if (modelSelect) {
+										modelSelect.innerHTML = '<option value="mixture">Mixture of Models</option>';
+										modelSelect.value = 'mixture';
+									}
 									document.getElementById('model_mixture_config_json').value = buildMixtureConfigJSON();
+									setMixtureValidationError('');
+									return true;
 								} else if (isOpenAICompatibleProvider(provider)) {
 									var presetInput = document.getElementById('model_openai_compatible_preset');								var currentPreset = presetInput.value || 'custom';
 								var nextPreset = openAICompatiblePresetForProvider(provider);
@@ -1364,6 +1399,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							} else {
 								providerValue.value = provider;
 							}
+							return true;
 						}
 
 						function setOpenAICompatibleModelValue(modelID, label, selectModel) {						var modelSelect = document.getElementById('model_id');
@@ -1592,9 +1628,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					var ollamaInfo = document.getElementById('ollama_info');
 					var forcePresetDefaults = selectedModel === undefined && selectedReasoningEffort === undefined;
 
-					normalizeModelFormBeforeSubmit();
-					hideAllInfoBoxes();				var activeModel = setModelOptions(provider, selectedModel);
-
+						document.getElementById('model_provider_value').value = effectiveProvider;
+						hideAllInfoBoxes();				var activeModel = setModelOptions(provider, selectedModel);
 				if (provider === 'anthropic') {
 					anthropicAuthTypeField.classList.remove('hidden');
 					openaiAuthTypeField.classList.add('hidden');
@@ -1774,15 +1809,21 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 			}
 		</script>
 		<script>
-			// Close modal after successful HTMX form submission
-			document.body.addEventListener('htmx:afterSwap', function(event) {
-				if (event.detail.target && event.detail.target.id === 'models-container') {
-					var modal = document.getElementById('new_model_modal');
-					if (modal && modal.open) {
-						modal.close();
+				// Close modal after successful HTMX form submission
+				document.body.addEventListener('htmx:afterSwap', function(event) {
+					if (event.detail.target && event.detail.target.id === 'models-container') {
+						var modal = document.getElementById('new_model_modal');
+						if (modal && modal.open) {
+							modal.close();
+						}
 					}
-				}
-			});
-		</script>
+				});
+				document.body.addEventListener('htmx:responseError', function(event) {
+					var form = document.getElementById('model_form');
+					if (!form || !event.detail || event.detail.elt !== form) return;
+					var message = 'Could not save model.';
+					if (event.detail.xhr && event.detail.xhr.responseText) message = event.detail.xhr.responseText;
+					if (typeof setMixtureValidationError === 'function') setMixtureValidationError(message);
+				});		</script>
 	</div>
 }

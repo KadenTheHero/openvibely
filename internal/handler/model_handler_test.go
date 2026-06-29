@@ -306,9 +306,54 @@ func TestCreateModel_Mixture(t *testing.T) {
 	if err := json.Unmarshal([]byte(created.MixtureConfigJSON), &cfg); err != nil {
 		t.Fatalf("unmarshal mixture config: %v", err)
 	}
+	if created.Model != "research-heavy" {
+		t.Fatalf("expected submitted mixture model id to persist, got %q", created.Model)
+	}
 	if !cfg.Enabled || cfg.Aggregator.AgentConfigID != agg.ID || cfg.Aggregator.Label != "Aggregator" || len(cfg.ReferenceModels) != 1 || cfg.ReferenceModels[0].AgentConfigID != ref.ID || cfg.ReferenceTimeoutSeconds != 45 || cfg.MaxReferenceWorkers != 4 {
 		t.Fatalf("unexpected mixture config: %s", created.MixtureConfigJSON)
 	}
+}
+
+func TestCreateModel_MixtureDefaultsBlankModel(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agg := &models.LLMConfig{Name: "Aggregator", Provider: models.ProviderTest, Model: "agg"}
+	ref := &models.LLMConfig{Name: "Reference", Provider: models.ProviderTest, Model: "ref"}
+	for _, cfg := range []*models.LLMConfig{agg, ref} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	form := url.Values{}
+	form.Set("name", "Browser Mixture")
+	form.Set("provider", "mixture")
+	form.Set("model", "")
+	form.Set("mixture_enabled", "on")
+	form.Set("mixture_aggregator_id", agg.ID)
+	form.Add("mixture_reference_ids", ref.ID)
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	configs, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for i := range configs {
+		if configs[i].Name == "Browser Mixture" {
+			if configs[i].Model != "default" {
+				t.Fatalf("expected blank mixture model to default to virtual id, got %q", configs[i].Model)
+			}
+			return
+		}
+	}
+	t.Fatal("created mixture not found")
 }
 
 func TestCreateModel_MixtureCommaSeparatedReferenceOrder(t *testing.T) {

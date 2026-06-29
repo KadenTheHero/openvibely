@@ -254,6 +254,11 @@ func TestModelsContent_MixtureReferenceOrderingControls(t *testing.T) {
 		"select.insertBefore(select.options[index + 1], option);",
 		"syncMixtureReferenceOrderInput();",
 		"selectedMixtureReferenceIDs().map(function(id)",
+		"id === aggregatorID",
+		"setMixtureValidationError('The aggregator cannot also be a reference model.')",
+		"modelSelect.innerHTML = '<option value=\"mixture\">Mixture of Models</option>'",
+		"return false;",
+		"htmx:responseError",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected mixture reference ordering UI/script to contain %q", want)
@@ -438,7 +443,7 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		`<input type="hidden" id="model_provider_value" name="provider" value="anthropic"`,
 		`<select id="model_provider"`,
 		`oninput="syncModelAPIKeySubmitValue(); scheduleAutoDiscoverOpenAICompatibleModels()"`,
-		`onsubmit="normalizeModelFormBeforeSubmit()"`,
+		`onsubmit="return normalizeModelFormBeforeSubmit()"`,
 		`<input type="hidden" id="model_openai_compatible_preset" name="preset_slug" value="custom"`,
 		"OpenAI-compatible presets auto-load available models when selected; Custom stays manual.",
 		"openai_compatible_openrouter: [",
