@@ -1164,6 +1164,138 @@ func TestCreateModel_WithExistingModelConfigIDUpdatesAnthropicOAuthInPlace(t *te
 	}
 }
 
+func TestUpdateModel_SwitchAnthropicOAuthToOpenAIOAuthClearsStaleOAuthState(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:              "Claude OAuth",
+		Provider:          models.ProviderAnthropic,
+		Model:             "claude-opus-4-8",
+		AuthMethod:        models.AuthMethodOAuth,
+		OAuthAccessToken:  "anthropic-access-token",
+		OAuthRefreshToken: "anthropic-refresh-token",
+		OAuthExpiresAt:    time.Now().Add(time.Hour).UnixMilli(),
+		OAuthAccountID:    "anthropic-account",
+		OAuthClientID:     "stale-client-id",
+		OAuthClientSecret: "stale-client-secret",
+		OAuthAuthorizeURL: "https://stale.example/authorize",
+		OAuthTokenURL:     "https://stale.example/token",
+		OAuthScopes:       "stale-scope",
+	}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create error: %v", err)
+	}
+	before, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list before: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "OpenAI OAuth")
+	form.Set("provider", "openai")
+	form.Set("openai_auth_type", "subscription")
+	form.Set("auth_method", "oauth")
+	form.Set("model", "gpt-5.3-codex")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPut, "/models/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	after, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list after: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("expected provider switch to update existing model count %d, got %d", len(before), len(after))
+	}
+	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get error: %v", err)
+	}
+	if updated.Provider != models.ProviderOpenAI || updated.AuthMethod != models.AuthMethodOAuth {
+		t.Fatalf("provider/auth = %s/%s, want openai/oauth", updated.Provider, updated.AuthMethod)
+	}
+	if updated.OAuthAccessToken != "" || updated.OAuthRefreshToken != "" || updated.OAuthExpiresAt != 0 || updated.OAuthAccountID != "" {
+		t.Fatalf("expected OAuth tokens/account cleared on provider switch, got access=%q refresh=%q expires=%d account=%q", updated.OAuthAccessToken, updated.OAuthRefreshToken, updated.OAuthExpiresAt, updated.OAuthAccountID)
+	}
+	if updated.OAuthClientID != "" || updated.OAuthClientSecret != "" || updated.OAuthAuthorizeURL != "" || updated.OAuthTokenURL != "" || updated.OAuthScopes != "" {
+		t.Fatalf("expected stale OAuth client fields cleared on provider switch, got client_id=%q authorize=%q token=%q scopes=%q", updated.OAuthClientID, updated.OAuthAuthorizeURL, updated.OAuthTokenURL, updated.OAuthScopes)
+	}
+}
+
+func TestUpdateModel_SwitchOpenAIOAuthToAnthropicOAuthClearsStaleOAuthState(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:              "OpenAI OAuth",
+		Provider:          models.ProviderOpenAI,
+		Model:             "gpt-5.3-codex",
+		AuthMethod:        models.AuthMethodOAuth,
+		OAuthAccessToken:  "openai-access-token",
+		OAuthRefreshToken: "openai-refresh-token",
+		OAuthExpiresAt:    time.Now().Add(time.Hour).UnixMilli(),
+		OAuthAccountID:    "openai-account",
+		OAuthClientID:     "openai-client-id",
+		OAuthClientSecret: "openai-client-secret",
+		OAuthAuthorizeURL: "https://openai.example/authorize",
+		OAuthTokenURL:     "https://openai.example/token",
+		OAuthScopes:       "openid profile",
+	}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create error: %v", err)
+	}
+	before, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list before: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Claude OAuth")
+	form.Set("provider", "anthropic")
+	form.Set("anthropic_auth_type", "subscription")
+	form.Set("auth_method", "oauth")
+	form.Set("model", "claude-opus-4-8")
+	form.Set("temperature", "0")
+
+	req := httptest.NewRequest(http.MethodPut, "/models/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	after, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list after: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("expected provider switch to update existing model count %d, got %d", len(before), len(after))
+	}
+	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get error: %v", err)
+	}
+	if updated.Provider != models.ProviderAnthropic || updated.AuthMethod != models.AuthMethodOAuth {
+		t.Fatalf("provider/auth = %s/%s, want anthropic/oauth", updated.Provider, updated.AuthMethod)
+	}
+	if updated.OAuthAccessToken != "" || updated.OAuthRefreshToken != "" || updated.OAuthExpiresAt != 0 || updated.OAuthAccountID != "" {
+		t.Fatalf("expected OAuth tokens/account cleared on provider switch, got access=%q refresh=%q expires=%d account=%q", updated.OAuthAccessToken, updated.OAuthRefreshToken, updated.OAuthExpiresAt, updated.OAuthAccountID)
+	}
+	if updated.OAuthClientID != "" || updated.OAuthClientSecret != "" || updated.OAuthAuthorizeURL != "" || updated.OAuthTokenURL != "" || updated.OAuthScopes != "" {
+		t.Fatalf("expected OpenAI OAuth client fields cleared on Anthropic switch, got client_id=%q authorize=%q token=%q scopes=%q", updated.OAuthClientID, updated.OAuthAuthorizeURL, updated.OAuthTokenURL, updated.OAuthScopes)
+	}
+}
+
 func TestUpdateModel_SwitchToOpenAICompatibleBlankAPIKeyClearsStaleCredential(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -1508,6 +1640,10 @@ func TestUpdateModel_OpenAIOAuthPreservesStoredConfigWhenFormOmitsFields(t *test
 		AuthMethod:        models.AuthMethodOAuth,
 		MaxTokens:         4096,
 		IsDefault:         true,
+		OAuthAccessToken:  "openai-access-token",
+		OAuthRefreshToken: "openai-refresh-token",
+		OAuthExpiresAt:    time.Now().Add(time.Hour).UnixMilli(),
+		OAuthAccountID:    "openai-account",
 		OAuthClientID:     "client-id-1",
 		OAuthClientSecret: "client-secret-1",
 		OAuthAuthorizeURL: "https://example.com/oauth/authorize",
@@ -1541,6 +1677,9 @@ func TestUpdateModel_OpenAIOAuthPreservesStoredConfigWhenFormOmitsFields(t *test
 	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
 	if err != nil {
 		t.Fatalf("get error: %v", err)
+	}
+	if updated.OAuthAccessToken != "openai-access-token" || updated.OAuthRefreshToken != "openai-refresh-token" || updated.OAuthExpiresAt != agent.OAuthExpiresAt || updated.OAuthAccountID != "openai-account" {
+		t.Fatalf("expected OAuth token state preserved, got access=%q refresh=%q expires=%d account=%q", updated.OAuthAccessToken, updated.OAuthRefreshToken, updated.OAuthExpiresAt, updated.OAuthAccountID)
 	}
 	if updated.OAuthClientID != "client-id-1" {
 		t.Errorf("oauth_client_id = %q, want %q", updated.OAuthClientID, "client-id-1")

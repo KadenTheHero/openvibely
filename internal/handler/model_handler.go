@@ -227,6 +227,18 @@ func clearOpenAICompatibleFields(agent *models.LLMConfig) {
 	agent.TokenRefreshFormat = ""
 }
 
+func clearOAuthState(agent *models.LLMConfig) {
+	agent.OAuthAccessToken = ""
+	agent.OAuthRefreshToken = ""
+	agent.OAuthExpiresAt = 0
+	agent.OAuthAccountID = ""
+	agent.OAuthClientID = ""
+	agent.OAuthClientSecret = ""
+	agent.OAuthAuthorizeURL = ""
+	agent.OAuthTokenURL = ""
+	agent.OAuthScopes = ""
+}
+
 func parseMixtureConfigForm(c echo.Context) (llmmixture.Config, error) {
 	raw := strings.TrimSpace(c.FormValue("mixture_config_json"))
 	if raw != "" {
@@ -527,17 +539,10 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 	}
 	agent.IsDefault = c.FormValue("is_default") == "on"
 	agent.AutoStartTasks = c.FormValue("auto_start_tasks") == "on"
-	// If switching away from OAuth, clear tokens
-	if agent.AuthMethod != models.AuthMethodOAuth {
-		agent.OAuthAccessToken = ""
-		agent.OAuthRefreshToken = ""
-		agent.OAuthExpiresAt = 0
-		agent.OAuthAccountID = ""
-		agent.OAuthClientID = ""
-		agent.OAuthClientSecret = ""
-		agent.OAuthAuthorizeURL = ""
-		agent.OAuthTokenURL = ""
-		agent.OAuthScopes = ""
+	// Provider/auth changes require reauthorization. Preserve OAuth state only for
+	// same-provider OAuth edits such as model settings updates.
+	if previousProvider != agent.Provider || previousAuthMethod != agent.AuthMethod {
+		clearOAuthState(agent)
 	}
 	// Store OpenAI OAuth config fields
 	if agent.Provider == models.ProviderOpenAI && agent.AuthMethod == models.AuthMethodOAuth {
