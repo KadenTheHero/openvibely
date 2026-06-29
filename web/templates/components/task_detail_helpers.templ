@@ -801,11 +801,12 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							streamContainer.classList.remove('hidden');
 							var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
 							if (bubble) {
-								var thinking = bubble.querySelector('.ov-loading-dots');
-								if (thinking) {
-									var thinkingWrap = thinking.closest('.flex.flex-col.items-start.gap-1');
-									if (thinkingWrap) thinkingWrap.classList.add('hidden');
-									else thinking.classList.add('hidden');
+								var thinkingWrap = document.getElementById('streaming-thinking-' + execId) || document.getElementById('streaming-thinking-resume-' + execId);
+								if (thinkingWrap) {
+									thinkingWrap.classList.add('hidden');
+								} else {
+									var thinking = bubble.querySelector('.ov-loading-dots');
+									if (thinking) thinking.classList.add('hidden');
 								}
 								var loading = bubble.querySelector('.loading-dots, [id^="streaming-dots-"]');
 								if (loading) loading.classList.add('hidden');

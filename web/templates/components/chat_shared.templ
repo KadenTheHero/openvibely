@@ -319,8 +319,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 				(function() {
 					var streamingDots = document.currentScript.previousElementSibling;
 					var container = streamingDots.previousElementSibling;
-					var thinkingIndicator = container.previousElementSibling;
 					var execId = container.getAttribute('data-exec-id');
+					var thinkingIndicator = document.getElementById('streaming-thinking-' + execId);
 					var messagesId = container.getAttribute('data-messages-container');
 					var pauseTarget = container.getAttribute('data-pause-polling-target');
 					var isThread = container.getAttribute('data-is-thread') === 'true';
@@ -697,7 +697,7 @@ templ _initThreadStreamingScript() {
 				var streamingDots = document.getElementById('streaming-dots-resume-' + execId);
 				// Content is in data-raw-content attribute (not textContent)
 				var hasContent = !!container.getAttribute('data-raw-content');
-				var thinkingIndicator = !hasContent ? container.previousElementSibling : null;
+				var thinkingIndicator = !hasContent ? document.getElementById('streaming-thinking-resume-' + execId) : null;
 
 				// Pause HTMX polling if requested
 				if (pauseTarget) {

@@ -189,6 +189,38 @@ func TestInitThreadStreamingScript_CancelledDoneWithoutOutputClearsThinkingIndic
 	}
 }
 
+func TestChatBubbleStreaming_HidesThinkingWrapperNotMixtureProgress(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatBubbleStreaming("Assistant", "exec-1", "task-thread-messages", "task-thread-view", true).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatBubbleStreaming: %v", err)
+	}
+	html := buf.String()
+	execIdx := strings.Index(html, "var execId = container.getAttribute('data-exec-id')")
+	thinkingIdx := strings.Index(html, "document.getElementById('streaming-thinking-' + execId)")
+	if execIdx == -1 || thinkingIdx == -1 || thinkingIdx < execIdx {
+		t.Fatal("streaming bubble must initialize execId before selecting and hiding the explicit thinking wrapper")
+	}
+	if strings.Contains(html, "var thinkingIndicator = container.previousElementSibling") {
+		t.Fatal("streaming bubble must not treat mixture-progress as the thinking indicator")
+	}
+}
+
+func TestChatBubbleStreamingResume_HidesThinkingWrapperNotMixtureProgress(t *testing.T) {
+	var buf bytes.Buffer
+	if err := _initThreadStreamingScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render init thread streaming script: %v", err)
+	}
+	html := buf.String()
+	execIdx := strings.Index(html, "var execId = container.getAttribute('data-exec-id')")
+	thinkingIdx := strings.Index(html, "document.getElementById('streaming-thinking-resume-' + execId)")
+	if execIdx == -1 || thinkingIdx == -1 || thinkingIdx < execIdx {
+		t.Fatal("resume streaming must initialize execId before selecting and hiding the explicit thinking wrapper")
+	}
+	if strings.Contains(html, "var thinkingIndicator = !hasContent ? container.previousElementSibling : null") {
+		t.Fatal("resume streaming must not treat mixture-progress as the thinking indicator")
+	}
+}
+
 func TestChatBubbleStreaming_NeverTargetsTaskDetailContent(t *testing.T) {
 	cases := []struct {
 		name          string
