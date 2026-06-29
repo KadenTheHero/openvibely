@@ -750,7 +750,45 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							if (!pendingContainer || !pendingContainer.querySelector('[data-thread-input-id]') || typeof htmx === 'undefined') return;
 							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: scopedPendingContainerSelector(), swap: 'outerHTML'});
 						}
-						function syncCompletedThreadOutput(execId, completedOutput) {
+						function refreshThreadComposerAction() {
+							if (typeof htmx === 'undefined' || !document.getElementById('task-thread-form-primary-action')) return;
+							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action', {target: '#task-thread-form-primary-action', swap: 'outerHTML'});
+						}
+						function stopThreadPollingAfterCompletion() {
+							var view = currentTaskThreadView();
+							if (!view) return;
+							view.setAttribute('data-task-active', 'false');
+							view.removeAttribute('hx-trigger');
+							view.removeAttribute('hx-get');
+							if (typeof htmx !== 'undefined') htmx.process(view);
+						}
+						function showCompletedThreadTerminalStatus(status) {
+							stopThreadPollingAfterCompletion();
+							var form = document.getElementById('task-thread-form');
+							if (form) {
+								var textarea = document.getElementById('task-message-input');
+								if (textarea) textarea.setAttribute('placeholder', 'Type your message... (Enter to send, Shift+Enter for new line)');
+								refreshThreadComposerAction();
+							}
+							var messages = document.getElementById('task-thread-messages');
+							if (!messages || document.getElementById('task-thread-terminal-status')) return;
+							var wrap = document.createElement('div');
+							wrap.id = 'task-thread-terminal-status';
+							wrap.className = 'flex items-center justify-center gap-2 py-2';
+							var inner = document.createElement('div');
+							var statusClass = status === 'failed' ? 'text-error' : (status === 'cancelled' ? 'text-warning' : 'text-success');
+							inner.className = 'flex items-center gap-2 text-sm opacity-70 ' + statusClass;
+							var icon = document.createElement('span');
+							icon.setAttribute('aria-hidden', 'true');
+							icon.textContent = status === 'failed' ? '✕' : (status === 'cancelled' ? '■' : '✓');
+							var text = document.createElement('span');
+							text.textContent = 'Task ' + (status === 'failed' ? 'failed' : (status === 'cancelled' ? 'cancelled' : 'completed'));
+							inner.appendChild(icon);
+							inner.appendChild(text);
+							wrap.appendChild(inner);
+							messages.appendChild(wrap);
+						}
+						function syncCompletedThreadOutput(execId, completedOutput, status) {
 							if (!currentTaskThreadView() || !execId || typeof completedOutput !== 'string' || completedOutput === '') return;
 							var streamContainer = document.getElementById('streaming-message-' + execId);
 							if (!streamContainer) return;
@@ -776,6 +814,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 								if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
 							}
 							window._taskThreadStreamingActive = false;
+							showCompletedThreadTerminalStatus(status || 'completed');
 						}
 						function renderQueuedRow(data) {
 							if (!data || data.task_id !== taskId || !data.pending_input_id || !currentTaskThreadView()) return;
@@ -870,7 +909,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 					var chatHandler = function(event) {
 						var data = event.detail || {};
 						if (data.type !== 'chat_response_done' || data.task_id !== taskId || !data.exec_id) return;
-						syncCompletedThreadOutput(data.exec_id, data.completed_output);
+						syncCompletedThreadOutput(data.exec_id, data.completed_output, data.status || 'completed');
 					};
 					var handler = function(event) {
 						var data = event.detail || {};

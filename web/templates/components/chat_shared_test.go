@@ -1803,7 +1803,12 @@ func TestTaskThreadLiveEventsScript_ReconcilesChatResponseDoneCompletedOutput(t 
 	for _, snippet := range []string{
 		"window.addEventListener('sse-chat-live-event', chatHandler)",
 		"if (data.type !== 'chat_response_done' || data.task_id !== taskId || !data.exec_id) return;",
-		"syncCompletedThreadOutput(data.exec_id, data.completed_output)",
+		"syncCompletedThreadOutput(data.exec_id, data.completed_output, data.status || 'completed')",
+		"showCompletedThreadTerminalStatus(status || 'completed')",
+		"refreshThreadComposerAction()",
+		"htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action'",
+		"stopThreadPollingAfterCompletion()",
+		"view.setAttribute('data-task-active', 'false')",
 		"document.getElementById('streaming-message-' + execId)",
 		"streamContainer.setAttribute('data-raw-content', completedOutput)",
 		"window.renderStreamingContent(streamContainer, completedOutput)",
@@ -1811,6 +1816,7 @@ func TestTaskThreadLiveEventsScript_ReconcilesChatResponseDoneCompletedOutput(t 
 		"loading.classList.add('hidden')",
 		"thinking.classList.add('hidden')",
 		"window._taskThreadStreamingActive = false",
+		"Task ' + (status === 'failed' ? 'failed' : (status === 'cancelled' ? 'cancelled' : 'completed'))",
 		"window.removeEventListener('sse-chat-live-event', chatHandler)",
 	} {
 		if !strings.Contains(html, snippet) {
