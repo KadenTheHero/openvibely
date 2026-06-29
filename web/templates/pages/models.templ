@@ -109,11 +109,7 @@ func mixtureModelOptionsJSON(agents []models.LLMConfig) string {
 }
 
 func mixtureConfigAttr(agent models.LLMConfig) string {
-	b, err := json.Marshal(agent.MixtureConfigJSON)
-	if err != nil {
-		return "\"\""
-	}
-	return string(b)
+	return agent.MixtureConfigJSON
 }
 
 func mixtureAggregatorSummary(agent models.LLMConfig, agents []models.LLMConfig) string {
@@ -482,9 +478,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							<option value="oauth">API (OAuth via web)</option>
 						</select>
 					</div>
-					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">Model</span></label>
-						<select name="model" id="model_id" class="select select-bordered" onchange="handleModelChange()">
+						<div id="model_field" class="form-control mb-3">
+							<label class="label"><span class="label-text">Model</span></label>
+							<select name="model" id="model_id" class="select select-bordered" onchange="handleModelChange()">
 							<option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
 							<option value="claude-opus-4-8">Claude Opus 4.8</option>
 							<option value="claude-opus-4-7">Claude Opus 4.7</option>
@@ -1598,17 +1594,18 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					document.getElementById('model_openai_compatible_transport').value = transport || 'chat_completions';
 					document.getElementById('model_openai_compatible_preset').value = presetSlug || 'custom';
 						document.getElementById('model_openai_compatible_custom_model').value = dbProvider === 'openai_compatible' ? model : '';
-						applyMixtureConfig(dbProvider === 'mixture' ? mixtureConfigJSON : '');
 						document.getElementById('model_auto_start_tasks').checked = autoStartTasks;				document.getElementById('model_submit_btn').textContent = 'Save';
 				toggleProviderFields(model, reasoningEffort);
+				applyMixtureConfig(dbProvider === 'mixture' ? mixtureConfigJSON : '');
 				resetSecretInputVisibility('model_api_key');
 				new_model_modal.showModal();
 			}
 
 			function toggleProviderFields(selectedModel, selectedReasoningEffort) {
-					var provider = document.getElementById('model_provider').value;
-					var effectiveProvider = canonicalProvider(provider);
-					var apiKeyField = document.getElementById('api_key_field');				var apiKeyInput = document.getElementById('model_api_key');
+						var provider = document.getElementById('model_provider').value;
+						var effectiveProvider = canonicalProvider(provider);
+						var modelField = document.getElementById('model_field');
+						var apiKeyField = document.getElementById('api_key_field');				var apiKeyInput = document.getElementById('model_api_key');
 				var anthropicAuthTypeField = document.getElementById('anthropic_auth_type_field');
 				var openaiAuthTypeField = document.getElementById('openai_auth_type_field');
 				var openaiConnectionMethodField = document.getElementById('openai_connection_method_field');
@@ -1616,8 +1613,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					var ollamaInfo = document.getElementById('ollama_info');
 					var forcePresetDefaults = selectedModel === undefined && selectedReasoningEffort === undefined;
 
-						document.getElementById('model_provider_value').value = effectiveProvider;
-						hideAllInfoBoxes();				var activeModel = setModelOptions(provider, selectedModel);
+							document.getElementById('model_provider_value').value = effectiveProvider;
+							hideAllInfoBoxes();				var activeModel = setModelOptions(provider, selectedModel);
+							if (modelField) modelField.classList.toggle('hidden', provider === 'mixture');
 				if (provider === 'anthropic') {
 					anthropicAuthTypeField.classList.remove('hidden');
 					openaiAuthTypeField.classList.add('hidden');

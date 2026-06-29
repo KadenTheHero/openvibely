@@ -3,7 +3,9 @@ package pages
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"html"
 	"strings"
 	"testing"
 
@@ -234,6 +236,8 @@ func TestModelsContent_MixtureReferenceOrderingControls(t *testing.T) {
 	out := buf.String()
 
 	for _, want := range []string{
+		`id="model_field"`,
+		`if (modelField) modelField.classList.toggle('hidden', provider === 'mixture');`,
 		`id="model_mixture_reference_available"`,
 		`id="model_mixture_references"`,
 		`id="model_mixture_reference_ids_order"`,
@@ -310,6 +314,36 @@ func TestModelsContent_MixtureEditHydratesSavedReferenceOrder(t *testing.T) {
 	}
 	if !strings.Contains(out, "renderMixtureReferenceOptions(selectedIDs);") {
 		t.Fatal("expected edit hydration to rebuild reference selector in saved order")
+	}
+	if strings.Contains(cardMarkup, `&quot;{`) || strings.Contains(cardMarkup, `\\u0022`) {
+		t.Fatalf("expected mixture edit config data to be raw attribute-escaped JSON, not double-encoded JSON string: %s", cardMarkup)
+	}
+	attrPrefix := `data-model-mixture-config-json="`
+	attrStart := strings.Index(cardMarkup, attrPrefix)
+	if attrStart < 0 {
+		t.Fatal("expected mixture edit card to include mixture config data attribute")
+	}
+	attrValue := cardMarkup[attrStart+len(attrPrefix):]
+	attrEnd := strings.Index(attrValue, `"`)
+	if attrEnd < 0 {
+		t.Fatalf("expected terminated mixture config data attribute: %s", cardMarkup)
+	}
+	var parsed struct {
+		Aggregator struct {
+			AgentConfigID string `json:"agent_config_id"`
+		} `json:"aggregator"`
+		ReferenceModels []struct {
+			AgentConfigID string `json:"agent_config_id"`
+		} `json:"reference_models"`
+	}
+	if err := json.Unmarshal([]byte(html.UnescapeString(attrValue[:attrEnd])), &parsed); err != nil {
+		t.Fatalf("expected browser-readable mixture config JSON data attribute: %v", err)
+	}
+	if parsed.Aggregator.AgentConfigID != "ref-a" || len(parsed.ReferenceModels) != 2 || parsed.ReferenceModels[0].AgentConfigID != "ref-b" || parsed.ReferenceModels[1].AgentConfigID != "ref-a" {
+		t.Fatalf("expected edit hydration data to preserve aggregator and ordered references, got %+v", parsed)
+	}
+	if strings.Index(out, "toggleProviderFields(model, reasoningEffort);") > strings.Index(out, "applyMixtureConfig(dbProvider === 'mixture' ? mixtureConfigJSON : '')") {
+		t.Fatal("expected edit mixture config hydration to run after provider field toggling")
 	}
 }
 
