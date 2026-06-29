@@ -167,12 +167,15 @@ func TestModelsContent_ModelFormUsesHTMXSubmit(t *testing.T) {
 	if !strings.Contains(out, `hx-swap="outerHTML"`) {
 		t.Fatal("expected model form to have hx-swap outerHTML")
 	}
-	// JS dynamically updates hx-post and action to include project_id for both paths.
-	if !strings.Contains(out, "form.setAttribute('hx-post', _createUrl);") {
-		t.Fatal("expected create flow to update hx-post dynamically")
+	if !strings.Contains(out, `id="model_config_id" name="model_config_id" value=""`) {
+		t.Fatal("expected model form to include hidden model config ID")
 	}
-	if !strings.Contains(out, "form.setAttribute('hx-post', _editUrl);") {
-		t.Fatal("expected edit flow to update hx-post dynamically")
+	// JS dynamically updates HTMX method and action to include project_id for create/edit paths.
+	if !strings.Contains(out, "form.removeAttribute('hx-put');") || !strings.Contains(out, "form.setAttribute('hx-post', _createUrl);") {
+		t.Fatal("expected create flow to use hx-post and clear edit hx-put")
+	}
+	if !strings.Contains(out, "form.removeAttribute('hx-post');") || !strings.Contains(out, "form.setAttribute('hx-put', _editUrl);") {
+		t.Fatal("expected edit flow to use hx-put and clear create hx-post")
 	}
 	if !strings.Contains(out, "form.action = _createUrl;") {
 		t.Fatal("expected create flow to update form action")
@@ -192,6 +195,12 @@ func TestModelsContent_ModelFormUsesHTMXSubmit(t *testing.T) {
 	}
 	if !strings.Contains(out, "form.dataset.mode = 'edit';") || !strings.Contains(out, "form.dataset.mode = 'create';") {
 		t.Fatal("expected create/edit flow to track form mode")
+	}
+	if !strings.Contains(out, "document.getElementById('model_config_id').value = id;") {
+		t.Fatal("expected edit flow to submit existing model config ID")
+	}
+	if !strings.Contains(out, "document.getElementById('model_config_id').value = '';") {
+		t.Fatal("expected create flow to clear model config ID")
 	}
 }
 

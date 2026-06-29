@@ -379,6 +379,11 @@ func (h *Handler) mixturesUsingModel(ctx context.Context, modelID string) ([]str
 }
 
 func (h *Handler) CreateModel(c echo.Context) error {
+	if id := strings.TrimSpace(c.FormValue("model_config_id")); id != "" {
+		applog.Infof("[handler] CreateModel received existing model_config_id=%s; updating instead", id)
+		return h.updateModelByID(c, id)
+	}
+
 	temp, _ := strconv.ParseFloat(c.FormValue("temperature"), 64)
 	isDefault := c.FormValue("is_default") == "on"
 	reasoningEffort := c.FormValue("reasoning_effort")
@@ -475,7 +480,10 @@ func (h *Handler) CreateModel(c echo.Context) error {
 }
 
 func (h *Handler) UpdateModel(c echo.Context) error {
-	id := c.Param("id")
+	return h.updateModelByID(c, c.Param("id"))
+}
+
+func (h *Handler) updateModelByID(c echo.Context, id string) error {
 	applog.Infof("[handler] UpdateModel id=%s", id)
 
 	agent, err := h.llmConfigRepo.GetByID(c.Request().Context(), id)

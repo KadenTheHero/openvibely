@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -1088,6 +1089,78 @@ func TestCreateModel_OllamaWithCustomModel(t *testing.T) {
 	// Custom model name should override the dropdown selection
 	if found.Model != "my-fine-tuned:latest" {
 		t.Errorf("model = %q, want %q", found.Model, "my-fine-tuned:latest")
+	}
+}
+
+func TestCreateModel_WithExistingModelConfigIDUpdatesAnthropicOAuthInPlace(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:              "Claude Opus 4.8",
+		Provider:          models.ProviderAnthropic,
+		Model:             "claude-opus-4-8",
+		ReasoningEffort:   "low",
+		AuthMethod:        models.AuthMethodOAuth,
+		Temperature:       0,
+		OAuthAccessToken:  "expired-access-token",
+		OAuthRefreshToken: "refresh-token",
+		OAuthExpiresAt:    time.Now().Add(-time.Hour).UnixMilli(),
+	}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create error: %v", err)
+	}
+
+	before, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list before: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("model_config_id", agent.ID)
+	form.Set("name", "Claude Opus 4.8")
+	form.Set("provider", "anthropic")
+	form.Set("anthropic_auth_type", "oauth")
+	form.Set("auth_method", "oauth")
+	form.Set("model", "claude-opus-4-8")
+	form.Set("reasoning_effort", "high")
+	form.Set("temperature", "0")
+
+	// Simulate the duplicated-card failure mode: the reusable edit form submits to
+	// the create route while carrying the existing config ID.
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	after, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list after: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("expected edit to update existing model count %d, got %d", len(before), len(after))
+	}
+
+	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get updated: %v", err)
+	}
+	if updated == nil {
+		t.Fatal("updated model not found")
+	}
+	if updated.ReasoningEffort != "high" {
+		t.Fatalf("reasoning_effort = %q, want high", updated.ReasoningEffort)
+	}
+	if updated.OAuthAccessToken != "expired-access-token" || updated.OAuthRefreshToken != "refresh-token" || updated.OAuthExpiresAt != agent.OAuthExpiresAt {
+		t.Fatalf("expected OAuth token state preserved, got access=%q refresh=%q expires=%d", updated.OAuthAccessToken, updated.OAuthRefreshToken, updated.OAuthExpiresAt)
+	}
+	if updated.AuthMethod != models.AuthMethodOAuth || updated.Provider != models.ProviderAnthropic {
+		t.Fatalf("provider/auth = %s/%s, want anthropic/oauth", updated.Provider, updated.AuthMethod)
 	}
 }
 

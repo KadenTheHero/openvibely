@@ -410,8 +410,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
 					<h3 id="model_modal_title" class="font-bold text-lg mb-4 pr-10">New Model Configuration</h3>
-						<form id="model_form" method="post" action="/models" hx-post="/models" hx-target="#models-container" hx-swap="outerHTML" onsubmit="return normalizeModelFormBeforeSubmit()">					<div class="form-control mb-3">						<label class="label"><span class="label-text">Name</span></label>
-						<input type="text" id="model_name" name="name" class="input input-bordered" required placeholder="My Model"/>
+						<form id="model_form" method="post" action="/models" hx-post="/models" hx-target="#models-container" hx-swap="outerHTML" onsubmit="return normalizeModelFormBeforeSubmit()">					<input type="hidden" id="model_config_id" name="model_config_id" value=""/>
+					<div class="form-control mb-3">						<label class="label"><span class="label-text">Name</span></label>
+							<input type="text" id="model_name" name="name" class="input input-bordered" required placeholder="My Model"/>
 					</div>
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">Provider</span></label>
@@ -1578,10 +1579,12 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					var _editPid = _editParams.get('project_id') || '';
 					var _editUrl = '/models/' + id + (_editPid ? '?project_id=' + encodeURIComponent(_editPid) : '');
 					form.action = _editUrl;
-					form.setAttribute('hx-post', _editUrl);
+					form.removeAttribute('hx-post');
+					form.setAttribute('hx-put', _editUrl);
 					form.method = 'post';
 					form.dataset.mode = 'edit';
-					form.dataset.originalApiKey = apiKey;					document.getElementById('model_name').value = name;				document.getElementById('model_provider').value = uiProvider;
+					form.dataset.originalApiKey = apiKey;
+					document.getElementById('model_config_id').value = id;					document.getElementById('model_name').value = name;				document.getElementById('model_provider').value = uiProvider;
 				document.getElementById('model_anthropic_auth_type').value = anthropicAuthType;
 				document.getElementById('model_openai_auth_type').value = openaiAuthType;
 					document.getElementById('model_openai_connection_method').value = openaiConnectionMethod;
@@ -1768,10 +1771,12 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					var _pid = _params.get('project_id') || '';
 					var _createUrl = '/models' + (_pid ? '?project_id=' + encodeURIComponent(_pid) : '');
 					form.action = _createUrl;
+					form.removeAttribute('hx-put');
 					form.setAttribute('hx-post', _createUrl);
 					form.method = 'post';
 					form.dataset.mode = 'create';
 					form.dataset.originalApiKey = '';
+					document.getElementById('model_config_id').value = '';
 					document.getElementById('model_name').value = '';				document.getElementById('model_provider').value = 'anthropic';
 				document.getElementById('model_anthropic_auth_type').value = 'api_key';
 				document.getElementById('model_openai_auth_type').value = 'api_key';
