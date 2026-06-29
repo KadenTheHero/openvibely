@@ -568,6 +568,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackSvc.SetChannelMessageRouter(channelMessageRouter)
 	emailSvc.SetChannelMessageRouter(channelMessageRouter)
 	emailSvc.SetCustomPersonalityRepo(customPersonalityRepo)
+	emailSvc.SetUploadsDir(uploadsPath)
+	emailSvc.SetChatAttachmentRepo(chatAttachmentRepo)
 	emailSvc.SetChatBroadcaster(chatBroadcaster)
 	emailSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 	emailSvc.SetAgentRepo(agentRepo)

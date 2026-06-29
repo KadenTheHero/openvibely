@@ -1,9 +1,15 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	messagemail "github.com/emersion/go-message/mail"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -343,4 +349,165 @@ func TestEmailServiceResolveAuthorizedProjectUsesSavedSelection(t *testing.T) {
 
 	resolved := svc.resolveAuthorizedProject(ctx, "bob@example.com")
 	require.Equal(t, project2.ID, resolved, "resolveAuthorizedProject must return the saved active project, not the first one")
+}
+func buildEmailMultipartFixture(t *testing.T, png []byte, withAttachment bool) []byte {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("From: Alice <alice@example.com>\r\n")
+	b.WriteString("Subject: Photo\r\n")
+	b.WriteString("Message-ID: <photo@example.com>\r\n")
+	b.WriteString("MIME-Version: 1.0\r\n")
+	b.WriteString("Content-Type: multipart/mixed; boundary=\"BOUND\"\r\n\r\n")
+	b.WriteString("--BOUND\r\n")
+	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
+	b.WriteString("Here is a photo\r\n")
+	if withAttachment {
+		encoded := base64.StdEncoding.EncodeToString(png)
+		b.WriteString("--BOUND\r\n")
+		b.WriteString("Content-Type: image/png\r\n")
+		b.WriteString("Content-Disposition: attachment; filename=\"shot.png\"\r\n")
+		b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+		// wrap at 76 chars per MIME convention
+		for i := 0; i < len(encoded); i += 76 {
+			end := i + 76
+			if end > len(encoded) {
+				end = len(encoded)
+			}
+			b.WriteString(encoded[i:end] + "\r\n")
+		}
+	}
+	b.WriteString("--BOUND--\r\n")
+	return []byte(b.String())
+}
+
+func TestReadEmailParts_ExtractsDecodedAttachmentAndBody(t *testing.T) {
+	raw := buildEmailMultipartFixture(t, slackTestPNGBytes, true)
+	mr, err := messagemail.CreateReader(bytes.NewReader(raw))
+	require.NoError(t, err)
+	body, attachments := readEmailParts(mr, false)
+	require.Equal(t, "Here is a photo", body)
+	require.Len(t, attachments, 1)
+	require.Equal(t, "shot.png", attachments[0].FileName)
+	require.Equal(t, "image/png", attachments[0].ContentType)
+	require.Equal(t, slackTestPNGBytes, attachments[0].Data, "attachment bytes must be base64-decoded back to original PNG")
+}
+
+func TestReadEmailParts_SkipAttachmentsDropsAttachmentParts(t *testing.T) {
+	raw := buildEmailMultipartFixture(t, slackTestPNGBytes, true)
+	mr, err := messagemail.CreateReader(bytes.NewReader(raw))
+	require.NoError(t, err)
+	body, attachments := readEmailParts(mr, true)
+	require.Equal(t, "Here is a photo", body)
+	require.Empty(t, attachments, "attachments must be dropped when skipAttachments is true")
+}
+
+func newEmailAttachmentTestService(t *testing.T) (*EmailService, *repository.ChatAttachmentRepo, *repository.ThreadInputRepo, *models.Project, *models.LLMConfig, *models.LLMConfig) {
+	t.Helper()
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	project := &models.Project{Name: "Email Attachment Project", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
+	defaultAgent := &models.LLMConfig{Name: "text-cli", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodCLI, Model: "claude-sonnet-4-5", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, defaultAgent))
+	visionAgent := &models.LLMConfig{Name: "vision", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-3-5-sonnet-20241022", APIKey: "key"}
+	require.NoError(t, llmConfigRepo.Create(ctx, visionAgent))
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	workerSvc := NewWorkerService(llmSvc, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	svc.SetThreadInputRepo(threadInputRepo)
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	svc.SetChatAttachmentRepo(chatAttachmentRepo)
+	svc.SetUploadsDir(t.TempDir())
+	return svc, chatAttachmentRepo, threadInputRepo, project, defaultAgent, visionAgent
+}
+
+func TestEmailService_FirstTurnLinksImageAttachmentAndSelectsVisionModel(t *testing.T) {
+	svc, chatAttachmentRepo, _, _, _, visionAgent := newEmailAttachmentTestService(t)
+	ctx := context.Background()
+	var runReq ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runReq = req })
+	svc.ProcessIncoming(ctx, EmailInboundMessage{
+		FromAddress: "alice@example.com",
+		Subject:     "Photo",
+		Body:        "what is in this screenshot?",
+		MessageID:   "<photo@example.com>",
+		Attachments: []EmailInboundAttachment{{FileName: "shot.png", ContentType: "image/png", Data: slackTestPNGBytes}},
+	})
+	require.NotEmpty(t, runReq.ExecID, "expected a first-turn execution")
+	require.Equal(t, visionAgent.ID, runReq.Agent.ID, "image attachment must drive vision model selection")
+	require.Len(t, runReq.ImageAttachments, 1)
+	require.Equal(t, "shot.png", runReq.ImageAttachments[0].FileName)
+	linked, err := chatAttachmentRepo.ListByExecution(ctx, runReq.ExecID)
+	require.NoError(t, err)
+	require.Len(t, linked, 1, "image attachment must be linked to the execution")
+	require.Equal(t, "image/png", linked[0].MediaType)
+	data, err := os.ReadFile(linked[0].FilePath)
+	require.NoError(t, err)
+	require.Equal(t, slackTestPNGBytes, data, "persisted attachment bytes must match the source PNG")
+}
+
+func TestEmailService_OctetStreamImageBytesClassifiedAsImage(t *testing.T) {
+	svc, chatAttachmentRepo, _, _, _, visionAgent := newEmailAttachmentTestService(t)
+	ctx := context.Background()
+	var runReq ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runReq = req })
+	svc.ProcessIncoming(ctx, EmailInboundMessage{
+		FromAddress: "alice@example.com",
+		Subject:     "Mislabeled",
+		Body:        "look at this",
+		MessageID:   "<mislabel@example.com>",
+		Attachments: []EmailInboundAttachment{{FileName: "data.bin", ContentType: "application/octet-stream", Data: slackTestPNGBytes}},
+	})
+	require.NotEmpty(t, runReq.ExecID)
+	require.Equal(t, visionAgent.ID, runReq.Agent.ID, "octet-stream bytes that sniff as PNG must select vision model")
+	linked, err := chatAttachmentRepo.ListByExecution(ctx, runReq.ExecID)
+	require.NoError(t, err)
+	require.Len(t, linked, 1)
+	require.Equal(t, "image/png", linked[0].MediaType, "media type must be corrected from sniffed bytes")
+}
+
+func TestEmailService_QueuedChatAttachmentStoresPendingSession(t *testing.T) {
+	svc, _, threadInputRepo, project, defaultAgent, visionAgent := newEmailAttachmentTestService(t)
+	ctx := context.Background()
+	// Seed an active chat execution for the same email session so the next message queues.
+	taskRepo := svc.taskRepo
+	execRepo := svc.execRepo
+	sessionKey := EmailSessionKey("alice@example.com", "<root@example.com>", "", "Photo")
+	activeTask := &models.Task{ProjectID: project.ID, Title: "Root", Prompt: "root", Category: models.CategoryChat, Status: models.StatusRunning, CreatedVia: models.TaskOriginEmail, AgentID: &defaultAgent.ID}
+	require.NoError(t, taskRepo.Create(ctx, activeTask))
+	require.NoError(t, svc.emailTaskContextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: activeTask.ID, EmailFrom: "alice@example.com", EmailMessageID: "<root@example.com>", EmailSubject: "Photo", EmailSessionKey: sessionKey}))
+	activeExec := &models.Execution{TaskID: activeTask.ID, AgentConfigID: defaultAgent.ID, Status: models.ExecRunning, PromptSent: "root"}
+	require.NoError(t, execRepo.Create(ctx, activeExec))
+
+	svc.SetChannelChatRunner(func(context.Context, ChannelChatRunRequest) {})
+	svc.ProcessIncoming(ctx, EmailInboundMessage{
+		FromAddress: "alice@example.com",
+		Subject:     "Photo",
+		Body:        "another screenshot",
+		MessageID:   "<photo2@example.com>",
+		References:  "<root@example.com>",
+		Attachments: []EmailInboundAttachment{{FileName: "shot.png", ContentType: "image/png", Data: slackTestPNGBytes}},
+	})
+
+	pending, err := threadInputRepo.ListPendingForChat(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, pending, 1, "expected the attachment-bearing email to queue")
+	require.Equal(t, visionAgent.ID, pending[0].AgentConfigID, "queued input must persist the vision model from sniffed bytes")
+	require.NotEmpty(t, pending[0].AttachmentSessionID, "queued input must reference a pending attachment session")
+	pendingDir := filepath.Join(svc.emailUploadsDir(), "chat", "pending", pending[0].AttachmentSessionID)
+	entries, err := os.ReadDir(pendingDir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "exactly one staged attachment expected")
 }

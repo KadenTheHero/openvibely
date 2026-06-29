@@ -12,6 +12,8 @@ import (
 	"mime"
 	netmail "net/mail"
 	"net/smtp"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -53,6 +55,10 @@ const (
 
 	emailProcessTimeout   = 5 * time.Minute
 	emailChatHistoryLimit = 50
+
+	emailMaxFileSize     = 20 << 20   // 20 MB per attachment
+	emailMaxTextFileSize = 100 * 1024 // 100KB for inline text-attachment context
+	emailMaxAttachments  = 10
 )
 
 type EmailProviderPreset struct {
@@ -174,25 +180,27 @@ type emailIMAPClient interface {
 }
 
 type EmailService struct {
-	settingsRepo          *repository.SettingsRepo
-	projectRepo           *repository.ProjectRepo
-	llmConfigRepo         *repository.LLMConfigRepo
-	taskRepo              *repository.TaskRepo
-	execRepo              *repository.ExecutionRepo
-	scheduleRepo          *repository.ScheduleRepo
-	taskSvc               *TaskService
-	llmSvc                *LLMService
-	workerSvc             *WorkerService
-	emailAuthRepo            *repository.EmailAuthRepo
-	emailTaskContextRepo     *repository.EmailTaskContextRepo
-	emailSenderProjectRepo   *repository.EmailSenderProjectRepo
-	threadInputRepo       *repository.ThreadInputRepo
-	customPersonalityRepo *repository.CustomPersonalityRepo
-	agentRepo             *repository.AgentRepo
-	chatBroadcaster       *events.ChatBroadcaster
-	queuedTurnPromoter    func(projectID string)
-	channelChatRunner     ChannelChatRunner
-	channelMessageRouter  *ChannelMessageRouter
+	settingsRepo           *repository.SettingsRepo
+	projectRepo            *repository.ProjectRepo
+	llmConfigRepo          *repository.LLMConfigRepo
+	taskRepo               *repository.TaskRepo
+	execRepo               *repository.ExecutionRepo
+	scheduleRepo           *repository.ScheduleRepo
+	taskSvc                *TaskService
+	llmSvc                 *LLMService
+	workerSvc              *WorkerService
+	emailAuthRepo          *repository.EmailAuthRepo
+	emailTaskContextRepo   *repository.EmailTaskContextRepo
+	emailSenderProjectRepo *repository.EmailSenderProjectRepo
+	threadInputRepo        *repository.ThreadInputRepo
+	customPersonalityRepo  *repository.CustomPersonalityRepo
+	agentRepo              *repository.AgentRepo
+	chatBroadcaster        *events.ChatBroadcaster
+	queuedTurnPromoter     func(projectID string)
+	channelChatRunner      ChannelChatRunner
+	channelMessageRouter   *ChannelMessageRouter
+	chatAttachmentRepo     *repository.ChatAttachmentRepo
+	uploadsDir             string
 
 	mu                       sync.RWMutex
 	running                  bool
@@ -227,6 +235,17 @@ type EmailInboundMessage struct {
 	AutoSubmitted string
 	Precedence    string
 	ListUnsub     string
+	Attachments   []EmailInboundAttachment
+}
+
+// EmailInboundAttachment carries the decoded bytes and metadata of a single
+// MIME attachment part extracted from an inbound email. The go-message/mail
+// reader already decodes transfer encodings (base64/quoted-printable), so
+// Data holds the raw file bytes.
+type EmailInboundAttachment struct {
+	FileName    string
+	ContentType string
+	Data        []byte
 }
 
 func NewEmailService(settingsRepo *repository.SettingsRepo, projectRepo *repository.ProjectRepo, llmConfigRepo *repository.LLMConfigRepo, taskRepo *repository.TaskRepo, execRepo *repository.ExecutionRepo, scheduleRepo *repository.ScheduleRepo, taskSvc *TaskService, llmSvc *LLMService, workerSvc *WorkerService, emailAuthRepo *repository.EmailAuthRepo, emailTaskContextRepo *repository.EmailTaskContextRepo) *EmailService {
@@ -263,6 +282,18 @@ func (s *EmailService) SetChannelMessageRouter(router *ChannelMessageRouter) {
 }
 func (s *EmailService) SetEmailSenderProjectRepo(repo *repository.EmailSenderProjectRepo) {
 	s.emailSenderProjectRepo = repo
+}
+func (s *EmailService) SetChatAttachmentRepo(repo *repository.ChatAttachmentRepo) {
+	s.chatAttachmentRepo = repo
+}
+func (s *EmailService) SetUploadsDir(dir string) {
+	if strings.TrimSpace(dir) == "" {
+		return
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	s.uploadsDir = dir
 }
 
 func (s *EmailService) IsRunning() bool {
@@ -429,7 +460,7 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 		}
 		return
 	}
-	messages, err := fetchEmailMessages(client, ids)
+	messages, err := fetchEmailMessages(client, ids, cfg.SkipAttachments)
 	if err != nil {
 		applog.Infof("[email] fetch messages failed: %v", err)
 		return
@@ -467,7 +498,7 @@ func defaultEmailIMAPConnect(ctx context.Context, cfg EmailRuntimeConfig) (email
 	return client, nil
 }
 
-func fetchEmailMessages(client emailIMAPClient, ids []uint32) ([]EmailInboundMessage, error) {
+func fetchEmailMessages(client emailIMAPClient, ids []uint32, skipAttachments bool) ([]EmailInboundMessage, error) {
 	seqset := new(imap.SeqSet)
 	seqset.AddNum(ids...)
 	section := &imap.BodySectionName{}
@@ -481,7 +512,7 @@ func fetchEmailMessages(client emailIMAPClient, ids []uint32) ([]EmailInboundMes
 		if msg == nil {
 			continue
 		}
-		inbound, err := parseIMAPMessage(msg, section)
+		inbound, err := parseIMAPMessage(msg, section, skipAttachments)
 		if err != nil {
 			applog.Infof("[email] parse message failed: %v", err)
 			continue
@@ -491,7 +522,7 @@ func fetchEmailMessages(client emailIMAPClient, ids []uint32) ([]EmailInboundMes
 	return out, nil
 }
 
-func parseIMAPMessage(msg *imap.Message, section *imap.BodySectionName) (EmailInboundMessage, error) {
+func parseIMAPMessage(msg *imap.Message, section *imap.BodySectionName, skipAttachments bool) (EmailInboundMessage, error) {
 	var inbound EmailInboundMessage
 	if msg.Envelope != nil {
 		inbound.Subject = strings.TrimSpace(msg.Envelope.Subject)
@@ -519,7 +550,7 @@ func parseIMAPMessage(msg *imap.Message, section *imap.BodySectionName) (EmailIn
 			inbound.AutoSubmitted = h.Get("Auto-Submitted")
 			inbound.Precedence = h.Get("Precedence")
 			inbound.ListUnsub = h.Get("List-Unsubscribe")
-			inbound.Body = readPlainTextBody(mr)
+			inbound.Body, inbound.Attachments = readEmailParts(mr, skipAttachments)
 		} else {
 			raw, _ := io.ReadAll(body)
 			inbound.Body = string(raw)
@@ -531,8 +562,16 @@ func parseIMAPMessage(msg *imap.Message, section *imap.BodySectionName) (EmailIn
 	return inbound, nil
 }
 
-func readPlainTextBody(mr *messagemail.Reader) string {
+// readEmailParts walks the MIME tree, returning the best plain-text body and any
+// attachment parts. The go-message/mail reader decodes transfer encodings
+// (base64/quoted-printable) on part.Body, so attachment Data holds raw bytes.
+// Inline parts that carry a filename (for example embedded/inline images) are
+// also treated as attachments. When skipAttachments is true, attachment parts
+// are read past and discarded so behavior matches the legacy text-only path.
+func readEmailParts(mr *messagemail.Reader, skipAttachments bool) (string, []EmailInboundAttachment) {
+	var plain string
 	var fallback string
+	var attachments []EmailInboundAttachment
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
@@ -544,16 +583,75 @@ func readPlainTextBody(mr *messagemail.Reader) string {
 		switch h := part.Header.(type) {
 		case *messagemail.InlineHeader:
 			contentType, _, _ := h.ContentType()
+			fileName := emailPartFilename(h)
 			b, _ := io.ReadAll(part.Body)
-			if strings.HasPrefix(contentType, "text/plain") {
-				return strings.TrimSpace(string(b))
+			// Inline parts with a filename (e.g. inline images) are attachments.
+			if fileName != "" && !strings.HasPrefix(contentType, "text/") {
+				if !skipAttachments && len(attachments) < emailMaxAttachments {
+					attachments = appendEmailAttachment(attachments, fileName, contentType, b)
+				}
+				continue
+			}
+			if plain == "" && strings.HasPrefix(contentType, "text/plain") {
+				plain = strings.TrimSpace(string(b))
+				continue
 			}
 			if fallback == "" && strings.HasPrefix(contentType, "text/html") {
 				fallback = stripHTML(string(b))
 			}
+		case *messagemail.AttachmentHeader:
+			if skipAttachments || len(attachments) >= emailMaxAttachments {
+				_, _ = io.Copy(io.Discard, part.Body)
+				continue
+			}
+			contentType, _, _ := h.ContentType()
+			fileName := emailPartFilename(h)
+			b, _ := io.ReadAll(part.Body)
+			attachments = appendEmailAttachment(attachments, fileName, contentType, b)
 		}
 	}
-	return strings.TrimSpace(fallback)
+	body := plain
+	if body == "" {
+		body = strings.TrimSpace(fallback)
+	}
+	return body, attachments
+}
+
+func appendEmailAttachment(attachments []EmailInboundAttachment, fileName, contentType string, data []byte) []EmailInboundAttachment {
+	if len(data) == 0 || len(data) > emailMaxFileSize {
+		if len(data) > emailMaxFileSize {
+			applog.Infof("[email] skipping oversized attachment file=%s size=%d max=%d", fileName, len(data), emailMaxFileSize)
+		}
+		return attachments
+	}
+	if strings.TrimSpace(fileName) == "" {
+		fileName = "email-attachment"
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	return append(attachments, EmailInboundAttachment{FileName: fileName, ContentType: mediaType, Data: data})
+}
+
+// emailPartHeader is the subset of go-message header behavior used to resolve a
+// part's filename; both *mail.InlineHeader and *mail.AttachmentHeader satisfy it.
+type emailPartHeader interface {
+	ContentDisposition() (string, map[string]string, error)
+	ContentType() (string, map[string]string, error)
+}
+
+// emailPartFilename resolves a part's filename, handling RFC 2047/2231 encoded
+// names via the header's ContentDisposition/ContentType params.
+func emailPartFilename(h emailPartHeader) string {
+	if _, params, err := h.ContentDisposition(); err == nil {
+		if name := strings.TrimSpace(params["filename"]); name != "" {
+			return name
+		}
+	}
+	if _, params, err := h.ContentType(); err == nil {
+		if name := strings.TrimSpace(params["name"]); name != "" {
+			return name
+		}
+	}
+	return ""
 }
 
 var htmlTagRE = regexp.MustCompile(`<[^>]+>`)
@@ -597,6 +695,7 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 		Message:               prompt,
 		Source:                models.TaskOriginEmail,
 		Surface:               chatcontrol.SurfaceEmail,
+		HasAttachments:        len(msg.Attachments) > 0,
 		TaskRepo:              s.taskRepo,
 		ExecRepo:              s.execRepo,
 		ThreadInputRepo:       s.threadInputRepo,
@@ -608,20 +707,36 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 		SettingsRepo:          s.settingsRepo,
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
+		UploadsDir:            s.emailUploadsDir(),
 		SelectionMessage:      msg.Body,
+		DownloadAttachments: func(ctx context.Context) (channelChatIngressDownloadResult, error) {
+			if len(msg.Attachments) == 0 {
+				return channelChatIngressDownloadResult{}, nil
+			}
+			attCtx, imgAtts, chatAtts, err := s.stageEmailAttachments(msg.Attachments)
+			return channelChatIngressDownloadResult{AttachmentContext: attCtx, ImageAttachments: imgAtts, ChatAttachments: chatAtts}, err
+		},
+		IncomingAttachmentsNeedVision: func() bool { return emailIncomingAttachmentsRequireVision(msg.Attachments) },
+		SavePendingAttachments:        s.saveChatAttachmentsToPendingSession,
 		FindActiveExecution: func(ctx context.Context, projectID string) (*models.Execution, error) {
 			return s.execRepo.FindLatestActiveEmailChatExecution(ctx, projectID, sessionKey)
 		},
 		NewQueuedInput: func() *models.ThreadInput {
 			return &models.ThreadInput{EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey}
 		},
-		OnModelSelectionFailed: func(context.Context, error) { applog.Infof("[email] model selection failed") },
-		OnActiveLookupFailed:   func(context.Context) { applog.Infof("[email] active chat check failed") },
+		OnAttachmentDownloadFailed: func(context.Context, string) { applog.Infof("[email] attachment processing failed") },
+		OnAttachmentStoreFailed:    func(context.Context, string) { applog.Infof("[email] attachment staging failed") },
+		OnModelSelectionFailed:     func(context.Context, error) { applog.Infof("[email] model selection failed") },
+		OnActiveLookupFailed:       func(context.Context) { applog.Infof("[email] active chat check failed") },
 		FirstTurn: channelChatIngressFirstTurnOptions{
 			Task:              &models.Task{Title: fmt.Sprintf("Email %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Subject, 47)), CreatedVia: models.TaskOriginEmail},
 			ReplyContext:      ChannelReplyContext{Source: models.TaskOriginEmail, EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey},
 			ChannelChatRunner: s.channelChatRunner,
 			RuntimeTools:      s.buildEmailActionToolRuntime(projectID, msg.FromAddress),
+			LinkAttachments:   s.linkAttachmentsToExecution,
+			AttachmentContextAndImages: func(atts []models.ChatAttachment) (string, []models.Attachment) {
+				return channelChatAttachmentContextAndImages(atts, emailMaxTextFileSize)
+			},
 			CreateTaskContext: func(ctx context.Context, taskID string) error {
 				if s.emailTaskContextRepo == nil {
 					return nil
@@ -635,6 +750,97 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 			FilterChatHistory: filterEmailChatHistory,
 		},
 	})
+}
+
+// emailUploadsDir returns the configured uploads root, defaulting to "uploads"
+// so attachment staging/linking works even before SetUploadsDir wiring.
+func (s *EmailService) emailUploadsDir() string {
+	if strings.TrimSpace(s.uploadsDir) != "" {
+		return s.uploadsDir
+	}
+	return "uploads"
+}
+
+// stageEmailAttachments writes decoded MIME attachment bytes to a temp dir,
+// sniffs/validates the bytes (so mislabeled images are classified correctly),
+// and returns attachment context, image attachments, and chat attachment
+// records for the shared ingress pipeline.
+func (s *EmailService) stageEmailAttachments(parts []EmailInboundAttachment) (string, []models.Attachment, []models.ChatAttachment, error) {
+	if len(parts) == 0 {
+		return "", nil, nil, nil
+	}
+	tmpDir, err := os.MkdirTemp("", "email-attachment-*")
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.RemoveAll(tmpDir)
+		}
+	}()
+	chatAttachments := make([]models.ChatAttachment, 0, len(parts))
+	for _, part := range parts {
+		if len(part.Data) > emailMaxFileSize {
+			return "", nil, nil, fmt.Errorf("attachment %q too large (%d bytes, max %d)", part.FileName, len(part.Data), emailMaxFileSize)
+		}
+		fileName := safeChannelChatAttachmentFileName(part.FileName, "email-attachment")
+		destPath := filepath.Join(tmpDir, uniqueChannelChatTempFilename(tmpDir, fileName))
+		if err := os.WriteFile(destPath, part.Data, 0644); err != nil {
+			return "", nil, nil, fmt.Errorf("failed to write attachment %q: %w", fileName, err)
+		}
+		mediaType := part.ContentType
+		normalizedMediaType, validateErr := validateChannelChatDownloadedImageFile(destPath, fileName, mediaType, "email")
+		if validateErr != nil {
+			return "", nil, nil, validateErr
+		}
+		if normalizedMediaType != "" {
+			mediaType = normalizedMediaType
+		}
+		absPath, err := filepath.Abs(destPath)
+		if err != nil {
+			absPath = destPath
+		}
+		chatAttachments = append(chatAttachments, models.ChatAttachment{
+			FileName:  fileName,
+			FilePath:  absPath,
+			MediaType: mediaType,
+			FileSize:  int64(len(part.Data)),
+		})
+		applog.Infof("[email] staged attachment file=%s size=%d mime=%s", fileName, len(part.Data), mediaType)
+	}
+	cleanup = false
+	attachmentContext, imageAttachments := channelChatAttachmentContextAndImages(chatAttachments, emailMaxTextFileSize)
+	return attachmentContext, imageAttachments, chatAttachments, nil
+}
+
+func (s *EmailService) saveChatAttachmentsToPendingSession(attachments []models.ChatAttachment) (string, error) {
+	return saveChannelChatAttachmentsToPendingSession(s.emailUploadsDir(), "email-attachment", attachments)
+}
+
+func (s *EmailService) linkAttachmentsToExecution(ctx context.Context, execID string, attachments []models.ChatAttachment) ([]models.ChatAttachment, error) {
+	return linkChannelChatAttachmentsToExecution(ctx, execID, attachments, channelChatAttachmentLinkOptions{
+		Platform:     "email",
+		UploadsDir:   s.emailUploadsDir(),
+		Repo:         s.chatAttachmentRepo,
+		FallbackName: "email-attachment",
+	})
+}
+
+// emailIncomingAttachmentsRequireVision reports whether any inbound attachment
+// is (or may be) an image, based on declared content types. Final image
+// classification is done from sniffed bytes after staging.
+func emailIncomingAttachmentsRequireVision(parts []EmailInboundAttachment) bool {
+	for _, part := range parts {
+		mediaType := strings.ToLower(strings.TrimSpace(strings.Split(part.ContentType, ";")[0]))
+		if isChannelChatImageMediaType(mediaType) {
+			return true
+		}
+		if mediaType == "" || mediaType == "application/octet-stream" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *EmailService) resolveAuthorizedProject(ctx context.Context, sender string) string {
