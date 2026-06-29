@@ -320,9 +320,6 @@ func (h *Handler) applyAndValidateMixtureForm(ctx context.Context, c echo.Contex
 			return fmt.Errorf("duplicate reference model %q", cfg.ReferenceModels[i].Label)
 		}
 		seenRefs[id] = struct{}{}
-		if id == strings.TrimSpace(cfg.Aggregator.AgentConfigID) {
-			return fmt.Errorf("aggregator cannot also be a reference model")
-		}
 	}
 	normalized, err := llmmixture.NormalizeConfig(cfg)
 	if err != nil {

@@ -254,8 +254,6 @@ func TestModelsContent_MixtureReferenceOrderingControls(t *testing.T) {
 		"select.insertBefore(select.options[index + 1], option);",
 		"syncMixtureReferenceOrderInput();",
 		"selectedMixtureReferenceIDs().map(function(id)",
-		"id === aggregatorID",
-		"setMixtureValidationError('The aggregator cannot also be a reference model.')",
 		"modelSelect.innerHTML = '<option value=\"mixture\">Mixture of Models</option>'",
 		"return false;",
 		"htmx:responseError",
@@ -270,6 +268,8 @@ func TestModelsContent_MixtureReferenceOrderingControls(t *testing.T) {
 		"function moveMixtureReferences(direction)",
 		"opt.selected && !prev.selected",
 		"current.selected && !next.selected",
+		"id === aggregatorID",
+		"The aggregator cannot also be a reference model.",
 	} {
 		if strings.Contains(out, broken) {
 			t.Fatalf("rendered mixture reference ordering still contains broken fixed-order behavior: %q", broken)

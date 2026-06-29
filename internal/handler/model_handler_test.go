@@ -356,6 +356,57 @@ func TestCreateModel_MixtureDefaultsBlankModel(t *testing.T) {
 	t.Fatal("created mixture not found")
 }
 
+func TestCreateModel_MixtureAllowsAggregatorAsReference(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agg := &models.LLMConfig{Name: "Aggregator", Provider: models.ProviderTest, Model: "agg"}
+	if err := llmConfigRepo.Create(ctx, agg); err != nil {
+		t.Fatalf("create aggregator: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Self Review Mixture")
+	form.Set("provider", "mixture")
+	form.Set("model", "self-review")
+	form.Set("mixture_enabled", "on")
+	form.Set("mixture_aggregator_id", agg.ID)
+	form.Add("mixture_reference_ids", agg.ID)
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	configs, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for i := range configs {
+		if configs[i].Name != "Self Review Mixture" {
+			continue
+		}
+		var cfg struct {
+			Aggregator struct {
+				AgentConfigID string `json:"agent_config_id"`
+			} `json:"aggregator"`
+			ReferenceModels []struct {
+				AgentConfigID string `json:"agent_config_id"`
+			} `json:"reference_models"`
+		}
+		if err := json.Unmarshal([]byte(configs[i].MixtureConfigJSON), &cfg); err != nil {
+			t.Fatalf("unmarshal mixture config: %v", err)
+		}
+		if cfg.Aggregator.AgentConfigID != agg.ID || len(cfg.ReferenceModels) != 1 || cfg.ReferenceModels[0].AgentConfigID != agg.ID {
+			t.Fatalf("expected aggregator to also be saved as reference, got %s", configs[i].MixtureConfigJSON)
+		}
+		return
+	}
+	t.Fatal("created mixture not found")
+}
+
 func TestCreateModel_MixtureCommaSeparatedReferenceOrder(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -479,7 +530,6 @@ func TestCreateModel_MixtureRejectsRecursiveAndDuplicateSlots(t *testing.T) {
 	}{
 		{name: "recursive", refs: []string{recursive.ID}, want: "mixture model"},
 		{name: "duplicate", refs: []string{ref.ID, ref.ID}, want: "duplicate reference"},
-		{name: "aggregator as reference", refs: []string{agg.ID}, want: "aggregator cannot also be a reference"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

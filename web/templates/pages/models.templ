@@ -1244,19 +1244,18 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 										var selectedSelect = document.getElementById('model_mixture_references');
 										var availableSelect = document.getElementById('model_mixture_reference_available');
 										if (!selectedSelect || !availableSelect) return;
-										var aggregatorID = document.getElementById('model_mixture_aggregator') ? document.getElementById('model_mixture_aggregator').value : '';
 										var selected = {};
 										selectedSelect.innerHTML = '';
 										availableSelect.innerHTML = '<option value="">Select reference to add</option>';
 										for (var i = 0; i < (selectedIDs || []).length; i++) {
 											var id = selectedIDs[i];
 											var option = mixtureOptionByID(id);
-											if (!option || selected[id] || id === aggregatorID) continue;
+											if (!option || selected[id]) continue;
 											selected[id] = true;
 											appendMixtureReferenceOption(selectedSelect, option);
 										}
 										for (var k = 0; k < mixtureModelOptions.length; k++) {
-											if (selected[mixtureModelOptions[k].id] || mixtureModelOptions[k].id === aggregatorID) continue;
+											if (selected[mixtureModelOptions[k].id]) continue;
 											appendMixtureReferenceOption(availableSelect, mixtureModelOptions[k]);
 										}
 										syncMixtureReferenceOrderInput();
@@ -1316,15 +1315,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 									error.classList.toggle('hidden', !message);
 								}
 
-								function updateMixtureCostWarning() {
-									var refs = selectedMixtureReferenceIDs();
-									var aggregatorID = document.getElementById('model_mixture_aggregator') ? document.getElementById('model_mixture_aggregator').value : '';
-									if (aggregatorID && refs.indexOf(aggregatorID) >= 0) {
-										renderMixtureReferenceOptions(refs);
-										refs = selectedMixtureReferenceIDs();
-									}
-									var workers = document.getElementById('model_mixture_max_workers');
-									if (workers && (!workers.value || workers.value === '0')) workers.value = Math.min(8, Math.max(1, refs.length)).toString();
+									function updateMixtureCostWarning() {
+										var refs = selectedMixtureReferenceIDs();
+										var workers = document.getElementById('model_mixture_max_workers');									if (workers && (!workers.value || workers.value === '0')) workers.value = Math.min(8, Math.max(1, refs.length)).toString();
 									var warning = document.getElementById('model_mixture_cost_warning');
 									if (warning) warning.textContent = 'This mixture calls ' + refs.length + ' reference model' + (refs.length === 1 ? '' : 's') + ' plus 1 aggregator model per turn.';
 									setMixtureValidationError('');
@@ -1375,11 +1368,6 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 									}
 									if (refs.length === 0 && document.getElementById('model_mixture_enabled').checked) {
 										setMixtureValidationError('Add at least one reference model, or disable reference fan-out.');
-										return false;
-									}
-									if (refs.indexOf(aggregatorID) >= 0) {
-										renderMixtureReferenceOptions(refs);
-										setMixtureValidationError('The aggregator cannot also be a reference model.');
 										return false;
 									}
 									var modelSelect = document.getElementById('model_id');

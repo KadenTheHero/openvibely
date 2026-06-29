@@ -97,7 +97,7 @@ Where a low-level provider API still requires an output limit, OpenVibely choose
 ### Mixture of Models
 
 - A Mixture of Models is a virtual model config composed from existing non-mixture model configs.
-- Choose one `Aggregator Model` and one or more `Reference Models` in the model dialog.
+- Choose one `Aggregator Model` and one or more `Reference Models` in the model dialog. The same model can be both the aggregator and one reference if you want it to provide advisory output before its final answer.
 - On each turn, reference models run first as private advisory calls with tools disabled. Their outputs are not shown as separate chat/task messages.
 - The aggregator then runs as the acting model with normal OpenVibely behavior, including tools, streaming, attachments, task updates, and channel replies.
 - The dialog shows the cost warning `This mixture calls N reference models plus 1 aggregator model per turn.`
