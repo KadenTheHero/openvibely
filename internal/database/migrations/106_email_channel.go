@@ -9,10 +9,10 @@ import (
 )
 
 func init() {
-	goose.AddNamedMigrationContext("098_email_channel.go", upEmailChannel098, downEmailChannel098)
+	goose.AddNamedMigrationContext("106_email_channel.go", upEmailChannel106, downEmailChannel106)
 }
 
-func upEmailChannel098(ctx context.Context, tx *sql.Tx) error {
+func upEmailChannel106(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS email_authorized_senders (
 			id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
@@ -42,7 +42,7 @@ func upEmailChannel098(ctx context.Context, tx *sql.Tx) error {
 		return fmt.Errorf("creating email channel tables: %w", err)
 	}
 
-	contextColumns, err := tableColumns098(ctx, tx, "email_task_context")
+	contextColumns, err := tableColumns106(ctx, tx, "email_task_context")
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func upEmailChannel098(ctx context.Context, tx *sql.Tx) error {
 		}
 	}
 
-	columns, err := tableColumns098(ctx, tx, "thread_inputs")
+	columns, err := tableColumns106(ctx, tx, "thread_inputs")
 	if err != nil {
 		return err
 	}
@@ -75,7 +75,7 @@ func upEmailChannel098(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func downEmailChannel098(ctx context.Context, tx *sql.Tx) error {
+func downEmailChannel106(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `
 			DROP INDEX IF EXISTS idx_email_task_context_session;
 			DROP INDEX IF EXISTS idx_email_task_context_from;
@@ -88,7 +88,7 @@ func downEmailChannel098(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-func tableColumns098(ctx context.Context, tx *sql.Tx, table string) (map[string]bool, error) {
+func tableColumns106(ctx context.Context, tx *sql.Tx, table string) (map[string]bool, error) {
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return nil, fmt.Errorf("reading %s columns: %w", table, err)
