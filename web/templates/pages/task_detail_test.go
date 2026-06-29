@@ -494,7 +494,7 @@ func TestTaskDetailContent_ThreadAutoLoadsWhenChatTabInitiallyActive(t *testing.
 	}
 }
 
-func TestTaskDetailContent_ThreadReloadsForCurrentTaskLiveRunEvents(t *testing.T) {
+func TestTaskDetailContent_ThreadStartEventsUseFragmentAppendNotFullReload(t *testing.T) {
 	task := &models.Task{
 		ID:        "task-thread-run-race",
 		Title:     "Task",
@@ -526,7 +526,8 @@ func TestTaskDetailContent_ThreadReloadsForCurrentTaskLiveRunEvents(t *testing.T
 		"if (!currentThreadContent || currentThreadContent.dataset.taskId !== taskId) return;",
 		"setTimeout(function() { _refreshActiveThreadContent(taskId, true, expectedExecId, attempt + 1); }, 150 * (attempt + 1));",
 		"if (data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied') {",
-		"_refreshActiveThreadContent(data.task_id, true, data.exec_id || '', 0);",
+		"TaskThreadLiveEventsScript owns these events",
+		"without replacing #thread-content or closing the fresh stream",
 		"if (data.type === 'task_status_changed') {",
 		"var activeStatuses = { pending: true, queued: true, running: true };",
 		"_refreshActiveThreadContent(data.task_id, true, data.exec_id || '', 0);",
@@ -596,14 +597,14 @@ func TestTaskDetailContent_LiveConnectedHandler_PreservesPendingAttachmentOnReco
 	}
 }
 
-// TestTaskDetailContent_TaskEventHandler_PreservesPendingAttachmentOnExecutionStarted
-// verifies that _taskDetailTaskEventHandler skips the full thread reload for
-// task_thread_execution_started / task_thread_input_applied events when the composer
-// has a pending attachment upload session. TaskThreadLiveEventsScript handles
-// ensureStreamingFragment for those events without replacing the composer.
-func TestTaskDetailContent_TaskEventHandler_PreservesPendingAttachmentOnExecutionStarted(t *testing.T) {
+// TestTaskDetailContent_TaskEventHandler_DoesNotFullReloadOnExecutionStarted
+// verifies that the page-level task detail listener does not also reload the
+// whole task-thread panel for task_thread_execution_started / task_thread_input_applied.
+// The scoped TaskThreadLiveEventsScript owns those events and appends the
+// authoritative execution fragment without closing per-execution streams.
+func TestTaskDetailContent_TaskEventHandler_DoesNotFullReloadOnExecutionStarted(t *testing.T) {
 	task := &models.Task{
-		ID:        "task-attach-exec-start",
+		ID:        "task-exec-start-no-reload",
 		Title:     "Task",
 		ProjectID: "project-1",
 		Status:    models.StatusRunning,
@@ -616,11 +617,20 @@ func TestTaskDetailContent_TaskEventHandler_PreservesPendingAttachmentOnExecutio
 	}
 	output := buf.String()
 
-	if !strings.Contains(output, "var sessionInputEl = document.getElementById('task-thread-form-session-id');") {
-		t.Fatal("expected execution_started handler to read attachment session input by ID")
+	branchStart := strings.Index(output, "if (data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied') {")
+	if branchStart < 0 {
+		t.Fatal("expected execution start/applied branch")
 	}
-	if !strings.Contains(output, "if (!sessionInputEl || !sessionInputEl.value) {") {
-		t.Fatal("expected execution_started handler to guard _refreshActiveThreadContent behind attachment session check")
+	branchEnd := strings.Index(output[branchStart:], "if (data.type === 'task_status_changed') {")
+	if branchEnd < 0 {
+		t.Fatal("expected status branch after execution start/applied branch")
+	}
+	branch := output[branchStart : branchStart+branchEnd]
+	if !strings.Contains(branch, "TaskThreadLiveEventsScript owns these events") {
+		t.Fatal("expected execution start/applied branch to defer to TaskThreadLiveEventsScript")
+	}
+	if strings.Contains(branch, "_refreshActiveThreadContent") || strings.Contains(branch, "task-thread-form-session-id") {
+		t.Fatal("execution start/applied branch must not full-reload thread content or depend on attachment-session guards")
 	}
 }
 
