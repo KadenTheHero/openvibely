@@ -2788,6 +2788,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 					}
 
+					window.refreshCardSearches = initAllCardSearches;
+
 					// Init on page load
 					setTimeout(function() { initAllCardSearches(); }, 0);
 

@@ -298,12 +298,27 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				return projectID ? '?project_id=' + encodeURIComponent(projectID) : '';
 			}
 
-			function setSkillModalError(message) {
-				var el = document.getElementById('skill_error');
-				if (!el) return;
-				el.textContent = message || '';
-				el.classList.toggle('hidden', !message);
-			}
+				function refreshSkillsContainerSearch() {
+					if (typeof window.refreshCardSearches === 'function') {
+						window.refreshCardSearches(document.getElementById('skills-container'));
+					}
+				}
+
+				function replaceSkillsContainer(html) {
+					var container = document.getElementById('skills-container');
+					if (!container) return;
+					container.outerHTML = html;
+					var nextContainer = document.getElementById('skills-container');
+					if (window.htmx) htmx.process(nextContainer);
+					refreshSkillsContainerSearch();
+				}
+
+				function setSkillModalError(message) {
+					var el = document.getElementById('skill_error');
+					if (!el) return;
+					el.textContent = message || '';
+					el.classList.toggle('hidden', !message);
+				}
 
 			function setSkillImportError(message) {
 				var el = document.getElementById('skill_import_error');
@@ -434,11 +449,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 					}
 					return resp.text();
 				}).then(function(html) {
-					var container = document.getElementById('skills-container');
-					if (container) {
-						container.outerHTML = html;
-						if (window.htmx) htmx.process(document.getElementById('skills-container'));
-					}
+					replaceSkillsContainer(html);
 				}).catch(function(err) {
 					alert(err.message || 'Failed to ' + action.toLowerCase() + ' skill.');
 				});
@@ -460,11 +471,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 					}
 					return resp.text();
 				}).then(function(html) {
-					var container = document.getElementById('skills-container');
-					if (container) {
-						container.outerHTML = html;
-						if (window.htmx) htmx.process(document.getElementById('skills-container'));
-					}
+					replaceSkillsContainer(html);
 				}).catch(function(err) {
 					alert(err.message || 'Failed to update always use setting.');
 				});
@@ -493,11 +500,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 					}
 					return resp.text();
 				}).then(function(html) {
-					var container = document.getElementById('skills-container');
-					if (container) {
-						container.outerHTML = html;
-						if (window.htmx) htmx.process(document.getElementById('skills-container'));
-					}
+					replaceSkillsContainer(html);
 					var modal = document.getElementById('skill_import_modal');
 					if (modal && modal.open) modal.close();
 				}).catch(function(err) {
@@ -561,11 +564,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 						return resp2.text();
 					});
 				}).then(function(html) {
-					var container = document.getElementById('skills-container');
-					if (container) {
-						container.outerHTML = html;
-						if (window.htmx) htmx.process(document.getElementById('skills-container'));
-					}
+					replaceSkillsContainer(html);
 					var modal = document.getElementById('skill_modal');
 					if (modal && modal.open) modal.close();
 				}).catch(function(err) {

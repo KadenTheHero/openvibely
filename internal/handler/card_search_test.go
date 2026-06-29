@@ -214,6 +214,32 @@ func TestCardSearch_SkillsPartial(t *testing.T) {
 	}
 }
 
+func TestCardSearch_SkillsManualRefreshReappliesActiveSearch(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetAgentSkillRoot(t.TempDir())
+
+	req := httptest.NewRequest(http.MethodGet, "/skills?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`window.refreshCardSearches = initAllCardSearches`,
+		`function replaceSkillsContainer(html)`,
+		`refreshSkillsContainerSearch();`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected Skills page search refresh contract to contain %q", want)
+		}
+	}
+	if got := strings.Count(body, `replaceSkillsContainer(html);`); got != 4 {
+		t.Fatalf("expected all four manual Skills container refresh paths to use shared search-aware replacement, got %d", got)
+	}
+}
+
 func TestCardSearch_AlertsPage(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Test Project")
