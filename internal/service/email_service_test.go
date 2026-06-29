@@ -458,6 +458,42 @@ func TestEmailService_FirstTurnLinksImageAttachmentAndSelectsVisionModel(t *test
 	require.Equal(t, slackTestPNGBytes, data, "persisted attachment bytes must match the source PNG")
 }
 
+func TestEmailService_EmptyBodyWithAttachmentCreatesAndLinksFirstTurn(t *testing.T) {
+	svc, chatAttachmentRepo, _, _, _, visionAgent := newEmailAttachmentTestService(t)
+	ctx := context.Background()
+	var runReq ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runReq = req })
+	// Attachment-only email: empty body must still reach the ingress pipeline.
+	svc.ProcessIncoming(ctx, EmailInboundMessage{
+		FromAddress: "alice@example.com",
+		Subject:     "Photo",
+		Body:        "",
+		MessageID:   "<nobody@example.com>",
+		Attachments: []EmailInboundAttachment{{FileName: "shot.png", ContentType: "image/png", Data: slackTestPNGBytes}},
+	})
+	require.NotEmpty(t, runReq.ExecID, "empty-body email with an attachment must still create a first-turn execution")
+	require.Equal(t, visionAgent.ID, runReq.Agent.ID, "image attachment must drive vision model selection even with empty body")
+	require.Len(t, runReq.ImageAttachments, 1)
+	linked, err := chatAttachmentRepo.ListByExecution(ctx, runReq.ExecID)
+	require.NoError(t, err)
+	require.Len(t, linked, 1, "attachment must be linked to the execution")
+	require.Equal(t, "image/png", linked[0].MediaType)
+}
+
+func TestEmailService_EmptyBodyNoAttachmentIsIgnored(t *testing.T) {
+	svc, _, _, _, _, _ := newEmailAttachmentTestService(t)
+	ctx := context.Background()
+	called := false
+	svc.SetChannelChatRunner(func(context.Context, ChannelChatRunRequest) { called = true })
+	svc.ProcessIncoming(ctx, EmailInboundMessage{
+		FromAddress: "alice@example.com",
+		Subject:     "Empty",
+		Body:        "",
+		MessageID:   "<empty@example.com>",
+	})
+	require.False(t, called, "empty-body email with no attachments must still be ignored")
+}
+
 func TestEmailService_OctetStreamImageBytesClassifiedAsImage(t *testing.T) {
 	svc, chatAttachmentRepo, _, _, _, visionAgent := newEmailAttachmentTestService(t)
 	ctx := context.Background()

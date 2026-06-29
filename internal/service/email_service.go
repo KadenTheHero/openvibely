@@ -673,7 +673,8 @@ func (s *EmailService) ProcessIncoming(ctx context.Context, msg EmailInboundMess
 }
 
 func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInboundMessage) {
-	if isIgnoredEmail(msg, s.getConfiguredAddress(ctx)) || strings.TrimSpace(msg.Body) == "" {
+	if isIgnoredEmail(msg, s.getConfiguredAddress(ctx)) ||
+		(strings.TrimSpace(msg.Body) == "" && len(msg.Attachments) == 0) {
 		return
 	}
 	if s.taskRepo == nil || s.execRepo == nil || s.llmConfigRepo == nil || s.llmSvc == nil || s.taskSvc == nil || s.projectRepo == nil {
