@@ -1688,41 +1688,31 @@ func (h *Handler) startFollowupDiffSnapshotBroadcast(ctx context.Context, taskID
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 
-		publish := func() {
+		state := &service.DiffSnapshotState{}
+		publish := func(final bool) {
 			diffOutput := captureDiff()
 			if diffOutput == "" {
 				return
 			}
-			if err := h.execRepo.UpdateDiffOutput(ctx, execID, diffOutput); err != nil {
-				applog.Infof("[handler] followup diff broadcast exec=%s error updating diff output: %v", execID, err)
-			} else {
-				// applog.Debugf("[handler] followup diff broadcast exec=%s updated diff output (%d bytes)", execID, len(diffOutput))
-			}
-			h.fileChangeBroadcaster.Publish(events.FileChangeEvent{
-				Type:       events.DiffSnapshot,
-				TaskID:     taskID,
-				ExecID:     execID,
-				DiffOutput: diffOutput,
-				Timestamp:  time.Now().UnixMilli(),
-			})
+			service.PublishDiffSnapshotIfChanged(ctx, h.execRepo, h.fileChangeBroadcaster, state, taskID, execID, diffOutput, final)
 		}
 
 		for {
 			select {
 			case <-stop:
-				publish()
+				publish(true)
 				return
 			default:
 			}
 
 			select {
 			case <-stop:
-				publish()
+				publish(true)
 				return
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				publish()
+				publish(false)
 			}
 		}
 	}()

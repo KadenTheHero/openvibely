@@ -1244,7 +1244,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 				if (!data.task_id || data.task_id !== _fileChangesTaskId) return;
 
 				if (data.type === 'diff_snapshot') {
-					_updateDiffViewer(data.diff_output || '');
+					_updateDiffViewer();
 					return;
 				}
 				if (data.type === 'file_modified') {

@@ -13,19 +13,18 @@ const (
 	FileModified FileChangeEventType = "file_modified"
 	// FileDeleted is sent when a file is deleted
 	FileDeleted FileChangeEventType = "file_deleted"
-	// DiffSnapshot is sent periodically with the current git diff
+	// DiffSnapshot is sent when the current git diff changes.
 	DiffSnapshot FileChangeEventType = "diff_snapshot"
 )
 
-// FileChangeEvent represents a file modification during task execution
+// FileChangeEvent represents a file modification or diff invalidation during task execution.
 type FileChangeEvent struct {
-	Type       FileChangeEventType `json:"type"`
-	TaskID     string              `json:"task_id"`
-	ExecID     string              `json:"exec_id"`
-	FilePath   string              `json:"file_path,omitempty"`
-	ToolName   string              `json:"tool_name,omitempty"`   // "write_file", "edit_file", etc.
-	DiffOutput string              `json:"diff_output,omitempty"` // git diff output
-	Timestamp  int64               `json:"timestamp"`             // Unix milliseconds
+	Type      FileChangeEventType `json:"type"`
+	TaskID    string              `json:"task_id"`
+	ExecID    string              `json:"exec_id"`
+	FilePath  string              `json:"file_path,omitempty"`
+	ToolName  string              `json:"tool_name,omitempty"` // "write_file", "edit_file", etc.
+	Timestamp int64               `json:"timestamp"`           // Unix milliseconds
 }
 
 // FileChangeSubscriber is a channel that receives file change events

@@ -5363,7 +5363,7 @@ func TestProcessStreamingResponse_TaskFollowupBroadcastsRealtimeDiffSnapshots(t 
 	for !receivedDiffSnapshot {
 		select {
 		case evt := <-sub:
-			if evt.Type == events.DiffSnapshot && evt.TaskID == task.ID && evt.ExecID == followupExec.ID && strings.TrimSpace(evt.DiffOutput) != "" {
+			if evt.Type == events.DiffSnapshot && evt.TaskID == task.ID && evt.ExecID == followupExec.ID {
 				receivedDiffSnapshot = true
 			}
 		case <-timeout:

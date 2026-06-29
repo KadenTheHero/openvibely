@@ -130,8 +130,10 @@ func TestLiveEventsSSE_ReceivesTaskChatAndFileEvents(t *testing.T) {
 	if _, ok := received["chat_thread_input_applied"]; !ok {
 		t.Fatal("expected chat_thread_input_applied event from live stream")
 	}
-	if _, ok := received["diff_snapshot"]; !ok {
+	if got, ok := received["diff_snapshot"]; !ok {
 		t.Fatal("expected diff_snapshot event from live stream")
+	} else if strings.Contains(got, "diff_output") {
+		t.Fatalf("diff_snapshot live event should not include diff_output, got %q", got)
 	}
 }
 

@@ -810,6 +810,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			} else {
 				exec.DiffOutput = diffOutput
 				applog.Infof("[agent-svc] ExecuteTaskWithAgent captured diff output for exec=%s (%d bytes)", exec.ID, len(diffOutput))
+				PublishDiffSnapshotIfChanged(finalizeCtx, nil, s.fileChangeBroadcaster, &DiffSnapshotState{}, task.ID, exec.ID, diffOutput, true)
 			}
 		}
 	}
@@ -1030,6 +1031,61 @@ func buildWorktreeCommitSupportingContext(commitCtx WorktreeCommitMessageContext
 	return strings.Join(parts, "\n")
 }
 
+type DiffSnapshotState struct {
+	lastDiff string
+	hasLast  bool
+}
+
+func (s *DiffSnapshotState) shouldPublishPeriodic(diffOutput string) bool {
+	if diffOutput == "" {
+		return false
+	}
+	if s.hasLast && diffOutput == s.lastDiff {
+		return false
+	}
+	s.lastDiff = diffOutput
+	s.hasLast = true
+	return true
+}
+
+func (s *DiffSnapshotState) publishFinal(diffOutput string) bool {
+	if diffOutput == "" {
+		return false
+	}
+	s.lastDiff = diffOutput
+	s.hasLast = true
+	return true
+}
+
+func PublishDiffSnapshotIfChanged(ctx context.Context, execRepo interface {
+	UpdateDiffOutput(context.Context, string, string) error
+}, broadcaster *events.FileChangeBroadcaster, state *DiffSnapshotState, taskID, execID, diffOutput string, final bool) bool {
+	if state == nil {
+		state = &DiffSnapshotState{}
+	}
+	shouldPublish := state.shouldPublishPeriodic(diffOutput)
+	if final {
+		shouldPublish = state.publishFinal(diffOutput)
+	}
+	if !shouldPublish {
+		return false
+	}
+	if execRepo != nil {
+		if err := execRepo.UpdateDiffOutput(ctx, execID, diffOutput); err != nil {
+			applog.Infof("[diff-broadcast] error updating execution diff output: %v", err)
+		}
+	}
+	if broadcaster != nil {
+		broadcaster.Publish(events.FileChangeEvent{
+			Type:      events.DiffSnapshot,
+			TaskID:    taskID,
+			ExecID:    execID,
+			Timestamp: time.Now().UnixMilli(),
+		})
+	}
+	return true
+}
+
 func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec *models.Execution, task *models.Task, repoDir string, outputSummary string, agent models.LLMConfig) string {
 	if exec == nil || task == nil || task.WorktreePath == "" || task.WorktreeBranch == "" || repoDir == "" {
 		return ""
@@ -1063,6 +1119,7 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 		return diffOutput
 	}
 	applog.Infof("[agent-svc] ExecuteTaskWithAgent captured worktree diff output for exec=%s (%d bytes)", exec.ID, len(diffOutput))
+	PublishDiffSnapshotIfChanged(ctx, nil, s.fileChangeBroadcaster, &DiffSnapshotState{}, task.ID, exec.ID, diffOutput, true)
 	return diffOutput
 }
 
@@ -1084,19 +1141,15 @@ func (s *LLMService) broadcastDiffSnapshots(ctx context.Context, taskID, execID,
 
 	ticker := time.NewTicker(2 * time.Second) // Capture diff every 2 seconds
 	defer ticker.Stop()
+	state := &DiffSnapshotState{}
 
 	for {
 		select {
 		case <-stop:
-			// Final snapshot on completion
+			// Final invalidation on completion. Final DB persistence is handled by
+			// captureWorktreeDiffAfterExecution/CaptureGitDiff in the finalize path.
 			if diffOutput := captureDiff(); diffOutput != "" {
-				s.fileChangeBroadcaster.Publish(events.FileChangeEvent{
-					Type:       events.DiffSnapshot,
-					TaskID:     taskID,
-					ExecID:     execID,
-					DiffOutput: diffOutput,
-					Timestamp:  time.Now().UnixMilli(),
-				})
+				PublishDiffSnapshotIfChanged(ctx, nil, s.fileChangeBroadcaster, state, taskID, execID, diffOutput, true)
 			}
 			return
 
@@ -1105,24 +1158,10 @@ func (s *LLMService) broadcastDiffSnapshots(ctx context.Context, taskID, execID,
 
 		case <-ticker.C:
 			diffOutput := captureDiff()
-			if diffOutput != "" {
-				// Update execution's diff output in database for realtime UI refresh.
-				// This allows the Changes tab to show in-progress diffs when it polls
-				// via GET /tasks/:taskId/changes, not just completed execution diffs.
-				if err := s.execRepo.UpdateDiffOutput(ctx, execID, diffOutput); err != nil {
-					applog.Infof("[diff-broadcast] error updating execution diff output: %v", err)
-				} else {
-					// applog.Debugf("[diff-broadcast] updated execution diff for realtime UI (task=%s exec=%s, %d bytes)", taskID, execID, len(diffOutput))
-				}
-				// Broadcast via SSE to connected clients
-				s.fileChangeBroadcaster.Publish(events.FileChangeEvent{
-					Type:       events.DiffSnapshot,
-					TaskID:     taskID,
-					ExecID:     execID,
-					DiffOutput: diffOutput,
-					Timestamp:  time.Now().UnixMilli(),
-				})
-			}
+			// Update execution's diff output in database for realtime UI refresh only
+			// when the diff actually changed. The SSE event is a small invalidation
+			// signal; clients fetch GET /tasks/:taskId/changes for rendered content.
+			PublishDiffSnapshotIfChanged(ctx, s.execRepo, s.fileChangeBroadcaster, state, taskID, execID, diffOutput, false)
 		}
 	}
 }
