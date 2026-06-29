@@ -63,6 +63,37 @@ func gitRevParseTest(t *testing.T, dir string, rev string) string {
 	return runGitTest(t, dir, "rev-parse", rev)
 }
 
+func createBareTestGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "remote.git")
+	cmd := exec.Command("git", "init", "--bare", "-b", "main", dir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init bare failed: %v\n%s", err, out)
+	}
+	return dir
+}
+
+func cloneTestGitRepo(t *testing.T, remote string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "clone")
+	cmd := exec.Command("git", "clone", remote, dir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git clone failed: %v\n%s", err, out)
+	}
+	runGitTest(t, dir, "config", "user.email", "test@test.com")
+	runGitTest(t, dir, "config", "user.name", "Test")
+	return dir
+}
+
+func writeAndCommitTestFile(t *testing.T, dir, name, content, message string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, dir, "add", name)
+	runGitTest(t, dir, "commit", "-m", message)
+}
+
 func TestIsGitRepo(t *testing.T) {
 	// Non-git directory
 	tmpDir := t.TempDir()
@@ -416,7 +447,116 @@ func TestSyncWorktreeFromMainAtStart_ConflictFailsGracefully(t *testing.T) {
 	}
 }
 
-func TestSyncWorktreeFromMainAtStart_FetchFailureFallsBackToLocalBranch(t *testing.T) {
+func TestSyncWorktreeFromMainAtStart_OriginMainDivergenceDoesNotCauseStartupConflictByDefault(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	bare := createBareTestGitRepo(t)
+	seed := createTestGitRepo(t)
+	runGitTest(t, seed, "remote", "add", "origin", bare)
+	runGitTest(t, seed, "push", "-u", "origin", "main")
+
+	repoDir := cloneTestGitRepo(t, bare)
+	writeAndCommitTestFile(t, repoDir, "README.md", "local main is source of truth\n", "local main update")
+
+	remoteClone := cloneTestGitRepo(t, bare)
+	writeAndCommitTestFile(t, remoteClone, "README.md", "origin main should not be merged\n", "origin main update")
+	runGitTest(t, remoteClone, "push", "origin", "main")
+	runGitTest(t, repoDir, "fetch", "origin", "main")
+
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Startup Sync Ignores Diverged Origin",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: "main",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	wtPath, wtBranch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("SetupWorktree: %v", err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+
+	if err := ws.SyncWorktreeFromMainAtStart(ctx, task, repoDir); err != nil {
+		t.Fatalf("expected startup sync to keep local main despite diverged origin/main, got: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(wtPath, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "local main is source of truth\n" {
+		t.Fatalf("expected worktree to keep local main content, got %q", string(content))
+	}
+
+	dbTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if dbTask.MergeStatus == models.MergeStatusConflict {
+		t.Fatal("expected origin/main divergence not to set startup merge conflict status")
+	}
+}
+
+func TestSyncWorktreeFromMainAtStart_OriginMainExistenceAloneDoesNotChangeSyncSource(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	bare := createBareTestGitRepo(t)
+	seed := createTestGitRepo(t)
+	runGitTest(t, seed, "remote", "add", "origin", bare)
+	runGitTest(t, seed, "push", "-u", "origin", "main")
+
+	repoDir := cloneTestGitRepo(t, bare)
+	writeAndCommitTestFile(t, repoDir, "local_only.txt", "local main\n", "local main only")
+
+	remoteClone := cloneTestGitRepo(t, bare)
+	writeAndCommitTestFile(t, remoteClone, "origin_only.txt", "origin main\n", "origin main only")
+	runGitTest(t, remoteClone, "push", "origin", "main")
+	runGitTest(t, repoDir, "fetch", "origin", "main")
+
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Startup Sync Ignores Origin Existence",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: "main",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, wtBranch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("SetupWorktree: %v", err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+
+	if err := ws.SyncWorktreeFromMainAtStart(ctx, task, repoDir); err != nil {
+		t.Fatalf("SyncWorktreeFromMainAtStart: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wtPath, "local_only.txt")); err != nil {
+		t.Fatalf("expected local main file in worktree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wtPath, "origin_only.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected origin/main-only file not to be merged by startup sync")
+	}
+}
+
+func TestSyncWorktreeFromMainAtStart_BrokenOriginStillUsesLocalBranch(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	projectRepo := repository.NewProjectRepo(db)
@@ -425,18 +565,12 @@ func TestSyncWorktreeFromMainAtStart_FetchFailureFallsBackToLocalBranch(t *testi
 
 	repoDir := createTestGitRepo(t)
 	defaultBranch := GetCurrentBranch(repoDir)
-
-	// Add a broken origin so fetch fails immediately.
-	cmd := exec.Command("git", "remote", "add", "origin", "/tmp/nonexistent-openvibely-origin")
-	cmd.Dir = repoDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git remote add origin failed: %v\n%s", err, out)
-	}
+	runGitTest(t, repoDir, "remote", "add", "origin", "/tmp/nonexistent-openvibely-origin")
 
 	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
 	task := &models.Task{
 		ProjectID:         "default",
-		Title:             "Startup Sync Fetch Fallback",
+		Title:             "Startup Sync Broken Origin Ignored",
 		Category:          models.CategoryActive,
 		Status:            models.StatusPending,
 		MergeTargetBranch: defaultBranch,
@@ -452,27 +586,56 @@ func TestSyncWorktreeFromMainAtStart_FetchFailureFallsBackToLocalBranch(t *testi
 	task.WorktreePath = wtPath
 	task.WorktreeBranch = wtBranch
 
-	// Add commit on main/default branch after worktree creation.
-	if err := os.WriteFile(filepath.Join(repoDir, "fallback_sync_file.txt"), []byte("main update\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	cmd = exec.Command("git", "add", "fallback_sync_file.txt")
-	cmd.Dir = repoDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git add on main failed: %v\n%s", err, out)
-	}
-	cmd = exec.Command("git", "commit", "-m", "main update for fetch fallback")
-	cmd.Dir = repoDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git commit on main failed: %v\n%s", err, out)
-	}
+	writeAndCommitTestFile(t, repoDir, "local_sync_file.txt", "main update\n", "main update with broken origin")
 
 	if err := ws.SyncWorktreeFromMainAtStart(ctx, task, repoDir); err != nil {
-		t.Fatalf("expected fallback local merge without error, got: %v", err)
+		t.Fatalf("expected local merge without contacting broken origin, got: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(wtPath, "fallback_sync_file.txt")); err != nil {
+	if _, err := os.Stat(filepath.Join(wtPath, "local_sync_file.txt")); err != nil {
 		t.Fatalf("expected local main branch update to be merged into worktree: %v", err)
+	}
+}
+
+func TestSyncWorktreeFromMainAtStart_UpstreamOnlyUsesLocalBranch(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	upstream := createBareTestGitRepo(t)
+	runGitTest(t, repoDir, "remote", "add", "upstream", upstream)
+	runGitTest(t, repoDir, "push", "-u", "upstream", defaultBranch)
+
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Startup Sync Upstream Only",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	wtPath, wtBranch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("SetupWorktree: %v", err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+
+	writeAndCommitTestFile(t, repoDir, "upstream_local_sync.txt", "local main\n", "local update with upstream remote")
+
+	if err := ws.SyncWorktreeFromMainAtStart(ctx, task, repoDir); err != nil {
+		t.Fatalf("SyncWorktreeFromMainAtStart: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wtPath, "upstream_local_sync.txt")); err != nil {
+		t.Fatalf("expected startup sync to merge local branch with only upstream remote: %v", err)
 	}
 }
 

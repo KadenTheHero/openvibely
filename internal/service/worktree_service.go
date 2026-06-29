@@ -23,7 +23,6 @@ type WorktreeService struct {
 	projectRepo  *repository.ProjectRepo
 	settingsRepo *repository.SettingsRepo
 	llmSvc       *LLMService
-	githubSvc    *GitHubService
 }
 
 func NewWorktreeService(taskRepo *repository.TaskRepo, projectRepo *repository.ProjectRepo, settingsRepo *repository.SettingsRepo) *WorktreeService {
@@ -37,11 +36,6 @@ func NewWorktreeService(taskRepo *repository.TaskRepo, projectRepo *repository.P
 // SetLLMService sets the LLM service for AI-assisted conflict resolution.
 func (ws *WorktreeService) SetLLMService(llmSvc *LLMService) {
 	ws.llmSvc = llmSvc
-}
-
-// SetGitHubService sets GitHub service for remote git auth when syncing worktrees.
-func (ws *WorktreeService) SetGitHubService(githubSvc *GitHubService) {
-	ws.githubSvc = githubSvc
 }
 
 // slugify creates a branch-name-safe slug from a string.
@@ -408,15 +402,12 @@ func (ws *WorktreeService) clearStaleConflictStatusIfClean(ctx context.Context, 
 	applog.Infof("[worktree] cleared stale conflict status for task %s after clean aborted merge state", task.ID)
 }
 
-// SyncWorktreeFromMainAtStart updates a task branch with the latest main/default branch
-// before task execution begins. It only runs when the worktree is clean.
+// SyncWorktreeFromMainAtStart updates a task branch with the latest local
+// merge target/default branch before task execution begins. It only runs when
+// the worktree is clean and does not implicitly fetch or merge remote branches.
 func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task *models.Task, repoDir string) error {
 	if task == nil || task.WorktreePath == "" {
 		return nil
-	}
-	authEnv := []string(nil)
-	if ws.githubSvc != nil {
-		authEnv = ws.githubSvc.GitAuthEnvForRepo(ctx, repoDir)
 	}
 
 	runGit := func(dir string, args ...string) ([]byte, error) {
@@ -429,9 +420,6 @@ func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task
 			"GIT_ASKPASS=true",
 			"SSH_ASKPASS=true",
 		)
-		if len(authEnv) > 0 {
-			cmd.Env = append(cmd.Env, authEnv...)
-		}
 		return cmd.CombinedOutput()
 	}
 
@@ -457,31 +445,15 @@ func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task
 
 	syncBranch := task.MergeTargetBranch
 	if syncBranch == "" {
-		syncBranch = "main"
-		hasMain := false
 		if _, err := runGit(repoDir, "show-ref", "--verify", "--quiet", "refs/heads/main"); err == nil {
-			hasMain = true
+			syncBranch = "main"
 		} else {
-			_, err = runGit(repoDir, "show-ref", "--verify", "--quiet", "refs/remotes/origin/main")
-			hasMain = err == nil
-		}
-		if !hasMain {
 			syncBranch = GetDefaultBranch(repoDir)
 		}
 	}
 
 	mergeSource := syncBranch
-	if _, originErr := runGit(repoDir, "remote", "get-url", "origin"); originErr == nil {
-		fetchOut, fetchErr := runGit(task.WorktreePath, "fetch", "origin", syncBranch)
-		if fetchErr != nil {
-			applog.Infof("[worktree] startup auto-merge task=%s fetch origin/%s skipped (non-fatal): %s", task.ID, syncBranch, strings.TrimSpace(string(fetchOut)))
-			mergeSource = syncBranch
-		} else {
-			mergeSource = "origin/" + syncBranch
-		}
-	} else {
-		applog.Infof("[worktree] startup auto-merge task=%s no origin remote, using local %s", task.ID, syncBranch)
-	}
+	applog.Infof("[worktree] startup auto-merge task=%s using local %s", task.ID, mergeSource)
 
 	mergeOut, mergeErr := runGit(task.WorktreePath, "merge", "--no-edit", mergeSource)
 	mergeMsg := strings.TrimSpace(string(mergeOut))
