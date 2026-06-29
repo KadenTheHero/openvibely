@@ -417,6 +417,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						<label class="label"><span class="label-text">Provider</span></label>
 							<input type="hidden" id="model_provider_value" name="provider" value="anthropic"/>
 							<select id="model_provider" class="select select-bordered" onchange="toggleProviderFields()">
+								<optgroup label="Virtual Providers">
+									<option value="mixture">Mixture of Models</option>
+								</optgroup>
+								<optgroup label="Model Providers">
 									<option value="anthropic">Anthropic</option>
 									<option value="openai">OpenAI</option>
 									<option value="openai_compatible_openrouter">OpenRouter</option>
@@ -452,9 +456,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 									<option value="openai_compatible_xiaomi_mimo">Xiaomi MiMo</option>
 									<option value="openai_compatible_inferrs">Inferrs Local</option>
 									<option value="openai_compatible_ds4">ds4 Local</option>
-								<option value="openai_compatible_custom">Custom OpenAI-Compatible</option>
-								<option value="ollama">Ollama</option>
-								<option value="mixture">Mixture of Models</option>								</select>					</div>
+									<option value="openai_compatible_custom">Custom OpenAI-Compatible</option>
+									<option value="ollama">Ollama</option>
+								</optgroup>
+							</select>					</div>
 					<!-- Auth type selector for Anthropic -->
 					<div id="anthropic_auth_type_field" class="form-control mb-3">
 						<label class="label"><span class="label-text">Authentication</span></label>

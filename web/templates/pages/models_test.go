@@ -389,6 +389,24 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 	}
 	out := buf.String()
 
+	providerSelectStart := strings.Index(out, `<select id="model_provider"`)
+	if providerSelectStart < 0 {
+		t.Fatal("expected provider dropdown")
+	}
+	providerSelectEnd := strings.Index(out[providerSelectStart:], `</select>`)
+	if providerSelectEnd < 0 {
+		t.Fatal("expected provider dropdown closing tag")
+	}
+	providerSelectMarkup := out[providerSelectStart : providerSelectStart+providerSelectEnd]
+	for _, want := range []string{`<optgroup label="Virtual Providers">`, `<option value="mixture">Mixture of Models</option>`, `<optgroup label="Model Providers">`} {
+		if !strings.Contains(providerSelectMarkup, want) {
+			t.Fatalf("expected provider dropdown to contain %q", want)
+		}
+	}
+	if strings.Index(providerSelectMarkup, `<option value="mixture">Mixture of Models</option>`) > strings.Index(providerSelectMarkup, `<optgroup label="Model Providers">`) {
+		t.Fatal("expected Mixture of Models to appear before other model providers")
+	}
+
 	presetOptions := map[string]string{
 		"openrouter":          "OpenRouter",
 		"nvidia_nim":          "NVIDIA NIM",
