@@ -193,6 +193,34 @@ func createHandlerTestGitRepo(t *testing.T) string {
 	return dir
 }
 
+func TestFinalizeStreamingTurn_BroadcastsTaskFollowupResponseDone(t *testing.T) {
+	chatBroadcaster := events.NewChatBroadcaster()
+	h := &Handler{}
+	h.SetChatBroadcaster(chatBroadcaster)
+	sub, err := chatBroadcaster.Subscribe()
+	require.NoError(t, err)
+	defer chatBroadcaster.Unsubscribe(sub)
+
+	h.finalizeStreamingTurn(streamingResponseParams{
+		ProjectID:      "proj-1",
+		TaskID:         "task-1",
+		ExecID:         "exec-1",
+		IsTaskFollowup: true,
+	}, "final task-thread answer")
+
+	select {
+	case evt := <-sub:
+		require.Equal(t, events.ChatResponseDone, evt.Type)
+		require.Equal(t, "proj-1", evt.ProjectID)
+		require.Equal(t, "task-1", evt.TaskID)
+		require.Equal(t, "exec-1", evt.ExecID)
+		require.Equal(t, "final task-thread answer", evt.CompletedOutput)
+		require.True(t, evt.IsTaskFollowup)
+	case <-time.After(time.Second):
+		t.Fatal("expected task follow-up completion to broadcast chat_response_done with completed output")
+	}
+}
+
 func TestBuildThreadSystemContext_WithHistory_DoesNotIncludeTaskPrompt(t *testing.T) {
 	// When there is prior conversation history, the system context should NOT
 	// include the original task prompt because it's already in the conversation

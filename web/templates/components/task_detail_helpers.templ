@@ -750,6 +750,33 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							if (!pendingContainer || !pendingContainer.querySelector('[data-thread-input-id]') || typeof htmx === 'undefined') return;
 							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: scopedPendingContainerSelector(), swap: 'outerHTML'});
 						}
+						function syncCompletedThreadOutput(execId, completedOutput) {
+							if (!currentTaskThreadView() || !execId || typeof completedOutput !== 'string' || completedOutput === '') return;
+							var streamContainer = document.getElementById('streaming-message-' + execId);
+							if (!streamContainer) return;
+							streamContainer.setAttribute('data-raw-content', completedOutput);
+							if (window.renderStreamingContent) {
+								window.renderStreamingContent(streamContainer, completedOutput);
+							} else {
+								streamContainer.textContent = completedOutput;
+							}
+							streamContainer.classList.remove('hidden');
+							var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
+							if (bubble) {
+								var thinking = bubble.querySelector('.ov-loading-dots');
+								if (thinking) {
+									var thinkingWrap = thinking.closest('.flex.flex-col.items-start.gap-1');
+									if (thinkingWrap) thinkingWrap.classList.add('hidden');
+									else thinking.classList.add('hidden');
+								}
+								var loading = bubble.querySelector('.loading-dots, [id^="streaming-dots-"]');
+								if (loading) loading.classList.add('hidden');
+								if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
+								if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
+								if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+							}
+							window._taskThreadStreamingActive = false;
+						}
 						function renderQueuedRow(data) {
 							if (!data || data.task_id !== taskId || !data.pending_input_id || !currentTaskThreadView()) return;
 							if (document.querySelector('[data-thread-input-id="' + data.pending_input_id + '"][data-task-id="' + taskId + '"]')) return;
@@ -840,6 +867,11 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							}
 						});
 					}
+					var chatHandler = function(event) {
+						var data = event.detail || {};
+						if (data.type !== 'chat_response_done' || data.task_id !== taskId || !data.exec_id) return;
+						syncCompletedThreadOutput(data.exec_id, data.completed_output);
+					};
 					var handler = function(event) {
 						var data = event.detail || {};
 						if (data.type !== 'mixture_progress' && data.task_id !== taskId) return;
@@ -871,6 +903,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 				};
 					window._taskThreadLiveHandlers[taskId] = handler;
 					window.addEventListener('sse-task-event', handler);
+					window.addEventListener('sse-chat-live-event', chatHandler);
 					consumePendingExecutionEvent();
 
 					// On SSE reconnect (e.g. after tab blur/refocus), refresh the pending-inputs
@@ -895,6 +928,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						var target = event.detail && event.detail.target;
 						if (target && (target.id === 'main-content' || target.id === 'task-detail-content' || target.id === 'thread-content' || target.id === 'task-thread-view')) {
 							window.removeEventListener('sse-task-event', handler);
+							window.removeEventListener('sse-chat-live-event', chatHandler);
 							delete window._taskThreadLiveHandlers[taskId];
 							window.removeEventListener('sse-live-connected', reconnectHandler);
 							delete window._taskThreadReconnectHandlers[taskId];

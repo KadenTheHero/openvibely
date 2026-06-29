@@ -1250,6 +1250,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						}
 
 					if (eventType === 'chat_response_done') {
+						if (data.is_task_followup) return;
 						// Guard: only act if we're still on the chat page.
 						if (!document.getElementById('chat-messages')) return;
 

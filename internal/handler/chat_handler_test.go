@@ -3323,6 +3323,8 @@ func TestHandler_Chat_PlanCompletionPrompt_ChatResponseDoneFallback(t *testing.T
 		"chat_response_done fallback should use completed_output when present")
 	assert.Contains(t, doneHandlerBody, "syncCompletedOutputToBubble(data.exec_id, data.completed_output)",
 		"chat_response_done should reconcile the live bubble with completed_output")
+	assert.Contains(t, doneHandlerBody, "if (data.is_task_followup) return;",
+		"global chat page must ignore task-thread completion broadcasts")
 }
 
 func TestHandler_Chat_PlanCompletionPrompt_NewMessageSetsStreamingFlag(t *testing.T) {

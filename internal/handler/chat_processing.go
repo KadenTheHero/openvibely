@@ -900,16 +900,17 @@ func combineActivePromptWithSteering(activePrompt, steeringInstruction string) s
 }
 
 func (h *Handler) finalizeStreamingTurn(params streamingResponseParams, output string) {
-	// Broadcast response done for chat messages (not task followups).
-	// Include completed output so chat_response_done SSE fallback can evaluate
-	// plan-completion prompt visibility without a DOM scan.
-	if !params.IsTaskFollowup && h.chatBroadcaster != nil {
+	// Broadcast response done for chat messages and task-thread follow-ups.
+	// Include completed output so live UI fallbacks can reconcile visible bubbles
+	// even when the per-execution token stream was missed or closed early.
+	if h.chatBroadcaster != nil {
 		h.chatBroadcaster.Publish(events.ChatEvent{
 			Type:            events.ChatResponseDone,
 			ProjectID:       params.ProjectID,
 			ExecID:          params.ExecID,
 			TaskID:          params.TaskID,
 			CompletedOutput: output,
+			IsTaskFollowup:  params.IsTaskFollowup,
 		})
 	}
 	go h.startNextQueuedTurnAfter(context.Background(), params, "")

@@ -1794,6 +1794,31 @@ func TestTaskThreadLiveEventsScript_HandlesMixtureProgressWithoutTaskID(t *testi
 	}
 }
 
+func TestTaskThreadLiveEventsScript_ReconcilesChatResponseDoneCompletedOutput(t *testing.T) {
+	var buf bytes.Buffer
+	if err := TaskThreadLiveEventsScript("task-1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render TaskThreadLiveEventsScript: %v", err)
+	}
+	html := buf.String()
+	for _, snippet := range []string{
+		"window.addEventListener('sse-chat-live-event', chatHandler)",
+		"if (data.type !== 'chat_response_done' || data.task_id !== taskId || !data.exec_id) return;",
+		"syncCompletedThreadOutput(data.exec_id, data.completed_output)",
+		"document.getElementById('streaming-message-' + execId)",
+		"streamContainer.setAttribute('data-raw-content', completedOutput)",
+		"window.renderStreamingContent(streamContainer, completedOutput)",
+		"streamContainer.classList.remove('hidden')",
+		"loading.classList.add('hidden')",
+		"thinking.classList.add('hidden')",
+		"window._taskThreadStreamingActive = false",
+		"window.removeEventListener('sse-chat-live-event', chatHandler)",
+	} {
+		if !strings.Contains(html, snippet) {
+			t.Fatalf("task-thread live script must reconcile completed task follow-up output from chat_response_done; missing %q", snippet)
+		}
+	}
+}
+
 func TestChatBubbleStreaming_RendersMixtureProgressStatusSlot(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ChatBubbleStreaming("Assistant", "exec-mix", "chat-messages", "", false).Render(context.Background(), &buf); err != nil {

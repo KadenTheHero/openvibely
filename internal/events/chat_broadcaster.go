@@ -35,6 +35,7 @@ type ChatEvent struct {
 	Steering        bool          `json:"steering,omitempty"`
 	HasAttachments  bool          `json:"has_attachments,omitempty"`
 	PendingInputID  string        `json:"pending_input_id,omitempty"`
+	IsTaskFollowup  bool          `json:"is_task_followup,omitempty"`
 }
 
 // ToSSE converts a ChatEvent to SSE format
