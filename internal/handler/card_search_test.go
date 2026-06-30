@@ -99,9 +99,21 @@ func TestCardSearch_ChannelsMutationsRefreshContainerWithoutFullPageReload(t *te
 		`hx-target="this"`,
 		`hx-swap="outerHTML"`,
 		`window.refreshCardSearches = initAllCardSearches`,
+		`var webhookAvailableAgents = [];`,
+		`var selectedWebhookAgentIDs = [];`,
+		`var activeWebhookSection = 'config';`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected Channels searchable refresh contract to contain %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`let webhookAvailableAgents = [];`,
+		`let selectedWebhookAgentIDs = [];`,
+		`let activeWebhookSection = 'config';`,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("expected Channels refreshed script to avoid re-execution-unsafe top-level declaration %q", forbidden)
 		}
 	}
 }

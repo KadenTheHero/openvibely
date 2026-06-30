@@ -1276,10 +1276,10 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					closeDeleteChannelConfirm();
 				}
 
-				// Webhook agent state
-				let webhookAvailableAgents = [];
-				let selectedWebhookAgentIDs = [];
-				let activeWebhookSection = 'config';
+					// Webhook agent state
+					var webhookAvailableAgents = [];
+					var selectedWebhookAgentIDs = [];
+					var activeWebhookSection = 'config';
 			function setWebhookSection(sectionName) {
 				const sectionNameMap = {
 					config: 'config',
