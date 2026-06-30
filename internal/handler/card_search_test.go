@@ -240,6 +240,31 @@ func TestCardSearch_SkillsManualRefreshReappliesActiveSearch(t *testing.T) {
 	}
 }
 
+func TestCardSearch_AgentsManualDeleteRefreshReappliesActiveSearch(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetAgentRepo(repository.NewAgentRepo(db))
+	project := createProject(t, h, "Test Project")
+
+	req := httptest.NewRequest(http.MethodGet, "/agents?project_id="+project.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`data-card-search="agents"`,
+		`const refreshedContainer = document.getElementById('agents-container');`,
+		`htmx.process(refreshedContainer);`,
+		`if (window.refreshCardSearches) window.refreshCardSearches(refreshedContainer);`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected Agents delete search refresh contract to contain %q", want)
+		}
+	}
+}
+
 func TestCardSearch_AlertsPage(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Test Project")

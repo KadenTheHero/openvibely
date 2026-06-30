@@ -511,7 +511,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 						const container = document.getElementById('agents-container');
 						if (container) {
 							container.outerHTML = html;
-							htmx.process(document.getElementById('agents-container'));
+							const refreshedContainer = document.getElementById('agents-container');
+							htmx.process(refreshedContainer);
+							if (window.refreshCardSearches) window.refreshCardSearches(refreshedContainer);
 						}
 						deleteAgentID = '';
 						if (window.showToast) window.showToast('Agent deleted', 'completed');
