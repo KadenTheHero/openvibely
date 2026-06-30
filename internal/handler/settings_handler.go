@@ -35,6 +35,13 @@ var updateTelegramServiceToken = func(svc *service.TelegramService, token string
 	return svc.UpdateToken(token)
 }
 
+const channelsRefreshTrigger = "channels-refresh"
+
+func triggerChannelsRefresh(c echo.Context) error {
+	c.Response().Header().Set("HX-Trigger", channelsRefreshTrigger)
+	return c.NoContent(http.StatusOK)
+}
+
 // handleChannels renders the channels (integrations) page
 func (h *Handler) handleChannels(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
@@ -356,8 +363,7 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 	}
 
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/channels")
 }
@@ -429,8 +435,7 @@ func (h *Handler) handleTelegramRemove(c echo.Context) error {
 	_ = h.settingsRepo.Set(c.Request().Context(), service.TelegramSettingRichMessagesV2, "")
 
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/channels")
 }
@@ -508,8 +513,7 @@ func (h *Handler) handleGitHubConfigure(c echo.Context) error {
 	}
 
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/channels")
 }
@@ -533,8 +537,7 @@ func (h *Handler) handleGitHubDisconnect(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to disconnect GitHub")
 	}
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/channels")
 }
@@ -554,8 +557,7 @@ func (h *Handler) handleGitHubRemove(c echo.Context) error {
 	_ = h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingAuthMode, "")
 
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/channels")
 }
@@ -633,8 +635,7 @@ func (h *Handler) handleSlackConfigure(c echo.Context) error {
 	}
 
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/channels")
 }
@@ -672,8 +673,7 @@ func (h *Handler) handleSlackDisconnect(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to disconnect Slack")
 	}
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/channels")
 }
@@ -699,8 +699,7 @@ func (h *Handler) handleSlackRemove(c echo.Context) error {
 	_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingSendResponses, "")
 
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/channels")
 }
@@ -745,8 +744,7 @@ func (h *Handler) handleDiscordConfigure(c echo.Context) error {
 		}
 	}
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/channels")
 }
@@ -767,8 +765,7 @@ func (h *Handler) handleDiscordRemove(c echo.Context) error {
 		_ = h.discordAuthRepo.DeleteByProject(c.Request().Context(), projectID)
 	}
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/channels")
 }
@@ -828,8 +825,7 @@ func (h *Handler) handleEmailConfigure(c echo.Context) error {
 		_ = h.emailService.ReloadFromSettings(c.Request().Context())
 	}
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/channels")
 }
@@ -845,8 +841,7 @@ func (h *Handler) handleEmailRemove(c echo.Context) error {
 		_ = h.settingsRepo.Set(c.Request().Context(), key, "")
 	}
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/channels")
 }

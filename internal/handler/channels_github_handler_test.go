@@ -122,9 +122,7 @@ func TestChannelsGitHubCallbackAndDisconnect(t *testing.T) {
 	if !disconnectCalled {
 		t.Fatal("expected disconnect handler to be called")
 	}
-	if disconnectRec.Header().Get("HX-Refresh") != "true" {
-		t.Fatal("expected HX-Refresh header on HTMX disconnect")
-	}
+	assertChannelsRefreshTrigger(t, disconnectRec)
 }
 
 func TestChannelsGitHubConfigure(t *testing.T) {
@@ -144,9 +142,7 @@ func TestChannelsGitHubConfigure(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("HX-Refresh") != "true" {
-		t.Fatalf("expected HX-Refresh true")
-	}
+	assertChannelsRefreshTrigger(t, rec)
 
 	appID, err := h.settingsRepo.Get(context.Background(), service.GitHubSettingAppID)
 	if err != nil {
@@ -194,9 +190,7 @@ func TestChannelsGitHubConfigurePAT(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("HX-Refresh") != "true" {
-		t.Fatalf("expected HX-Refresh true")
-	}
+	assertChannelsRefreshTrigger(t, rec)
 
 	authMode, err := h.settingsRepo.Get(context.Background(), service.GitHubSettingAuthMode)
 	if err != nil {
@@ -230,9 +224,7 @@ func TestChannelsGitHubRemove(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("HX-Refresh") != "true" {
-		t.Fatalf("expected HX-Refresh true")
-	}
+	assertChannelsRefreshTrigger(t, rec)
 	appID, _ := h.settingsRepo.Get(context.Background(), service.GitHubSettingAppID)
 	appSlug, _ := h.settingsRepo.Get(context.Background(), service.GitHubSettingAppSlug)
 	privateKey, _ := h.settingsRepo.Get(context.Background(), service.GitHubSettingAppPrivateKey)

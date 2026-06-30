@@ -254,6 +254,17 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	}
 
 	body := rec.Body.String()
+	for _, want := range []string{
+		`id="channels-container"`,
+		`hx-get="/channels?project_id=default"`,
+		`hx-trigger="channels-refresh from:body"`,
+		`hx-target="this"`,
+		`hx-swap="outerHTML"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected Channels container refresh contract to contain %q", want)
+		}
+	}
 	outboundCard := cardSectionByType(body, "outbound-targets")
 	if outboundCard == "" {
 		t.Fatal("expected permanent outbound message targets card")

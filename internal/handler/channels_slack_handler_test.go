@@ -78,9 +78,7 @@ func TestChannelsSlackConfigure(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("HX-Refresh") != "true" {
-		t.Fatalf("expected HX-Refresh true")
-	}
+	assertChannelsRefreshTrigger(t, rec)
 	if !reloaded {
 		t.Fatal("expected slack reload to be triggered")
 	}

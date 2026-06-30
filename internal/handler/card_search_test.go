@@ -79,6 +79,33 @@ func TestCardSearch_ChannelsPartial(t *testing.T) {
 	}
 }
 
+func TestCardSearch_ChannelsMutationsRefreshContainerWithoutFullPageReload(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	_ = h
+
+	req := httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`id="channels-container"`,
+		`data-card-search="channels"`,
+		`hx-get="/channels?project_id=default"`,
+		`hx-trigger="channels-refresh from:body"`,
+		`hx-target="this"`,
+		`hx-swap="outerHTML"`,
+		`window.refreshCardSearches = initAllCardSearches`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected Channels searchable refresh contract to contain %q", want)
+		}
+	}
+}
+
 func TestCardSearch_AgentsPage(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetAgentRepo(repository.NewAgentRepo(db))

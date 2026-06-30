@@ -43,7 +43,14 @@ func TestHandleTelegramTest_NotRunning(t *testing.T) {
 	assert.NotContains(t, body, "setTimeout")        // should NOT auto-dismiss
 }
 
-func TestHandleTelegramSaveHTMXRefreshesChannels(t *testing.T) {
+func assertChannelsRefreshTrigger(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	assert.Equal(t, channelsRefreshTrigger, rec.Header().Get("HX-Trigger"))
+	assert.Empty(t, rec.Header().Get("HX-Refresh"))
+	assert.Empty(t, rec.Header().Get("Location"))
+}
+
+func TestHandleTelegramSaveHTMXTriggersChannelsRefresh(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 
 	h.telegramService = &service.TelegramService{}
@@ -59,8 +66,7 @@ func TestHandleTelegramSaveHTMXRefreshesChannels(t *testing.T) {
 
 	rec := htmxPost(e, "/channels/telegram", form)
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "true", rec.Header().Get("HX-Refresh"))
-	assert.Empty(t, rec.Header().Get("Location"))
+	assertChannelsRefreshTrigger(t, rec)
 
 	token, err := h.settingsRepo.Get(context.Background(), service.TelegramSettingBotToken)
 	require.NoError(t, err)
@@ -68,6 +74,114 @@ func TestHandleTelegramSaveHTMXRefreshesChannels(t *testing.T) {
 	richMessages, err := h.settingsRepo.Get(context.Background(), service.TelegramSettingRichMessagesV2)
 	require.NoError(t, err)
 	assert.Equal(t, "true", richMessages)
+}
+
+func TestChannelCoreHTMXMutationsTriggerInPlaceChannelsRefresh(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+
+	h.telegramService = &service.TelegramService{}
+	origUpdateTelegramServiceToken := updateTelegramServiceToken
+	t.Cleanup(func() { updateTelegramServiceToken = origUpdateTelegramServiceToken })
+	updateTelegramServiceToken = func(svc *service.TelegramService, token string) error { return nil }
+
+	base := func() url.Values {
+		return url.Values{}
+	}
+	tests := []struct {
+		name string
+		path string
+		form func() url.Values
+	}{
+		{
+			name: "telegram save",
+			path: "/channels/telegram",
+			form: func() url.Values {
+				form := base()
+				form.Set("token", "test-token")
+				form.Set("telegram_rich_messages_v2", "true")
+				return form
+			},
+		},
+		{
+			name: "telegram remove",
+			path: "/channels/telegram/remove",
+			form: base,
+		},
+		{
+			name: "github configure",
+			path: "/channels/github/configure",
+			form: func() url.Values {
+				form := base()
+				form.Set("github_auth_mode", service.GitHubAuthModePAT)
+				form.Set("github_pat", "ghp_test_token")
+				return form
+			},
+		},
+		{
+			name: "github remove",
+			path: "/channels/github/remove",
+			form: base,
+		},
+		{
+			name: "slack configure",
+			path: "/channels/slack/configure",
+			form: func() url.Values {
+				form := base()
+				form.Set("slack_client_id", "cid")
+				form.Set("slack_client_secret", "secret")
+				form.Set("slack_app_token", "xapp-token")
+				form.Set("slack_bot_token_mode", service.SlackBotTokenSourceOAuth)
+				return form
+			},
+		},
+		{
+			name: "slack remove",
+			path: "/channels/slack/remove",
+			form: base,
+		},
+		{
+			name: "discord configure",
+			path: "/channels/discord/configure",
+			form: func() url.Values {
+				form := base()
+				form.Set("discord_bot_token", "discord-token")
+				return form
+			},
+		},
+		{
+			name: "discord remove",
+			path: "/channels/discord/remove",
+			form: base,
+		},
+		{
+			name: "email configure",
+			path: "/channels/email/configure",
+			form: func() url.Values {
+				form := base()
+				form.Set("email_provider", service.EmailProviderCustom)
+				form.Set("email_address", "bot@example.com")
+				form.Set("email_password", "app-password")
+				form.Set("email_imap_host", "imap.example.com")
+				form.Set("email_imap_port", "993")
+				form.Set("email_smtp_host", "smtp.example.com")
+				form.Set("email_smtp_port", "587")
+				return form
+			},
+		},
+		{
+			name: "email remove",
+			path: "/channels/email/remove",
+			form: base,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := htmxPost(e, tc.path, tc.form())
+			assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assertChannelsRefreshTrigger(t, rec)
+		})
+	}
 }
 
 func TestHandleTelegramSaveStoresRichMessagesFalseWhenUnchecked(t *testing.T) {
@@ -165,7 +279,7 @@ func TestHandleTelegramSaveNonHTMXRedirectsToChannels(t *testing.T) {
 	assert.Equal(t, "", token)
 }
 
-func TestHandleTelegramRemoveHTMXRefreshesChannelsAndClearsSettings(t *testing.T) {
+func TestHandleTelegramRemoveHTMXTriggersChannelsRefreshAndClearsSettings(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	require.NoError(t, h.settingsRepo.Set(context.Background(), service.TelegramSettingBotToken, "test-token"))
 	require.NoError(t, h.settingsRepo.Set(context.Background(), service.TelegramSettingSendResponses, "true"))
@@ -179,8 +293,7 @@ func TestHandleTelegramRemoveHTMXRefreshesChannelsAndClearsSettings(t *testing.T
 	e.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "true", rec.Header().Get("HX-Refresh"))
-	assert.Empty(t, rec.Header().Get("Location"))
+	assertChannelsRefreshTrigger(t, rec)
 
 	token, err := h.settingsRepo.Get(context.Background(), service.TelegramSettingBotToken)
 	require.NoError(t, err)

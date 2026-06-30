@@ -113,9 +113,7 @@ func TestChannelsDiscordConfigure(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("HX-Refresh") != "true" {
-		t.Fatalf("expected HX-Refresh header")
-	}
+	assertChannelsRefreshTrigger(t, rec)
 	if !reloaded {
 		t.Fatalf("expected discord service reload")
 	}
@@ -160,9 +158,7 @@ func TestChannelsDiscordConfigureReturnsSuccessWhenReloadFailsAfterSave(t *testi
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200 after saving settings despite reload failure, got %d (%s)", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("HX-Refresh") != "true" {
-		t.Fatalf("expected HX-Refresh header")
-	}
+	assertChannelsRefreshTrigger(t, rec)
 	got, err := h.settingsRepo.Get(context.Background(), service.DiscordSettingBotToken)
 	if err != nil || got != "bot-token" {
 		t.Fatalf("expected saved bot token despite reload failure, got %q err=%v", got, err)
@@ -213,9 +209,7 @@ func TestChannelsDiscordRemoveClearsSettings(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
-	if rec.Header().Get("HX-Refresh") != "true" {
-		t.Fatalf("expected HX-Refresh header")
-	}
+	assertChannelsRefreshTrigger(t, rec)
 	if !disconnected {
 		t.Fatalf("expected discord service disconnect")
 	}
