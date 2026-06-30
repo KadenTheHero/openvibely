@@ -139,11 +139,11 @@ func (h *Handler) HandleWebhookInbound(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusAccepted, map[string]interface{}{
-		"task_id":    task.ID,
-		"title":      task.Title,
-		"category":   task.Category,
-		"priority":   task.Priority,
-		"status":     task.Status,
+		"task_id":     task.ID,
+		"title":       task.Title,
+		"category":    task.Category,
+		"priority":    task.Priority,
+		"status":      task.Status,
 		"created_via": task.CreatedVia,
 	})
 }
@@ -311,8 +311,7 @@ func (h *Handler) HandleWebhookCreate(c echo.Context) error {
 	}
 
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.JSON(http.StatusCreated, w)
 }
@@ -350,8 +349,7 @@ func (h *Handler) HandleWebhookUpdate(c echo.Context) error {
 	_ = h.webhookRepo.SetEndpointAgents(c.Request().Context(), w.ID, agentIDs)
 
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.JSON(http.StatusOK, w)
 }
@@ -367,8 +365,7 @@ func (h *Handler) HandleWebhookDelete(c echo.Context) error {
 	}
 
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.NoContent(http.StatusOK)
 }
@@ -385,8 +382,7 @@ func (h *Handler) HandleWebhookRotateSecret(c echo.Context) error {
 	}
 
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Refresh", "true")
-		return c.NoContent(http.StatusOK)
+		return triggerChannelsRefresh(c)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"secret": newSecret})
 }

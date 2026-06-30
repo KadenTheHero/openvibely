@@ -385,6 +385,89 @@ func TestWebhookCRUD_CreateViaForm(t *testing.T) {
 	}
 }
 
+func TestWebhookCRUD_HTMXMutationsTriggerChannelsRefresh(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH HTMX Refresh").Build()
+	agent := wtc.createAgent(t, "Webhook Agent")
+
+	createForm := url.Values{
+		"project_id":            {project.ID},
+		"name":                  {"Created Hook"},
+		"system_instructions":   {"Handle created hooks"},
+		"default_priority":      {"1"},
+		"webhook_agent_ids_csv": {agent.ID},
+	}
+	createReq := httptest.NewRequest("POST", "/channels/webhooks?project_id="+project.ID, strings.NewReader(createForm.Encode()))
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	createReq.Header.Set("HX-Request", "true")
+	createRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create: expected 200, got %d; body=%s", createRec.Code, createRec.Body.String())
+	}
+	assertChannelsRefreshTrigger(t, createRec)
+
+	webhooks, _ := wtc.webhookRepo.ListByProject(context.Background(), project.ID)
+	if len(webhooks) != 1 {
+		t.Fatalf("expected 1 webhook after create, got %d", len(webhooks))
+	}
+	endpoint := webhooks[0]
+	if endpoint.Name != "Created Hook" {
+		t.Fatalf("created webhook name = %q", endpoint.Name)
+	}
+
+	updateForm := url.Values{
+		"name":                  {"Updated Hook"},
+		"enabled":               {"on"},
+		"system_instructions":   {"Handle updated hooks"},
+		"default_priority":      {"3"},
+		"webhook_agent_ids_csv": {agent.ID},
+	}
+	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+endpoint.ID, strings.NewReader(updateForm.Encode()))
+	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	updateReq.Header.Set("HX-Request", "true")
+	updateRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update: expected 200, got %d; body=%s", updateRec.Code, updateRec.Body.String())
+	}
+	assertChannelsRefreshTrigger(t, updateRec)
+
+	updated, _ := wtc.webhookRepo.GetByID(context.Background(), endpoint.ID)
+	if updated == nil || updated.Name != "Updated Hook" || updated.DefaultPriority != 3 {
+		t.Fatalf("webhook was not updated correctly: %#v", updated)
+	}
+
+	oldSecret := updated.Secret
+	rotateReq := httptest.NewRequest("POST", "/channels/webhooks/"+endpoint.ID+"/rotate-secret", nil)
+	rotateReq.Header.Set("HX-Request", "true")
+	rotateRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(rotateRec, rotateReq)
+	if rotateRec.Code != http.StatusOK {
+		t.Fatalf("rotate: expected 200, got %d; body=%s", rotateRec.Code, rotateRec.Body.String())
+	}
+	assertChannelsRefreshTrigger(t, rotateRec)
+
+	rotated, _ := wtc.webhookRepo.GetByID(context.Background(), endpoint.ID)
+	if rotated == nil || rotated.Secret == oldSecret {
+		t.Fatalf("expected rotated secret to change")
+	}
+
+	deleteReq := httptest.NewRequest("DELETE", "/channels/webhooks/"+endpoint.ID, nil)
+	deleteReq.Header.Set("HX-Request", "true")
+	deleteRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete: expected 200, got %d; body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	assertChannelsRefreshTrigger(t, deleteRec)
+
+	deleted, _ := wtc.webhookRepo.GetByID(context.Background(), endpoint.ID)
+	if deleted != nil {
+		t.Fatalf("expected webhook to be deleted")
+	}
+}
+
 func TestWebhookCRUD_Delete(t *testing.T) {
 	wtc := newWebhookTestContext(t)
 	project := wtc.CreateProject().WithName("WH Delete").Build()
@@ -643,9 +726,7 @@ func TestWebhookCreate_ShowsOnChannelsPage(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create: expected 200, got %d; body=%s", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("HX-Refresh") != "true" {
-		t.Error("expected HX-Refresh: true header")
-	}
+	assertChannelsRefreshTrigger(t, rec)
 
 	// Simulate refreshed channels page for that project
 	rec2 := wtc.HTMX().Get("/channels?project_id=" + project.ID).Execute()
