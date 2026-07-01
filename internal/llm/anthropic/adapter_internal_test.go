@@ -65,6 +65,7 @@ func TestClaudeCodeMaxOutputTokens(t *testing.T) {
 		model string
 		want  int
 	}{
+		{"sonnet 5", "claude-sonnet-5", 64000},
 		{"fable 5", "claude-fable-5", 64000},
 		{"mythos 5", "claude-mythos-5", 64000},
 		{"opus 4.8", "claude-opus-4-8", 64000},
@@ -98,6 +99,9 @@ func TestClaudeCodeMaxOutputTokens(t *testing.T) {
 
 func TestClaudeCodeMaxOutputTokensOverrideClampsToUpperLimit(t *testing.T) {
 	t.Setenv(claudeCodeMaxOutputTokensEnv, "999999")
+	if got := claudeCodeMaxOutputTokens("claude-sonnet-5"); got != 128000 {
+		t.Fatalf("sonnet 5 override = %d, want 128000", got)
+	}
 	if got := claudeCodeMaxOutputTokens("claude-fable-5"); got != 128000 {
 		t.Fatalf("fable 5 override = %d, want 128000", got)
 	}
