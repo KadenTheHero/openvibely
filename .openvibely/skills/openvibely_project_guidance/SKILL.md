@@ -68,6 +68,12 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 - When the current prompt provides a `[CREATE_TASK]` block contract and the user asks to create a task, output the marker exactly as required; include `"category": "backlog"` when the user asks not to run/start it. If direct task APIs/handlers are actually available and the user explicitly wants a local persisted OpenVibely task, `category=backlog` keeps it non-running while active-category creation may auto-submit to the worker.
 - If tasks run in isolated worktrees, include explicit worktree orientation in the model prompt while keeping runtime workdir enforcement as the source of truth.
 
+## Project Overview Requests
+
+- When the user asks to explain or summarize this project, inspect the README plus a small set of current entry points or package directories before answering; do not rely only on remembered project context.
+- Do not run build or test validation for read-only overview requests unless the user asks for verification.
+- Only include setup or run commands in the summary when you have read exact commands from repository files. Quote those actual commands, and omit the commands section entirely rather than leaving empty fenced code blocks, placeholders, or guessed commands.
+
 
 ## Adding Features
 

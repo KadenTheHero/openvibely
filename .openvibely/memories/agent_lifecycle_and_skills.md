@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-06-28
-source: after_complete
-source_id: f9581da8e435f4769b0cf3bbd9bb3444
+updated: 2026-07-01
+source: consolidation
+source_id: memory_consolidation_2026_07_01
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -73,4 +73,3 @@ Scheduled maintenance and UI facts:
 - The agent create/edit dialog aligns with on-disk agent-owned skills and labels the area “Skills.” Lifecycle editing focuses on real hook slots, not `task_mode`.
 - The Agents edit modal must hydrate persisted Advanced-tab values from authoritative card/server state, including unchecked booleans such as `enabled` and `selectable_as_primary`, before saving; otherwise default hidden fields can overwrite backend state when a modal is reopened or saved before async detail refresh completes.
 
-Operational implementation guidance belongs in skills such as `openvibely_skill_lifecycle_workflow`, `openvibely_lifecycle_hook_workflow`, and `openvibely_task_goals_workflow`.

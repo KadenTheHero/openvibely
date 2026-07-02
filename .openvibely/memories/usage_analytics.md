@@ -2,9 +2,9 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-06-26
+updated: 2026-07-01
 source: consolidation
-source_id: memory_consolidation_2026_06_26
+source_id: memory_consolidation_2026_07_01
 confidence: high
 title: Usage Analytics
 ---
@@ -67,4 +67,3 @@ OAuth account facts:
 - OAuth access tokens, refresh tokens, JWTs, decoded claims, auth headers, local config IDs, raw account IDs, fingerprints, and provider identity fields are backend-only and absent from frontend, templates, logs, model tools, and tool results.
 - Provider account-limit endpoints are fragile; refresh failures affect live account cards, not local token usage.
 
-Operational guidance belongs in `openvibely_model_usage_tracking_workflow`.

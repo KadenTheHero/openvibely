@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-06-28
-source: after_complete
-source_id: 71ecb86c455fdd6b61883ed82f813d56:96eeb2f116815937
+updated: 2026-07-01
+source: consolidation
+source_id: memory_consolidation_2026_07_01
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -22,6 +22,7 @@ User interaction preferences:
 - If a user challenges why there is no diff after a claimed coding change, inspect branch pointers, status, reflog, and file contents, then plainly correct any prior summary based on non-persisted or stale output.
 - Broad reviews should actively look for mistakes, unintended diff, dead code, and verification gaps. If repeated reviews find one issue at a time, the user may request audit-only mode: return a consolidated ranked problem list before making fixes.
 - When multiple findings are variants of one bug class, fix or audit the whole analogous class instead of narrowly addressing one instance.
+- When reviewing a messy fix stack after a difficult bug, inspect the actual commit diffs and rerun relevant validation before recommending keep/drop; distinguish the commit that directly fixed the observed symptom from defensive hardening that may still be useful.
 - Draft reusable skills that the user has not approved for publication should stay local/ignored by default. If the user wants in-app testing before release, keep the skill indexed and ensure the package body exists in the checkout the app loads; do not hide it by removing the index.
 
 Model-facing prompt preferences:
@@ -64,4 +65,3 @@ Current release boundary:
 - Previous release boundary `v0.2.0` was published on 2026-06-07. Its canonical tag was force-moved to commit `13189db` after publication so the macOS app-bundle zip fix was included; live `v0.2.0` macOS zips extract to `OpenVibely.app/`.
 - Known release-build pitfalls: dry-run macOS bundle filesystem leakage, missing Windows cross-compiler, preserving `OpenVibely.app` in macOS zips, avoiding managed worktree cleanup paths for real builds, and preferring script-default or absolute dist paths when running release-build steps.
 
-Operational guidance belongs in project skills such as `openvibely_project_guidance`, `openvibely_validation_workflow`, `openvibely_release_workflow`, `openvibely_docs_editing_workflow`, `openvibely_go_maintenance_workflow`, and `openvibely_audit_review_workflow`.
