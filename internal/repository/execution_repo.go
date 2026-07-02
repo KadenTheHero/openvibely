@@ -266,6 +266,16 @@ func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, 
 }
 
 func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (int64, error) {
+	// A running execution is only stale if its owning task's status is
+	// terminal/pending (no worker goroutine can still be driving it), OR
+	// the task's category is neither "active" nor "scheduled" — those are
+	// the only two categories the worker pool dispatches and keeps running
+	// (see WorkerService.dispatchNext's queue-pruning check). Using a bare
+	// "category != active" check here incorrectly flagged legitimately
+	// running scheduled tasks (e.g. recurring "System: Memory Consolidation"
+	// and other cron-style scheduled tasks) as stale while their worker
+	// goroutine was still executing, causing the execution to be marked
+	// failed out from under the still-running task.
 	if _, err := r.db.ExecContext(ctx, `
 		UPDATE thread_inputs
 		SET input_mode = 'queued', turn_id = NULL, expected_turn_id = NULL, updated_at = datetime('now')
@@ -277,7 +287,8 @@ func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (
 		      JOIN tasks t ON t.id = e.task_id
 			      WHERE e.status = 'running'
 			        AND t.category != 'chat'
-			        AND (t.status IN ('completed', 'failed', 'cancelled', 'pending') OR t.category != 'active')
+			        AND (t.status IN ('completed', 'failed', 'cancelled', 'pending')
+			             OR t.category NOT IN ('active', 'scheduled'))
 		  )`); err != nil {
 		return 0, fmt.Errorf("requeueing stale running task steering inputs: %w", err)
 	}
@@ -298,7 +309,8 @@ func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (
 		      FROM tasks t
 		      WHERE t.id = executions.task_id
 		        AND t.category != 'chat'
-		        AND (t.status IN ('completed', 'failed', 'cancelled', 'pending') OR t.category != 'active')
+		        AND (t.status IN ('completed', 'failed', 'cancelled', 'pending')
+		             OR t.category NOT IN ('active', 'scheduled'))
 		  )`)
 	if err != nil {
 		return 0, fmt.Errorf("recovering stale running task executions: %w", err)

@@ -852,6 +852,51 @@ func TestExecutionRepo_RecoverStaleRunningTaskExecutionsRepairsPendingTaskCrashL
 //     expected_turn_id set, so it should appear in the list.
 //  2. After PreparePendingSteering — expected_turn_id is cleared (row is in-flight),
 //     so it must be hidden from the list.
+// TestExecutionRepo_RecoverStaleRunningTaskExecutionsPreservesRunningScheduledTask
+// is a regression test for a bug where recurring scheduled tasks (e.g. the
+// built-in "System: Memory Consolidation" task and any other cron-style task
+// left in category="scheduled" while status="running") had their live,
+// in-progress execution incorrectly reaped by the stale-recovery sweep. The
+// sweep previously treated any task whose category wasn't "active" as
+// inactive/stale, but the worker pool legitimately runs tasks in both the
+// "active" and "scheduled" categories (see WorkerService.dispatchNext).
+// RecoverStaleRunningTaskExecutions is called on virtually every
+// FindActiveTaskExecution/HasActiveTaskExecution lookup (not just at server
+// startup), so this bug could fail a task's execution out from under it
+// mid-run, while the worker goroutine kept executing obliviously — leaving
+// an inconsistent "failed execution but task still running" state.
+func TestExecutionRepo_RecoverStaleRunningTaskExecutionsPreservesRunningScheduledTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	taskRepo := NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: project.ID, Title: "System: Memory Consolidation", Category: models.CategoryScheduled, Status: models.StatusRunning, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create scheduled task: %v", err)
+	}
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	liveExec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "in-progress consolidation run"}
+	if err := execRepo.Create(ctx, liveExec); err != nil {
+		t.Fatalf("create live execution: %v", err)
+	}
+
+	recovered, err := execRepo.RecoverStaleRunningTaskExecutions(ctx)
+	if err != nil {
+		t.Fatalf("RecoverStaleRunningTaskExecutions: %v", err)
+	}
+	if recovered != 0 {
+		t.Fatalf("expected 0 recovered executions for a legitimately running scheduled task, got %d", recovered)
+	}
+	stored, err := execRepo.GetByID(ctx, liveExec.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored.Status != models.ExecRunning {
+		t.Fatalf("expected live scheduled-task execution to remain running, got %s (error=%q)", stored.Status, stored.ErrorMessage)
+	}
+}
+
 func TestThreadInputRepo_ListPendingForTask_ExcludesPreparedSteering(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
