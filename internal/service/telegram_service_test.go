@@ -400,28 +400,32 @@ func TestTelegramServiceConcurrentUpdateTokenIsSerialized(t *testing.T) {
 		client.releaseOne()
 	}
 
-	results := make(chan error, 2)
-	go func() { results <- svc.UpdateToken("token-a") }()
-	go func() { results <- svc.UpdateToken("token-b") }()
+	type updateResult struct {
+		token string
+		err   error
+	}
+	results := make(chan updateResult, 2)
+	go func() { results <- updateResult{token: "token-a", err: svc.UpdateToken("token-a")} }()
+	go func() { results <- updateResult{token: "token-b", err: svc.UpdateToken("token-b")} }()
 
 	select {
-	case err := <-results:
-		t.Fatalf("UpdateToken returned before the initial poller drained: %v", err)
+	case result := <-results:
+		t.Fatalf("UpdateToken(%s) returned before the initial poller drained: %v", result.token, result.err)
 	case <-time.After(50 * time.Millisecond):
 	}
 
 	releaseClient("initial-token")
-	seenReplacementPollers := make(map[string]struct{})
 	completedUpdates := 0
+	lastCompletedToken := ""
 	for completedUpdates < 2 {
 		select {
-		case err := <-results:
-			require.NoError(t, err)
+		case result := <-results:
+			require.NoError(t, result.err)
 			completedUpdates++
+			lastCompletedToken = result.token
 		case path := <-started:
 			for _, token := range []string{"token-a", "token-b"} {
 				if strings.Contains(path, "/bot"+token+"/getUpdates") {
-					seenReplacementPollers[token] = struct{}{}
 					releaseClient(token)
 				}
 			}
@@ -431,7 +435,14 @@ func TestTelegramServiceConcurrentUpdateTokenIsSerialized(t *testing.T) {
 		assert.LessOrEqual(t, atomic.LoadInt32(&globalMaxActiveUpdates), int32(1), "concurrent token updates must not overlap long-poll requests")
 	}
 
-	require.NotEmpty(t, seenReplacementPollers)
+	svc.lifecycleMu.Lock()
+	currentToken := ""
+	if svc.bot != nil {
+		currentToken = svc.bot.Token
+	}
+	svc.lifecycleMu.Unlock()
+	require.Equal(t, lastCompletedToken, currentToken, "current bot should reflect the last completed token update")
+	waitForTelegramPoller(t, started, currentToken)
 	require.Eventually(t, func() bool {
 		return atomic.LoadInt32(&globalActiveUpdates) == 1
 	}, time.Second, 10*time.Millisecond)
