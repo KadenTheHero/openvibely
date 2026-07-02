@@ -320,7 +320,9 @@ func TestTelegramServiceWaitsForStoppedPollerBeforeRestart(t *testing.T) {
 	svc := &TelegramService{bot: bot}
 	defer func() {
 		client.unblock()
-		require.True(t, svc.stop(true))
+		svc.lifecycleOpMu.Lock()
+		require.True(t, svc.stopLocked(true))
+		svc.lifecycleOpMu.Unlock()
 	}()
 
 	svc.Start()
@@ -335,7 +337,11 @@ func TestTelegramServiceWaitsForStoppedPollerBeforeRestart(t *testing.T) {
 	assert.Equal(t, int32(1), atomic.LoadInt32(&client.maxActiveUpdates), "must not start a second poller while the stopped poller is still draining")
 
 	stopped := make(chan bool, 1)
-	go func() { stopped <- svc.stop(true) }()
+	go func() {
+		svc.lifecycleOpMu.Lock()
+		stopped <- svc.stopLocked(true)
+		svc.lifecycleOpMu.Unlock()
+	}()
 
 	select {
 	case <-stopped:
@@ -347,15 +353,146 @@ func TestTelegramServiceWaitsForStoppedPollerBeforeRestart(t *testing.T) {
 	assert.True(t, <-stopped)
 }
 
+func TestTelegramServiceConcurrentUpdateTokenIsSerialized(t *testing.T) {
+	var globalActiveUpdates int32
+	var globalMaxActiveUpdates int32
+	started := make(chan string, 10)
+	clientsMu := sync.Mutex{}
+	clients := make(map[string]*telegramStubClient)
+
+	newBot := func(token string) (*tgbotapi.BotAPI, error) {
+		client := &telegramStubClient{
+			blockUpdates:           make(chan struct{}),
+			releaseUpdates:         make(chan struct{}),
+			globalActiveUpdates:    &globalActiveUpdates,
+			globalMaxActiveUpdates: &globalMaxActiveUpdates,
+			updatesStarted:         started,
+		}
+		clientsMu.Lock()
+		clients[token] = client
+		clientsMu.Unlock()
+		return tgbotapi.NewBotAPIWithClient(token, tgbotapi.APIEndpoint, client)
+	}
+
+	initialBot, err := newBot("initial-token")
+	require.NoError(t, err)
+	svc := &TelegramService{bot: initialBot, newBotAPI: newBot}
+	defer func() {
+		clientsMu.Lock()
+		for _, client := range clients {
+			client.unblock()
+		}
+		clientsMu.Unlock()
+		svc.lifecycleOpMu.Lock()
+		require.True(t, svc.stopLocked(true))
+		svc.lifecycleOpMu.Unlock()
+	}()
+
+	svc.Start()
+	waitForTelegramPoller(t, started, "initial-token")
+
+	releaseClient := func(token string) {
+		t.Helper()
+		clientsMu.Lock()
+		client := clients[token]
+		clientsMu.Unlock()
+		require.NotNil(t, client, "missing client for %s", token)
+		client.releaseOne()
+	}
+
+	results := make(chan error, 2)
+	go func() { results <- svc.UpdateToken("token-a") }()
+	go func() { results <- svc.UpdateToken("token-b") }()
+
+	select {
+	case err := <-results:
+		t.Fatalf("UpdateToken returned before the initial poller drained: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	releaseClient("initial-token")
+	seenReplacementPollers := make(map[string]struct{})
+	completedUpdates := 0
+	for completedUpdates < 2 {
+		select {
+		case err := <-results:
+			require.NoError(t, err)
+			completedUpdates++
+		case path := <-started:
+			for _, token := range []string{"token-a", "token-b"} {
+				if strings.Contains(path, "/bot"+token+"/getUpdates") {
+					seenReplacementPollers[token] = struct{}{}
+					releaseClient(token)
+				}
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for concurrent UpdateToken calls to finish")
+		}
+		assert.LessOrEqual(t, atomic.LoadInt32(&globalMaxActiveUpdates), int32(1), "concurrent token updates must not overlap long-poll requests")
+	}
+
+	require.NotEmpty(t, seenReplacementPollers)
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&globalActiveUpdates) == 1
+	}, time.Second, 10*time.Millisecond)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&globalMaxActiveUpdates), "concurrent token updates must not overlap long-poll requests")
+	assert.True(t, svc.IsRunning())
+}
+
+func waitForTelegramPoller(t *testing.T, started <-chan string, tokens ...string) string {
+	t.Helper()
+	wanted := make(map[string]struct{}, len(tokens))
+	for _, token := range tokens {
+		wanted[token] = struct{}{}
+	}
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case path := <-started:
+			for token := range wanted {
+				if strings.Contains(path, "/bot"+token+"/getUpdates") {
+					return token
+				}
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for telegram poller for one of %v", tokens)
+		}
+	}
+}
+
 type telegramStubClient struct {
-	blockUpdates     chan struct{}
-	activeUpdates    int32
-	maxActiveUpdates int32
-	closeOnce        sync.Once
+	blockUpdates           chan struct{}
+	releaseUpdates         chan struct{}
+	activeUpdates          int32
+	maxActiveUpdates       int32
+	globalActiveUpdates    *int32
+	globalMaxActiveUpdates *int32
+	updatesStarted         chan string
+	closeOnce              sync.Once
 }
 
 func (c *telegramStubClient) unblock() {
 	c.closeOnce.Do(func() { close(c.blockUpdates) })
+}
+
+func (c *telegramStubClient) releaseOne() {
+	if c.releaseUpdates == nil {
+		c.unblock()
+		return
+	}
+	c.releaseUpdates <- struct{}{}
+}
+
+func updateMaxInt32(max *int32, value int32) {
+	if max == nil {
+		return
+	}
+	for {
+		current := atomic.LoadInt32(max)
+		if value <= current || atomic.CompareAndSwapInt32(max, current, value) {
+			return
+		}
+	}
 }
 
 func (c *telegramStubClient) Do(req *http.Request) (*http.Response, error) {
@@ -364,16 +501,28 @@ func (c *telegramStubClient) Do(req *http.Request) (*http.Response, error) {
 	}
 	if strings.Contains(req.URL.Path, "/getUpdates") {
 		active := atomic.AddInt32(&c.activeUpdates, 1)
-		for {
-			maxActive := atomic.LoadInt32(&c.maxActiveUpdates)
-			if active <= maxActive || atomic.CompareAndSwapInt32(&c.maxActiveUpdates, maxActive, active) {
-				break
-			}
+		updateMaxInt32(&c.maxActiveUpdates, active)
+		if c.globalActiveUpdates != nil {
+			globalActive := atomic.AddInt32(c.globalActiveUpdates, 1)
+			updateMaxInt32(c.globalMaxActiveUpdates, globalActive)
+			defer atomic.AddInt32(c.globalActiveUpdates, -1)
 		}
 		defer atomic.AddInt32(&c.activeUpdates, -1)
+		if c.updatesStarted != nil {
+			select {
+			case c.updatesStarted <- req.URL.Path:
+			default:
+			}
+		}
+		releasedOne := false
 		select {
 		case <-c.blockUpdates:
+		case <-c.releaseUpdates:
+			releasedOne = true
 		case <-req.Context().Done():
+		}
+		if releasedOne {
+			time.Sleep(25 * time.Millisecond)
 		}
 		return telegramJSONResponse(`{"ok":true,"result":[]}`), nil
 	}

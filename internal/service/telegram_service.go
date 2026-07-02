@@ -88,9 +88,11 @@ type TelegramService struct {
 	editMessageFunc          func(chatID int64, messageID int, text string)
 	sendConfigFunc           func(c tgbotapi.Chattable) (tgbotapi.Message, error)
 	makeRequestFunc          func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error)
+	newBotAPI                func(token string) (*tgbotapi.BotAPI, error)
 	previewMu                sync.Mutex
 	activePreviews           map[telegramPreviewKey]*telegramPreviewState
 	userProjects             map[int64]string // Maps Telegram user ID to active project ID
+	lifecycleOpMu            sync.Mutex
 	lifecycleMu              sync.Mutex
 	ctx                      context.Context
 	cancel                   context.CancelFunc
@@ -136,6 +138,7 @@ func NewTelegramService(
 		chatAttachmentRepo: chatAttachmentRepo,
 		llmSvc:             llmSvc,
 		workerSvc:          workerSvc,
+		newBotAPI:          tgbotapi.NewBotAPI,
 		userProjects:       make(map[int64]string),
 		ctx:                ctx,
 		cancel:             cancel,
@@ -274,22 +277,35 @@ func (s *TelegramService) checkAuthorization(userID int64, username string, proj
 
 // UpdateToken stops the current bot, reinitializes with the new token, and starts again.
 func (s *TelegramService) UpdateToken(token string) error {
-	if !s.stop(true) {
+	s.lifecycleOpMu.Lock()
+	defer s.lifecycleOpMu.Unlock()
+
+	if !s.stopLocked(true) {
 		return fmt.Errorf("timed out waiting for previous telegram poller to stop")
 	}
-	bot, err := tgbotapi.NewBotAPI(token)
+	newBotAPI := s.newBotAPI
+	if newBotAPI == nil {
+		newBotAPI = tgbotapi.NewBotAPI
+	}
+	bot, err := newBotAPI(token)
 	if err != nil {
 		return fmt.Errorf("invalid telegram token: %w", err)
 	}
 	s.lifecycleMu.Lock()
 	s.bot = bot
 	s.lifecycleMu.Unlock()
-	s.Start()
+	s.startLocked()
 	return nil
 }
 
 // Start begins listening for Telegram updates.
 func (s *TelegramService) Start() {
+	s.lifecycleOpMu.Lock()
+	defer s.lifecycleOpMu.Unlock()
+	s.startLocked()
+}
+
+func (s *TelegramService) startLocked() {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()
 	if s.bot == nil || s.running || s.runDone != nil {
@@ -303,10 +319,12 @@ func (s *TelegramService) Start() {
 
 // Stop stops the Telegram bot.
 func (s *TelegramService) Stop() {
-	s.stop(false)
+	s.lifecycleOpMu.Lock()
+	defer s.lifecycleOpMu.Unlock()
+	s.stopLocked(false)
 }
 
-func (s *TelegramService) stop(wait bool) bool {
+func (s *TelegramService) stopLocked(wait bool) bool {
 	s.lifecycleMu.Lock()
 	done := s.runDone
 	if !s.running {
