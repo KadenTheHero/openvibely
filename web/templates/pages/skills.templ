@@ -305,6 +305,10 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				}
 
 				function replaceSkillsContainer(html) {
+					if (typeof window.replaceSearchableCardContainer === 'function') {
+						window.replaceSearchableCardContainer('#skills-container', html);
+						return;
+					}
 					var container = document.getElementById('skills-container');
 					if (!container) return;
 					container.outerHTML = html;

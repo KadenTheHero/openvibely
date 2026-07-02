@@ -2739,16 +2739,28 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					// The helper filters cards, shows/hides a no-results message, and
 					// persists the search term in sessionStorage per page key.
 
+					function cardSearchStorageKey(pageKey) {
+						return 'ov_card_search_' + pageKey;
+					}
+
+					function storeCardSearchTerm(pageKey, value) {
+						if (!pageKey) return;
+						try { sessionStorage.setItem(cardSearchStorageKey(pageKey), value || ''); } catch(e) {}
+					}
+
+					function loadCardSearchTerm(pageKey) {
+						try { return sessionStorage.getItem(cardSearchStorageKey(pageKey)) || ''; } catch(e) { return ''; }
+					}
+
 					function initCardSearch(input) {
 						var pageKey = input.getAttribute('data-card-search');
 						if (!pageKey) return;
-						var storageKey = 'ov_card_search_' + pageKey;
 						var container = input.closest('[data-search-container]');
 						if (!container) return;
 
 						function applyFilter() {
 							var term = (input.value || '').toLowerCase().trim();
-							try { sessionStorage.setItem(storageKey, input.value || ''); } catch(e) {}
+							storeCardSearchTerm(pageKey, input.value || '');
 
 							var cards = container.querySelectorAll('[data-search-card]');
 							var visibleCount = 0;
@@ -2768,8 +2780,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 						if (!input.dataset.cardSearchInit) {
 							// Restore persisted term once per input instance.
-							var saved = '';
-							try { saved = sessionStorage.getItem(storageKey) || ''; } catch(e) {}
+							var saved = loadCardSearchTerm(pageKey);
 							if (saved) {
 								input.value = saved;
 							}
@@ -2788,7 +2799,27 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 					}
 
+					function replaceSearchableCardContainer(containerOrSelector, html) {
+						var container = typeof containerOrSelector === 'string' ? document.querySelector(containerOrSelector) : containerOrSelector;
+						if (!container) return null;
+						var input = container.querySelector('input[data-card-search]');
+						var pageKey = input ? input.getAttribute('data-card-search') : '';
+						var activeTerm = input ? input.value || '' : (pageKey ? loadCardSearchTerm(pageKey) : '');
+						if (pageKey) storeCardSearchTerm(pageKey, activeTerm);
+						container.outerHTML = html;
+						var nextContainer = container.id ? document.getElementById(container.id) : null;
+						if (!nextContainer) return null;
+						var nextInput = nextContainer.querySelector('input[data-card-search]');
+						if (nextInput && pageKey && nextInput.getAttribute('data-card-search') === pageKey) {
+							nextInput.value = activeTerm;
+						}
+						if (window.htmx) htmx.process(nextContainer);
+						initAllCardSearches(nextContainer);
+						return nextContainer;
+					}
+
 					window.refreshCardSearches = initAllCardSearches;
+					window.replaceSearchableCardContainer = replaceSearchableCardContainer;
 
 					// Init on page load
 					setTimeout(function() { initAllCardSearches(); }, 0);

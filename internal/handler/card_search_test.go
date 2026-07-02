@@ -267,7 +267,9 @@ func TestCardSearch_SkillsManualRefreshReappliesActiveSearch(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		`window.refreshCardSearches = initAllCardSearches`,
+		`window.replaceSearchableCardContainer = replaceSearchableCardContainer`,
 		`function replaceSkillsContainer(html)`,
+		`window.replaceSearchableCardContainer('#skills-container', html);`,
 		`refreshSkillsContainerSearch();`,
 	} {
 		if !strings.Contains(body, want) {

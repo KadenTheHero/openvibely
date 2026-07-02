@@ -422,6 +422,81 @@ func TestCreateSkillWritesStandaloneSkillAndReturnsCards(t *testing.T) {
 	}
 }
 
+func TestCreateSkillResponseIncludesFreshSearchText(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+
+	payload := skillSaveRequest{
+		Handle:      "search_target",
+		Name:        "Search Test Skill",
+		Description: "appears for active test filter",
+		Scope:       "global",
+		Body:        "Run checks.",
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/skills", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	response := rec.Body.String()
+	for _, want := range []string{
+		`id="skills-container"`,
+		`data-card-search="skills"`,
+		`data-skill-handle="search_target"`,
+		`data-search-text="search_target Search Test Skill appears for active test filter global`,
+	} {
+		if !strings.Contains(response, want) {
+			t.Fatalf("expected create response to contain %q; got %s", want, response)
+		}
+	}
+}
+
+func TestUpdateSkillResponseSearchTextReflectsClearedFields(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+	writeStandaloneSkill(t, root, "no_longer_matching", "Test Skill", "test description", "global")
+
+	payload := skillSaveRequest{
+		Handle:      "no_longer_matching",
+		Name:        "",
+		Description: "",
+		Scope:       "global",
+		Body:        "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n    key: no_longer_matching\n    name: Test Skill\n    scope: global\n    description: test description\n---\n\nNo matching keyword remains.",
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPut, "/skills/no_longer_matching", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	response := rec.Body.String()
+	if !strings.Contains(response, `data-skill-handle="no_longer_matching"`) {
+		t.Fatalf("expected updated skill card in response; got %s", response)
+	}
+	if strings.Contains(response, `data-search-text="no_longer_matching Test Skill test description`) {
+		t.Fatalf("expected search text to drop cleared name/description; got %s", response)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "skills", "no_longer_matching", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read skill: %v", err)
+	}
+	content := string(data)
+	if strings.Contains(content, "Test Skill") || strings.Contains(content, "test description") {
+		t.Fatalf("expected cleared fields not to remain in frontmatter; got\n%s", content)
+	}
+}
+
 func TestCreateSkillDoesNotWriteEnabledTrueToFrontmatter(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	root := t.TempDir()

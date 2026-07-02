@@ -614,9 +614,7 @@ func (h *Handler) writeStandaloneSkillFromDialog(c echo.Context, req skillSaveRe
 			Kind:    "openvibely.agent_skill",
 			Version: 1,
 			Skill: agentlibrary.SkillBlock{
-				Key:         handle,
-				Name:        firstDialogNonEmpty(strings.TrimSpace(req.Name), handle),
-				Description: strings.TrimSpace(req.Description),
+				Key: handle,
 				// Enabled left nil: absence = enabled, keeps frontmatter clean
 			},
 		}
@@ -624,12 +622,11 @@ func (h *Handler) writeStandaloneSkillFromDialog(c echo.Context, req skillSaveRe
 	decl.Agent.Key = ""
 	decl.Skill.Key = handle
 	decl.Skill.Scope = scope
-	if strings.TrimSpace(req.Name) != "" {
-		decl.Skill.Name = strings.TrimSpace(req.Name)
+	decl.Skill.Name = strings.TrimSpace(req.Name)
+	if decl.Skill.Name == "" && !strings.HasPrefix(strings.TrimSpace(req.Body), "---") {
+		decl.Skill.Name = handle
 	}
-	if strings.TrimSpace(req.Description) != "" {
-		decl.Skill.Description = strings.TrimSpace(req.Description)
-	}
+	decl.Skill.Description = strings.TrimSpace(req.Description)
 	if req.Enabled != nil {
 		if !*req.Enabled {
 			// Explicitly disable — write enabled: false
