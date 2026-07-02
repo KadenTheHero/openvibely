@@ -353,6 +353,39 @@ func TestTelegramServiceWaitsForStoppedPollerBeforeRestart(t *testing.T) {
 	assert.True(t, <-stopped)
 }
 
+func TestTelegramServiceConflictClassifierMatchesTypedTelegramError(t *testing.T) {
+	err := &tgbotapi.Error{Code: http.StatusConflict, Message: "Conflict: webhook is already configured"}
+	assert.True(t, isTelegramConflictError(err), "409 conflicts must be classified by typed error code, not only by one getUpdates message substring")
+}
+
+func TestTelegramServiceGetUpdatesConflictDoesNotUseLibraryRetryLoop(t *testing.T) {
+	client := &telegramStubClient{
+		blockUpdates:       make(chan struct{}),
+		getUpdatesResponse: `{"ok":false,"error_code":409,"description":"Conflict: webhook is already configured"}`,
+	}
+	bot, err := tgbotapi.NewBotAPIWithClient("test-token", tgbotapi.APIEndpoint, client)
+	require.NoError(t, err)
+
+	svc := &TelegramService{bot: bot}
+	t.Cleanup(func() {
+		client.unblock()
+		svc.lifecycleOpMu.Lock()
+		require.True(t, svc.stopLocked(true))
+		svc.lifecycleOpMu.Unlock()
+	})
+
+	svc.Start()
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&client.activeUpdates) == 1
+	}, time.Second, 10*time.Millisecond)
+	client.releaseOne()
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&client.activeUpdates) == 0
+	}, time.Second, 10*time.Millisecond)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&client.maxActiveUpdates), "conflict retries must not create overlapping long-poll requests")
+	assert.True(t, svc.IsRunning())
+}
+
 func TestTelegramServiceConcurrentUpdateTokenIsSerialized(t *testing.T) {
 	var globalActiveUpdates int32
 	var globalMaxActiveUpdates int32
@@ -474,6 +507,7 @@ func waitForTelegramPoller(t *testing.T, started <-chan string, tokens ...string
 type telegramStubClient struct {
 	blockUpdates           chan struct{}
 	releaseUpdates         chan struct{}
+	getUpdatesResponse     string
 	activeUpdates          int32
 	maxActiveUpdates       int32
 	globalActiveUpdates    *int32
@@ -535,7 +569,11 @@ func (c *telegramStubClient) Do(req *http.Request) (*http.Response, error) {
 		if releasedOne {
 			time.Sleep(25 * time.Millisecond)
 		}
-		return telegramJSONResponse(`{"ok":true,"result":[]}`), nil
+		body := c.getUpdatesResponse
+		if body == "" {
+			body = `{"ok":true,"result":[]}`
+		}
+		return telegramJSONResponse(body), nil
 	}
 	return telegramJSONResponse(`{"ok":true,"result":{}}`), nil
 }

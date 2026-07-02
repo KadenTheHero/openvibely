@@ -342,16 +342,12 @@ func (s *TelegramService) stopLocked(wait bool) bool {
 	}
 	applog.Infof("[telegram] stopping bot")
 	cancel := s.cancel
-	bot := s.bot
 	s.running = false
 	s.cancel = nil
 	s.lifecycleMu.Unlock()
 
 	if cancel != nil {
 		cancel()
-	}
-	if bot != nil {
-		bot.StopReceivingUpdates()
 	}
 	if wait && done != nil {
 		select {
@@ -380,59 +376,100 @@ func (s *TelegramService) run(ctx context.Context, bot *tgbotapi.BotAPI, done ch
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
-	updates := bot.GetUpdatesChan(u)
-
 	applog.Infof("[telegram] bot started, waiting for updates")
 
-	for update := range updates {
+	var lastConflictLog time.Time
+	for {
 		select {
 		case <-ctx.Done():
-			continue
+			applog.Infof("[telegram] bot stopped")
+			return
 		default:
 		}
-		if update.Message == nil {
-			continue
-		}
 
-		// Check authorization before processing any message (including commands)
-		userID := update.Message.From.ID
-		chatID := update.Message.Chat.ID
-		username := update.Message.From.UserName
-
-		// Resolve the user's active project for authorization check
-		projectID := s.getActiveProject(userID)
-		if !s.checkAuthorization(userID, username, projectID) {
-			applog.Infof("[telegram] unauthorized access attempt from user %d (username: %s) for project %s",
-				userID, username, projectID)
-			s.sendMessage(s.ctx, chatID, "You are not authorized to use this bot. Contact the project owner to get access.")
-			continue
-		}
-
-		// Handle special commands: /start and /project
-		if update.Message.IsCommand() {
-			cmd := update.Message.Command()
-			switch cmd {
-			case "start":
-				response := s.handleStart(update.Message.From.ID)
-				s.sendMessage(s.ctx, update.Message.Chat.ID, response)
-				continue
-			case "project":
-				response := s.handleProject(update.Message.From.ID, update.Message.CommandArguments())
-				s.sendMessage(s.ctx, update.Message.Chat.ID, response)
-				continue
+		updates, err := bot.GetUpdates(u)
+		if err != nil {
+			if isTelegramConflictError(err) {
+				if time.Since(lastConflictLog) >= 30*time.Second {
+					applog.Infof("[telegram] getUpdates conflict: another consumer is polling this bot token; retrying with backoff")
+					lastConflictLog = time.Now()
+				}
+			} else {
+				applog.Infof("[telegram] getUpdates error: %v; retrying with backoff", err)
 			}
-		}
-
-		// Check for natural language project commands before forwarding to LLM
-		if response, handled := s.handleNaturalLanguageProjectCommand(userID, update.Message.Text); handled {
-			s.sendMessage(s.ctx, chatID, response)
+			select {
+			case <-ctx.Done():
+				applog.Infof("[telegram] bot stopped")
+				return
+			case <-time.After(3 * time.Second):
+			}
 			continue
 		}
 
-		// Forward all other messages (including unrecognized commands) to the chat orchestrator
-		go s.handleChatMessage(update.Message)
+		for _, update := range updates {
+			if update.UpdateID >= u.Offset {
+				u.Offset = update.UpdateID + 1
+			}
+			s.handleTelegramUpdate(ctx, update)
+		}
 	}
-	applog.Infof("[telegram] bot stopped")
+}
+
+func (s *TelegramService) handleTelegramUpdate(ctx context.Context, update tgbotapi.Update) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+	if update.Message == nil {
+		return
+	}
+
+	// Check authorization before processing any message (including commands)
+	userID := update.Message.From.ID
+	chatID := update.Message.Chat.ID
+	username := update.Message.From.UserName
+
+	// Resolve the user's active project for authorization check
+	projectID := s.getActiveProject(userID)
+	if !s.checkAuthorization(userID, username, projectID) {
+		applog.Infof("[telegram] unauthorized access attempt from user %d (username: %s) for project %s",
+			userID, username, projectID)
+		s.sendMessage(s.ctx, chatID, "You are not authorized to use this bot. Contact the project owner to get access.")
+		return
+	}
+
+	// Handle special commands: /start and /project
+	if update.Message.IsCommand() {
+		cmd := update.Message.Command()
+		switch cmd {
+		case "start":
+			response := s.handleStart(update.Message.From.ID)
+			s.sendMessage(s.ctx, update.Message.Chat.ID, response)
+			return
+		case "project":
+			response := s.handleProject(update.Message.From.ID, update.Message.CommandArguments())
+			s.sendMessage(s.ctx, update.Message.Chat.ID, response)
+			return
+		}
+	}
+
+	// Check for natural language project commands before forwarding to LLM
+	if response, handled := s.handleNaturalLanguageProjectCommand(userID, update.Message.Text); handled {
+		s.sendMessage(s.ctx, chatID, response)
+		return
+	}
+
+	// Forward all other messages (including unrecognized commands) to the chat orchestrator
+	go s.handleChatMessage(update.Message)
+}
+
+func isTelegramConflictError(err error) bool {
+	var tgErr *tgbotapi.Error
+	if errors.As(err, &tgErr) && tgErr.Code == http.StatusConflict {
+		return true
+	}
+	return strings.Contains(err.Error(), "terminated by other getUpdates request")
 }
 
 // handleStart welcomes the user and sets the default project
