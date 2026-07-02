@@ -4360,6 +4360,60 @@ func TestHandler_GetTaskThread_RunningWithPartialOutput_ShowsStreamingDots(t *te
 	assert.NotContains(t, body, "Thinking...")
 }
 
+// TestHandler_GetTaskThread_ScheduledTaskExecutionSurvivesStaleRecoverySweep is a
+// regression test for a bug where recurring scheduled tasks (e.g. the built-in
+// "System: Memory Consolidation" task) had their live, in-progress execution
+// incorrectly reaped by RecoverStaleRunningTaskExecutions because the sweep
+// treated any task whose category wasn't "active" as inactive/stale — even
+// though the worker pool legitimately keeps "scheduled" category tasks running.
+// That sweep runs on nearly every FindActiveTaskExecution/HasActiveTaskExecution
+// call throughout the app (not just at startup), so a concurrent request could
+// flip the execution to "failed" (with the error "Recovered stale running
+// execution: owning task is terminal or inactive") while the worker goroutine
+// kept running the real LLM call in the background and task.Status stayed
+// "running". The task thread page would then render the execution as a
+// terminal failed bubble instead of the live SSE-streaming bubble on every 3s
+// poll, while the background writer kept appending output to the same row —
+// causing the DOM to reshape every poll and the auto-scroll logic to yank the
+// view to the top and then back to the bottom in a loop for the task's entire
+// duration. This test asserts the execution (and thus the streaming bubble)
+// survives the sweep for a running scheduled task.
+func TestHandler_GetTaskThread_ScheduledTaskExecutionSurvivesStaleRecoverySweep(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Scheduled Task Stale Recovery Project")
+	task := createTask(t, h, project.ID, "System: Memory Consolidation", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryScheduled
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Consolidate memories"
+	})
+	assert.NoError(t, h.execRepo.UpdateOutput(ctx, exec.ID, "partial consolidation output"))
+
+	// Simulate an unrelated concurrent request triggering the stale-execution
+	// recovery sweep while the scheduled task is legitimately still running.
+	_, err := h.execRepo.RecoverStaleRunningTaskExecutions(ctx)
+	assert.NoError(t, err)
+
+	stored, err := h.execRepo.GetByID(ctx, exec.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, models.ExecRunning, stored.Status, "running scheduled task execution must not be reaped as stale")
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	// The thread must still render the live SSE-streaming bubble, not a
+	// terminal failed bubble, so the poll doesn't reshape the DOM/scroll state.
+	assert.Contains(t, body, `data-streaming-resume="true"`)
+	assert.NotContains(t, body, "Recovered stale running execution")
+	assert.NotContains(t, body, "Task failed")
+}
+
 // TestHandler_GetTaskThread_MultiTurnOrdering verifies that follow-up messages
 // appear after the original task prompt in the thread timeline (chronological order).
 // This was a bug where GetTask used ListByTask (DESC) instead of ListByTaskChronological (ASC),
