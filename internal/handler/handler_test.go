@@ -877,7 +877,7 @@ func TestHandler_ListModels_DeleteConfirmationDialog(t *testing.T) {
 		`onclick="confirmDeleteModel()"`,
 		`class="btn btn-error"`,
 		`modal.showModal()`,
-		`htmx.ajax('DELETE', '/models/' + _deleteModelId`,
+		`htmx.ajax('DELETE', modelMutationURL('/models/' + _deleteModelId)`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected models delete confirmation markup/script to contain %q", want)

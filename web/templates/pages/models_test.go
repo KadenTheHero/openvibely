@@ -203,15 +203,25 @@ func TestModelsContent_ModelFormUsesHTMXSubmit(t *testing.T) {
 	if !strings.Contains(out, "form.action = _editUrl;") {
 		t.Fatal("expected edit flow to update form action")
 	}
-	// project_id is read from the current URL so the picker is preserved on submit.
+	// project_id is taken from the live project selector first so mutations preserve
+	// a newly selected project even if the URL query is missing or stale.
+	if !strings.Contains(out, "function selectedProjectIDForModelMutation()") {
+		t.Fatal("expected JS helper to resolve current project for model mutations")
+	}
+	if !strings.Contains(out, "document.getElementById('project-selector')") {
+		t.Fatal("expected model mutation project helper to prefer active project selector")
+	}
 	if !strings.Contains(out, "new URLSearchParams(window.location.search)") {
-		t.Fatal("expected JS to read project_id from URL params")
+		t.Fatal("expected JS to fall back to URL project_id params")
 	}
-	if !strings.Contains(out, "encodeURIComponent(_pid)") {
-		t.Fatal("expected JS to encode project_id in create URL")
+	if !strings.Contains(out, "function modelMutationURL(path)") || !strings.Contains(out, "project_id=' + encodeURIComponent(projectID)") {
+		t.Fatal("expected JS to append encoded project_id to model mutation URLs")
 	}
-	if !strings.Contains(out, "encodeURIComponent(_editPid)") {
-		t.Fatal("expected JS to encode project_id in edit URL")
+	if !strings.Contains(out, "var _createUrl = modelMutationURL('/models');") {
+		t.Fatal("expected create flow to preserve selected project in request URL")
+	}
+	if !strings.Contains(out, "var _editUrl = modelMutationURL('/models/' + id);") {
+		t.Fatal("expected edit flow to preserve selected project in request URL")
 	}
 	if !strings.Contains(out, "form.dataset.mode = 'edit';") || !strings.Contains(out, "form.dataset.mode = 'create';") {
 		t.Fatal("expected create/edit flow to track form mode")
@@ -221,6 +231,46 @@ func TestModelsContent_ModelFormUsesHTMXSubmit(t *testing.T) {
 	}
 	if !strings.Contains(out, "document.getElementById('model_config_id').value = '';") {
 		t.Fatal("expected create flow to clear model config ID")
+	}
+}
+
+func TestModelsContent_ModelMutationsPreserveActiveProject(t *testing.T) {
+	agents := []models.LLMConfig{
+		{ID: "model-a", Name: "Model A", Provider: models.ProviderAnthropic, Model: "claude-sonnet-5", IsDefault: false},
+		{ID: "model-b", Name: "Model B", Provider: models.ProviderOpenAI, Model: "gpt-5", IsDefault: true},
+	}
+	var buf bytes.Buffer
+	if err := ModelsContent(agents, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+	out := buf.String()
+
+	for _, want := range []string{
+		"var selector = document.getElementById('project-selector');",
+		"if (selector && selector.value) return selector.value;",
+		"return params.get('project_id') || '';",
+		"var _createUrl = modelMutationURL('/models');",
+		"var _editUrl = modelMutationURL('/models/' + id);",
+		"data-model-set-default-url=",
+		`onclick="setDefaultModel(this)"`,
+		"htmx.ajax('POST', modelMutationURL(path)",
+		"htmx.ajax('DELETE', modelMutationURL('/models/' + _deleteModelId)",
+		"htmx.ajax('DELETE', modelMutationURL('/models/' + _deleteModelId + '?new_default_id=' + encodeURIComponent(newDefaultId))",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected rendered Models mutation flow to contain %q", want)
+		}
+	}
+
+	for _, stale := range []string{
+		"var _pid = _params.get('project_id')",
+		"var _editPid = _editParams.get('project_id')",
+		"htmx.ajax('DELETE', '/models/' + _deleteModelId",
+		`hx-post="/models/model-a/set-default"`,
+	} {
+		if strings.Contains(out, stale) {
+			t.Fatalf("rendered Models mutation flow still contains stale project-less behavior %q", stale)
+		}
 	}
 }
 

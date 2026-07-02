@@ -252,9 +252,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 										if !agent.IsDefault {
 											<li>
 												<button
-													hx-post={ fmt.Sprintf("/models/%s/set-default", agent.ID) }
-													hx-target="#models-container"
-													hx-swap="outerHTML"
+													data-model-set-default-url={ fmt.Sprintf("/models/%s/set-default", agent.ID) }
+													onclick="setDefaultModel(this)"
 												>
 													Set as Default
 												</button>
@@ -1464,6 +1463,18 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 								document.getElementById('openai_api_key_info').classList.add('hidden');					document.getElementById('openai_subscription_info_cli').classList.add('hidden');					document.getElementById('openai_subscription_info_oauth').classList.add('hidden');
 				}
 
+				function selectedProjectIDForModelMutation() {
+					var selector = document.getElementById('project-selector');
+					if (selector && selector.value) return selector.value;
+					var params = new URLSearchParams(window.location.search);
+					return params.get('project_id') || '';
+				}
+
+				function modelMutationURL(path) {
+					var projectID = selectedProjectIDForModelMutation();
+					return path + (projectID ? (path.indexOf('?') === -1 ? '?' : '&') + 'project_id=' + encodeURIComponent(projectID) : '');
+				}
+
 				var _deleteModelId = '';
 				var _deleteModelName = '';
 				var _deleteModelIsDefault = false;
@@ -1493,7 +1504,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							return;
 						}
 					}
-					htmx.ajax('DELETE', '/models/' + _deleteModelId, {
+					htmx.ajax('DELETE', modelMutationURL('/models/' + _deleteModelId), {
 						target: '#models-container',
 						swap: 'outerHTML'
 					}).catch(function(xhr) {
@@ -1513,7 +1524,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					return;
 				}
 				reassign_default_modal.close();
-				htmx.ajax('DELETE', '/models/' + _deleteModelId + '?new_default_id=' + newDefaultId, {
+				htmx.ajax('DELETE', modelMutationURL('/models/' + _deleteModelId + '?new_default_id=' + encodeURIComponent(newDefaultId)), {
 					target: '#models-container',
 					swap: 'outerHTML'
 				}).catch(function(xhr) {
@@ -1525,6 +1536,15 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					alert(msg);
 				});
 			}
+
+				function setDefaultModel(button) {
+					var path = button.dataset.modelSetDefaultUrl;
+					if (!path) return;
+					htmx.ajax('POST', modelMutationURL(path), {
+						target: '#models-container',
+						swap: 'outerHTML'
+					});
+				}
 
 			function editModelFromData(button) {
 				var id = button.dataset.modelId;
@@ -1577,9 +1597,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 
 					var form = document.getElementById('model_form');
 					document.getElementById('model_modal_title').textContent = 'Edit Model Configuration';
-					var _editParams = new URLSearchParams(window.location.search);
-					var _editPid = _editParams.get('project_id') || '';
-					var _editUrl = '/models/' + id + (_editPid ? '?project_id=' + encodeURIComponent(_editPid) : '');
+					var _editUrl = modelMutationURL('/models/' + id);
 					form.action = _editUrl;
 					form.removeAttribute('hx-post');
 					form.setAttribute('hx-put', _editUrl);
@@ -1769,9 +1787,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				function openNewModelModal() {
 					var form = document.getElementById('model_form');
 					document.getElementById('model_modal_title').textContent = 'New Model Configuration';
-					var _params = new URLSearchParams(window.location.search);
-					var _pid = _params.get('project_id') || '';
-					var _createUrl = '/models' + (_pid ? '?project_id=' + encodeURIComponent(_pid) : '');
+					var _createUrl = modelMutationURL('/models');
 					form.action = _createUrl;
 					form.removeAttribute('hx-put');
 					form.setAttribute('hx-post', _createUrl);
