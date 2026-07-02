@@ -1,7 +1,10 @@
 package anthropic
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -56,6 +59,62 @@ func TestComposeRuntimeToolFilter_OrchestrateAllowsMemoryViewWithoutFilesystemRe
 	}
 	if filter("read_file") || filter("Read") || filter("list_files") {
 		t.Fatal("did not expect filesystem/default read tools to be allowed in orchestrate mode")
+	}
+}
+
+func TestRuntimeAnthropicToolsAliasesSkillsListWireName(t *testing.T) {
+	rt := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{
+			{Name: "skill_view"},
+			{Name: "skills_list"},
+			{Name: "skill_manage"},
+			{Name: "memory_view"},
+		},
+	}
+
+	tools := runtimeAnthropicTools(rt)
+	got := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		got = append(got, tool.Name)
+	}
+	want := []string{"skill_view", "skill_list", "skill_manage", "memory_view"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("runtimeAnthropicTools names = %v, want %v", got, want)
+	}
+}
+
+func TestComposeRuntimeToolExecutorCanonicalizesAnthropicSkillListAlias(t *testing.T) {
+	rt := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "skills_list"}},
+		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if name != "skills_list" {
+				return "", true, true, fmt.Errorf("unexpected tool name %q", name)
+			}
+			return "listed", true, false, nil
+		},
+	}
+
+	exec := composeRuntimeToolExecutor(nil, rt)
+	out, isError, err := exec(context.Background(), "skill_list", json.RawMessage(`{}`))
+	if err != nil || isError || out != "listed" {
+		t.Fatalf("aliased runtime executor = (%q, %v, %v), want listed false nil", out, isError, err)
+	}
+}
+
+func TestComposeRuntimeToolFilterCanonicalizesAnthropicSkillListAlias(t *testing.T) {
+	rt := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "skills_list"}},
+		Filter: func(name string) (bool, bool) {
+			if name != "skills_list" {
+				return false, true
+			}
+			return true, true
+		},
+	}
+
+	filter := composeRuntimeToolFilter(nil, rt, false, models.ChatModeOrchestrate)
+	if !filter("skill_list") {
+		t.Fatalf("expected aliased skills_list tool to be allowed through canonical runtime filter")
 	}
 }
 

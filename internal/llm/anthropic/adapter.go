@@ -221,12 +221,27 @@ func runtimeAnthropicTools(rt *llmcontracts.RuntimeTools) []anthropicclient.Tool
 			continue
 		}
 		out = append(out, anthropicclient.ToolDefinition{
-			Name:        name,
+			Name:        anthropicRuntimeToolWireName(name),
 			Description: strings.TrimSpace(def.Description),
 			InputSchema: def.Parameters,
 		})
 	}
 	return out
+}
+
+func anthropicRuntimeToolWireName(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if strings.EqualFold(trimmed, "skills_list") {
+		return "skill_list"
+	}
+	return trimmed
+}
+
+func anthropicRuntimeToolCanonicalName(name string) string {
+	if strings.EqualFold(strings.TrimSpace(name), "skill_list") {
+		return "skills_list"
+	}
+	return name
 }
 
 func runtimeToolAccessMap(rt *llmcontracts.RuntimeTools) map[string]llmcontracts.RuntimeToolAccess {
@@ -252,7 +267,7 @@ func runtimeToolAccess(runtimeTools map[string]llmcontracts.RuntimeToolAccess, n
 	if len(runtimeTools) == 0 {
 		return "", false
 	}
-	access, ok := runtimeTools[strings.ToLower(strings.TrimSpace(name))]
+	access, ok := runtimeTools[strings.ToLower(strings.TrimSpace(anthropicRuntimeToolCanonicalName(name)))]
 	return access, ok
 }
 
@@ -261,13 +276,14 @@ func composeRuntimeToolExecutor(base func(context.Context, string, json.RawMessa
 		return base
 	}
 	return func(ctx context.Context, name string, input json.RawMessage) (string, bool, error) {
-		if output, handled, isError, err := rt.Executor(ctx, name, input); handled || err != nil {
+		canonicalName := anthropicRuntimeToolCanonicalName(name)
+		if output, handled, isError, err := rt.Executor(ctx, canonicalName, input); handled || err != nil {
 			return output, isError, err
 		}
 		if base == nil {
-			return "", true, fmt.Errorf("tool %q is not available", name)
+			return "", true, fmt.Errorf("tool %q is not available", canonicalName)
 		}
-		return base(ctx, name, input)
+		return base(ctx, canonicalName, input)
 	}
 }
 
@@ -295,7 +311,7 @@ func composeRuntimeToolFilter(base func(string) bool, rt *llmcontracts.RuntimeTo
 
 		if isRuntimeTool {
 			if rt != nil && rt.Filter != nil {
-				allow, handled := rt.Filter(name)
+				allow, handled := rt.Filter(anthropicRuntimeToolCanonicalName(name))
 				if handled {
 					return allow
 				}
