@@ -312,6 +312,41 @@ func TestTelegramServiceStartIsIdempotent(t *testing.T) {
 	assert.True(t, svc.IsRunning())
 }
 
+func TestTelegramServiceWaitsForStoppedPollerBeforeRestart(t *testing.T) {
+	client := &telegramStubClient{blockUpdates: make(chan struct{})}
+	bot, err := tgbotapi.NewBotAPIWithClient("test-token", tgbotapi.APIEndpoint, client)
+	require.NoError(t, err)
+
+	svc := &TelegramService{bot: bot}
+	defer func() {
+		client.unblock()
+		require.True(t, svc.stop(true))
+	}()
+
+	svc.Start()
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&client.activeUpdates) == 1
+	}, time.Second, 10*time.Millisecond)
+
+	svc.Stop()
+	assert.False(t, svc.IsRunning())
+
+	svc.Start()
+	assert.Equal(t, int32(1), atomic.LoadInt32(&client.maxActiveUpdates), "must not start a second poller while the stopped poller is still draining")
+
+	stopped := make(chan bool, 1)
+	go func() { stopped <- svc.stop(true) }()
+
+	select {
+	case <-stopped:
+		t.Fatal("blocking stop returned before the old long-poll request drained")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	client.unblock()
+	assert.True(t, <-stopped)
+}
+
 type telegramStubClient struct {
 	blockUpdates     chan struct{}
 	activeUpdates    int32

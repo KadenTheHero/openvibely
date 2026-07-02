@@ -274,7 +274,9 @@ func (s *TelegramService) checkAuthorization(userID int64, username string, proj
 
 // UpdateToken stops the current bot, reinitializes with the new token, and starts again.
 func (s *TelegramService) UpdateToken(token string) error {
-	s.stop(true)
+	if !s.stop(true) {
+		return fmt.Errorf("timed out waiting for previous telegram poller to stop")
+	}
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return fmt.Errorf("invalid telegram token: %w", err)
@@ -290,7 +292,7 @@ func (s *TelegramService) UpdateToken(token string) error {
 func (s *TelegramService) Start() {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()
-	if s.bot == nil || s.running {
+	if s.bot == nil || s.running || s.runDone != nil {
 		return
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
@@ -304,19 +306,27 @@ func (s *TelegramService) Stop() {
 	s.stop(false)
 }
 
-func (s *TelegramService) stop(wait bool) {
+func (s *TelegramService) stop(wait bool) bool {
 	s.lifecycleMu.Lock()
+	done := s.runDone
 	if !s.running {
 		s.lifecycleMu.Unlock()
-		return
+		if wait && done != nil {
+			select {
+			case <-done:
+				return true
+			case <-time.After(65 * time.Second):
+				applog.Infof("[telegram] timeout waiting for bot poller to stop")
+				return false
+			}
+		}
+		return true
 	}
 	applog.Infof("[telegram] stopping bot")
 	cancel := s.cancel
 	bot := s.bot
-	done := s.runDone
 	s.running = false
 	s.cancel = nil
-	s.runDone = nil
 	s.lifecycleMu.Unlock()
 
 	if cancel != nil {
@@ -328,15 +338,27 @@ func (s *TelegramService) stop(wait bool) {
 	if wait && done != nil {
 		select {
 		case <-done:
+			return true
 		case <-time.After(65 * time.Second):
 			applog.Infof("[telegram] timeout waiting for bot poller to stop")
+			return false
 		}
 	}
+	return true
 }
 
 // run is the main bot loop.
-func (s *TelegramService) run(ctx context.Context, bot *tgbotapi.BotAPI, done chan<- struct{}) {
-	defer close(done)
+func (s *TelegramService) run(ctx context.Context, bot *tgbotapi.BotAPI, done chan struct{}) {
+	defer func() {
+		s.lifecycleMu.Lock()
+		if s.runDone == done {
+			s.runDone = nil
+			s.cancel = nil
+			s.running = false
+		}
+		s.lifecycleMu.Unlock()
+		close(done)
+	}()
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
@@ -344,59 +366,55 @@ func (s *TelegramService) run(ctx context.Context, bot *tgbotapi.BotAPI, done ch
 
 	applog.Infof("[telegram] bot started, waiting for updates")
 
-	for {
+	for update := range updates {
 		select {
 		case <-ctx.Done():
-			applog.Infof("[telegram] bot stopped")
-			return
-		case update, ok := <-updates:
-			if !ok {
-				applog.Infof("[telegram] bot stopped")
-				return
-			}
-			if update.Message == nil {
-				continue
-			}
-
-			// Check authorization before processing any message (including commands)
-			userID := update.Message.From.ID
-			chatID := update.Message.Chat.ID
-			username := update.Message.From.UserName
-
-			// Resolve the user's active project for authorization check
-			projectID := s.getActiveProject(userID)
-			if !s.checkAuthorization(userID, username, projectID) {
-				applog.Infof("[telegram] unauthorized access attempt from user %d (username: %s) for project %s",
-					userID, username, projectID)
-				s.sendMessage(s.ctx, chatID, "You are not authorized to use this bot. Contact the project owner to get access.")
-				continue
-			}
-
-			// Handle special commands: /start and /project
-			if update.Message.IsCommand() {
-				cmd := update.Message.Command()
-				switch cmd {
-				case "start":
-					response := s.handleStart(update.Message.From.ID)
-					s.sendMessage(s.ctx, update.Message.Chat.ID, response)
-					continue
-				case "project":
-					response := s.handleProject(update.Message.From.ID, update.Message.CommandArguments())
-					s.sendMessage(s.ctx, update.Message.Chat.ID, response)
-					continue
-				}
-			}
-
-			// Check for natural language project commands before forwarding to LLM
-			if response, handled := s.handleNaturalLanguageProjectCommand(userID, update.Message.Text); handled {
-				s.sendMessage(s.ctx, chatID, response)
-				continue
-			}
-
-			// Forward all other messages (including unrecognized commands) to the chat orchestrator
-			go s.handleChatMessage(update.Message)
+			continue
+		default:
 		}
+		if update.Message == nil {
+			continue
+		}
+
+		// Check authorization before processing any message (including commands)
+		userID := update.Message.From.ID
+		chatID := update.Message.Chat.ID
+		username := update.Message.From.UserName
+
+		// Resolve the user's active project for authorization check
+		projectID := s.getActiveProject(userID)
+		if !s.checkAuthorization(userID, username, projectID) {
+			applog.Infof("[telegram] unauthorized access attempt from user %d (username: %s) for project %s",
+				userID, username, projectID)
+			s.sendMessage(s.ctx, chatID, "You are not authorized to use this bot. Contact the project owner to get access.")
+			continue
+		}
+
+		// Handle special commands: /start and /project
+		if update.Message.IsCommand() {
+			cmd := update.Message.Command()
+			switch cmd {
+			case "start":
+				response := s.handleStart(update.Message.From.ID)
+				s.sendMessage(s.ctx, update.Message.Chat.ID, response)
+				continue
+			case "project":
+				response := s.handleProject(update.Message.From.ID, update.Message.CommandArguments())
+				s.sendMessage(s.ctx, update.Message.Chat.ID, response)
+				continue
+			}
+		}
+
+		// Check for natural language project commands before forwarding to LLM
+		if response, handled := s.handleNaturalLanguageProjectCommand(userID, update.Message.Text); handled {
+			s.sendMessage(s.ctx, chatID, response)
+			continue
+		}
+
+		// Forward all other messages (including unrecognized commands) to the chat orchestrator
+		go s.handleChatMessage(update.Message)
 	}
+	applog.Infof("[telegram] bot stopped")
 }
 
 // handleStart welcomes the user and sets the default project
