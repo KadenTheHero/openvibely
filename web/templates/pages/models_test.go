@@ -256,6 +256,9 @@ func TestModelsContent_ModelMutationsPreserveActiveProject(t *testing.T) {
 		"htmx.ajax('POST', modelMutationURL(path)",
 		"htmx.ajax('DELETE', modelMutationURL('/models/' + _deleteModelId)",
 		"htmx.ajax('DELETE', modelMutationURL('/models/' + _deleteModelId + '?new_default_id=' + encodeURIComponent(newDefaultId))",
+		"href = modelMutationURL(href);",
+		"fetch(modelMutationURL('/models/oauth/manual-complete')",
+		"window.location.href = modelMutationURL('/models');",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected rendered Models mutation flow to contain %q", want)
@@ -267,6 +270,7 @@ func TestModelsContent_ModelMutationsPreserveActiveProject(t *testing.T) {
 		"var _editPid = _editParams.get('project_id')",
 		"htmx.ajax('DELETE', '/models/' + _deleteModelId",
 		`hx-post="/models/model-a/set-default"`,
+		"window.location.reload();",
 	} {
 		if strings.Contains(out, stale) {
 			t.Fatalf("rendered Models mutation flow still contains stale project-less behavior %q", stale)

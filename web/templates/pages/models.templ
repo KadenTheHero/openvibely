@@ -749,6 +749,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					function launchOAuthInSystemBrowser(path) {
 						var href = path || '';
 						if (!href) return false;
+						href = modelMutationURL(href);
 						var externalURL = href;
 						if (externalURL.indexOf('?') === -1) {
 							externalURL += '?external=1';
@@ -830,7 +831,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						return;
 					}
 
-					fetch('/models/oauth/manual-complete', {
+					fetch(modelMutationURL('/models/oauth/manual-complete'), {
 						method: 'POST',
 						headers: {
 							'Content-Type': 'application/json',
@@ -849,7 +850,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					}).then(function() {
 						if (window.showToast) window.showToast('OAuth connected', 'completed');
 						input.value = '';
-						window.location.reload();
+						window.location.href = modelMutationURL('/models');
 					}).catch(function(err) {
 						if (window.showToast) window.showToast(err.message || 'OAuth completion failed', 'failed');
 					});

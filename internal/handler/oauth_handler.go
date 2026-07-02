@@ -58,6 +58,7 @@ type oauthPendingFlow struct {
 	ClientID     string // From model config (OpenAI) or hardcoded (Claude Max)
 	ClientSecret string // Only used for OpenAI OAuth
 	TokenURL     string // From model config (OpenAI) or hardcoded (Claude Max)
+	ProjectID    string
 }
 
 // oauthFlows tracks pending OAuth authorization flows (keyed by state).
@@ -89,6 +90,25 @@ var (
 	// a real browser during test runs.
 	openOAuthURL = browser.OpenURL
 )
+
+func modelsReturnURL(c echo.Context, projectID string) string {
+	return modelsReturnURLFromRequest(c.Request(), projectID, buildAbsoluteURL(c, "/models"))
+}
+
+func modelsReturnURLFromRequest(r *http.Request, projectID string, fallback string) string {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return fallback
+	}
+	u, err := url.Parse(fallback)
+	if err != nil {
+		return fallback
+	}
+	q := u.Query()
+	q.Set("project_id", projectID)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
 
 // OAuthInitiate starts the OAuth flow for a model config.
 // It starts a temporary HTTP listener on a random port for the callback,
@@ -174,7 +194,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 	// Cancel any previous callback server for this config before starting a new one.
 	shutdownPreviousOAuthServer(id)
 
-	modelsURL := buildAbsoluteURL(c, "/models")
+	modelsURL := modelsReturnURL(c, c.QueryParam("project_id"))
 	// Redirect paths must match what the OAuth providers accept for their
 	// registered client IDs:
 	//   Anthropic: /callback   (matches http://localhost:<port>/callback pattern)
@@ -247,6 +267,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
 		TokenURL:     tokenEndpoint,
+		ProjectID:    c.QueryParam("project_id"),
 	}
 	oauthFlowsMu.Unlock()
 
@@ -343,8 +364,7 @@ func (h *Handler) startOAuthCallbackServer(ctx context.Context, cancel context.C
 // OAuthCallback handles OAuth provider callbacks for both hosted and localhost flows.
 // GET /models/oauth/callback
 func (h *Handler) OAuthCallback(c echo.Context) error {
-	modelsURL := buildAbsoluteURL(c, "/models")
-	h.handleOAuthCallbackResponse(c.Response().Writer, c.Request(), modelsURL, nil)
+	h.handleOAuthCallbackResponse(c.Response().Writer, c.Request(), buildAbsoluteURL(c, "/models"), nil)
 	return nil
 }
 
@@ -409,6 +429,23 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 		}()
 	}
 
+	state := r.URL.Query().Get("state")
+	code := r.URL.Query().Get("code")
+
+	var flow *oauthPendingFlow
+	ok := false
+	if state != "" {
+		oauthFlowsMu.Lock()
+		flow, ok = oauthFlows[state]
+		if ok {
+			delete(oauthFlows, state)
+		}
+		oauthFlowsMu.Unlock()
+		if ok {
+			modelsURL = modelsReturnURLFromRequest(r, flow.ProjectID, modelsURL)
+		}
+	}
+
 	if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
 		errDesc := r.URL.Query().Get("error_description")
 		if errDesc == "" {
@@ -423,8 +460,6 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	state := r.URL.Query().Get("state")
-	code := r.URL.Query().Get("code")
 	if state == "" || code == "" {
 		fmt.Fprintf(w, `<html><body>
 			<h2>Invalid Callback</h2>
@@ -433,13 +468,6 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 		</body></html>`, modelsURL)
 		return
 	}
-
-	oauthFlowsMu.Lock()
-	flow, ok := oauthFlows[state]
-	if ok {
-		delete(oauthFlows, state)
-	}
-	oauthFlowsMu.Unlock()
 
 	if !ok {
 		applog.Infof("[handler] OAuthCallback state not found or expired")
