@@ -91,8 +91,10 @@ type TelegramService struct {
 	previewMu                sync.Mutex
 	activePreviews           map[telegramPreviewKey]*telegramPreviewState
 	userProjects             map[int64]string // Maps Telegram user ID to active project ID
+	lifecycleMu              sync.Mutex
 	ctx                      context.Context
 	cancel                   context.CancelFunc
+	runDone                  chan struct{}
 	running                  bool
 }
 
@@ -142,6 +144,8 @@ func NewTelegramService(
 
 // IsRunning returns whether the bot is currently running.
 func (s *TelegramService) IsRunning() bool {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 	return s.running
 }
 
@@ -270,57 +274,86 @@ func (s *TelegramService) checkAuthorization(userID int64, username string, proj
 
 // UpdateToken stops the current bot, reinitializes with the new token, and starts again.
 func (s *TelegramService) UpdateToken(token string) error {
-	if s.running {
-		s.Stop()
-	}
+	s.stop(true)
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return fmt.Errorf("invalid telegram token: %w", err)
 	}
+	s.lifecycleMu.Lock()
 	s.bot = bot
-	ctx, cancel := context.WithCancel(context.Background())
-	s.ctx = ctx
-	s.cancel = cancel
+	s.lifecycleMu.Unlock()
 	s.Start()
 	return nil
 }
 
-// Start begins listening for Telegram updates
+// Start begins listening for Telegram updates.
 func (s *TelegramService) Start() {
-	if s.bot == nil {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.bot == nil || s.running {
 		return
 	}
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.runDone = make(chan struct{})
 	s.running = true
-	go s.run()
+	go s.run(s.ctx, s.bot, s.runDone)
 }
 
-// Stop stops the Telegram bot
+// Stop stops the Telegram bot.
 func (s *TelegramService) Stop() {
-	applog.Infof("[telegram] stopping bot")
-	s.running = false
-	if s.cancel != nil {
-		s.cancel()
+	s.stop(false)
+}
+
+func (s *TelegramService) stop(wait bool) {
+	s.lifecycleMu.Lock()
+	if !s.running {
+		s.lifecycleMu.Unlock()
+		return
 	}
-	if s.bot != nil {
-		s.bot.StopReceivingUpdates()
+	applog.Infof("[telegram] stopping bot")
+	cancel := s.cancel
+	bot := s.bot
+	done := s.runDone
+	s.running = false
+	s.cancel = nil
+	s.runDone = nil
+	s.lifecycleMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if bot != nil {
+		bot.StopReceivingUpdates()
+	}
+	if wait && done != nil {
+		select {
+		case <-done:
+		case <-time.After(65 * time.Second):
+			applog.Infof("[telegram] timeout waiting for bot poller to stop")
+		}
 	}
 }
 
-// run is the main bot loop
-func (s *TelegramService) run() {
+// run is the main bot loop.
+func (s *TelegramService) run(ctx context.Context, bot *tgbotapi.BotAPI, done chan<- struct{}) {
+	defer close(done)
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
-	updates := s.bot.GetUpdatesChan(u)
+	updates := bot.GetUpdatesChan(u)
 
 	applog.Infof("[telegram] bot started, waiting for updates")
 
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			applog.Infof("[telegram] bot stopped")
 			return
-		case update := <-updates:
+		case update, ok := <-updates:
+			if !ok {
+				applog.Infof("[telegram] bot stopped")
+				return
+			}
 			if update.Message == nil {
 				continue
 			}

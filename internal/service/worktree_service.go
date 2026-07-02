@@ -1603,14 +1603,17 @@ func (ws *WorktreeService) CleanupWorktree(ctx context.Context, task *models.Tas
 // from the current target branch after target advances, rebases, or squash
 // merges.
 func GetWorktreeDiff(repoDir string, branchName string, targetBranch string) string {
-	if branchName == "" || targetBranch == "" {
+	if branchName == "" || targetBranch == "" || !isGitRepoDir(repoDir) {
+		return ""
+	}
+	if !gitRefExists(repoDir, branchName) || !gitRefExists(repoDir, targetBranch) {
 		return ""
 	}
 	cmd := exec.Command("git", "diff", targetBranch, branchName)
 	cmd.Dir = repoDir
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		applog.Infof("[worktree] error getting worktree diff: %v", err)
+		applog.Infof("[worktree] error getting worktree diff repo=%s target=%s branch=%s: %v: %s", repoDir, targetBranch, branchName, err, strings.TrimSpace(string(out)))
 		return ""
 	}
 	return string(out)
@@ -1622,41 +1625,67 @@ func GetWorktreeDiff(repoDir string, branchName string, targetBranch string) str
 // files without rendering the same tracked path once for the committed branch
 // state and again for the uncommitted follow-up state.
 func GetWorktreeDiffWithUncommitted(repoDir string, branchName string, targetBranch string, worktreePath string) string {
-	committedDiff := GetWorktreeDiff(repoDir, branchName, targetBranch)
-
-	if worktreePath == "" || targetBranch == "" {
-		return committedDiff
+	if targetBranch == "" {
+		return ""
 	}
-
-	trackedDiff, trackedDiffOK := captureWorktreeDiffAgainstTarget(worktreePath, targetBranch)
-	if !trackedDiffOK {
-		trackedDiff = committedDiff
+	if worktreePath != "" && isGitWorktreeDir(worktreePath) {
+		trackedDiff, trackedDiffOK := captureWorktreeDiffAgainstTarget(worktreePath, targetBranch)
+		if trackedDiffOK {
+			untrackedDiff := captureWorktreeUntracked(worktreePath)
+			if trackedDiff == "" {
+				return untrackedDiff
+			}
+			if untrackedDiff == "" {
+				return trackedDiff
+			}
+			return trackedDiff + "\n" + untrackedDiff
+		}
 	}
-	untrackedDiff := captureWorktreeUntracked(worktreePath)
-
-	if trackedDiff == "" {
-		return untrackedDiff
-	}
-	if untrackedDiff == "" {
-		return trackedDiff
-	}
-	return trackedDiff + "\n" + untrackedDiff
+	return GetWorktreeDiff(repoDir, branchName, targetBranch)
 }
 
 // captureWorktreeDiffAgainstTarget captures the net tracked-file diff between a
 // target branch and a worktree's current working tree, including staged and
 // unstaged tracked changes.
 func captureWorktreeDiffAgainstTarget(worktreePath, targetBranch string) (string, bool) {
-	if worktreePath == "" || targetBranch == "" {
+	if worktreePath == "" || targetBranch == "" || !isGitWorktreeDir(worktreePath) || !gitRefExists(worktreePath, targetBranch) {
 		return "", false
 	}
 	cmd := exec.Command("git", "diff", targetBranch)
 	cmd.Dir = worktreePath
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
+		applog.Infof("[worktree] error getting live worktree diff path=%s target=%s: %v: %s", worktreePath, targetBranch, err, strings.TrimSpace(string(out)))
 		return "", false
 	}
 	return string(out), true
+}
+
+func isGitRepoDir(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	return err == nil && strings.TrimSpace(string(out)) == "true"
+}
+
+func isGitWorktreeDir(dir string) bool {
+	return isGitRepoDir(dir)
+}
+
+func gitRefExists(repoDir, ref string) bool {
+	if repoDir == "" || ref == "" {
+		return false
+	}
+	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	cmd.Dir = repoDir
+	return cmd.Run() == nil
 }
 
 // captureWorktreeUntracked captures untracked files in a worktree directory as

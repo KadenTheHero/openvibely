@@ -3483,6 +3483,21 @@ func TestListGitWorktrees(t *testing.T) {
 	}
 }
 
+func TestGetWorktreeDiffMissingRefsAndWorktreeReturnEmpty(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetDefaultBranch(repoDir)
+
+	if diff := GetWorktreeDiff(repoDir, "missing-branch", defaultBranch); diff != "" {
+		t.Fatalf("expected empty diff for missing branch, got %q", diff)
+	}
+	if diff := GetWorktreeDiffWithUncommitted(repoDir, "missing-branch", defaultBranch, filepath.Join(repoDir, ".worktrees", "missing")); diff != "" {
+		t.Fatalf("expected empty diff for missing branch and worktree, got %q", diff)
+	}
+	if diff := GetWorktreeDiff(filepath.Join(repoDir, "missing-repo"), "missing-branch", defaultBranch); diff != "" {
+		t.Fatalf("expected empty diff for missing repo, got %q", diff)
+	}
+}
+
 func TestGetWorktreeDiffWithUncommitted(t *testing.T) {
 	repoDir := createTestGitRepo(t)
 

@@ -5,12 +5,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -286,6 +289,68 @@ func TestTelegramService_NewTelegramService_InvalidToken(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, svc)
 	assert.Contains(t, err.Error(), "failed to create telegram bot")
+}
+
+func TestTelegramServiceStartIsIdempotent(t *testing.T) {
+	client := &telegramStubClient{blockUpdates: make(chan struct{})}
+	bot, err := tgbotapi.NewBotAPIWithClient("test-token", tgbotapi.APIEndpoint, client)
+	require.NoError(t, err)
+
+	svc := &TelegramService{bot: bot}
+	t.Cleanup(func() {
+		client.unblock()
+		svc.Stop()
+	})
+
+	svc.Start()
+	svc.Start()
+
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&client.activeUpdates) == 1
+	}, time.Second, 10*time.Millisecond)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&client.maxActiveUpdates))
+	assert.True(t, svc.IsRunning())
+}
+
+type telegramStubClient struct {
+	blockUpdates     chan struct{}
+	activeUpdates    int32
+	maxActiveUpdates int32
+	closeOnce        sync.Once
+}
+
+func (c *telegramStubClient) unblock() {
+	c.closeOnce.Do(func() { close(c.blockUpdates) })
+}
+
+func (c *telegramStubClient) Do(req *http.Request) (*http.Response, error) {
+	if strings.Contains(req.URL.Path, "/getMe") {
+		return telegramJSONResponse(`{"ok":true,"result":{"id":1,"is_bot":true,"first_name":"Test","username":"test_bot"}}`), nil
+	}
+	if strings.Contains(req.URL.Path, "/getUpdates") {
+		active := atomic.AddInt32(&c.activeUpdates, 1)
+		for {
+			maxActive := atomic.LoadInt32(&c.maxActiveUpdates)
+			if active <= maxActive || atomic.CompareAndSwapInt32(&c.maxActiveUpdates, maxActive, active) {
+				break
+			}
+		}
+		defer atomic.AddInt32(&c.activeUpdates, -1)
+		select {
+		case <-c.blockUpdates:
+		case <-req.Context().Done():
+		}
+		return telegramJSONResponse(`{"ok":true,"result":[]}`), nil
+	}
+	return telegramJSONResponse(`{"ok":true,"result":{}}`), nil
+}
+
+func telegramJSONResponse(body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
 }
 
 // Helper to create a TelegramService for testing (no real bot connection)
