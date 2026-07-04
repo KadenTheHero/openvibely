@@ -323,6 +323,112 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsPersists(t *testing.T) {
 	require.Equal(t, project2.ID, saved, "switch_project must have persisted selection to email_sender_projects")
 }
 
+func TestEmailServiceSwitchProjectViaRuntimeToolsNormalizesDisplayNameSender(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+
+	project1 := &models.Project{Name: "Default Display Email Project"}
+	project2 := &models.Project{Name: "Target Display Email Project"}
+	require.NoError(t, projectRepo.Create(ctx, project1))
+	require.NoError(t, projectRepo.Create(ctx, project2))
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project1.ID, EmailAddress: "sender@example.test", AddedBy: "test"}))
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project2.ID, EmailAddress: "sender@example.test", AddedBy: "test"}))
+
+	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
+	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+
+	var got ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
+
+	svc.ProcessIncoming(ctx, EmailInboundMessage{
+		FromAddress: "Test Sender <sender@example.test>",
+		Subject:     "Switch please",
+		Body:        "switch project",
+		MessageID:   "<james-display-1@example.com>",
+	})
+
+	require.NotNil(t, got.RuntimeTools, "RuntimeTools must be non-nil for email channel turns")
+
+	result, handled, _, err := got.RuntimeTools.Executor(ctx, "switch_project", []byte(`{"project":"Target Display Email Project"}`))
+	require.NoError(t, err)
+	require.True(t, handled, "switch_project must be handled by email channel executor")
+	require.Contains(t, result, "Target Display Email Project")
+	require.NotContains(t, result, "not authorized")
+
+	saved, err := emailSenderProjectRepo.GetSenderProject(ctx, "sender@example.test")
+	require.NoError(t, err)
+	require.Equal(t, project2.ID, saved, "selection must persist under normalized sender address")
+
+	resolved := svc.resolveAuthorizedProject(ctx, "Test Sender <sender@example.test>")
+	require.Equal(t, project2.ID, resolved, "future display-name messages must use the saved normalized sender project")
+}
+
+func TestEmailServiceSwitchProjectViaRuntimeToolsRejectsUnauthorizedTarget(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+
+	project1 := &models.Project{Name: "Authorized Email Project"}
+	project2 := &models.Project{Name: "Unauthorized Email Project"}
+	require.NoError(t, projectRepo.Create(ctx, project1))
+	require.NoError(t, projectRepo.Create(ctx, project2))
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project1.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
+
+	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
+	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+
+	var got ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { got = req })
+
+	svc.ProcessIncoming(ctx, EmailInboundMessage{
+		FromAddress: "Alice <alice@example.com>",
+		Subject:     "Switch please",
+		Body:        "switch project",
+		MessageID:   "<alice-unauth-1@example.com>",
+	})
+
+	require.NotNil(t, got.RuntimeTools, "RuntimeTools must be non-nil for email channel turns")
+
+	result, handled, _, err := got.RuntimeTools.Executor(ctx, "switch_project", []byte(`{"project":"Unauthorized Email Project"}`))
+	require.NoError(t, err)
+	require.True(t, handled, "switch_project must be handled by email channel executor")
+	require.Contains(t, result, "Failed to switch project")
+	require.Contains(t, result, "not authorized")
+
+	saved, err := emailSenderProjectRepo.GetSenderProject(ctx, "alice@example.com")
+	require.NoError(t, err)
+	require.Empty(t, saved, "unauthorized switch must not persist selection")
+}
+
 // TestEmailServiceResolveAuthorizedProjectUsesSavedSelection verifies that
 // resolveAuthorizedProject returns the sender's saved active project (from
 // email_sender_projects) instead of the first authorized project in the list.
