@@ -61,6 +61,47 @@ func TestSwarmServiceCreateAndApplyPlannerOutput(t *testing.T) {
 	}
 }
 
+func TestSwarmServiceApplyPlannerOutputAllowsOverlappingWorktreeScopes(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Fix email switching", Prompt: "Fix email switching", MaxWorkers: 4, WorkerIsolation: "worktree", ReviewerEnabled: true, IntegratorEnabled: true})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+
+	output := PlannerOutput{
+		Workers: []PlannerWorker{
+			{Title: "Email runtime fixer", Prompt: "Fix email runtime switch_project", WorkerKind: "backend", Ownership: []string{"internal/service/email_service.go"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, ReadScope: []string{"."}, Required: true},
+			{Title: "Cross-channel comparison", Prompt: "Compare channel switch_project behavior", WorkerKind: "backend", Ownership: []string{"internal/service/chat_action_runtime.go"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, ReadScope: []string{"."}, Required: true},
+		},
+		ReviewerPrompt:   "Review overlapping service changes and conflicts",
+		IntegratorPrompt: "Integrate accepted service changes",
+	}
+	if err := svc.ApplyPlannerOutput(context.Background(), planner.ID, output); err != nil {
+		t.Fatalf("ApplyPlannerOutput should allow overlapping isolated worktree scopes: %v", err)
+	}
+	children, err := repo.ListSwarmChildren(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatalf("ListSwarmChildren: %v", err)
+	}
+	workers := 0
+	for _, child := range children {
+		if child.SwarmRole == models.SwarmRoleWorker {
+			workers++
+		}
+	}
+	if workers != 2 {
+		t.Fatalf("expected 2 workers from overlapping scopes, got %d children=%#v", workers, children)
+	}
+}
+
 func TestSwarmServiceCreateSwarmTaskCanDeferPlannerStart(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)

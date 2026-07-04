@@ -933,7 +933,6 @@ func validatePlannerOutput(output PlannerOutput, parentCfg models.SwarmConfig) e
 	if parentCfg.IntegratorEnabled && strings.TrimSpace(output.IntegratorPrompt) == "" {
 		return errors.New("integrator_prompt is required")
 	}
-	writeOwners := map[string]int{}
 	for i, w := range output.Workers {
 		if strings.TrimSpace(w.Title) == "" || strings.TrimSpace(w.Prompt) == "" || strings.TrimSpace(w.WorkerKind) == "" || len(w.Ownership) == 0 {
 			return fmt.Errorf("worker %d must include title, prompt, worker_kind, and ownership", i+1)
@@ -947,18 +946,6 @@ func validatePlannerOutput(output PlannerOutput, parentCfg models.SwarmConfig) e
 		}
 		if iso != "read_only" && iso != "worktree" {
 			return fmt.Errorf("code-changing worker %q must use worktree isolation", w.Title)
-		}
-		if !w.AllowOverlap {
-			for _, scope := range w.WriteScope {
-				scope = strings.TrimSpace(scope)
-				if scope == "" {
-					continue
-				}
-				if prev, ok := writeOwners[scope]; ok && !w.ReadOnly {
-					return fmt.Errorf("worker %d write_scope overlaps worker %d at %s", i+1, prev+1, scope)
-				}
-				writeOwners[scope] = i
-			}
 		}
 	}
 	return nil
