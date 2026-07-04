@@ -611,6 +611,8 @@ func newTestTelegramService(t *testing.T) (*TelegramService, *repository.Project
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	workerSvc := NewWorkerService(nil, 0, projectRepo)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, execRepo, workerSvc)
+	taskSvc.SetSwarmService(swarmSvc)
 
 	settingsRepo := repository.NewSettingsRepo(db)
 	scheduleRepo := repository.NewScheduleRepo(db)
@@ -765,8 +767,29 @@ func TestTelegramService_RuntimeCreateTaskTool_SetsTelegramOrigin(t *testing.T) 
 	require.Equal(t, models.TaskOriginTelegram, created.CreatedVia)
 	require.Equal(t, int64(12345), created.TelegramChatID)
 
+	swarmOutput, handled, isErr, err := rt.Executor(ctx, "create_swarm_task", json.RawMessage(`{"title":"Telegram Swarm Created","prompt":"Split this work","start_immediately":false}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, swarmOutput, "Created swarm task: Telegram Swarm Created")
+
+	tasks, err = taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	var swarmParent *models.Task
+	for i := range tasks {
+		if tasks[i].Title == "Telegram Swarm Created" {
+			swarmParent = &tasks[i]
+			break
+		}
+	}
+	require.NotNil(t, swarmParent)
+	require.Equal(t, models.SwarmRoleParent, swarmParent.SwarmRole)
+	require.Equal(t, models.TaskOriginTelegram, swarmParent.CreatedVia)
+	require.Equal(t, int64(12345), swarmParent.TelegramChatID)
+
 	finalOutput := collector.appendToOutput("Done.")
 	require.Contains(t, finalOutput, "[TASK_ID:")
+	require.Contains(t, finalOutput, swarmParent.ID)
 }
 
 func TestTelegramService_RuntimeListAlertsTool_Handled(t *testing.T) {

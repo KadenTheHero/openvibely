@@ -1221,9 +1221,6 @@ func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64,
 			}
 		},
 	})
-	handlers["create_swarm_task"] = func(context.Context, json.RawMessage) (string, error) {
-		return "", fmt.Errorf("create_swarm_task is not supported from Telegram yet")
-	}
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: projectID, TaskRepo: s.taskRepo, TaskGoalSvc: s.taskGoalSvc}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelThreadActionHandlers(channelThreadActionHandlerOptions{
 		Platform:                 "telegram",

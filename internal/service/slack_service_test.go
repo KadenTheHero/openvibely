@@ -318,6 +318,8 @@ func TestSlackService_RuntimeCreateTaskTool_CreatedTasksGetSlackOriginAndContext
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, execRepo, workerSvc)
+	taskSvc.SetSwarmService(swarmSvc)
 	agentRepo := repository.NewAgentRepo(db)
 	taskSvc.SetAgentRepo(agentRepo)
 	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Enabled: true, SelectableAsPrimary: true}
@@ -362,8 +364,32 @@ func TestSlackService_RuntimeCreateTaskTool_CreatedTasksGetSlackOriginAndContext
 	require.Equal(t, "C1", stc.SlackChannelID)
 	require.Equal(t, "1710000000.100000", stc.SlackThreadTS)
 
+	swarmOutput, handled, isErr, err := rt.Executor(ctx, "create_swarm_task", json.RawMessage(`{"title":"Slack Swarm Created","prompt":"Split this work","start_immediately":false}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, swarmOutput, "Created swarm task: Slack Swarm Created")
+
+	tasks, err = taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	var swarmParent *models.Task
+	for i := range tasks {
+		if tasks[i].Title == "Slack Swarm Created" {
+			swarmParent = &tasks[i]
+			break
+		}
+	}
+	require.NotNil(t, swarmParent)
+	require.Equal(t, models.SwarmRoleParent, swarmParent.SwarmRole)
+	require.Equal(t, models.TaskOriginSlack, swarmParent.CreatedVia)
+	stc, err = slackTaskContextRepo.GetByTaskID(ctx, swarmParent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stc)
+	require.Equal(t, "C1", stc.SlackChannelID)
+
 	finalOutput := collector.appendToOutput("Done.")
 	require.Contains(t, finalOutput, "[TASK_ID:")
+	require.Contains(t, finalOutput, swarmParent.ID)
 }
 
 func TestSlackService_RuntimeListAlertsTool_Handled(t *testing.T) {

@@ -127,6 +127,8 @@ func TestDiscordActionHandlersCoverAdvertisedRuntimeTools(t *testing.T) {
 	scheduleRepo := repository.NewScheduleRepo(db)
 	attachmentRepo := repository.NewAttachmentRepo(db)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, execRepo, nil)
+	taskSvc.SetSwarmService(swarmSvc)
 	taskSvc.SetAgentRepo(repository.NewAgentRepo(db))
 	svc.llmConfigRepo = llmConfigRepo
 	svc.execRepo = execRepo
@@ -151,9 +153,38 @@ func TestDiscordActionHandlersCoverAdvertisedRuntimeTools(t *testing.T) {
 		}
 	}
 
-	handlers := svc.discordActionHandlers(project.ID, discordMarkerContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"}, nil)
+	markerCtx := discordMarkerContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"}
+	handlers := svc.discordActionHandlers(project.ID, markerCtx, nil)
 	if err := chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceDiscord, true, handlers); err != nil {
 		t.Fatalf("discord handler coverage: %v", err)
+	}
+	out, err := handlers["create_swarm_task"](ctx, json.RawMessage(`{"title":"Discord Swarm Created","prompt":"Split this work","start_immediately":false}`))
+	if err != nil {
+		t.Fatalf("create_swarm_task handler failed: %v", err)
+	}
+	if !strings.Contains(out, "Created swarm task: Discord Swarm Created") {
+		t.Fatalf("unexpected create_swarm_task output: %s", out)
+	}
+	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	var swarmParent *models.Task
+	for i := range tasks {
+		if tasks[i].Title == "Discord Swarm Created" {
+			swarmParent = &tasks[i]
+			break
+		}
+	}
+	if swarmParent == nil {
+		t.Fatalf("expected Discord swarm parent to be created")
+	}
+	if swarmParent.SwarmRole != models.SwarmRoleParent || swarmParent.CreatedVia != models.TaskOriginDiscord {
+		t.Fatalf("expected Discord swarm parent with origin, got role=%q origin=%q", swarmParent.SwarmRole, swarmParent.CreatedVia)
+	}
+	dtc, err := svc.discordTaskContextRepo.GetByTaskID(ctx, swarmParent.ID)
+	if err != nil || dtc == nil || dtc.DiscordChannelID != "chan-1" || dtc.DiscordThreadID != "thread-1" {
+		t.Fatalf("expected Discord task context for swarm parent, ctx=%#v err=%v", dtc, err)
 	}
 }
 

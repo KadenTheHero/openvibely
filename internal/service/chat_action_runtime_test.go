@@ -166,3 +166,45 @@ func TestBuildChannelTaskActionHandlersCreateTaskUsesSharedLogicAndOriginCallbac
 	require.Equal(t, 2, created.Priority)
 	require.Contains(t, strings.Join(collector.createdLines, "\n"), callbackTaskIDs[0])
 }
+
+func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Channel Swarm Actions"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	taskSvc := NewTaskService(taskRepo, nil, nil)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, nil)
+	taskSvc.SetSwarmService(swarmSvc)
+	collector := newChannelActionSummaryCollector()
+	var callbackTaskIDs []string
+	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
+		ProjectID: project.ID,
+		TaskSvc:   taskSvc,
+		Collector: collector,
+		OnTasksCreated: func(_ context.Context, tasks []models.Task) {
+			for _, task := range tasks {
+				callbackTaskIDs = append(callbackTaskIDs, task.ID)
+			}
+		},
+	})
+	startImmediately := false
+	payload, err := json.Marshal(channelCreateSwarmTaskInput{Title: "Shared swarm", Prompt: "Split this across workers", StartImmediately: &startImmediately})
+	require.NoError(t, err)
+
+	summary, err := handlers["create_swarm_task"](ctx, payload)
+	require.NoError(t, err)
+	require.Contains(t, summary, "Created swarm task: Shared swarm")
+	require.Contains(t, summary, "Planner is ready to start")
+	require.Len(t, callbackTaskIDs, 1)
+	created, err := taskRepo.GetByID(ctx, callbackTaskIDs[0])
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.Equal(t, models.SwarmRoleParent, created.SwarmRole)
+	require.Equal(t, models.StatusBlocked, created.Status)
+	require.Contains(t, strings.Join(collector.createdLines, "\n"), callbackTaskIDs[0])
+	planner, err := taskRepo.FindSwarmChildByRole(ctx, created.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.Nil(t, planner)
+}

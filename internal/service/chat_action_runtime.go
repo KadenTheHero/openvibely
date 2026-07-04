@@ -34,9 +34,21 @@ type channelActionSummaryCollector struct {
 type channelTaskActionHandlerOptions struct {
 	ProjectID      string
 	TaskSvc        *TaskService
+	SwarmSvc       *SwarmService
 	LLMConfigRepo  *repository.LLMConfigRepo
 	Collector      *channelActionSummaryCollector
 	OnTasksCreated func(context.Context, []models.Task)
+}
+
+// channelCreateSwarmTaskInput mirrors the canonical create_swarm_task runtime
+// tool schema for channel surfaces.
+type channelCreateSwarmTaskInput struct {
+	Title            string `json:"title"`
+	Prompt           string `json:"prompt"`
+	ProjectID        string `json:"project_id"`
+	MaxWorkers       int    `json:"max_workers"`
+	WorkerIsolation  string `json:"worker_isolation"`
+	StartImmediately *bool  `json:"start_immediately"`
 }
 
 type channelGoalActionHandlerOptions struct {
@@ -116,6 +128,56 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 				opts.Collector.addCreated(summary)
 			}
 			return strings.TrimSpace(summary), nil
+		},
+		"create_swarm_task": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req channelCreateSwarmTaskInput
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Prompt) == "" {
+				return "", fmt.Errorf("create_swarm_task requires title and prompt")
+			}
+			projectID := strings.TrimSpace(req.ProjectID)
+			if projectID == "" {
+				projectID = strings.TrimSpace(opts.ProjectID)
+			}
+			if projectID == "" {
+				return "", fmt.Errorf("create_swarm_task requires project_id")
+			}
+			swarmSvc := opts.SwarmSvc
+			if swarmSvc == nil && opts.TaskSvc != nil {
+				swarmSvc = opts.TaskSvc.swarmSvc
+			}
+			if swarmSvc == nil {
+				return "", fmt.Errorf("create_swarm_task: swarm service unavailable")
+			}
+			parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{
+				ProjectID:         projectID,
+				Title:             req.Title,
+				Prompt:            req.Prompt,
+				Category:          models.CategoryActive,
+				Priority:          2,
+				MaxWorkers:        req.MaxWorkers,
+				WorkerIsolation:   req.WorkerIsolation,
+				ReviewerEnabled:   true,
+				IntegratorEnabled: true,
+				StartImmediately:  req.StartImmediately,
+			})
+			if err != nil {
+				return "", err
+			}
+			if opts.OnTasksCreated != nil {
+				opts.OnTasksCreated(ctx, []models.Task{*parent})
+			}
+			plannerMessage := "Planner is splitting the work into workers."
+			if req.StartImmediately != nil && !*req.StartImmediately {
+				plannerMessage = "Planner is ready to start from the swarm task."
+			}
+			summary := fmt.Sprintf("Created swarm task: %s.\n%s\n- \"%s\" (active) [TASK_ID:%s]", parent.Title, plannerMessage, parent.Title, parent.ID)
+			if opts.Collector != nil {
+				opts.Collector.addCreated(summary)
+			}
+			return summary, nil
 		},
 		"edit_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req TaskEditRequest
