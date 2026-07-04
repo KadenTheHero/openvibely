@@ -250,6 +250,55 @@ func TestSwarmServiceIntegratorCompletionPersistsParentResult(t *testing.T) {
 	}
 }
 
+func TestSwarmServiceChildCancellationSetsRoleSpecificParentState(t *testing.T) {
+	roles := []struct {
+		name       string
+		role       models.SwarmRole
+		wantStatus string
+	}{
+		{name: "worker", role: models.SwarmRoleWorker, wantStatus: "needs_coordination"},
+		{name: "reviewer", role: models.SwarmRoleReviewer, wantStatus: "needs_review"},
+		{name: "integrator", role: models.SwarmRoleIntegrator, wantStatus: "needs_integration"},
+	}
+	for _, tc := range roles {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			repo := repository.NewTaskRepo(db, nil)
+			taskSvc := NewTaskService(repo, nil, nil)
+			svc := NewSwarmService(taskSvc, repo, nil, nil)
+			parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			planner, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRolePlanner)
+			if planner == nil {
+				t.Fatal("planner missing")
+			}
+			output := PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}
+			if err := svc.ApplyPlannerOutput(context.Background(), planner.ID, output); err != nil {
+				t.Fatal(err)
+			}
+			child, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, tc.role)
+			if child == nil {
+				t.Fatalf("%s child missing", tc.role)
+			}
+			if err := repo.UpdateStatus(context.Background(), child.ID, models.StatusCancelled); err != nil {
+				t.Fatal(err)
+			}
+			if err := svc.OnChildCompleted(context.Background(), child.ID); err != nil {
+				t.Fatal(err)
+			}
+			updatedParent, err := repo.GetByID(context.Background(), parent.ID)
+			if err != nil || updatedParent == nil {
+				t.Fatalf("get parent: %v", err)
+			}
+			if updatedParent.Status != models.StatusBlocked || updatedParent.SwarmStatus != tc.wantStatus {
+				t.Fatalf("parent after %s cancel: status=%s swarm_status=%s", tc.role, updatedParent.Status, updatedParent.SwarmStatus)
+			}
+		})
+	}
+}
+
 func TestSwarmServiceParentFollowupCoordinatesAffectedWorkers(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)

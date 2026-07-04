@@ -1574,6 +1574,7 @@ func (h *Handler) completeWithCancellation(execID, taskID, output string, tokens
 	if len(channelReply) > 0 {
 		reply = channelReply[0]
 	}
+	h.notifySwarmChildTerminal(ctx, taskID)
 	h.sendChannelResponse(ctx, task, reply, output, "cancelled", telegramMessageID)
 }
 

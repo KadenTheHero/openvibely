@@ -1338,6 +1338,8 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	} else if err := h.taskSvc.CancelTask(c.Request().Context(), taskID); err != nil {
 		applog.Infof("[handler] CancelTask error: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	} else if models.IsSwarmChildRole(task.SwarmRole) {
+		h.notifySwarmChildTerminal(c.Request().Context(), taskID)
 	}
 	if h.execRepo != nil {
 		if cancelled, err := h.execRepo.CancelRunningByTask(c.Request().Context(), taskID); err != nil {

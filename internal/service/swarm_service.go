@@ -380,6 +380,9 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 		return err
 	}
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	if child.Status == models.StatusCancelled {
+		return s.handleChildCancelled(ctx, parent, child, parentCfg)
+	}
 	if child.SwarmRole == models.SwarmRoleWorker && child.Status == models.StatusCompleted {
 		cfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
 		if cfg.CompletedGeneration < parentCfg.Generation {
@@ -446,6 +449,40 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 		_ = s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryCompleted)
 	}
 	return s.RecomputeParentStatus(ctx, parent.ID)
+}
+
+func (s *SwarmService) handleChildCancelled(ctx context.Context, parent *models.Task, child *models.Task, parentCfg models.SwarmConfig) error {
+	if parent == nil || child == nil {
+		return nil
+	}
+	swarmStatus := "blocked"
+	parentStatus := models.StatusBlocked
+	switch child.SwarmRole {
+	case models.SwarmRoleWorker:
+		swarmStatus = "needs_coordination"
+		parentCfg.LastError = fmt.Sprintf("worker %s was cancelled; coordinator must decide whether it is still required", child.ID)
+	case models.SwarmRoleReviewer:
+		swarmStatus = "needs_review"
+		parentCfg.ReviewedGeneration = 0
+		parentCfg.LastError = fmt.Sprintf("reviewer %s was cancelled; review must be rerun", child.ID)
+	case models.SwarmRoleIntegrator:
+		swarmStatus = "needs_integration"
+		parentCfg.IntegratedGeneration = 0
+		parentCfg.LastError = fmt.Sprintf("integrator %s was cancelled; integration must be rerun", child.ID)
+	default:
+		return s.RecomputeParentStatus(ctx, parent.ID)
+	}
+	parent.SwarmConfig, _ = parentCfg.JSON()
+	if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, swarmStatus, parent.SwarmConfig, parent.SwarmSequence); err != nil {
+		return err
+	}
+	if err := s.taskRepo.UpdateStatus(ctx, parent.ID, parentStatus); err != nil {
+		return err
+	}
+	if parent.Category == models.CategoryCompleted {
+		return s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryActive)
+	}
+	return nil
 }
 
 func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID string, message string) error {
