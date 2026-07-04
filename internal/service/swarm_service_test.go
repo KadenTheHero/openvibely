@@ -552,8 +552,9 @@ func TestSwarmServiceStartsReviewerAndIntegratorOnce(t *testing.T) {
 func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
-	svc := NewSwarmService(taskSvc, repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 	ctx := context.Background()
 
 	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: true})
@@ -677,8 +678,31 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 		t.Fatalf("integrator rerun category = %s, want active", persistedIntegrator.Category)
 	}
 	parent, _ = repo.GetByID(ctx, parent.ID)
+	parentCfg, _ = models.ParseSwarmConfig(parent.SwarmConfig)
 	if parent.SwarmStatus != "needs_integration" || parent.Status != models.StatusRunning || parent.Category != models.CategoryActive {
 		t.Fatalf("parent not reactivated for integrator rerun: swarm=%s status=%s category=%s", parent.SwarmStatus, parent.Status, parent.Category)
+	}
+	integratorCfg, _ := models.ParseSwarmConfig(rerunIntegrator.SwarmConfig)
+	if parentCfg.IntegratedGeneration >= integratorCfg.RerunGeneration {
+		t.Fatalf("parent integration freshness not invalidated for integrator rerun: parent=%#v integrator=%#v", parentCfg, integratorCfg)
+	}
+	integrationRun := &models.Execution{TaskID: rerunIntegrator.ID, Status: models.ExecRunning, PromptSent: "Integrate again"}
+	if err := execRepo.Create(ctx, integrationRun); err != nil {
+		t.Fatal(err)
+	}
+	if err := execRepo.Complete(ctx, integrationRun.ID, models.ExecCompleted, "Final rerun result", "", 0, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(ctx, rerunIntegrator.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.OnChildCompleted(ctx, rerunIntegrator.ID); err != nil {
+		t.Fatal(err)
+	}
+	parent, _ = repo.GetByID(ctx, parent.ID)
+	parentCfg, _ = models.ParseSwarmConfig(parent.SwarmConfig)
+	if parent.SwarmStatus != "current" || parent.Status != models.StatusCompleted || parentCfg.IntegratedGeneration < integratorCfg.RerunGeneration {
+		t.Fatalf("integrator rerun completion did not refresh parent result: swarm=%s status=%s cfg=%#v", parent.SwarmStatus, parent.Status, parentCfg)
 	}
 }
 

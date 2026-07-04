@@ -690,6 +690,13 @@ func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role 
 		if parentCfg.ReviewedGeneration > 0 && childCfg.RerunGeneration < parentCfg.ReviewedGeneration {
 			childCfg.RerunGeneration = parentCfg.ReviewedGeneration
 		}
+		if parentCfg.IntegratedGeneration >= childCfg.RerunGeneration {
+			parentCfg.IntegratedGeneration = childCfg.RerunGeneration - 1
+			if parentCfg.IntegratedGeneration < 0 {
+				parentCfg.IntegratedGeneration = 0
+			}
+		}
+		parent.SwarmConfig, _ = parentCfg.JSON()
 		if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_integration", parent.SwarmConfig, parent.SwarmSequence); err != nil {
 			return nil, err
 		}
