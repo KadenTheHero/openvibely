@@ -78,17 +78,21 @@ const (
 type SwarmRole string
 
 const (
-	SwarmRoleNone       SwarmRole = ""
-	SwarmRoleParent     SwarmRole = "swarm_parent"
-	SwarmRolePlanner    SwarmRole = "planner"
-	SwarmRoleWorker     SwarmRole = "worker"
-	SwarmRoleReviewer   SwarmRole = "reviewer"
-	SwarmRoleIntegrator SwarmRole = "integrator"
+	SwarmRoleNone             SwarmRole = ""
+	SwarmRoleParent           SwarmRole = "swarm_parent"
+	SwarmRolePlanner          SwarmRole = "planner"
+	SwarmRoleWorker           SwarmRole = "worker"
+	SwarmRoleReviewer         SwarmRole = "reviewer"
+	SwarmRoleMerger           SwarmRole = "merger"
+	SwarmRoleLegacyIntegrator SwarmRole = "integrator"
+
+	// SwarmRoleIntegrator is kept as a source-compatible alias for existing code and API clients.
+	SwarmRoleIntegrator = SwarmRoleMerger
 )
 
 func IsSwarmChildRole(role SwarmRole) bool {
 	switch role {
-	case SwarmRolePlanner, SwarmRoleWorker, SwarmRoleReviewer, SwarmRoleIntegrator:
+	case SwarmRolePlanner, SwarmRoleWorker, SwarmRoleReviewer, SwarmRoleMerger, SwarmRoleLegacyIntegrator:
 		return true
 	default:
 		return false
@@ -100,11 +104,14 @@ type SwarmConfig struct {
 	DefaultWorkerIsolation           string   `json:"default_worker_isolation,omitempty"`
 	MaxWorkers                       int      `json:"max_workers,omitempty"`
 	ReviewerEnabled                  bool     `json:"reviewer_enabled,omitempty"`
+	MergerEnabled                    bool     `json:"merger_enabled,omitempty"`
 	IntegratorEnabled                bool     `json:"integrator_enabled,omitempty"`
 	RerunReviewerAfterWorkerFollowup bool     `json:"rerun_reviewer_after_worker_followup,omitempty"`
+	RerunMergerAfterReviewer         bool     `json:"rerun_merger_after_reviewer,omitempty"`
 	RerunIntegratorAfterReviewer     bool     `json:"rerun_integrator_after_reviewer,omitempty"`
 	Generation                       int      `json:"generation,omitempty"`
 	ReviewedGeneration               int      `json:"reviewed_generation,omitempty"`
+	MergedGeneration                 int      `json:"merged_generation,omitempty"`
 	IntegratedGeneration             int      `json:"integrated_generation,omitempty"`
 	MergeStrategy                    string   `json:"merge_strategy,omitempty"`
 	WorkerKind                       string   `json:"worker_kind,omitempty"`
@@ -117,6 +124,7 @@ type SwarmConfig struct {
 	WriteScope                       []string `json:"write_scope,omitempty"`
 	ReadScope                        []string `json:"read_scope,omitempty"`
 	ReviewerPrompt                   string   `json:"reviewer_prompt,omitempty"`
+	MergerPrompt                     string   `json:"merger_prompt,omitempty"`
 	IntegratorPrompt                 string   `json:"integrator_prompt,omitempty"`
 	PlannerNotes                     string   `json:"planner_notes,omitempty"`
 	LastError                        string   `json:"last_error,omitempty"`
@@ -130,10 +138,34 @@ func ParseSwarmConfig(raw string) (SwarmConfig, error) {
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		return SwarmConfig{}, err
 	}
+	cfg.NormalizeMergerFields()
 	return cfg, nil
 }
 
+func (c *SwarmConfig) NormalizeMergerFields() {
+	if c == nil {
+		return
+	}
+	if c.IntegratorEnabled {
+		c.MergerEnabled = true
+	}
+	if c.RerunIntegratorAfterReviewer {
+		c.RerunMergerAfterReviewer = true
+	}
+	if c.IntegratedGeneration > c.MergedGeneration {
+		c.MergedGeneration = c.IntegratedGeneration
+	}
+	if c.MergerPrompt == "" {
+		c.MergerPrompt = c.IntegratorPrompt
+	}
+	c.IntegratorEnabled = false
+	c.RerunIntegratorAfterReviewer = false
+	c.IntegratedGeneration = 0
+	c.IntegratorPrompt = ""
+}
+
 func (c SwarmConfig) JSON() (string, error) {
+	c.NormalizeMergerFields()
 	data, err := json.Marshal(c)
 	if err != nil {
 		return "", err

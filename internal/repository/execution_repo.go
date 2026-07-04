@@ -557,8 +557,8 @@ func (r *ExecutionRepo) UpdateDiffOutput(ctx context.Context, id string, diffOut
 	return nil
 }
 
-func (r *ExecutionRepo) UpsertSwarmParentResult(ctx context.Context, parentTaskID, integratorExecutionID, output, diffOutput string, durationMs int64) error {
-	prompt := "Swarm integrator final result from execution " + integratorExecutionID
+func (r *ExecutionRepo) UpsertSwarmParentResult(ctx context.Context, parentTaskID, mergerExecutionID, output, diffOutput string, durationMs int64) error {
+	prompt := "Swarm merger final result from execution " + mergerExecutionID
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE executions
 		 SET output = ?, diff_output = ?, duration_ms = ?, completed_at = datetime('now')

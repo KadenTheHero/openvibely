@@ -17,7 +17,7 @@ func TestSwarmServiceCreateAndApplyPlannerOutput(t *testing.T) {
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 
-	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 3, WorkerIsolation: "worktree", ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 3, WorkerIsolation: "worktree", ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatalf("CreateSwarmTask: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestSwarmServiceCreateAndApplyPlannerOutput(t *testing.T) {
 		t.Fatalf("planner child not created: %#v", children)
 	}
 
-	output := PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}}, ReviewerPrompt: "Review workers", IntegratorPrompt: "Integrate workers"}
+	output := PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}}, ReviewerPrompt: "Review workers", MergerPrompt: "Integrate workers"}
 	if err := svc.ApplyPlannerOutput(context.Background(), children[0].ID, output); err != nil {
 		t.Fatalf("ApplyPlannerOutput: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestSwarmServiceCreateAndApplyPlannerOutput(t *testing.T) {
 	for _, child := range children {
 		counts[child.SwarmRole]++
 	}
-	if counts[models.SwarmRoleWorker] != 1 || counts[models.SwarmRoleReviewer] != 1 || counts[models.SwarmRoleIntegrator] != 1 {
+	if counts[models.SwarmRoleWorker] != 1 || counts[models.SwarmRoleReviewer] != 1 || counts[models.SwarmRoleMerger] != 1 {
 		t.Fatalf("unexpected children: %#v", counts)
 	}
 	var workerChild *models.Task
@@ -67,7 +67,7 @@ func TestSwarmServiceApplyPlannerOutputAllowsOverlappingWorktreeScopes(t *testin
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 
-	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Fix email switching", Prompt: "Fix email switching", MaxWorkers: 4, WorkerIsolation: "worktree", ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Fix email switching", Prompt: "Fix email switching", MaxWorkers: 4, WorkerIsolation: "worktree", ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatalf("CreateSwarmTask: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestSwarmServiceApplyPlannerOutputAllowsOverlappingWorktreeScopes(t *testin
 			{Title: "Cross-channel comparison", Prompt: "Compare channel switch_project behavior", WorkerKind: "backend", Ownership: []string{"internal/service/chat_action_runtime.go"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, ReadScope: []string{"."}, Required: true},
 		},
 		ReviewerPrompt:   "Review overlapping service changes and conflicts",
-		IntegratorPrompt: "Integrate accepted service changes",
+		MergerPrompt: "Integrate accepted service changes",
 	}
 	if err := svc.ApplyPlannerOutput(context.Background(), planner.ID, output); err != nil {
 		t.Fatalf("ApplyPlannerOutput should allow overlapping isolated worktree scopes: %v", err)
@@ -109,7 +109,7 @@ func TestSwarmServiceCreateSwarmTaskCanDeferPlannerStart(t *testing.T) {
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 	startImmediately := false
 
-	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 3, WorkerIsolation: "worktree", ReviewerEnabled: true, IntegratorEnabled: true, StartImmediately: &startImmediately})
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 3, WorkerIsolation: "worktree", ReviewerEnabled: true, MergerEnabled: true, StartImmediately: &startImmediately})
 	if err != nil {
 		t.Fatalf("CreateSwarmTask: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestSwarmServiceAppliesPlannerOutputOnPlannerCompletion(t *testing.T) {
 	execRepo := repository.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
-	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 2, ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestSwarmServiceAppliesPlannerOutputOnPlannerCompletion(t *testing.T) {
 	if err := execRepo.Create(context.Background(), exec); err != nil {
 		t.Fatalf("create planner execution: %v", err)
 	}
-	plannerJSON := `{"workers":[{"title":"Backend worker","prompt":"Do backend","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","write_scope":["internal/service"],"required":true}],"reviewer_prompt":"Review workers","integrator_prompt":"Integrate workers"}`
+	plannerJSON := `{"workers":[{"title":"Backend worker","prompt":"Do backend","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","write_scope":["internal/service"],"required":true}],"reviewer_prompt":"Review workers","merger_prompt":"Integrate workers"}`
 	if err := execRepo.Complete(context.Background(), exec.ID, models.ExecCompleted, plannerJSON, "", 0, 1); err != nil {
 		t.Fatalf("complete planner execution: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestSwarmServiceAppliesPlannerOutputOnPlannerCompletion(t *testing.T) {
 	for _, child := range children {
 		counts[child.SwarmRole]++
 	}
-	if counts[models.SwarmRoleWorker] != 1 || counts[models.SwarmRoleReviewer] != 1 || counts[models.SwarmRoleIntegrator] != 1 {
+	if counts[models.SwarmRoleWorker] != 1 || counts[models.SwarmRoleReviewer] != 1 || counts[models.SwarmRoleMerger] != 1 {
 		t.Fatalf("planner completion did not create swarm children: %#v", counts)
 	}
 	if err := svc.OnChildCompleted(context.Background(), planner.ID); err != nil {
@@ -181,7 +181,7 @@ func TestSwarmServiceAppliesPlannerOutputOnPlannerCompletion(t *testing.T) {
 	for _, child := range children {
 		counts[child.SwarmRole]++
 	}
-	if counts[models.SwarmRoleWorker] != 1 || counts[models.SwarmRoleReviewer] != 1 || counts[models.SwarmRoleIntegrator] != 1 {
+	if counts[models.SwarmRoleWorker] != 1 || counts[models.SwarmRoleReviewer] != 1 || counts[models.SwarmRoleMerger] != 1 {
 		t.Fatalf("duplicate planner completion created extra children: %#v", counts)
 	}
 }
@@ -194,7 +194,7 @@ func TestSwarmServiceTerminalizesChildSwarmStatusOnCompletion(t *testing.T) {
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 	ctx := context.Background()
 
-	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestSwarmServiceTerminalizesChildSwarmStatusOnCompletion(t *testing.T) {
 	if err != nil || planner == nil {
 		t.Fatalf("planner missing: %v", err)
 	}
-	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}); err != nil {
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}}, ReviewerPrompt: "Review", MergerPrompt: "Integrate"}); err != nil {
 		t.Fatal(err)
 	}
 	planner, err = repo.GetByID(ctx, planner.ID)
@@ -246,33 +246,33 @@ func TestSwarmServiceTerminalizesChildSwarmStatusOnCompletion(t *testing.T) {
 		t.Fatalf("reviewer swarm_status not terminalized: %s", reviewer.SwarmStatus)
 	}
 
-	integrator, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleIntegrator)
-	if err != nil || integrator == nil {
-		t.Fatalf("integrator missing: %v", err)
+	merger, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleMerger)
+	if err != nil || merger == nil {
+		t.Fatalf("merger missing: %v", err)
 	}
-	if integrator.Status != models.StatusPending || integrator.SwarmStatus != "ready" {
-		t.Fatalf("integrator not started after reviewer completion: status=%s swarm_status=%s", integrator.Status, integrator.SwarmStatus)
+	if merger.Status != models.StatusPending || merger.SwarmStatus != "ready" {
+		t.Fatalf("merger not started after reviewer completion: status=%s swarm_status=%s", merger.Status, merger.SwarmStatus)
 	}
-	exec := &models.Execution{TaskID: integrator.ID, Status: models.ExecRunning, PromptSent: integrator.Prompt}
+	exec := &models.Execution{TaskID: merger.ID, Status: models.ExecRunning, PromptSent: merger.Prompt}
 	if err := execRepo.Create(ctx, exec); err != nil {
 		t.Fatal(err)
 	}
 	if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "Final integrated output", "", 0, 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpdateStatus(ctx, integrator.ID, models.StatusCompleted); err != nil {
+	if err := repo.UpdateStatus(ctx, merger.ID, models.StatusCompleted); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.OnChildCompleted(ctx, integrator.ID); err != nil {
+	if err := svc.OnChildCompleted(ctx, merger.ID); err != nil {
 		t.Fatal(err)
 	}
-	integrator, _ = repo.GetByID(ctx, integrator.ID)
-	if integrator.SwarmStatus != "integrated" {
-		t.Fatalf("integrator swarm_status not terminalized: %s", integrator.SwarmStatus)
+	merger, _ = repo.GetByID(ctx, merger.ID)
+	if merger.SwarmStatus != "integrated" {
+		t.Fatalf("merger swarm_status not terminalized: %s", merger.SwarmStatus)
 	}
 }
 
-func TestSwarmServiceCompletesReviewerOnlySwarmWithoutIntegrator(t *testing.T) {
+func TestSwarmServiceCompletesReviewerOnlySwarmWithoutMerger(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)
 	execRepo := repository.NewExecutionRepo(db)
@@ -280,7 +280,7 @@ func TestSwarmServiceCompletesReviewerOnlySwarmWithoutIntegrator(t *testing.T) {
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 	ctx := context.Background()
 
-	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: false})
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, MergerEnabled: false})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,8 +291,8 @@ func TestSwarmServiceCompletesReviewerOnlySwarmWithoutIntegrator(t *testing.T) {
 	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}}, ReviewerPrompt: "Review"}); err != nil {
 		t.Fatal(err)
 	}
-	if integrator, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleIntegrator); err != nil || integrator != nil {
-		t.Fatalf("integrator should not exist when disabled, integrator=%#v err=%v", integrator, err)
+	if merger, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleMerger); err != nil || merger != nil {
+		t.Fatalf("merger should not exist when disabled, merger=%#v err=%v", merger, err)
 	}
 	worker, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	if err != nil || worker == nil {
@@ -323,29 +323,29 @@ func TestSwarmServiceCompletesReviewerOnlySwarmWithoutIntegrator(t *testing.T) {
 		t.Fatalf("get parent: %v", err)
 	}
 	if parent.Status != models.StatusCompleted || parent.Category != models.CategoryCompleted || parent.SwarmStatus != "current" {
-		t.Fatalf("parent not completed without integrator: status=%s category=%s swarm_status=%s", parent.Status, parent.Category, parent.SwarmStatus)
+		t.Fatalf("parent not completed without merger: status=%s category=%s swarm_status=%s", parent.Status, parent.Category, parent.SwarmStatus)
 	}
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
-	if parentCfg.IntegratedGeneration != parentCfg.Generation || parentCfg.Generation != 1 {
-		t.Fatalf("parent freshness not marked complete without integrator: %#v", parentCfg)
+	if parentCfg.MergedGeneration != parentCfg.Generation || parentCfg.Generation != 1 {
+		t.Fatalf("parent freshness not marked complete without merger: %#v", parentCfg)
 	}
 	parentExecs, err := execRepo.ListByTask(ctx, parent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(parentExecs) != 0 {
-		t.Fatalf("integrator-disabled swarm should not fabricate parent execution, got %#v", parentExecs)
+		t.Fatalf("merger-disabled swarm should not fabricate parent execution, got %#v", parentExecs)
 	}
 }
 
-func TestSwarmServiceCompletesWorkerOnlySwarmWithoutReviewerOrIntegrator(t *testing.T) {
+func TestSwarmServiceCompletesWorkerOnlySwarmWithoutReviewerOrMerger(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 	ctx := context.Background()
 
-	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: false, IntegratorEnabled: false})
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: false, MergerEnabled: false})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,8 +359,8 @@ func TestSwarmServiceCompletesWorkerOnlySwarmWithoutReviewerOrIntegrator(t *test
 	if reviewer, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleReviewer); err != nil || reviewer != nil {
 		t.Fatalf("reviewer should not exist when disabled, reviewer=%#v err=%v", reviewer, err)
 	}
-	if integrator, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleIntegrator); err != nil || integrator != nil {
-		t.Fatalf("integrator should not exist when disabled, integrator=%#v err=%v", integrator, err)
+	if merger, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleMerger); err != nil || merger != nil {
+		t.Fatalf("merger should not exist when disabled, merger=%#v err=%v", merger, err)
 	}
 	worker, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	if err != nil || worker == nil {
@@ -381,12 +381,12 @@ func TestSwarmServiceCompletesWorkerOnlySwarmWithoutReviewerOrIntegrator(t *test
 		t.Fatalf("worker-only parent not completed: status=%s category=%s swarm_status=%s", parent.Status, parent.Category, parent.SwarmStatus)
 	}
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
-	if parentCfg.IntegratedGeneration != parentCfg.Generation || parentCfg.Generation != 1 {
+	if parentCfg.MergedGeneration != parentCfg.Generation || parentCfg.Generation != 1 {
 		t.Fatalf("worker-only parent freshness not marked complete: %#v", parentCfg)
 	}
 }
 
-func TestSwarmServiceStartsIntegratorAfterWorkersWhenReviewerDisabled(t *testing.T) {
+func TestSwarmServiceStartsMergerAfterWorkersWhenReviewerDisabled(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
@@ -394,7 +394,7 @@ func TestSwarmServiceStartsIntegratorAfterWorkersWhenReviewerDisabled(t *testing
 	svc := NewSwarmService(taskSvc, repo, nil, workerSvc)
 	ctx := context.Background()
 
-	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: false, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: false, MergerEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestSwarmServiceStartsIntegratorAfterWorkersWhenReviewerDisabled(t *testing
 	if err != nil || planner == nil {
 		t.Fatalf("planner missing: %v", err)
 	}
-	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}}, IntegratorPrompt: "Integrate"}); err != nil {
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}}, MergerPrompt: "Integrate"}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -425,27 +425,27 @@ func TestSwarmServiceStartsIntegratorAfterWorkersWhenReviewerDisabled(t *testing
 		t.Fatal(err)
 	}
 
-	integrator, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleIntegrator)
-	if err != nil || integrator == nil {
-		t.Fatalf("integrator missing: %v", err)
+	merger, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleMerger)
+	if err != nil || merger == nil {
+		t.Fatalf("merger missing: %v", err)
 	}
-	if integrator.Status != models.StatusPending || integrator.Category != models.CategoryActive || integrator.SwarmStatus != "ready" {
-		t.Fatalf("integrator not started after worker completion without reviewer: status=%s category=%s swarm_status=%s", integrator.Status, integrator.Category, integrator.SwarmStatus)
+	if merger.Status != models.StatusPending || merger.Category != models.CategoryActive || merger.SwarmStatus != "ready" {
+		t.Fatalf("merger not started after worker completion without reviewer: status=%s category=%s swarm_status=%s", merger.Status, merger.Category, merger.SwarmStatus)
 	}
-	intCfg, _ := models.ParseSwarmConfig(integrator.SwarmConfig)
+	intCfg, _ := models.ParseSwarmConfig(merger.SwarmConfig)
 	if intCfg.RerunGeneration != 1 {
-		t.Fatalf("integrator target generation=%d, want 1", intCfg.RerunGeneration)
+		t.Fatalf("merger target generation=%d, want 1", intCfg.RerunGeneration)
 	}
 	select {
 	case submitted := <-workerSvc.Submitted():
-		if submitted.ID != integrator.ID {
-			t.Fatalf("submitted task ID=%s, want integrator %s", submitted.ID, integrator.ID)
+		if submitted.ID != merger.ID {
+			t.Fatalf("submitted task ID=%s, want merger %s", submitted.ID, merger.ID)
 		}
 		if submitted.Status != models.StatusPending || submitted.Category != models.CategoryActive {
-			t.Fatalf("submitted integrator not runnable: status=%s category=%s", submitted.Status, submitted.Category)
+			t.Fatalf("submitted merger not runnable: status=%s category=%s", submitted.Status, submitted.Category)
 		}
 	default:
-		t.Fatal("expected integrator to be submitted")
+		t.Fatal("expected merger to be submitted")
 	}
 }
 
@@ -455,7 +455,7 @@ func TestParsePlannerOutputJSONExtractsPlannerObjectFromTranscript(t *testing.T)
 {"handle":"chat_thread_system.md","body":"not the planner"}
 
 Here is the bounded plan:
-{"workers":[{"title":"Email runtime fixer","prompt":"Fix email runtime switch project","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","write_scope":["internal/service"],"read_scope":["."],"required":true}],"reviewer_prompt":"Review email runtime fix","integrator_prompt":"Integrate email runtime fix","notes":"One worker is enough."}`
+{"workers":[{"title":"Email runtime fixer","prompt":"Fix email runtime switch project","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","write_scope":["internal/service"],"read_scope":["."],"required":true}],"reviewer_prompt":"Review email runtime fix","merger_prompt":"Integrate email runtime fix","notes":"One worker is enough."}`
 
 	out, err := ParsePlannerOutputJSON(raw)
 	if err != nil {
@@ -464,13 +464,13 @@ Here is the bounded plan:
 	if len(out.Workers) != 1 || out.Workers[0].Title != "Email runtime fixer" {
 		t.Fatalf("parsed wrong planner workers: %#v", out.Workers)
 	}
-	if out.ReviewerPrompt == "" || out.IntegratorPrompt == "" {
-		t.Fatalf("expected reviewer and integrator prompts: %#v", out)
+	if out.ReviewerPrompt == "" || out.MergerPrompt == "" {
+		t.Fatalf("expected reviewer and merger prompts: %#v", out)
 	}
 }
 
 func TestParsePlannerOutputJSONExtractsFencedPlannerObject(t *testing.T) {
-	raw := "Planner output:\n```json\n{" + `"workers":[{"title":"Backend worker","prompt":"Do backend","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","write_scope":["internal/service"],"required":true}],"reviewer_prompt":"Review","integrator_prompt":"Integrate"` + "}\n```"
+	raw := "Planner output:\n```json\n{" + `"workers":[{"title":"Backend worker","prompt":"Do backend","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","write_scope":["internal/service"],"required":true}],"reviewer_prompt":"Review","merger_prompt":"Integrate"` + "}\n```"
 
 	out, err := ParsePlannerOutputJSON(raw)
 	if err != nil {
@@ -483,9 +483,9 @@ func TestParsePlannerOutputJSONExtractsFencedPlannerObject(t *testing.T) {
 
 func TestParsePlannerOutputJSONPrefersFinalPlannerObject(t *testing.T) {
 	raw := "Earlier transcript contained a stale candidate:\n" +
-		`{"workers":[{"title":"Stale worker","prompt":"Do the old plan","worker_kind":"backend","ownership":["old"],"isolation":"worktree","write_scope":["old"],"required":true}],"reviewer_prompt":"Review stale","integrator_prompt":"Integrate stale"}` +
+		`{"workers":[{"title":"Stale worker","prompt":"Do the old plan","worker_kind":"backend","ownership":["old"],"isolation":"worktree","write_scope":["old"],"required":true}],"reviewer_prompt":"Review stale","merger_prompt":"Integrate stale"}` +
 		"\n\nAfter considering the follow-up, use this final planner JSON:\n```json\n" +
-		`{"workers":[{"title":"Final worker","prompt":"Do the final plan","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","write_scope":["internal/service"],"required":true}],"reviewer_prompt":"Review final","integrator_prompt":"Integrate final"}` +
+		`{"workers":[{"title":"Final worker","prompt":"Do the final plan","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","write_scope":["internal/service"],"required":true}],"reviewer_prompt":"Review final","merger_prompt":"Integrate final"}` +
 		"\n```"
 
 	out, err := ParsePlannerOutputJSON(raw)
@@ -495,7 +495,7 @@ func TestParsePlannerOutputJSONPrefersFinalPlannerObject(t *testing.T) {
 	if len(out.Workers) != 1 || out.Workers[0].Title != "Final worker" {
 		t.Fatalf("parsed stale planner output: %#v", out.Workers)
 	}
-	if out.ReviewerPrompt != "Review final" || out.IntegratorPrompt != "Integrate final" {
+	if out.ReviewerPrompt != "Review final" || out.MergerPrompt != "Integrate final" {
 		t.Fatalf("parsed stale prompts: %#v", out)
 	}
 }
@@ -506,7 +506,7 @@ func TestSwarmServiceStartPlannerReactivatesExistingPlannerBeforeSubmit(t *testi
 	taskSvc := NewTaskService(repo, nil, nil)
 	workerSvc := newTestWorkerService(t)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
-	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 2, ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +552,7 @@ func TestSwarmServiceInvalidPlannerExecutionBlocksParent(t *testing.T) {
 	execRepo := repository.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
-	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 2, ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -583,13 +583,13 @@ func TestSwarmServiceInvalidPlannerExecutionBlocksParent(t *testing.T) {
 	}
 }
 
-func TestSwarmServiceIntegratorCompletionPersistsParentResult(t *testing.T) {
+func TestSwarmServiceMergerCompletionPersistsParentResult(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)
 	execRepo := repository.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
-	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -597,7 +597,7 @@ func TestSwarmServiceIntegratorCompletionPersistsParentResult(t *testing.T) {
 	if planner == nil {
 		t.Fatal("planner missing")
 	}
-	output := PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}
+	output := PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", MergerPrompt: "Integrate"}
 	if err := svc.ApplyPlannerOutput(context.Background(), planner.ID, output); err != nil {
 		t.Fatal(err)
 	}
@@ -628,11 +628,11 @@ func TestSwarmServiceIntegratorCompletionPersistsParentResult(t *testing.T) {
 			}
 		}
 	}
-	integrator, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleIntegrator)
-	if integrator == nil {
-		t.Fatal("integrator missing")
+	merger, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleMerger)
+	if merger == nil {
+		t.Fatal("merger missing")
 	}
-	exec := &models.Execution{TaskID: integrator.ID, Status: models.ExecRunning, PromptSent: integrator.Prompt}
+	exec := &models.Execution{TaskID: merger.ID, Status: models.ExecRunning, PromptSent: merger.Prompt}
 	if err := execRepo.Create(context.Background(), exec); err != nil {
 		t.Fatal(err)
 	}
@@ -642,10 +642,10 @@ func TestSwarmServiceIntegratorCompletionPersistsParentResult(t *testing.T) {
 	if err := execRepo.Complete(context.Background(), exec.ID, models.ExecCompleted, "Final integrated summary", "", 12, 34); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpdateStatus(context.Background(), integrator.ID, models.StatusCompleted); err != nil {
+	if err := repo.UpdateStatus(context.Background(), merger.ID, models.StatusCompleted); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.OnChildCompleted(context.Background(), integrator.ID); err != nil {
+	if err := svc.OnChildCompleted(context.Background(), merger.ID); err != nil {
 		t.Fatal(err)
 	}
 	updatedParent, err := repo.GetByID(context.Background(), parent.ID)
@@ -669,7 +669,7 @@ func TestSwarmServiceIntegratorCompletionPersistsParentResult(t *testing.T) {
 	if parentExec.Output != "Final integrated summary" || parentExec.DiffOutput != "diff --git a/final.go b/final.go" {
 		t.Fatalf("parent result execution mismatch: output=%q diff=%q", parentExec.Output, parentExec.DiffOutput)
 	}
-	if err := svc.OnChildCompleted(context.Background(), integrator.ID); err != nil {
+	if err := svc.OnChildCompleted(context.Background(), merger.ID); err != nil {
 		t.Fatal(err)
 	}
 	parentExecs, err = execRepo.ListByTask(context.Background(), parent.ID)
@@ -677,7 +677,7 @@ func TestSwarmServiceIntegratorCompletionPersistsParentResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(parentExecs) != 1 {
-		t.Fatalf("integrator completion should be idempotent, got %d parent executions", len(parentExecs))
+		t.Fatalf("merger completion should be idempotent, got %d parent executions", len(parentExecs))
 	}
 }
 
@@ -688,7 +688,7 @@ func TestTaskServiceUpdateCategoryNotifiesSwarmChildCancellation(t *testing.T) {
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 	taskSvc.SetSwarmService(svc)
 	ctx := context.Background()
-	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Swarm parent", Prompt: "Build result", Category: models.CategoryActive, MaxWorkers: 1, WorkerIsolation: "worktree", ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Swarm parent", Prompt: "Build result", Category: models.CategoryActive, MaxWorkers: 1, WorkerIsolation: "worktree", ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -699,7 +699,7 @@ func TestTaskServiceUpdateCategoryNotifiesSwarmChildCancellation(t *testing.T) {
 	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{
 		Workers:          []PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}},
 		ReviewerPrompt:   "Review worker",
-		IntegratorPrompt: "Integrate worker",
+		MergerPrompt: "Integrate worker",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -741,7 +741,7 @@ func TestTaskServiceUpdateCategoryNotifiesPendingSwarmChildCancellation(t *testi
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
 	taskSvc.SetSwarmService(svc)
 	ctx := context.Background()
-	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Swarm parent", Prompt: "Build result", Category: models.CategoryActive, MaxWorkers: 1, WorkerIsolation: "worktree", ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Swarm parent", Prompt: "Build result", Category: models.CategoryActive, MaxWorkers: 1, WorkerIsolation: "worktree", ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -752,7 +752,7 @@ func TestTaskServiceUpdateCategoryNotifiesPendingSwarmChildCancellation(t *testi
 	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{
 		Workers:          []PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}},
 		ReviewerPrompt:   "Review worker",
-		IntegratorPrompt: "Integrate worker",
+		MergerPrompt: "Integrate worker",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -795,7 +795,7 @@ func TestSwarmServiceChildCancellationSetsRoleSpecificParentState(t *testing.T) 
 	}{
 		{name: "worker", role: models.SwarmRoleWorker, wantStatus: "needs_coordination"},
 		{name: "reviewer", role: models.SwarmRoleReviewer, wantStatus: "needs_review"},
-		{name: "integrator", role: models.SwarmRoleIntegrator, wantStatus: "needs_integration"},
+		{name: "merger", role: models.SwarmRoleMerger, wantStatus: "needs_integration"},
 	}
 	for _, tc := range roles {
 		t.Run(tc.name, func(t *testing.T) {
@@ -803,7 +803,7 @@ func TestSwarmServiceChildCancellationSetsRoleSpecificParentState(t *testing.T) 
 			repo := repository.NewTaskRepo(db, nil)
 			taskSvc := NewTaskService(repo, nil, nil)
 			svc := NewSwarmService(taskSvc, repo, nil, nil)
-			parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: true})
+			parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, MergerEnabled: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -811,7 +811,7 @@ func TestSwarmServiceChildCancellationSetsRoleSpecificParentState(t *testing.T) 
 			if planner == nil {
 				t.Fatal("planner missing")
 			}
-			output := PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}
+			output := PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", MergerPrompt: "Integrate"}
 			if err := svc.ApplyPlannerOutput(context.Background(), planner.ID, output); err != nil {
 				t.Fatal(err)
 			}
@@ -841,7 +841,7 @@ func TestSwarmServiceParentFollowupCoordinatesAffectedWorkers(t *testing.T) {
 	repo := repository.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
-	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 3, ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 3, ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -849,7 +849,7 @@ func TestSwarmServiceParentFollowupCoordinatesAffectedWorkers(t *testing.T) {
 	if planner == nil {
 		t.Fatal("planner missing")
 	}
-	initialOutput := PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}, {Title: "Frontend worker", Prompt: "Do frontend", WorkerKind: "frontend", Ownership: []string{"web/templates"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}
+	initialOutput := PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}, {Title: "Frontend worker", Prompt: "Do frontend", WorkerKind: "frontend", Ownership: []string{"web/templates"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", MergerPrompt: "Integrate"}
 	if err := svc.ApplyPlannerOutput(context.Background(), planner.ID, initialOutput); err != nil {
 		t.Fatal(err)
 	}
@@ -882,8 +882,8 @@ func TestSwarmServiceParentFollowupCoordinatesAffectedWorkers(t *testing.T) {
 			if err := repo.UpdateStatus(context.Background(), child.ID, models.StatusCompleted); err != nil {
 				t.Fatal(err)
 			}
-		case models.SwarmRoleIntegrator:
-			cfg.IntegratedGeneration = 1
+		case models.SwarmRoleMerger:
+			cfg.MergedGeneration = 1
 			child.SwarmConfig, _ = cfg.JSON()
 			if err := repo.UpdateSwarmFields(context.Background(), child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
 				t.Fatal(err)
@@ -898,7 +898,7 @@ func TestSwarmServiceParentFollowupCoordinatesAffectedWorkers(t *testing.T) {
 	}
 	parent, _ = repo.GetByID(context.Background(), parent.ID)
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
-	parentCfg.IntegratedGeneration = 1
+	parentCfg.MergedGeneration = 1
 	parent.SwarmConfig, _ = parentCfg.JSON()
 	if err := repo.UpdateSwarmFields(context.Background(), parent.ID, parent.SwarmRole, "current", parent.SwarmConfig, parent.SwarmSequence); err != nil {
 		t.Fatal(err)
@@ -911,7 +911,7 @@ func TestSwarmServiceParentFollowupCoordinatesAffectedWorkers(t *testing.T) {
 	if planner == nil || planner.Status != models.StatusPending || !strings.Contains(planner.Prompt, "Only update backend behavior") {
 		t.Fatalf("planner was not prepared for coordination follow-up: %#v", planner)
 	}
-	followupOutput := PlannerOutput{Workers: []PlannerWorker{{TaskID: backend.ID, Title: "Backend worker", Prompt: "Update backend only", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review backend update", IntegratorPrompt: "Integrate backend update"}
+	followupOutput := PlannerOutput{Workers: []PlannerWorker{{TaskID: backend.ID, Title: "Backend worker", Prompt: "Update backend only", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review backend update", MergerPrompt: "Integrate backend update"}
 	if err := svc.ApplyPlannerOutput(context.Background(), planner.ID, followupOutput); err != nil {
 		t.Fatal(err)
 	}
@@ -926,9 +926,9 @@ func TestSwarmServiceParentFollowupCoordinatesAffectedWorkers(t *testing.T) {
 		t.Fatalf("unaffected frontend not carried forward: status=%s cfg=%#v", frontendAfter.Status, frontendCfg)
 	}
 	reviewer, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleReviewer)
-	integrator, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleIntegrator)
-	if reviewer == nil || reviewer.Status != models.StatusBlocked || integrator == nil || integrator.Status != models.StatusBlocked {
-		t.Fatalf("reviewer/integrator should wait for affected worker: reviewer=%#v integrator=%#v", reviewer, integrator)
+	merger, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleMerger)
+	if reviewer == nil || reviewer.Status != models.StatusBlocked || merger == nil || merger.Status != models.StatusBlocked {
+		t.Fatalf("reviewer/merger should wait for affected worker: reviewer=%#v merger=%#v", reviewer, merger)
 	}
 	backendCfg.CompletedGeneration = 2
 	backendAfter.SwarmConfig, _ = backendCfg.JSON()
@@ -957,18 +957,18 @@ func TestSwarmServiceParentFollowupCoordinatesAffectedWorkers(t *testing.T) {
 	if err := svc.OnChildCompleted(context.Background(), reviewer.ID); err != nil {
 		t.Fatal(err)
 	}
-	integrator, _ = repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleIntegrator)
-	if integrator == nil || integrator.Status != models.StatusPending {
-		t.Fatalf("integrator not rerun after reviewer completed: %#v", integrator)
+	merger, _ = repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleMerger)
+	if merger == nil || merger.Status != models.StatusPending {
+		t.Fatalf("merger not rerun after reviewer completed: %#v", merger)
 	}
 }
 
-func TestSwarmServiceStartsReviewerAndIntegratorOnce(t *testing.T) {
+func TestSwarmServiceStartsReviewerAndMergerOnce(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
-	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 2, ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -976,7 +976,7 @@ func TestSwarmServiceStartsReviewerAndIntegratorOnce(t *testing.T) {
 	if planner == nil {
 		t.Fatal("planner missing")
 	}
-	output := PlannerOutput{Workers: []PlannerWorker{{Title: "Worker A", Prompt: "A", WorkerKind: "backend", Ownership: []string{"a"}, Isolation: "worktree", Required: true}, {Title: "Worker B", Prompt: "B", WorkerKind: "frontend", Ownership: []string{"b"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}
+	output := PlannerOutput{Workers: []PlannerWorker{{Title: "Worker A", Prompt: "A", WorkerKind: "backend", Ownership: []string{"a"}, Isolation: "worktree", Required: true}, {Title: "Worker B", Prompt: "B", WorkerKind: "frontend", Ownership: []string{"b"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", MergerPrompt: "Integrate"}
 	if err := svc.ApplyPlannerOutput(context.Background(), planner.ID, output); err != nil {
 		t.Fatal(err)
 	}
@@ -1036,13 +1036,13 @@ func TestSwarmServiceStartsReviewerAndIntegratorOnce(t *testing.T) {
 	if err := svc.OnChildCompleted(context.Background(), reviewer.ID); err != nil {
 		t.Fatal(err)
 	}
-	integrator, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleIntegrator)
-	if integrator == nil || integrator.Status != models.StatusPending {
-		t.Fatalf("integrator not pending once: %#v", integrator)
+	merger, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleMerger)
+	if merger == nil || merger.Status != models.StatusPending {
+		t.Fatalf("merger not pending once: %#v", merger)
 	}
 }
 
-func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *testing.T) {
+func TestSwarmServiceRerunReviewerStartsMergerAfterReviewerCompletes(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)
 	execRepo := repository.NewExecutionRepo(db)
@@ -1050,7 +1050,7 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
 	ctx := context.Background()
 
-	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1058,7 +1058,7 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 	if planner == nil {
 		t.Fatal("planner missing")
 	}
-	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}); err != nil {
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", MergerPrompt: "Integrate"}); err != nil {
 		t.Fatal(err)
 	}
 	children, err := repo.ListSwarmChildren(ctx, parent.ID)
@@ -1086,8 +1086,8 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 			if err := repo.UpdateStatus(ctx, child.ID, models.StatusCompleted); err != nil {
 				t.Fatal(err)
 			}
-		case models.SwarmRoleIntegrator:
-			cfg.IntegratedGeneration = 1
+		case models.SwarmRoleMerger:
+			cfg.MergedGeneration = 1
 			child.SwarmConfig, _ = cfg.JSON()
 			if err := repo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
 				t.Fatal(err)
@@ -1100,7 +1100,7 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 	parent, _ = repo.GetByID(ctx, parent.ID)
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	parentCfg.Generation = 1
-	parentCfg.IntegratedGeneration = 1
+	parentCfg.MergedGeneration = 1
 	parent.SwarmConfig, _ = parentCfg.JSON()
 	if err := repo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "current", parent.SwarmConfig, parent.SwarmSequence); err != nil {
 		t.Fatal(err)
@@ -1128,7 +1128,7 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 	}
 	parent, _ = repo.GetByID(ctx, parent.ID)
 	parentCfg, _ = models.ParseSwarmConfig(parent.SwarmConfig)
-	if parent.SwarmStatus != "needs_review" || parentCfg.IntegratedGeneration >= parentCfg.Generation {
+	if parent.SwarmStatus != "needs_review" || parentCfg.MergedGeneration >= parentCfg.Generation {
 		t.Fatalf("parent integration freshness not invalidated: status=%s cfg=%#v", parent.SwarmStatus, parentCfg)
 	}
 	if parent.Status != models.StatusRunning || parent.Category != models.CategoryActive {
@@ -1140,12 +1140,12 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 	if err := svc.OnChildCompleted(ctx, rerunReviewer.ID); err != nil {
 		t.Fatal(err)
 	}
-	integrator, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleIntegrator)
-	if err != nil || integrator == nil {
-		t.Fatalf("integrator missing: %v", err)
+	merger, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleMerger)
+	if err != nil || merger == nil {
+		t.Fatalf("merger missing: %v", err)
 	}
-	if integrator.Status != models.StatusPending || integrator.Category != models.CategoryActive {
-		t.Fatalf("integrator not rerun as active task after reviewer retry completed: %#v", integrator)
+	if merger.Status != models.StatusPending || merger.Category != models.CategoryActive {
+		t.Fatalf("merger not rerun as active task after reviewer retry completed: %#v", merger)
 	}
 	if err := repo.UpdateStatus(ctx, parent.ID, models.StatusCompleted); err != nil {
 		t.Fatal(err)
@@ -1153,60 +1153,60 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 	if err := repo.UpdateCategory(ctx, parent.ID, models.CategoryCompleted); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpdateStatus(ctx, integrator.ID, models.StatusCompleted); err != nil {
+	if err := repo.UpdateStatus(ctx, merger.ID, models.StatusCompleted); err != nil {
 		t.Fatal(err)
 	}
-	rerunIntegrator, err := svc.RerunRole(ctx, parent.ID, models.SwarmRoleIntegrator)
+	rerunMerger, err := svc.RerunRole(ctx, parent.ID, models.SwarmRoleMerger)
 	if err != nil {
-		t.Fatalf("RerunRole integrator: %v", err)
+		t.Fatalf("RerunRole merger: %v", err)
 	}
-	if rerunIntegrator == nil || rerunIntegrator.Status != models.StatusPending || rerunIntegrator.Category != models.CategoryActive {
-		t.Fatalf("integrator not queued for active rerun: %#v", rerunIntegrator)
+	if rerunMerger == nil || rerunMerger.Status != models.StatusPending || rerunMerger.Category != models.CategoryActive {
+		t.Fatalf("merger not queued for active rerun: %#v", rerunMerger)
 	}
-	persistedIntegrator, err := repo.GetByID(ctx, rerunIntegrator.ID)
+	persistedMerger, err := repo.GetByID(ctx, rerunMerger.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persistedIntegrator.Category != models.CategoryActive {
-		t.Fatalf("integrator rerun category = %s, want active", persistedIntegrator.Category)
+	if persistedMerger.Category != models.CategoryActive {
+		t.Fatalf("merger rerun category = %s, want active", persistedMerger.Category)
 	}
 	parent, _ = repo.GetByID(ctx, parent.ID)
 	parentCfg, _ = models.ParseSwarmConfig(parent.SwarmConfig)
 	if parent.SwarmStatus != "needs_integration" || parent.Status != models.StatusRunning || parent.Category != models.CategoryActive {
-		t.Fatalf("parent not reactivated for integrator rerun: swarm=%s status=%s category=%s", parent.SwarmStatus, parent.Status, parent.Category)
+		t.Fatalf("parent not reactivated for merger rerun: swarm=%s status=%s category=%s", parent.SwarmStatus, parent.Status, parent.Category)
 	}
-	integratorCfg, _ := models.ParseSwarmConfig(rerunIntegrator.SwarmConfig)
-	if parentCfg.IntegratedGeneration >= integratorCfg.RerunGeneration {
-		t.Fatalf("parent integration freshness not invalidated for integrator rerun: parent=%#v integrator=%#v", parentCfg, integratorCfg)
+	mergerCfg, _ := models.ParseSwarmConfig(rerunMerger.SwarmConfig)
+	if parentCfg.MergedGeneration >= mergerCfg.RerunGeneration {
+		t.Fatalf("parent integration freshness not invalidated for merger rerun: parent=%#v merger=%#v", parentCfg, mergerCfg)
 	}
-	integrationRun := &models.Execution{TaskID: rerunIntegrator.ID, Status: models.ExecRunning, PromptSent: "Integrate again"}
+	integrationRun := &models.Execution{TaskID: rerunMerger.ID, Status: models.ExecRunning, PromptSent: "Integrate again"}
 	if err := execRepo.Create(ctx, integrationRun); err != nil {
 		t.Fatal(err)
 	}
 	if err := execRepo.Complete(ctx, integrationRun.ID, models.ExecCompleted, "Final rerun result", "", 0, 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpdateStatus(ctx, rerunIntegrator.ID, models.StatusCompleted); err != nil {
+	if err := repo.UpdateStatus(ctx, rerunMerger.ID, models.StatusCompleted); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.OnChildCompleted(ctx, rerunIntegrator.ID); err != nil {
+	if err := svc.OnChildCompleted(ctx, rerunMerger.ID); err != nil {
 		t.Fatal(err)
 	}
 	parent, _ = repo.GetByID(ctx, parent.ID)
 	parentCfg, _ = models.ParseSwarmConfig(parent.SwarmConfig)
-	if parent.SwarmStatus != "current" || parent.Status != models.StatusCompleted || parentCfg.IntegratedGeneration < integratorCfg.RerunGeneration {
-		t.Fatalf("integrator rerun completion did not refresh parent result: swarm=%s status=%s cfg=%#v", parent.SwarmStatus, parent.Status, parentCfg)
+	if parent.SwarmStatus != "current" || parent.Status != models.StatusCompleted || parentCfg.MergedGeneration < mergerCfg.RerunGeneration {
+		t.Fatalf("merger rerun completion did not refresh parent result: swarm=%s status=%s cfg=%#v", parent.SwarmStatus, parent.Status, parentCfg)
 	}
 }
 
-func TestSwarmServiceOnChildCompletedIgnoresStaleIntegratorCompletion(t *testing.T) {
+func TestSwarmServiceOnChildCompletedIgnoresStaleMergerCompletion(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)
 	execRepo := repository.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
-	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1214,14 +1214,14 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleIntegratorCompletion(t *testing
 	if planner == nil {
 		t.Fatal("planner missing")
 	}
-	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}); err != nil {
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", MergerPrompt: "Integrate"}); err != nil {
 		t.Fatal(err)
 	}
 	children, err := repo.ListSwarmChildren(ctx, parent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var reviewer, integrator *models.Task
+	var reviewer, merger *models.Task
 	for i := range children {
 		child := children[i]
 		cfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
@@ -1245,8 +1245,8 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleIntegratorCompletion(t *testing
 				t.Fatal(err)
 			}
 			reviewer, _ = repo.GetByID(ctx, child.ID)
-		case models.SwarmRoleIntegrator:
-			cfg.IntegratedGeneration = 1
+		case models.SwarmRoleMerger:
+			cfg.MergedGeneration = 1
 			cfg.RerunGeneration = 1
 			child.SwarmConfig, _ = cfg.JSON()
 			if err := repo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
@@ -1255,13 +1255,13 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleIntegratorCompletion(t *testing
 			if err := repo.UpdateStatus(ctx, child.ID, models.StatusCompleted); err != nil {
 				t.Fatal(err)
 			}
-			integrator, _ = repo.GetByID(ctx, child.ID)
+			merger, _ = repo.GetByID(ctx, child.ID)
 		}
 	}
-	if reviewer == nil || integrator == nil {
-		t.Fatal("reviewer/integrator missing")
+	if reviewer == nil || merger == nil {
+		t.Fatal("reviewer/merger missing")
 	}
-	exec := &models.Execution{TaskID: integrator.ID, Status: models.ExecRunning, PromptSent: integrator.Prompt}
+	exec := &models.Execution{TaskID: merger.ID, Status: models.ExecRunning, PromptSent: merger.Prompt}
 	if err := execRepo.Create(ctx, exec); err != nil {
 		t.Fatal(err)
 	}
@@ -1272,7 +1272,7 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleIntegratorCompletion(t *testing
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	parentCfg.Generation = 2
 	parentCfg.ReviewedGeneration = 1
-	parentCfg.IntegratedGeneration = 1
+	parentCfg.MergedGeneration = 1
 	parent.SwarmConfig, _ = parentCfg.JSON()
 	if err := repo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_review", parent.SwarmConfig, parent.SwarmSequence); err != nil {
 		t.Fatal(err)
@@ -1284,7 +1284,7 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleIntegratorCompletion(t *testing
 		t.Fatal(err)
 	}
 
-	if err := svc.OnChildCompleted(ctx, integrator.ID); err != nil {
+	if err := svc.OnChildCompleted(ctx, merger.ID); err != nil {
 		t.Fatal(err)
 	}
 	updatedParent, err := repo.GetByID(ctx, parent.ID)
@@ -1292,15 +1292,15 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleIntegratorCompletion(t *testing
 		t.Fatalf("get parent: %v", err)
 	}
 	updatedCfg, _ := models.ParseSwarmConfig(updatedParent.SwarmConfig)
-	if updatedParent.Status == models.StatusCompleted || updatedParent.SwarmStatus == "current" || updatedCfg.IntegratedGeneration != 1 {
-		t.Fatalf("stale integrator completion updated parent: status=%s swarm=%s cfg=%#v", updatedParent.Status, updatedParent.SwarmStatus, updatedCfg)
+	if updatedParent.Status == models.StatusCompleted || updatedParent.SwarmStatus == "current" || updatedCfg.MergedGeneration != 1 {
+		t.Fatalf("stale merger completion updated parent: status=%s swarm=%s cfg=%#v", updatedParent.Status, updatedParent.SwarmStatus, updatedCfg)
 	}
 	parentExecs, err := execRepo.ListByTask(ctx, parent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(parentExecs) != 0 {
-		t.Fatalf("stale integrator completion copied parent result: %#v", parentExecs)
+		t.Fatalf("stale merger completion copied parent result: %#v", parentExecs)
 	}
 }
 
@@ -1309,15 +1309,15 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleWorkerCompletion(t *testing.T) 
 	repo, svc, parent, children := newCompletedSwarmForServiceTest(t, ctx)
 	worker := children[models.SwarmRoleWorker]
 	reviewer := children[models.SwarmRoleReviewer]
-	integrator := children[models.SwarmRoleIntegrator]
-	if worker == nil || reviewer == nil || integrator == nil {
+	merger := children[models.SwarmRoleMerger]
+	if worker == nil || reviewer == nil || merger == nil {
 		t.Fatal("required children missing")
 	}
 
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	parentCfg.Generation = 2
 	parentCfg.ReviewedGeneration = 1
-	parentCfg.IntegratedGeneration = 1
+	parentCfg.MergedGeneration = 1
 	parent.SwarmConfig, _ = parentCfg.JSON()
 	if err := repo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_review", parent.SwarmConfig, parent.SwarmSequence); err != nil {
 		t.Fatal(err)
@@ -1347,13 +1347,13 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleWorkerCompletion(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	integratorCfg, _ := models.ParseSwarmConfig(integrator.SwarmConfig)
-	integratorCfg.IntegratedGeneration = 1
-	integrator.SwarmConfig, _ = integratorCfg.JSON()
-	if err := repo.UpdateSwarmFields(ctx, integrator.ID, integrator.SwarmRole, "completed", integrator.SwarmConfig, integrator.SwarmSequence); err != nil {
+	mergerCfg, _ := models.ParseSwarmConfig(merger.SwarmConfig)
+	mergerCfg.MergedGeneration = 1
+	merger.SwarmConfig, _ = mergerCfg.JSON()
+	if err := repo.UpdateSwarmFields(ctx, merger.ID, merger.SwarmRole, "completed", merger.SwarmConfig, merger.SwarmSequence); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpdateStatus(ctx, integrator.ID, models.StatusCompleted); err != nil {
+	if err := repo.UpdateStatus(ctx, merger.ID, models.StatusCompleted); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1390,15 +1390,15 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleReviewerCompletion(t *testing.T
 	repo, svc, parent, children := newCompletedSwarmForServiceTest(t, ctx)
 	worker := children[models.SwarmRoleWorker]
 	reviewer := children[models.SwarmRoleReviewer]
-	integrator := children[models.SwarmRoleIntegrator]
-	if worker == nil || reviewer == nil || integrator == nil {
+	merger := children[models.SwarmRoleMerger]
+	if worker == nil || reviewer == nil || merger == nil {
 		t.Fatal("required children missing")
 	}
 
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	parentCfg.Generation = 2
 	parentCfg.ReviewedGeneration = 1
-	parentCfg.IntegratedGeneration = 1
+	parentCfg.MergedGeneration = 1
 	parent.SwarmConfig, _ = parentCfg.JSON()
 	if err := repo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_review", parent.SwarmConfig, parent.SwarmSequence); err != nil {
 		t.Fatal(err)
@@ -1429,14 +1429,14 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleReviewerCompletion(t *testing.T
 		t.Fatal(err)
 	}
 
-	integratorCfg, _ := models.ParseSwarmConfig(integrator.SwarmConfig)
-	integratorCfg.IntegratedGeneration = 1
-	integratorCfg.RerunGeneration = 1
-	integrator.SwarmConfig, _ = integratorCfg.JSON()
-	if err := repo.UpdateSwarmFields(ctx, integrator.ID, integrator.SwarmRole, "completed", integrator.SwarmConfig, integrator.SwarmSequence); err != nil {
+	mergerCfg, _ := models.ParseSwarmConfig(merger.SwarmConfig)
+	mergerCfg.MergedGeneration = 1
+	mergerCfg.RerunGeneration = 1
+	merger.SwarmConfig, _ = mergerCfg.JSON()
+	if err := repo.UpdateSwarmFields(ctx, merger.ID, merger.SwarmRole, "completed", merger.SwarmConfig, merger.SwarmSequence); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpdateStatus(ctx, integrator.ID, models.StatusCompleted); err != nil {
+	if err := repo.UpdateStatus(ctx, merger.ID, models.StatusCompleted); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1452,12 +1452,12 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleReviewerCompletion(t *testing.T
 	if updatedReviewerCfg.ReviewedGeneration != 1 {
 		t.Fatalf("stale reviewer completion advanced review freshness: %#v", updatedReviewerCfg)
 	}
-	updatedIntegrator, err := repo.GetByID(ctx, integrator.ID)
-	if err != nil || updatedIntegrator == nil {
-		t.Fatalf("get integrator: %v", err)
+	updatedMerger, err := repo.GetByID(ctx, merger.ID)
+	if err != nil || updatedMerger == nil {
+		t.Fatalf("get merger: %v", err)
 	}
-	if updatedIntegrator.Status == models.StatusPending {
-		t.Fatalf("stale reviewer completion started integrator: %#v", updatedIntegrator)
+	if updatedMerger.Status == models.StatusPending {
+		t.Fatalf("stale reviewer completion started merger: %#v", updatedMerger)
 	}
 	updatedParent, err := repo.GetByID(ctx, parent.ID)
 	if err != nil || updatedParent == nil {
@@ -1468,7 +1468,7 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleReviewerCompletion(t *testing.T
 	}
 }
 
-func TestSwarmServiceRecomputeParentStatusDoesNotLetStaleIntegratorOverrideActiveWork(t *testing.T) {
+func TestSwarmServiceRecomputeParentStatusDoesNotLetStaleMergerOverrideActiveWork(t *testing.T) {
 	ctx := context.Background()
 	repo, svc, parent, children := newCompletedSwarmForServiceTest(t, ctx)
 
@@ -1487,7 +1487,7 @@ func TestSwarmServiceRecomputeParentStatusDoesNotLetStaleIntegratorOverrideActiv
 		t.Fatalf("get parent: %v", err)
 	}
 	if updatedParent.Status != models.StatusRunning {
-		t.Fatalf("pending reviewer should keep parent running despite old completed integrator, got %s", updatedParent.Status)
+		t.Fatalf("pending reviewer should keep parent running despite old completed merger, got %s", updatedParent.Status)
 	}
 
 	if err := repo.UpdateStatus(ctx, reviewer.ID, models.StatusCompleted); err != nil {
@@ -1495,7 +1495,7 @@ func TestSwarmServiceRecomputeParentStatusDoesNotLetStaleIntegratorOverrideActiv
 	}
 	parentCfg, _ := models.ParseSwarmConfig(updatedParent.SwarmConfig)
 	parentCfg.Generation = 2
-	parentCfg.IntegratedGeneration = 1
+	parentCfg.MergedGeneration = 1
 	updatedParent.SwarmConfig, _ = parentCfg.JSON()
 	if err := repo.UpdateSwarmFields(ctx, updatedParent.ID, updatedParent.SwarmRole, "needs_integration", updatedParent.SwarmConfig, updatedParent.SwarmSequence); err != nil {
 		t.Fatal(err)
@@ -1527,7 +1527,7 @@ func TestSwarmServiceHandleChildFollowupIsRoleSpecific(t *testing.T) {
 	}{
 		{name: "worker", role: models.SwarmRoleWorker, wantParentStatus: "needs_review", wantGeneration: 2, wantReviewed: 1, wantIntegrated: 1, wantChildCompleted: 1, wantChildRerunAtLeast: 2},
 		{name: "reviewer", role: models.SwarmRoleReviewer, wantParentStatus: "needs_review", wantGeneration: 1, wantReviewed: 1, wantIntegrated: 0, wantChildReviewed: 0, wantChildRerunAtLeast: 1},
-		{name: "integrator", role: models.SwarmRoleIntegrator, wantParentStatus: "needs_integration", wantGeneration: 1, wantReviewed: 1, wantIntegrated: 0, wantChildIntegrated: 0, wantChildRerunAtLeast: 1},
+		{name: "merger", role: models.SwarmRoleMerger, wantParentStatus: "needs_integration", wantGeneration: 1, wantReviewed: 1, wantIntegrated: 0, wantChildIntegrated: 0, wantChildRerunAtLeast: 1},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1548,7 +1548,7 @@ func TestSwarmServiceHandleChildFollowupIsRoleSpecific(t *testing.T) {
 			if updatedParent.SwarmStatus != tc.wantParentStatus || updatedParent.Status != models.StatusRunning || updatedParent.Category != models.CategoryActive {
 				t.Fatalf("parent state after %s follow-up: swarm=%s status=%s category=%s", tc.role, updatedParent.SwarmStatus, updatedParent.Status, updatedParent.Category)
 			}
-			if parentCfg.Generation != tc.wantGeneration || parentCfg.ReviewedGeneration != tc.wantReviewed || parentCfg.IntegratedGeneration != tc.wantIntegrated {
+			if parentCfg.Generation != tc.wantGeneration || parentCfg.ReviewedGeneration != tc.wantReviewed || parentCfg.MergedGeneration != tc.wantIntegrated {
 				t.Fatalf("parent cfg after %s follow-up: %#v", tc.role, parentCfg)
 			}
 			updatedChild, err := repo.GetByID(ctx, child.ID)
@@ -1556,14 +1556,14 @@ func TestSwarmServiceHandleChildFollowupIsRoleSpecific(t *testing.T) {
 				t.Fatalf("get child: %v", err)
 			}
 			childCfg, _ := models.ParseSwarmConfig(updatedChild.SwarmConfig)
-			if childCfg.CompletedGeneration != tc.wantChildCompleted || childCfg.ReviewedGeneration != tc.wantChildReviewed || childCfg.IntegratedGeneration != tc.wantChildIntegrated || childCfg.RerunGeneration < tc.wantChildRerunAtLeast {
+			if childCfg.CompletedGeneration != tc.wantChildCompleted || childCfg.ReviewedGeneration != tc.wantChildReviewed || childCfg.MergedGeneration != tc.wantChildIntegrated || childCfg.RerunGeneration < tc.wantChildRerunAtLeast {
 				t.Fatalf("child cfg after %s follow-up: %#v", tc.role, childCfg)
 			}
-			if tc.role == models.SwarmRoleIntegrator {
+			if tc.role == models.SwarmRoleMerger {
 				reviewer := children[models.SwarmRoleReviewer]
 				updatedReviewer, _ := repo.GetByID(ctx, reviewer.ID)
 				if updatedReviewer.Status != models.StatusCompleted {
-					t.Fatalf("integrator follow-up should not rerun reviewer: %#v", updatedReviewer)
+					t.Fatalf("merger follow-up should not rerun reviewer: %#v", updatedReviewer)
 				}
 			}
 		})
@@ -1576,7 +1576,7 @@ func newCompletedSwarmForServiceTest(t *testing.T, ctx context.Context) (*reposi
 	repo := repository.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, nil, nil)
-	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1584,7 +1584,7 @@ func newCompletedSwarmForServiceTest(t *testing.T, ctx context.Context) (*reposi
 	if planner == nil {
 		t.Fatal("planner missing")
 	}
-	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}); err != nil {
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", MergerPrompt: "Integrate"}); err != nil {
 		t.Fatal(err)
 	}
 	children, err := repo.ListSwarmChildren(ctx, parent.ID)
@@ -1618,8 +1618,8 @@ func newCompletedSwarmForServiceTest(t *testing.T, ctx context.Context) (*reposi
 			if err := repo.UpdateStatus(ctx, child.ID, models.StatusCompleted); err != nil {
 				t.Fatal(err)
 			}
-		case models.SwarmRoleIntegrator:
-			cfg.IntegratedGeneration = 1
+		case models.SwarmRoleMerger:
+			cfg.MergedGeneration = 1
 			child.SwarmConfig, _ = cfg.JSON()
 			if err := repo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
 				t.Fatal(err)
@@ -1638,7 +1638,7 @@ func newCompletedSwarmForServiceTest(t *testing.T, ctx context.Context) (*reposi
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	parentCfg.Generation = 1
 	parentCfg.ReviewedGeneration = 1
-	parentCfg.IntegratedGeneration = 1
+	parentCfg.MergedGeneration = 1
 	parent.SwarmConfig, _ = parentCfg.JSON()
 	if err := repo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "current", parent.SwarmConfig, parent.SwarmSequence); err != nil {
 		t.Fatal(err)
@@ -1660,7 +1660,7 @@ func TestSwarmServiceRerunRoleRejectsActiveRoleExecutionWithoutRetargeting(t *te
 	execRepo := repository.NewExecutionRepo(db)
 	taskSvc := NewTaskService(repo, nil, nil)
 	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
-	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: true})
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, MergerEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1668,7 +1668,7 @@ func TestSwarmServiceRerunRoleRejectsActiveRoleExecutionWithoutRetargeting(t *te
 	if planner == nil {
 		t.Fatal("planner missing")
 	}
-	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}); err != nil {
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", MergerPrompt: "Integrate"}); err != nil {
 		t.Fatal(err)
 	}
 	reviewer, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleReviewer)

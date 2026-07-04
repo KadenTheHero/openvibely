@@ -577,10 +577,10 @@ func (r *TaskRepo) DeleteBlockedChildrenByParent(ctx context.Context, parentTask
 func (r *TaskRepo) ListSwarmChildren(ctx context.Context, parentTaskID string) ([]models.Task, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+taskSelectColumns+`
-		 FROM tasks WHERE parent_task_id = ? AND swarm_role IN ('planner','worker','reviewer','integrator')
-		 ORDER BY swarm_sequence ASC,
-		 CASE swarm_role WHEN 'planner' THEN 0 WHEN 'worker' THEN 1 WHEN 'reviewer' THEN 2 WHEN 'integrator' THEN 3 ELSE 9 END,
-		 created_at ASC`, parentTaskID)
+			 FROM tasks WHERE parent_task_id = ? AND swarm_role IN ('planner','worker','reviewer','merger','integrator')
+			 ORDER BY swarm_sequence ASC,
+			 CASE swarm_role WHEN 'planner' THEN 0 WHEN 'worker' THEN 1 WHEN 'reviewer' THEN 2 WHEN 'merger' THEN 3 WHEN 'integrator' THEN 3 ELSE 9 END,
+			 created_at ASC`, parentTaskID)
 	if err != nil {
 		return nil, fmt.Errorf("listing swarm children: %w", err)
 	}
@@ -599,10 +599,16 @@ func (r *TaskRepo) ListSwarmChildren(ctx context.Context, parentTaskID string) (
 }
 
 func (r *TaskRepo) FindSwarmChildByRole(ctx context.Context, parentTaskID string, role models.SwarmRole) (*models.Task, error) {
+	if role == models.SwarmRoleMerger {
+		return r.getOne(ctx,
+			`SELECT `+taskSelectColumns+`
+			 FROM tasks WHERE parent_task_id = ? AND swarm_role IN ('merger','integrator')
+			 ORDER BY swarm_sequence ASC, CASE swarm_role WHEN 'merger' THEN 0 WHEN 'integrator' THEN 1 ELSE 9 END, created_at ASC LIMIT 1`, parentTaskID)
+	}
 	return r.getOne(ctx,
 		`SELECT `+taskSelectColumns+`
-		 FROM tasks WHERE parent_task_id = ? AND swarm_role = ?
-		 ORDER BY swarm_sequence ASC, created_at ASC LIMIT 1`, parentTaskID, role)
+			 FROM tasks WHERE parent_task_id = ? AND swarm_role = ?
+			 ORDER BY swarm_sequence ASC, created_at ASC LIMIT 1`, parentTaskID, role)
 }
 
 func (r *TaskRepo) UpdateSwarmFields(ctx context.Context, id string, role models.SwarmRole, status, config string, sequence int) error {

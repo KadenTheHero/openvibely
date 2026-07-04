@@ -752,7 +752,7 @@ func TestHandler_CreateTask_SwarmCanDeferAutonomousPlanner(t *testing.T) {
 	form.Set("swarm_worker_isolation", "worktree")
 	form.Set("swarm_autonomous_planner", "false")
 	form.Set("swarm_reviewer_enabled", "false")
-	form.Set("swarm_integrator_enabled", "false")
+	form.Set("swarm_merger_enabled", "false")
 
 	rec := postForm(e, "/tasks?project_id="+project.ID, form)
 	assertCode(t, rec, http.StatusOK)
@@ -773,7 +773,7 @@ func TestHandler_CreateTask_SwarmCanDeferAutonomousPlanner(t *testing.T) {
 	cfg, err := models.ParseSwarmConfig(parent.SwarmConfig)
 	require.NoError(t, err)
 	assert.False(t, cfg.ReviewerEnabled)
-	assert.False(t, cfg.IntegratorEnabled)
+	assert.False(t, cfg.MergerEnabled)
 }
 
 func TestHandler_CreateTask_DuplicateTitle(t *testing.T) {
@@ -3450,7 +3450,7 @@ func TestHandler_TaskThreadSend_SwarmParentRoutesWithoutNormalExecution(t *testi
 		MaxWorkers:        3,
 		WorkerIsolation:   "worktree",
 		ReviewerEnabled:   true,
-		IntegratorEnabled: true,
+		MergerEnabled: true,
 	})
 	require.NoError(t, err)
 
@@ -3497,7 +3497,7 @@ func TestHandler_SwarmFollowupChildCreatesTaskThreadExecution(t *testing.T) {
 		MaxWorkers:        1,
 		WorkerIsolation:   "worktree",
 		ReviewerEnabled:   true,
-		IntegratorEnabled: true,
+		MergerEnabled: true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -3506,7 +3506,7 @@ func TestHandler_SwarmFollowupChildCreatesTaskThreadExecution(t *testing.T) {
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
 		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
 		ReviewerPrompt:   "Review the worker",
-		IntegratorPrompt: "Integrate the worker",
+		MergerPrompt: "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3560,7 +3560,7 @@ func TestHandler_SwarmFollowupChildQueuesWhenActive(t *testing.T) {
 		MaxWorkers:        1,
 		WorkerIsolation:   "worktree",
 		ReviewerEnabled:   true,
-		IntegratorEnabled: true,
+		MergerEnabled: true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -3569,7 +3569,7 @@ func TestHandler_SwarmFollowupChildQueuesWhenActive(t *testing.T) {
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
 		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
 		ReviewerPrompt:   "Review the worker",
-		IntegratorPrompt: "Integrate the worker",
+		MergerPrompt: "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3616,7 +3616,7 @@ func TestHandler_SubmitReview_SwarmChildQueuesBehindActiveExecutionWithoutRoutin
 		MaxWorkers:        1,
 		WorkerIsolation:   "worktree",
 		ReviewerEnabled:   true,
-		IntegratorEnabled: true,
+		MergerEnabled: true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -3625,7 +3625,7 @@ func TestHandler_SubmitReview_SwarmChildQueuesBehindActiveExecutionWithoutRoutin
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
 		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
 		ReviewerPrompt:   "Review the worker",
-		IntegratorPrompt: "Integrate the worker",
+		MergerPrompt: "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3686,7 +3686,7 @@ func TestHandler_SubmitReview_SwarmChildDirectStartAppliesRouting(t *testing.T) 
 		MaxWorkers:        1,
 		WorkerIsolation:   "worktree",
 		ReviewerEnabled:   true,
-		IntegratorEnabled: true,
+		MergerEnabled: true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -3695,7 +3695,7 @@ func TestHandler_SubmitReview_SwarmChildDirectStartAppliesRouting(t *testing.T) 
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
 		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
 		ReviewerPrompt:   "Review the worker",
-		IntegratorPrompt: "Integrate the worker",
+		MergerPrompt: "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3748,7 +3748,7 @@ func TestHandler_TaskThreadSend_SwarmChildQueuedFollowupDefersRoutingUntilPromot
 		MaxWorkers:        1,
 		WorkerIsolation:   "worktree",
 		ReviewerEnabled:   true,
-		IntegratorEnabled: true,
+		MergerEnabled: true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -3757,7 +3757,7 @@ func TestHandler_TaskThreadSend_SwarmChildQueuedFollowupDefersRoutingUntilPromot
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
 		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
 		ReviewerPrompt:   "Review the worker",
-		IntegratorPrompt: "Integrate the worker",
+		MergerPrompt: "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3814,7 +3814,7 @@ func TestHandler_StartQueuedTaskThreadInput_AppliesSwarmChildFollowupOnPromotion
 		MaxWorkers:        1,
 		WorkerIsolation:   "worktree",
 		ReviewerEnabled:   true,
-		IntegratorEnabled: true,
+		MergerEnabled: true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -3823,7 +3823,7 @@ func TestHandler_StartQueuedTaskThreadInput_AppliesSwarmChildFollowupOnPromotion
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
 		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
 		ReviewerPrompt:   "Review the worker",
-		IntegratorPrompt: "Integrate the worker",
+		MergerPrompt: "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3889,7 +3889,7 @@ func TestHandler_CompleteWithSuccess_NotifiesSwarmChildFollowupCompletion(t *tes
 		MaxWorkers:        3,
 		WorkerIsolation:   "worktree",
 		ReviewerEnabled:   true,
-		IntegratorEnabled: true,
+		MergerEnabled: true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -3900,7 +3900,7 @@ func TestHandler_CompleteWithSuccess_NotifiesSwarmChildFollowupCompletion(t *tes
 			{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true},
 		},
 		ReviewerPrompt:   "Review the worker",
-		IntegratorPrompt: "Integrate the worker",
+		MergerPrompt: "Integrate the worker",
 	}
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, output))
 	children, err := h.taskRepo.ListSwarmChildren(ctx, parent.ID)
@@ -3951,7 +3951,7 @@ func TestHandler_CancelTask_NotifiesSwarmChildCancellation(t *testing.T) {
 		MaxWorkers:        1,
 		WorkerIsolation:   "worktree",
 		ReviewerEnabled:   true,
-		IntegratorEnabled: true,
+		MergerEnabled: true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -3960,7 +3960,7 @@ func TestHandler_CancelTask_NotifiesSwarmChildCancellation(t *testing.T) {
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
 		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
 		ReviewerPrompt:   "Review the worker",
-		IntegratorPrompt: "Integrate the worker",
+		MergerPrompt: "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3996,7 +3996,7 @@ func TestHandler_UpdateTask_NotifiesPendingSwarmChildCancellation(t *testing.T) 
 		MaxWorkers:        1,
 		WorkerIsolation:   "worktree",
 		ReviewerEnabled:   true,
-		IntegratorEnabled: true,
+		MergerEnabled: true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -4005,7 +4005,7 @@ func TestHandler_UpdateTask_NotifiesPendingSwarmChildCancellation(t *testing.T) 
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
 		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
 		ReviewerPrompt:   "Review the worker",
-		IntegratorPrompt: "Integrate the worker",
+		MergerPrompt: "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4050,7 +4050,7 @@ func TestHandler_UpdateTaskCategory_NotifiesSwarmChildCancellation(t *testing.T)
 		MaxWorkers:        1,
 		WorkerIsolation:   "worktree",
 		ReviewerEnabled:   true,
-		IntegratorEnabled: true,
+		MergerEnabled: true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -4059,7 +4059,7 @@ func TestHandler_UpdateTaskCategory_NotifiesSwarmChildCancellation(t *testing.T)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
 		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
 		ReviewerPrompt:   "Review the worker",
-		IntegratorPrompt: "Integrate the worker",
+		MergerPrompt: "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4104,7 +4104,7 @@ func TestHandler_CompleteWithCancellation_NotifiesSwarmChildCancellation(t *test
 		MaxWorkers:        1,
 		WorkerIsolation:   "worktree",
 		ReviewerEnabled:   true,
-		IntegratorEnabled: true,
+		MergerEnabled: true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -4113,7 +4113,7 @@ func TestHandler_CompleteWithCancellation_NotifiesSwarmChildCancellation(t *test
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
 		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
 		ReviewerPrompt:   "Review the worker",
-		IntegratorPrompt: "Integrate the worker",
+		MergerPrompt: "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4394,7 +4394,7 @@ func TestHandler_RunTask_StartsPlannerForDeferredSwarmParent(t *testing.T) {
 		AgentID:           &agent.ID,
 		MaxWorkers:        2,
 		ReviewerEnabled:   true,
-		IntegratorEnabled: true,
+		MergerEnabled: true,
 		StartImmediately:  &startImmediately,
 	})
 	require.NoError(t, err)
@@ -5499,7 +5499,7 @@ func TestHandler_RerunSwarmReviewerRejectsActiveRoleExecution(t *testing.T) {
 		MaxWorkers:        1,
 		WorkerIsolation:   "worktree",
 		ReviewerEnabled:   true,
-		IntegratorEnabled: true,
+		MergerEnabled: true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -5508,7 +5508,7 @@ func TestHandler_RerunSwarmReviewerRejectsActiveRoleExecution(t *testing.T) {
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
 		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", Required: true}},
 		ReviewerPrompt:   "Review the worker",
-		IntegratorPrompt: "Integrate the worker",
+		MergerPrompt: "Integrate the worker",
 	}))
 	reviewer, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleReviewer)
 	require.NoError(t, err)

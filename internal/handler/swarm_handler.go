@@ -209,15 +209,16 @@ func (h *Handler) RerunSwarmReviewer(c echo.Context) error {
 	return h.rerunSwarmRole(c, models.SwarmRoleReviewer)
 }
 
-// RerunSwarmIntegrator reruns the integrator child task.
-// @Summary Rerun swarm integrator
+// RerunSwarmMerger reruns the merger child task.
+// @Summary Rerun swarm merger
 // @Tags tasks
 // @Produce json
 // @Param id path string true "Task ID"
 // @Success 200 {object} map[string]string
+// @Router /api/tasks/{id}/swarm/rerun-merger [post]
 // @Router /api/tasks/{id}/swarm/rerun-integrator [post]
-func (h *Handler) RerunSwarmIntegrator(c echo.Context) error {
-	return h.rerunSwarmRole(c, models.SwarmRoleIntegrator)
+func (h *Handler) RerunSwarmMerger(c echo.Context) error {
+	return h.rerunSwarmRole(c, models.SwarmRoleMerger)
 }
 
 func (h *Handler) rerunSwarmRole(c echo.Context, role models.SwarmRole) error {

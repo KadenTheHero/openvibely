@@ -631,7 +631,9 @@ definitions:
     - planner
     - worker
     - reviewer
+    - merger
     - integrator
+    - merger
     type: string
     x-enum-varnames:
     - SwarmRoleNone
@@ -639,6 +641,8 @@ definitions:
     - SwarmRolePlanner
     - SwarmRoleWorker
     - SwarmRoleReviewer
+    - SwarmRoleMerger
+    - SwarmRoleLegacyIntegrator
     - SwarmRoleIntegrator
   models.Task:
     properties:
@@ -2419,7 +2423,27 @@ paths:
             additionalProperties:
               type: string
             type: object
-      summary: Rerun swarm integrator
+      summary: Rerun swarm merger
+      tags:
+      - tasks
+  /api/tasks/{id}/swarm/rerun-merger:
+    post:
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Rerun swarm merger
       tags:
       - tasks
   /api/tasks/{id}/swarm/rerun-reviewer:

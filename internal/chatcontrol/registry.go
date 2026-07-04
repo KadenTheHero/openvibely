@@ -155,7 +155,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:               "create_swarm_task",
-		Description:        "Create an autonomous swarm parent task when the user explicitly asks for swarm, subagents, parallel workers, multiple agents, or splitting work across workers. The planner child creates worker/reviewer/integrator tasks.",
+		Description:        "Create an autonomous swarm parent task when the user explicitly asks for swarm, subagents, parallel workers, multiple agents, or splitting work across workers. The planner child creates worker/reviewer/merger tasks.",
 		Domain:             DomainTasks,
 		Access:             AccessWrite,
 		Sensitivity:        SensitivityNormal,

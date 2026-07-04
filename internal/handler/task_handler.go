@@ -92,6 +92,13 @@ func formBoolEnabled(c echo.Context, name string, defaultValue bool) bool {
 	return false
 }
 
+func swarmMergerEnabledFormValue(c echo.Context) bool {
+	if _, ok := c.Request().PostForm["swarm_merger_enabled"]; ok {
+		return formBoolEnabled(c, "swarm_merger_enabled", true)
+	}
+	return formBoolEnabled(c, "swarm_integrator_enabled", true)
+}
+
 func isValidCompletedSort(sortBy string) bool {
 	switch sortBy {
 	case "title_asc", "title_desc", "completed_asc", "completed_desc", "priority_asc", "priority_desc":
@@ -286,7 +293,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		}
 		maxWorkers, _ := strconv.Atoi(c.FormValue("swarm_max_workers"))
 		startImmediately := formBoolEnabled(c, "swarm_autonomous_planner", true)
-		parent, err := h.swarmSvc.CreateSwarmTask(c.Request().Context(), service.CreateSwarmTaskRequest{ProjectID: projectID, Title: t.Title, Prompt: t.Prompt, Goal: c.FormValue("goal"), Category: category, Priority: priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: maxWorkers, WorkerIsolation: c.FormValue("swarm_worker_isolation"), ReviewerEnabled: formBoolEnabled(c, "swarm_reviewer_enabled", true), IntegratorEnabled: formBoolEnabled(c, "swarm_integrator_enabled", true), StartImmediately: &startImmediately, MergeTargetBranch: t.MergeTargetBranch})
+		parent, err := h.swarmSvc.CreateSwarmTask(c.Request().Context(), service.CreateSwarmTaskRequest{ProjectID: projectID, Title: t.Title, Prompt: t.Prompt, Goal: c.FormValue("goal"), Category: category, Priority: priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: maxWorkers, WorkerIsolation: c.FormValue("swarm_worker_isolation"), ReviewerEnabled: formBoolEnabled(c, "swarm_reviewer_enabled", true), MergerEnabled: swarmMergerEnabledFormValue(c), StartImmediately: &startImmediately, MergeTargetBranch: t.MergeTargetBranch})
 		if err != nil {
 			if errors.Is(err, service.ErrDuplicateTask) {
 				return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")

@@ -110,7 +110,7 @@ func (h *Handler) executeCreateSwarmTaskTool(ctx context.Context, params streami
 	if projectID == "" {
 		return "", fmt.Errorf("create_swarm_task: no current project")
 	}
-	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{ProjectID: projectID, Title: req.Title, Prompt: req.Prompt, Category: models.CategoryActive, Priority: 2, MaxWorkers: req.MaxWorkers, WorkerIsolation: req.WorkerIsolation, ReviewerEnabled: true, IntegratorEnabled: true, StartImmediately: req.StartImmediately})
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{ProjectID: projectID, Title: req.Title, Prompt: req.Prompt, Category: models.CategoryActive, Priority: 2, MaxWorkers: req.MaxWorkers, WorkerIsolation: req.WorkerIsolation, ReviewerEnabled: true, MergerEnabled: true, StartImmediately: req.StartImmediately})
 	if err != nil {
 		return "", err
 	}

@@ -149,16 +149,16 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 				return "", fmt.Errorf("create_swarm_task: swarm service unavailable")
 			}
 			parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{
-				ProjectID:         projectID,
-				Title:             req.Title,
-				Prompt:            req.Prompt,
-				Category:          models.CategoryActive,
-				Priority:          2,
-				MaxWorkers:        req.MaxWorkers,
-				WorkerIsolation:   req.WorkerIsolation,
-				ReviewerEnabled:   true,
-				IntegratorEnabled: true,
-				StartImmediately:  req.StartImmediately,
+				ProjectID:        projectID,
+				Title:            req.Title,
+				Prompt:           req.Prompt,
+				Category:         models.CategoryActive,
+				Priority:         2,
+				MaxWorkers:       req.MaxWorkers,
+				WorkerIsolation:  req.WorkerIsolation,
+				ReviewerEnabled:  true,
+				MergerEnabled:    true,
+				StartImmediately: req.StartImmediately,
 			})
 			if err != nil {
 				return "", err

@@ -2091,7 +2091,38 @@ const docTemplate = `{
                 "tags": [
                     "tasks"
                 ],
-                "summary": "Rerun swarm integrator",
+                "summary": "Rerun swarm merger",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tasks/{id}/swarm/rerun-merger": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Rerun swarm merger",
                 "parameters": [
                     {
                         "type": "string",
@@ -3284,7 +3315,9 @@ const docTemplate = `{
                 "planner",
                 "worker",
                 "reviewer",
-                "integrator"
+                "merger",
+                "integrator",
+                "merger"
             ],
             "x-enum-varnames": [
                 "SwarmRoleNone",
@@ -3292,6 +3325,8 @@ const docTemplate = `{
                 "SwarmRolePlanner",
                 "SwarmRoleWorker",
                 "SwarmRoleReviewer",
+                "SwarmRoleMerger",
+                "SwarmRoleLegacyIntegrator",
                 "SwarmRoleIntegrator"
             ]
         },
