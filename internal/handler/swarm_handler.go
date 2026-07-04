@@ -81,13 +81,6 @@ func (h *Handler) SwarmFollowup(c echo.Context) error {
 	return echo.NewHTTPError(http.StatusBadRequest, "task is not part of a swarm")
 }
 
-// CancelSwarm cancels a swarm parent and runnable/running children.
-// @Summary Cancel swarm
-// @Tags tasks
-// @Produce json
-// @Param id path string true "Task ID"
-// @Success 200 {object} map[string]string
-// @Router /api/tasks/{id}/swarm/cancel [post]
 func (h *Handler) acceptSwarmChildFollowup(c echo.Context, task *models.Task, message string) error {
 	ctx := c.Request().Context()
 	agentID := c.FormValue("agent_id")
@@ -188,6 +181,13 @@ func (h *Handler) acceptSwarmChildFollowup(c echo.Context, task *models.Task, me
 	return c.JSON(http.StatusOK, map[string]string{"status": "started", "execution_id": exec.ID})
 }
 
+// CancelSwarm cancels a swarm parent and runnable/running children.
+// @Summary Cancel swarm
+// @Tags tasks
+// @Produce json
+// @Param id path string true "Task ID"
+// @Success 200 {object} map[string]string
+// @Router /api/tasks/{id}/swarm/cancel [post]
 func (h *Handler) CancelSwarm(c echo.Context) error {
 	if h.swarmSvc == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "swarm service unavailable")
