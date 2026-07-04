@@ -5201,3 +5201,44 @@ func TestHandler_GetTaskThreadRendersLatestWindowAndEarlierFragment(t *testing.T
 		}
 	}
 }
+
+func TestHandler_RerunSwarmReviewerRejectsActiveRoleExecution(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "API Swarm Rerun Active Project")
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
+		ProjectID:         project.ID,
+		Title:             "Swarm parent",
+		Prompt:            "Build the swarm result",
+		Category:          models.CategoryActive,
+		Priority:          2,
+		AgentID:           &agent.ID,
+		MaxWorkers:        1,
+		WorkerIsolation:   "worktree",
+		ReviewerEnabled:   true,
+		IntegratorEnabled: true,
+	})
+	require.NoError(t, err)
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
+		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", Required: true}},
+		ReviewerPrompt:   "Review the worker",
+		IntegratorPrompt: "Integrate the worker",
+	}))
+	reviewer, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleReviewer)
+	require.NoError(t, err)
+	require.NotNil(t, reviewer)
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, reviewer.ID, models.StatusRunning))
+	exec := &models.Execution{TaskID: reviewer.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active reviewer run"}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/tasks/"+parent.ID+"/swarm/rerun-reviewer", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "already running")
+}

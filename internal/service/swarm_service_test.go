@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -1119,4 +1120,57 @@ func newCompletedSwarmForServiceTest(t *testing.T, ctx context.Context) (*reposi
 	}
 	parent, _ = repo.GetByID(ctx, parent.ID)
 	return repo, svc, parent, byRole
+}
+
+func TestSwarmServiceRerunRoleRejectsActiveRoleExecutionWithoutRetargeting(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner, _ := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if planner == nil {
+		t.Fatal("planner missing")
+	}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}); err != nil {
+		t.Fatal(err)
+	}
+	reviewer, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleReviewer)
+	if err != nil || reviewer == nil {
+		t.Fatalf("reviewer missing: %v", err)
+	}
+	cfg, _ := models.ParseSwarmConfig(reviewer.SwarmConfig)
+	cfg.RerunGeneration = 1
+	cfg.ReviewedGeneration = 0
+	reviewer.SwarmConfig, _ = cfg.JSON()
+	if err := repo.UpdateSwarmFields(ctx, reviewer.ID, reviewer.SwarmRole, reviewer.SwarmStatus, reviewer.SwarmConfig, reviewer.SwarmSequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(ctx, reviewer.ID, models.StatusRunning); err != nil {
+		t.Fatal(err)
+	}
+	exec := &models.Execution{TaskID: reviewer.ID, Status: models.ExecRunning, PromptSent: "active reviewer run"}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatal(err)
+	}
+	parentBefore, _ := repo.GetByID(ctx, parent.ID)
+	reviewerBefore, _ := repo.GetByID(ctx, reviewer.ID)
+
+	_, err = svc.RerunRole(ctx, parent.ID, models.SwarmRoleReviewer)
+	if !errors.Is(err, ErrSwarmRoleActive) {
+		t.Fatalf("RerunRole error = %v, want ErrSwarmRoleActive", err)
+	}
+	parentAfter, _ := repo.GetByID(ctx, parent.ID)
+	reviewerAfter, _ := repo.GetByID(ctx, reviewer.ID)
+	if parentAfter.SwarmConfig != parentBefore.SwarmConfig || parentAfter.SwarmStatus != parentBefore.SwarmStatus || parentAfter.Status != parentBefore.Status || parentAfter.Category != parentBefore.Category {
+		t.Fatalf("parent mutated despite rejected active rerun: before=%#v after=%#v", parentBefore, parentAfter)
+	}
+	if reviewerAfter.SwarmConfig != reviewerBefore.SwarmConfig || reviewerAfter.SwarmStatus != reviewerBefore.SwarmStatus || reviewerAfter.Status != reviewerBefore.Status {
+		t.Fatalf("reviewer mutated despite rejected active rerun: before=%#v after=%#v", reviewerBefore, reviewerAfter)
+	}
 }

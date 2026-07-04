@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 )
 
 // GetSwarm returns a swarm parent and its child task summary.
@@ -224,6 +226,9 @@ func (h *Handler) rerunSwarmRole(c echo.Context, role models.SwarmRole) error {
 	}
 	child, err := h.swarmSvc.RerunRole(c.Request().Context(), c.Param("id"), role)
 	if err != nil {
+		if errors.Is(err, service.ErrSwarmRoleActive) {
+			return echo.NewHTTPError(http.StatusConflict, "swarm role is already running; wait for it to finish before retrying")
+		}
 		return err
 	}
 	if child == nil {

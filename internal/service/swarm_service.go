@@ -53,6 +53,8 @@ type PlannerWorker struct {
 	AllowOverlap bool     `json:"allow_overlap"`
 }
 
+var ErrSwarmRoleActive = errors.New("swarm role already has an active execution")
+
 type SwarmService struct {
 	taskSvc   *TaskService
 	taskRepo  *repository.TaskRepo
@@ -655,6 +657,18 @@ func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role 
 	child, err := s.taskRepo.FindSwarmChildByRole(ctx, parentTaskID, role)
 	if err != nil || child == nil {
 		return child, err
+	}
+	if child.Status == models.StatusRunning || child.Status == models.StatusQueued || child.Status == models.StatusPending {
+		return nil, ErrSwarmRoleActive
+	}
+	if s.execRepo != nil {
+		active, err := s.execRepo.HasActiveTaskExecution(ctx, child.ID, "")
+		if err != nil {
+			return nil, err
+		}
+		if active {
+			return nil, ErrSwarmRoleActive
+		}
 	}
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	childCfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
