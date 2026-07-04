@@ -622,8 +622,15 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 	if err != nil {
 		t.Fatalf("RerunRole reviewer: %v", err)
 	}
-	if rerunReviewer == nil || rerunReviewer.Status != models.StatusPending {
-		t.Fatalf("reviewer not queued for rerun: %#v", rerunReviewer)
+	if rerunReviewer == nil || rerunReviewer.Status != models.StatusPending || rerunReviewer.Category != models.CategoryActive {
+		t.Fatalf("reviewer not queued for active rerun: %#v", rerunReviewer)
+	}
+	persistedReviewer, err := repo.GetByID(ctx, rerunReviewer.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persistedReviewer.Category != models.CategoryActive {
+		t.Fatalf("reviewer rerun category = %s, want active", persistedReviewer.Category)
 	}
 	parent, _ = repo.GetByID(ctx, parent.ID)
 	parentCfg, _ = models.ParseSwarmConfig(parent.SwarmConfig)
@@ -659,8 +666,15 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 	if err != nil {
 		t.Fatalf("RerunRole integrator: %v", err)
 	}
-	if rerunIntegrator == nil || rerunIntegrator.Status != models.StatusPending {
-		t.Fatalf("integrator not queued for rerun: %#v", rerunIntegrator)
+	if rerunIntegrator == nil || rerunIntegrator.Status != models.StatusPending || rerunIntegrator.Category != models.CategoryActive {
+		t.Fatalf("integrator not queued for active rerun: %#v", rerunIntegrator)
+	}
+	persistedIntegrator, err := repo.GetByID(ctx, rerunIntegrator.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persistedIntegrator.Category != models.CategoryActive {
+		t.Fatalf("integrator rerun category = %s, want active", persistedIntegrator.Category)
 	}
 	parent, _ = repo.GetByID(ctx, parent.ID)
 	if parent.SwarmStatus != "needs_integration" || parent.Status != models.StatusRunning || parent.Category != models.CategoryActive {

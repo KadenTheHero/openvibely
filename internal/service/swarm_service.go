@@ -706,9 +706,13 @@ func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role 
 	if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
 		return nil, err
 	}
+	if err := s.taskRepo.UpdateCategory(ctx, child.ID, models.CategoryActive); err != nil {
+		return nil, err
+	}
 	if err := s.taskRepo.UpdateStatus(ctx, child.ID, models.StatusPending); err != nil {
 		return nil, err
 	}
+	child.Category = models.CategoryActive
 	child.Status = models.StatusPending
 	if s.workerSvc != nil {
 		s.workerSvc.Submit(*child)
