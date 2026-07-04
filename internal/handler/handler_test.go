@@ -3427,6 +3427,68 @@ func TestHandler_TaskThreadSend_SwarmParentRoutesWithoutNormalExecution(t *testi
 	assert.Contains(t, planner.Prompt, "Update only the API worker")
 }
 
+func TestHandler_CompleteWithSuccess_NotifiesSwarmChildFollowupCompletion(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Swarm Child Completion Project")
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
+		ProjectID:         project.ID,
+		Title:             "Swarm parent",
+		Prompt:            "Build the swarm result",
+		Category:          models.CategoryActive,
+		Priority:          2,
+		AgentID:           &agent.ID,
+		MaxWorkers:        3,
+		WorkerIsolation:   "worktree",
+		ReviewerEnabled:   true,
+		IntegratorEnabled: true,
+	})
+	require.NoError(t, err)
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	output := service.PlannerOutput{
+		Workers: []service.PlannerWorker{
+			{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true},
+		},
+		ReviewerPrompt:   "Review the worker",
+		IntegratorPrompt: "Integrate the worker",
+	}
+	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, output))
+	children, err := h.taskRepo.ListSwarmChildren(ctx, parent.ID)
+	require.NoError(t, err)
+	var worker, reviewer *models.Task
+	for i := range children {
+		switch children[i].SwarmRole {
+		case models.SwarmRoleWorker:
+			worker = &children[i]
+		case models.SwarmRoleReviewer:
+			reviewer = &children[i]
+		}
+	}
+	require.NotNil(t, worker)
+	require.NotNil(t, reviewer)
+	require.NoError(t, h.swarmSvc.HandleChildFollowup(ctx, worker.ID, "finish the API update"))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, worker.ID, models.StatusRunning))
+	exec := &models.Execution{TaskID: worker.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "finish the API update", IsFollowup: true}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+
+	outcome := h.completeWithSuccess(ctx, exec.ID, worker.ID, "worker follow-up done", "", 0, 1)
+	require.Equal(t, repository.CompleteSuccessCompleted, outcome)
+
+	updatedWorker, err := h.taskRepo.GetByID(ctx, worker.ID)
+	require.NoError(t, err)
+	workerCfg, err := models.ParseSwarmConfig(updatedWorker.SwarmConfig)
+	require.NoError(t, err)
+	assert.Equal(t, 2, workerCfg.CompletedGeneration)
+	updatedReviewer, err := h.taskRepo.GetByID(ctx, reviewer.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.StatusPending, updatedReviewer.Status)
+	assert.Equal(t, "ready", updatedReviewer.SwarmStatus)
+}
+
 func TestHandler_TaskThreadSend_ResumesGoalPausedByUserStop(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()

@@ -1492,7 +1492,17 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 			}
 		}
 	}
+	h.notifySwarmChildTerminal(ctx, taskID)
 	return repository.CompleteSuccessCompleted
+}
+
+func (h *Handler) notifySwarmChildTerminal(ctx context.Context, taskID string) {
+	if h.swarmSvc == nil || taskID == "" {
+		return
+	}
+	if err := h.swarmSvc.OnChildCompleted(ctx, taskID); err != nil {
+		applog.Infof("[handler] swarm child completion hook task=%s error: %v", taskID, err)
+	}
 }
 
 func (h *Handler) recordStreamingUsage(ctx context.Context, params streamingResponseParams, result llmcontracts.AgentResult, status, errMsg string, durationMs int64) {
@@ -1791,6 +1801,7 @@ func (h *Handler) completeWithFailure(_ context.Context, execID, taskID, errorMe
 			applog.Infof("[handler] completeWithFailure task=%s error creating alert: %v", taskID, err)
 		}
 	}
+	h.notifySwarmChildTerminal(ctx, taskID)
 }
 
 // completeWithFailureAndOutput is like completeWithFailure but preserves partial output
@@ -1829,6 +1840,7 @@ func (h *Handler) completeWithFailureAndOutput(_ context.Context, execID, taskID
 			applog.Infof("[handler] completeWithFailureAndOutput task=%s error creating alert: %v", taskID, err)
 		}
 	}
+	h.notifySwarmChildTerminal(ctx, taskID)
 }
 
 // filterChatHistory filters a list of executions to exclude the current execution

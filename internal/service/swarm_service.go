@@ -386,6 +386,9 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 			cfg.CompletedGeneration = parentCfg.Generation
 			child.SwarmConfig, _ = cfg.JSON()
 			_ = s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence)
+			if refreshed, refreshErr := s.taskRepo.ListSwarmChildren(ctx, parent.ID); refreshErr == nil {
+				children = refreshed
+			}
 		}
 	}
 	if allRequiredWorkersCompleted(children, parentCfg.Generation) && parentCfg.ReviewerEnabled {
