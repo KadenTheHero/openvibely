@@ -1054,7 +1054,8 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	oldCategory := task.Category
 	oldStatus := task.Status
 	newCategory := models.TaskCategory(c.FormValue("category"))
-	stopActiveViaCategoryUpdate := oldCategory == models.CategoryActive && newCategory != oldCategory && newCategory != models.CategoryActive && (oldStatus == models.StatusRunning || oldStatus == models.StatusQueued)
+	isCancellableActiveWork := oldStatus == models.StatusRunning || oldStatus == models.StatusQueued || (oldStatus == models.StatusPending && models.IsSwarmChildRole(task.SwarmRole))
+	stopActiveViaCategoryUpdate := oldCategory == models.CategoryActive && newCategory != oldCategory && newCategory != models.CategoryActive && isCancellableActiveWork
 	if oldCategory != newCategory && newCategory == models.CategoryActive {
 		hasModels, err := h.hasConfiguredModels(c)
 		if err != nil {
