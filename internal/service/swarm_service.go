@@ -803,15 +803,45 @@ func (s *SwarmService) RecomputeParentStatus(ctx context.Context, parentTaskID s
 		status = models.StatusFailed
 	case anyBlocked:
 		status = models.StatusBlocked
-	case parentCfg.Generation > 0 && parentCfg.IntegratedGeneration >= parentCfg.Generation:
+	case parentCfg.Generation > 0 && parentCfg.IntegratorEnabled && parentCfg.IntegratedGeneration >= parentCfg.Generation:
 		if integrator := findChild(children, models.SwarmRoleIntegrator); integrator != nil && integrator.Status == models.StatusCompleted {
 			status = models.StatusCompleted
 		}
+	case swarmCompleteWithoutIntegrator(children, parentCfg):
+		status = models.StatusCompleted
+		if parentCfg.IntegratedGeneration < parentCfg.Generation {
+			parentCfg.IntegratedGeneration = parentCfg.Generation
+			parent.SwarmConfig, _ = parentCfg.JSON()
+			if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "current", parent.SwarmConfig, parent.SwarmSequence); err != nil {
+				return err
+			}
+			parent.SwarmStatus = "current"
+		}
 	}
 	if parent.Status != status {
-		return s.taskRepo.UpdateStatus(ctx, parent.ID, status)
+		if err := s.taskRepo.UpdateStatus(ctx, parent.ID, status); err != nil {
+			return err
+		}
+	}
+	if status == models.StatusCompleted && parent.Category != models.CategoryCompleted {
+		return s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryCompleted)
 	}
 	return nil
+}
+
+func swarmCompleteWithoutIntegrator(children []models.Task, parentCfg models.SwarmConfig) bool {
+	if parentCfg.Generation <= 0 || parentCfg.IntegratorEnabled || !allRequiredWorkersCompleted(children, parentCfg.Generation) {
+		return false
+	}
+	if !parentCfg.ReviewerEnabled {
+		return true
+	}
+	reviewer := findChild(children, models.SwarmRoleReviewer)
+	if reviewer == nil || reviewer.Status != models.StatusCompleted {
+		return false
+	}
+	reviewerCfg, _ := models.ParseSwarmConfig(reviewer.SwarmConfig)
+	return reviewerCfg.ReviewedGeneration >= parentCfg.Generation
 }
 
 func (s *SwarmService) CancelSwarm(ctx context.Context, parentTaskID string) error {

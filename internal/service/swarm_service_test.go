@@ -272,6 +272,120 @@ func TestSwarmServiceTerminalizesChildSwarmStatusOnCompletion(t *testing.T) {
 	}
 }
 
+func TestSwarmServiceCompletesReviewerOnlySwarmWithoutIntegrator(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
+	ctx := context.Background()
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: %v", err)
+	}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}}, ReviewerPrompt: "Review"}); err != nil {
+		t.Fatal(err)
+	}
+	if integrator, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleIntegrator); err != nil || integrator != nil {
+		t.Fatalf("integrator should not exist when disabled, integrator=%#v err=%v", integrator, err)
+	}
+	worker, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	if err != nil || worker == nil {
+		t.Fatalf("worker missing: %v", err)
+	}
+	if err := repo.UpdateStatus(ctx, worker.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.OnChildCompleted(ctx, worker.ID); err != nil {
+		t.Fatal(err)
+	}
+	reviewer, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleReviewer)
+	if err != nil || reviewer == nil {
+		t.Fatalf("reviewer missing: %v", err)
+	}
+	if reviewer.Status != models.StatusPending {
+		t.Fatalf("reviewer not started after worker completion: %#v", reviewer)
+	}
+	if err := repo.UpdateStatus(ctx, reviewer.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.OnChildCompleted(ctx, reviewer.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	parent, err = repo.GetByID(ctx, parent.ID)
+	if err != nil || parent == nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	if parent.Status != models.StatusCompleted || parent.Category != models.CategoryCompleted || parent.SwarmStatus != "current" {
+		t.Fatalf("parent not completed without integrator: status=%s category=%s swarm_status=%s", parent.Status, parent.Category, parent.SwarmStatus)
+	}
+	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	if parentCfg.IntegratedGeneration != parentCfg.Generation || parentCfg.Generation != 1 {
+		t.Fatalf("parent freshness not marked complete without integrator: %#v", parentCfg)
+	}
+	parentExecs, err := execRepo.ListByTask(ctx, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parentExecs) != 0 {
+		t.Fatalf("integrator-disabled swarm should not fabricate parent execution, got %#v", parentExecs)
+	}
+}
+
+func TestSwarmServiceCompletesWorkerOnlySwarmWithoutReviewerOrIntegrator(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+	ctx := context.Background()
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: false, IntegratorEnabled: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: %v", err)
+	}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	if reviewer, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleReviewer); err != nil || reviewer != nil {
+		t.Fatalf("reviewer should not exist when disabled, reviewer=%#v err=%v", reviewer, err)
+	}
+	if integrator, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleIntegrator); err != nil || integrator != nil {
+		t.Fatalf("integrator should not exist when disabled, integrator=%#v err=%v", integrator, err)
+	}
+	worker, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	if err != nil || worker == nil {
+		t.Fatalf("worker missing: %v", err)
+	}
+	if err := repo.UpdateStatus(ctx, worker.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.OnChildCompleted(ctx, worker.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	parent, err = repo.GetByID(ctx, parent.ID)
+	if err != nil || parent == nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	if parent.Status != models.StatusCompleted || parent.Category != models.CategoryCompleted || parent.SwarmStatus != "current" {
+		t.Fatalf("worker-only parent not completed: status=%s category=%s swarm_status=%s", parent.Status, parent.Category, parent.SwarmStatus)
+	}
+	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	if parentCfg.IntegratedGeneration != parentCfg.Generation || parentCfg.Generation != 1 {
+		t.Fatalf("worker-only parent freshness not marked complete: %#v", parentCfg)
+	}
+}
+
 func TestSwarmServiceStartsIntegratorAfterWorkersWhenReviewerDisabled(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)
