@@ -256,7 +256,9 @@ func TestTaskCard_HasMobileSafeActionsAndReadableText(t *testing.T) {
 		"w-11",
 		"pt-14",
 		"sm:pt-4",
-		"lg:pr-16",
+		"pr-0",
+		"sm:pr-24",
+		"lg:pr-12",
 		"break-words",
 		"sm:truncate",
 		"line-clamp-3",
@@ -270,6 +272,44 @@ func TestTaskCard_HasMobileSafeActionsAndReadableText(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected mobile-safe task card markup to contain %q, got %s", want, body)
 		}
+	}
+}
+
+func TestTaskCard_SwarmAccordionIsFullWidthAndCollapsedByDefault(t *testing.T) {
+	childID := "worker-1"
+	task := models.Task{
+		ID:        "parent-1",
+		ProjectID: "default",
+		Title:     "Swarm parent",
+		Category:  models.CategoryActive,
+		Status:    models.StatusRunning,
+		SwarmRole: models.SwarmRoleParent,
+		SwarmChildren: []models.Task{
+			{
+				ID:           childID,
+				ProjectID:    "default",
+				Title:        "Worker child",
+				Category:     models.CategoryCompleted,
+				Status:       models.StatusCompleted,
+				SwarmRole:    models.SwarmRoleWorker,
+				ParentTaskID: &childID,
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := TaskCard(task, "default", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task card: %v", err)
+	}
+	body := buf.String()
+	if !strings.Contains(body, `<details class="group mt-3 w-full`) {
+		t.Fatalf("expected swarm accordion to render full-width details container, got %s", body)
+	}
+	if strings.Contains(body, `<details class="group mt-3 w-full rounded-xl border border-base-300 bg-base-200/45 text-xs shadow-inner overflow-hidden" open`) {
+		t.Fatalf("expected swarm accordion to be collapsed by default, got %s", body)
+	}
+	if !strings.Contains(body, "1 worker") || !strings.Contains(body, "1/1 done") {
+		t.Fatalf("expected existing swarm summary labels in accordion header, got %s", body)
 	}
 }
 

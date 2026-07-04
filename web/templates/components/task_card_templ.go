@@ -436,7 +436,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" hx-target=\"#kanban-board\" hx-swap=\"outerHTML\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><div class=\"card-body p-4 pt-14 sm:pt-4 pr-4 sm:pr-28 lg:pr-16\"><div class=\"flex items-start justify-between\"><div class=\"flex-1 min-w-0\"><a href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" hx-target=\"#kanban-board\" hx-swap=\"outerHTML\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><div class=\"card-body p-4 pt-14 sm:pt-4\"><div class=\"flex items-start justify-between pr-0 sm:pr-24 lg:pr-12\"><div class=\"flex-1 min-w-0\"><a href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -681,7 +681,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			return templ_7745c5c3_Err
 		}
 		if task.SwarmRole == models.SwarmRoleParent && len(task.SwarmChildren) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<details class=\"group mt-3 rounded-xl border border-base-300 bg-base-200/45 text-xs shadow-inner overflow-hidden\" open><summary class=\"flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 font-semibold text-base-content/80 transition-colors hover:bg-base-300/40 [&::-webkit-details-marker]:hidden\" onclick=\"event.stopPropagation()\"><span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<details class=\"group mt-3 w-full rounded-xl border border-base-300 bg-base-200/45 text-xs shadow-inner overflow-hidden\"><summary class=\"flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 font-semibold text-base-content/80 transition-colors hover:bg-base-300/40 [&::-webkit-details-marker]:hidden\" onclick=\"event.stopPropagation()\"><span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
