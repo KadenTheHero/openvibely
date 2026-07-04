@@ -3534,6 +3534,60 @@ func TestHandler_CancelTask_NotifiesSwarmChildCancellation(t *testing.T) {
 	assert.Equal(t, "needs_coordination", updatedParent.SwarmStatus)
 }
 
+func TestHandler_UpdateTaskCategory_NotifiesSwarmChildCancellation(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Swarm Child Drop Cancel Project")
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
+		ProjectID:         project.ID,
+		Title:             "Swarm parent",
+		Prompt:            "Build the swarm result",
+		Category:          models.CategoryActive,
+		Priority:          2,
+		AgentID:           &agent.ID,
+		MaxWorkers:        1,
+		WorkerIsolation:   "worktree",
+		ReviewerEnabled:   true,
+		IntegratorEnabled: true,
+	})
+	require.NoError(t, err)
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
+		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt:   "Review the worker",
+		IntegratorPrompt: "Integrate the worker",
+	}))
+	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	require.NoError(t, err)
+	require.NotNil(t, worker)
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, worker.ID, models.StatusRunning))
+	require.NoError(t, h.taskRepo.UpdateCategory(ctx, worker.ID, models.CategoryActive))
+
+	form := url.Values{}
+	form.Set("category", string(models.CategoryCompleted))
+	req := httptest.NewRequest(http.MethodPatch, "/tasks/"+worker.ID+"/category", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	updatedParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedParent)
+	assert.Equal(t, models.StatusBlocked, updatedParent.Status)
+	assert.Equal(t, "needs_coordination", updatedParent.SwarmStatus)
+	updatedWorker, err := h.taskRepo.GetByID(ctx, worker.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedWorker)
+	assert.Equal(t, models.StatusCancelled, updatedWorker.Status)
+	assert.Equal(t, models.CategoryCompleted, updatedWorker.Category)
+}
+
 func TestHandler_CompleteWithCancellation_NotifiesSwarmChildCancellation(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil

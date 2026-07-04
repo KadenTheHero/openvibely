@@ -207,7 +207,16 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 		if s.workerSvc != nil {
 			s.workerSvc.CancelRunningTask(id)
 		}
-		s.repo.UpdateStatus(ctx, id, models.StatusCancelled)
+		if err := s.repo.UpdateStatus(ctx, id, models.StatusCancelled); err != nil {
+			applog.Infof("[task-svc] UpdateCategory error marking active task cancelled id=%s: %v", id, err)
+			return err
+		}
+		if s.swarmSvc != nil && models.IsSwarmChildRole(task.SwarmRole) {
+			if err := s.swarmSvc.OnChildCompleted(ctx, id); err != nil {
+				applog.Infof("[task-svc] UpdateCategory error notifying swarm child cancellation id=%s: %v", id, err)
+				return err
+			}
+		}
 		applog.Infof("[task-svc] UpdateCategory cancelled active task id=%s and kept requested category=%s", id, category)
 	}
 
