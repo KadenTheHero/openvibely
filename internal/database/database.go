@@ -43,7 +43,7 @@ func New(dsn string) (*sql.DB, error) {
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		return nil, fmt.Errorf("setting dialect: %w", err)
 	}
-	if err := goose.Up(db, "."); err != nil {
+	if err := goose.Up(db, ".", goose.WithAllowMissing()); err != nil {
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 

@@ -87,8 +87,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 106 {
-		t.Fatalf("max goose version = %d, want 106", maxVersion)
+	if maxVersion != 107 {
+		t.Fatalf("max goose version = %d, want 107", maxVersion)
 	}
 }
 
@@ -120,6 +120,63 @@ func TestMigration105_AllowsMixtureProviderAndConfig(t *testing.T) {
 	}
 	if raw != `{"enabled":false}` {
 		t.Fatalf("mixture_config_json = %q", raw)
+	}
+}
+
+func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "old-swarm-106.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("failed to set dialect: %v", err)
+	}
+	if err := goose.UpTo(db, ".", 105); err != nil {
+		t.Fatalf("failed to migrate to 105: %v", err)
+	}
+	if _, err := db.Exec(`
+		ALTER TABLE tasks ADD COLUMN swarm_role TEXT NOT NULL DEFAULT '';
+		ALTER TABLE tasks ADD COLUMN swarm_status TEXT NOT NULL DEFAULT '';
+		ALTER TABLE tasks ADD COLUMN swarm_config TEXT NOT NULL DEFAULT '{}';
+		ALTER TABLE tasks ADD COLUMN swarm_sequence INTEGER NOT NULL DEFAULT 0;
+		CREATE INDEX IF NOT EXISTS idx_tasks_swarm_parent
+		  ON tasks(parent_task_id, swarm_role, swarm_sequence);
+	`); err != nil {
+		t.Fatalf("failed to simulate old local swarm schema: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (106, 1)`); err != nil {
+		t.Fatalf("failed to simulate old local swarm 106 goose row: %v", err)
+	}
+
+	if err := goose.Up(db, ".", goose.WithAllowMissing()); err != nil {
+		t.Fatalf("expected allow-missing migrations to recover old local swarm 106 database: %v", err)
+	}
+
+	for _, column := range []string{"swarm_role", "swarm_status", "swarm_config", "swarm_sequence"} {
+		if !tableHasColumn(t, db, "tasks", column) {
+			t.Fatalf("expected tasks.%s after swarm migration recovery", column)
+		}
+	}
+	for _, table := range []string{"email_authorized_senders", "email_task_context"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatalf("failed to inspect table %s: %v", table, err)
+		}
+		if count != 1 {
+			t.Fatalf("expected table %s to exist after recovered migration chain", table)
+		}
+	}
+	var maxVersion int
+	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
+		t.Fatalf("failed to read max goose version: %v", err)
+	}
+	if maxVersion != 107 {
+		t.Fatalf("max goose version = %d, want 107", maxVersion)
 	}
 }
 
@@ -557,8 +614,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 106 {
-		t.Fatalf("max goose version = %d, want 106", maxVersion)
+	if maxVersion != 107 {
+		t.Fatalf("max goose version = %d, want 107", maxVersion)
 	}
 }
 
@@ -909,8 +966,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 106 {
-		t.Fatalf("max goose version = %d, want 106", maxVersion)
+	if maxVersion != 107 {
+		t.Fatalf("max goose version = %d, want 107", maxVersion)
 	}
 }
 
