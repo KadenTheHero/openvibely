@@ -298,8 +298,9 @@ func completeChannelExecution(ctx context.Context, opts channelExecutionCompleti
 	if opts.ErrorMessage != "" {
 		if err := opts.ExecRepo.Complete(ctx, opts.ExecID, models.ExecFailed, "", opts.ErrorMessage, 0, opts.DurationMs); err != nil {
 			applog.Infof("[%s] complete failed execution error: %v", platform, err)
+		} else {
+			publishChannelExecutionTerminal(opts.ExecutionStreamHub, opts.ExecID, models.ExecFailed, opts.ErrorMessage)
 		}
-		publishChannelExecutionTerminal(opts.ExecutionStreamHub, opts.ExecID, models.ExecFailed, opts.ErrorMessage)
 		if err := opts.TaskRepo.UpdateStatus(ctx, opts.TaskID, models.StatusFailed); err != nil {
 			applog.Infof("[%s] update failed task status error: %v", platform, err)
 		}
@@ -308,8 +309,9 @@ func completeChannelExecution(ctx context.Context, opts channelExecutionCompleti
 	}
 	if err := opts.ExecRepo.Complete(ctx, opts.ExecID, models.ExecCompleted, opts.Output, "", opts.TokensUsed, opts.DurationMs); err != nil {
 		applog.Infof("[%s] complete execution error: %v", platform, err)
+	} else {
+		publishChannelExecutionTerminal(opts.ExecutionStreamHub, opts.ExecID, models.ExecCompleted, "")
 	}
-	publishChannelExecutionTerminal(opts.ExecutionStreamHub, opts.ExecID, models.ExecCompleted, "")
 	if err := opts.TaskRepo.UpdateStatus(ctx, opts.TaskID, models.StatusCompleted); err != nil {
 		applog.Infof("[%s] update task status error: %v", platform, err)
 	}

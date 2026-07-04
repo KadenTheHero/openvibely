@@ -1581,8 +1581,9 @@ func (h *Handler) completeWithCancellation(execID, taskID, output string, tokens
 	defer cancel()
 	if err := h.execRepo.Complete(ctx, execID, models.ExecCancelled, output, "cancelled", tokensUsed, durationMs); err != nil {
 		applog.Infof("[handler] completeWithCancellation exec=%s error completing cancelled execution: %v", execID, err)
+	} else {
+		h.publishExecutionTerminal(execID, models.ExecCancelled, "cancelled")
 	}
-	h.publishExecutionTerminal(execID, models.ExecCancelled, "cancelled")
 	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusCancelled); err != nil {
 		applog.Infof("[handler] completeWithCancellation task=%s error updating status: %v", taskID, err)
 	}
@@ -1804,8 +1805,9 @@ func (h *Handler) completeWithFailure(_ context.Context, execID, taskID, errorMe
 
 	if err := h.execRepo.Complete(ctx, execID, models.ExecFailed, "", errorMessage, 0, durationMs); err != nil {
 		applog.Infof("[handler] completeWithFailure exec=%s error completing execution: %v", execID, err)
+	} else {
+		h.publishExecutionTerminal(execID, models.ExecFailed, errorMessage)
 	}
-	h.publishExecutionTerminal(execID, models.ExecFailed, errorMessage)
 
 	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed); err != nil {
 		applog.Infof("[handler] completeWithFailure task=%s error updating status: %v", taskID, err)
@@ -1844,8 +1846,9 @@ func (h *Handler) completeWithFailureAndOutput(_ context.Context, execID, taskID
 
 	if err := h.execRepo.Complete(ctx, execID, models.ExecFailed, output, errorMessage, tokensUsed, durationMs); err != nil {
 		applog.Infof("[handler] completeWithFailureAndOutput exec=%s error completing execution: %v", execID, err)
+	} else {
+		h.publishExecutionTerminal(execID, models.ExecFailed, errorMessage)
 	}
-	h.publishExecutionTerminal(execID, models.ExecFailed, errorMessage)
 
 	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed); err != nil {
 		applog.Infof("[handler] completeWithFailureAndOutput task=%s error updating status: %v", taskID, err)

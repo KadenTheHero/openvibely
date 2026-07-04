@@ -418,8 +418,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error loading attachments: %v", err)
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", err.Error(), 0, 0); completeErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after attachment load failure: %v", completeErr)
+		} else {
+			s.publishExecutionTerminal(exec.ID, models.ExecFailed, err.Error())
 		}
-		s.publishExecutionTerminal(exec.ID, models.ExecFailed, err.Error())
 		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after attachment load failure: %v", statusErr)
 		}
@@ -459,8 +460,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 				applog.Infof("[agent-svc] ExecuteTaskWithAgent ERROR: %s", errMsg)
 				if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); completeErr != nil {
 					applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after missing repo: %v", completeErr)
+				} else {
+					s.publishExecutionTerminal(exec.ID, models.ExecFailed, errMsg)
 				}
-				s.publishExecutionTerminal(exec.ID, models.ExecFailed, errMsg)
 				if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 					applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after missing repo: %v", statusErr)
 				}
@@ -493,8 +495,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 				applog.Infof("[agent-svc] ExecuteTaskWithAgent startup worktree auto-merge failed task=%s: %v", task.ID, syncErr)
 				if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", syncErr.Error(), 0, 0); completeErr != nil {
 					applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after startup auto-merge failure: %v", completeErr)
+				} else {
+					s.publishExecutionTerminal(exec.ID, models.ExecFailed, syncErr.Error())
 				}
-				s.publishExecutionTerminal(exec.ID, models.ExecFailed, syncErr.Error())
 				if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 					applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after startup auto-merge failure: %v", statusErr)
 				}
@@ -542,8 +545,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent scoped files prep failed task=%s: %v", task.ID, prepErr)
 			if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); completeErr != nil {
 				applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after scoped files prep failure: %v", completeErr)
+			} else {
+				s.publishExecutionTerminal(exec.ID, models.ExecFailed, errMsg)
 			}
-			s.publishExecutionTerminal(exec.ID, models.ExecFailed, errMsg)
 			if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 				applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after scoped files prep failure: %v", statusErr)
 			}
@@ -636,8 +640,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			// Pass output (may contain partial streamed content) so Complete preserves it
 			if completeErr := s.execRepo.Complete(bgCtx, exec.ID, models.ExecCancelled, output, "task cancelled by user", tokensUsed, durationMs); completeErr != nil {
 				applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing cancelled execution: %v", completeErr)
+			} else {
+				s.publishExecutionTerminal(exec.ID, models.ExecCancelled, "task cancelled by user")
 			}
-			s.publishExecutionTerminal(exec.ID, models.ExecCancelled, "task cancelled by user")
 			RecordUsageFromResult(bgCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecCancelled), ErrorMessage: "task cancelled by user", LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 			// Task status is already set to cancelled by CancelTask, but set it again
 			// in case the cancellation came from a different path (e.g., server shutdown).
@@ -663,8 +668,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		}
 		if completeErr := s.execRepo.Complete(bgCtx, exec.ID, models.ExecFailed, failedOutput, err.Error(), tokensUsed, durationMs); completeErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
+		} else {
+			s.publishExecutionTerminal(exec.ID, models.ExecFailed, err.Error())
 		}
-		s.publishExecutionTerminal(exec.ID, models.ExecFailed, err.Error())
 		RecordUsageFromResult(bgCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: err.Error(), LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 		if statusErr := s.taskRepo.UpdateStatus(bgCtx, task.ID, models.StatusFailed); statusErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to failed: %v", statusErr)
@@ -704,8 +710,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing steering task=%s exec=%s: %v", task.ID, exec.ID, err)
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, output, err.Error(), tokensUsed, durationMs); completeErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after steering commit failure: %v", completeErr)
+		} else {
+			s.publishExecutionTerminal(exec.ID, models.ExecFailed, err.Error())
 		}
-		s.publishExecutionTerminal(exec.ID, models.ExecFailed, err.Error())
 		RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: err.Error(), LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after steering commit failure: %v", statusErr)
@@ -721,8 +728,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent empty LLM response task=%s duration=%dms", task.ID, durationMs)
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", reason, tokensUsed, durationMs); completeErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing empty-response execution: %v", completeErr)
+		} else {
+			s.publishExecutionTerminal(exec.ID, models.ExecFailed, reason)
 		}
-		s.publishExecutionTerminal(exec.ID, models.ExecFailed, reason)
 		RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: reason, LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after empty response: %v", statusErr)
@@ -761,8 +769,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		// can replay the failed turn chronologically instead of looking like a blank task.
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, output, reason, tokensUsed, durationMs); completeErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
+		} else {
+			s.publishExecutionTerminal(exec.ID, models.ExecFailed, reason)
 		}
-		s.publishExecutionTerminal(exec.ID, models.ExecFailed, reason)
 		RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: reason, LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to failed: %v", statusErr)
@@ -824,14 +833,19 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	}
 
 	// Record success
+	completedExecution := false
 	if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecCompleted, output, "", tokensUsed, durationMs); completeErr != nil {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
+	} else {
+		completedExecution = true
 	}
 	RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecCompleted), LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 	if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusCompleted); statusErr != nil {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to completed: %v", statusErr)
 	}
-	s.publishExecutionTerminal(exec.ID, models.ExecCompleted, "")
+	if completedExecution {
+		s.publishExecutionTerminal(exec.ID, models.ExecCompleted, "")
+	}
 
 	// Capture git diff of changes made during execution
 	if workDir != "" {
