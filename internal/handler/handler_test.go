@@ -3380,6 +3380,53 @@ func TestHandler_TaskThreadSend(t *testing.T) {
 	}
 }
 
+func TestHandler_TaskThreadSend_SwarmParentRoutesWithoutNormalExecution(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Swarm Parent Project")
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
+		ProjectID:         project.ID,
+		Title:             "Swarm parent",
+		Prompt:            "Build the swarm result",
+		Category:          models.CategoryCompleted,
+		Priority:          2,
+		AgentID:           &agent.ID,
+		MaxWorkers:        3,
+		WorkerIsolation:   "worktree",
+		ReviewerEnabled:   true,
+		IntegratorEnabled: true,
+	})
+	require.NoError(t, err)
+
+	form := url.Values{}
+	form.Set("message", "Update only the API worker")
+	rec := htmxPost(e, "/tasks/"+parent.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "Update only the API worker")
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Empty(t, execs, "parent swarm follow-up must not create a normal parent execution")
+	pending, err := h.threadInputRepo.ListPendingForTask(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Empty(t, pending, "parent swarm follow-up must not queue a normal parent thread input")
+
+	updatedParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedParent)
+	assert.Equal(t, "needs_coordination", updatedParent.SwarmStatus)
+	assert.Equal(t, models.StatusRunning, updatedParent.Status)
+
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	assert.Equal(t, models.StatusPending, planner.Status)
+	assert.Equal(t, "coordinating", planner.SwarmStatus)
+	assert.Contains(t, planner.Prompt, "Update only the API worker")
+}
+
 func TestHandler_TaskThreadSend_ResumesGoalPausedByUserStop(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()

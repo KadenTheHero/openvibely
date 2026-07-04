@@ -1843,9 +1843,19 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	}
 	if h.swarmSvc != nil {
 		if task.SwarmRole == models.SwarmRoleParent {
-			_ = h.swarmSvc.HandleParentFollowup(c.Request().Context(), task.ID, message)
+			if err := h.swarmSvc.HandleParentFollowup(c.Request().Context(), task.ID, message); err != nil {
+				applog.Infof("[handler] TaskThreadSend swarm parent follow-up routing failed task=%s: %v", taskID, err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
+			}
+			return render(c, http.StatusOK, templ.Join(
+				components.TaskThreadQueuedFollowupResponse(message, nil),
+				components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false),
+			))
 		} else if models.IsSwarmChildRole(task.SwarmRole) {
-			_ = h.swarmSvc.HandleChildFollowup(c.Request().Context(), task.ID, message)
+			if err := h.swarmSvc.HandleChildFollowup(c.Request().Context(), task.ID, message); err != nil {
+				applog.Infof("[handler] TaskThreadSend swarm child follow-up routing failed task=%s: %v", taskID, err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
+			}
 		}
 	}
 
