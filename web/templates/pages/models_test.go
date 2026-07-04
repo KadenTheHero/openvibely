@@ -252,7 +252,7 @@ func TestModelsContent_ModelMutationsPreserveActiveProject(t *testing.T) {
 		"var _createUrl = modelMutationURL('/models');",
 		"var _editUrl = modelMutationURL('/models/' + id);",
 		"data-model-set-default-url=",
-		`onclick="setDefaultModel(this)"`,
+		`onclick="event.stopPropagation(); setDefaultModel(this)"`,
 		"htmx.ajax('POST', modelMutationURL(path)",
 		"htmx.ajax('DELETE', modelMutationURL('/models/' + _deleteModelId)",
 		"htmx.ajax('DELETE', modelMutationURL('/models/' + _deleteModelId + '?new_default_id=' + encodeURIComponent(newDefaultId))",
@@ -304,10 +304,78 @@ func TestModelsContent_ModelModalJavaScriptShape(t *testing.T) {
 	for _, broken := range []string{
 		"// In \"Create\" mode, update the per-request output token cap to the model-specific default.",
 		"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\t\t\t\t\tfunction",
+		"// Map DB provider values to UI values\t\t\t\tvar uiProvider = dbProvider;",
 	} {
 		if strings.Contains(out, broken) {
 			t.Fatalf("rendered script contains known broken modal JavaScript fragment: %q", broken)
 		}
+	}
+	if !strings.Contains(out, "/* Map DB provider values to UI values. */") || !strings.Contains(out, "var uiProvider = dbProvider;") {
+		t.Fatal("expected edit modal JavaScript to initialize uiProvider before provider-specific mapping")
+	}
+}
+
+func TestModelsContent_DefaultCardCarriesCompleteEditData(t *testing.T) {
+	agents := []models.LLMConfig{
+		{
+			ID:             "default-model",
+			Name:           "Default OpenAI",
+			Provider:       models.ProviderOpenAI,
+			Model:          "gpt-5.5",
+			AuthMethod:     models.AuthMethodAPIKey,
+			APIKey:         "sk-default",
+			Temperature:    0.42,
+			IsDefault:      true,
+			AutoStartTasks: true,
+		},
+		{
+			ID:              "other-model",
+			Name:            "Other Claude",
+			Provider:        models.ProviderAnthropic,
+			Model:           "claude-sonnet-5",
+			AuthMethod:      models.AuthMethodOAuth,
+			Temperature:     0.9,
+			ReasoningEffort: "high",
+		},
+	}
+	var buf bytes.Buffer
+	if err := ModelsContent(agents, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+	out := buf.String()
+
+	defaultCard := renderedModelCard(t, out, "default-model")
+	for _, want := range []string{
+		`onclick="editModelFromData(this)"`,
+		`data-model-name="Default OpenAI"`,
+		`data-model-provider="openai"`,
+		`data-model-model="gpt-5.5"`,
+		`data-model-auth-method="api_key"`,
+		`data-model-api-key="sk-default"`,
+		`data-model-temperature="0.420000"`,
+		`data-model-is-default="true"`,
+		`data-model-auto-start-tasks="true"`,
+	} {
+		if !strings.Contains(defaultCard, want) {
+			t.Fatalf("expected default model card edit data to contain %q in:\n%s", want, defaultCard)
+		}
+	}
+	if !strings.Contains(defaultCard, "Default</span>") {
+		t.Fatal("expected default badge to render without replacing card edit click target")
+	}
+	if strings.Contains(defaultCard, `data-model-set-default-url=`) {
+		t.Fatal("default card should not render a set-default action that can conflict with edit opening")
+	}
+
+	otherCard := renderedModelCard(t, out, "other-model")
+	if !strings.Contains(otherCard, `onclick="editModelFromData(this)"`) {
+		t.Fatal("expected non-default card to remain directly editable")
+	}
+	if !strings.Contains(otherCard, `data-model-provider="anthropic"`) || !strings.Contains(otherCard, `data-model-auth-method="oauth"`) {
+		t.Fatal("expected non-default card to carry its own provider/auth edit data")
+	}
+	if !strings.Contains(otherCard, `data-model-reasoning-effort="high"`) {
+		t.Fatal("expected non-default card to carry its own reasoning effort edit data")
 	}
 }
 
@@ -634,6 +702,29 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 			t.Fatalf("expected discovery UI not to contain %q", forbidden)
 		}
 	}
+}
+
+func renderedModelCard(t *testing.T, out, id string) string {
+	t.Helper()
+	marker := `data-model-id="` + id + `"`
+	idx := strings.Index(out, marker)
+	if idx < 0 {
+		t.Fatalf("expected rendered model card for %s", id)
+	}
+	cardClass := `<div class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer`
+	start := strings.LastIndex(out[:idx], cardClass)
+	if start < 0 {
+		t.Fatalf("expected model card %s to start with card container", id)
+	}
+	end := strings.Index(out[idx+len(marker):], cardClass)
+	if end >= 0 {
+		return out[start : idx+len(marker)+end]
+	}
+	modalStart := strings.Index(out[idx:], `<dialog id="new_model_modal"`)
+	if modalStart < 0 {
+		t.Fatalf("expected model card %s to be followed by modal markup", id)
+	}
+	return out[start : idx+modalStart]
 }
 
 func balancedJavaScriptBraces(value string) error {

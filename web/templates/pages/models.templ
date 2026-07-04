@@ -245,17 +245,15 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 									</label>
 									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
 										<li>
-											<button onclick="editModelFromData(this.closest('[data-model-id]'))">
-												Edit
-											</button>
-										</li>
+										<button onclick="event.stopPropagation(); editModelFromData(this.closest('[data-model-id]'))">
+											Edit
+										</button>										</li>
 										if !agent.IsDefault {
 											<li>
-												<button
-													data-model-set-default-url={ fmt.Sprintf("/models/%s/set-default", agent.ID) }
-													onclick="setDefaultModel(this)"
-												>
-													Set as Default
+											<button
+												data-model-set-default-url={ fmt.Sprintf("/models/%s/set-default", agent.ID) }
+												onclick="event.stopPropagation(); setDefaultModel(this)"
+											>													Set as Default
 												</button>
 											</li>
 										}
@@ -265,7 +263,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 												data-model-id={ agent.ID }
 												data-model-name={ agent.Name }
 												data-model-is-default={ fmt.Sprintf("%t", agent.IsDefault) }
-												onclick="deleteModel(this)"
+												onclick="event.stopPropagation(); deleteModel(this)"
 											>
 												Delete
 											</button>
@@ -1569,8 +1567,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						var autoStartTasks = button.dataset.modelAutoStartTasks === 'true';
 						var mixtureConfigJSON = button.dataset.modelMixtureConfigJson || '';
 
-					// Map DB provider values to UI values				var uiProvider = dbProvider;
-				var anthropicAuthType = 'api_key';
+						/* Map DB provider values to UI values. */
+						var uiProvider = dbProvider;				var anthropicAuthType = 'api_key';
 				var openaiAuthType = 'api_key';
 				var openaiConnectionMethod = 'oauth';
 					if (dbProvider === 'anthropic') {
