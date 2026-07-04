@@ -671,21 +671,33 @@ func (s *SwarmService) RecomputeParentStatus(ctx context.Context, parentTaskID s
 	if len(children) == 0 {
 		return nil
 	}
+
+	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	status := models.StatusPending
+	anyActive := false
+	anyFailed := false
+	anyBlocked := false
 	for _, child := range children {
-		if child.Status == models.StatusRunning || child.Status == models.StatusPending || child.Status == models.StatusQueued {
-			status = models.StatusRunning
-			break
-		}
-		if child.Status == models.StatusFailed {
-			status = models.StatusFailed
-		}
-		if child.Status == models.StatusBlocked && status != models.StatusFailed {
-			status = models.StatusBlocked
+		switch child.Status {
+		case models.StatusRunning, models.StatusPending, models.StatusQueued:
+			anyActive = true
+		case models.StatusFailed:
+			anyFailed = true
+		case models.StatusBlocked:
+			anyBlocked = true
 		}
 	}
-	if integrator := findChild(children, models.SwarmRoleIntegrator); integrator != nil && integrator.Status == models.StatusCompleted {
-		status = models.StatusCompleted
+	switch {
+	case anyActive:
+		status = models.StatusRunning
+	case anyFailed:
+		status = models.StatusFailed
+	case anyBlocked:
+		status = models.StatusBlocked
+	case parentCfg.Generation > 0 && parentCfg.IntegratedGeneration >= parentCfg.Generation:
+		if integrator := findChild(children, models.SwarmRoleIntegrator); integrator != nil && integrator.Status == models.StatusCompleted {
+			status = models.StatusCompleted
+		}
 	}
 	if parent.Status != status {
 		return s.taskRepo.UpdateStatus(ctx, parent.ID, status)

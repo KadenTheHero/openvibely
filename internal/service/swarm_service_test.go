@@ -667,6 +667,50 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 	}
 }
 
+func TestSwarmServiceRecomputeParentStatusDoesNotLetStaleIntegratorOverrideActiveWork(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, parent, children := newCompletedSwarmForServiceTest(t, ctx)
+
+	reviewer := children[models.SwarmRoleReviewer]
+	if reviewer == nil {
+		t.Fatal("reviewer missing")
+	}
+	if err := repo.UpdateStatus(ctx, reviewer.ID, models.StatusPending); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RecomputeParentStatus(ctx, parent.ID); err != nil {
+		t.Fatalf("RecomputeParentStatus with pending reviewer: %v", err)
+	}
+	updatedParent, err := repo.GetByID(ctx, parent.ID)
+	if err != nil || updatedParent == nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	if updatedParent.Status != models.StatusRunning {
+		t.Fatalf("pending reviewer should keep parent running despite old completed integrator, got %s", updatedParent.Status)
+	}
+
+	if err := repo.UpdateStatus(ctx, reviewer.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	parentCfg, _ := models.ParseSwarmConfig(updatedParent.SwarmConfig)
+	parentCfg.Generation = 2
+	parentCfg.IntegratedGeneration = 1
+	updatedParent.SwarmConfig, _ = parentCfg.JSON()
+	if err := repo.UpdateSwarmFields(ctx, updatedParent.ID, updatedParent.SwarmRole, "needs_integration", updatedParent.SwarmConfig, updatedParent.SwarmSequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RecomputeParentStatus(ctx, parent.ID); err != nil {
+		t.Fatalf("RecomputeParentStatus with stale integration: %v", err)
+	}
+	updatedParent, err = repo.GetByID(ctx, parent.ID)
+	if err != nil || updatedParent == nil {
+		t.Fatalf("get parent after stale integration: %v", err)
+	}
+	if updatedParent.Status == models.StatusCompleted {
+		t.Fatalf("stale integrated_generation should not complete parent")
+	}
+}
+
 func TestSwarmServiceHandleChildFollowupIsRoleSpecific(t *testing.T) {
 	tests := []struct {
 		name                  string
