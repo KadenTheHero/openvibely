@@ -434,21 +434,46 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 	}
 	if child.SwarmRole == models.SwarmRoleIntegrator && child.Status == models.StatusCompleted {
 		cfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
-		if cfg.IntegratedGeneration < parentCfg.Generation {
-			cfg.IntegratedGeneration = parentCfg.Generation
-			child.SwarmConfig, _ = cfg.JSON()
-			_ = s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence)
+		targetGeneration := cfg.RerunGeneration
+		if targetGeneration <= 0 {
+			targetGeneration = cfg.IntegratedGeneration
+		}
+		reviewedCurrent := !parentCfg.ReviewerEnabled
+		if reviewer := findChild(children, models.SwarmRoleReviewer); reviewer != nil && parentCfg.ReviewerEnabled {
+			revCfg, _ := models.ParseSwarmConfig(reviewer.SwarmConfig)
+			reviewedCurrent = revCfg.ReviewedGeneration >= targetGeneration && reviewer.Status == models.StatusCompleted
+		}
+		if targetGeneration <= parentCfg.IntegratedGeneration || targetGeneration != parentCfg.Generation || !reviewedCurrent || hasActiveSwarmWorkBeforeIntegration(children) {
+			return s.RecomputeParentStatus(ctx, parent.ID)
+		}
+		cfg.IntegratedGeneration = targetGeneration
+		child.SwarmConfig, _ = cfg.JSON()
+		if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+			return err
 		}
 		if err := s.persistIntegratorResultToParent(ctx, parent.ID, child.ID); err != nil {
 			return err
 		}
-		parentCfg.IntegratedGeneration = max(parentCfg.IntegratedGeneration, parentCfg.Generation)
+		parentCfg.IntegratedGeneration = targetGeneration
 		parent.SwarmConfig, _ = parentCfg.JSON()
 		_ = s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "current", parent.SwarmConfig, parent.SwarmSequence)
 		_ = s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusCompleted)
 		_ = s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryCompleted)
 	}
 	return s.RecomputeParentStatus(ctx, parent.ID)
+}
+
+func hasActiveSwarmWorkBeforeIntegration(children []models.Task) bool {
+	for _, child := range children {
+		if child.SwarmRole == models.SwarmRoleIntegrator {
+			continue
+		}
+		switch child.Status {
+		case models.StatusPending, models.StatusQueued, models.StatusRunning:
+			return true
+		}
+	}
+	return false
 }
 
 func (s *SwarmService) handleChildCancelled(ctx context.Context, parent *models.Task, child *models.Task, parentCfg models.SwarmConfig) error {
