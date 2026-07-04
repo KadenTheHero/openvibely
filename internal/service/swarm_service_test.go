@@ -666,3 +666,144 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 		t.Fatalf("parent not reactivated for integrator rerun: swarm=%s status=%s category=%s", parent.SwarmStatus, parent.Status, parent.Category)
 	}
 }
+
+func TestSwarmServiceHandleChildFollowupIsRoleSpecific(t *testing.T) {
+	tests := []struct {
+		name                  string
+		role                  models.SwarmRole
+		wantParentStatus      string
+		wantGeneration        int
+		wantReviewed          int
+		wantIntegrated        int
+		wantChildCompleted    int
+		wantChildReviewed     int
+		wantChildIntegrated   int
+		wantChildRerunAtLeast int
+	}{
+		{name: "worker", role: models.SwarmRoleWorker, wantParentStatus: "needs_review", wantGeneration: 2, wantReviewed: 1, wantIntegrated: 1, wantChildCompleted: 1, wantChildRerunAtLeast: 2},
+		{name: "reviewer", role: models.SwarmRoleReviewer, wantParentStatus: "needs_review", wantGeneration: 1, wantReviewed: 1, wantIntegrated: 0, wantChildReviewed: 0, wantChildRerunAtLeast: 1},
+		{name: "integrator", role: models.SwarmRoleIntegrator, wantParentStatus: "needs_integration", wantGeneration: 1, wantReviewed: 1, wantIntegrated: 0, wantChildIntegrated: 0, wantChildRerunAtLeast: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo, svc, parent, children := newCompletedSwarmForServiceTest(t, ctx)
+			child := children[tc.role]
+			if child == nil {
+				t.Fatalf("%s child missing", tc.role)
+			}
+			if err := svc.HandleChildFollowup(ctx, child.ID, "please adjust this role"); err != nil {
+				t.Fatalf("HandleChildFollowup: %v", err)
+			}
+			updatedParent, err := repo.GetByID(ctx, parent.ID)
+			if err != nil || updatedParent == nil {
+				t.Fatalf("get parent: %v", err)
+			}
+			parentCfg, _ := models.ParseSwarmConfig(updatedParent.SwarmConfig)
+			if updatedParent.SwarmStatus != tc.wantParentStatus || updatedParent.Status != models.StatusRunning || updatedParent.Category != models.CategoryActive {
+				t.Fatalf("parent state after %s follow-up: swarm=%s status=%s category=%s", tc.role, updatedParent.SwarmStatus, updatedParent.Status, updatedParent.Category)
+			}
+			if parentCfg.Generation != tc.wantGeneration || parentCfg.ReviewedGeneration != tc.wantReviewed || parentCfg.IntegratedGeneration != tc.wantIntegrated {
+				t.Fatalf("parent cfg after %s follow-up: %#v", tc.role, parentCfg)
+			}
+			updatedChild, err := repo.GetByID(ctx, child.ID)
+			if err != nil || updatedChild == nil {
+				t.Fatalf("get child: %v", err)
+			}
+			childCfg, _ := models.ParseSwarmConfig(updatedChild.SwarmConfig)
+			if childCfg.CompletedGeneration != tc.wantChildCompleted || childCfg.ReviewedGeneration != tc.wantChildReviewed || childCfg.IntegratedGeneration != tc.wantChildIntegrated || childCfg.RerunGeneration < tc.wantChildRerunAtLeast {
+				t.Fatalf("child cfg after %s follow-up: %#v", tc.role, childCfg)
+			}
+			if tc.role == models.SwarmRoleIntegrator {
+				reviewer := children[models.SwarmRoleReviewer]
+				updatedReviewer, _ := repo.GetByID(ctx, reviewer.ID)
+				if updatedReviewer.Status != models.StatusCompleted {
+					t.Fatalf("integrator follow-up should not rerun reviewer: %#v", updatedReviewer)
+				}
+			}
+		})
+	}
+}
+
+func newCompletedSwarmForServiceTest(t *testing.T, ctx context.Context) (*repository.TaskRepo, *SwarmService, *models.Task, map[models.SwarmRole]*models.Task) {
+	t.Helper()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner, _ := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if planner == nil {
+		t.Fatal("planner missing")
+	}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}); err != nil {
+		t.Fatal(err)
+	}
+	children, err := repo.ListSwarmChildren(ctx, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byRole := map[models.SwarmRole]*models.Task{}
+	for i := range children {
+		child := children[i]
+		cfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
+		switch child.SwarmRole {
+		case models.SwarmRolePlanner:
+			if err := repo.UpdateStatus(ctx, child.ID, models.StatusCompleted); err != nil {
+				t.Fatal(err)
+			}
+		case models.SwarmRoleWorker:
+			cfg.CompletedGeneration = 1
+			child.SwarmConfig, _ = cfg.JSON()
+			if err := repo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.UpdateStatus(ctx, child.ID, models.StatusCompleted); err != nil {
+				t.Fatal(err)
+			}
+		case models.SwarmRoleReviewer:
+			cfg.ReviewedGeneration = 1
+			child.SwarmConfig, _ = cfg.JSON()
+			if err := repo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.UpdateStatus(ctx, child.ID, models.StatusCompleted); err != nil {
+				t.Fatal(err)
+			}
+		case models.SwarmRoleIntegrator:
+			cfg.IntegratedGeneration = 1
+			child.SwarmConfig, _ = cfg.JSON()
+			if err := repo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.UpdateStatus(ctx, child.ID, models.StatusCompleted); err != nil {
+				t.Fatal(err)
+			}
+		}
+		updated, err := repo.GetByID(ctx, child.ID)
+		if err != nil || updated == nil {
+			t.Fatalf("reload %s child: %v", child.SwarmRole, err)
+		}
+		byRole[child.SwarmRole] = updated
+	}
+	parent, _ = repo.GetByID(ctx, parent.ID)
+	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	parentCfg.Generation = 1
+	parentCfg.ReviewedGeneration = 1
+	parentCfg.IntegratedGeneration = 1
+	parent.SwarmConfig, _ = parentCfg.JSON()
+	if err := repo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "current", parent.SwarmConfig, parent.SwarmSequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(ctx, parent.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateCategory(ctx, parent.ID, models.CategoryCompleted); err != nil {
+		t.Fatal(err)
+	}
+	parent, _ = repo.GetByID(ctx, parent.ID)
+	return repo, svc, parent, byRole
+}

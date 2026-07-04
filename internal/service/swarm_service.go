@@ -531,17 +531,74 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 
 func (s *SwarmService) HandleChildFollowup(ctx context.Context, childTaskID string, message string) error {
 	child, err := s.taskRepo.GetByID(ctx, childTaskID)
-	if err != nil || child == nil || child.ParentTaskID == nil {
+	if err != nil || child == nil || child.ParentTaskID == nil || !models.IsSwarmChildRole(child.SwarmRole) {
 		return err
 	}
 	parent, err := s.taskRepo.GetByID(ctx, *child.ParentTaskID)
 	if err != nil || parent == nil {
 		return err
 	}
-	cfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
-	cfg.Generation++
-	parent.SwarmConfig, _ = cfg.JSON()
-	return s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_review", parent.SwarmConfig, parent.SwarmSequence)
+	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	childCfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
+	swarmStatus := ""
+	switch child.SwarmRole {
+	case models.SwarmRoleWorker:
+		parentCfg.Generation++
+		if parentCfg.Generation == 0 {
+			parentCfg.Generation = 1
+		}
+		parentCfg.ReviewedGeneration = min(parentCfg.ReviewedGeneration, parentCfg.Generation-1)
+		parentCfg.IntegratedGeneration = min(parentCfg.IntegratedGeneration, parentCfg.Generation-1)
+		childCfg.RerunGeneration = parentCfg.Generation
+		childCfg.CompletedGeneration = min(childCfg.CompletedGeneration, parentCfg.Generation-1)
+		swarmStatus = "needs_review"
+	case models.SwarmRoleReviewer:
+		if parentCfg.Generation <= 0 {
+			parentCfg.Generation = 1
+		}
+		parentCfg.IntegratedGeneration = min(parentCfg.IntegratedGeneration, parentCfg.Generation-1)
+		childCfg.RerunGeneration = max(childCfg.RerunGeneration, parentCfg.Generation)
+		childCfg.ReviewedGeneration = min(childCfg.ReviewedGeneration, parentCfg.Generation-1)
+		swarmStatus = "needs_review"
+	case models.SwarmRoleIntegrator:
+		if parentCfg.Generation <= 0 {
+			parentCfg.Generation = 1
+		}
+		parentCfg.IntegratedGeneration = min(parentCfg.IntegratedGeneration, parentCfg.Generation-1)
+		childCfg.RerunGeneration = max(childCfg.RerunGeneration, max(parentCfg.ReviewedGeneration, parentCfg.Generation))
+		childCfg.IntegratedGeneration = min(childCfg.IntegratedGeneration, parentCfg.Generation-1)
+		swarmStatus = "needs_integration"
+	default:
+		return nil
+	}
+	if parentCfg.ReviewedGeneration < 0 {
+		parentCfg.ReviewedGeneration = 0
+	}
+	if parentCfg.IntegratedGeneration < 0 {
+		parentCfg.IntegratedGeneration = 0
+	}
+	if childCfg.CompletedGeneration < 0 {
+		childCfg.CompletedGeneration = 0
+	}
+	if childCfg.ReviewedGeneration < 0 {
+		childCfg.ReviewedGeneration = 0
+	}
+	if childCfg.IntegratedGeneration < 0 {
+		childCfg.IntegratedGeneration = 0
+	}
+	parent.SwarmConfig, _ = parentCfg.JSON()
+	if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, swarmStatus, parent.SwarmConfig, parent.SwarmSequence); err != nil {
+		return err
+	}
+	if err := s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning); err != nil {
+		return err
+	}
+	if err := s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryActive); err != nil {
+		return err
+	}
+	child.SwarmConfig, _ = childCfg.JSON()
+	child.SwarmStatus = "followup_pending"
+	return s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence)
 }
 
 func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role models.SwarmRole) (*models.Task, error) {
@@ -1004,6 +1061,13 @@ func AttachSwarmChildren(tasks []models.Task) []models.Task {
 		}
 	}
 	return out
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func max(a, b int) int {
