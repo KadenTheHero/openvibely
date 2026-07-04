@@ -557,6 +557,29 @@ func (r *ExecutionRepo) UpdateDiffOutput(ctx context.Context, id string, diffOut
 	return nil
 }
 
+func (r *ExecutionRepo) UpsertSwarmParentResult(ctx context.Context, parentTaskID, integratorExecutionID, output, diffOutput string, durationMs int64) error {
+	prompt := "Swarm integrator final result from execution " + integratorExecutionID
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE executions
+		 SET output = ?, diff_output = ?, duration_ms = ?, completed_at = datetime('now')
+		 WHERE task_id = ? AND prompt_sent = ? AND status = ?`,
+		output, diffOutput, durationMs, parentTaskID, prompt, models.ExecCompleted)
+	if err != nil {
+		return fmt.Errorf("updating swarm parent result execution: %w", err)
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows > 0 {
+		return nil
+	}
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, output, diff_output, duration_ms, completed_at)
+		 VALUES (lower(hex(randomblob(16))), ?, NULL, ?, ?, ?, ?, ?, datetime('now'))`,
+		parentTaskID, models.ExecCompleted, prompt, output, diffOutput, durationMs)
+	if err != nil {
+		return fmt.Errorf("creating swarm parent result execution: %w", err)
+	}
+	return nil
+}
+
 // GetLatestNonEmptyDiffOutput returns the diff_output from the most recent execution for
 // the given task that has a non-empty diff_output. Returns "" with no error when none exist.
 // This avoids loading all execution rows just to find the preserved diff.

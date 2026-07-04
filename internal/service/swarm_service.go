@@ -300,7 +300,7 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 		}
 	}
 	children, _ = s.taskRepo.ListSwarmChildren(ctx, parent.ID)
-	if reviewer := findChild(children, models.SwarmRoleReviewer); reviewer != nil && parentCfg.IntegratorEnabled {
+	if reviewer := findChild(children, models.SwarmRoleReviewer); reviewer != nil && parentCfg.IntegratorEnabled && !(child.SwarmRole == models.SwarmRoleIntegrator && child.Status == models.StatusCompleted) {
 		revCfg, _ := models.ParseSwarmConfig(reviewer.SwarmConfig)
 		if revCfg.ReviewedGeneration > parentCfg.IntegratedGeneration {
 			if integrator := findChild(children, models.SwarmRoleIntegrator); integrator != nil && integrator.Status != models.StatusRunning && integrator.Status != models.StatusPending {
@@ -321,6 +321,9 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 			cfg.IntegratedGeneration = parentCfg.Generation
 			child.SwarmConfig, _ = cfg.JSON()
 			_ = s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence)
+		}
+		if err := s.persistIntegratorResultToParent(ctx, parent.ID, child.ID); err != nil {
+			return err
 		}
 		parentCfg.IntegratedGeneration = max(parentCfg.IntegratedGeneration, parentCfg.Generation)
 		parent.SwarmConfig, _ = parentCfg.JSON()
@@ -441,6 +444,26 @@ func (s *SwarmService) applyCompletedPlannerExecution(ctx context.Context, plann
 		return s.markPlannerOutputInvalid(ctx, planner, fmt.Sprintf("invalid planner JSON: %v", err))
 	}
 	return s.ApplyPlannerOutput(ctx, planner.ID, output)
+}
+
+func (s *SwarmService) persistIntegratorResultToParent(ctx context.Context, parentTaskID, integratorTaskID string) error {
+	if s.execRepo == nil {
+		return errors.New("swarm integrator result unavailable: execution repository is not configured")
+	}
+	exec, err := s.execRepo.GetLatestCompletedByTask(ctx, integratorTaskID)
+	if err != nil {
+		return err
+	}
+	if exec == nil {
+		return errors.New("swarm integrator completed without a final execution")
+	}
+	if err := s.execRepo.UpsertSwarmParentResult(ctx, parentTaskID, exec.ID, exec.Output, exec.DiffOutput, exec.DurationMs); err != nil {
+		return err
+	}
+	if strings.TrimSpace(exec.DiffOutput) != "" {
+		return s.taskRepo.UpdateMergeStatus(ctx, parentTaskID, models.MergeStatusPending)
+	}
+	return nil
 }
 
 func (s *SwarmService) markPlannerOutputInvalid(ctx context.Context, planner *models.Task, message string) error {

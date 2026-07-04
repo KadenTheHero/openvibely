@@ -137,6 +137,104 @@ func TestSwarmServiceInvalidPlannerExecutionBlocksParent(t *testing.T) {
 	}
 }
 
+func TestSwarmServiceIntegratorCompletionPersistsParentResult(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRolePlanner)
+	if planner == nil {
+		t.Fatal("planner missing")
+	}
+	output := PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}
+	if err := svc.ApplyPlannerOutput(context.Background(), planner.ID, output); err != nil {
+		t.Fatal(err)
+	}
+	children, err := repo.ListSwarmChildren(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, child := range children {
+		cfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
+		switch child.SwarmRole {
+		case models.SwarmRoleWorker:
+			cfg.CompletedGeneration = 1
+			child.SwarmConfig, _ = cfg.JSON()
+			if err := repo.UpdateSwarmFields(context.Background(), child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.UpdateStatus(context.Background(), child.ID, models.StatusCompleted); err != nil {
+				t.Fatal(err)
+			}
+		case models.SwarmRoleReviewer:
+			cfg.ReviewedGeneration = 1
+			child.SwarmConfig, _ = cfg.JSON()
+			if err := repo.UpdateSwarmFields(context.Background(), child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.UpdateStatus(context.Background(), child.ID, models.StatusCompleted); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	integrator, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleIntegrator)
+	if integrator == nil {
+		t.Fatal("integrator missing")
+	}
+	exec := &models.Execution{TaskID: integrator.ID, Status: models.ExecRunning, PromptSent: integrator.Prompt}
+	if err := execRepo.Create(context.Background(), exec); err != nil {
+		t.Fatal(err)
+	}
+	if err := execRepo.UpdateDiffOutput(context.Background(), exec.ID, "diff --git a/final.go b/final.go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := execRepo.Complete(context.Background(), exec.ID, models.ExecCompleted, "Final integrated summary", "", 12, 34); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(context.Background(), integrator.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.OnChildCompleted(context.Background(), integrator.ID); err != nil {
+		t.Fatal(err)
+	}
+	updatedParent, err := repo.GetByID(context.Background(), parent.ID)
+	if err != nil || updatedParent == nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	if updatedParent.Status != models.StatusCompleted || updatedParent.Category != models.CategoryCompleted || updatedParent.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("parent not finalized with pending merge: status=%s category=%s merge=%s", updatedParent.Status, updatedParent.Category, updatedParent.MergeStatus)
+	}
+	parentExecs, err := execRepo.ListByTask(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parentExecs) != 1 || parentExecs[0].Output != "Final integrated summary" || parentExecs[0].DiffOutput != "" {
+		t.Fatalf("parent execution summary not stored through light list: %#v", parentExecs)
+	}
+	parentExec, err := execRepo.GetByID(context.Background(), parentExecs[0].ID)
+	if err != nil || parentExec == nil {
+		t.Fatalf("get parent execution: %v", err)
+	}
+	if parentExec.Output != "Final integrated summary" || parentExec.DiffOutput != "diff --git a/final.go b/final.go" {
+		t.Fatalf("parent result execution mismatch: output=%q diff=%q", parentExec.Output, parentExec.DiffOutput)
+	}
+	if err := svc.OnChildCompleted(context.Background(), integrator.ID); err != nil {
+		t.Fatal(err)
+	}
+	parentExecs, err = execRepo.ListByTask(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parentExecs) != 1 {
+		t.Fatalf("integrator completion should be idempotent, got %d parent executions", len(parentExecs))
+	}
+}
+
 func TestSwarmServiceStartsReviewerAndIntegratorOnce(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)
