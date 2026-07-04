@@ -446,21 +446,27 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 		}
 	}
 	children, _ = s.taskRepo.ListSwarmChildren(ctx, parent.ID)
-	if reviewer := findChild(children, models.SwarmRoleReviewer); reviewer != nil && parentCfg.IntegratorEnabled && !(child.SwarmRole == models.SwarmRoleIntegrator && child.Status == models.StatusCompleted) {
-		revCfg, _ := models.ParseSwarmConfig(reviewer.SwarmConfig)
-		if revCfg.ReviewedGeneration > parentCfg.IntegratedGeneration {
-			if integrator := findChild(children, models.SwarmRoleIntegrator); integrator != nil && integrator.Status != models.StatusRunning && integrator.Status != models.StatusPending {
-				intCfg, _ := models.ParseSwarmConfig(integrator.SwarmConfig)
-				intCfg.RerunGeneration = revCfg.ReviewedGeneration
-				integrator.SwarmConfig, _ = intCfg.JSON()
-				_ = s.taskRepo.UpdateSwarmFields(ctx, integrator.ID, integrator.SwarmRole, "ready", integrator.SwarmConfig, integrator.SwarmSequence)
-				_ = s.taskRepo.UpdateCategory(ctx, integrator.ID, models.CategoryActive)
-				_ = s.taskRepo.UpdateStatus(ctx, integrator.ID, models.StatusPending)
-				integrator.Category = models.CategoryActive
-				integrator.Status = models.StatusPending
-				if s.workerSvc != nil {
-					s.workerSvc.Submit(*integrator)
-				}
+	integrationTargetGeneration := 0
+	if parentCfg.ReviewerEnabled {
+		if reviewer := findChild(children, models.SwarmRoleReviewer); reviewer != nil {
+			revCfg, _ := models.ParseSwarmConfig(reviewer.SwarmConfig)
+			integrationTargetGeneration = revCfg.ReviewedGeneration
+		}
+	} else if allRequiredWorkersCompleted(children, parentCfg.Generation) {
+		integrationTargetGeneration = parentCfg.Generation
+	}
+	if parentCfg.IntegratorEnabled && integrationTargetGeneration > parentCfg.IntegratedGeneration && !(child.SwarmRole == models.SwarmRoleIntegrator && child.Status == models.StatusCompleted) {
+		if integrator := findChild(children, models.SwarmRoleIntegrator); integrator != nil && integrator.Status != models.StatusRunning && integrator.Status != models.StatusPending {
+			intCfg, _ := models.ParseSwarmConfig(integrator.SwarmConfig)
+			intCfg.RerunGeneration = integrationTargetGeneration
+			integrator.SwarmConfig, _ = intCfg.JSON()
+			_ = s.taskRepo.UpdateSwarmFields(ctx, integrator.ID, integrator.SwarmRole, "ready", integrator.SwarmConfig, integrator.SwarmSequence)
+			_ = s.taskRepo.UpdateCategory(ctx, integrator.ID, models.CategoryActive)
+			_ = s.taskRepo.UpdateStatus(ctx, integrator.ID, models.StatusPending)
+			integrator.Category = models.CategoryActive
+			integrator.Status = models.StatusPending
+			if s.workerSvc != nil {
+				s.workerSvc.Submit(*integrator)
 			}
 		}
 	}

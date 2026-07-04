@@ -272,6 +272,69 @@ func TestSwarmServiceTerminalizesChildSwarmStatusOnCompletion(t *testing.T) {
 	}
 }
 
+func TestSwarmServiceStartsIntegratorAfterWorkersWhenReviewerDisabled(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	workerSvc := newTestWorkerService(t)
+	svc := NewSwarmService(taskSvc, repo, nil, workerSvc)
+	ctx := context.Background()
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: false, IntegratorEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: %v", err)
+	}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}}, IntegratorPrompt: "Integrate"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-workerSvc.Submitted():
+	default:
+		t.Fatal("expected initial worker submission")
+	}
+	if reviewer, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleReviewer); err != nil || reviewer != nil {
+		t.Fatalf("reviewer should not exist when disabled, reviewer=%#v err=%v", reviewer, err)
+	}
+	worker, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	if err != nil || worker == nil {
+		t.Fatalf("worker missing: %v", err)
+	}
+	if err := repo.UpdateStatus(ctx, worker.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.OnChildCompleted(ctx, worker.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	integrator, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleIntegrator)
+	if err != nil || integrator == nil {
+		t.Fatalf("integrator missing: %v", err)
+	}
+	if integrator.Status != models.StatusPending || integrator.Category != models.CategoryActive || integrator.SwarmStatus != "ready" {
+		t.Fatalf("integrator not started after worker completion without reviewer: status=%s category=%s swarm_status=%s", integrator.Status, integrator.Category, integrator.SwarmStatus)
+	}
+	intCfg, _ := models.ParseSwarmConfig(integrator.SwarmConfig)
+	if intCfg.RerunGeneration != 1 {
+		t.Fatalf("integrator target generation=%d, want 1", intCfg.RerunGeneration)
+	}
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != integrator.ID {
+			t.Fatalf("submitted task ID=%s, want integrator %s", submitted.ID, integrator.ID)
+		}
+		if submitted.Status != models.StatusPending || submitted.Category != models.CategoryActive {
+			t.Fatalf("submitted integrator not runnable: status=%s category=%s", submitted.Status, submitted.Category)
+		}
+	default:
+		t.Fatal("expected integrator to be submitted")
+	}
+}
+
 func TestParsePlannerOutputJSONExtractsPlannerObjectFromTranscript(t *testing.T) {
 	raw := `I’ll produce the swarm task JSON directly and first load context.
 [Using tool: memory_view]
