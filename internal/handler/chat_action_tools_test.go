@@ -214,6 +214,42 @@ func TestCreateSwarmTaskRuntimeTool_CanDeferPlannerStart(t *testing.T) {
 	}
 }
 
+func TestCreateSwarmTaskRuntimeTool_ChannelSurfaceUsesActiveProject(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	authorizedProject := createProject(t, h, "Email Authorized Swarm Project")
+	foreignProject := createProject(t, h, "Email Foreign Swarm Project")
+
+	handlers := h.chatActionHandlers(streamingResponseParams{ExecID: "exec-email-swarm", ProjectID: authorizedProject.ID, Surface: chatcontrol.SurfaceEmail}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceEmail)
+	createHandler := handlers["create_swarm_task"]
+	if createHandler == nil {
+		t.Fatal("create_swarm_task handler missing")
+	}
+
+	payload := `{"title":"Email swarm","prompt":"Split this email work","project_id":"` + foreignProject.ID + `","start_immediately":false}`
+	out, err := createHandler(context.Background(), json.RawMessage(payload))
+	if err != nil {
+		t.Fatalf("create_swarm_task failed: %v", err)
+	}
+	ids := extractTaskIDsFromOutput(out)
+	if len(ids) != 1 {
+		t.Fatalf("expected one parent task id in output, got %q", out)
+	}
+	parent, err := h.taskRepo.GetByID(context.Background(), ids[0])
+	if err != nil || parent == nil {
+		t.Fatalf("parent not persisted: %v", err)
+	}
+	if parent.ProjectID != authorizedProject.ID {
+		t.Fatalf("channel swarm should use active project %s, got %s", authorizedProject.ID, parent.ProjectID)
+	}
+	foreignTasks, err := h.taskRepo.ListByProject(context.Background(), foreignProject.ID, "")
+	if err != nil {
+		t.Fatalf("list foreign tasks: %v", err)
+	}
+	if len(foreignTasks) != 0 {
+		t.Fatalf("expected no tasks in foreign project, got %d", len(foreignTasks))
+	}
+}
+
 func TestCreateSwarmTaskRuntimeTool_CreatesParentAndPlanner(t *testing.T) {
 	h, _, _, _ := setupTestHandlerWithDB(t)
 	project := createProject(t, h, "Swarm Tool Project")

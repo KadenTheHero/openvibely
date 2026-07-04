@@ -84,6 +84,15 @@ type createSwarmTaskToolInput struct {
 	StartImmediately *bool  `json:"start_immediately"`
 }
 
+func isChannelActionSurface(surface chatcontrol.Surface) bool {
+	switch surface {
+	case chatcontrol.SurfaceSlack, chatcontrol.SurfaceTelegram, chatcontrol.SurfaceDiscord, chatcontrol.SurfaceEmail:
+		return true
+	default:
+		return false
+	}
+}
+
 func (h *Handler) executeCreateSwarmTaskTool(ctx context.Context, params streamingResponseParams, input json.RawMessage, collector *chatActionSummaryCollector) (string, error) {
 	if h.swarmSvc == nil {
 		return "", fmt.Errorf("create_swarm_task: swarm service unavailable")
@@ -92,9 +101,11 @@ func (h *Handler) executeCreateSwarmTaskTool(ctx context.Context, params streami
 	if err := json.Unmarshal(input, &req); err != nil {
 		return "", err
 	}
-	projectID := strings.TrimSpace(req.ProjectID)
-	if projectID == "" {
-		projectID = strings.TrimSpace(params.ProjectID)
+	projectID := strings.TrimSpace(params.ProjectID)
+	if !isChannelActionSurface(params.Surface) {
+		if override := strings.TrimSpace(req.ProjectID); override != "" {
+			projectID = override
+		}
 	}
 	if projectID == "" {
 		return "", fmt.Errorf("create_swarm_task: no current project")
