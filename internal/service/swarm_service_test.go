@@ -99,6 +99,20 @@ func TestSwarmServiceAppliesPlannerOutputOnPlannerCompletion(t *testing.T) {
 	if counts[models.SwarmRoleWorker] != 1 || counts[models.SwarmRoleReviewer] != 1 || counts[models.SwarmRoleIntegrator] != 1 {
 		t.Fatalf("planner completion did not create swarm children: %#v", counts)
 	}
+	if err := svc.OnChildCompleted(context.Background(), planner.ID); err != nil {
+		t.Fatalf("duplicate OnChildCompleted planner: %v", err)
+	}
+	children, err = repo.ListSwarmChildren(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts = map[models.SwarmRole]int{}
+	for _, child := range children {
+		counts[child.SwarmRole]++
+	}
+	if counts[models.SwarmRoleWorker] != 1 || counts[models.SwarmRoleReviewer] != 1 || counts[models.SwarmRoleIntegrator] != 1 {
+		t.Fatalf("duplicate planner completion created extra children: %#v", counts)
+	}
 }
 
 func TestSwarmServiceInvalidPlannerExecutionBlocksParent(t *testing.T) {

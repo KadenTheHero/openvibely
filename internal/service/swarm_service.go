@@ -192,6 +192,9 @@ func (s *SwarmService) ApplyPlannerOutput(ctx context.Context, plannerTaskID str
 		return err
 	}
 	if hasExecutionChildren(existing) {
+		if parent.SwarmStatus != "needs_coordination" || planner.SwarmStatus != "coordinating" {
+			return s.RecomputeParentStatus(ctx, parent.ID)
+		}
 		return s.applyFollowupPlannerOutput(ctx, parent, planner, output, existing, parentCfg)
 	}
 	parentCfg.ReviewerPrompt = output.ReviewerPrompt
@@ -564,9 +567,7 @@ func (s *SwarmService) applyCompletedPlannerExecution(ctx context.Context, plann
 		if err != nil || parent == nil {
 			return err
 		}
-		plannerCfg, _ := models.ParseSwarmConfig(planner.SwarmConfig)
-		parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
-		if planner.SwarmStatus != "coordinating" && parent.SwarmStatus != "needs_coordination" && plannerCfg.RerunGeneration < parentCfg.Generation {
+		if planner.SwarmStatus != "coordinating" || parent.SwarmStatus != "needs_coordination" {
 			return s.RecomputeParentStatus(ctx, *planner.ParentTaskID)
 		}
 	}
