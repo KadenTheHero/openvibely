@@ -137,10 +137,7 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 			if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Prompt) == "" {
 				return "", fmt.Errorf("create_swarm_task requires title and prompt")
 			}
-			projectID := strings.TrimSpace(req.ProjectID)
-			if projectID == "" {
-				projectID = strings.TrimSpace(opts.ProjectID)
-			}
+			projectID := strings.TrimSpace(opts.ProjectID)
 			if projectID == "" {
 				return "", fmt.Errorf("create_swarm_task requires project_id")
 			}

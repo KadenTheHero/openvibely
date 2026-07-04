@@ -174,6 +174,8 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *
 	taskRepo := repository.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Channel Swarm Actions"}
 	require.NoError(t, projectRepo.Create(ctx, project))
+	foreignProject := &models.Project{Name: "Foreign Channel Swarm Project"}
+	require.NoError(t, projectRepo.Create(ctx, foreignProject))
 	taskSvc := NewTaskService(taskRepo, nil, nil)
 	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, nil)
 	taskSvc.SetSwarmService(swarmSvc)
@@ -190,7 +192,7 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *
 		},
 	})
 	startImmediately := false
-	payload, err := json.Marshal(channelCreateSwarmTaskInput{Title: "Shared swarm", Prompt: "Split this across workers", StartImmediately: &startImmediately})
+	payload, err := json.Marshal(channelCreateSwarmTaskInput{Title: "Shared swarm", Prompt: "Split this across workers", ProjectID: foreignProject.ID, StartImmediately: &startImmediately})
 	require.NoError(t, err)
 
 	summary, err := handlers["create_swarm_task"](ctx, payload)
@@ -201,8 +203,12 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *
 	created, err := taskRepo.GetByID(ctx, callbackTaskIDs[0])
 	require.NoError(t, err)
 	require.NotNil(t, created)
+	require.Equal(t, project.ID, created.ProjectID)
 	require.Equal(t, models.SwarmRoleParent, created.SwarmRole)
 	require.Equal(t, models.StatusBlocked, created.Status)
+	foreignTasks, err := taskRepo.ListByProject(ctx, foreignProject.ID, "")
+	require.NoError(t, err)
+	require.Empty(t, foreignTasks)
 	require.Contains(t, strings.Join(collector.createdLines, "\n"), callbackTaskIDs[0])
 	planner, err := taskRepo.FindSwarmChildByRole(ctx, created.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
