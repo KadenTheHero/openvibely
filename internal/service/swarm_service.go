@@ -544,6 +544,58 @@ func (s *SwarmService) HandleChildFollowup(ctx context.Context, childTaskID stri
 	return s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_review", parent.SwarmConfig, parent.SwarmSequence)
 }
 
+func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role models.SwarmRole) (*models.Task, error) {
+	if role != models.SwarmRoleReviewer && role != models.SwarmRoleIntegrator {
+		return nil, fmt.Errorf("unsupported swarm rerun role %q", role)
+	}
+	parent, err := s.taskRepo.GetByID(ctx, parentTaskID)
+	if err != nil || parent == nil {
+		return nil, err
+	}
+	child, err := s.taskRepo.FindSwarmChildByRole(ctx, parentTaskID, role)
+	if err != nil || child == nil {
+		return child, err
+	}
+	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	childCfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
+	childCfg.RerunGeneration = max(childCfg.RerunGeneration, parentCfg.Generation)
+	swarmStatus := "pending"
+	if role == models.SwarmRoleReviewer {
+		if parentCfg.IntegratedGeneration >= parentCfg.Generation {
+			parentCfg.IntegratedGeneration = parentCfg.Generation - 1
+			if parentCfg.IntegratedGeneration < 0 {
+				parentCfg.IntegratedGeneration = 0
+			}
+		}
+		parent.SwarmConfig, _ = parentCfg.JSON()
+		if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_review", parent.SwarmConfig, parent.SwarmSequence); err != nil {
+			return nil, err
+		}
+		swarmStatus = "rerun_review"
+	} else {
+		if parentCfg.ReviewedGeneration > 0 && childCfg.RerunGeneration < parentCfg.ReviewedGeneration {
+			childCfg.RerunGeneration = parentCfg.ReviewedGeneration
+		}
+		if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_integration", parent.SwarmConfig, parent.SwarmSequence); err != nil {
+			return nil, err
+		}
+		swarmStatus = "rerun_integration"
+	}
+	child.SwarmStatus = swarmStatus
+	child.SwarmConfig, _ = childCfg.JSON()
+	if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+		return nil, err
+	}
+	if err := s.taskRepo.UpdateStatus(ctx, child.ID, models.StatusPending); err != nil {
+		return nil, err
+	}
+	child.Status = models.StatusPending
+	if s.workerSvc != nil {
+		s.workerSvc.Submit(*child)
+	}
+	return child, nil
+}
+
 func (s *SwarmService) RecomputeParentStatus(ctx context.Context, parentTaskID string) error {
 	parent, err := s.taskRepo.GetByID(ctx, parentTaskID)
 	if err != nil || parent == nil || parent.SwarmRole != models.SwarmRoleParent {

@@ -117,19 +117,15 @@ func (h *Handler) RerunSwarmIntegrator(c echo.Context) error {
 }
 
 func (h *Handler) rerunSwarmRole(c echo.Context, role models.SwarmRole) error {
-	child, err := h.taskRepo.FindSwarmChildByRole(c.Request().Context(), c.Param("id"), role)
+	if h.swarmSvc == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "swarm service unavailable")
+	}
+	child, err := h.swarmSvc.RerunRole(c.Request().Context(), c.Param("id"), role)
 	if err != nil {
 		return err
 	}
 	if child == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "swarm role task not found")
-	}
-	if err := h.taskRepo.UpdateStatus(c.Request().Context(), child.ID, models.StatusPending); err != nil {
-		return err
-	}
-	child.Status = models.StatusPending
-	if h.workerSvc != nil {
-		h.workerSvc.Submit(*child)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "started", "task_id": child.ID})
 }
