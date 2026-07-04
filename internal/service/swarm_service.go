@@ -652,6 +652,21 @@ func (s *SwarmService) HandleChildFollowup(ctx context.Context, childTaskID stri
 	return s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence)
 }
 
+func (s *SwarmService) ReactivateParentForChildFollowupRetry(ctx context.Context, childTaskID string) error {
+	child, err := s.taskRepo.GetByID(ctx, childTaskID)
+	if err != nil || child == nil || child.ParentTaskID == nil || !models.IsSwarmChildRole(child.SwarmRole) || child.SwarmStatus != "followup_pending" {
+		return err
+	}
+	parent, err := s.taskRepo.GetByID(ctx, *child.ParentTaskID)
+	if err != nil || parent == nil {
+		return err
+	}
+	if err := s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning); err != nil {
+		return err
+	}
+	return s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryActive)
+}
+
 func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role models.SwarmRole) (*models.Task, error) {
 	if role != models.SwarmRoleReviewer && role != models.SwarmRoleIntegrator {
 		return nil, fmt.Errorf("unsupported swarm rerun role %q", role)

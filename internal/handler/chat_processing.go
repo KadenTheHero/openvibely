@@ -1329,7 +1329,7 @@ func (h *Handler) applySwarmChildFollowupRetryStart(ctx context.Context, task *m
 		return nil
 	}
 	if task.SwarmStatus == "followup_pending" {
-		return nil
+		return h.swarmSvc.ReactivateParentForChildFollowupRetry(ctx, task.ID)
 	}
 	return h.swarmSvc.HandleChildFollowup(ctx, task.ID, message)
 }

@@ -5332,6 +5332,101 @@ func TestRetryLatestFailedTaskThreadFollowup_RoutesUnroutedSwarmChildRetry(t *te
 	assert.Equal(t, updatedParentCfg.Generation, updatedWorkerCfg.RerunGeneration)
 }
 
+func TestRetryLatestFailedTaskThreadFollowup_ReactivatesParentForAlreadyRoutedSwarmChild(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Retry Routed Swarm Followup Project")
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
+		ProjectID:         project.ID,
+		Title:             "Swarm parent",
+		Prompt:            "Build the swarm result",
+		Category:          models.CategoryActive,
+		Priority:          2,
+		AgentID:           &agent.ID,
+		MaxWorkers:        1,
+		WorkerIsolation:   "worktree",
+		ReviewerEnabled:   true,
+		IntegratorEnabled: true,
+	})
+	require.NoError(t, err)
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
+		Workers:          []service.PlannerWorker{{Title: "Retry worker", Prompt: "Update retry path", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt:   "Review the worker",
+		IntegratorPrompt: "Integrate the worker",
+	}))
+	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	require.NoError(t, err)
+	require.NotNil(t, worker)
+
+	require.NoError(t, h.swarmSvc.HandleChildFollowup(ctx, worker.ID, "retry the already routed swarm worker follow-up"))
+	routedParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	routedParentCfg, err := models.ParseSwarmConfig(routedParent.SwarmConfig)
+	require.NoError(t, err)
+	routedGeneration := routedParentCfg.Generation
+
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, worker.ID, models.StatusFailed))
+	require.NoError(t, h.taskRepo.UpdateCategory(ctx, worker.ID, models.CategoryBacklog))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusFailed))
+	require.NoError(t, h.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryBacklog))
+	failedFollowup := createExec(t, h, worker.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "retry the already routed swarm worker follow-up"
+		ex.IsFollowup = true
+	})
+	require.NoError(t, h.execRepo.Complete(ctx, failedFollowup.ID, models.ExecFailed, "provider failed", "provider failed", 0, 20))
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "retry complete"
+	mock.TextOnly = "retry complete"
+	mock.OnCall = func(ctx context.Context, _ testutil.MockLLMCall) {
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	handled, err := h.RetryLatestFailedTaskThreadFollowup(ctx, worker.ID)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.Eventually(t, func() bool {
+		select {
+		case <-started:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+
+	updatedParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	updatedParentCfg, err := models.ParseSwarmConfig(updatedParent.SwarmConfig)
+	require.NoError(t, err)
+	assert.Equal(t, routedGeneration, updatedParentCfg.Generation)
+	assert.Equal(t, models.StatusRunning, updatedParent.Status)
+	assert.Equal(t, models.CategoryActive, updatedParent.Category)
+	assert.Equal(t, "needs_review", updatedParent.SwarmStatus)
+
+	close(release)
+	require.Eventually(t, func() bool {
+		execs, err := h.execRepo.ListByTask(ctx, worker.ID)
+		if err != nil {
+			return false
+		}
+		return len(execs) >= 2 && execs[0].Status == models.ExecCompleted
+	}, time.Second, 10*time.Millisecond)
+}
+
 func TestRetryLatestFailedTaskThreadFollowup_ReplaysFailedFollowupPromptFromActiveDrop(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
