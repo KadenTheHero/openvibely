@@ -445,7 +445,10 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 				intCfg.RerunGeneration = revCfg.ReviewedGeneration
 				integrator.SwarmConfig, _ = intCfg.JSON()
 				_ = s.taskRepo.UpdateSwarmFields(ctx, integrator.ID, integrator.SwarmRole, "ready", integrator.SwarmConfig, integrator.SwarmSequence)
+				_ = s.taskRepo.UpdateCategory(ctx, integrator.ID, models.CategoryActive)
 				_ = s.taskRepo.UpdateStatus(ctx, integrator.ID, models.StatusPending)
+				integrator.Category = models.CategoryActive
+				integrator.Status = models.StatusPending
 				if s.workerSvc != nil {
 					s.workerSvc.Submit(*integrator)
 				}

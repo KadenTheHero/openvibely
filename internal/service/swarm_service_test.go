@@ -651,8 +651,8 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 	if err != nil || integrator == nil {
 		t.Fatalf("integrator missing: %v", err)
 	}
-	if integrator.Status != models.StatusPending {
-		t.Fatalf("integrator not rerun after reviewer retry completed: %#v", integrator)
+	if integrator.Status != models.StatusPending || integrator.Category != models.CategoryActive {
+		t.Fatalf("integrator not rerun as active task after reviewer retry completed: %#v", integrator)
 	}
 	if err := repo.UpdateStatus(ctx, parent.ID, models.StatusCompleted); err != nil {
 		t.Fatal(err)
