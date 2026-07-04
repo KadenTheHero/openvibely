@@ -1843,22 +1843,15 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	if task == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
-	if h.swarmSvc != nil {
-		if task.SwarmRole == models.SwarmRoleParent {
-			if err := h.swarmSvc.HandleParentFollowup(c.Request().Context(), task.ID, message); err != nil {
-				applog.Infof("[handler] TaskThreadSend swarm parent follow-up routing failed task=%s: %v", taskID, err)
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
-			}
-			return render(c, http.StatusOK, templ.Join(
-				components.TaskThreadQueuedFollowupResponse(message, nil),
-				components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false),
-			))
-		} else if models.IsSwarmChildRole(task.SwarmRole) {
-			if err := h.swarmSvc.HandleChildFollowup(c.Request().Context(), task.ID, message); err != nil {
-				applog.Infof("[handler] TaskThreadSend swarm child follow-up routing failed task=%s: %v", taskID, err)
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
-			}
+	if h.swarmSvc != nil && task.SwarmRole == models.SwarmRoleParent {
+		if err := h.swarmSvc.HandleParentFollowup(c.Request().Context(), task.ID, message); err != nil {
+			applog.Infof("[handler] TaskThreadSend swarm parent follow-up routing failed task=%s: %v", taskID, err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
 		}
+		return render(c, http.StatusOK, templ.Join(
+			components.TaskThreadQueuedFollowupResponse(message, nil),
+			components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false),
+		))
 	}
 
 	// Check for pending image attachments (for vision-aware agent selection)
@@ -1939,6 +1932,11 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	if err := h.execRepo.Create(c.Request().Context(), exec); err != nil {
 		applog.Infof("[handler] TaskThreadSend error creating execution: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
+	}
+	if err := h.applySwarmChildFollowupStart(c.Request().Context(), task, message); err != nil {
+		applog.Infof("[handler] TaskThreadSend swarm child follow-up routing failed task=%s: %v", taskID, err)
+		h.completeWithFailure(c.Request().Context(), exec.ID, taskID, err.Error(), 0)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
 	}
 
 	applog.Infof("[handler] TaskThreadSend created followup exec=%s for task=%s agent=%s status=%s", exec.ID, taskID, agent.Name, exec.Status)

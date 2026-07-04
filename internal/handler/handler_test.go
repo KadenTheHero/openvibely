@@ -3543,6 +3543,146 @@ func TestHandler_SwarmFollowupChildQueuesWhenActive(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, execs, 1, "queued API follow-up must not create a duplicate child execution while one is active")
 }
+func TestHandler_TaskThreadSend_SwarmChildQueuedFollowupDefersRoutingUntilPromotion(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Swarm Child Queue Timing Project")
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
+		ProjectID:         project.ID,
+		Title:             "Swarm parent",
+		Prompt:            "Build the swarm result",
+		Category:          models.CategoryActive,
+		Priority:          2,
+		AgentID:           &agent.ID,
+		MaxWorkers:        1,
+		WorkerIsolation:   "worktree",
+		ReviewerEnabled:   true,
+		IntegratorEnabled: true,
+	})
+	require.NoError(t, err)
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
+		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt:   "Review the worker",
+		IntegratorPrompt: "Integrate the worker",
+	}))
+	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	require.NoError(t, err)
+	require.NotNil(t, worker)
+	workerCfg, err := models.ParseSwarmConfig(worker.SwarmConfig)
+	require.NoError(t, err)
+	initialWorkerGeneration := workerCfg.RerunGeneration
+	parentCfg, err := models.ParseSwarmConfig(parent.SwarmConfig)
+	require.NoError(t, err)
+	initialParentGeneration := parentCfg.Generation
+
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, worker.ID, models.StatusRunning))
+	activeExec := &models.Execution{TaskID: worker.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active worker run"}
+	require.NoError(t, h.execRepo.Create(ctx, activeExec))
+
+	form := url.Values{}
+	form.Set("message", "Queued worker follow-up")
+	rec := htmxPost(e, "/tasks/"+worker.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+
+	updatedParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedParent)
+	updatedParentCfg, err := models.ParseSwarmConfig(updatedParent.SwarmConfig)
+	require.NoError(t, err)
+	assert.Equal(t, initialParentGeneration, updatedParentCfg.Generation, "queued child follow-up must not advance parent generation before it starts")
+
+	updatedWorker, err := h.taskRepo.GetByID(ctx, worker.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedWorker)
+	updatedWorkerCfg, err := models.ParseSwarmConfig(updatedWorker.SwarmConfig)
+	require.NoError(t, err)
+	assert.Equal(t, initialWorkerGeneration, updatedWorkerCfg.RerunGeneration, "queued child follow-up must not retarget the active worker run")
+
+	pending, err := h.threadInputRepo.ListPendingForTask(ctx, worker.ID)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, activeExec.ID, pending[0].RunExecutionID)
+}
+
+func TestHandler_StartQueuedTaskThreadInput_AppliesSwarmChildFollowupOnPromotion(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Swarm Child Promotion Timing Project")
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
+		ProjectID:         project.ID,
+		Title:             "Swarm parent",
+		Prompt:            "Build the swarm result",
+		Category:          models.CategoryActive,
+		Priority:          2,
+		AgentID:           &agent.ID,
+		MaxWorkers:        1,
+		WorkerIsolation:   "worktree",
+		ReviewerEnabled:   true,
+		IntegratorEnabled: true,
+	})
+	require.NoError(t, err)
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
+		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt:   "Review the worker",
+		IntegratorPrompt: "Integrate the worker",
+	}))
+	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	require.NoError(t, err)
+	require.NotNil(t, worker)
+	parentCfg, err := models.ParseSwarmConfig(parent.SwarmConfig)
+	require.NoError(t, err)
+	initialParentGeneration := parentCfg.Generation
+
+	queued := &models.ThreadInput{
+		Scope:         models.ThreadInputScopeTask,
+		ProjectID:     project.ID,
+		TaskID:        worker.ID,
+		AgentConfigID: agent.ID,
+		InputMode:     models.ThreadInputModeQueued,
+		InputStatus:   models.ThreadInputPending,
+		Content:       "Promoted worker follow-up",
+		Source:        models.TaskOriginWeb,
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
+	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *queued))
+
+	updatedParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedParent)
+	updatedParentCfg, err := models.ParseSwarmConfig(updatedParent.SwarmConfig)
+	require.NoError(t, err)
+	assert.Equal(t, initialParentGeneration+1, updatedParentCfg.Generation)
+	assert.Equal(t, "needs_review", updatedParent.SwarmStatus)
+
+	updatedWorker, err := h.taskRepo.GetByID(ctx, worker.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedWorker)
+	updatedWorkerCfg, err := models.ParseSwarmConfig(updatedWorker.SwarmConfig)
+	require.NoError(t, err)
+	assert.Equal(t, updatedParentCfg.Generation, updatedWorkerCfg.RerunGeneration)
+	assert.Equal(t, "followup_pending", updatedWorker.SwarmStatus)
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, worker.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	assert.True(t, execs[0].IsFollowup)
+	assert.Equal(t, "Promoted worker follow-up", execs[0].PromptSent)
+	applied, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.NotNil(t, applied)
+	assert.Equal(t, models.ThreadInputApplied, applied.InputStatus)
+	assert.Equal(t, execs[0].ID, applied.RunExecutionID)
+}
 
 func TestHandler_CompleteWithSuccess_NotifiesSwarmChildFollowupCompletion(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)

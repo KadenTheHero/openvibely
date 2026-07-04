@@ -1313,6 +1313,13 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 	return nil
 }
 
+func (h *Handler) applySwarmChildFollowupStart(ctx context.Context, task *models.Task, message string) error {
+	if h.swarmSvc == nil || task == nil || !models.IsSwarmChildRole(task.SwarmRole) {
+		return nil
+	}
+	return h.swarmSvc.HandleChildFollowup(ctx, task.ID, message)
+}
+
 func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.ThreadInput) error {
 	task, err := h.taskRepo.GetByID(ctx, input.TaskID)
 	if err != nil || task == nil {
@@ -1348,6 +1355,12 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			applog.Infof("[handler] startQueuedTaskThreadInput input=%s claim error: %v", input.ID, err)
 		}
 		return err
+	}
+	if err := h.applySwarmChildFollowupStart(ctx, task, input.Content); err != nil {
+		applog.Infof("[handler] startQueuedTaskThreadInput input=%s swarm child follow-up routing failed: %v", input.ID, err)
+		h.completeWithFailure(ctx, exec.ID, exec.TaskID, err.Error(), 0, channelReplyFromThreadInput(input))
+		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, exec.ID)
+		return nil
 	}
 	task.Status = models.StatusQueued
 	task.Category = models.CategoryActive

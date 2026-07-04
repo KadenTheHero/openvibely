@@ -137,9 +137,6 @@ func (h *Handler) acceptSwarmChildFollowup(c echo.Context, task *models.Task, me
 		} else if shouldPromote {
 			go h.PromoteQueuedTaskThreadInput(task.ID)
 		}
-		if err := h.swarmSvc.HandleChildFollowup(ctx, task.ID, message); err != nil {
-			return err
-		}
 		return c.JSON(http.StatusOK, map[string]string{"status": "queued", "queued_input_id": queued.ID})
 	}
 	exec := &models.Execution{
@@ -152,7 +149,8 @@ func (h *Handler) acceptSwarmChildFollowup(c echo.Context, task *models.Task, me
 	if err := h.execRepo.Create(ctx, exec); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
 	}
-	if err := h.swarmSvc.HandleChildFollowup(ctx, task.ID, message); err != nil {
+	if err := h.applySwarmChildFollowupStart(ctx, task, message); err != nil {
+		h.completeWithFailure(ctx, exec.ID, task.ID, err.Error(), 0)
 		return err
 	}
 	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
