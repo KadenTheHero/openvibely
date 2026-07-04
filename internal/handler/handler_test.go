@@ -738,6 +738,44 @@ func TestHandler_CreateTask_ActiveCategory(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 }
 
+func TestHandler_CreateTask_SwarmCanDeferAutonomousPlanner(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Deferred Swarm Form Project")
+	form := url.Values{}
+	form.Set("title", "Deferred Swarm")
+	form.Set("category", "active")
+	form.Set("priority", "2")
+	form.Set("prompt", "Plan this later")
+	form.Set("swarm_mode", "on")
+	form.Set("swarm_max_workers", "2")
+	form.Set("swarm_worker_isolation", "worktree")
+	form.Set("swarm_autonomous_planner", "false")
+	form.Set("swarm_reviewer_enabled", "false")
+	form.Set("swarm_integrator_enabled", "false")
+
+	rec := postForm(e, "/tasks?project_id="+project.ID, form)
+	assertCode(t, rec, http.StatusOK)
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	var parent *models.Task
+	for i := range tasks {
+		if tasks[i].Title == "Deferred Swarm" {
+			parent = &tasks[i]
+			break
+		}
+	}
+	require.NotNil(t, parent)
+	assert.Equal(t, models.SwarmRoleParent, parent.SwarmRole)
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	assert.Nil(t, planner, "deferred form swarm should not create planner until explicit start")
+	cfg, err := models.ParseSwarmConfig(parent.SwarmConfig)
+	require.NoError(t, err)
+	assert.False(t, cfg.ReviewerEnabled)
+	assert.False(t, cfg.IntegratorEnabled)
+}
+
 func TestHandler_CreateTask_DuplicateTitle(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 	form1 := url.Values{}
@@ -1177,6 +1215,22 @@ func TestHandler_Dashboard(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 	rec := htmxGet(e, "/dashboard")
 	assertCode(t, rec, http.StatusOK)
+}
+
+func TestHandler_TasksPage_RendersAutonomousPlannerToggle(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Tasks Swarm UI Project")
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, "Autonomous planner")
+	assert.Contains(t, body, `name="swarm_autonomous_planner" value="false"`)
+	assert.Contains(t, body, `name="swarm_autonomous_planner" value="true"`)
+	assert.Contains(t, body, `name="swarm_autonomous_planner" value="true" class="toggle toggle-sm toggle-primary" checked`)
 }
 
 func TestHandler_TasksPage_DoesNotContainChatRootSelector(t *testing.T) {

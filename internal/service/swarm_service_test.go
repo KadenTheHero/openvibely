@@ -61,6 +61,35 @@ func TestSwarmServiceCreateAndApplyPlannerOutput(t *testing.T) {
 	}
 }
 
+func TestSwarmServiceCreateSwarmTaskCanDeferPlannerStart(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+	startImmediately := false
+
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 3, WorkerIsolation: "worktree", ReviewerEnabled: true, IntegratorEnabled: true, StartImmediately: &startImmediately})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	if planner, err := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRolePlanner); err != nil {
+		t.Fatalf("FindSwarmChildByRole: %v", err)
+	} else if planner != nil {
+		t.Fatalf("expected deferred swarm to have no planner child yet, got %#v", planner)
+	}
+
+	if err := svc.StartPlanner(context.Background(), parent.ID); err != nil {
+		t.Fatalf("StartPlanner: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner not created on explicit start: planner=%#v err=%v", planner, err)
+	}
+	if planner.Status != models.StatusPending || planner.Category != models.CategoryActive {
+		t.Fatalf("planner not runnable after explicit start: category=%s status=%s", planner.Category, planner.Status)
+	}
+}
+
 func TestSwarmServiceAppliesPlannerOutputOnPlannerCompletion(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)

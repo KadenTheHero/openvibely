@@ -28,7 +28,7 @@ type CreateSwarmTaskRequest struct {
 	WorkerIsolation   string
 	ReviewerEnabled   bool
 	IntegratorEnabled bool
-	StartImmediately  bool
+	StartImmediately  *bool
 	MergeTargetBranch string
 }
 
@@ -124,8 +124,10 @@ func (s *SwarmService) CreateSwarmTask(ctx context.Context, req CreateSwarmTaskR
 	if err := s.ensureIntegrationWorktreeMetadata(ctx, parent); err != nil {
 		return nil, err
 	}
-	if err := s.StartPlanner(ctx, parent.ID); err != nil {
-		return nil, err
+	if req.StartImmediately == nil || *req.StartImmediately {
+		if err := s.StartPlanner(ctx, parent.ID); err != nil {
+			return nil, err
+		}
 	}
 	return parent, nil
 }

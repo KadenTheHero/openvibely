@@ -78,6 +78,20 @@ func isValidBacklogSort(sortBy string) bool {
 	}
 }
 
+func formBoolEnabled(c echo.Context, name string, defaultValue bool) bool {
+	values := c.Request().PostForm[name]
+	if len(values) == 0 {
+		return defaultValue
+	}
+	for _, value := range values {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "true", "1", "on", "yes":
+			return true
+		}
+	}
+	return false
+}
+
 func isValidCompletedSort(sortBy string) bool {
 	switch sortBy {
 	case "title_asc", "title_desc", "completed_asc", "completed_desc", "priority_asc", "priority_desc":
@@ -271,7 +285,8 @@ func (h *Handler) CreateTask(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "swarm service unavailable")
 		}
 		maxWorkers, _ := strconv.Atoi(c.FormValue("swarm_max_workers"))
-		parent, err := h.swarmSvc.CreateSwarmTask(c.Request().Context(), service.CreateSwarmTaskRequest{ProjectID: projectID, Title: t.Title, Prompt: t.Prompt, Goal: c.FormValue("goal"), Category: category, Priority: priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: maxWorkers, WorkerIsolation: c.FormValue("swarm_worker_isolation"), ReviewerEnabled: c.FormValue("swarm_reviewer_enabled") != "false", IntegratorEnabled: c.FormValue("swarm_integrator_enabled") != "false", MergeTargetBranch: t.MergeTargetBranch})
+		startImmediately := formBoolEnabled(c, "swarm_autonomous_planner", true)
+		parent, err := h.swarmSvc.CreateSwarmTask(c.Request().Context(), service.CreateSwarmTaskRequest{ProjectID: projectID, Title: t.Title, Prompt: t.Prompt, Goal: c.FormValue("goal"), Category: category, Priority: priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: maxWorkers, WorkerIsolation: c.FormValue("swarm_worker_isolation"), ReviewerEnabled: formBoolEnabled(c, "swarm_reviewer_enabled", true), IntegratorEnabled: formBoolEnabled(c, "swarm_integrator_enabled", true), StartImmediately: &startImmediately, MergeTargetBranch: t.MergeTargetBranch})
 		if err != nil {
 			if errors.Is(err, service.ErrDuplicateTask) {
 				return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")

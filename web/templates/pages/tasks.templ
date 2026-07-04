@@ -135,6 +135,14 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 										<span class="label-text font-medium">Swarm mode</span>
 									</label>
 									<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+										<div class="form-control sm:col-span-2">
+											<input type="hidden" name="swarm_autonomous_planner" value="false"/>
+											<label class="label cursor-pointer justify-start gap-2 p-0">
+												<input type="checkbox" name="swarm_autonomous_planner" value="true" class="toggle toggle-sm toggle-primary" checked/>
+												<span class="label-text">Autonomous planner</span>
+											</label>
+											<p class="text-xs opacity-60 mt-1">Start the planner immediately after creating the swarm.</p>
+										</div>
 										<div class="form-control">
 											<label class="label"><span class="label-text">Max workers</span></label>
 											<input type="number" name="swarm_max_workers" class="input input-bordered" min="1" max="8" value="3"/>
@@ -149,10 +157,12 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 										</div>
 									</div>
 									<div class="flex flex-wrap gap-4">
+										<input type="hidden" name="swarm_reviewer_enabled" value="false"/>
 										<label class="label cursor-pointer justify-start gap-2 p-0">
 											<input type="checkbox" name="swarm_reviewer_enabled" value="true" class="checkbox checkbox-sm" checked/>
 											<span class="label-text">Reviewer enabled</span>
 										</label>
+										<input type="hidden" name="swarm_integrator_enabled" value="false"/>
 										<label class="label cursor-pointer justify-start gap-2 p-0">
 											<input type="checkbox" name="swarm_integrator_enabled" value="true" class="checkbox checkbox-sm" checked/>
 											<span class="label-text">Integrator enabled</span>

@@ -81,7 +81,7 @@ type createSwarmTaskToolInput struct {
 	ProjectID        string `json:"project_id"`
 	MaxWorkers       int    `json:"max_workers"`
 	WorkerIsolation  string `json:"worker_isolation"`
-	StartImmediately bool   `json:"start_immediately"`
+	StartImmediately *bool  `json:"start_immediately"`
 }
 
 func (h *Handler) executeCreateSwarmTaskTool(ctx context.Context, params streamingResponseParams, input json.RawMessage, collector *chatActionSummaryCollector) (string, error) {
@@ -103,7 +103,11 @@ func (h *Handler) executeCreateSwarmTaskTool(ctx context.Context, params streami
 	if err != nil {
 		return "", err
 	}
-	summary := fmt.Sprintf("Created swarm task: %s.\nPlanner is splitting the work into workers.\n- \"%s\" (active) [TASK_ID:%s]", parent.Title, parent.Title, parent.ID)
+	plannerMessage := "Planner is splitting the work into workers."
+	if req.StartImmediately != nil && !*req.StartImmediately {
+		plannerMessage = "Planner is ready to start from the swarm task."
+	}
+	summary := fmt.Sprintf("Created swarm task: %s.\n%s\n- \"%s\" (active) [TASK_ID:%s]", parent.Title, plannerMessage, parent.Title, parent.ID)
 	if collector != nil {
 		collector.addCreated(summary)
 	}

@@ -186,6 +186,34 @@ func TestChatActionHandlers_CoverageWebAndAPI(t *testing.T) {
 	}
 }
 
+func TestCreateSwarmTaskRuntimeTool_CanDeferPlannerStart(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Deferred Swarm Tool Project")
+	handlers := h.chatActionHandlers(streamingResponseParams{ExecID: "exec-swarm-deferred", ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	createHandler := handlers["create_swarm_task"]
+	if createHandler == nil {
+		t.Fatal("create_swarm_task handler missing")
+	}
+	out, err := createHandler(context.Background(), json.RawMessage(`{"title":"Plan export","prompt":"Plan export with workers","max_workers":3,"worker_isolation":"worktree","start_immediately":false}`))
+	if err != nil {
+		t.Fatalf("create_swarm_task failed: %v", err)
+	}
+	if !strings.Contains(out, "Planner is ready to start from the swarm task.") {
+		t.Fatalf("expected deferred planner summary, got %q", out)
+	}
+	ids := extractTaskIDsFromOutput(out)
+	if len(ids) != 1 {
+		t.Fatalf("expected one parent task id in output, got %q", out)
+	}
+	planner, err := h.taskRepo.FindSwarmChildByRole(context.Background(), ids[0], models.SwarmRolePlanner)
+	if err != nil {
+		t.Fatalf("FindSwarmChildByRole: %v", err)
+	}
+	if planner != nil {
+		t.Fatalf("expected no planner child for deferred runtime tool swarm, got %#v", planner)
+	}
+}
+
 func TestCreateSwarmTaskRuntimeTool_CreatesParentAndPlanner(t *testing.T) {
 	h, _, _, _ := setupTestHandlerWithDB(t)
 	project := createProject(t, h, "Swarm Tool Project")
