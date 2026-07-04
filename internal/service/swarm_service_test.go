@@ -499,6 +499,7 @@ func TestSwarmServiceStartsReviewerAndIntegratorOnce(t *testing.T) {
 	}
 	children, _ := repo.ListSwarmChildren(context.Background(), parent.ID)
 	workerID := ""
+	reviewerID := ""
 	for _, child := range children {
 		if child.SwarmRole == models.SwarmRoleWorker {
 			workerID = child.ID
@@ -513,9 +514,18 @@ func TestSwarmServiceStartsReviewerAndIntegratorOnce(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+		if child.SwarmRole == models.SwarmRoleReviewer {
+			reviewerID = child.ID
+			if err := repo.UpdateCategory(context.Background(), child.ID, models.CategoryCompleted); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	if workerID == "" {
 		t.Fatal("worker missing")
+	}
+	if reviewerID == "" {
+		t.Fatal("reviewer missing")
 	}
 	if err := svc.OnChildCompleted(context.Background(), workerID); err != nil {
 		t.Fatal(err)
@@ -524,8 +534,8 @@ func TestSwarmServiceStartsReviewerAndIntegratorOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	reviewer, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleReviewer)
-	if reviewer == nil || reviewer.Status != models.StatusPending {
-		t.Fatalf("reviewer not pending once: %#v", reviewer)
+	if reviewer == nil || reviewer.Status != models.StatusPending || reviewer.Category != models.CategoryActive {
+		t.Fatalf("reviewer not pending and active once: %#v", reviewer)
 	}
 	if err := repo.UpdateStatus(context.Background(), reviewer.ID, models.StatusCompleted); err != nil {
 		t.Fatal(err)
