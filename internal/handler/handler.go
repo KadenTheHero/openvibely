@@ -18,6 +18,7 @@ import (
 type Handler struct {
 	projectSvc                 *service.ProjectService
 	taskSvc                    *service.TaskService
+	swarmSvc                   *service.SwarmService
 	taskGoalSvc                *service.TaskGoalService
 	llmSvc                     *service.LLMService
 	workerSvc                  *service.WorkerService
@@ -178,6 +179,18 @@ func New(
 	if workerSvc != nil && skillAnalyticsRepo != nil {
 		workerSvc.SetSkillAnalyticsRepo(skillAnalyticsRepo)
 	}
+	var swarmSvc *service.SwarmService
+	if taskSvc != nil && taskRepo != nil {
+		swarmSvc = service.NewSwarmService(taskSvc, taskRepo, execRepo, workerSvc)
+		taskSvc.SetSwarmService(swarmSvc)
+		if workerSvc != nil {
+			workerSvc.SetOnTaskComplete(func(task models.Task, executionErr error) {
+				if models.IsSwarmChildRole(task.SwarmRole) && swarmSvc != nil {
+					_ = swarmSvc.OnChildCompleted(context.Background(), task.ID)
+				}
+			})
+		}
+	}
 	if llmSvc != nil && threadInputRepo != nil {
 		llmSvc.SetThreadInputRepo(threadInputRepo)
 		llmSvc.SetBroadcaster(broadcaster)
@@ -191,6 +204,7 @@ func New(
 	h = &Handler{
 		projectSvc:           projectSvc,
 		taskSvc:              taskSvc,
+		swarmSvc:             swarmSvc,
 		llmSvc:               llmSvc,
 		workerSvc:            workerSvc,
 		schedulerSvc:         schedulerSvc,
@@ -508,6 +522,12 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.DELETE("/tasks/:taskId", h.DeleteTask)
 	e.POST("/tasks/:taskId/run", h.RunTask)
 	e.POST("/tasks/:taskId/cancel", h.CancelTask)
+	e.GET("/api/tasks/:id/swarm", h.GetSwarm)
+	e.POST("/api/tasks/:id/swarm/start", h.StartSwarm)
+	e.POST("/api/tasks/:id/swarm/followup", h.SwarmFollowup)
+	e.POST("/api/tasks/:id/swarm/cancel", h.CancelSwarm)
+	e.POST("/api/tasks/:id/swarm/rerun-reviewer", h.RerunSwarmReviewer)
+	e.POST("/api/tasks/:id/swarm/rerun-integrator", h.RerunSwarmIntegrator)
 	e.PATCH("/tasks/:taskId/category", h.UpdateTaskCategory)
 	e.PATCH("/tasks/:taskId/status", h.UpdateTaskStatus)
 	e.PATCH("/tasks/:taskId/reorder", h.ReorderTask)

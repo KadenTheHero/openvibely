@@ -16,6 +16,9 @@ func capitalize(s string) string {
 func filterByCategory(tasks []models.Task, cat models.TaskCategory) []models.Task {
 	var result []models.Task
 	for _, t := range tasks {
+		if models.IsSwarmChildRole(t.SwarmRole) {
+			continue
+		}
 		if t.Category == cat {
 			result = append(result, t)
 		}
@@ -29,6 +32,9 @@ func filterByCategory(tasks []models.Task, cat models.TaskCategory) []models.Tas
 func filterActiveColumn(tasks []models.Task) []models.Task {
 	var result []models.Task
 	for _, t := range tasks {
+		if models.IsSwarmChildRole(t.SwarmRole) {
+			continue
+		}
 		if t.Category == models.CategoryActive {
 			result = append(result, t)
 		} else if t.Category == models.CategoryScheduled && t.Status == models.StatusRunning {

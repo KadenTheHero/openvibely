@@ -15,6 +15,12 @@ import (
 
 var ErrDuplicateTask = errors.New("task with this name already exists in this project")
 
+const taskSelectColumns = `id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
+
+const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
+			EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
+			t.created_at, t.updated_at, t.completed_at`
+
 type TaskRepo struct {
 	db          *sql.DB
 	broadcaster *events.Broadcaster
@@ -36,10 +42,8 @@ func (r *TaskRepo) ListByProjectWithSort(ctx context.Context, projectID string, 
 }
 
 func (r *TaskRepo) ListByProjectWithCategorySorts(ctx context.Context, projectID string, category string, backlogSort string, completedSort string) ([]models.Task, error) {
-	query := `SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
-		EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
-		t.created_at, t.updated_at, t.completed_at
-		 FROM tasks t WHERE t.project_id = ?`
+	query := `SELECT ` + taskSelectColumnsWithGoal + `
+			 FROM tasks t WHERE t.project_id = ?`
 	args := []any{projectID}
 
 	if category != "" {
@@ -60,7 +64,7 @@ func (r *TaskRepo) ListByProjectWithCategorySorts(ctx context.Context, projectID
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.HasGoal, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.HasGoal, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -201,13 +205,13 @@ func taskDisplayOrderDesc(a models.Task, b models.Task) bool {
 
 func (r *TaskRepo) GetByID(ctx context.Context, id string) (*models.Task, error) {
 	return r.getOne(ctx,
-		`SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at
+		`SELECT `+taskSelectColumns+`
 		 FROM tasks WHERE id = ?`, id)
 }
 
 func (r *TaskRepo) GetByProjectAndTitle(ctx context.Context, projectID, title string) (*models.Task, error) {
 	return r.getOne(ctx,
-		`SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at
+		`SELECT `+taskSelectColumns+`
 		 FROM tasks WHERE project_id = ? AND title = ? LIMIT 1`, projectID, title)
 }
 
@@ -215,7 +219,7 @@ func (r *TaskRepo) getOne(ctx context.Context, query string, args ...any) (*mode
 	var t models.Task
 	err := r.db.QueryRowContext(ctx, query, args...).
 		Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt)
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -223,6 +227,13 @@ func (r *TaskRepo) getOne(ctx context.Context, query string, args ...any) (*mode
 		return nil, fmt.Errorf("getting task: %w", err)
 	}
 	return &t, nil
+}
+
+func defaultJSON(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return "{}"
+	}
+	return raw
 }
 
 func (r *TaskRepo) Create(ctx context.Context, t *models.Task) error {
@@ -276,10 +287,10 @@ func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *
 		autoMerge = 1
 	}
 	err = exec.QueryRowContext(ctx,
-		`INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id)
-		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 RETURNING id, created_at, updated_at, completed_at`,
-		t.ProjectID, t.Title, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, displayOrder, t.ParentTaskID, t.ChainConfig, t.WorktreePath, t.WorktreeBranch, autoMerge, t.MergeTargetBranch, t.MergeStatus, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.CreatedVia, t.TelegramChatID).
+		`INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id)
+			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 RETURNING id, created_at, updated_at, completed_at`,
+		t.ProjectID, t.Title, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, displayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus, defaultJSON(t.SwarmConfig), t.SwarmSequence, t.WorktreePath, t.WorktreeBranch, autoMerge, t.MergeTargetBranch, t.MergeStatus, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.CreatedVia, t.TelegramChatID).
 		Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
@@ -315,10 +326,10 @@ func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {
 	}
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE tasks SET title = ?, category = ?, priority = ?, status = ?,
-		 prompt = ?, agent_id = ?, agent_definition_id = ?, tag = ?, display_order = ?, parent_task_id = ?, chain_config = ?,
-		 auto_merge = ?, merge_target_branch = ?, base_branch = ?, base_commit_sha = ?, lineage_depth = ?, updated_at = datetime('now')
-		 WHERE id = ?`,
-		t.Title, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, t.DisplayOrder, t.ParentTaskID, t.ChainConfig, autoMerge, t.MergeTargetBranch, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.ID)
+			 prompt = ?, agent_id = ?, agent_definition_id = ?, tag = ?, display_order = ?, parent_task_id = ?, chain_config = ?,
+			 swarm_role = ?, swarm_status = ?, swarm_config = ?, swarm_sequence = ?, auto_merge = ?, merge_target_branch = ?, base_branch = ?, base_commit_sha = ?, lineage_depth = ?, updated_at = datetime('now')
+			 WHERE id = ?`,
+		t.Title, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, t.DisplayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus, defaultJSON(t.SwarmConfig), t.SwarmSequence, autoMerge, t.MergeTargetBranch, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
 			return ErrDuplicateTask
@@ -498,7 +509,7 @@ func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
 // Excludes chat tasks (CategoryChat) since those are internal chat messages, not user tasks.
 func (r *TaskRepo) SearchByTitle(ctx context.Context, projectID string, titleQuery string) ([]models.Task, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at
+		`SELECT `+taskSelectColumns+`
 		 FROM tasks WHERE project_id = ? AND category != 'chat' AND title LIKE ?
 		 ORDER BY
 		   CASE WHEN LOWER(title) = LOWER(?) THEN 0
@@ -516,7 +527,7 @@ func (r *TaskRepo) SearchByTitle(ctx context.Context, projectID string, titleQue
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -536,14 +547,14 @@ func (r *TaskRepo) Delete(ctx context.Context, id string) error {
 // Returns nil, nil if no blocked child exists.
 func (r *TaskRepo) FindBlockedChildByParent(ctx context.Context, parentTaskID string) (*models.Task, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at
+		`SELECT `+taskSelectColumns+`
 		 FROM tasks WHERE parent_task_id = ? AND status = ?
 		 LIMIT 1`,
 		parentTaskID, models.StatusBlocked)
 
 	var t models.Task
 	if err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-		&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+		&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -563,9 +574,50 @@ func (r *TaskRepo) DeleteBlockedChildrenByParent(ctx context.Context, parentTask
 	return nil
 }
 
+func (r *TaskRepo) ListSwarmChildren(ctx context.Context, parentTaskID string) ([]models.Task, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+taskSelectColumns+`
+		 FROM tasks WHERE parent_task_id = ? AND swarm_role IN ('planner','worker','reviewer','integrator')
+		 ORDER BY swarm_sequence ASC,
+		 CASE swarm_role WHEN 'planner' THEN 0 WHEN 'worker' THEN 1 WHEN 'reviewer' THEN 2 WHEN 'integrator' THEN 3 ELSE 9 END,
+		 created_at ASC`, parentTaskID)
+	if err != nil {
+		return nil, fmt.Errorf("listing swarm children: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []models.Task
+	for rows.Next() {
+		var t models.Task
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			return nil, fmt.Errorf("scanning swarm child: %w", err)
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+func (r *TaskRepo) FindSwarmChildByRole(ctx context.Context, parentTaskID string, role models.SwarmRole) (*models.Task, error) {
+	return r.getOne(ctx,
+		`SELECT `+taskSelectColumns+`
+		 FROM tasks WHERE parent_task_id = ? AND swarm_role = ?
+		 ORDER BY swarm_sequence ASC, created_at ASC LIMIT 1`, parentTaskID, role)
+}
+
+func (r *TaskRepo) UpdateSwarmFields(ctx context.Context, id string, role models.SwarmRole, status, config string, sequence int) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE tasks SET swarm_role = ?, swarm_status = ?, swarm_config = ?, swarm_sequence = ?, updated_at = datetime('now') WHERE id = ?`,
+		role, status, defaultJSON(config), sequence, id)
+	if err != nil {
+		return fmt.Errorf("updating swarm fields: %w", err)
+	}
+	return nil
+}
+
 func (r *TaskRepo) ListActivePending(ctx context.Context) ([]models.Task, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at
+		`SELECT `+taskSelectColumns+`
 		 FROM tasks WHERE category = 'active' AND status = 'pending'
 		 ORDER BY priority DESC, display_order ASC, created_at ASC`)
 	if err != nil {
@@ -577,7 +629,7 @@ func (r *TaskRepo) ListActivePending(ctx context.Context) ([]models.Task, error)
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -591,7 +643,7 @@ func (r *TaskRepo) ListActivePending(ctx context.Context) ([]models.Task, error)
 func (r *TaskRepo) ListStaleQueuedTasks(ctx context.Context, staleDuration time.Duration) ([]models.Task, error) {
 	cutoff := time.Now().UTC().Add(-staleDuration).Format("2006-01-02 15:04:05")
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at
+		`SELECT `+taskSelectColumns+`
 		 FROM tasks WHERE category = 'active' AND status = 'queued' AND updated_at < ?
 		 ORDER BY priority DESC, display_order ASC, created_at ASC`, cutoff)
 	if err != nil {
@@ -603,7 +655,7 @@ func (r *TaskRepo) ListStaleQueuedTasks(ctx context.Context, staleDuration time.
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -619,7 +671,7 @@ type TaskWithSchedule struct {
 
 func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID string) ([]TaskWithSchedule, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id, t.created_at, t.updated_at, t.completed_at,
+		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id, t.created_at, t.updated_at, t.completed_at,
 		 s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.next_run, s.last_run, s.created_at, s.updated_at
 		 FROM tasks t
 		 LEFT JOIN schedules s ON t.id = s.task_id
@@ -640,7 +692,7 @@ func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID str
 
 		if err := rows.Scan(
 			&tws.Task.ID, &tws.Task.ProjectID, &tws.Task.Title, &tws.Task.Category,
-			&tws.Task.Priority, &tws.Task.Status, &tws.Task.Prompt, &tws.Task.AgentID, &tws.Task.AgentDefinitionID, &tws.Task.Tag, &tws.Task.DisplayOrder, &tws.Task.ParentTaskID, &tws.Task.ChainConfig, &tws.Task.WorktreePath, &tws.Task.WorktreeBranch, &tws.Task.AutoMerge, &tws.Task.MergeTargetBranch, &tws.Task.MergeStatus, &tws.Task.BaseBranch, &tws.Task.BaseCommitSHA, &tws.Task.LineageDepth, &tws.Task.CreatedVia, &tws.Task.TelegramChatID, &tws.Task.CreatedAt, &tws.Task.UpdatedAt, &tws.Task.CompletedAt,
+			&tws.Task.Priority, &tws.Task.Status, &tws.Task.Prompt, &tws.Task.AgentID, &tws.Task.AgentDefinitionID, &tws.Task.Tag, &tws.Task.DisplayOrder, &tws.Task.ParentTaskID, &tws.Task.ChainConfig, &tws.Task.SwarmRole, &tws.Task.SwarmStatus, &tws.Task.SwarmConfig, &tws.Task.SwarmSequence, &tws.Task.WorktreePath, &tws.Task.WorktreeBranch, &tws.Task.AutoMerge, &tws.Task.MergeTargetBranch, &tws.Task.MergeStatus, &tws.Task.BaseBranch, &tws.Task.BaseCommitSHA, &tws.Task.LineageDepth, &tws.Task.CreatedVia, &tws.Task.TelegramChatID, &tws.Task.CreatedAt, &tws.Task.UpdatedAt, &tws.Task.CompletedAt,
 			&schedID, &schedTaskID, &schedRunAt, &schedRepeatType, &schedRepeatInterval, &schedEnabled, &schedNextRun, &schedLastRun, &schedCreatedAt, &schedUpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning task with schedule: %w", err)
@@ -755,7 +807,7 @@ func (r *TaskRepo) MoveCompletedActiveToCompleted(ctx context.Context) (int, err
 
 // ListByCategory returns all tasks in a specific category across all projects.
 func (r *TaskRepo) ListByCategory(ctx context.Context, category models.TaskCategory) ([]models.Task, error) {
-	query := `SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at
+	query := `SELECT ` + taskSelectColumns + `
 		 FROM tasks WHERE category = ?
 		 ORDER BY display_order ASC, created_at ASC`
 
@@ -769,7 +821,7 @@ func (r *TaskRepo) ListByCategory(ctx context.Context, category models.TaskCateg
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -933,7 +985,7 @@ func (r *TaskRepo) ReorderTask(ctx context.Context, taskID string, newPosition i
 // If priority is 0, returns all backlog tasks. Otherwise returns tasks with that exact priority.
 // Only returns tasks with status pending, failed, or cancelled (eligible for execution).
 func (r *TaskRepo) ListBacklogByPriority(ctx context.Context, projectID string, priority int) ([]models.Task, error) {
-	query := `SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at
+	query := `SELECT ` + taskSelectColumns + `
 		 FROM tasks WHERE category = 'backlog' AND project_id = ? AND status IN ('pending', 'failed', 'cancelled', 'completed')`
 	args := []any{projectID}
 
@@ -954,7 +1006,7 @@ func (r *TaskRepo) ListBacklogByPriority(ctx context.Context, projectID string, 
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -990,7 +1042,7 @@ func (r *TaskRepo) CountBacklogByPriority(ctx context.Context, projectID string)
 // Optional filters: projectID (empty string = all projects), category (empty string = all categories),
 // minPriority (0 = no filter), status (empty string = all statuses).
 func (r *TaskRepo) ListByTags(ctx context.Context, tags []models.TaskTag, projectID string, category models.TaskCategory, minPriority int, status models.TaskStatus) ([]models.Task, error) {
-	query := `SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at
+	query := `SELECT ` + taskSelectColumns + `
 		 FROM tasks WHERE 1=1`
 	args := []any{}
 
@@ -1037,7 +1089,7 @@ func (r *TaskRepo) ListByTags(ctx context.Context, tags []models.TaskTag, projec
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -1095,7 +1147,7 @@ func (r *TaskRepo) ClearWorktreeInfo(ctx context.Context, id string) error {
 
 // ListWithWorktrees returns all tasks that have active worktrees.
 func (r *TaskRepo) ListWithWorktrees(ctx context.Context) ([]models.Task, error) {
-	query := `SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at
+	query := `SELECT ` + taskSelectColumns + `
 		 FROM tasks WHERE worktree_path != '' AND worktree_branch != ''
 		 ORDER BY created_at ASC`
 
@@ -1109,7 +1161,7 @@ func (r *TaskRepo) ListWithWorktrees(ctx context.Context) ([]models.Task, error)
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)

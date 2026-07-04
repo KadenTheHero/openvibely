@@ -1987,6 +1987,195 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/tasks/{id}/swarm": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Get task swarm",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.Task"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tasks/{id}/swarm/cancel": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Cancel swarm",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tasks/{id}/swarm/followup": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Send swarm follow-up",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Follow-up message",
+                        "name": "message",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tasks/{id}/swarm/rerun-integrator": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Rerun swarm integrator",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tasks/{id}/swarm/rerun-reviewer": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Rerun swarm reviewer",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tasks/{id}/swarm/start": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Start swarm planner",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/workflows/best-agent": {
             "get": {
                 "description": "Returns the best-performing model for the requested task type based on workflow metrics.",
@@ -2785,6 +2974,23 @@ const docTemplate = `{
                 }
             }
         },
+        "models.MergeStatus": {
+            "type": "string",
+            "enum": [
+                "",
+                "pending",
+                "merged",
+                "failed",
+                "conflict"
+            ],
+            "x-enum-varnames": [
+                "MergeStatusNone",
+                "MergeStatusPending",
+                "MergeStatusMerged",
+                "MergeStatusFailed",
+                "MergeStatusConflict"
+            ]
+        },
         "models.ModelUsagePoint": {
             "type": "object",
             "properties": {
@@ -3069,6 +3275,212 @@ const docTemplate = `{
                     "type": "integer"
                 }
             }
+        },
+        "models.SwarmRole": {
+            "type": "string",
+            "enum": [
+                "",
+                "swarm_parent",
+                "planner",
+                "worker",
+                "reviewer",
+                "integrator"
+            ],
+            "x-enum-varnames": [
+                "SwarmRoleNone",
+                "SwarmRoleParent",
+                "SwarmRolePlanner",
+                "SwarmRoleWorker",
+                "SwarmRoleReviewer",
+                "SwarmRoleIntegrator"
+            ]
+        },
+        "models.Task": {
+            "type": "object",
+            "properties": {
+                "agent_definition_id": {
+                    "description": "Optional: agent definition (system prompt, skills, MCP)",
+                    "type": "string"
+                },
+                "agent_id": {
+                    "description": "Optional: LLM config (model) to use; uses default if nil",
+                    "type": "string"
+                },
+                "auto_merge": {
+                    "type": "boolean"
+                },
+                "base_branch": {
+                    "description": "Git branch this task should base its worktree on (from parent lineage)",
+                    "type": "string"
+                },
+                "base_commit_sha": {
+                    "description": "Git commit SHA to base worktree on (from parent lineage)",
+                    "type": "string"
+                },
+                "category": {
+                    "$ref": "#/definitions/models.TaskCategory"
+                },
+                "chain_config": {
+                    "description": "JSON configuration for task chaining",
+                    "type": "string"
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_via": {
+                    "description": "Origin: \"web\", \"telegram\", etc.",
+                    "type": "string"
+                },
+                "display_order": {
+                    "type": "integer"
+                },
+                "has_goal": {
+                    "description": "Derived: task has a non-cleared persisted goal",
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "lineage_depth": {
+                    "description": "Depth in chain: 0 = root, 1 = child, 2 = grandchild, etc.",
+                    "type": "integer"
+                },
+                "merge_status": {
+                    "$ref": "#/definitions/models.MergeStatus"
+                },
+                "merge_target_branch": {
+                    "type": "string"
+                },
+                "parent_task_id": {
+                    "description": "Optional: references parent task for chaining or swarm grouping",
+                    "type": "string"
+                },
+                "priority": {
+                    "type": "integer"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "prompt": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/models.TaskStatus"
+                },
+                "swarm_children": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Task"
+                    }
+                },
+                "swarm_config": {
+                    "type": "string"
+                },
+                "swarm_role": {
+                    "$ref": "#/definitions/models.SwarmRole"
+                },
+                "swarm_sequence": {
+                    "type": "integer"
+                },
+                "swarm_status": {
+                    "type": "string"
+                },
+                "tag": {
+                    "$ref": "#/definitions/models.TaskTag"
+                },
+                "telegram_chat_id": {
+                    "description": "Telegram chat ID for sending completion notifications",
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "worktree_branch": {
+                    "type": "string"
+                },
+                "worktree_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.TaskCategory": {
+            "type": "string",
+            "enum": [
+                "active",
+                "completed",
+                "backlog",
+                "scheduled",
+                "chat"
+            ],
+            "x-enum-comments": {
+                "CategoryChat": "Internal category for chat messages (not displayed in UI)"
+            },
+            "x-enum-descriptions": [
+                "",
+                "",
+                "",
+                "",
+                "Internal category for chat messages (not displayed in UI)"
+            ],
+            "x-enum-varnames": [
+                "CategoryActive",
+                "CategoryCompleted",
+                "CategoryBacklog",
+                "CategoryScheduled",
+                "CategoryChat"
+            ]
+        },
+        "models.TaskStatus": {
+            "type": "string",
+            "enum": [
+                "pending",
+                "queued",
+                "running",
+                "completed",
+                "failed",
+                "cancelled",
+                "blocked"
+            ],
+            "x-enum-comments": {
+                "StatusBlocked": "Waiting for parent task to complete (chained child pre-created for visibility)"
+            },
+            "x-enum-descriptions": [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "Waiting for parent task to complete (chained child pre-created for visibility)"
+            ],
+            "x-enum-varnames": [
+                "StatusPending",
+                "StatusQueued",
+                "StatusRunning",
+                "StatusCompleted",
+                "StatusFailed",
+                "StatusCancelled",
+                "StatusBlocked"
+            ]
+        },
+        "models.TaskTag": {
+            "type": "string",
+            "enum": [
+                "",
+                "feature",
+                "bug"
+            ],
+            "x-enum-varnames": [
+                "TagNone",
+                "TagFeature",
+                "TagBug"
+            ]
         },
         "models.UnderusedSkillMetric": {
             "type": "object",

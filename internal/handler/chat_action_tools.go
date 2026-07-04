@@ -75,6 +75,41 @@ func containsSummaryLine(items []string, target string) bool {
 	return false
 }
 
+type createSwarmTaskToolInput struct {
+	Title            string `json:"title"`
+	Prompt           string `json:"prompt"`
+	ProjectID        string `json:"project_id"`
+	MaxWorkers       int    `json:"max_workers"`
+	WorkerIsolation  string `json:"worker_isolation"`
+	StartImmediately bool   `json:"start_immediately"`
+}
+
+func (h *Handler) executeCreateSwarmTaskTool(ctx context.Context, params streamingResponseParams, input json.RawMessage, collector *chatActionSummaryCollector) (string, error) {
+	if h.swarmSvc == nil {
+		return "", fmt.Errorf("create_swarm_task: swarm service unavailable")
+	}
+	var req createSwarmTaskToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	projectID := strings.TrimSpace(req.ProjectID)
+	if projectID == "" {
+		projectID = strings.TrimSpace(params.ProjectID)
+	}
+	if projectID == "" {
+		return "", fmt.Errorf("create_swarm_task: no current project")
+	}
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{ProjectID: projectID, Title: req.Title, Prompt: req.Prompt, Category: models.CategoryActive, Priority: 2, MaxWorkers: req.MaxWorkers, WorkerIsolation: req.WorkerIsolation, ReviewerEnabled: true, IntegratorEnabled: true, StartImmediately: req.StartImmediately})
+	if err != nil {
+		return "", err
+	}
+	summary := fmt.Sprintf("Created swarm task: %s.\nPlanner is splitting the work into workers.\n- \"%s\" (active) [TASK_ID:%s]", parent.Title, parent.Title, parent.ID)
+	if collector != nil {
+		collector.addCreated(summary)
+	}
+	return summary, nil
+}
+
 func (c *chatActionSummaryCollector) appendToOutput(output string) string {
 	if c == nil {
 		return output
@@ -147,6 +182,9 @@ func (h *Handler) chatActionExecutor(params streamingResponseParams, collector *
 
 func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *chatActionSummaryCollector, mode models.ChatMode, surface chatcontrol.Surface) map[string]chatcontrol.RuntimeActionHandler {
 	return map[string]chatcontrol.RuntimeActionHandler{
+		"create_swarm_task": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeCreateSwarmTaskTool(ctx, params, input, collector)
+		},
 		"create_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			marker, err := buildToolMarker("CREATE_TASK", input, true)
 			if err != nil {

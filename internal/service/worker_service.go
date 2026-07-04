@@ -250,8 +250,9 @@ func (w *WorkerService) dispatchNext() {
 				continue
 			}
 
-			// Dependency gating: chained tasks must wait for parent to reach terminal state
-			if dbTask.ParentTaskID != nil && *dbTask.ParentTaskID != "" {
+			// Dependency gating: chained tasks must wait for parent to reach terminal state.
+			// Swarm child tasks are grouped under an active parent and run independently.
+			if dbTask.ParentTaskID != nil && *dbTask.ParentTaskID != "" && !models.IsSwarmChildRole(dbTask.SwarmRole) {
 				parentTask, parentErr := w.taskRepo.GetByID(context.Background(), *dbTask.ParentTaskID)
 				if parentErr == nil && parentTask != nil && !models.IsTerminalStatus(parentTask.Status) {
 					applog.Infof("[worker] dependency gate: task=%s %q waiting on parent=%s (status=%s)",

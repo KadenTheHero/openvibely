@@ -696,6 +696,9 @@ func (s *DiscordService) discordActionHandlers(projectID string, markerCtx disco
 			}
 		},
 	})
+	handlers["create_swarm_task"] = func(context.Context, json.RawMessage) (string, error) {
+		return "", fmt.Errorf("create_swarm_task is not supported from Discord yet")
+	}
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: projectID, TaskRepo: s.taskRepo, TaskGoalSvc: s.taskGoalSvc}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelThreadActionHandlers(channelThreadActionHandlerOptions{
 		Platform:                 "discord",

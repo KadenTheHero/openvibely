@@ -42,6 +42,26 @@ You can drag cards between categories and active sub-lanes to change where work 
 
 Optional: enable `Auto-merge to target branch on completion` for git worktree flow.
 
+## Swarm Tasks
+
+Enable `Swarm mode` in the task dialog when a job should be split across planner, worker, reviewer, and integrator child tasks. OpenVibely creates a swarm parent card plus real child tasks, so each worker keeps its own thread, diff, retry, follow-up, and worktree context.
+
+Defaults:
+
+- `Max workers`: `3`, configurable from `1` to `8`.
+- `Worker isolation`: `worktree`, so code-writing workers do not share a checkout by default.
+- `Reviewer enabled`: on.
+- `Integrator enabled`: on.
+
+The kanban board shows the swarm parent as one grouped card by default. Child rows inside the card link to their full task pages and diffs. Open the parent task for a swarm overview, or open a child task to inspect or continue that role directly.
+
+Follow-up behavior:
+
+- Parent follow-ups coordinate the whole swarm and mark the result for renewed review/integration.
+- Worker follow-ups continue only that worker slice, then require reviewer/integrator reruns.
+- Reviewer follow-ups rerun review without rerunning workers.
+- Integrator follow-ups update integration without rerunning workers or reviewer.
+
 ## Card Actions
 
 From each task card menu:

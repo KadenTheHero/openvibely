@@ -120,15 +120,47 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 								</select>
 							</div>
 						</div>
-						<div class="form-control mt-3">
-							<label class="label"><span class="label-text">Tag</span></label>
-							<select name="tag" class="select select-bordered">
-								<option value="">None</option>
-								<option value="feature">Feature</option>
-								<option value="bug">Bug</option>
-							</select>
-						</div>
-						<!-- Git Worktree: Auto-merge -->
+							<div class="form-control mt-3">
+								<label class="label"><span class="label-text">Tag</span></label>
+								<select name="tag" class="select select-bordered">
+									<option value="">None</option>
+									<option value="feature">Feature</option>
+									<option value="bug">Bug</option>
+								</select>
+							</div>
+							<div class="card bg-base-200/50 border border-base-300 mt-3">
+								<div class="card-body p-3 space-y-3">
+									<label class="label cursor-pointer justify-start gap-2 p-0">
+										<input type="checkbox" name="swarm_mode" class="toggle toggle-sm toggle-primary"/>
+										<span class="label-text font-medium">Swarm mode</span>
+									</label>
+									<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+										<div class="form-control">
+											<label class="label"><span class="label-text">Max workers</span></label>
+											<input type="number" name="swarm_max_workers" class="input input-bordered" min="1" max="8" value="3"/>
+										</div>
+										<div class="form-control">
+											<label class="label"><span class="label-text">Worker isolation</span></label>
+											<select name="swarm_worker_isolation" class="select select-bordered">
+												<option value="worktree" selected>Worktree</option>
+												<option value="read_only">Read only</option>
+												<option value="shared">Shared</option>
+											</select>
+										</div>
+									</div>
+									<div class="flex flex-wrap gap-4">
+										<label class="label cursor-pointer justify-start gap-2 p-0">
+											<input type="checkbox" name="swarm_reviewer_enabled" value="true" class="checkbox checkbox-sm" checked/>
+											<span class="label-text">Reviewer enabled</span>
+										</label>
+										<label class="label cursor-pointer justify-start gap-2 p-0">
+											<input type="checkbox" name="swarm_integrator_enabled" value="true" class="checkbox checkbox-sm" checked/>
+											<span class="label-text">Integrator enabled</span>
+										</label>
+									</div>
+								</div>
+							</div>
+							<!-- Git Worktree: Auto-merge -->
 						<div class="form-control mt-3">
 							<label class="label cursor-pointer justify-start gap-2">
 								<input type="checkbox" name="auto_merge" class="toggle toggle-sm toggle-primary"/>

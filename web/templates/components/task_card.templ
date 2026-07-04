@@ -143,6 +143,40 @@ func hasChainConfigEnabled(task models.Task) bool {
 	return config.Enabled
 }
 
+func swarmRoleLabel(role models.SwarmRole) string {
+	switch role {
+	case models.SwarmRolePlanner:
+		return "Planner"
+	case models.SwarmRoleWorker:
+		return "Worker"
+	case models.SwarmRoleReviewer:
+		return "Reviewer"
+	case models.SwarmRoleIntegrator:
+		return "Integrator"
+	default:
+		return "Swarm"
+	}
+}
+
+func swarmSummary(task models.Task) string {
+	workers, done, running, blocked := 0, 0, 0, 0
+	for _, child := range task.SwarmChildren {
+		if child.SwarmRole == models.SwarmRoleWorker {
+			workers++
+		}
+		if child.Status == models.StatusCompleted {
+			done++
+		}
+		if child.Status == models.StatusRunning {
+			running++
+		}
+		if child.Status == models.StatusBlocked || child.Status == models.StatusFailed {
+			blocked++
+		}
+	}
+	return fmt.Sprintf("%d workers · %d/%d done · %d running · %d blocked", workers, done, len(task.SwarmChildren), running, blocked)
+}
+
 templ TaskCard(task models.Task, projectID string, viewingCategory string, llmModels []models.LLMConfig, agentDefs []models.Agent) {
 	<div
 		id={ fmt.Sprintf("task-%s", task.ID) }
@@ -254,9 +288,12 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 								Chain
 							</span>
 						}
-						if task.HasGoal {
-							<span class="badge badge-sm badge-primary badge-outline inline-flex items-center" title="Task has an active goal">Goal</span>
-						}
+							if task.HasGoal {
+								<span class="badge badge-sm badge-primary badge-outline inline-flex items-center" title="Task has an active goal">Goal</span>
+							}
+							if task.SwarmRole == models.SwarmRoleParent {
+								<span class="badge badge-sm badge-accent badge-outline inline-flex items-center" title="Swarm parent task">Swarm</span>
+							}
 						<!-- Model Badge -->
 						if len(llmModels) > 0 {
 							<span class="badge badge-sm badge-outline" title={ fmt.Sprintf("Model: %s", getModelDisplayName(findModelByID(llmModels, task.AgentID))) }>
@@ -275,8 +312,25 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 							<span class="badge badge-sm badge-outline">{ PriorityLabel(task.Priority) }</span>
 						}
 					</div>
+					</div>
 				</div>
+				if task.SwarmRole == models.SwarmRoleParent && len(task.SwarmChildren) > 0 {
+					<div class="mt-3 rounded-lg border border-base-300 bg-base-200/50 p-2 text-xs">
+						<div class="font-medium text-base-content/80 mb-1">{ swarmSummary(task) }</div>
+						<div class="space-y-1">
+							for _, child := range task.SwarmChildren {
+								<div class="flex items-center gap-2 min-w-0">
+									<span class={ "badge badge-xs", StatusBadgeClass(child.Status) }>{ StatusLabelForTask(child.Status, child.Category) }</span>
+									<a href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", child.ID)) } hx-get={ fmt.Sprintf("/tasks/%s?from=tasks", child.ID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="truncate hover:underline">{ child.Title }</a>
+									<span class="opacity-50 shrink-0">{ swarmRoleLabel(child.SwarmRole) }</span>
+									if child.WorktreeBranch != "" {
+										<a href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=changes&from=tasks", child.ID)) } hx-get={ fmt.Sprintf("/tasks/%s?tab=changes&from=tasks", child.ID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="link link-primary shrink-0">Diff</a>
+									}
+								</div>
+							}
+						</div>
+					</div>
+				}
 			</div>
 		</div>
-	</div>
-}
+	}

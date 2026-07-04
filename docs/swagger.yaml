@@ -417,6 +417,20 @@ definitions:
       updated_at:
         type: string
     type: object
+  models.MergeStatus:
+    enum:
+    - ""
+    - pending
+    - merged
+    - failed
+    - conflict
+    type: string
+    x-enum-varnames:
+    - MergeStatusNone
+    - MergeStatusPending
+    - MergeStatusMerged
+    - MergeStatusFailed
+    - MergeStatusConflict
   models.ModelUsagePoint:
     properties:
       cached_input_tokens:
@@ -610,6 +624,163 @@ definitions:
       viewed_count:
         type: integer
     type: object
+  models.SwarmRole:
+    enum:
+    - ""
+    - swarm_parent
+    - planner
+    - worker
+    - reviewer
+    - integrator
+    type: string
+    x-enum-varnames:
+    - SwarmRoleNone
+    - SwarmRoleParent
+    - SwarmRolePlanner
+    - SwarmRoleWorker
+    - SwarmRoleReviewer
+    - SwarmRoleIntegrator
+  models.Task:
+    properties:
+      agent_definition_id:
+        description: 'Optional: agent definition (system prompt, skills, MCP)'
+        type: string
+      agent_id:
+        description: 'Optional: LLM config (model) to use; uses default if nil'
+        type: string
+      auto_merge:
+        type: boolean
+      base_branch:
+        description: Git branch this task should base its worktree on (from parent
+          lineage)
+        type: string
+      base_commit_sha:
+        description: Git commit SHA to base worktree on (from parent lineage)
+        type: string
+      category:
+        $ref: '#/definitions/models.TaskCategory'
+      chain_config:
+        description: JSON configuration for task chaining
+        type: string
+      completed_at:
+        type: string
+      created_at:
+        type: string
+      created_via:
+        description: 'Origin: "web", "telegram", etc.'
+        type: string
+      display_order:
+        type: integer
+      has_goal:
+        description: 'Derived: task has a non-cleared persisted goal'
+        type: boolean
+      id:
+        type: string
+      lineage_depth:
+        description: 'Depth in chain: 0 = root, 1 = child, 2 = grandchild, etc.'
+        type: integer
+      merge_status:
+        $ref: '#/definitions/models.MergeStatus'
+      merge_target_branch:
+        type: string
+      parent_task_id:
+        description: 'Optional: references parent task for chaining or swarm grouping'
+        type: string
+      priority:
+        type: integer
+      project_id:
+        type: string
+      prompt:
+        type: string
+      status:
+        $ref: '#/definitions/models.TaskStatus'
+      swarm_children:
+        items:
+          $ref: '#/definitions/models.Task'
+        type: array
+      swarm_config:
+        type: string
+      swarm_role:
+        $ref: '#/definitions/models.SwarmRole'
+      swarm_sequence:
+        type: integer
+      swarm_status:
+        type: string
+      tag:
+        $ref: '#/definitions/models.TaskTag'
+      telegram_chat_id:
+        description: Telegram chat ID for sending completion notifications
+        type: integer
+      title:
+        type: string
+      updated_at:
+        type: string
+      worktree_branch:
+        type: string
+      worktree_path:
+        type: string
+    type: object
+  models.TaskCategory:
+    enum:
+    - active
+    - completed
+    - backlog
+    - scheduled
+    - chat
+    type: string
+    x-enum-comments:
+      CategoryChat: Internal category for chat messages (not displayed in UI)
+    x-enum-descriptions:
+    - ""
+    - ""
+    - ""
+    - ""
+    - Internal category for chat messages (not displayed in UI)
+    x-enum-varnames:
+    - CategoryActive
+    - CategoryCompleted
+    - CategoryBacklog
+    - CategoryScheduled
+    - CategoryChat
+  models.TaskStatus:
+    enum:
+    - pending
+    - queued
+    - running
+    - completed
+    - failed
+    - cancelled
+    - blocked
+    type: string
+    x-enum-comments:
+      StatusBlocked: Waiting for parent task to complete (chained child pre-created
+        for visibility)
+    x-enum-descriptions:
+    - ""
+    - ""
+    - ""
+    - ""
+    - ""
+    - ""
+    - Waiting for parent task to complete (chained child pre-created for visibility)
+    x-enum-varnames:
+    - StatusPending
+    - StatusQueued
+    - StatusRunning
+    - StatusCompleted
+    - StatusFailed
+    - StatusCancelled
+    - StatusBlocked
+  models.TaskTag:
+    enum:
+    - ""
+    - feature
+    - bug
+    type: string
+    x-enum-varnames:
+    - TagNone
+    - TagFeature
+    - TagBug
   models.UnderusedSkillMetric:
     properties:
       activity_count:
@@ -2169,6 +2340,128 @@ paths:
       summary: List lifecycle executions for a task
       tags:
       - Lifecycle
+  /api/tasks/{id}/swarm:
+    get:
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Task'
+      summary: Get task swarm
+      tags:
+      - tasks
+  /api/tasks/{id}/swarm/cancel:
+    post:
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Cancel swarm
+      tags:
+      - tasks
+  /api/tasks/{id}/swarm/followup:
+    post:
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Follow-up message
+        in: formData
+        name: message
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Send swarm follow-up
+      tags:
+      - tasks
+  /api/tasks/{id}/swarm/rerun-integrator:
+    post:
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Rerun swarm integrator
+      tags:
+      - tasks
+  /api/tasks/{id}/swarm/rerun-reviewer:
+    post:
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Rerun swarm reviewer
+      tags:
+      - tasks
+  /api/tasks/{id}/swarm/start:
+    post:
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Start swarm planner
+      tags:
+      - tasks
   /api/workflows/best-agent:
     get:
       description: Returns the best-performing model for the requested task type based

@@ -158,6 +158,19 @@ func (r *ExecutionRepo) GetByID(ctx context.Context, id string) (*models.Executi
 	return &e, nil
 }
 
+func (r *ExecutionRepo) GetLatestCompletedByTask(ctx context.Context, taskID string) (*models.Execution, error) {
+	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
+		`SELECT `+executionSelectColumns+` FROM executions WHERE task_id = ? AND status = ? ORDER BY completed_at DESC, started_at DESC LIMIT 1`,
+		taskID, models.ExecCompleted))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting latest completed execution: %w", err)
+	}
+	return &e, nil
+}
+
 func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
 	isFollowup := 0
 	if e.IsFollowup {
@@ -165,7 +178,7 @@ func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
 	}
 	err := r.db.QueryRowContext(ctx,
 		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
-		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
+		 VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?)
 		 RETURNING id, started_at`,
 		e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup).
 		Scan(&e.ID, &e.StartedAt)

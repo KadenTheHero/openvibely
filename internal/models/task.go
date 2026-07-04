@@ -75,6 +75,75 @@ const (
 	MergeStatusConflict MergeStatus = "conflict"
 )
 
+type SwarmRole string
+
+const (
+	SwarmRoleNone       SwarmRole = ""
+	SwarmRoleParent     SwarmRole = "swarm_parent"
+	SwarmRolePlanner    SwarmRole = "planner"
+	SwarmRoleWorker     SwarmRole = "worker"
+	SwarmRoleReviewer   SwarmRole = "reviewer"
+	SwarmRoleIntegrator SwarmRole = "integrator"
+)
+
+func IsSwarmChildRole(role SwarmRole) bool {
+	switch role {
+	case SwarmRolePlanner, SwarmRoleWorker, SwarmRoleReviewer, SwarmRoleIntegrator:
+		return true
+	default:
+		return false
+	}
+}
+
+type SwarmConfig struct {
+	Mode                             string   `json:"mode,omitempty"`
+	DefaultWorkerIsolation           string   `json:"default_worker_isolation,omitempty"`
+	MaxWorkers                       int      `json:"max_workers,omitempty"`
+	ReviewerEnabled                  bool     `json:"reviewer_enabled,omitempty"`
+	IntegratorEnabled                bool     `json:"integrator_enabled,omitempty"`
+	RerunReviewerAfterWorkerFollowup bool     `json:"rerun_reviewer_after_worker_followup,omitempty"`
+	RerunIntegratorAfterReviewer     bool     `json:"rerun_integrator_after_reviewer,omitempty"`
+	Generation                       int      `json:"generation,omitempty"`
+	ReviewedGeneration               int      `json:"reviewed_generation,omitempty"`
+	IntegratedGeneration             int      `json:"integrated_generation,omitempty"`
+	MergeStrategy                    string   `json:"merge_strategy,omitempty"`
+	WorkerKind                       string   `json:"worker_kind,omitempty"`
+	Ownership                        []string `json:"ownership,omitempty"`
+	Isolation                        string   `json:"isolation,omitempty"`
+	DependsOnRoles                   []string `json:"depends_on_roles,omitempty"`
+	RerunGeneration                  int      `json:"rerun_generation,omitempty"`
+	CompletedGeneration              int      `json:"completed_generation,omitempty"`
+	Required                         bool     `json:"required,omitempty"`
+	WriteScope                       []string `json:"write_scope,omitempty"`
+	ReadScope                        []string `json:"read_scope,omitempty"`
+	ReviewerPrompt                   string   `json:"reviewer_prompt,omitempty"`
+	IntegratorPrompt                 string   `json:"integrator_prompt,omitempty"`
+	PlannerNotes                     string   `json:"planner_notes,omitempty"`
+	LastError                        string   `json:"last_error,omitempty"`
+}
+
+func ParseSwarmConfig(raw string) (SwarmConfig, error) {
+	if raw == "" || raw == "{}" {
+		return SwarmConfig{}, nil
+	}
+	var cfg SwarmConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return SwarmConfig{}, err
+	}
+	return cfg, nil
+}
+
+func (c SwarmConfig) JSON() (string, error) {
+	data, err := json.Marshal(c)
+	if err != nil {
+		return "", err
+	}
+	if string(data) == "null" {
+		return "{}", nil
+	}
+	return string(data), nil
+}
+
 // TaskOrigin identifies which interface created a task.
 const (
 	TaskOriginWeb         = "web"
@@ -97,8 +166,13 @@ type Task struct {
 	AgentDefinitionID *string      `json:"agent_definition_id,omitempty"` // Optional: agent definition (system prompt, skills, MCP)
 	Tag               TaskTag      `json:"tag"`
 	DisplayOrder      int          `json:"display_order"`
-	ParentTaskID      *string      `json:"parent_task_id,omitempty"` // Optional: references parent task for chaining
+	ParentTaskID      *string      `json:"parent_task_id,omitempty"` // Optional: references parent task for chaining or swarm grouping
 	ChainConfig       string       `json:"chain_config"`             // JSON configuration for task chaining
+	SwarmRole         SwarmRole    `json:"swarm_role"`
+	SwarmStatus       string       `json:"swarm_status"`
+	SwarmConfig       string       `json:"swarm_config"`
+	SwarmSequence     int          `json:"swarm_sequence"`
+	SwarmChildren     []Task       `json:"swarm_children,omitempty"`
 	WorktreePath      string       `json:"worktree_path"`
 	WorktreeBranch    string       `json:"worktree_branch"`
 	AutoMerge         bool         `json:"auto_merge"`

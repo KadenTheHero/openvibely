@@ -186,6 +186,35 @@ func TestChatActionHandlers_CoverageWebAndAPI(t *testing.T) {
 	}
 }
 
+func TestCreateSwarmTaskRuntimeTool_CreatesParentAndPlanner(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Swarm Tool Project")
+	handlers := h.chatActionHandlers(streamingResponseParams{ExecID: "exec-swarm", ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	createHandler := handlers["create_swarm_task"]
+	if createHandler == nil {
+		t.Fatal("create_swarm_task handler missing")
+	}
+	out, err := createHandler(context.Background(), json.RawMessage(`{"title":"Build export","prompt":"Build export with workers","max_workers":3,"worker_isolation":"worktree","start_immediately":true}`))
+	if err != nil {
+		t.Fatalf("create_swarm_task failed: %v", err)
+	}
+	ids := extractTaskIDsFromOutput(out)
+	if len(ids) != 1 {
+		t.Fatalf("expected one parent task id in output, got %q", out)
+	}
+	parent, err := h.taskRepo.GetByID(context.Background(), ids[0])
+	if err != nil || parent == nil {
+		t.Fatalf("parent not persisted: %v", err)
+	}
+	if parent.SwarmRole != models.SwarmRoleParent {
+		t.Fatalf("expected swarm parent role, got %q", parent.SwarmRole)
+	}
+	planner, err := h.taskRepo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner child not created: %v", err)
+	}
+}
+
 // TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure is the regression
 // test for the phantom create_task bug: the runtime tool handler used to
 // always return (summary, nil), so even if processChatTaskCreations failed to

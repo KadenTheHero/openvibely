@@ -7,7 +7,7 @@
 // # API-domain mapping policy
 //
 // Chat RW (orchestrate mode):
-//   - tasks: create_task, edit_task, execute_tasks, send_to_task
+//   - tasks: create_task, create_swarm_task, edit_task, execute_tasks, send_to_task
 //   - schedules: schedule_task, delete_schedule, modify_schedule
 //   - alerts: create_alert, delete_alert, toggle_alert
 //   - personality: set_personality
@@ -131,6 +131,8 @@ const chainSchemaProperties = `{"type":"object","properties":{"enabled":{"type":
 // createTaskParams is the full JSON Schema for the create_task tool.
 const createTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","description":"Optional completion condition for the task. If set, the Goal Agent may continue the task across turns until this condition is satisfied."},"category":{"type":"string","enum":["active","backlog"]},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"chain":` + chainSchemaProperties + `},"required":["title","prompt"],"additionalProperties":false}`
 
+const createSwarmTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"project_id":{"type":"string","description":"Optional project id; defaults to current project."},"max_workers":{"type":"integer","minimum":1,"maximum":8},"worker_isolation":{"type":"string","enum":["worktree","read_only","shared"]},"start_immediately":{"type":"boolean"}},"required":["title","prompt"],"additionalProperties":false}`
+
 // editTaskParams is the full JSON Schema for the edit_task tool.
 const editTaskParams = `{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog","scheduled"]},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string"},"agent_id":{"type":"string"},"agent_config_id":{"type":"string"},"chain":` + chainSchemaProperties + `,"attachments":{"type":"array","items":{"type":"string"}}},"required":["id"],"additionalProperties":false}`
 
@@ -150,6 +152,17 @@ var registry = []ActionDef{
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: false,
 		Parameters:         json.RawMessage(createTaskParams),
+	},
+	{
+		Name:               "create_swarm_task",
+		Description:        "Create an autonomous swarm parent task when the user explicitly asks for swarm, subagents, parallel workers, multiple agents, or splitting work across workers. The planner child creates worker/reviewer/integrator tasks.",
+		Domain:             DomainTasks,
+		Access:             AccessWrite,
+		Sensitivity:        SensitivityNormal,
+		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:           allSurfaces(),
+		IncludeThreadTools: false,
+		Parameters:         json.RawMessage(createSwarmTaskParams),
 	},
 	{
 		Name:               "edit_task",

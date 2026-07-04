@@ -182,6 +182,9 @@ func (h *Handler) ListTasks(c echo.Context) error {
 			applog.Infof("[handler] ListTasks error: %v", err)
 			return err
 		}
+		if c.QueryParam("include_swarm_children") != "true" {
+			tasks = service.AttachSwarmChildren(tasks)
+		}
 		applog.Infof("[handler] ListTasks found %d tasks", len(tasks))
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
@@ -198,6 +201,9 @@ func (h *Handler) ListTasks(c echo.Context) error {
 		applog.Infof("[handler] ListTasks error: %v", err)
 		return err
 	}
+	if c.QueryParam("include_swarm_children") != "true" {
+		tasks = service.AttachSwarmChildren(tasks)
+	}
 	applog.Infof("[handler] ListTasks found %d tasks", len(tasks))
 
 	project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
@@ -209,6 +215,11 @@ func (h *Handler) ListTasks(c echo.Context) error {
 	}
 
 	return render(c, http.StatusOK, pages.Tasks(projects, project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed))
+}
+
+func isSwarmTaskForm(c echo.Context) bool {
+	v := c.FormValue("swarm_mode")
+	return v == "on" || v == "true" || v == "1"
 }
 
 func (h *Handler) CreateTask(c echo.Context) error {
@@ -255,7 +266,20 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	applog.Infof("[handler] CreateTask project=%s title=%q category=%s priority=%d tag=%s prompt_len=%d",
 		projectID, t.Title, t.Category, t.Priority, t.Tag, len(t.Prompt))
 
-	if err := h.taskSvc.CreateWithGoal(c.Request().Context(), t, c.FormValue("goal")); err != nil {
+	if isSwarmTaskForm(c) {
+		if h.swarmSvc == nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "swarm service unavailable")
+		}
+		maxWorkers, _ := strconv.Atoi(c.FormValue("swarm_max_workers"))
+		parent, err := h.swarmSvc.CreateSwarmTask(c.Request().Context(), service.CreateSwarmTaskRequest{ProjectID: projectID, Title: t.Title, Prompt: t.Prompt, Goal: c.FormValue("goal"), Category: category, Priority: priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: maxWorkers, WorkerIsolation: c.FormValue("swarm_worker_isolation"), ReviewerEnabled: c.FormValue("swarm_reviewer_enabled") != "false", IntegratorEnabled: c.FormValue("swarm_integrator_enabled") != "false", MergeTargetBranch: t.MergeTargetBranch})
+		if err != nil {
+			if errors.Is(err, service.ErrDuplicateTask) {
+				return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
+			}
+			return err
+		}
+		*t = *parent
+	} else if err := h.taskSvc.CreateWithGoal(c.Request().Context(), t, c.FormValue("goal")); err != nil {
 		if errors.Is(err, service.ErrDuplicateTask) {
 			applog.Infof("[handler] CreateTask duplicate title=%q", t.Title)
 			return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
@@ -418,6 +442,11 @@ func (h *Handler) GetTask(c echo.Context) error {
 	if task == nil {
 		applog.Infof("[handler] GetTask not found id=%s", taskID)
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if task.SwarmRole == models.SwarmRoleParent {
+		if children, childErr := h.taskRepo.ListSwarmChildren(c.Request().Context(), task.ID); childErr == nil {
+			task.SwarmChildren = children
+		}
 	}
 
 	executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
@@ -1301,7 +1330,12 @@ func (h *Handler) CancelTask(c echo.Context) error {
 			applog.Infof("[handler] CancelTask error cancelling pending thread inputs task=%s: %v", taskID, err)
 		}
 	}
-	if err := h.taskSvc.CancelTask(c.Request().Context(), taskID); err != nil {
+	if task.SwarmRole == models.SwarmRoleParent && h.swarmSvc != nil {
+		if err := h.swarmSvc.CancelSwarm(c.Request().Context(), taskID); err != nil {
+			applog.Infof("[handler] CancelTask swarm cascade error: %v", err)
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+	} else if err := h.taskSvc.CancelTask(c.Request().Context(), taskID); err != nil {
 		applog.Infof("[handler] CancelTask error: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -1806,6 +1840,13 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	}
 	if task == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if h.swarmSvc != nil {
+		if task.SwarmRole == models.SwarmRoleParent {
+			_ = h.swarmSvc.HandleParentFollowup(c.Request().Context(), task.ID, message)
+		} else if models.IsSwarmChildRole(task.SwarmRole) {
+			_ = h.swarmSvc.HandleChildFollowup(c.Request().Context(), task.ID, message)
+		}
 	}
 
 	// Check for pending image attachments (for vision-aware agent selection)

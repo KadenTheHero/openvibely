@@ -21,6 +21,7 @@ type TaskService struct {
 	workerSvc                         *WorkerService
 	agentRepo                         *repository.AgentRepo
 	goalSvc                           *TaskGoalService
+	swarmSvc                          *SwarmService
 	queuedTaskThreadFollowupHook      func(context.Context, string) (bool, error)
 	failedTaskThreadFollowupRetryHook func(context.Context, string) (bool, error)
 }
@@ -39,6 +40,10 @@ func (s *TaskService) SetAgentRepo(agentRepo *repository.AgentRepo) {
 
 func (s *TaskService) SetTaskGoalService(goalSvc *TaskGoalService) {
 	s.goalSvc = goalSvc
+}
+
+func (s *TaskService) SetSwarmService(swarmSvc *SwarmService) {
+	s.swarmSvc = swarmSvc
 }
 
 func (s *TaskService) resumeGoalStoppedByUser(ctx context.Context, taskID string, actor string) {
