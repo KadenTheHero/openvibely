@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -232,6 +233,133 @@ func TestSwarmServiceIntegratorCompletionPersistsParentResult(t *testing.T) {
 	}
 	if len(parentExecs) != 1 {
 		t.Fatalf("integrator completion should be idempotent, got %d parent executions", len(parentExecs))
+	}
+}
+
+func TestSwarmServiceParentFollowupCoordinatesAffectedWorkers(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 3, ReviewerEnabled: true, IntegratorEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRolePlanner)
+	if planner == nil {
+		t.Fatal("planner missing")
+	}
+	initialOutput := PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}, {Title: "Frontend worker", Prompt: "Do frontend", WorkerKind: "frontend", Ownership: []string{"web/templates"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}
+	if err := svc.ApplyPlannerOutput(context.Background(), planner.ID, initialOutput); err != nil {
+		t.Fatal(err)
+	}
+	children, _ := repo.ListSwarmChildren(context.Background(), parent.ID)
+	var backend, frontend *models.Task
+	for i := range children {
+		child := children[i]
+		cfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
+		switch child.SwarmRole {
+		case models.SwarmRoleWorker:
+			cfg.CompletedGeneration = 1
+			child.SwarmConfig, _ = cfg.JSON()
+			if err := repo.UpdateSwarmFields(context.Background(), child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.UpdateStatus(context.Background(), child.ID, models.StatusCompleted); err != nil {
+				t.Fatal(err)
+			}
+			if cfg.WorkerKind == "backend" {
+				backend = &child
+			} else if cfg.WorkerKind == "frontend" {
+				frontend = &child
+			}
+		case models.SwarmRoleReviewer:
+			cfg.ReviewedGeneration = 1
+			child.SwarmConfig, _ = cfg.JSON()
+			if err := repo.UpdateSwarmFields(context.Background(), child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.UpdateStatus(context.Background(), child.ID, models.StatusCompleted); err != nil {
+				t.Fatal(err)
+			}
+		case models.SwarmRoleIntegrator:
+			cfg.IntegratedGeneration = 1
+			child.SwarmConfig, _ = cfg.JSON()
+			if err := repo.UpdateSwarmFields(context.Background(), child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.UpdateStatus(context.Background(), child.ID, models.StatusCompleted); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if backend == nil || frontend == nil {
+		t.Fatalf("workers missing: backend=%#v frontend=%#v", backend, frontend)
+	}
+	parent, _ = repo.GetByID(context.Background(), parent.ID)
+	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	parentCfg.IntegratedGeneration = 1
+	parent.SwarmConfig, _ = parentCfg.JSON()
+	if err := repo.UpdateSwarmFields(context.Background(), parent.ID, parent.SwarmRole, "current", parent.SwarmConfig, parent.SwarmSequence); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.HandleParentFollowup(context.Background(), parent.ID, "Only update backend behavior"); err != nil {
+		t.Fatal(err)
+	}
+	planner, _ = repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRolePlanner)
+	if planner == nil || planner.Status != models.StatusPending || !strings.Contains(planner.Prompt, "Only update backend behavior") {
+		t.Fatalf("planner was not prepared for coordination follow-up: %#v", planner)
+	}
+	followupOutput := PlannerOutput{Workers: []PlannerWorker{{TaskID: backend.ID, Title: "Backend worker", Prompt: "Update backend only", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review backend update", IntegratorPrompt: "Integrate backend update"}
+	if err := svc.ApplyPlannerOutput(context.Background(), planner.ID, followupOutput); err != nil {
+		t.Fatal(err)
+	}
+	backendAfter, _ := repo.GetByID(context.Background(), backend.ID)
+	frontendAfter, _ := repo.GetByID(context.Background(), frontend.ID)
+	backendCfg, _ := models.ParseSwarmConfig(backendAfter.SwarmConfig)
+	frontendCfg, _ := models.ParseSwarmConfig(frontendAfter.SwarmConfig)
+	if backendAfter.Status != models.StatusPending || backendCfg.RerunGeneration != 2 || backendCfg.CompletedGeneration >= 2 {
+		t.Fatalf("affected backend not queued for generation 2: status=%s cfg=%#v", backendAfter.Status, backendCfg)
+	}
+	if frontendAfter.Status != models.StatusCompleted || frontendCfg.CompletedGeneration != 2 {
+		t.Fatalf("unaffected frontend not carried forward: status=%s cfg=%#v", frontendAfter.Status, frontendCfg)
+	}
+	reviewer, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleReviewer)
+	integrator, _ := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleIntegrator)
+	if reviewer == nil || reviewer.Status != models.StatusBlocked || integrator == nil || integrator.Status != models.StatusBlocked {
+		t.Fatalf("reviewer/integrator should wait for affected worker: reviewer=%#v integrator=%#v", reviewer, integrator)
+	}
+	backendCfg.CompletedGeneration = 2
+	backendAfter.SwarmConfig, _ = backendCfg.JSON()
+	if err := repo.UpdateSwarmFields(context.Background(), backendAfter.ID, backendAfter.SwarmRole, backendAfter.SwarmStatus, backendAfter.SwarmConfig, backendAfter.SwarmSequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(context.Background(), backendAfter.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.OnChildCompleted(context.Background(), backendAfter.ID); err != nil {
+		t.Fatal(err)
+	}
+	reviewer, _ = repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleReviewer)
+	if reviewer == nil || reviewer.Status != models.StatusPending {
+		t.Fatalf("reviewer not rerun after affected worker completed: %#v", reviewer)
+	}
+	revCfg, _ := models.ParseSwarmConfig(reviewer.SwarmConfig)
+	revCfg.ReviewedGeneration = 2
+	reviewer.SwarmConfig, _ = revCfg.JSON()
+	if err := repo.UpdateSwarmFields(context.Background(), reviewer.ID, reviewer.SwarmRole, reviewer.SwarmStatus, reviewer.SwarmConfig, reviewer.SwarmSequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(context.Background(), reviewer.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.OnChildCompleted(context.Background(), reviewer.ID); err != nil {
+		t.Fatal(err)
+	}
+	integrator, _ = repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRoleIntegrator)
+	if integrator == nil || integrator.Status != models.StatusPending {
+		t.Fatalf("integrator not rerun after reviewer completed: %#v", integrator)
 	}
 }
 
