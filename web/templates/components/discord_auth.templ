@@ -8,6 +8,7 @@ import (
 // DiscordAuthorizedUsersList renders the list of authorized Discord users with add/remove controls.
 templ DiscordAuthorizedUsersList(users []models.DiscordAuthorizedUser, projectID string) {
 	<div id="discord-authorized-users">
+		<p class="text-xs opacity-60 mb-2">Authorized Discord users are system-level for this channel and can use Discord across projects. Outbound Message Targets remain project-specific.</p>
 		if len(users) == 0 {
 			<p class="text-sm opacity-50 italic mb-3">No authorized users configured. Access is denied until authorized users are added.</p>
 		} else {

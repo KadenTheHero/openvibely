@@ -110,16 +110,16 @@ func TestTelegramAuthRepo_CRUD(t *testing.T) {
 	}
 }
 
-func TestTelegramAuthRepo_UniqueConstraint(t *testing.T) {
+func TestTelegramAuthRepo_SystemAuthorizationAcrossProjects(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTelegramAuthRepo(db)
 	projectRepo := NewProjectRepo(db)
 	ctx := context.Background()
 
 	project := &models.Project{Name: "Unique Test"}
-	if err := projectRepo.Create(ctx, project); err != nil {
-		t.Fatalf("failed to create project: %v", err)
-	}
+	otherProject := &models.Project{Name: "Other Test"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, otherProject))
 
 	user := &models.TelegramAuthorizedUser{
 		ProjectID:      project.ID,
@@ -127,20 +127,20 @@ func TestTelegramAuthRepo_UniqueConstraint(t *testing.T) {
 		DisplayName:    "User",
 		AddedBy:        "web",
 	}
-	if err := repo.Create(ctx, user); err != nil {
-		t.Fatalf("first Create failed: %v", err)
-	}
-
-	// Duplicate should fail
-	dup := &models.TelegramAuthorizedUser{
-		ProjectID:      project.ID,
+	require.NoError(t, repo.Create(ctx, user))
+	require.NoError(t, repo.Create(ctx, &models.TelegramAuthorizedUser{
+		ProjectID:      otherProject.ID,
 		TelegramUserID: 999,
 		DisplayName:    "User Dup",
 		AddedBy:        "web",
-	}
-	if err := repo.Create(ctx, dup); err == nil {
-		t.Error("expected error on duplicate (project_id, telegram_user_id)")
-	}
+	}))
+
+	authorized, err := repo.IsAuthorized(ctx, otherProject.ID, 999, "")
+	require.NoError(t, err)
+	require.True(t, authorized)
+	users, err := repo.ListByProject(ctx, otherProject.ID)
+	require.NoError(t, err)
+	require.Len(t, users, 1)
 }
 
 func TestTelegramAuthRepo_IsAuthorized(t *testing.T) {

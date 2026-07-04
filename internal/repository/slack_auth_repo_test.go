@@ -104,14 +104,16 @@ func TestSlackAuthRepo_AuthorizationChecks(t *testing.T) {
 	assert.True(t, authorizedAnywhere)
 }
 
-func TestSlackAuthRepo_UniqueConstraint(t *testing.T) {
+func TestSlackAuthRepo_SystemAuthorizationAcrossProjects(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewSlackAuthRepo(db)
 	projectRepo := NewProjectRepo(db)
 	ctx := context.Background()
 
 	project := &models.Project{Name: "Slack Unique"}
+	otherProject := &models.Project{Name: "Slack Other"}
 	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, otherProject))
 
 	require.NoError(t, repo.Create(ctx, &models.SlackAuthorizedUser{
 		ProjectID:   project.ID,
@@ -119,12 +121,20 @@ func TestSlackAuthRepo_UniqueConstraint(t *testing.T) {
 		DisplayName: "Original",
 		AddedBy:     "test",
 	}))
-
-	err := repo.Create(ctx, &models.SlackAuthorizedUser{
-		ProjectID:   project.ID,
+	require.NoError(t, repo.Create(ctx, &models.SlackAuthorizedUser{
+		ProjectID:   otherProject.ID,
 		SlackUserID: "UDUP",
 		DisplayName: "Duplicate",
 		AddedBy:     "test",
-	})
-	require.Error(t, err)
+	}))
+
+	authorized, err := repo.IsAuthorized(ctx, otherProject.ID, "UDUP")
+	require.NoError(t, err)
+	require.True(t, authorized)
+	projectScoped, err := repo.IsAuthorizedForProject(ctx, otherProject.ID, "UDUP")
+	require.NoError(t, err)
+	require.False(t, projectScoped)
+	users, err := repo.ListByProject(ctx, otherProject.ID)
+	require.NoError(t, err)
+	require.Len(t, users, 1)
 }

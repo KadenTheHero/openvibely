@@ -35,12 +35,12 @@ func TelegramAuthorizedUsersList(users []models.TelegramAuthorizedUser, projectI
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"telegram-authorized-users\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"telegram-authorized-users\"><p class=\"text-xs opacity-60 mb-2\">Authorized Telegram users are system-level for this channel and can use Telegram across projects. Outbound Message Targets remain project-specific.</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(users) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<p class=\"text-sm opacity-50 italic mb-3\">No authorized users configured. All Telegram users can interact with this project.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<p class=\"text-sm opacity-50 italic mb-3\">No authorized users configured. Access is denied until authorized users are added.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -57,7 +57,7 @@ func TelegramAuthorizedUsersList(users []models.TelegramAuthorizedUser, projectI
 				var templ_7745c5c3_Var2 string
 				templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(user.DisplayName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/telegram_auth.templ`, Line: 21, Col: 59}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/telegram_auth.templ`, Line: 22, Col: 59}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 				if templ_7745c5c3_Err != nil {
@@ -75,7 +75,7 @@ func TelegramAuthorizedUsersList(users []models.TelegramAuthorizedUser, projectI
 					var templ_7745c5c3_Var3 string
 					templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("@%s", user.TelegramUsername))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/telegram_auth.templ`, Line: 23, Col: 84}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/telegram_auth.templ`, Line: 24, Col: 84}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 					if templ_7745c5c3_Err != nil {
@@ -94,7 +94,7 @@ func TelegramAuthorizedUsersList(users []models.TelegramAuthorizedUser, projectI
 					var templ_7745c5c3_Var4 string
 					templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("ID: %d", user.TelegramUserID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/telegram_auth.templ`, Line: 26, Col: 85}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/telegram_auth.templ`, Line: 27, Col: 85}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 					if templ_7745c5c3_Err != nil {
@@ -112,7 +112,7 @@ func TelegramAuthorizedUsersList(users []models.TelegramAuthorizedUser, projectI
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/channels/telegram/authorized-users/%s?project_id=%s", user.ID, projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/telegram_auth.templ`, Line: 32, Col: 106}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/telegram_auth.templ`, Line: 33, Col: 106}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 				if templ_7745c5c3_Err != nil {
@@ -135,7 +135,7 @@ func TelegramAuthorizedUsersList(users []models.TelegramAuthorizedUser, projectI
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(projectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/telegram_auth.templ`, Line: 46, Col: 59}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/telegram_auth.templ`, Line: 47, Col: 59}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {

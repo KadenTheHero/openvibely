@@ -8,8 +8,9 @@ import (
 // TelegramAuthorizedUsersList renders the list of authorized Telegram users with add/remove controls.
 templ TelegramAuthorizedUsersList(users []models.TelegramAuthorizedUser, projectID string) {
 	<div id="telegram-authorized-users">
+		<p class="text-xs opacity-60 mb-2">Authorized Telegram users are system-level for this channel and can use Telegram across projects. Outbound Message Targets remain project-specific.</p>
 		if len(users) == 0 {
-			<p class="text-sm opacity-50 italic mb-3">No authorized users configured. All Telegram users can interact with this project.</p>
+			<p class="text-sm opacity-50 italic mb-3">No authorized users configured. Access is denied until authorized users are added.</p>
 		} else {
 			<div class="space-y-2 mb-3">
 				for _, user := range users {

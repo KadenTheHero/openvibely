@@ -50,12 +50,15 @@ func TestEmailService_AuthorizationRequiresConfiguredSender(t *testing.T) {
 	settingsRepo := repository.NewSettingsRepo(db)
 	projectRepo := repository.NewProjectRepo(db)
 	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
 	project := &models.Project{Name: "Email Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	svc := NewEmailService(settingsRepo, projectRepo, repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, emailAuthRepo, repository.NewEmailTaskContextRepo(db))
+	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
 
 	assert.Empty(t, svc.resolveAuthorizedProject(ctx, "alice@example.com"))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "Alice@Example.com", AddedBy: "test"}))
+	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
 	assert.Equal(t, project.ID, svc.resolveAuthorizedProject(ctx, "alice@example.com"))
 	assert.Empty(t, svc.resolveAuthorizedProject(ctx, "bob@example.com"))
 }
@@ -83,6 +86,8 @@ func TestEmailService_UsesThreadScopedSessionForActiveChatAndHistory(t *testing.
 	project := &models.Project{Name: "Email Session Project"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
+	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	activeTask := &models.Task{ProjectID: project.ID, Title: "Root Thread", Prompt: "root", Category: models.CategoryChat, Status: models.StatusRunning, CreatedVia: models.TaskOriginEmail, AgentID: &agent.ID}
@@ -102,6 +107,7 @@ func TestEmailService_UsesThreadScopedSessionForActiveChatAndHistory(t *testing.
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
 	svc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 	var runReq ChannelChatRunRequest
 	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runReq = req })
@@ -286,7 +292,6 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsPersists(t *testing.T) {
 	require.NoError(t, projectRepo.Create(ctx, project1))
 	require.NoError(t, projectRepo.Create(ctx, project2))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project1.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
-	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project2.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
 
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
@@ -340,7 +345,6 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsNormalizesDisplayNameSender(t *
 	require.NoError(t, projectRepo.Create(ctx, project1))
 	require.NoError(t, projectRepo.Create(ctx, project2))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project1.ID, EmailAddress: "sender@example.test", AddedBy: "test"}))
-	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project2.ID, EmailAddress: "sender@example.test", AddedBy: "test"}))
 
 	agent := &models.LLMConfig{Name: "Email Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
@@ -378,7 +382,7 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsNormalizesDisplayNameSender(t *
 	require.Equal(t, project2.ID, resolved, "future display-name messages must use the saved normalized sender project")
 }
 
-func TestEmailServiceSwitchProjectViaRuntimeToolsRejectsUnauthorizedTarget(t *testing.T) {
+func TestEmailServiceSwitchProjectViaRuntimeToolsAllowsSystemAuthorizedSenderAcrossProjects(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	settingsRepo := repository.NewSettingsRepo(db)
@@ -390,8 +394,8 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsRejectsUnauthorizedTarget(t *te
 	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
 	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
 
-	project1 := &models.Project{Name: "Authorized Email Project"}
-	project2 := &models.Project{Name: "Unauthorized Email Project"}
+	project1 := &models.Project{Name: "openvibely"}
+	project2 := &models.Project{Name: "Default Project"}
 	require.NoError(t, projectRepo.Create(ctx, project1))
 	require.NoError(t, projectRepo.Create(ctx, project2))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project1.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
@@ -418,15 +422,15 @@ func TestEmailServiceSwitchProjectViaRuntimeToolsRejectsUnauthorizedTarget(t *te
 
 	require.NotNil(t, got.RuntimeTools, "RuntimeTools must be non-nil for email channel turns")
 
-	result, handled, _, err := got.RuntimeTools.Executor(ctx, "switch_project", []byte(`{"project":"Unauthorized Email Project"}`))
+	result, handled, _, err := got.RuntimeTools.Executor(ctx, "switch_project", []byte(`{"project":"Default Project"}`))
 	require.NoError(t, err)
 	require.True(t, handled, "switch_project must be handled by email channel executor")
-	require.Contains(t, result, "Failed to switch project")
-	require.Contains(t, result, "not authorized")
+	require.Contains(t, result, "Default")
+	require.NotContains(t, result, "not authorized")
 
 	saved, err := emailSenderProjectRepo.GetSenderProject(ctx, "alice@example.com")
 	require.NoError(t, err)
-	require.Empty(t, saved, "unauthorized switch must not persist selection")
+	require.Equal(t, project2.ID, saved, "system-authorized sender must be able to switch to another project")
 }
 
 // TestEmailServiceResolveAuthorizedProjectUsesSavedSelection verifies that
@@ -445,7 +449,6 @@ func TestEmailServiceResolveAuthorizedProjectUsesSavedSelection(t *testing.T) {
 	require.NoError(t, projectRepo.Create(ctx, project1))
 	require.NoError(t, projectRepo.Create(ctx, project2))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project1.ID, EmailAddress: "bob@example.com", AddedBy: "test"}))
-	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project2.ID, EmailAddress: "bob@example.com", AddedBy: "test"}))
 
 	// Save project2 as the active project for bob.
 	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "bob@example.com", project2.ID))
@@ -521,6 +524,8 @@ func newEmailAttachmentTestService(t *testing.T) (*EmailService, *repository.Cha
 	project := &models.Project{Name: "Email Attachment Project", IsDefault: true}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
+	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
 	defaultAgent := &models.LLMConfig{Name: "text-cli", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodCLI, Model: "claude-sonnet-4-5", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, defaultAgent))
 	visionAgent := &models.LLMConfig{Name: "vision", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-3-5-sonnet-20241022", APIKey: "key"}
@@ -531,6 +536,7 @@ func newEmailAttachmentTestService(t *testing.T) (*EmailService, *repository.Cha
 	workerSvc := NewWorkerService(llmSvc, 0, nil)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
+	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
 	threadInputRepo := repository.NewThreadInputRepo(db)
 	svc.SetThreadInputRepo(threadInputRepo)
 	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)

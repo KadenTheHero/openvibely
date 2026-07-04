@@ -49,7 +49,7 @@ type outboundDiscordDMSender interface {
 }
 
 type outboundAuthorizedUserStore interface {
-	IsAuthorized(ctx context.Context, projectID, userID string) (bool, error)
+	IsAuthorizedForProject(ctx context.Context, projectID, userID string) (bool, error)
 }
 
 type outboundAuthorizedUserAnywhereStore interface {
@@ -547,7 +547,7 @@ func (r *ChannelMessageRouter) resolveAuthorizedDirectUserTarget(ctx context.Con
 	if store == nil {
 		return resolvedMessageTarget{}, fmt.Errorf("%s authorized-user store is not configured", platform)
 	}
-	allowed, err := store.IsAuthorized(ctx, projectID, userID)
+	allowed, err := store.IsAuthorizedForProject(ctx, projectID, userID)
 	if err != nil {
 		return resolvedMessageTarget{}, err
 	}
@@ -626,5 +626,3 @@ func firstNonEmptyMessageString(values ...string) string {
 	}
 	return ""
 }
-
-

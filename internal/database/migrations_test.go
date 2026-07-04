@@ -87,8 +87,66 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 107 {
-		t.Fatalf("max goose version = %d, want 107", maxVersion)
+	if maxVersion != 108 {
+		t.Fatalf("max goose version = %d, want 108", maxVersion)
+	}
+}
+
+func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "system-channel-auth.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("failed to set dialect: %v", err)
+	}
+	if err := goose.UpTo(db, ".", 107); err != nil {
+		t.Fatalf("failed to migrate to 107: %v", err)
+	}
+	for _, id := range []string{"project-one", "project-two"} {
+		if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES (?, ?, '', '')`, id, id); err != nil {
+			t.Fatalf("failed to insert project %s: %v", id, err)
+		}
+	}
+	if _, err := db.Exec(`
+		INSERT INTO slack_authorized_users (id, project_id, slack_user_id, display_name) VALUES ('slack-one', 'project-one', 'U123', 'One');
+		INSERT INTO slack_authorized_users (id, project_id, slack_user_id, display_name) VALUES ('slack-two', 'project-two', 'U123', 'Two');
+		INSERT INTO discord_authorized_users (id, project_id, discord_user_id, display_name) VALUES ('discord-one', 'project-one', '123456789012345678', 'One');
+		INSERT INTO discord_authorized_users (id, project_id, discord_user_id, display_name) VALUES ('discord-two', 'project-two', '123456789012345678', 'Two');
+		INSERT INTO email_authorized_senders (id, project_id, email_address, display_name) VALUES ('email-one', 'project-one', 'sender@example.com', 'One');
+		INSERT INTO email_authorized_senders (id, project_id, email_address, display_name) VALUES ('email-two', 'project-two', 'SENDER@example.com', 'Two');
+		INSERT INTO telegram_authorized_users (id, project_id, telegram_user_id, telegram_username, display_name) VALUES ('telegram-one', 'project-one', 999, '', 'One');
+		INSERT INTO telegram_authorized_users (id, project_id, telegram_user_id, telegram_username, display_name) VALUES ('telegram-two', 'project-two', 999, '', 'Two');
+	`); err != nil {
+		t.Fatalf("failed to seed duplicate auth rows: %v", err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("failed to run migration 108: %v", err)
+	}
+	assertSingleAuthRow := func(table, where string) {
+		t.Helper()
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table + ` WHERE ` + where).Scan(&count); err != nil {
+			t.Fatalf("failed to count %s: %v", table, err)
+		}
+		if count != 1 {
+			t.Fatalf("%s duplicate count = %d, want 1", table, count)
+		}
+	}
+	assertSingleAuthRow("slack_authorized_users", `slack_user_id = 'U123'`)
+	assertSingleAuthRow("discord_authorized_users", `discord_user_id = '123456789012345678'`)
+	assertSingleAuthRow("email_authorized_senders", `lower(email_address) = 'sender@example.com'`)
+	assertSingleAuthRow("telegram_authorized_users", `telegram_user_id = 999`)
+	if _, err := db.Exec(`INSERT INTO channel_targets (id, project_id, platform, name, target_id) VALUES ('target-one', 'project-one', 'email', '', 'one@example.com')`); err != nil {
+		t.Fatalf("channel_targets must remain project-scoped and insertable after auth migration: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO channel_targets (id, project_id, platform, name, target_id) VALUES ('target-two', 'project-two', 'email', '', 'one@example.com')`); err != nil {
+		t.Fatalf("same outbound target destination should remain allowed in another project: %v", err)
 	}
 }
 
@@ -175,8 +233,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 107 {
-		t.Fatalf("max goose version = %d, want 107", maxVersion)
+	if maxVersion != 108 {
+		t.Fatalf("max goose version = %d, want 108", maxVersion)
 	}
 }
 
@@ -614,8 +672,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 107 {
-		t.Fatalf("max goose version = %d, want 107", maxVersion)
+	if maxVersion != 108 {
+		t.Fatalf("max goose version = %d, want 108", maxVersion)
 	}
 }
 
@@ -966,8 +1024,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 107 {
-		t.Fatalf("max goose version = %d, want 107", maxVersion)
+	if maxVersion != 108 {
+		t.Fatalf("max goose version = %d, want 108", maxVersion)
 	}
 }
 

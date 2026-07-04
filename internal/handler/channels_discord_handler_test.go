@@ -218,8 +218,8 @@ func TestChannelsDiscordRemoveClearsSettings(t *testing.T) {
 		t.Fatalf("expected discord authorized users cleared for deleted project, got %d err=%v", len(users), err)
 	}
 	otherUsers, err := h.discordAuthRepo.ListByProject(context.Background(), otherProject.ID)
-	if err != nil || len(otherUsers) != 1 {
-		t.Fatalf("expected other project discord users preserved, got %d err=%v", len(otherUsers), err)
+	if err != nil || len(otherUsers) != 0 {
+		t.Fatalf("expected system-level discord authorized users cleared, got %d err=%v", len(otherUsers), err)
 	}
 }
 

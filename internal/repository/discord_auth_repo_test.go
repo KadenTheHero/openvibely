@@ -51,7 +51,7 @@ func TestDiscordAuthRepo_CRUD(t *testing.T) {
 	require.Error(t, repo.Delete(ctx, "missing-id"))
 }
 
-func TestDiscordAuthRepo_DeleteByProject(t *testing.T) {
+func TestDiscordAuthRepo_DeleteByProjectClearsSystemAllowlist(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewDiscordAuthRepo(db)
 	projectRepo := NewProjectRepo(db)
@@ -73,7 +73,7 @@ func TestDiscordAuthRepo_DeleteByProject(t *testing.T) {
 	assert.Len(t, users, 0)
 	otherUsers, err := repo.ListByProject(ctx, otherProject.ID)
 	require.NoError(t, err)
-	assert.Len(t, otherUsers, 1)
+	assert.Len(t, otherUsers, 0)
 }
 
 func TestDiscordAuthRepo_AuthorizationChecks(t *testing.T) {
@@ -129,27 +129,37 @@ func TestDiscordAuthRepo_AuthorizationChecks(t *testing.T) {
 	assert.True(t, authorizedAnywhere)
 }
 
-func TestDiscordAuthRepo_UniqueConstraint(t *testing.T) {
+func TestDiscordAuthRepo_SystemAuthorizationAcrossProjects(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewDiscordAuthRepo(db)
 	projectRepo := NewProjectRepo(db)
 	ctx := context.Background()
 
 	project := &models.Project{Name: "Discord Unique"}
+	otherProject := &models.Project{Name: "Discord Other"}
 	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, otherProject))
 
 	require.NoError(t, repo.Create(ctx, &models.DiscordAuthorizedUser{
 		ProjectID:     project.ID,
-		DiscordUserID: "dup",
+		DiscordUserID: "123456789012345678",
 		DisplayName:   "Original",
 		AddedBy:       "test",
 	}))
-
-	err := repo.Create(ctx, &models.DiscordAuthorizedUser{
-		ProjectID:     project.ID,
-		DiscordUserID: "dup",
+	require.NoError(t, repo.Create(ctx, &models.DiscordAuthorizedUser{
+		ProjectID:     otherProject.ID,
+		DiscordUserID: "123456789012345678",
 		DisplayName:   "Duplicate",
 		AddedBy:       "test",
-	})
-	require.Error(t, err)
+	}))
+
+	authorized, err := repo.IsAuthorized(ctx, otherProject.ID, "123456789012345678")
+	require.NoError(t, err)
+	require.True(t, authorized)
+	projectScoped, err := repo.IsAuthorizedForProject(ctx, otherProject.ID, "123456789012345678")
+	require.NoError(t, err)
+	require.False(t, projectScoped)
+	users, err := repo.ListByProject(ctx, otherProject.ID)
+	require.NoError(t, err)
+	require.Len(t, users, 1)
 }

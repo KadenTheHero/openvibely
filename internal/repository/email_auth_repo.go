@@ -32,13 +32,13 @@ func NormalizeEmailAddress(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
-// ListByProject returns all authorized email senders for a project.
+// ListByProject returns all system-level authorized email senders.
+// projectID is accepted for UI compatibility but does not scope inbound authorization.
 func (r *EmailAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.EmailAuthorizedSender, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, project_id, email_address, display_name, added_at, added_by
 		 FROM email_authorized_senders
-		 WHERE project_id = ?
-		 ORDER BY added_at ASC`, projectID)
+		 ORDER BY added_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list email authorized senders: %w", err)
 	}
@@ -55,28 +55,29 @@ func (r *EmailAuthRepo) ListByProject(ctx context.Context, projectID string) ([]
 	return senders, rows.Err()
 }
 
-// IsAuthorized checks whether an email address is authorized for a given project.
+// IsAuthorized checks whether an email address is authorized at the system channel level.
+// projectID is accepted for compatibility but does not scope inbound authorization.
 func (r *EmailAuthRepo) IsAuthorized(ctx context.Context, projectID, emailAddress string) (bool, error) {
+	return r.IsAuthorizedAnywhere(ctx, emailAddress)
+}
+
+// IsAuthorizedForProject checks the legacy project-scoped row ownership for diagnostics/tests.
+func (r *EmailAuthRepo) IsAuthorizedForProject(ctx context.Context, projectID, emailAddress string) (bool, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM email_authorized_senders
 		 WHERE project_id = ? AND lower(email_address) = lower(?)`,
 		projectID, NormalizeEmailAddress(emailAddress)).Scan(&count)
 	if err != nil {
-		return false, fmt.Errorf("check email authorization: %w", err)
+		return false, fmt.Errorf("check email project authorization: %w", err)
 	}
 	return count > 0, nil
 }
 
-// HasAnyAuthorizedUsers checks whether a project has any authorized email senders configured.
+// HasAnyAuthorizedUsers checks whether any system-level email authorized senders are configured.
+// projectID is accepted for compatibility but does not scope inbound authorization.
 func (r *EmailAuthRepo) HasAnyAuthorizedUsers(ctx context.Context, projectID string) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM email_authorized_senders WHERE project_id = ?`, projectID).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("count email authorized senders: %w", err)
-	}
-	return count > 0, nil
+	return r.HasAnyAuthorizedUsersAnywhere(ctx)
 }
 
 // HasAnyAuthorizedUsersAnywhere checks whether any project has email authorized senders configured.
@@ -101,15 +102,30 @@ func (r *EmailAuthRepo) IsAuthorizedAnywhere(ctx context.Context, emailAddress s
 	return count > 0, nil
 }
 
-// Create adds a new authorized email sender to a project.
+// Create adds a system-level authorized email sender.
 func (r *EmailAuthRepo) Create(ctx context.Context, s *models.EmailAuthorizedSender) error {
 	s.EmailAddress = NormalizeEmailAddress(s.EmailAddress)
-	return r.db.QueryRowContext(ctx,
+	err := r.db.QueryRowContext(ctx,
 		`INSERT INTO email_authorized_senders (project_id, email_address, display_name, added_by)
 		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT DO NOTHING
 		 RETURNING id, added_at`,
 		s.ProjectID, s.EmailAddress, s.DisplayName, s.AddedBy).
 		Scan(&s.ID, &s.AddedAt)
+	if err == nil {
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+	if s.DisplayName != "" {
+		if _, updateErr := r.db.ExecContext(ctx, `UPDATE email_authorized_senders SET display_name = ?, added_by = ? WHERE lower(email_address) = lower(?)`, s.DisplayName, s.AddedBy, s.EmailAddress); updateErr != nil {
+			return updateErr
+		}
+	}
+	return r.db.QueryRowContext(ctx,
+		`SELECT id, added_at FROM email_authorized_senders WHERE lower(email_address) = lower(?)`,
+		s.EmailAddress).Scan(&s.ID, &s.AddedAt)
 }
 
 // Delete removes an authorized email sender by ID.

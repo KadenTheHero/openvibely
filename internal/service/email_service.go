@@ -849,37 +849,27 @@ func emailIncomingAttachmentsRequireVision(parts []EmailInboundAttachment) bool 
 }
 
 func (s *EmailService) resolveAuthorizedProject(ctx context.Context, sender string) string {
-	if s.emailAuthRepo == nil || sender == "" {
+	if s.emailAuthRepo == nil || sender == "" || s.projectRepo == nil {
 		return ""
 	}
-	// If the sender has a saved active project selection, use it (after verifying
-	// they are still authorized for that project).
+	ok, err := s.emailAuthRepo.IsAuthorized(ctx, "", sender)
+	if err != nil || !ok {
+		return ""
+	}
 	if s.emailSenderProjectRepo != nil {
 		savedProjectID, err := s.emailSenderProjectRepo.GetSenderProject(ctx, sender)
 		if err == nil && savedProjectID != "" {
-			ok, authErr := s.emailAuthRepo.IsAuthorized(ctx, savedProjectID, sender)
-			if authErr == nil && ok {
+			if project, projectErr := s.projectRepo.GetByID(ctx, savedProjectID); projectErr == nil && project != nil {
 				return savedProjectID
 			}
-			// Authorization for saved project lost — fall through to default scan.
-			applog.Infof("[email] saved project %s no longer authorized for sender=%s; rescanning", savedProjectID, redactEmail(sender))
+			applog.Infof("[email] saved project %s no longer exists for sender=%s; using default", savedProjectID, redactEmail(sender))
 		}
 	}
 	projects, err := s.projectRepo.List(ctx)
-	if err != nil {
+	if err != nil || len(projects) == 0 {
 		return ""
 	}
-	for _, p := range projects {
-		hasAny, err := s.emailAuthRepo.HasAnyAuthorizedUsers(ctx, p.ID)
-		if err != nil || !hasAny {
-			continue
-		}
-		ok, err := s.emailAuthRepo.IsAuthorized(ctx, p.ID, sender)
-		if err == nil && ok {
-			return p.ID
-		}
-	}
-	return ""
+	return projects[0].ID
 }
 
 // buildEmailActionToolRuntime returns channel-specific RuntimeTools for an

@@ -8,6 +8,7 @@ import (
 // EmailAuthorizedSendersList renders the list of authorized email senders with add/remove controls.
 templ EmailAuthorizedSendersList(senders []models.EmailAuthorizedSender, projectID string) {
 	<div id="email-authorized-senders">
+		<p class="text-xs opacity-60 mb-2">Authorized email senders are system-level for this channel and can use Email across projects. Outbound Message Targets remain project-specific.</p>
 		if len(senders) == 0 {
 			<p class="text-sm opacity-50 italic mb-3">No authorized senders configured. Access is denied until senders are added.</p>
 		} else {

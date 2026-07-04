@@ -18,13 +18,13 @@ func NewSlackAuthRepo(db *sql.DB) *SlackAuthRepo {
 	return &SlackAuthRepo{db: db}
 }
 
-// ListByProject returns all authorized Slack users for a project.
+// ListByProject returns all system-level authorized Slack users.
+// projectID is accepted for UI compatibility but does not scope inbound authorization.
 func (r *SlackAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.SlackAuthorizedUser, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, project_id, slack_user_id, display_name, added_at, added_by
 		 FROM slack_authorized_users
-		 WHERE project_id = ?
-		 ORDER BY added_at ASC`, projectID)
+		 ORDER BY added_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list slack auth users: %w", err)
 	}
@@ -41,29 +41,29 @@ func (r *SlackAuthRepo) ListByProject(ctx context.Context, projectID string) ([]
 	return users, rows.Err()
 }
 
-// IsAuthorized checks whether a Slack user is authorized for a given project.
+// IsAuthorized checks whether a Slack user is authorized at the system channel level.
+// projectID is accepted for compatibility but does not scope inbound authorization.
 func (r *SlackAuthRepo) IsAuthorized(ctx context.Context, projectID, slackUserID string) (bool, error) {
+	return r.IsAuthorizedAnywhere(ctx, slackUserID)
+}
+
+// IsAuthorizedForProject checks the legacy project-scoped row ownership used only for outbound DM compatibility.
+func (r *SlackAuthRepo) IsAuthorizedForProject(ctx context.Context, projectID, slackUserID string) (bool, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM slack_authorized_users
 		 WHERE project_id = ? AND slack_user_id = ?`,
 		projectID, slackUserID).Scan(&count)
 	if err != nil {
-		return false, fmt.Errorf("check slack auth: %w", err)
+		return false, fmt.Errorf("check slack project auth: %w", err)
 	}
 	return count > 0, nil
 }
 
-// HasAnyAuthorizedUsers checks whether a project has any authorized Slack users configured.
+// HasAnyAuthorizedUsers checks whether any system-level Slack authorized users are configured.
+// projectID is accepted for compatibility but does not scope inbound authorization.
 func (r *SlackAuthRepo) HasAnyAuthorizedUsers(ctx context.Context, projectID string) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM slack_authorized_users WHERE project_id = ?`,
-		projectID).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("count slack auth users: %w", err)
-	}
-	return count > 0, nil
+	return r.HasAnyAuthorizedUsersAnywhere(ctx)
 }
 
 // HasAnyAuthorizedUsersAnywhere checks whether any project has Slack authorized users configured.
@@ -89,11 +89,14 @@ func (r *SlackAuthRepo) IsAuthorizedAnywhere(ctx context.Context, slackUserID st
 	return count > 0, nil
 }
 
-// Create adds a new authorized Slack user to a project.
+// Create adds a system-level authorized Slack user.
 func (r *SlackAuthRepo) Create(ctx context.Context, u *models.SlackAuthorizedUser) error {
 	return r.db.QueryRowContext(ctx,
 		`INSERT INTO slack_authorized_users (project_id, slack_user_id, display_name, added_by)
 		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(slack_user_id) DO UPDATE SET
+			display_name = CASE WHEN excluded.display_name != '' THEN excluded.display_name ELSE slack_authorized_users.display_name END,
+			added_by = excluded.added_by
 		 RETURNING id, added_at`,
 		u.ProjectID, u.SlackUserID, u.DisplayName, u.AddedBy).
 		Scan(&u.ID, &u.AddedAt)

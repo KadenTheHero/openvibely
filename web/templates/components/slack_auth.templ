@@ -8,6 +8,7 @@ import (
 // SlackAuthorizedUsersList renders the list of authorized Slack users with add/remove controls.
 templ SlackAuthorizedUsersList(users []models.SlackAuthorizedUser, projectID string) {
 	<div id="slack-authorized-users">
+		<p class="text-xs opacity-60 mb-2">Authorized Slack users are system-level for this channel and can use Slack across projects. Outbound Message Targets remain project-specific.</p>
 		if len(users) == 0 {
 			<p class="text-sm opacity-50 italic mb-3">No authorized users configured.</p>
 		} else {

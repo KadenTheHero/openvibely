@@ -67,27 +67,24 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	isBotRunning := h.telegramService != nil && h.telegramService.IsRunning()
 	hasTelegramChannel := strings.TrimSpace(token) != "" || isBotRunning
 
-	// Load authorized Telegram users for the current project
+	// Load system-level inbound channel authorization allowlists.
 	var authorizedUsers []models.TelegramAuthorizedUser
-	if resolvedProjectID != "" && h.telegramAuthRepo != nil {
+	if h.telegramAuthRepo != nil {
 		authorizedUsers, _ = h.telegramAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
 	}
 
-	// Load authorized Slack users for the current project
 	var slackAuthorizedUsers []models.SlackAuthorizedUser
-	if resolvedProjectID != "" && h.slackAuthRepo != nil {
+	if h.slackAuthRepo != nil {
 		slackAuthorizedUsers, _ = h.slackAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
 	}
 
-	// Load authorized Email senders for the current project
 	var emailAuthorizedSenders []models.EmailAuthorizedSender
-	if resolvedProjectID != "" && h.emailAuthRepo != nil {
+	if h.emailAuthRepo != nil {
 		emailAuthorizedSenders, _ = h.emailAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
 	}
 
-	// Load authorized Discord users for the current project
 	var discordAuthorizedUsers []models.DiscordAuthorizedUser
-	if resolvedProjectID != "" && h.discordAuthRepo != nil {
+	if h.discordAuthRepo != nil {
 		discordAuthorizedUsers, _ = h.discordAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
 	}
 

@@ -59,15 +59,26 @@ func TestEmailAuthRepo_CRUDAuthorizationAndNormalization(t *testing.T) {
 	assert.Empty(t, senders)
 }
 
-func TestEmailAuthRepo_DuplicateAddressRejectedCaseInsensitive(t *testing.T) {
+func TestEmailAuthRepo_SystemAuthorizationAcrossProjects(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewEmailAuthRepo(db)
 	projectRepo := NewProjectRepo(db)
 	ctx := context.Background()
 
 	project := &models.Project{Name: "Email Unique"}
+	otherProject := &models.Project{Name: "Email Other"}
 	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, otherProject))
 	require.NoError(t, repo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "a@example.com", AddedBy: "test"}))
-	err := repo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "A@EXAMPLE.com", AddedBy: "test"})
-	require.Error(t, err)
+	require.NoError(t, repo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: otherProject.ID, EmailAddress: "A@EXAMPLE.com", AddedBy: "test"}))
+
+	ok, err := repo.IsAuthorized(ctx, otherProject.ID, "a@example.com")
+	require.NoError(t, err)
+	require.True(t, ok)
+	projectScoped, err := repo.IsAuthorizedForProject(ctx, otherProject.ID, "a@example.com")
+	require.NoError(t, err)
+	require.False(t, projectScoped)
+	senders, err := repo.ListByProject(ctx, otherProject.ID)
+	require.NoError(t, err)
+	require.Len(t, senders, 1)
 }

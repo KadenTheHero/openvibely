@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -18,13 +19,13 @@ func NewTelegramAuthRepo(db *sql.DB) *TelegramAuthRepo {
 	return &TelegramAuthRepo{db: db}
 }
 
-// ListByProject returns all authorized Telegram users for a project.
+// ListByProject returns all system-level authorized Telegram users.
+// projectID is accepted for UI compatibility but does not scope inbound authorization.
 func (r *TelegramAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.TelegramAuthorizedUser, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, project_id, telegram_user_id, telegram_username, display_name, added_at, added_by
 		 FROM telegram_authorized_users
-		 WHERE project_id = ?
-		 ORDER BY added_at ASC`, projectID)
+		 ORDER BY added_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list telegram auth users: %w", err)
 	}
@@ -41,40 +42,32 @@ func (r *TelegramAuthRepo) ListByProject(ctx context.Context, projectID string) 
 	return users, rows.Err()
 }
 
-// IsAuthorized checks whether a Telegram user is authorized for a given project.
+// IsAuthorized checks whether a Telegram user is authorized at the system channel level.
 // Checks both by user ID and by username (for entries added by username before the user messaged).
+// projectID is accepted for compatibility but does not scope inbound authorization.
 func (r *TelegramAuthRepo) IsAuthorized(ctx context.Context, projectID string, telegramUserID int64, username string) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM telegram_authorized_users
-		 WHERE project_id = ?
-		   AND (telegram_user_id = ? OR (telegram_user_id = 0 AND telegram_username != '' AND LOWER(telegram_username) = LOWER(?)))`,
-		projectID, telegramUserID, username).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("check telegram auth: %w", err)
-	}
-	return count > 0, nil
+	return r.IsAuthorizedAnywhere(ctx, telegramUserID, username)
 }
 
 // BackfillUserID updates the telegram_user_id for entries that were added by username only.
 // Called when a user first messages the bot, so future checks can use the numeric ID.
+// projectID is accepted for compatibility but does not scope inbound authorization.
 func (r *TelegramAuthRepo) BackfillUserID(ctx context.Context, projectID string, username string, userID int64) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE telegram_authorized_users SET telegram_user_id = ?
-		 WHERE project_id = ? AND telegram_user_id = 0 AND LOWER(telegram_username) = LOWER(?)`,
-		userID, projectID, username)
+		 WHERE telegram_user_id = 0 AND LOWER(telegram_username) = LOWER(?)`,
+		userID, username)
 	if err != nil {
 		return fmt.Errorf("backfill telegram user id: %w", err)
 	}
 	return nil
 }
 
-// HasAnyAuthorizedUsers checks whether a project has any authorized Telegram users configured.
+// HasAnyAuthorizedUsers checks whether any system-level Telegram authorized users are configured.
+// projectID is accepted for compatibility but does not scope inbound authorization.
 func (r *TelegramAuthRepo) HasAnyAuthorizedUsers(ctx context.Context, projectID string) (bool, error) {
 	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM telegram_authorized_users WHERE project_id = ?`,
-		projectID).Scan(&count)
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM telegram_authorized_users`).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("count telegram auth users: %w", err)
 	}
@@ -95,14 +88,36 @@ func (r *TelegramAuthRepo) IsAuthorizedAnywhere(ctx context.Context, telegramUse
 	return count > 0, nil
 }
 
-// Create adds a new authorized Telegram user to a project.
+// Create adds a system-level authorized Telegram user.
 func (r *TelegramAuthRepo) Create(ctx context.Context, u *models.TelegramAuthorizedUser) error {
-	return r.db.QueryRowContext(ctx,
+	u.TelegramUsername = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(u.TelegramUsername, "@")))
+	err := r.db.QueryRowContext(ctx,
 		`INSERT INTO telegram_authorized_users (project_id, telegram_user_id, telegram_username, display_name, added_by)
 		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT DO NOTHING
 		 RETURNING id, added_at`,
 		u.ProjectID, u.TelegramUserID, u.TelegramUsername, u.DisplayName, u.AddedBy).
 		Scan(&u.ID, &u.AddedAt)
+	if err == nil {
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+	where := `telegram_user_id = ?`
+	arg := any(u.TelegramUserID)
+	if u.TelegramUserID == 0 && u.TelegramUsername != "" {
+		where = `LOWER(telegram_username) = LOWER(?)`
+		arg = u.TelegramUsername
+	}
+	if u.DisplayName != "" {
+		if _, updateErr := r.db.ExecContext(ctx, `UPDATE telegram_authorized_users SET display_name = ?, added_by = ? WHERE `+where, u.DisplayName, u.AddedBy, arg); updateErr != nil {
+			return updateErr
+		}
+	}
+	return r.db.QueryRowContext(ctx,
+		`SELECT id, added_at FROM telegram_authorized_users WHERE `+where,
+		arg).Scan(&u.ID, &u.AddedAt)
 }
 
 // Delete removes an authorized Telegram user by ID.

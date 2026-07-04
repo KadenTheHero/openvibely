@@ -35,7 +35,7 @@ func EmailAuthorizedSendersList(senders []models.EmailAuthorizedSender, projectI
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"email-authorized-senders\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"email-authorized-senders\"><p class=\"text-xs opacity-60 mb-2\">Authorized email senders are system-level for this channel and can use Email across projects. Outbound Message Targets remain project-specific.</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -57,7 +57,7 @@ func EmailAuthorizedSendersList(senders []models.EmailAuthorizedSender, projectI
 				var templ_7745c5c3_Var2 string
 				templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(sender.DisplayName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/email_auth.templ`, Line: 21, Col: 70}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/email_auth.templ`, Line: 22, Col: 70}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 				if templ_7745c5c3_Err != nil {
@@ -70,7 +70,7 @@ func EmailAuthorizedSendersList(senders []models.EmailAuthorizedSender, projectI
 				var templ_7745c5c3_Var3 string
 				templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(sender.EmailAddress)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/email_auth.templ`, Line: 22, Col: 70}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/email_auth.templ`, Line: 23, Col: 70}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 				if templ_7745c5c3_Err != nil {
@@ -83,7 +83,7 @@ func EmailAuthorizedSendersList(senders []models.EmailAuthorizedSender, projectI
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/channels/email/authorized-senders/%s?project_id=%s", sender.ID, projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/email_auth.templ`, Line: 27, Col: 107}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/email_auth.templ`, Line: 28, Col: 107}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 				if templ_7745c5c3_Err != nil {
@@ -106,7 +106,7 @@ func EmailAuthorizedSendersList(senders []models.EmailAuthorizedSender, projectI
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(projectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/email_auth.templ`, Line: 41, Col: 59}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/email_auth.templ`, Line: 42, Col: 59}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
