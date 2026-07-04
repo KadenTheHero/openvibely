@@ -371,6 +371,16 @@ func (a *mixtureProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontrac
 	aggReq.Agent = aggregator
 	aggReq.Agent.Temperature = cfg.AggregatorTemperature
 	a.publishMixtureProgress(req, "aggregator_starting", len(results), len(cfg.ReferenceModels), "Aggregator starting...")
+	// applog.Debugf("[mixture] aggregator input provider=%s model=%s message_len=%d message=%q chat_context_len=%d chat_context=%q project_instructions_len=%d project_instructions=%q",
+	//	aggReq.Agent.Provider,
+	//	aggReq.Agent.Model,
+	//	len(aggReq.Message),
+	//	aggReq.Message,
+	//	len(aggReq.ChatSystemContext),
+	//	aggReq.ChatSystemContext,
+	//	len(aggReq.ProjectInstructions),
+	//	aggReq.ProjectInstructions,
+	// )
 	res, err := a.callAggregator(aggReq)
 	res.Usage = mergeMixtureUsage(results, res.Usage)
 	return res, err
@@ -480,6 +490,8 @@ func (a *mixtureProviderAdapter) callMixtureReference(req llmcontracts.AgentRequ
 	if result.Output == "" {
 		result.Output = res.Output
 	}
+	// applog.Debugf("[mixture] reference %d output provider=%s model=%s len=%d output=%q",
+	//	index+1, result.Provider, result.Model, len(result.Output), result.Output)
 	result.Usage = res.Usage
 	return result
 }
