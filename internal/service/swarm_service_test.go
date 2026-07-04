@@ -218,6 +218,25 @@ func TestParsePlannerOutputJSONExtractsFencedPlannerObject(t *testing.T) {
 	}
 }
 
+func TestParsePlannerOutputJSONPrefersFinalPlannerObject(t *testing.T) {
+	raw := "Earlier transcript contained a stale candidate:\n" +
+		`{"workers":[{"title":"Stale worker","prompt":"Do the old plan","worker_kind":"backend","ownership":["old"],"isolation":"worktree","write_scope":["old"],"required":true}],"reviewer_prompt":"Review stale","integrator_prompt":"Integrate stale"}` +
+		"\n\nAfter considering the follow-up, use this final planner JSON:\n```json\n" +
+		`{"workers":[{"title":"Final worker","prompt":"Do the final plan","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","write_scope":["internal/service"],"required":true}],"reviewer_prompt":"Review final","integrator_prompt":"Integrate final"}` +
+		"\n```"
+
+	out, err := ParsePlannerOutputJSON(raw)
+	if err != nil {
+		t.Fatalf("ParsePlannerOutputJSON: %v", err)
+	}
+	if len(out.Workers) != 1 || out.Workers[0].Title != "Final worker" {
+		t.Fatalf("parsed stale planner output: %#v", out.Workers)
+	}
+	if out.ReviewerPrompt != "Review final" || out.IntegratorPrompt != "Integrate final" {
+		t.Fatalf("parsed stale prompts: %#v", out)
+	}
+}
+
 func TestSwarmServiceStartPlannerReactivatesExistingPlannerBeforeSubmit(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)

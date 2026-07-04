@@ -982,6 +982,7 @@ func ParsePlannerOutputJSON(raw string) (PlannerOutput, error) {
 	if err := json.Unmarshal([]byte(trimmed), &output); err == nil {
 		return output, nil
 	}
+	var lastValidCandidate *PlannerOutput
 	for _, candidate := range plannerOutputJSONCandidates(trimmed) {
 		var candidateOutput PlannerOutput
 		if err := json.Unmarshal([]byte(candidate), &candidateOutput); err != nil {
@@ -990,7 +991,10 @@ func ParsePlannerOutputJSON(raw string) (PlannerOutput, error) {
 		if len(candidateOutput.Workers) == 0 {
 			continue
 		}
-		return candidateOutput, nil
+		lastValidCandidate = &candidateOutput
+	}
+	if lastValidCandidate != nil {
+		return *lastValidCandidate, nil
 	}
 	if err := json.Unmarshal([]byte(trimmed), &output); err != nil {
 		return output, err
@@ -1011,22 +1015,6 @@ func plannerOutputJSONCandidates(raw string) []string {
 			}
 		}
 		candidates = append(candidates, candidate)
-	}
-	for _, fence := range []string{"```json", "```"} {
-		search := raw
-		for {
-			idx := strings.Index(search, fence)
-			if idx < 0 {
-				break
-			}
-			rest := search[idx+len(fence):]
-			end := strings.Index(rest, "```")
-			if end < 0 {
-				break
-			}
-			addCandidate(rest[:end])
-			search = rest[end+3:]
-		}
 	}
 	for _, candidate := range balancedPlannerJSONObjects(raw) {
 		addCandidate(candidate)
