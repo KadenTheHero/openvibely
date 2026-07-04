@@ -1310,7 +1310,24 @@ func (h *Handler) RunTask(c echo.Context) error {
 		return noModelsConfiguredResponse(c)
 	}
 
-	if err := h.taskSvc.RunTask(c.Request().Context(), taskID); err != nil {
+	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil {
+		applog.Infof("[handler] RunTask fetch error: %v", err)
+		return err
+	}
+	if task == nil {
+		applog.Infof("[handler] RunTask not found id=%s", taskID)
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if task.SwarmRole == models.SwarmRoleParent {
+		if h.swarmSvc == nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "swarm service unavailable")
+		}
+		if err := h.swarmSvc.StartPlanner(c.Request().Context(), taskID); err != nil {
+			applog.Infof("[handler] RunTask swarm planner start error: %v", err)
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+	} else if err := h.taskSvc.RunTask(c.Request().Context(), taskID); err != nil {
 		applog.Infof("[handler] RunTask error: %v", err)
 		return err
 	}

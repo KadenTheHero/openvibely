@@ -4379,6 +4379,44 @@ func TestHandler_TaskThreadSend_QueuesBehindActiveTurn(t *testing.T) {
 	assert.Equal(t, "queued follow up", inputs[0].Content)
 }
 
+func TestHandler_RunTask_StartsPlannerForDeferredSwarmParent(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Deferred Swarm Run Project")
+	startImmediately := false
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
+		ProjectID:         project.ID,
+		Title:             "Deferred swarm",
+		Prompt:            "Split this deferred swarm into workers",
+		Category:          models.CategoryActive,
+		Priority:          2,
+		AgentID:           &agent.ID,
+		MaxWorkers:        2,
+		ReviewerEnabled:   true,
+		IntegratorEnabled: true,
+		StartImmediately:  &startImmediately,
+	})
+	require.NoError(t, err)
+
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.Nil(t, planner)
+
+	rec := htmxPost(e, "/tasks/"+parent.ID+"/run", nil)
+	assertCode(t, rec, http.StatusNoContent)
+
+	planner, err = h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	assert.Equal(t, models.CategoryActive, planner.Category)
+	assert.Equal(t, models.StatusPending, planner.Status)
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, parent.ID)
+	require.NoError(t, err)
+	assert.Empty(t, execs, "generic Run Now must not submit the swarm parent as an ordinary task")
+}
+
 func TestHandler_RunTask_PromotesPendingTaskThreadInputInsteadOfOriginalPrompt(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
