@@ -350,6 +350,59 @@ func TestTaskServiceUpdateCategoryNotifiesSwarmChildCancellation(t *testing.T) {
 	}
 }
 
+func TestTaskServiceUpdateCategoryNotifiesPendingSwarmChildCancellation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+	taskSvc.SetSwarmService(svc)
+	ctx := context.Background()
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Swarm parent", Prompt: "Build result", Category: models.CategoryActive, MaxWorkers: 1, WorkerIsolation: "worktree", ReviewerEnabled: true, IntegratorEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: %v", err)
+	}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{
+		Workers:          []PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}},
+		ReviewerPrompt:   "Review worker",
+		IntegratorPrompt: "Integrate worker",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	if err != nil || worker == nil {
+		t.Fatalf("worker missing: %v", err)
+	}
+	if err := repo.UpdateStatus(ctx, worker.ID, models.StatusPending); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateCategory(ctx, worker.ID, models.CategoryActive); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := taskSvc.UpdateCategory(ctx, worker.ID, models.CategoryCompleted); err != nil {
+		t.Fatalf("UpdateCategory: %v", err)
+	}
+
+	updatedWorker, err := repo.GetByID(ctx, worker.ID)
+	if err != nil || updatedWorker == nil {
+		t.Fatalf("updated worker missing: %v", err)
+	}
+	if updatedWorker.Status != models.StatusCancelled || updatedWorker.Category != models.CategoryCompleted {
+		t.Fatalf("worker status/category = %s/%s", updatedWorker.Status, updatedWorker.Category)
+	}
+	updatedParent, err := repo.GetByID(ctx, parent.ID)
+	if err != nil || updatedParent == nil {
+		t.Fatalf("updated parent missing: %v", err)
+	}
+	if updatedParent.Status != models.StatusBlocked || updatedParent.SwarmStatus != "needs_coordination" {
+		t.Fatalf("parent status/swarm_status = %s/%s", updatedParent.Status, updatedParent.SwarmStatus)
+	}
+}
+
 func TestSwarmServiceChildCancellationSetsRoleSpecificParentState(t *testing.T) {
 	roles := []struct {
 		name       string
