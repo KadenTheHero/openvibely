@@ -60,6 +60,19 @@ func (s *TaskService) resumeGoalStoppedByUser(ctx context.Context, taskID string
 	}
 }
 
+func (s *TaskService) submitActivatedTask(ctx context.Context, task models.Task, actor string) error {
+	s.resumeGoalStoppedByUser(ctx, task.ID, actor)
+	if task.SwarmRole == models.SwarmRoleParent {
+		if s.swarmSvc == nil {
+			return errors.New("swarm service unavailable")
+		}
+		applog.Infof("[task-svc] activating swarm parent id=%s via planner start", task.ID)
+		return s.swarmSvc.StartPlanner(ctx, task.ID)
+	}
+	s.workerSvc.Submit(task)
+	return nil
+}
+
 func (s *TaskService) SetQueuedTaskThreadFollowupHook(hook func(context.Context, string) (bool, error)) {
 	s.queuedTaskThreadFollowupHook = hook
 }
@@ -250,17 +263,10 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 				return nil
 			}
 		}
-		if task.SwarmRole == models.SwarmRoleParent {
-			if s.swarmSvc == nil {
-				return errors.New("swarm service unavailable")
-			}
-			applog.Infof("[task-svc] UpdateCategory activating swarm parent id=%s via planner start", id)
-			return s.swarmSvc.StartPlanner(ctx, id)
-		}
-		applog.Infof("[task-svc] UpdateCategory resetting status to pending and auto-submitting id=%s (was %s)", id, task.Status)
+		applog.Infof("[task-svc] UpdateCategory resetting status to pending and activating id=%s (was %s)", id, task.Status)
 		s.repo.UpdateStatus(ctx, id, models.StatusPending)
 		task.Status = models.StatusPending
-		s.workerSvc.Submit(*task)
+		return s.submitActivatedTask(ctx, *task, "user")
 	}
 	return nil
 }
@@ -278,11 +284,11 @@ func (s *TaskService) UpdateStatus(ctx context.Context, id string, status models
 			return err
 		}
 		if task != nil && task.Category == models.CategoryActive {
-			s.resumeGoalStoppedByUser(ctx, id, "user")
 			if status == models.StatusPending {
-				applog.Infof("[task-svc] UpdateStatus auto-submitting active task id=%s", id)
-				s.workerSvc.Submit(*task)
+				applog.Infof("[task-svc] UpdateStatus activating pending active task id=%s", id)
+				return s.submitActivatedTask(ctx, *task, "user")
 			}
+			s.resumeGoalStoppedByUser(ctx, id, "user")
 		}
 	}
 	return nil
@@ -380,10 +386,9 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 		return nil
 	}
 
-	applog.Infof("[task-svc] RunTask submitting id=%s title=%q", id, task.Title)
+	applog.Infof("[task-svc] RunTask activating id=%s title=%q", id, task.Title)
 	task.Status = models.StatusPending
-	s.workerSvc.Submit(*task)
-	return nil
+	return s.submitActivatedTask(ctx, *task, "user")
 }
 
 func (s *TaskService) CancelTask(ctx context.Context, id string) error {
@@ -566,8 +571,9 @@ func (s *TaskService) ActivateAllBacklog(ctx context.Context, projectID string) 
 		} else {
 			for _, task := range activeTasks {
 				if task.Status == models.StatusPending {
-					s.resumeGoalStoppedByUser(ctx, task.ID, "user")
-					s.workerSvc.Submit(task)
+					if err := s.submitActivatedTask(ctx, task, "user"); err != nil {
+						applog.Infof("[task-svc] ActivateAllBacklog error activating task %s: %v", task.ID, err)
+					}
 				}
 			}
 		}
@@ -636,9 +642,11 @@ func (s *TaskService) ExecuteBacklogTasks(ctx context.Context, projectID string,
 			task.Status = models.StatusPending
 		}
 
-		// Submit to worker pool
-		s.resumeGoalStoppedByUser(ctx, task.ID, "user")
-		s.workerSvc.Submit(task)
+		// Activate task execution or swarm planning.
+		if err := s.submitActivatedTask(ctx, task, "user"); err != nil {
+			applog.Infof("[task-svc] ExecuteBacklogTasks error activating task %s: %v", task.ID, err)
+			continue
+		}
 		submitted++
 	}
 
@@ -662,7 +670,7 @@ func (s *TaskService) ExecuteTasksByTags(ctx context.Context, tags []models.Task
 	// Completed status/category is opt-in only to avoid accidental mass re-runs.
 	var allTasks []models.Task
 	categoriesToSearch := []models.TaskCategory{models.CategoryBacklog, models.CategoryActive}
-	statusesToSearch := []models.TaskStatus{models.StatusPending, models.StatusFailed, models.StatusCancelled}
+	statusesToSearch := []models.TaskStatus{models.StatusPending, models.StatusFailed, models.StatusCancelled, models.StatusBlocked}
 	if includeCompleted {
 		categoriesToSearch = append(categoriesToSearch, models.CategoryCompleted)
 		statusesToSearch = append(statusesToSearch, models.StatusCompleted)
@@ -688,6 +696,9 @@ func (s *TaskService) ExecuteTasksByTags(ctx context.Context, tags []models.Task
 	// Move backlog tasks to active and reset status to pending
 	submitted := 0
 	for _, task := range allTasks {
+		if task.Status == models.StatusBlocked && task.SwarmRole != models.SwarmRoleParent {
+			continue
+		}
 		needsStatusUpdate := task.Status != models.StatusPending
 		needsCategoryUpdate := task.Category != models.CategoryActive
 
@@ -711,9 +722,11 @@ func (s *TaskService) ExecuteTasksByTags(ctx context.Context, tags []models.Task
 			applog.Infof("[task-svc] ExecuteTasksByTags reset status to pending for task %s", task.ID)
 		}
 
-		// Submit to worker pool
-		s.resumeGoalStoppedByUser(ctx, task.ID, "user")
-		s.workerSvc.Submit(task)
+		// Activate task execution or swarm planning.
+		if err := s.submitActivatedTask(ctx, task, "user"); err != nil {
+			applog.Infof("[task-svc] ExecuteTasksByTags error activating task %s: %v", task.ID, err)
+			continue
+		}
 		submitted++
 	}
 

@@ -905,7 +905,10 @@ func (r *TaskRepo) ListRunningChatTaskIDs(ctx context.Context, projectID string)
 // with status 'pending'. Returns the number of tasks updated.
 func (r *TaskRepo) ActivateAllBacklog(ctx context.Context, projectID string) (int, error) {
 	result, err := r.db.ExecContext(ctx,
-		`UPDATE tasks SET category = 'active', status = 'pending' WHERE category = 'backlog' AND status != 'blocked' AND project_id = ?`, projectID)
+		`UPDATE tasks SET category = 'active', status = 'pending'
+		 WHERE category = 'backlog'
+		   AND project_id = ?
+		   AND (status != 'blocked' OR swarm_role = 'swarm_parent')`, projectID)
 	if err != nil {
 		return 0, fmt.Errorf("activating backlog tasks: %w", err)
 	}
@@ -992,7 +995,7 @@ func (r *TaskRepo) ReorderTask(ctx context.Context, taskID string, newPosition i
 // Only returns tasks with status pending, failed, or cancelled (eligible for execution).
 func (r *TaskRepo) ListBacklogByPriority(ctx context.Context, projectID string, priority int) ([]models.Task, error) {
 	query := `SELECT ` + taskSelectColumns + `
-		 FROM tasks WHERE category = 'backlog' AND project_id = ? AND status IN ('pending', 'failed', 'cancelled', 'completed')`
+		 FROM tasks WHERE category = 'backlog' AND project_id = ? AND (status IN ('pending', 'failed', 'cancelled', 'completed') OR (status = 'blocked' AND swarm_role = 'swarm_parent'))`
 	args := []any{projectID}
 
 	if priority > 0 {
@@ -1025,7 +1028,7 @@ func (r *TaskRepo) ListBacklogByPriority(ctx context.Context, projectID string, 
 func (r *TaskRepo) CountBacklogByPriority(ctx context.Context, projectID string) (map[int]int, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT priority, COUNT(*) FROM tasks
-		 WHERE category = 'backlog' AND project_id = ? AND status IN ('pending', 'failed', 'cancelled', 'completed')
+		 WHERE category = 'backlog' AND project_id = ? AND (status IN ('pending', 'failed', 'cancelled', 'completed') OR (status = 'blocked' AND swarm_role = 'swarm_parent'))
 		 GROUP BY priority ORDER BY priority DESC`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("counting backlog tasks by priority: %w", err)

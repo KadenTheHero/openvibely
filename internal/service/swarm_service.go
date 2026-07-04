@@ -155,6 +155,12 @@ func (s *SwarmService) StartPlanner(ctx context.Context, parentTaskID string) er
 		}
 		parent.Category = models.CategoryActive
 	}
+	if parent.Status != models.StatusBlocked {
+		if err := s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusBlocked); err != nil {
+			return err
+		}
+		parent.Status = models.StatusBlocked
+	}
 	if existing, err := s.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner); err != nil {
 		return err
 	} else if existing != nil {

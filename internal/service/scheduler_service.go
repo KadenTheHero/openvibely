@@ -209,6 +209,14 @@ func (s *SchedulerService) checkActiveTasks(ctx context.Context) {
 	}
 
 	for _, task := range tasks {
+		if task.SwarmRole == models.SwarmRoleParent && s.swarmStarter != nil {
+			applog.Infof("[scheduler] checkActiveTasks starting swarm planner task id=%s title=%q project=%s",
+				task.ID, task.Title, task.ProjectID)
+			if err := s.swarmStarter.StartPlanner(ctx, task.ID); err != nil {
+				applog.Infof("[scheduler] checkActiveTasks error starting swarm planner task=%s: %v", task.ID, err)
+			}
+			continue
+		}
 		applog.Infof("[scheduler] checkActiveTasks auto-submitting task id=%s title=%q project=%s",
 			task.ID, task.Title, task.ProjectID)
 		s.workerSvc.Submit(task)
@@ -228,6 +236,15 @@ func (s *SchedulerService) checkActiveTasks(ctx context.Context) {
 			task.ID, task.Title, staleQueuedTaskTimeout)
 		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
 			applog.Infof("[scheduler] checkActiveTasks error resetting stale task %s to pending: %v", task.ID, err)
+			continue
+		}
+		task.Status = models.StatusPending
+		if task.SwarmRole == models.SwarmRoleParent && s.swarmStarter != nil {
+			applog.Infof("[scheduler] checkActiveTasks starting swarm planner for recovered stale queued task id=%s title=%q project=%s",
+				task.ID, task.Title, task.ProjectID)
+			if err := s.swarmStarter.StartPlanner(ctx, task.ID); err != nil {
+				applog.Infof("[scheduler] checkActiveTasks error starting swarm planner task=%s: %v", task.ID, err)
+			}
 			continue
 		}
 		s.workerSvc.Submit(task)

@@ -882,3 +882,73 @@ func TestSchedulerService_CheckDueTasks_ReenabledScheduleRuns(t *testing.T) {
 		t.Error("expected re-enabled task to be submitted")
 	}
 }
+
+func TestSchedulerService_CheckActiveTasksStartsSwarmPlanner(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
+	taskSvc.SetSwarmService(swarmSvc)
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	svc.SetSwarmPlannerStarter(swarmSvc)
+	ctx := context.Background()
+
+	startImmediately := false
+	parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Recovered active swarm", Prompt: "plan after restart", Category: models.CategoryBacklog, MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true, StartImmediately: &startImmediately})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	if err := taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryActive); err != nil {
+		t.Fatalf("UpdateCategory: %v", err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, parent.ID, models.StatusPending); err != nil {
+		t.Fatalf("UpdateStatus: %v", err)
+	}
+
+	svc.checkActiveTasks(ctx)
+
+	planner, err := taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil {
+		t.Fatalf("FindSwarmChildByRole: %v", err)
+	}
+	if planner == nil {
+		t.Fatal("expected planner to be created")
+	}
+	if planner.Category != models.CategoryActive {
+		t.Fatalf("expected planner category active, got %s", planner.Category)
+	}
+	if planner.Status != models.StatusPending {
+		t.Fatalf("expected planner status pending, got %s", planner.Status)
+	}
+
+	storedParent, err := taskRepo.GetByID(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if storedParent == nil {
+		t.Fatal("expected parent to exist")
+	}
+	if storedParent.Status != models.StatusBlocked {
+		t.Fatalf("expected parent status blocked, got %s", storedParent.Status)
+	}
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != planner.ID {
+			t.Fatalf("expected submitted planner %s, got %s", planner.ID, submitted.ID)
+		}
+		if submitted.ID == parent.ID {
+			t.Fatal("swarm parent must not be submitted as a normal task")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected planner to be submitted")
+	}
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("unexpected extra submitted task %s", submitted.ID)
+	case <-time.After(100 * time.Millisecond):
+	}
+}

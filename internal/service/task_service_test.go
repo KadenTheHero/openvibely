@@ -2456,3 +2456,110 @@ func TestWorkerService_DispatchPrunesNonActiveCategoryTasks(t *testing.T) {
 		t.Errorf("expected empty queue after pruning, got %d", queueLen)
 	}
 }
+func TestTaskService_ActivateAllBacklogStartsSwarmPlanner(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
+	taskSvc.SetSwarmService(swarmSvc)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Swarm Bulk Activation"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	startImmediately := false
+	parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: project.ID, Title: "Deferred swarm", Prompt: "plan later", Category: models.CategoryBacklog, MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true, StartImmediately: &startImmediately})
+	require.NoError(t, err)
+
+	count, err := taskSvc.ActivateAllBacklog(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+	assertPlannerSubmittedForParent(t, taskRepo, workerSvc, parent.ID)
+}
+
+func TestTaskService_ExecuteBacklogTasksStartsSwarmPlanner(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
+	taskSvc.SetSwarmService(swarmSvc)
+	ctx := context.Background()
+
+	startImmediately := false
+	parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Deferred priority swarm", Prompt: "plan later", Category: models.CategoryBacklog, Priority: 3, MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true, StartImmediately: &startImmediately})
+	require.NoError(t, err)
+
+	_, submitted, err := taskSvc.ExecuteBacklogTasks(ctx, "default", 3)
+	require.NoError(t, err)
+	assert.Equal(t, 1, submitted)
+	assertPlannerSubmittedForParent(t, taskRepo, workerSvc, parent.ID)
+}
+
+func TestTaskService_ExecuteTasksByTagsStartsSwarmPlanner(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
+	taskSvc.SetSwarmService(swarmSvc)
+	ctx := context.Background()
+
+	startImmediately := false
+	parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Deferred tagged swarm", Prompt: "plan later", Category: models.CategoryBacklog, Tag: models.TagBug, Priority: 4, MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true, StartImmediately: &startImmediately})
+	require.NoError(t, err)
+
+	_, submitted, err := taskSvc.ExecuteTasksByTags(ctx, []models.TaskTag{models.TagBug}, "default", 1, false)
+	require.NoError(t, err)
+	assert.Equal(t, 1, submitted)
+	assertPlannerSubmittedForParent(t, taskRepo, workerSvc, parent.ID)
+}
+
+func TestTaskService_UpdateStatusPendingStartsSwarmPlanner(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
+	taskSvc.SetSwarmService(swarmSvc)
+	ctx := context.Background()
+
+	startImmediately := false
+	parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Active failed swarm", Prompt: "plan later", Category: models.CategoryBacklog, MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true, StartImmediately: &startImmediately})
+	require.NoError(t, err)
+	require.NoError(t, taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryActive))
+	require.NoError(t, taskRepo.UpdateStatus(ctx, parent.ID, models.StatusFailed))
+
+	require.NoError(t, taskSvc.UpdateStatus(ctx, parent.ID, models.StatusPending))
+	assertPlannerSubmittedForParent(t, taskRepo, workerSvc, parent.ID)
+}
+
+func assertPlannerSubmittedForParent(t *testing.T, taskRepo *repository.TaskRepo, workerSvc *WorkerService, parentID string) {
+	t.Helper()
+	planner, err := taskRepo.FindSwarmChildByRole(context.Background(), parentID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	assert.Equal(t, models.CategoryActive, planner.Category)
+	assert.Equal(t, models.StatusPending, planner.Status)
+
+	storedParent, err := taskRepo.GetByID(context.Background(), parentID)
+	require.NoError(t, err)
+	require.NotNil(t, storedParent)
+	assert.Equal(t, models.CategoryActive, storedParent.Category)
+	assert.Equal(t, models.StatusBlocked, storedParent.Status)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		assert.Equal(t, planner.ID, submitted.ID)
+		assert.NotEqual(t, parentID, submitted.ID, "swarm parent must not be submitted as a normal task")
+	case <-time.After(time.Second):
+		t.Fatal("expected planner to be submitted")
+	}
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("unexpected extra submitted task %s", submitted.ID)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
