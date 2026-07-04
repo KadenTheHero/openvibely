@@ -990,11 +990,106 @@ func validateFollowupPlannerOutput(output PlannerOutput, existing []models.Task,
 }
 
 func ParsePlannerOutputJSON(raw string) (PlannerOutput, error) {
+	trimmed := strings.TrimSpace(raw)
 	var output PlannerOutput
-	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &output); err != nil {
+	if err := json.Unmarshal([]byte(trimmed), &output); err == nil {
+		return output, nil
+	}
+	for _, candidate := range plannerOutputJSONCandidates(trimmed) {
+		var candidateOutput PlannerOutput
+		if err := json.Unmarshal([]byte(candidate), &candidateOutput); err != nil {
+			continue
+		}
+		if len(candidateOutput.Workers) == 0 {
+			continue
+		}
+		return candidateOutput, nil
+	}
+	if err := json.Unmarshal([]byte(trimmed), &output); err != nil {
 		return output, err
 	}
 	return output, nil
+}
+
+func plannerOutputJSONCandidates(raw string) []string {
+	var candidates []string
+	addCandidate := func(candidate string) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return
+		}
+		for _, existing := range candidates {
+			if existing == candidate {
+				return
+			}
+		}
+		candidates = append(candidates, candidate)
+	}
+	for _, fence := range []string{"```json", "```"} {
+		search := raw
+		for {
+			idx := strings.Index(search, fence)
+			if idx < 0 {
+				break
+			}
+			rest := search[idx+len(fence):]
+			end := strings.Index(rest, "```")
+			if end < 0 {
+				break
+			}
+			addCandidate(rest[:end])
+			search = rest[end+3:]
+		}
+	}
+	for _, candidate := range balancedPlannerJSONObjects(raw) {
+		addCandidate(candidate)
+	}
+	return candidates
+}
+
+func balancedPlannerJSONObjects(raw string) []string {
+	var candidates []string
+	inString := false
+	escaped := false
+	depth := 0
+	start := -1
+	for i, r := range raw {
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if r == '\\' {
+				escaped = true
+				continue
+			}
+			if r == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch r {
+		case '"':
+			if depth > 0 {
+				inString = true
+			}
+		case '{':
+			if depth == 0 {
+				start = i
+			}
+			depth++
+		case '}':
+			if depth == 0 {
+				continue
+			}
+			depth--
+			if depth == 0 && start >= 0 {
+				candidates = append(candidates, raw[start:i+1])
+				start = -1
+			}
+		}
+	}
+	return candidates
 }
 
 func maxWorkers(parent *models.Task) int {

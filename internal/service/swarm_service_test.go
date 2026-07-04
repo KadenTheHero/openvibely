@@ -145,6 +145,38 @@ func TestSwarmServiceAppliesPlannerOutputOnPlannerCompletion(t *testing.T) {
 	}
 }
 
+func TestParsePlannerOutputJSONExtractsPlannerObjectFromTranscript(t *testing.T) {
+	raw := `I’ll produce the swarm task JSON directly and first load context.
+[Using tool: memory_view]
+{"handle":"chat_thread_system.md","body":"not the planner"}
+
+Here is the bounded plan:
+{"workers":[{"title":"Email runtime fixer","prompt":"Fix email runtime switch project","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","write_scope":["internal/service"],"read_scope":["."],"required":true}],"reviewer_prompt":"Review email runtime fix","integrator_prompt":"Integrate email runtime fix","notes":"One worker is enough."}`
+
+	out, err := ParsePlannerOutputJSON(raw)
+	if err != nil {
+		t.Fatalf("ParsePlannerOutputJSON: %v", err)
+	}
+	if len(out.Workers) != 1 || out.Workers[0].Title != "Email runtime fixer" {
+		t.Fatalf("parsed wrong planner workers: %#v", out.Workers)
+	}
+	if out.ReviewerPrompt == "" || out.IntegratorPrompt == "" {
+		t.Fatalf("expected reviewer and integrator prompts: %#v", out)
+	}
+}
+
+func TestParsePlannerOutputJSONExtractsFencedPlannerObject(t *testing.T) {
+	raw := "Planner output:\n```json\n{" + `"workers":[{"title":"Backend worker","prompt":"Do backend","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","write_scope":["internal/service"],"required":true}],"reviewer_prompt":"Review","integrator_prompt":"Integrate"` + "}\n```"
+
+	out, err := ParsePlannerOutputJSON(raw)
+	if err != nil {
+		t.Fatalf("ParsePlannerOutputJSON: %v", err)
+	}
+	if len(out.Workers) != 1 || out.Workers[0].Title != "Backend worker" {
+		t.Fatalf("parsed wrong planner output: %#v", out)
+	}
+}
+
 func TestSwarmServiceStartPlannerReactivatesExistingPlannerBeforeSubmit(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)
