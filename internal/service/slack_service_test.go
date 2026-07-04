@@ -364,7 +364,7 @@ func TestSlackService_RuntimeCreateTaskTool_CreatedTasksGetSlackOriginAndContext
 	require.Equal(t, "C1", stc.SlackChannelID)
 	require.Equal(t, "1710000000.100000", stc.SlackThreadTS)
 
-	swarmOutput, handled, isErr, err := rt.Executor(ctx, "create_swarm_task", json.RawMessage(`{"title":"Slack Swarm Created","prompt":"Split this work","start_immediately":false}`))
+	swarmOutput, handled, isErr, err := rt.Executor(ctx, "create_swarm_task", json.RawMessage(`{"title":"Slack Swarm Created","prompt":"Split this work","category":"backlog"}`))
 	require.True(t, handled)
 	require.False(t, isErr)
 	require.NoError(t, err)

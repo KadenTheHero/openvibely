@@ -250,6 +250,13 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 				return nil
 			}
 		}
+		if task.SwarmRole == models.SwarmRoleParent {
+			if s.swarmSvc == nil {
+				return errors.New("swarm service unavailable")
+			}
+			applog.Infof("[task-svc] UpdateCategory activating swarm parent id=%s via planner start", id)
+			return s.swarmSvc.StartPlanner(ctx, id)
+		}
 		applog.Infof("[task-svc] UpdateCategory resetting status to pending and auto-submitting id=%s (was %s)", id, task.Status)
 		s.repo.UpdateStatus(ctx, id, models.StatusPending)
 		task.Status = models.StatusPending

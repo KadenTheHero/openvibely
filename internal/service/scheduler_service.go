@@ -21,11 +21,16 @@ const staleQueuedTaskTimeout = 10 * time.Minute
 // to run while the app was down) and executes them. For repeating schedules, only
 // one execution occurs on startup, and the next_run is calculated from the current
 // time (not catching up on all missed occurrences).
+type SwarmPlannerStarter interface {
+	StartPlanner(ctx context.Context, parentTaskID string) error
+}
+
 type SchedulerService struct {
 	scheduleRepo  *repository.ScheduleRepo
 	taskRepo      *repository.TaskRepo
 	workerSvc     *WorkerService
 	worktreeSvc   *WorktreeService
+	swarmStarter  SwarmPlannerStarter
 	interval      time.Duration
 	cancel        context.CancelFunc
 	wg            sync.WaitGroup
@@ -44,6 +49,10 @@ func NewSchedulerService(scheduleRepo *repository.ScheduleRepo, taskRepo *reposi
 // SetWorktreeService sets the worktree service for automatic cleanup.
 func (s *SchedulerService) SetWorktreeService(wts *WorktreeService) {
 	s.worktreeSvc = wts
+}
+
+func (s *SchedulerService) SetSwarmPlannerStarter(starter SwarmPlannerStarter) {
+	s.swarmStarter = starter
 }
 
 func (s *SchedulerService) Start(ctx context.Context) {
@@ -164,7 +173,14 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 			applog.Infof("[scheduler] checkDueTasks submitting scheduled task id=%s title=%q schedule=%s repeat=%s",
 				task.ID, task.Title, sched.ID, sched.RepeatType)
 		}
-		s.workerSvc.Submit(*task)
+		if task.SwarmRole == models.SwarmRoleParent && s.swarmStarter != nil {
+			if err := s.swarmStarter.StartPlanner(ctx, task.ID); err != nil {
+				applog.Infof("[scheduler] checkDueTasks error starting swarm planner task=%s: %v", task.ID, err)
+				continue
+			}
+		} else {
+			s.workerSvc.Submit(*task)
+		}
 
 		// Compute next run
 		nextRun := sched.ComputeNextRun(now)

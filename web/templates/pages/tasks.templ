@@ -135,15 +135,8 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 											<span class="label-text font-medium">Swarm mode</span>
 										</label>
 										<div id="create-task-swarm-options" class="hidden space-y-3">
+											<p class="text-xs opacity-70">Swarm planning starts when the parent task becomes Active. Choose Backlog to defer the planner until you run the task or move it to Active.</p>
 											<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-												<div class="form-control sm:col-span-2">
-													<input type="hidden" name="swarm_autonomous_planner" value="false"/>
-													<label class="label cursor-pointer justify-start gap-2 p-0">
-														<input type="checkbox" name="swarm_autonomous_planner" value="true" class="toggle toggle-sm toggle-primary" checked/>
-														<span class="label-text">Autonomous planner</span>
-													</label>
-													<p class="text-xs opacity-60 mt-1">Start the planner immediately after creating the swarm.</p>
-												</div>
 												<div class="form-control">
 													<label class="label"><span class="label-text">Max workers</span></label>
 													<input type="number" name="swarm_max_workers" class="input input-bordered" min="1" max="8" value="3"/>

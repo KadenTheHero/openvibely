@@ -738,19 +738,18 @@ func TestHandler_CreateTask_ActiveCategory(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 }
 
-func TestHandler_CreateTask_SwarmCanDeferAutonomousPlanner(t *testing.T) {
+func TestHandler_CreateTask_BacklogSwarmDefersPlanner(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Deferred Swarm Form Project")
 	form := url.Values{}
 	form.Set("title", "Deferred Swarm")
-	form.Set("category", "active")
+	form.Set("category", "backlog")
 	form.Set("priority", "2")
 	form.Set("prompt", "Plan this later")
 	form.Set("swarm_mode", "on")
 	form.Set("swarm_max_workers", "2")
 	form.Set("swarm_worker_isolation", "worktree")
-	form.Set("swarm_autonomous_planner", "false")
 	form.Set("swarm_reviewer_enabled", "false")
 	form.Set("swarm_merger_enabled", "false")
 
@@ -1217,7 +1216,7 @@ func TestHandler_Dashboard(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 }
 
-func TestHandler_TasksPage_RendersAutonomousPlannerToggle(t *testing.T) {
+func TestHandler_TasksPage_RendersCategoryDrivenSwarmPlannerCopy(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Tasks Swarm UI Project")
 
@@ -1227,10 +1226,10 @@ func TestHandler_TasksPage_RendersAutonomousPlannerToggle(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 	body := rec.Body.String()
 
-	assert.Contains(t, body, "Autonomous planner")
-	assert.Contains(t, body, `name="swarm_autonomous_planner" value="false"`)
-	assert.Contains(t, body, `name="swarm_autonomous_planner" value="true"`)
-	assert.Contains(t, body, `name="swarm_autonomous_planner" value="true" class="toggle toggle-sm toggle-primary" checked`)
+	assert.Contains(t, body, "Swarm planning starts when the parent task becomes Active")
+	assert.Contains(t, body, "Choose Backlog to defer the planner")
+	assert.NotContains(t, body, "Autonomous planner")
+	assert.NotContains(t, body, `name="swarm_autonomous_planner"`)
 }
 
 func TestHandler_TasksPage_DoesNotContainChatRootSelector(t *testing.T) {
@@ -3444,7 +3443,7 @@ func TestHandler_TaskThreadSend_SwarmParentRoutesWithoutNormalExecution(t *testi
 		ProjectID:         project.ID,
 		Title:             "Swarm parent",
 		Prompt:            "Build the swarm result",
-		Category:          models.CategoryCompleted,
+		Category:          models.CategoryActive,
 		Priority:          2,
 		AgentID:           &agent.ID,
 		MaxWorkers:        3,
@@ -3491,7 +3490,7 @@ func TestHandler_SwarmFollowupChildCreatesTaskThreadExecution(t *testing.T) {
 		ProjectID:         project.ID,
 		Title:             "Swarm parent",
 		Prompt:            "Build the swarm result",
-		Category:          models.CategoryCompleted,
+		Category:          models.CategoryActive,
 		Priority:          2,
 		AgentID:           &agent.ID,
 		MaxWorkers:        1,
@@ -4389,12 +4388,12 @@ func TestHandler_RunTask_StartsPlannerForDeferredSwarmParent(t *testing.T) {
 		ProjectID:         project.ID,
 		Title:             "Deferred swarm",
 		Prompt:            "Split this deferred swarm into workers",
-		Category:          models.CategoryActive,
+		Category:          models.CategoryBacklog,
 		Priority:          2,
 		AgentID:           &agent.ID,
 		MaxWorkers:        2,
 		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		MergerEnabled:     true,
 		StartImmediately:  &startImmediately,
 	})
 	require.NoError(t, err)

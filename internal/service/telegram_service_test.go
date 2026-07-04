@@ -767,7 +767,7 @@ func TestTelegramService_RuntimeCreateTaskTool_SetsTelegramOrigin(t *testing.T) 
 	require.Equal(t, models.TaskOriginTelegram, created.CreatedVia)
 	require.Equal(t, int64(12345), created.TelegramChatID)
 
-	swarmOutput, handled, isErr, err := rt.Executor(ctx, "create_swarm_task", json.RawMessage(`{"title":"Telegram Swarm Created","prompt":"Split this work","start_immediately":false}`))
+	swarmOutput, handled, isErr, err := rt.Executor(ctx, "create_swarm_task", json.RawMessage(`{"title":"Telegram Swarm Created","prompt":"Split this work","category":"backlog"}`))
 	require.True(t, handled)
 	require.False(t, isErr)
 	require.NoError(t, err)

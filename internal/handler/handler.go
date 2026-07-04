@@ -183,6 +183,9 @@ func New(
 	if taskSvc != nil && taskRepo != nil {
 		swarmSvc = service.NewSwarmService(taskSvc, taskRepo, execRepo, workerSvc)
 		taskSvc.SetSwarmService(swarmSvc)
+		if schedulerSvc != nil {
+			schedulerSvc.SetSwarmPlannerStarter(swarmSvc)
+		}
 		if workerSvc != nil {
 			workerSvc.SetOnTaskComplete(func(task models.Task, executionErr error) {
 				if models.IsSwarmChildRole(task.SwarmRole) && swarmSvc != nil {

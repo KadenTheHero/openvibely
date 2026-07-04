@@ -36,7 +36,7 @@ func TestTasksContent_SwarmOptionsHiddenByDefault(t *testing.T) {
 		t.Fatal("expected swarm sub-options container to render")
 	}
 	for _, field := range []string{
-		"Autonomous planner",
+		"Swarm planning starts when the parent task becomes Active",
 		"Max workers",
 		"Worker isolation",
 		"Reviewer enabled",
@@ -94,8 +94,11 @@ func TestTasksContent_OpenNewTaskModalResyncsSwarmOptionsAfterFormReset(t *testi
 func TestTasksContent_HiddenSwarmOptionsPreserveSubmittedFieldValues(t *testing.T) {
 	body := renderTasksContentForSwarmTest(t)
 
+	if !strings.Contains(body, "Swarm planning starts when the parent task becomes Active") || !strings.Contains(body, "Choose Backlog to defer the planner") {
+		t.Fatal("expected swarm options to explain category-driven planner start semantics")
+	}
+
 	swarmOptionControls := []string{
-		`name="swarm_autonomous_planner" value="true" class="toggle toggle-sm toggle-primary" checked`,
 		`name="swarm_max_workers" class="input input-bordered" min="1" max="8" value="3"`,
 		`name="swarm_worker_isolation" class="select select-bordered"`,
 		`name="swarm_reviewer_enabled" value="true" class="checkbox checkbox-sm" checked`,
@@ -108,7 +111,6 @@ func TestTasksContent_HiddenSwarmOptionsPreserveSubmittedFieldValues(t *testing.
 	}
 
 	for _, name := range []string{
-		"swarm_autonomous_planner",
 		"swarm_max_workers",
 		"swarm_worker_isolation",
 		"swarm_reviewer_enabled",

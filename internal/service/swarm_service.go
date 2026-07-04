@@ -136,7 +136,7 @@ func (s *SwarmService) CreateSwarmTask(ctx context.Context, req CreateSwarmTaskR
 	if err := s.ensureIntegrationWorktreeMetadata(ctx, parent); err != nil {
 		return nil, err
 	}
-	if req.StartImmediately == nil || *req.StartImmediately {
+	if parent.Category == models.CategoryActive {
 		if err := s.StartPlanner(ctx, parent.ID); err != nil {
 			return nil, err
 		}
@@ -148,6 +148,12 @@ func (s *SwarmService) StartPlanner(ctx context.Context, parentTaskID string) er
 	parent, err := s.taskRepo.GetByID(ctx, parentTaskID)
 	if err != nil || parent == nil {
 		return fmt.Errorf("loading swarm parent: %w", err)
+	}
+	if parent.Category != models.CategoryActive {
+		if err := s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryActive); err != nil {
+			return err
+		}
+		parent.Category = models.CategoryActive
 	}
 	if existing, err := s.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner); err != nil {
 		return err

@@ -74,6 +74,44 @@ func TestTaskService_ListNormalizesActiveTerminalTasks(t *testing.T) {
 	require.Equal(t, models.CategoryBacklog, storedOrphan.Category)
 }
 
+func TestTaskService_UpdateCategoryStartsPlannerForBacklogSwarmParent(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
+	taskSvc.SetSwarmService(swarmSvc)
+	ctx := context.Background()
+	startImmediately := false
+
+	parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Deferred category swarm", Prompt: "Plan this later", Category: models.CategoryBacklog, MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true, StartImmediately: &startImmediately})
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryBacklog, parent.Category)
+	planner, err := taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.Nil(t, planner)
+
+	require.NoError(t, taskSvc.UpdateCategory(ctx, parent.ID, models.CategoryActive))
+
+	planner, err = taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	assert.Equal(t, models.CategoryActive, planner.Category)
+	assert.Equal(t, models.StatusPending, planner.Status)
+	storedParent, err := taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.CategoryActive, storedParent.Category)
+	assert.Equal(t, models.StatusBlocked, storedParent.Status)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		assert.Equal(t, planner.ID, submitted.ID)
+		assert.NotEqual(t, parent.ID, submitted.ID, "swarm parent must not be submitted as a normal task")
+	case <-time.After(time.Second):
+		t.Fatal("expected planner to be submitted")
+	}
+}
+
 func TestTaskService_Create_DefaultsStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

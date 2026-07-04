@@ -46,6 +46,7 @@ type channelCreateSwarmTaskInput struct {
 	Title            string `json:"title"`
 	Prompt           string `json:"prompt"`
 	ProjectID        string `json:"project_id"`
+	Category         string `json:"category"`
 	MaxWorkers       int    `json:"max_workers"`
 	WorkerIsolation  string `json:"worker_isolation"`
 	StartImmediately *bool  `json:"start_immediately"`
@@ -148,11 +149,15 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 			if swarmSvc == nil {
 				return "", fmt.Errorf("create_swarm_task: swarm service unavailable")
 			}
+			category := models.CategoryActive
+			if strings.EqualFold(strings.TrimSpace(req.Category), string(models.CategoryBacklog)) {
+				category = models.CategoryBacklog
+			}
 			parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{
 				ProjectID:        projectID,
 				Title:            req.Title,
 				Prompt:           req.Prompt,
-				Category:         models.CategoryActive,
+				Category:         category,
 				Priority:         2,
 				MaxWorkers:       req.MaxWorkers,
 				WorkerIsolation:  req.WorkerIsolation,
@@ -166,11 +171,8 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 			if opts.OnTasksCreated != nil {
 				opts.OnTasksCreated(ctx, []models.Task{*parent})
 			}
-			plannerMessage := "Planner is splitting the work into workers."
-			if req.StartImmediately != nil && !*req.StartImmediately {
-				plannerMessage = "Planner is ready to start from the swarm task."
-			}
-			summary := fmt.Sprintf("Created swarm task: %s.\n%s\n- \"%s\" (active) [TASK_ID:%s]", parent.Title, plannerMessage, parent.Title, parent.ID)
+			plannerMessage := "Planner starts when the swarm parent is Active."
+			summary := fmt.Sprintf("Created swarm task: %s.\n%s\n- \"%s\" (%s) [TASK_ID:%s]", parent.Title, plannerMessage, parent.Title, parent.Category, parent.ID)
 			if opts.Collector != nil {
 				opts.Collector.addCreated(summary)
 			}

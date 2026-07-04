@@ -59,6 +59,61 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 	}
 }
 
+func TestSchedulerService_CheckDueTasks_StartsPlannerForSwarmParent(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
+	taskSvc.SetSwarmService(swarmSvc)
+	ctx := context.Background()
+
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	svc.SetSwarmPlannerStarter(swarmSvc)
+	parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Scheduled swarm", Prompt: "Plan on schedule", Category: models.CategoryBacklog, MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	now := time.Now().UTC()
+	sched := &models.Schedule{TaskID: parent.ID, RunAt: now.Add(-1 * time.Minute), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	if err := scheduleRepo.Create(ctx, sched); err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+
+	svc.checkDueTasks(ctx)
+
+	planner, err := taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("expected scheduler to create planner child, planner=%#v err=%v", planner, err)
+	}
+	if planner.Category != models.CategoryActive || planner.Status != models.StatusPending {
+		t.Fatalf("planner not runnable: category=%s status=%s", planner.Category, planner.Status)
+	}
+	storedParent, err := taskRepo.GetByID(ctx, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storedParent.Category != models.CategoryActive {
+		t.Fatalf("expected scheduled swarm parent to become active, got %s", storedParent.Category)
+	}
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != planner.ID {
+			t.Fatalf("expected scheduler to submit planner %s, got %s", planner.ID, submitted.ID)
+		}
+	default:
+		t.Fatal("expected planner to be submitted")
+	}
+	updated, err := scheduleRepo.GetByID(ctx, sched.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.LastRun == nil {
+		t.Fatal("expected swarm schedule to be marked as ran")
+	}
+}
+
 func TestSchedulerService_CheckDueTasks_SubmitsMemoryConsolidationTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	scheduleRepo := repository.NewScheduleRepo(db)

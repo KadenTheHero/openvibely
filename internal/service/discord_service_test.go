@@ -158,7 +158,7 @@ func TestDiscordActionHandlersCoverAdvertisedRuntimeTools(t *testing.T) {
 	if err := chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceDiscord, true, handlers); err != nil {
 		t.Fatalf("discord handler coverage: %v", err)
 	}
-	out, err := handlers["create_swarm_task"](ctx, json.RawMessage(`{"title":"Discord Swarm Created","prompt":"Split this work","start_immediately":false}`))
+	out, err := handlers["create_swarm_task"](ctx, json.RawMessage(`{"title":"Discord Swarm Created","prompt":"Split this work","category":"backlog"}`))
 	if err != nil {
 		t.Fatalf("create_swarm_task handler failed: %v", err)
 	}

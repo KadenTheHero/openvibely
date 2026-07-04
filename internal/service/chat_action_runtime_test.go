@@ -191,14 +191,14 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *
 			}
 		},
 	})
-	startImmediately := false
-	payload, err := json.Marshal(channelCreateSwarmTaskInput{Title: "Shared swarm", Prompt: "Split this across workers", ProjectID: foreignProject.ID, StartImmediately: &startImmediately})
+	payload, err := json.Marshal(channelCreateSwarmTaskInput{Title: "Shared swarm", Prompt: "Split this across workers", ProjectID: foreignProject.ID, Category: string(models.CategoryBacklog)})
 	require.NoError(t, err)
 
 	summary, err := handlers["create_swarm_task"](ctx, payload)
 	require.NoError(t, err)
 	require.Contains(t, summary, "Created swarm task: Shared swarm")
-	require.Contains(t, summary, "Planner is ready to start")
+	require.Contains(t, summary, "Planner starts when the swarm parent is Active")
+	require.Contains(t, summary, "(backlog)")
 	require.Len(t, callbackTaskIDs, 1)
 	created, err := taskRepo.GetByID(ctx, callbackTaskIDs[0])
 	require.NoError(t, err)
