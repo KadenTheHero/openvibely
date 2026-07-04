@@ -1258,6 +1258,10 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 	if err := h.execRepo.Create(ctx, exec); err != nil {
 		return err
 	}
+	if err := h.applySwarmChildFollowupRetryStart(ctx, task, failed.PromptSent); err != nil {
+		h.completeWithFailure(ctx, exec.ID, taskID, err.Error(), 0)
+		return err
+	}
 	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued); err != nil {
 		h.completeWithFailure(ctx, exec.ID, taskID, err.Error(), 0)
 		return err
@@ -1315,6 +1319,16 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 
 func (h *Handler) applySwarmChildFollowupStart(ctx context.Context, task *models.Task, message string) error {
 	if h.swarmSvc == nil || task == nil || !models.IsSwarmChildRole(task.SwarmRole) {
+		return nil
+	}
+	return h.swarmSvc.HandleChildFollowup(ctx, task.ID, message)
+}
+
+func (h *Handler) applySwarmChildFollowupRetryStart(ctx context.Context, task *models.Task, message string) error {
+	if h.swarmSvc == nil || task == nil || !models.IsSwarmChildRole(task.SwarmRole) {
+		return nil
+	}
+	if task.SwarmStatus == "followup_pending" {
 		return nil
 	}
 	return h.swarmSvc.HandleChildFollowup(ctx, task.ID, message)

@@ -3009,6 +3009,88 @@ func TestStartChannelTaskRun_AppliesSwarmChildFollowupRouting(t *testing.T) {
 	assert.Equal(t, "followup_pending", updatedWorker.SwarmStatus)
 }
 
+func TestStartChannelTaskRun_RoutesSwarmChildBeforeSetupFailure(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	repoDir := createHandlerTestGitRepo(t)
+	project := &models.Project{Name: "Channel Swarm Setup Failure Project", RepoPath: repoDir}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
+		ProjectID:         project.ID,
+		Title:             "Swarm parent",
+		Prompt:            "Build the swarm result",
+		Category:          models.CategoryActive,
+		Priority:          2,
+		AgentID:           &agent.ID,
+		MaxWorkers:        1,
+		WorkerIsolation:   "worktree",
+		ReviewerEnabled:   true,
+		IntegratorEnabled: true,
+	})
+	require.NoError(t, err)
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
+		Workers:          []service.PlannerWorker{{Title: "Channel worker", Prompt: "Update from channel", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt:   "Review the worker",
+		IntegratorPrompt: "Integrate the worker",
+	}))
+	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	require.NoError(t, err)
+	require.NotNil(t, worker)
+	parentCfg, err := models.ParseSwarmConfig(parent.SwarmConfig)
+	require.NoError(t, err)
+	initialParentGeneration := parentCfg.Generation
+
+	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+	wtPath, wtBranch, err := h.worktreeSvc.SetupWorktree(ctx, worker, repoDir)
+	require.NoError(t, err)
+	worker.WorktreePath = wtPath
+	worker.WorktreeBranch = wtBranch
+	require.NoError(t, os.WriteFile(filepath.Join(wtPath, ".git"), []byte("not a gitdir"), 0644))
+	require.NoError(t, h.taskRepo.UpdateWorktreeInfo(ctx, worker.ID, wtPath, wtBranch))
+	exec := createExec(t, h, worker.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "channel worker follow-up"
+		ex.IsFollowup = true
+	})
+
+	h.StartChannelTaskRun(ctx, service.ChannelTaskRunRequest{
+		ExecID:    exec.ID,
+		TaskID:    worker.ID,
+		ProjectID: project.ID,
+		Message:   "channel worker follow-up",
+		Agent:     *agent,
+		Surface:   "slack",
+		ReplyContext: service.ChannelReplyContext{
+			Source:         models.TaskOriginSlack,
+			SlackChannelID: "Cswarmfail",
+			SlackThreadTS:  "1710000000.910000",
+			SlackUserID:    "Uswarmfail",
+		},
+	})
+
+	updatedParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	updatedParentCfg, err := models.ParseSwarmConfig(updatedParent.SwarmConfig)
+	require.NoError(t, err)
+	assert.Equal(t, initialParentGeneration+1, updatedParentCfg.Generation)
+	assert.Equal(t, "needs_review", updatedParent.SwarmStatus)
+	updatedWorker, err := h.taskRepo.GetByID(ctx, worker.ID)
+	require.NoError(t, err)
+	updatedWorkerCfg, err := models.ParseSwarmConfig(updatedWorker.SwarmConfig)
+	require.NoError(t, err)
+	assert.Equal(t, updatedParentCfg.Generation, updatedWorkerCfg.RerunGeneration)
+	assert.Equal(t, "followup_pending", updatedWorker.SwarmStatus)
+	require.Eventually(t, func() bool {
+		failedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+		return err == nil && failedExec != nil && failedExec.Status == models.ExecFailed
+	}, 2*time.Second, 25*time.Millisecond)
+}
+
 func TestStartChannelTaskRunIncludesTaskGoalContext(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
@@ -5182,6 +5264,72 @@ func TestFollowupNoChangesDoesNotResetMergeStatus(t *testing.T) {
 	if updatedExec.DiffOutput != "" {
 		t.Errorf("expected no diff output for read-only followup, got %d bytes", len(updatedExec.DiffOutput))
 	}
+}
+
+func TestRetryLatestFailedTaskThreadFollowup_RoutesUnroutedSwarmChildRetry(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Retry Unrouted Swarm Followup Project")
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
+		ProjectID:         project.ID,
+		Title:             "Swarm parent",
+		Prompt:            "Build the swarm result",
+		Category:          models.CategoryActive,
+		Priority:          2,
+		AgentID:           &agent.ID,
+		MaxWorkers:        1,
+		WorkerIsolation:   "worktree",
+		ReviewerEnabled:   true,
+		IntegratorEnabled: true,
+	})
+	require.NoError(t, err)
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
+		Workers:          []service.PlannerWorker{{Title: "Retry worker", Prompt: "Update retry path", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt:   "Review the worker",
+		IntegratorPrompt: "Integrate the worker",
+	}))
+	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	require.NoError(t, err)
+	require.NotNil(t, worker)
+	parentCfg, err := models.ParseSwarmConfig(parent.SwarmConfig)
+	require.NoError(t, err)
+	initialParentGeneration := parentCfg.Generation
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, worker.ID, models.StatusFailed))
+	require.NoError(t, h.taskRepo.UpdateCategory(ctx, worker.ID, models.CategoryBacklog))
+	failedFollowup := createExec(t, h, worker.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "retry the unrouted swarm worker follow-up"
+		ex.IsFollowup = true
+	})
+	require.NoError(t, h.execRepo.Complete(ctx, failedFollowup.ID, models.ExecFailed, "setup failed before routing", "worktree setup failed", 0, 20))
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "retry complete"
+	mock.TextOnly = "retry complete"
+	h.llmSvc.SetLLMCaller(mock)
+
+	handled, err := h.RetryLatestFailedTaskThreadFollowup(ctx, worker.ID)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, time.Second, 10*time.Millisecond)
+
+	updatedParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	updatedParentCfg, err := models.ParseSwarmConfig(updatedParent.SwarmConfig)
+	require.NoError(t, err)
+	assert.Equal(t, initialParentGeneration+1, updatedParentCfg.Generation)
+	assert.Equal(t, "needs_review", updatedParent.SwarmStatus)
+	updatedWorker, err := h.taskRepo.GetByID(ctx, worker.ID)
+	require.NoError(t, err)
+	updatedWorkerCfg, err := models.ParseSwarmConfig(updatedWorker.SwarmConfig)
+	require.NoError(t, err)
+	assert.Equal(t, updatedParentCfg.Generation, updatedWorkerCfg.RerunGeneration)
 }
 
 func TestRetryLatestFailedTaskThreadFollowup_ReplaysFailedFollowupPromptFromActiveDrop(t *testing.T) {
