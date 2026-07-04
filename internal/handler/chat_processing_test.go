@@ -2939,6 +2939,76 @@ func TestStartQueuedTaskThreadInputFailureUsesQueuedChannelReplyContext(t *testi
 	require.Equal(t, "Ufail", sentUser)
 }
 
+func TestStartChannelTaskRun_AppliesSwarmChildFollowupRouting(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Channel Swarm Child Direct Followup Project")
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
+		ProjectID:         project.ID,
+		Title:             "Swarm parent",
+		Prompt:            "Build the swarm result",
+		Category:          models.CategoryActive,
+		Priority:          2,
+		AgentID:           &agent.ID,
+		MaxWorkers:        1,
+		WorkerIsolation:   "worktree",
+		ReviewerEnabled:   true,
+		IntegratorEnabled: true,
+	})
+	require.NoError(t, err)
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
+		Workers:          []service.PlannerWorker{{Title: "Channel worker", Prompt: "Update from channel", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt:   "Review the worker",
+		IntegratorPrompt: "Integrate the worker",
+	}))
+	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	require.NoError(t, err)
+	require.NotNil(t, worker)
+	parentCfg, err := models.ParseSwarmConfig(parent.SwarmConfig)
+	require.NoError(t, err)
+	initialParentGeneration := parentCfg.Generation
+
+	exec := createExec(t, h, worker.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "channel worker follow-up"
+		ex.IsFollowup = true
+	})
+
+	h.StartChannelTaskRun(ctx, service.ChannelTaskRunRequest{
+		ExecID:    exec.ID,
+		TaskID:    worker.ID,
+		ProjectID: project.ID,
+		Message:   "channel worker follow-up",
+		Agent:     *agent,
+		Surface:   "slack",
+		ReplyContext: service.ChannelReplyContext{
+			Source:         models.TaskOriginSlack,
+			SlackChannelID: "Cswarm",
+			SlackThreadTS:  "1710000000.900000",
+			SlackUserID:    "Uswarm",
+		},
+	})
+
+	updatedParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	updatedParentCfg, err := models.ParseSwarmConfig(updatedParent.SwarmConfig)
+	require.NoError(t, err)
+	assert.Equal(t, initialParentGeneration+1, updatedParentCfg.Generation)
+	assert.Equal(t, "needs_review", updatedParent.SwarmStatus)
+
+	updatedWorker, err := h.taskRepo.GetByID(ctx, worker.ID)
+	require.NoError(t, err)
+	updatedWorkerCfg, err := models.ParseSwarmConfig(updatedWorker.SwarmConfig)
+	require.NoError(t, err)
+	assert.Equal(t, updatedParentCfg.Generation, updatedWorkerCfg.RerunGeneration)
+	assert.Equal(t, "followup_pending", updatedWorker.SwarmStatus)
+}
+
 func TestStartChannelTaskRunIncludesTaskGoalContext(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
