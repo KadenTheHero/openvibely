@@ -116,6 +116,52 @@ func TestSwarmServiceAppliesPlannerOutputOnPlannerCompletion(t *testing.T) {
 	}
 }
 
+func TestSwarmServiceStartPlannerReactivatesExistingPlannerBeforeSubmit(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	workerSvc := newTestWorkerService(t)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 2, ReviewerEnabled: true, IntegratorEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner, err := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: %v", err)
+	}
+	if err := repo.UpdateCategory(context.Background(), planner.ID, models.CategoryBacklog); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(context.Background(), planner.ID, models.StatusFailed); err != nil {
+		t.Fatal(err)
+	}
+	svc.workerSvc = workerSvc
+
+	if err := svc.StartPlanner(context.Background(), parent.ID); err != nil {
+		t.Fatalf("StartPlanner: %v", err)
+	}
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != planner.ID {
+			t.Fatalf("submitted task ID=%s, want planner %s", submitted.ID, planner.ID)
+		}
+		if submitted.Category != models.CategoryActive || submitted.Status != models.StatusPending {
+			t.Fatalf("submitted planner not runnable: category=%s status=%s", submitted.Category, submitted.Status)
+		}
+	default:
+		t.Fatal("expected planner to be submitted")
+	}
+	planner, err = repo.GetByID(context.Background(), planner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if planner.Category != models.CategoryActive || planner.Status != models.StatusPending {
+		t.Fatalf("persisted planner not runnable: category=%s status=%s", planner.Category, planner.Status)
+	}
+}
+
 func TestSwarmServiceInvalidPlannerExecutionBlocksParent(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)

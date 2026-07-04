@@ -874,6 +874,12 @@ func (s *SwarmService) submitIfRunnable(ctx context.Context, task *models.Task) 
 	if task.Status == models.StatusBlocked || task.Status == models.StatusRunning || task.Status == models.StatusQueued {
 		return nil
 	}
+	if task.Category != models.CategoryActive && task.Category != models.CategoryScheduled {
+		if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
+			return err
+		}
+		task.Category = models.CategoryActive
+	}
 	if task.Status != models.StatusPending {
 		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
 			return err
