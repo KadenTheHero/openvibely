@@ -410,10 +410,19 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 	}
 	if child.SwarmRole == models.SwarmRoleReviewer && child.Status == models.StatusCompleted {
 		cfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
-		if cfg.ReviewedGeneration < parentCfg.Generation {
-			cfg.ReviewedGeneration = parentCfg.Generation
+		targetGeneration := cfg.RerunGeneration
+		if targetGeneration <= 0 {
+			targetGeneration = cfg.ReviewedGeneration
+		}
+		if targetGeneration != parentCfg.Generation || !allRequiredWorkersCompleted(children, targetGeneration) {
+			return s.RecomputeParentStatus(ctx, parent.ID)
+		}
+		if cfg.ReviewedGeneration < targetGeneration {
+			cfg.ReviewedGeneration = targetGeneration
 			child.SwarmConfig, _ = cfg.JSON()
-			_ = s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence)
+			if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+				return err
+			}
 		}
 	}
 	children, _ = s.taskRepo.ListSwarmChildren(ctx, parent.ID)

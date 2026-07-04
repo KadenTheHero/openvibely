@@ -772,6 +772,89 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleIntegratorCompletion(t *testing
 	}
 }
 
+func TestSwarmServiceOnChildCompletedIgnoresStaleReviewerCompletion(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, parent, children := newCompletedSwarmForServiceTest(t, ctx)
+	worker := children[models.SwarmRoleWorker]
+	reviewer := children[models.SwarmRoleReviewer]
+	integrator := children[models.SwarmRoleIntegrator]
+	if worker == nil || reviewer == nil || integrator == nil {
+		t.Fatal("required children missing")
+	}
+
+	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	parentCfg.Generation = 2
+	parentCfg.ReviewedGeneration = 1
+	parentCfg.IntegratedGeneration = 1
+	parent.SwarmConfig, _ = parentCfg.JSON()
+	if err := repo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_review", parent.SwarmConfig, parent.SwarmSequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(ctx, parent.ID, models.StatusRunning); err != nil {
+		t.Fatal(err)
+	}
+
+	workerCfg, _ := models.ParseSwarmConfig(worker.SwarmConfig)
+	workerCfg.RerunGeneration = 2
+	workerCfg.CompletedGeneration = 1
+	worker.SwarmConfig, _ = workerCfg.JSON()
+	if err := repo.UpdateSwarmFields(ctx, worker.ID, worker.SwarmRole, "pending", worker.SwarmConfig, worker.SwarmSequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(ctx, worker.ID, models.StatusPending); err != nil {
+		t.Fatal(err)
+	}
+
+	reviewerCfg, _ := models.ParseSwarmConfig(reviewer.SwarmConfig)
+	reviewerCfg.RerunGeneration = 1
+	reviewerCfg.ReviewedGeneration = 1
+	reviewer.SwarmConfig, _ = reviewerCfg.JSON()
+	if err := repo.UpdateSwarmFields(ctx, reviewer.ID, reviewer.SwarmRole, "completed", reviewer.SwarmConfig, reviewer.SwarmSequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(ctx, reviewer.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+
+	integratorCfg, _ := models.ParseSwarmConfig(integrator.SwarmConfig)
+	integratorCfg.IntegratedGeneration = 1
+	integratorCfg.RerunGeneration = 1
+	integrator.SwarmConfig, _ = integratorCfg.JSON()
+	if err := repo.UpdateSwarmFields(ctx, integrator.ID, integrator.SwarmRole, "completed", integrator.SwarmConfig, integrator.SwarmSequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(ctx, integrator.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.OnChildCompleted(ctx, reviewer.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	updatedReviewer, err := repo.GetByID(ctx, reviewer.ID)
+	if err != nil || updatedReviewer == nil {
+		t.Fatalf("get reviewer: %v", err)
+	}
+	updatedReviewerCfg, _ := models.ParseSwarmConfig(updatedReviewer.SwarmConfig)
+	if updatedReviewerCfg.ReviewedGeneration != 1 {
+		t.Fatalf("stale reviewer completion advanced review freshness: %#v", updatedReviewerCfg)
+	}
+	updatedIntegrator, err := repo.GetByID(ctx, integrator.ID)
+	if err != nil || updatedIntegrator == nil {
+		t.Fatalf("get integrator: %v", err)
+	}
+	if updatedIntegrator.Status == models.StatusPending {
+		t.Fatalf("stale reviewer completion started integrator: %#v", updatedIntegrator)
+	}
+	updatedParent, err := repo.GetByID(ctx, parent.ID)
+	if err != nil || updatedParent == nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	if updatedParent.Status == models.StatusCompleted || updatedParent.SwarmStatus == "current" {
+		t.Fatalf("stale reviewer completion finalized parent: status=%s swarm=%s", updatedParent.Status, updatedParent.SwarmStatus)
+	}
+}
+
 func TestSwarmServiceRecomputeParentStatusDoesNotLetStaleIntegratorOverrideActiveWork(t *testing.T) {
 	ctx := context.Background()
 	repo, svc, parent, children := newCompletedSwarmForServiceTest(t, ctx)
