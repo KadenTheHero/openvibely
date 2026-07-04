@@ -610,6 +610,12 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 	if err := repo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "current", parent.SwarmConfig, parent.SwarmSequence); err != nil {
 		t.Fatal(err)
 	}
+	if err := repo.UpdateStatus(ctx, parent.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateCategory(ctx, parent.ID, models.CategoryCompleted); err != nil {
+		t.Fatal(err)
+	}
 
 	rerunReviewer, err := svc.RerunRole(ctx, parent.ID, models.SwarmRoleReviewer)
 	if err != nil {
@@ -623,6 +629,9 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 	if parent.SwarmStatus != "needs_review" || parentCfg.IntegratedGeneration >= parentCfg.Generation {
 		t.Fatalf("parent integration freshness not invalidated: status=%s cfg=%#v", parent.SwarmStatus, parentCfg)
 	}
+	if parent.Status != models.StatusRunning || parent.Category != models.CategoryActive {
+		t.Fatalf("parent not reactivated for reviewer rerun: status=%s category=%s", parent.Status, parent.Category)
+	}
 	if err := repo.UpdateStatus(ctx, rerunReviewer.ID, models.StatusCompleted); err != nil {
 		t.Fatal(err)
 	}
@@ -635,5 +644,25 @@ func TestSwarmServiceRerunReviewerStartsIntegratorAfterReviewerCompletes(t *test
 	}
 	if integrator.Status != models.StatusPending {
 		t.Fatalf("integrator not rerun after reviewer retry completed: %#v", integrator)
+	}
+	if err := repo.UpdateStatus(ctx, parent.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateCategory(ctx, parent.ID, models.CategoryCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(ctx, integrator.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	rerunIntegrator, err := svc.RerunRole(ctx, parent.ID, models.SwarmRoleIntegrator)
+	if err != nil {
+		t.Fatalf("RerunRole integrator: %v", err)
+	}
+	if rerunIntegrator == nil || rerunIntegrator.Status != models.StatusPending {
+		t.Fatalf("integrator not queued for rerun: %#v", rerunIntegrator)
+	}
+	parent, _ = repo.GetByID(ctx, parent.ID)
+	if parent.SwarmStatus != "needs_integration" || parent.Status != models.StatusRunning || parent.Category != models.CategoryActive {
+		t.Fatalf("parent not reactivated for integrator rerun: swarm=%s status=%s category=%s", parent.SwarmStatus, parent.Status, parent.Category)
 	}
 }

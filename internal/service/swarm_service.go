@@ -581,6 +581,12 @@ func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role 
 		}
 		swarmStatus = "rerun_integration"
 	}
+	if err := s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning); err != nil {
+		return nil, err
+	}
+	if err := s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryActive); err != nil {
+		return nil, err
+	}
 	child.SwarmStatus = swarmStatus
 	child.SwarmConfig, _ = childCfg.JSON()
 	if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
