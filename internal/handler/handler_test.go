@@ -5013,6 +5013,33 @@ func TestHandler_GetTaskThread_HidesLifecycleAgentActivity(t *testing.T) {
 	assertNotContains(t, rec, "private context")
 }
 
+func TestHandler_GetTaskThread_ServerRendersSelectedComposerModelLabel(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	project := createProject(t, h, "Thread Selected Model Project")
+	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Opus Worker"
+		a.Model = "claude-opus-4-1"
+		a.Temperature = 1.0
+	})
+	task := createTask(t, h, project.ID, "Running Selected Model Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.AgentID = &agent.ID
+	})
+	createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Running prompt"
+	})
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, `id="task-thread-form-agent-select"`)
+	assert.Contains(t, body, `data-current-value="`+agent.ID+`"`)
+	assert.Contains(t, body, `>Opus Worker (claude-opus-4-1)</span>`)
+}
+
 func TestHandler_GetTaskThread_PollsWhenActivePending(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	project := createProject(t, h, "Pending Thread Polling Project")
