@@ -186,6 +186,92 @@ func TestSwarmServiceAppliesPlannerOutputOnPlannerCompletion(t *testing.T) {
 	}
 }
 
+func TestSwarmServiceTerminalizesChildSwarmStatusOnCompletion(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
+	ctx := context.Background()
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export", Prompt: "Build export", MaxWorkers: 1, ReviewerEnabled: true, IntegratorEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: %v", err)
+	}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}}, ReviewerPrompt: "Review", IntegratorPrompt: "Integrate"}); err != nil {
+		t.Fatal(err)
+	}
+	planner, err = repo.GetByID(ctx, planner.ID)
+	if err != nil || planner == nil {
+		t.Fatalf("reload planner: %v", err)
+	}
+	if planner.Status != models.StatusCompleted || planner.SwarmStatus != "planned" {
+		t.Fatalf("planner status not terminalized: status=%s swarm_status=%s", planner.Status, planner.SwarmStatus)
+	}
+
+	worker, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	if err != nil || worker == nil {
+		t.Fatalf("worker missing: %v", err)
+	}
+	if err := repo.UpdateStatus(ctx, worker.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.OnChildCompleted(ctx, worker.ID); err != nil {
+		t.Fatal(err)
+	}
+	worker, _ = repo.GetByID(ctx, worker.ID)
+	if worker.SwarmStatus != "completed" {
+		t.Fatalf("worker swarm_status not terminalized: %s", worker.SwarmStatus)
+	}
+
+	reviewer, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleReviewer)
+	if err != nil || reviewer == nil {
+		t.Fatalf("reviewer missing: %v", err)
+	}
+	if reviewer.Status != models.StatusPending || reviewer.SwarmStatus != "ready" {
+		t.Fatalf("reviewer not started after worker completion: status=%s swarm_status=%s", reviewer.Status, reviewer.SwarmStatus)
+	}
+	if err := repo.UpdateStatus(ctx, reviewer.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.OnChildCompleted(ctx, reviewer.ID); err != nil {
+		t.Fatal(err)
+	}
+	reviewer, _ = repo.GetByID(ctx, reviewer.ID)
+	if reviewer.SwarmStatus != "reviewed" {
+		t.Fatalf("reviewer swarm_status not terminalized: %s", reviewer.SwarmStatus)
+	}
+
+	integrator, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleIntegrator)
+	if err != nil || integrator == nil {
+		t.Fatalf("integrator missing: %v", err)
+	}
+	if integrator.Status != models.StatusPending || integrator.SwarmStatus != "ready" {
+		t.Fatalf("integrator not started after reviewer completion: status=%s swarm_status=%s", integrator.Status, integrator.SwarmStatus)
+	}
+	exec := &models.Execution{TaskID: integrator.ID, Status: models.ExecRunning, PromptSent: integrator.Prompt}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatal(err)
+	}
+	if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "Final integrated output", "", 0, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(ctx, integrator.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.OnChildCompleted(ctx, integrator.ID); err != nil {
+		t.Fatal(err)
+	}
+	integrator, _ = repo.GetByID(ctx, integrator.ID)
+	if integrator.SwarmStatus != "integrated" {
+		t.Fatalf("integrator swarm_status not terminalized: %s", integrator.SwarmStatus)
+	}
+}
+
 func TestParsePlannerOutputJSONExtractsPlannerObjectFromTranscript(t *testing.T) {
 	raw := `I’ll produce the swarm task JSON directly and first load context.
 [Using tool: memory_view]

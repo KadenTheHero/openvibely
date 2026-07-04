@@ -229,6 +229,7 @@ func (s *SwarmService) ApplyPlannerOutput(ctx context.Context, plannerTaskID str
 			return err
 		}
 	}
+	_ = s.taskRepo.UpdateSwarmFields(ctx, planner.ID, planner.SwarmRole, "planned", planner.SwarmConfig, planner.SwarmSequence)
 	_ = s.taskRepo.UpdateStatus(ctx, planner.ID, models.StatusCompleted)
 	return s.StartReadyWorkers(ctx, parent.ID)
 }
@@ -341,6 +342,7 @@ func (s *SwarmService) applyFollowupPlannerOutput(ctx context.Context, parent *m
 			}
 		}
 	}
+	_ = s.taskRepo.UpdateSwarmFields(ctx, planner.ID, planner.SwarmRole, "planned", planner.SwarmConfig, planner.SwarmSequence)
 	_ = s.taskRepo.UpdateStatus(ctx, planner.ID, models.StatusCompleted)
 	return s.StartReadyWorkers(ctx, parent.ID)
 }
@@ -396,18 +398,19 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 		if targetGeneration != parentCfg.Generation {
 			return s.RecomputeParentStatus(ctx, parent.ID)
 		}
-		if cfg.CompletedGeneration < targetGeneration {
+		if cfg.CompletedGeneration < targetGeneration || child.SwarmStatus != "completed" {
 			cfg.CompletedGeneration = targetGeneration
 			child.SwarmConfig, _ = cfg.JSON()
-			if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+			if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, "completed", child.SwarmConfig, child.SwarmSequence); err != nil {
 				return err
 			}
+			child.SwarmStatus = "completed"
 		}
 		if refreshed, refreshErr := s.taskRepo.ListSwarmChildren(ctx, parent.ID); refreshErr == nil {
 			children = refreshed
 		}
 	}
-	if allRequiredWorkersCompleted(children, parentCfg.Generation) && parentCfg.ReviewerEnabled {
+	if child.SwarmRole == models.SwarmRoleWorker && child.Status == models.StatusCompleted && allRequiredWorkersCompleted(children, parentCfg.Generation) && parentCfg.ReviewerEnabled {
 		if reviewer := findChild(children, models.SwarmRoleReviewer); reviewer != nil {
 			revCfg, _ := models.ParseSwarmConfig(reviewer.SwarmConfig)
 			if revCfg.ReviewedGeneration < parentCfg.Generation && reviewer.Status != models.StatusRunning && reviewer.Status != models.StatusPending && child.Status != models.StatusFailed {
@@ -433,12 +436,13 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 		if targetGeneration != parentCfg.Generation || !allRequiredWorkersCompleted(children, targetGeneration) {
 			return s.RecomputeParentStatus(ctx, parent.ID)
 		}
-		if cfg.ReviewedGeneration < targetGeneration {
+		if cfg.ReviewedGeneration < targetGeneration || child.SwarmStatus != "reviewed" {
 			cfg.ReviewedGeneration = targetGeneration
 			child.SwarmConfig, _ = cfg.JSON()
-			if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+			if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, "reviewed", child.SwarmConfig, child.SwarmSequence); err != nil {
 				return err
 			}
+			child.SwarmStatus = "reviewed"
 		}
 	}
 	children, _ = s.taskRepo.ListSwarmChildren(ctx, parent.ID)
@@ -461,6 +465,13 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 		}
 	}
 	if child.SwarmRole == models.SwarmRoleIntegrator && child.Status == models.StatusCompleted {
+		if refreshed, refreshErr := s.taskRepo.ListSwarmChildren(ctx, parent.ID); refreshErr == nil {
+			children = refreshed
+		}
+		child, _ = s.taskRepo.GetByID(ctx, child.ID)
+		if child == nil {
+			return nil
+		}
 		cfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
 		targetGeneration := cfg.RerunGeneration
 		if targetGeneration <= 0 {
@@ -476,9 +487,10 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 		}
 		cfg.IntegratedGeneration = targetGeneration
 		child.SwarmConfig, _ = cfg.JSON()
-		if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, child.SwarmStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+		if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, "integrated", child.SwarmConfig, child.SwarmSequence); err != nil {
 			return err
 		}
+		child.SwarmStatus = "integrated"
 		if err := s.persistIntegratorResultToParent(ctx, parent.ID, child.ID); err != nil {
 			return err
 		}
