@@ -1224,12 +1224,25 @@ func shortID(id string) string {
 }
 
 func plannerPrompt(parentPrompt string, maxWorkers int) string {
-	return fmt.Sprintf(`You are the planner for an OpenVibely swarm task.
+	return fmt.Sprintf(`You are the planner for a swarm task.
+
+Your only job is to decompose the goal into worker tasks and handoff instructions. You are not a worker, reviewer, or merger.
 
 Goal:
 %s
 
-Return strict JSON only. Do not edit files.
+Role boundaries:
+- Do not implement the requested feature or bug fix yourself.
+- Do not modify, create, delete, format, or regenerate files.
+- Do not run build, test, formatter, generator, git, or shell commands.
+- Do not investigate the repository beyond what is necessary to name high-level ownership and read/write scopes.
+- Delegate all implementation, verification, review, and merge work to workers, reviewer, and merger through the JSON fields.
+
+Output contract:
+- Return exactly one raw JSON object and nothing else.
+- Do not wrap the JSON in Markdown fences.
+- Do not include progress notes, tool transcripts, analysis, or prose outside the JSON object.
+- The JSON object must contain workers and may contain reviewer_prompt, merger_prompt, and notes.
 
 Create up to %d workers. Each worker must have a bounded objective, clear ownership, and an isolation mode. Prefer non-overlapping write scopes.
 
@@ -1240,13 +1253,26 @@ JSON schema:
 func coordinatorFollowupPrompt(parentPrompt, followup string, generation int) string {
 	return fmt.Sprintf(`You are coordinating a follow-up for an existing swarm task.
 
+Your only job is to decide which workers need new delegated work. You are not a worker, reviewer, or merger.
+
 Parent goal:
 %s
 
 Follow-up request:
 %s
 
-Decide which existing workers are affected and whether new workers are needed. Do not edit files. Return strict JSON only.
+Role boundaries:
+- Do not implement the follow-up yourself.
+- Do not modify, create, delete, format, or regenerate files.
+- Do not run build, test, formatter, generator, git, or shell commands.
+- Do not investigate the repository beyond what is necessary to name affected workers and high-level scopes.
+- Delegate all implementation, verification, review, and merge work to workers, reviewer, and merger through the JSON fields.
+
+Output contract:
+- Return exactly one raw JSON object and nothing else.
+- Do not wrap the JSON in Markdown fences.
+- Do not include progress notes, tool transcripts, analysis, or prose outside the JSON object.
+- The JSON object must contain workers and may contain reviewer_prompt, merger_prompt, and notes.
 
 For existing affected workers, include their existing task_id. Omit unaffected workers. For new workers, omit task_id.
 

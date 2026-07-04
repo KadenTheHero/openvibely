@@ -81,8 +81,8 @@ func TestSwarmServiceApplyPlannerOutputAllowsOverlappingWorktreeScopes(t *testin
 			{Title: "Email runtime fixer", Prompt: "Fix email runtime switch_project", WorkerKind: "backend", Ownership: []string{"internal/service/email_service.go"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, ReadScope: []string{"."}, Required: true},
 			{Title: "Cross-channel comparison", Prompt: "Compare channel switch_project behavior", WorkerKind: "backend", Ownership: []string{"internal/service/chat_action_runtime.go"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, ReadScope: []string{"."}, Required: true},
 		},
-		ReviewerPrompt:   "Review overlapping service changes and conflicts",
-		MergerPrompt: "Integrate accepted service changes",
+		ReviewerPrompt: "Review overlapping service changes and conflicts",
+		MergerPrompt:   "Integrate accepted service changes",
 	}
 	if err := svc.ApplyPlannerOutput(context.Background(), planner.ID, output); err != nil {
 		t.Fatalf("ApplyPlannerOutput should allow overlapping isolated worktree scopes: %v", err)
@@ -449,6 +449,53 @@ func TestSwarmServiceStartsMergerAfterWorkersWhenReviewerDisabled(t *testing.T) 
 	}
 }
 
+func TestPlannerPromptRoleBoundsPlannerToDelegationOnly(t *testing.T) {
+	prompt := plannerPrompt("Fix the bug", 3)
+
+	required := []string{
+		"Your only job is to decompose the goal into worker tasks and handoff instructions.",
+		"You are not a worker, reviewer, or merger.",
+		"Do not implement the requested feature or bug fix yourself.",
+		"Do not modify, create, delete, format, or regenerate files.",
+		"Do not run build, test, formatter, generator, git, or shell commands.",
+		"Return exactly one raw JSON object and nothing else.",
+		"Do not wrap the JSON in Markdown fences.",
+		"\"workers\"",
+		"\"reviewer_prompt\"",
+		"\"merger_prompt\"",
+		"\"notes\"",
+	}
+	for _, want := range required {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("planner prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestCoordinatorFollowupPromptRoleBoundsPlannerToDelegationOnly(t *testing.T) {
+	prompt := coordinatorFollowupPrompt("Parent goal", "Follow-up", 2)
+
+	required := []string{
+		"Your only job is to decide which workers need new delegated work.",
+		"You are not a worker, reviewer, or merger.",
+		"Do not implement the follow-up yourself.",
+		"Do not modify, create, delete, format, or regenerate files.",
+		"Do not run build, test, formatter, generator, git, or shell commands.",
+		"Return exactly one raw JSON object and nothing else.",
+		"Do not wrap the JSON in Markdown fences.",
+		"For existing affected workers, include their existing task_id.",
+		"\"workers\"",
+		"\"reviewer_prompt\"",
+		"\"merger_prompt\"",
+		"\"notes\"",
+	}
+	for _, want := range required {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("coordinator prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestParsePlannerOutputJSONExtractsPlannerObjectFromTranscript(t *testing.T) {
 	raw := `I’ll produce the swarm task JSON directly and first load context.
 [Using tool: memory_view]
@@ -697,9 +744,9 @@ func TestTaskServiceUpdateCategoryNotifiesSwarmChildCancellation(t *testing.T) {
 		t.Fatalf("planner missing: %v", err)
 	}
 	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{
-		Workers:          []PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}},
-		ReviewerPrompt:   "Review worker",
-		MergerPrompt: "Integrate worker",
+		Workers:        []PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}},
+		ReviewerPrompt: "Review worker",
+		MergerPrompt:   "Integrate worker",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -750,9 +797,9 @@ func TestTaskServiceUpdateCategoryNotifiesPendingSwarmChildCancellation(t *testi
 		t.Fatalf("planner missing: %v", err)
 	}
 	if err := svc.ApplyPlannerOutput(ctx, planner.ID, PlannerOutput{
-		Workers:          []PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}},
-		ReviewerPrompt:   "Review worker",
-		MergerPrompt: "Integrate worker",
+		Workers:        []PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", WriteScope: []string{"internal/service"}, Required: true}},
+		ReviewerPrompt: "Review worker",
+		MergerPrompt:   "Integrate worker",
 	}); err != nil {
 		t.Fatal(err)
 	}
