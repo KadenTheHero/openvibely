@@ -2,7 +2,7 @@
 name: testing_coverage_and_performance
 type: project
 created: 2026-06-07
-updated: 2026-07-02
+updated: 2026-07-03
 source: consolidation
 source_id: memory_consolidation_2026_07_01
 confidence: high
@@ -27,6 +27,7 @@ Durable coverage priorities:
 - Existing tests are mostly not wrong; the durable issue is narrow breadth, not excessive count. Avoid blanket `t.Parallel()` changes around shared DB setup.
 - Outbound DM permissions coverage is in place for Discord user-DM target persistence, saved Discord user-DM test dispatch, Authorized Users add/delete isolation from outbound targets, and outbound target save/delete isolation from Slack/Discord authorized users.
 - Channel project-switch persistence coverage is in place for Slack and Telegram runtime `switch_project` writes plus later active-project resolution. Web/API `switch_project` is guarded as informational-only and must not write Discord/Slack/Telegram/Email active-project tables.
+- Email project-switch regression coverage (added 2026-07-02 alongside the `NormalizeEmailAddress` display-name fix, extended 2026-07-03) lives in `internal/repository/email_auth_repo_test.go`, `internal/repository/email_sender_project_repo_test.go`, and `internal/service/email_service_test.go`. It covers RFC display-name sender authorization, mailbox-only authorized-sender storage, `email_sender_projects` normalization, runtime `switch_project` to a target project, saved-project revalidation, fallback when the saved project is missing/unauthorized, and session-identity normalization so display-name and mailbox-only senders share the same saved active-project row. Tests use non-private `example.com` addresses, not real user emails.
 - The canonical outbound direct-message target syntax in chat-control assertions is `platform:user:<id>`.
 
 Runtime and validation facts:
@@ -37,7 +38,6 @@ Runtime and validation facts:
 - A shared handler `TestMain` DB was deliberately not implemented because many handler tests mutate/query global/default/list state; `NewTestDB` already caches migrations and a shared DB would need transaction rollback isolation to be safe.
 - Prefer `make test`, `make test-cover`, or `go test ./... -count=1 -timeout 120s` for authoritative full validation. Raw 60s full-suite runs can time out in `internal/handler` or `internal/service` under load.
 - Full-suite failures may include unrelated/environmental desktop/config PATH issues, macOS Wails linker warnings, occasional SQLite-lock failures, date-sensitive handler reschedule tests, or plugin marketplace clone/network timeouts in `internal/agentplugins`/`internal/server`; distinguish repeatable touched-scope regressions from existing/environmental failure modes before attributing them to recent changes. When default temp-dir runs hang during plugin marketplace cloning, rerunning the full suite with `TMPDIR=/private/tmp` has been the stable validation path.
-- Current database migration tests on the swarm task branch expect goose version `107` after channel target kind `103`, email sender project `104`, Mixture of Models `105_mixture_provider.sql`, Email channel `106_email_channel.go`, and swarm metadata `107_swarm_tasks.go`. Mixture migration `105` rebuilds `agent_configs` to allow `provider='mixture'` and adds `mixture_config_json`; swarm migration `107` adds task swarm metadata idempotently so local DBs that previously recorded an unreleased swarm migration at version `106` can recover after main claimed `106` for Email channel. Migration `100` repairs the local-dev case where an old Discord migration occupied goose version `099` before main added outbound message target migrations; Discord’s channel schema migration is `101_discord_channel.go`, and Discord persisted per-user project selection is `102_discord_user_projects.sql`.
 - Handler `NewTestContext` now calls `h.SetLocalRepoPathEnabled(true)`, matching older `setupHandlerTest` default. Tests needing local paths disabled should explicitly call `tc.handler.SetLocalRepoPathEnabled(false)` after creating context.
 - Chat mode selector tests should reflect the custom portal select implementation: hidden form input updates are driven by `chat-select-change` custom events carrying `e.detail.value`, not native `change` events or `this.value`.
 - `internal/service` tests can intentionally emit malformed-JSON logs when exercising error paths; treat them as expected unless paired with a failing assertion/package result.

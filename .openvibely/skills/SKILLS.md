@@ -171,7 +171,3 @@ always_use:
 ## openvibely_virtual_model_provider_workflow
 
 [OpenVibely Virtual Model Provider Workflow](openvibely_virtual_model_provider_workflow/SKILL.md) — Implement OpenVibely virtual model providers that orchestrate other configured models without adding external credentials.
-
-## openvibely_channel_ingress_refactor_audit
-
-[OpenVibely Channel Ingress Refactor Audit](openvibely_channel_ingress_refactor_audit/SKILL.md) — Audit shared channel chat ingress refactors for residual duplicated adapter logic before claiming new-channel reusability.

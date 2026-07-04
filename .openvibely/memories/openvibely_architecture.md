@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-07-01
+updated: 2026-07-03
 source: consolidation
-source_id: memory_consolidation_2026_07_01
+source_id: memory_consolidation_2026_07_01; 11090658cf527d60fc9af73c9c89b573
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -41,6 +41,9 @@ OAuth and hosted deployment facts:
 - Current Hostinger VPS state as of 2026-06-14: VPS id `1580249`, hostname `srv1580249.hstgr.cloud`, plan `KVM 2`, Ubuntu 24.04 LTS, public IPv4 `2.24.193.101`, public IPv6 `2a02:4780:75:dff5::1`, state `running`.
 - Hostinger Docker Compose projects are managed under `/docker/<project>/docker-compose.yml`.
 - Running projects on that VPS include `agency` (`openvibely/openvibely-agency:latest`, port `3002`), `openvibely` (`openvibely/openvibely:latest`, port `3001`), `openvibely-docs` (`openvibely/openvibely-docs:latest`, port `4173`, `pull_policy: always`, `restart: unless-stopped`, Traefik-routed at `docs.openvibely.ai` with Let's Encrypt TLS), and `httpbin-traefik` (`traefik:latest`). `httpbin` was stopped as of 2026-06-14 and may be unused.
+
+Live DB inspection facts:
+- For read-only diagnosis against the live app DB (`$HOME/.openvibely/openvibely.db`), the `tasks` table has no `role` column; swarm role/state live in `swarm_role`, `swarm_status`, `swarm_config`, `swarm_sequence` (plus `parent_task_id`, `category`, `status`, `worktree_path`, `worktree_branch`, `merge_status`). The `executions` table has no `created_at`/`diff` columns; use `started_at`/`completed_at` for timing and `error_message`/`diff_output` for failure text/diff. Run `PRAGMA table_info(<table>)` first when unsure rather than guessing column names.
 
 Shared conventions:
 - `internal/handler` is the Echo HTTP boundary: `handler.go` owns the shared `Handler` dependency graph and route registration, while feature-specific files attach methods for tasks, projects, chat, models, auth, integrations, SSE, worktrees, and HTMX/API surfaces.
