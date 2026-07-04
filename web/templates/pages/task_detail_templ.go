@@ -2057,9 +2057,9 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var111 string
-			templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.JoinStringErrs(task.SwarmStatus)
+			templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.JoinStringErrs(components.SwarmStatusDisplayName(task.SwarmStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1730, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1730, Col: 104}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var111))
 			if templ_7745c5c3_Err != nil {
@@ -2072,7 +2072,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 			var templ_7745c5c3_Var112 string
 			templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(task.SwarmChildren)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1731, Col: 96}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1731, Col: 97}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var112))
 			if templ_7745c5c3_Err != nil {
@@ -2083,14 +2083,14 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if task.WorktreeBranch != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 212, "<div class=\"sm:col-span-2 min-w-0\"><span class=\"opacity-60\">Integration worktree:</span> <span class=\"break-all\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 212, "<div class=\"sm:col-span-2 min-w-0\"><span class=\"opacity-60\">Merge worktree:</span> <span class=\"break-all\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var113 string
 				templ_7745c5c3_Var113, templ_7745c5c3_Err = templ.JoinStringErrs(task.WorktreeBranch)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1733, Col: 140}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1733, Col: 135}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var113))
 				if templ_7745c5c3_Err != nil {

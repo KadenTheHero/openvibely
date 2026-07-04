@@ -176,6 +176,43 @@ func swarmStatusText(status models.TaskStatus, category models.TaskCategory) str
 	return strings.ToLower(label)
 }
 
+func SwarmStatusDisplayName(status string) string {
+	switch status {
+	case "needs_integration":
+		return "Needs merge"
+	case "integrating":
+		return "Merging"
+	case "integrated":
+		return "Merged"
+	case "needs_review":
+		return "Needs review"
+	case "reviewing":
+		return "Reviewing"
+	case "reviewed":
+		return "Reviewed"
+	case "planning":
+		return "Planning"
+	case "planned":
+		return "Planned"
+	case "current":
+		return "Current"
+	case "coordinating":
+		return "Coordinating"
+	case "blocked":
+		return "Blocked"
+	case "failed":
+		return "Failed"
+	case "cancelled":
+		return "Cancelled"
+	case "running":
+		return "Running"
+	case "pending", "":
+		return "Pending"
+	default:
+		return strings.TrimSpace(strings.ReplaceAll(status, "_", " "))
+	}
+}
+
 func swarmStatusIndicatorClass(status models.TaskStatus) string {
 	switch status {
 	case models.StatusCompleted:
@@ -347,41 +384,46 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 					</div>
 					</div>
 				</div>
-					if task.SwarmRole == models.SwarmRoleParent && len(task.SwarmChildren) > 0 {
-						<div class="mt-3 rounded-xl border border-base-300 bg-base-200/45 text-xs shadow-inner overflow-hidden">
-							<div class="px-3 py-2 font-semibold text-base-content/80 border-b border-base-300/80">{ swarmSummary(task) }</div>
-							<div class="divide-y divide-base-300/70">
-								for i, child := range task.SwarmChildren {
-									<div class="relative grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 min-w-0">
-										<div class="relative flex h-full min-h-7 items-center justify-center">
-											if i > 0 {
-												<span class="absolute -top-2 h-1/2 border-l border-base-content/20"></span>
-											}
-											if i < len(task.SwarmChildren)-1 {
-												<span class="absolute top-1/2 -bottom-2 border-l border-base-content/20"></span>
-											}
-											if child.Status == models.StatusCompleted {
-												<svg xmlns="http://www.w3.org/2000/svg" class={ "relative z-10 h-4 w-4", swarmStatusIndicatorClass(child.Status) } viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-													<path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.25 7.25a1 1 0 01-1.415 0l-3.25-3.25a1 1 0 111.414-1.414l2.543 2.543 6.543-6.543a1 1 0 011.415 0z" clip-rule="evenodd"></path>
-												</svg>
-											} else {
-												<span class={ "relative z-10 h-3.5 w-3.5 rounded-full border-2 bg-base-200", swarmStatusIndicatorClass(child.Status), templ.KV("border-current", true), templ.KV("bg-current", child.Status == models.StatusRunning) } aria-hidden="true"></span>
-											}
+						if task.SwarmRole == models.SwarmRoleParent && len(task.SwarmChildren) > 0 {
+							<details class="group mt-3 rounded-xl border border-base-300 bg-base-200/45 text-xs shadow-inner overflow-hidden" open>
+								<summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 font-semibold text-base-content/80 transition-colors hover:bg-base-300/40 [&::-webkit-details-marker]:hidden" onclick="event.stopPropagation()">
+									<span>{ swarmSummary(task) }</span>
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0 text-base-content/50 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+									</svg>
+								</summary>
+								<div class="divide-y divide-base-300/70 border-t border-base-300/80">
+									for i, child := range task.SwarmChildren {
+										<div class="relative grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 min-w-0 hover:bg-base-100/45 transition-colors" onclick="event.stopPropagation()">
+											<div class="relative flex h-full min-h-7 items-center justify-center">
+												if i > 0 {
+													<span class="absolute -top-2 h-1/2 border-l border-base-content/20"></span>
+												}
+												if i < len(task.SwarmChildren)-1 {
+													<span class="absolute top-1/2 -bottom-2 border-l border-base-content/20"></span>
+												}
+												if child.Status == models.StatusCompleted {
+													<svg xmlns="http://www.w3.org/2000/svg" class={ "relative z-10 h-4 w-4", swarmStatusIndicatorClass(child.Status) } viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+														<path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.415l-7.25 7.25a1 1 0 01-1.415 0l-3.25-3.25a1 1 0 111.414-1.414l2.543 2.543 6.543-6.543a1 1 0 011.415 0z" clip-rule="evenodd"></path>
+													</svg>
+												} else {
+													<span class={ "relative z-10 h-3.5 w-3.5 rounded-full border-2 bg-base-200", swarmStatusIndicatorClass(child.Status), templ.KV("border-current", true), templ.KV("bg-current", child.Status == models.StatusRunning) } aria-hidden="true"></span>
+												}
+											</div>
+											<a href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", child.ID)) } hx-get={ fmt.Sprintf("/tasks/%s?from=tasks", child.ID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="min-w-0 truncate text-sm font-semibold text-base-content/85 hover:text-primary hover:underline" title={ child.Title }>{ swarmChildDisplayTitle(child) }</a>
+											<div class="flex items-center gap-3 text-right text-sm font-medium shrink-0">
+												if child.WorktreeBranch != "" && (child.Status == models.StatusRunning || child.Status == models.StatusCompleted || child.Status == models.StatusFailed || child.Status == models.StatusBlocked) {
+													<a href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=changes&from=tasks", child.ID)) } hx-get={ fmt.Sprintf("/tasks/%s?tab=changes&from=tasks", child.ID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="link link-primary no-underline hover:underline">Diff</a>
+													<a href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=thread&from=tasks", child.ID)) } hx-get={ fmt.Sprintf("/tasks/%s?tab=thread&from=tasks", child.ID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="link link-primary no-underline hover:underline">Logs</a>
+												} else {
+													<span class="text-base-content/55">{ swarmStatusText(child.Status, child.Category) }</span>
+												}
+											</div>
 										</div>
-										<a href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", child.ID)) } hx-get={ fmt.Sprintf("/tasks/%s?from=tasks", child.ID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="min-w-0 truncate text-sm font-semibold text-base-content/85 hover:text-primary hover:underline" title={ child.Title }>{ swarmChildDisplayTitle(child) }</a>
-										<div class="flex items-center gap-3 text-right text-sm font-medium shrink-0">
-											if child.WorktreeBranch != "" && (child.Status == models.StatusRunning || child.Status == models.StatusCompleted || child.Status == models.StatusFailed || child.Status == models.StatusBlocked) {
-												<a href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=changes&from=tasks", child.ID)) } hx-get={ fmt.Sprintf("/tasks/%s?tab=changes&from=tasks", child.ID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="link link-primary no-underline hover:underline">Diff</a>
-												<a href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=thread&from=tasks", child.ID)) } hx-get={ fmt.Sprintf("/tasks/%s?tab=thread&from=tasks", child.ID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="link link-primary no-underline hover:underline">Logs</a>
-											} else {
-												<span class="text-base-content/55">{ swarmStatusText(child.Status, child.Category) }</span>
-											}
-										</div>
-									</div>
-								}
-							</div>
-						</div>
-					}
+									}
+								</div>
+							</details>
+						}
 			</div>
 		</div>
 	}

@@ -1726,13 +1726,13 @@ templ SwarmContextPanel(task *models.Task) {
 		<div class="card bg-base-200/50 border border-base-300 mb-4">
 			<div class="card-body p-4">
 				<h3 class="font-semibold mb-2">Swarm Overview</h3>
-				<div class="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-					<div><span class="opacity-60">Status:</span> { task.SwarmStatus }</div>
-					<div><span class="opacity-60">Children:</span> { fmt.Sprintf("%d", len(task.SwarmChildren)) }</div>
-					if task.WorktreeBranch != "" {
-						<div class="sm:col-span-2 min-w-0"><span class="opacity-60">Integration worktree:</span> <span class="break-all">{ task.WorktreeBranch }</span></div>
-					}
-				</div>
+					<div class="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+						<div><span class="opacity-60">Status:</span> { components.SwarmStatusDisplayName(task.SwarmStatus) }</div>
+						<div><span class="opacity-60">Children:</span> { fmt.Sprintf("%d", len(task.SwarmChildren)) }</div>
+						if task.WorktreeBranch != "" {
+							<div class="sm:col-span-2 min-w-0"><span class="opacity-60">Merge worktree:</span> <span class="break-all">{ task.WorktreeBranch }</span></div>
+						}
+					</div>
 				if len(task.SwarmChildren) > 0 {
 					<div class="mt-3 space-y-1">
 						for _, child := range task.SwarmChildren {
