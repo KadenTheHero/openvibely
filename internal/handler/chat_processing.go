@@ -1487,6 +1487,7 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusCompleted); err != nil {
 		applog.Infof("[handler] completeWithSuccess task=%s error updating status: %v", taskID, err)
 	}
+	h.publishExecutionTerminal(execID, models.ExecCompleted, "")
 
 	// Move active tasks to the completed category so they appear in the right column
 	task, err := h.taskRepo.GetByID(ctx, taskID)
@@ -1581,6 +1582,7 @@ func (h *Handler) completeWithCancellation(execID, taskID, output string, tokens
 	if err := h.execRepo.Complete(ctx, execID, models.ExecCancelled, output, "cancelled", tokensUsed, durationMs); err != nil {
 		applog.Infof("[handler] completeWithCancellation exec=%s error completing cancelled execution: %v", execID, err)
 	}
+	h.publishExecutionTerminal(execID, models.ExecCancelled, "cancelled")
 	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusCancelled); err != nil {
 		applog.Infof("[handler] completeWithCancellation task=%s error updating status: %v", taskID, err)
 	}
@@ -1803,6 +1805,7 @@ func (h *Handler) completeWithFailure(_ context.Context, execID, taskID, errorMe
 	if err := h.execRepo.Complete(ctx, execID, models.ExecFailed, "", errorMessage, 0, durationMs); err != nil {
 		applog.Infof("[handler] completeWithFailure exec=%s error completing execution: %v", execID, err)
 	}
+	h.publishExecutionTerminal(execID, models.ExecFailed, errorMessage)
 
 	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed); err != nil {
 		applog.Infof("[handler] completeWithFailure task=%s error updating status: %v", taskID, err)
@@ -1842,6 +1845,7 @@ func (h *Handler) completeWithFailureAndOutput(_ context.Context, execID, taskID
 	if err := h.execRepo.Complete(ctx, execID, models.ExecFailed, output, errorMessage, tokensUsed, durationMs); err != nil {
 		applog.Infof("[handler] completeWithFailureAndOutput exec=%s error completing execution: %v", execID, err)
 	}
+	h.publishExecutionTerminal(execID, models.ExecFailed, errorMessage)
 
 	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed); err != nil {
 		applog.Infof("[handler] completeWithFailureAndOutput task=%s error updating status: %v", taskID, err)

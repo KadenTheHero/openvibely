@@ -35,7 +35,7 @@ func TestAdapterCallDirectUsesConfiguredChatCompletionsEndpoint(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	adapter := New(nil)
+	adapter := New(nil, nil)
 	res, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
 		Operation: llmcontracts.OperationDirect,
 		Message:   "Say hi",
@@ -97,7 +97,7 @@ func TestAdapterCallDirectRawPromptOmitsOpenVibelySystemPrompt(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	adapter := New(nil)
+	adapter := New(nil, nil)
 	res, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
 		Operation:       llmcontracts.OperationDirect,
 		Message:         "REFERENCE PROMPT",
@@ -175,7 +175,7 @@ func TestAdapterToolCallReplaysToolResult(t *testing.T) {
 		},
 	})
 
-	adapter := New(nil)
+	adapter := New(nil, nil)
 	res, err := adapter.Call(ctx, llmcontracts.AgentRequest{
 		Ctx:       ctx,
 		Operation: llmcontracts.OperationDirect,

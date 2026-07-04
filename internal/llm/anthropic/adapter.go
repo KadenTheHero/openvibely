@@ -131,6 +131,7 @@ var errRefusal = fmt.Errorf("model refused the request: Anthropic returned stop_
 type Adapter struct {
 	llmConfigRepo *repository.LLMConfigRepo
 	execRepo      *repository.ExecutionRepo
+	streamHub     llmstream.ExecutionStreamPublisher
 	oauthRecovery *llmoauth.Manager
 }
 
@@ -412,10 +413,11 @@ func buildAnthropicRuntime(ctx context.Context, workDir string, agentDef *models
 }
 
 // New creates a new Anthropic adapter.
-func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.ExecutionRepo) *Adapter {
+func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.ExecutionRepo, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
 	return &Adapter{
 		llmConfigRepo: llmConfigRepo,
 		execRepo:      execRepo,
+		streamHub:     streamHub,
 		oauthRecovery: llmoauth.NewManager(llmConfigRepo),
 	}
 }
@@ -568,7 +570,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
 
-	sw := llmstream.NewWriter(execID, "", a.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
 	extraTools = append(extraTools, runtimeAnthropicTools(rt)...)
@@ -659,7 +661,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
 
-	sw := llmstream.NewWriter(execID, "", a.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)

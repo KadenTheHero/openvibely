@@ -36,13 +36,15 @@ var DefaultHTTPClient HTTPDoer = &http.Client{Timeout: defaultOllamaRequestTimeo
 // Adapter encapsulates Ollama provider logic.
 type Adapter struct {
 	execRepo   *repository.ExecutionRepo
+	streamHub  llmstream.ExecutionStreamPublisher
 	httpClient HTTPDoer
 }
 
 // New creates a new Ollama adapter.
-func New(execRepo *repository.ExecutionRepo) *Adapter {
+func New(execRepo *repository.ExecutionRepo, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
 	return &Adapter{
 		execRepo:   execRepo,
+		streamHub:  streamHub,
 		httpClient: DefaultHTTPClient,
 	}
 }
@@ -211,7 +213,7 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 		return "", 0, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, string(respBody))
 	}
 
-	sw := llmstream.NewWriter(execID, "", a.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
 	decoder := json.NewDecoder(resp.Body)
@@ -305,7 +307,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		return "", "", 0, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, string(respBody))
 	}
 
-	sw := llmstream.NewWriter(execID, "", a.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
 	decoder := json.NewDecoder(resp.Body)

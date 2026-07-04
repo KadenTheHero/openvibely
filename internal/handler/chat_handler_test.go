@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -646,9 +647,9 @@ func TestHandler_Chat_LoadsRunningExecutions(t *testing.T) {
 		t.Error("expected EventSource for SSE reconnection")
 	}
 
-	// Should track initial length to avoid duplication
-	if !strings.Contains(body, "data-initial-length") {
-		t.Error("expected data-initial-length attribute to track partial content")
+	// Should track initial UTF-8 byte length to avoid duplication on reconnect
+	if !strings.Contains(body, "data-initial-byte-length") {
+		t.Error("expected data-initial-byte-length attribute to track partial content")
 	}
 	if !strings.Contains(body, `id="streaming-dots-resume-`+exec.ID+`"`) {
 		t.Error("expected streaming resume dots container for running execution")
@@ -4328,5 +4329,148 @@ func TestHandler_ChatRendersLatestWindowAndEarlierFragment(t *testing.T) {
 		if strings.Contains(body, unexpected) {
 			t.Fatalf("earlier chat fragment should not contain %q", unexpected)
 		}
+	}
+}
+
+func createRunningChatStreamExecution(t *testing.T, tc *TestContext, output string) *models.Execution {
+	t.Helper()
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "SSE task", Prompt: "stream", Category: models.CategoryChat, Status: models.StatusRunning}
+	require.NoError(t, tc.taskRepo.Create(ctx, task))
+	agent, err := tc.llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, agent)
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "stream"}
+	require.NoError(t, tc.execRepo.Create(ctx, exec))
+	if output != "" {
+		require.NoError(t, tc.execRepo.UpdateOutput(ctx, exec.ID, output))
+	}
+	return exec
+}
+
+func startChatStreamSSETest(t *testing.T, h *Handler, execID, rawQuery string) (*httptest.ResponseRecorder, context.CancelFunc, chan error) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	path := "/events/chat/" + execID
+	if rawQuery != "" {
+		path += "?" + rawQuery
+	}
+	req := httptest.NewRequest(http.MethodGet, path, nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	e := echo.New()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("exec_id")
+	c.SetParamValues(execID)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- h.ChatStreamSSE(c)
+	}()
+	return rec, cancel, errCh
+}
+
+func waitForSSEBody(t *testing.T, rec *httptest.ResponseRecorder, want string) string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		body := rec.Body.String()
+		if strings.Contains(body, want) {
+			return body
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for SSE body containing %q; body=%q", want, rec.Body.String())
+	return ""
+}
+
+func waitForExecutionStreamSubscribers(t *testing.T, hub *events.ExecutionStreamHub, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if hub.SubscriberCount() == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d execution stream subscribers; got %d", want, hub.SubscriberCount())
+}
+
+func stopChatStreamSSETest(t *testing.T, cancel context.CancelFunc, errCh <-chan error) {
+	t.Helper()
+	cancel()
+	select {
+	case err := <-errCh:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ChatStreamSSE to stop")
+	}
+}
+
+func TestChatStreamSSE_StreamsHubDeltaBeforeDBUpdate(t *testing.T) {
+	tc := NewTestContext(t)
+	hub := events.NewExecutionStreamHub()
+	tc.handler.SetExecutionStreamHub(hub)
+	exec := createRunningChatStreamExecution(t, tc, "")
+
+	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, exec.ID, "")
+	defer stopChatStreamSSETest(t, cancel, errCh)
+	waitForExecutionStreamSubscribers(t, hub, 1)
+
+	hub.Publish(events.ExecutionStreamEvent{ExecID: exec.ID, Type: events.ExecutionStreamDelta, Delta: "instant", Offset: len("instant")})
+	body := waitForSSEBody(t, rec, "data: instant")
+	assert.Contains(t, body, "data: instant\n\n")
+
+	persisted, err := tc.execRepo.GetByID(context.Background(), exec.ID)
+	require.NoError(t, err)
+	require.NotNil(t, persisted)
+	assert.Empty(t, persisted.Output, "live hub delta should not depend on a DB output update")
+}
+
+func TestChatStreamSSE_DoesNotSubscribeMissingExecution(t *testing.T) {
+	tc := NewTestContext(t)
+	hub := events.NewExecutionStreamHub()
+	tc.handler.SetExecutionStreamHub(hub)
+
+	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, "missing-exec", "")
+	defer cancel()
+	select {
+	case err := <-errCh:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("missing execution stream did not return")
+	}
+	assert.Contains(t, rec.Body.String(), "event: error\ndata: execution not found\n\n")
+	assert.Equal(t, 0, hub.SubscriberCount())
+}
+
+func TestChatStreamSSE_DBFallbackHonorsOffsetAndClampsMidRune(t *testing.T) {
+	tc := NewTestContext(t)
+	exec := createRunningChatStreamExecution(t, tc, "héllo")
+
+	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, exec.ID, "offset=2")
+	defer stopChatStreamSSETest(t, cancel, errCh)
+
+	body := waitForSSEBody(t, rec, "data: éllo")
+	assert.Contains(t, body, "data: éllo\n\n")
+	assert.NotContains(t, body, "\ufffd")
+}
+
+func TestChatStreamSSE_TerminalErrorFramesMultilineData(t *testing.T) {
+	tc := NewTestContext(t)
+	hub := events.NewExecutionStreamHub()
+	tc.handler.SetExecutionStreamHub(hub)
+	exec := createRunningChatStreamExecution(t, tc, "")
+
+	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, exec.ID, "")
+	defer cancel()
+	waitForExecutionStreamSubscribers(t, hub, 1)
+
+	hub.Close(exec.ID, events.ExecutionStreamEvent{ExecID: exec.ID, Type: events.ExecutionStreamError, Error: "line one\nline two"})
+	body := waitForSSEBody(t, rec, "data: line two")
+	assert.Contains(t, body, "event: error\ndata: line one\ndata: line two\n\n")
+	select {
+	case err := <-errCh:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("terminal error stream did not return")
 	}
 }

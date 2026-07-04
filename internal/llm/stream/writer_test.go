@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -264,5 +265,77 @@ func TestStreamingWriter_EmptyRetryFlushDoesNotOverwriteExistingOutput(t *testin
 	}
 	if updatedExec.Output != "tool output before 429" {
 		t.Fatalf("expected prior streamed history to survive empty retry flush, got %q", updatedExec.Output)
+	}
+}
+
+type recordingExecutionStreamPublisher struct {
+	events []events.ExecutionStreamEvent
+}
+
+func (p *recordingExecutionStreamPublisher) Publish(event events.ExecutionStreamEvent) {
+	p.events = append(p.events, event)
+}
+
+func TestStreamingWriter_PublishesDeltaImmediatelyWithOffset(t *testing.T) {
+	publisher := &recordingExecutionStreamPublisher{}
+	sw := NewWriterWithPublisher("exec-1", "task-1", nil, context.Background(), time.Hour, publisher)
+	defer sw.Stop()
+
+	if _, err := sw.Write([]byte("hi ")); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	if _, err := sw.Write([]byte("世界")); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	if len(publisher.events) != 2 {
+		t.Fatalf("expected 2 published events, got %d", len(publisher.events))
+	}
+	if got := publisher.events[0]; got.ExecID != "exec-1" || got.Type != events.ExecutionStreamDelta || got.Delta != "hi " || got.Offset != len("hi ") {
+		t.Fatalf("unexpected first event: %+v", got)
+	}
+	if got := publisher.events[1]; got.Delta != "世界" || got.Offset != len("hi 世界") {
+		t.Fatalf("unexpected second event: %+v", got)
+	}
+}
+
+func TestStreamingWriter_DoesNotPublishSeedOrWriteText(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "Seed Publish", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	if err != nil || agent == nil {
+		t.Fatalf("failed to get default agent: %v", err)
+	}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "test"}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("failed to create execution: %v", err)
+	}
+	if err := execRepo.UpdateOutput(ctx, exec.ID, "seed"); err != nil {
+		t.Fatalf("failed to seed execution: %v", err)
+	}
+
+	publisher := &recordingExecutionStreamPublisher{}
+	sw := NewWriterWithPublisher(exec.ID, task.ID, execRepo, ctx, time.Hour, publisher)
+	defer sw.Stop()
+	if len(publisher.events) != 0 {
+		t.Fatalf("seeded content should not publish, got %+v", publisher.events)
+	}
+	sw.WriteText([]byte("text only"))
+	if len(publisher.events) != 0 {
+		t.Fatalf("WriteText should not publish, got %+v", publisher.events)
+	}
+	if _, err := sw.Write([]byte(" plus")); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	if len(publisher.events) != 1 || publisher.events[0].Offset != len("seed plus") {
+		t.Fatalf("expected one appended event with cumulative offset, got %+v", publisher.events)
 	}
 }

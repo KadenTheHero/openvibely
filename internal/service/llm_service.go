@@ -63,6 +63,7 @@ type LLMService struct {
 	usageRepo                *repository.UsageRepo
 	skillAnalyticsRepo       *repository.SkillAnalyticsRepo
 	broadcaster              *events.Broadcaster
+	executionStreamHub       *events.ExecutionStreamHub
 	queuedTaskThreadPromoter func(taskID string)
 	channelMessageRouter     *ChannelMessageRouter
 	// globalSkillRoot is the parent directory holding <root>/agents for global
@@ -144,6 +145,32 @@ func (s *LLMService) SetUsageRepo(repo *repository.UsageRepo) {
 
 func (s *LLMService) SetBroadcaster(b *events.Broadcaster) {
 	s.broadcaster = b
+}
+
+func (s *LLMService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
+	s.executionStreamHub = hub
+	s.initProviderAdapters()
+}
+
+func (s *LLMService) publishExecutionTerminal(execID string, status models.ExecutionStatus, errMsg string) {
+	if s == nil || s.executionStreamHub == nil || execID == "" {
+		return
+	}
+	event := events.ExecutionStreamEvent{ExecID: execID}
+	switch status {
+	case models.ExecCompleted:
+		event.Type = events.ExecutionStreamDone
+		event.Status = "completed"
+	case models.ExecCancelled:
+		event.Type = events.ExecutionStreamDone
+		event.Status = "cancelled"
+	case models.ExecFailed:
+		event.Type = events.ExecutionStreamError
+		event.Error = errMsg
+	default:
+		return
+	}
+	s.executionStreamHub.Close(execID, event)
 }
 
 func (s *LLMService) SetQueuedTaskThreadPromoter(promoter func(taskID string)) {
@@ -392,6 +419,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", err.Error(), 0, 0); completeErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after attachment load failure: %v", completeErr)
 		}
+		s.publishExecutionTerminal(exec.ID, models.ExecFailed, err.Error())
 		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after attachment load failure: %v", statusErr)
 		}
@@ -432,6 +460,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 				if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); completeErr != nil {
 					applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after missing repo: %v", completeErr)
 				}
+				s.publishExecutionTerminal(exec.ID, models.ExecFailed, errMsg)
 				if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 					applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after missing repo: %v", statusErr)
 				}
@@ -465,6 +494,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 				if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", syncErr.Error(), 0, 0); completeErr != nil {
 					applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after startup auto-merge failure: %v", completeErr)
 				}
+				s.publishExecutionTerminal(exec.ID, models.ExecFailed, syncErr.Error())
 				if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 					applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after startup auto-merge failure: %v", statusErr)
 				}
@@ -513,6 +543,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); completeErr != nil {
 				applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after scoped files prep failure: %v", completeErr)
 			}
+			s.publishExecutionTerminal(exec.ID, models.ExecFailed, errMsg)
 			if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 				applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after scoped files prep failure: %v", statusErr)
 			}
@@ -606,6 +637,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			if completeErr := s.execRepo.Complete(bgCtx, exec.ID, models.ExecCancelled, output, "task cancelled by user", tokensUsed, durationMs); completeErr != nil {
 				applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing cancelled execution: %v", completeErr)
 			}
+			s.publishExecutionTerminal(exec.ID, models.ExecCancelled, "task cancelled by user")
 			RecordUsageFromResult(bgCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecCancelled), ErrorMessage: "task cancelled by user", LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 			// Task status is already set to cancelled by CancelTask, but set it again
 			// in case the cancellation came from a different path (e.g., server shutdown).
@@ -632,6 +664,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if completeErr := s.execRepo.Complete(bgCtx, exec.ID, models.ExecFailed, failedOutput, err.Error(), tokensUsed, durationMs); completeErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
 		}
+		s.publishExecutionTerminal(exec.ID, models.ExecFailed, err.Error())
 		RecordUsageFromResult(bgCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: err.Error(), LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 		if statusErr := s.taskRepo.UpdateStatus(bgCtx, task.ID, models.StatusFailed); statusErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to failed: %v", statusErr)
@@ -672,6 +705,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, output, err.Error(), tokensUsed, durationMs); completeErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after steering commit failure: %v", completeErr)
 		}
+		s.publishExecutionTerminal(exec.ID, models.ExecFailed, err.Error())
 		RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: err.Error(), LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after steering commit failure: %v", statusErr)
@@ -688,6 +722,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", reason, tokensUsed, durationMs); completeErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing empty-response execution: %v", completeErr)
 		}
+		s.publishExecutionTerminal(exec.ID, models.ExecFailed, reason)
 		RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: reason, LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after empty response: %v", statusErr)
@@ -727,6 +762,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, output, reason, tokensUsed, durationMs); completeErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
 		}
+		s.publishExecutionTerminal(exec.ID, models.ExecFailed, reason)
 		RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecFailed), ErrorMessage: reason, LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 		if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to failed: %v", statusErr)
@@ -795,6 +831,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusCompleted); statusErr != nil {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to completed: %v", statusErr)
 	}
+	s.publishExecutionTerminal(exec.ID, models.ExecCompleted, "")
 
 	// Capture git diff of changes made during execution
 	if workDir != "" {
@@ -1531,7 +1568,7 @@ func (s *LLMService) callAnthropicChat(ctx context.Context, message string, atta
 		return "", 0, fmt.Errorf("convert attachments: %w", err)
 	}
 
-	sw := llmstream.NewWriter(execID, "", s.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(execID, "", s.execRepo, ctx, 500*time.Millisecond, s.executionStreamHub)
 	defer sw.Stop()
 
 	chatInThinking := false
@@ -1700,7 +1737,7 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 	// Use streaming writer for real-time DB updates.
 	// The background periodic flush ensures output is visible even during
 	// long pauses (e.g., while a tool is running).
-	sw := llmstream.NewWriter(execID, "", s.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(execID, "", s.execRepo, ctx, 500*time.Millisecond, s.executionStreamHub)
 	defer sw.Stop()
 
 	var stderr bytes.Buffer
@@ -1883,7 +1920,7 @@ func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, atta
 		return "", 0, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
-	sw := llmstream.NewWriter(execID, "", s.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(execID, "", s.execRepo, ctx, 500*time.Millisecond, s.executionStreamHub)
 	defer sw.Stop()
 
 	var stderr bytes.Buffer
@@ -2148,7 +2185,7 @@ func (s *LLMService) callCodexCLI(ctx context.Context, prompt string, attachment
 		return "", "", 0, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
-	sw := llmstream.NewWriter(execID, "", s.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(execID, "", s.execRepo, ctx, 500*time.Millisecond, s.executionStreamHub)
 	defer sw.Stop()
 
 	var stderr bytes.Buffer
@@ -2265,7 +2302,7 @@ func (s *LLMService) callCodexCLIChat(ctx context.Context, message string, attac
 		return "", 0, fmt.Errorf("creating stdout pipe: %w", err)
 	}
 
-	sw := llmstream.NewWriter(execID, "", s.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(execID, "", s.execRepo, ctx, 500*time.Millisecond, s.executionStreamHub)
 	defer sw.Stop()
 
 	var stderr bytes.Buffer

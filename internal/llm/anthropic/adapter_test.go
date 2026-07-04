@@ -37,7 +37,7 @@ func TestCallDirectReturnsErrorOnRefusalStopReason(t *testing.T) {
 	anthropicclient.AnthropicAPIHost = server.URL
 	defer func() { anthropicclient.AnthropicAPIHost = origHost }()
 
-	adapter := New(nil, nil)
+	adapter := New(nil, nil, nil)
 	output, usage, err := adapter.callDirect(context.Background(), "test", nil, models.LLMConfig{
 		Name:       "Fable",
 		Provider:   models.ProviderAnthropic,
@@ -86,7 +86,7 @@ func TestCallDirectRawPromptOmitsOpenVibelySystemTaskPromptAndTools(t *testing.T
 	anthropicclient.AnthropicAPIHost = server.URL
 	defer func() { anthropicclient.AnthropicAPIHost = origHost }()
 
-	adapter := New(nil, nil)
+	adapter := New(nil, nil, nil)
 	output, _, err := adapter.callDirect(context.Background(), "REFERENCE PROMPT", nil, models.LLMConfig{
 		Name:       "Claude API",
 		Provider:   models.ProviderAnthropic,

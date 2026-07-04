@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
@@ -357,10 +358,13 @@ func (h *Handler) ChatStop(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to preserve chat history")
 	}
 	if h.execRepo != nil {
-		if cancelled, err := h.execRepo.CancelRunningByTask(c.Request().Context(), activeChatExec.TaskID); err != nil {
+		if cancelledIDs, err := h.execRepo.CancelRunningByTaskReturningIDs(c.Request().Context(), activeChatExec.TaskID); err != nil {
 			applog.Infof("[handler] ChatStop error cancelling running executions task=%s: %v", activeChatExec.TaskID, err)
-		} else if cancelled > 0 {
-			applog.Infof("[handler] ChatStop cancelled %d running executions task=%s", cancelled, activeChatExec.TaskID)
+		} else if len(cancelledIDs) > 0 {
+			applog.Infof("[handler] ChatStop cancelled %d running executions task=%s", len(cancelledIDs), activeChatExec.TaskID)
+			for _, id := range cancelledIDs {
+				h.publishExecutionTerminal(id, models.ExecCancelled, "cancelled")
+			}
 		}
 	}
 	if isHTMX(c) {
@@ -803,6 +807,81 @@ func writeSSEData(c echo.Context, data string) {
 	fmt.Fprintf(c.Response(), "\n") // Empty line terminates the event
 }
 
+func writeChatSSEEvent(c echo.Context, eventName string, data string) {
+	fmt.Fprintf(c.Response(), "event: %s\n", eventName)
+	lines := strings.Split(data, "\n")
+	for _, line := range lines {
+		fmt.Fprintf(c.Response(), "data: %s\n", line)
+	}
+	fmt.Fprintf(c.Response(), "\n")
+}
+
+func parseStreamOffset(raw string) int {
+	offset, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || offset < 0 {
+		return 0
+	}
+	return offset
+}
+
+func clampOffsetToUTF8Boundary(offset int, s string) int {
+	if offset <= 0 {
+		return 0
+	}
+	if offset >= len(s) {
+		return len(s)
+	}
+	for offset > 0 && !utf8.RuneStart(s[offset]) {
+		offset--
+	}
+	return offset
+}
+
+func (h *Handler) writeExecutionTerminalSSE(c echo.Context, exec *models.Execution) bool {
+	if exec == nil {
+		return false
+	}
+	switch exec.Status {
+	case models.ExecCompleted:
+		writeChatSSEEvent(c, "done", "completed")
+		c.Response().Flush()
+		return true
+	case models.ExecCancelled:
+		writeChatSSEEvent(c, "done", "cancelled")
+		c.Response().Flush()
+		return true
+	case models.ExecFailed:
+		applog.Infof("[handler] ChatStreamSSE exec=%s failed: %s", exec.ID, exec.ErrorMessage)
+		writeChatSSEEvent(c, "error", exec.ErrorMessage)
+		c.Response().Flush()
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *Handler) catchUpExecutionSSE(ctx context.Context, c echo.Context, execID string, sentLen *int, appendTerminal bool) (bool, error) {
+	exec, err := h.execRepo.GetByID(ctx, execID)
+	if err != nil {
+		return false, err
+	}
+	if exec == nil {
+		return false, fmt.Errorf("execution not found")
+	}
+	if exec.Status == models.ExecRunning || appendTerminal {
+		start := clampOffsetToUTF8Boundary(*sentLen, exec.Output)
+		if len(exec.Output) > start {
+			writeSSEData(c, exec.Output[start:])
+			c.Response().Flush()
+			*sentLen = len(exec.Output)
+		}
+	}
+	if h.writeExecutionTerminalSSE(c, exec) {
+		return true, nil
+	}
+	return false, nil
+}
+
 // ChatStreamSSE streams chat execution output via SSE
 func (h *Handler) ChatStreamSSE(c echo.Context) error {
 	execID := c.Param("exec_id")
@@ -812,80 +891,196 @@ func (h *Handler) ChatStreamSSE(c echo.Context) error {
 
 	applog.Infof("[handler] ChatStreamSSE exec=%s connected", execID)
 
-	// Set headers for SSE
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")
-	c.Response().Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
+	c.Response().Header().Set("X-Accel-Buffering", "no")
 
 	ctx := c.Request().Context()
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
+	exec, err := h.execRepo.GetByID(ctx, execID)
+	if err != nil {
+		applog.Infof("[handler] ChatStreamSSE exec=%s error: %v", execID, err)
+		writeChatSSEEvent(c, "error", err.Error())
+		c.Response().Flush()
+		return nil
+	}
+	if exec == nil {
+		applog.Infof("[handler] ChatStreamSSE exec=%s not found", execID)
+		writeChatSSEEvent(c, "error", "execution not found")
+		c.Response().Flush()
+		return nil
+	}
 
-	lastOutput := ""
-	timeout := time.After(chatSSETimeout)
+	sentLen := parseStreamOffset(c.QueryParam("offset"))
+	if h.executionStreamHub == nil {
+		return h.chatStreamSSEDBFallback(ctx, c, execID, sentLen)
+	}
+
+	sub, unsubscribe, err := h.executionStreamHub.Subscribe(execID)
+	if err != nil {
+		writeChatSSEEvent(c, "error", err.Error())
+		c.Response().Flush()
+		return nil
+	}
+	defer unsubscribe()
+
+	if done, err := h.catchUpExecutionSSE(ctx, c, execID, &sentLen, false); err != nil {
+		applog.Infof("[handler] ChatStreamSSE exec=%s catch-up error: %v", execID, err)
+		writeChatSSEEvent(c, "error", err.Error())
+		c.Response().Flush()
+		return nil
+	} else if done {
+		return nil
+	}
+
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	catchup := time.NewTicker(2 * time.Second)
+	defer catchup.Stop()
+	timeout := time.NewTimer(chatSSETimeout)
+	defer timeout.Stop()
+	gapPending := false
+
+	resetTimeout := func() {
+		if !timeout.Stop() {
+			select {
+			case <-timeout.C:
+			default:
+			}
+		}
+		timeout.Reset(chatSSETimeout)
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			applog.Infof("[handler] ChatStreamSSE exec=%s client disconnected", execID)
 			return nil
-
-		case <-timeout:
+		case <-timeout.C:
 			applog.Infof("[handler] ChatStreamSSE exec=%s timeout", execID)
-			fmt.Fprintf(c.Response(), "event: error\ndata: timeout\n\n")
+			writeChatSSEEvent(c, "error", "timeout")
 			c.Response().Flush()
 			return nil
+		case <-heartbeat.C:
+			fmt.Fprintf(c.Response(), ": heartbeat\n\n")
+			c.Response().Flush()
+		case <-catchup.C:
+			if gapPending {
+				if done, err := h.catchUpExecutionSSE(ctx, c, execID, &sentLen, false); err != nil {
+					applog.Infof("[handler] ChatStreamSSE exec=%s catch-up error: %v", execID, err)
+					writeChatSSEEvent(c, "error", err.Error())
+					c.Response().Flush()
+					return nil
+				} else if done {
+					return nil
+				}
+				gapPending = false
+				resetTimeout()
+				continue
+			}
+			if done, err := h.catchUpExecutionSSE(ctx, c, execID, &sentLen, false); err != nil {
+				applog.Infof("[handler] ChatStreamSSE exec=%s terminal fallback error: %v", execID, err)
+				writeChatSSEEvent(c, "error", err.Error())
+				c.Response().Flush()
+				return nil
+			} else if done {
+				return nil
+			}
+		case ev, ok := <-sub:
+			if !ok {
+				if done, err := h.catchUpExecutionSSE(ctx, c, execID, &sentLen, false); err != nil {
+					applog.Infof("[handler] ChatStreamSSE exec=%s final reconcile error: %v", execID, err)
+					writeChatSSEEvent(c, "error", err.Error())
+					c.Response().Flush()
+					return nil
+				} else if done {
+					return nil
+				}
+				return nil
+			}
+			if ev.ExecID != execID {
+				continue
+			}
+			switch ev.Type {
+			case events.ExecutionStreamDelta:
+				eventStart := ev.Offset - len(ev.Delta)
+				if ev.Offset <= sentLen {
+					continue
+				}
+				if eventStart > sentLen {
+					if done, err := h.catchUpExecutionSSE(ctx, c, execID, &sentLen, false); err != nil {
+						applog.Infof("[handler] ChatStreamSSE exec=%s gap catch-up error: %v", execID, err)
+						writeChatSSEEvent(c, "error", err.Error())
+						c.Response().Flush()
+						return nil
+					} else if done {
+						return nil
+					}
+					if eventStart > sentLen {
+						gapPending = true
+						continue
+					}
+				}
+				start := sentLen - eventStart
+				if start < 0 {
+					start = 0
+				}
+				start = clampOffsetToUTF8Boundary(start, ev.Delta)
+				if start < len(ev.Delta) {
+					writeSSEData(c, ev.Delta[start:])
+					c.Response().Flush()
+					sentLen = ev.Offset
+					gapPending = false
+					resetTimeout()
+				}
+			case events.ExecutionStreamDone:
+				if done, err := h.catchUpExecutionSSE(ctx, c, execID, &sentLen, false); err != nil {
+					applog.Infof("[handler] ChatStreamSSE exec=%s terminal catch-up error: %v", execID, err)
+					writeChatSSEEvent(c, "error", err.Error())
+					c.Response().Flush()
+					return nil
+				} else if done {
+					return nil
+				}
+				status := ev.Status
+				if status == "" {
+					status = "completed"
+				}
+				writeChatSSEEvent(c, "done", status)
+				c.Response().Flush()
+				return nil
+			case events.ExecutionStreamError:
+				writeChatSSEEvent(c, "error", ev.Error)
+				c.Response().Flush()
+				return nil
+			}
+		}
+	}
+}
 
+func (h *Handler) chatStreamSSEDBFallback(ctx context.Context, c echo.Context, execID string, sentLen int) error {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.After(chatSSETimeout)
+	for {
+		select {
+		case <-ctx.Done():
+			applog.Infof("[handler] ChatStreamSSE exec=%s client disconnected", execID)
+			return nil
+		case <-timeout:
+			applog.Infof("[handler] ChatStreamSSE exec=%s timeout", execID)
+			writeChatSSEEvent(c, "error", "timeout")
+			c.Response().Flush()
+			return nil
 		case <-ticker.C:
-			// Get current execution state
-			exec, err := h.execRepo.GetByID(ctx, execID)
+			done, err := h.catchUpExecutionSSE(ctx, c, execID, &sentLen, true)
 			if err != nil {
-				applog.Infof("[handler] ChatStreamSSE exec=%s error: %v", execID, err)
-				fmt.Fprintf(c.Response(), "event: error\ndata: %s\n\n", err.Error())
+				applog.Infof("[handler] ChatStreamSSE exec=%s fallback error: %v", execID, err)
+				writeChatSSEEvent(c, "error", err.Error())
 				c.Response().Flush()
 				return nil
 			}
-
-			if exec == nil {
-				applog.Infof("[handler] ChatStreamSSE exec=%s not found", execID)
-				fmt.Fprintf(c.Response(), "event: error\ndata: execution not found\n\n")
-				c.Response().Flush()
-				return nil
-			}
-
-			output := exec.Output
-
-			// Send new output if changed
-			if output != lastOutput && len(output) > len(lastOutput) {
-				// Send only the delta (new content)
-				delta := output[len(lastOutput):]
-				// applog.Debugf("[handler] ChatStreamSSE exec=%s delta_len=%d delta=%q", execID, len(delta), delta)
-				// SSE requires multi-line data to have each line prefixed with "data:".
-				// Without this, content after the first newline is silently dropped
-				// by the browser's EventSource parser.
-				writeSSEData(c, delta)
-				c.Response().Flush()
-				lastOutput = output
-			} else if output != lastOutput {
-				// Output was modified (not just appended) — update tracking
-				lastOutput = output
-			}
-
-			// Check if execution is complete
-			if exec.Status == models.ExecCompleted {
-				// applog.Debugf("[handler] ChatStreamSSE exec=%s completed total_output_len=%d total_output=%q", execID, len(exec.Output), exec.Output)
-				fmt.Fprintf(c.Response(), "event: done\ndata: completed\n\n")
-				c.Response().Flush()
-				return nil
-			} else if exec.Status == models.ExecCancelled {
-				fmt.Fprintf(c.Response(), "event: done\ndata: cancelled\n\n")
-				c.Response().Flush()
-				return nil
-			} else if exec.Status == models.ExecFailed {
-				applog.Infof("[handler] ChatStreamSSE exec=%s failed: %s", execID, exec.ErrorMessage)
-				fmt.Fprintf(c.Response(), "event: error\ndata: %s\n\n", exec.ErrorMessage)
-				c.Response().Flush()
+			if done {
 				return nil
 			}
 		}

@@ -196,6 +196,7 @@ type EmailService struct {
 	customPersonalityRepo  *repository.CustomPersonalityRepo
 	agentRepo              *repository.AgentRepo
 	chatBroadcaster        *events.ChatBroadcaster
+	executionStreamHub     *events.ExecutionStreamHub
 	queuedTurnPromoter     func(projectID string)
 	channelChatRunner      ChannelChatRunner
 	channelMessageRouter   *ChannelMessageRouter
@@ -267,7 +268,10 @@ func NewEmailService(settingsRepo *repository.SettingsRepo, projectRepo *reposit
 	return s
 }
 
-func (s *EmailService) SetChatBroadcaster(cb *events.ChatBroadcaster)       { s.chatBroadcaster = cb }
+func (s *EmailService) SetChatBroadcaster(cb *events.ChatBroadcaster) { s.chatBroadcaster = cb }
+func (s *EmailService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
+	s.executionStreamHub = hub
+}
 func (s *EmailService) SetThreadInputRepo(repo *repository.ThreadInputRepo) { s.threadInputRepo = repo }
 func (s *EmailService) SetCustomPersonalityRepo(repo *repository.CustomPersonalityRepo) {
 	s.customPersonalityRepo = repo
@@ -744,7 +748,7 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 				}
 				return s.emailTaskContextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: taskID, EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey})
 			},
-			CompleteExecution: channelCompletionFunc("email", s.execRepo, s.taskRepo, s.queuedTurnPromoter),
+			CompleteExecution: channelCompletionFunc("email", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 			ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
 				return s.execRepo.ListEmailChatHistory(ctx, projectID, sessionKey, emailChatHistoryLimit)
 			},

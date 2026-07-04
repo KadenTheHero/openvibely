@@ -357,9 +357,9 @@ func TestChatBubbleStreamingResumeScrollBehavior(t *testing.T) {
 		t.Error("Missing exec ID")
 	}
 
-	// Verify initial length attribute for delta rendering
-	if !strings.Contains(content, "data-initial-length") {
-		t.Error("Missing data-initial-length attribute")
+	// Verify initial byte length attribute for offset-aware reconnects
+	if !strings.Contains(content, "data-initial-byte-length") {
+		t.Error("Missing data-initial-byte-length attribute")
 	}
 
 	// Verify messages container reference
@@ -1014,8 +1014,7 @@ func TestStreamingScrollIntegration(t *testing.T) {
 			mustHave: []string{
 				`data-streaming-resume="true"`,
 				"data-exec-id",
-				"data-initial-length",
-				"data-messages-container",
+				"data-initial-byte-length", "data-messages-container",
 			},
 		},
 	}
@@ -1102,8 +1101,8 @@ func TestUserScrollTracking(t *testing.T) {
 		if !strings.Contains(content, "test-exec-456") {
 			t.Error("Missing exec ID in data attributes")
 		}
-		if !strings.Contains(content, "data-initial-length") {
-			t.Error("Missing data-initial-length attribute")
+		if !strings.Contains(content, "data-initial-byte-length") {
+			t.Error("Missing data-initial-byte-length attribute")
 		}
 	})
 }
@@ -1751,30 +1750,17 @@ func TestChatBubbleStreamingResume_UsesDataRawContent(t *testing.T) {
 	}
 }
 
-// TestChatBubbleStreamingResume_InitialLengthUsesCharCount verifies that
-// data-initial-length uses character count (not byte count) so it matches
-// JavaScript's string.length for proper SSE delta rendering threshold.
-func TestChatBubbleStreamingResume_InitialLengthUsesCharCount(t *testing.T) {
+// TestChatBubbleStreamingResume_InitialByteLengthUsesUTF8Bytes verifies that
+// resume streams reconnect from the persisted raw UTF-8 byte offset, not JS string length.
+func TestChatBubbleStreamingResume_InitialByteLengthUsesUTF8Bytes(t *testing.T) {
 	tests := []struct {
-		name           string
-		content        string
-		expectedLength string
+		name          string
+		content       string
+		expectedBytes string
 	}{
-		{
-			name:           "ASCII only",
-			content:        "Hello World",
-			expectedLength: "11",
-		},
-		{
-			name:           "Unicode characters (multi-byte UTF-8)",
-			content:        "Hello… World—test",
-			expectedLength: "17", // 17 JS code units (… and — are BMP, 1 code unit each), but 21 bytes in UTF-8
-		},
-		{
-			name:           "emoji content",
-			content:        "Done! 🎉",
-			expectedLength: "8", // 6 ASCII + 2 code units for 🎉 (surrogate pair), matches JS "Done! 🎉".length === 8
-		},
+		{name: "ASCII only", content: "Hello World", expectedBytes: "11"},
+		{name: "Unicode characters", content: "Hello… World—test", expectedBytes: "21"},
+		{name: "emoji content", content: "Done! 🎉", expectedBytes: "10"},
 	}
 
 	for _, tt := range tests {
@@ -1786,12 +1772,59 @@ func TestChatBubbleStreamingResume_InitialLengthUsesCharCount(t *testing.T) {
 			}
 
 			html := buf.String()
-			expected := `data-initial-length="` + tt.expectedLength + `"`
+			expected := `data-initial-byte-length="` + tt.expectedBytes + `"`
 			if !strings.Contains(html, expected) {
-				t.Errorf("Expected %s but not found in HTML.\nGot HTML snippet around initial-length: %s",
-					expected, extractAttr(html, "data-initial-length"))
+				t.Errorf("Expected %s but not found in HTML.\nGot HTML snippet around initial-byte-length: %s",
+					expected, extractAttr(html, "data-initial-byte-length"))
+			}
+			if strings.Contains(html, "data-initial-length=") {
+				t.Error("resume stream should not use data-initial-length after switching to byte offsets")
 			}
 		})
+	}
+}
+
+func TestChatBubbleStreaming_UsesUTF8ByteOffsetInEventSourceURL(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatBubbleStreaming("Assistant", "exec-1", "chat-messages", "", false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatBubbleStreaming: %v", err)
+	}
+	html := buf.String()
+	if !strings.Contains(html, "function utf8ByteLength") || !strings.Contains(html, "streamTextEncoder.encode(value || '').length") {
+		t.Fatal("fresh stream should compute offsets as UTF-8 byte lengths")
+	}
+	if !strings.Contains(html, "var streamOffset = utf8ByteLength(textBuffer);") || !strings.Contains(html, "'/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset)") {
+		t.Fatal("fresh stream EventSource URL should include current textBuffer byte offset")
+	}
+}
+
+func TestChatBubbleStreamingResume_SeedsRenderedContentAndOffset(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatBubbleStreamingResume("Assistant", "partial 世界", "exec-1", "chat-messages", "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatBubbleStreamingResume: %v", err)
+	}
+	bubbleHTML := buf.String()
+	if !strings.Contains(bubbleHTML, `data-initial-byte-length="14"`) {
+		t.Fatalf("resume bubble should render raw UTF-8 byte offset, got attr %s", extractAttr(bubbleHTML, "data-initial-byte-length"))
+	}
+
+	buf.Reset()
+	if err := _initThreadStreamingScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render init thread streaming script: %v", err)
+	}
+	script := buf.String()
+	for _, snippet := range []string{
+		"var cumulativeContent = container.getAttribute('data-raw-content') || '';",
+		"var streamOffset = parseInt(container.getAttribute('data-initial-byte-length') || '0', 10) || 0;",
+		"new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset))",
+		"streamOffset += utf8ByteLength(event.data);",
+	} {
+		if !strings.Contains(script, snippet) {
+			t.Fatalf("resume script missing offset snippet: %s", snippet)
+		}
+	}
+	if strings.Contains(script, "var initialLength = parseInt") || strings.Contains(script, "cumulativeContent.length < initialLength") {
+		t.Fatal("resume script should not wait for replay from byte zero")
 	}
 }
 

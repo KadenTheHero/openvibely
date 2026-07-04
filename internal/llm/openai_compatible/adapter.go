@@ -23,11 +23,12 @@ const defaultOutputBudget = 16384
 var errMaxTokens = fmt.Errorf("response truncated: max output tokens limit reached (output budget exhausted before task completed)")
 
 type Adapter struct {
-	execRepo *repository.ExecutionRepo
+	execRepo  *repository.ExecutionRepo
+	streamHub llmstream.ExecutionStreamPublisher
 }
 
-func New(execRepo *repository.ExecutionRepo) *Adapter {
-	return &Adapter{execRepo: execRepo}
+func New(execRepo *repository.ExecutionRepo, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
+	return &Adapter{execRepo: execRepo, streamHub: streamHub}
 }
 
 func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workDir string) (llmcontracts.AgentResult, error) {
@@ -130,7 +131,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 		return "", "", llmusage.FromTotal(0), err
 	}
 
-	sw := llmstream.NewWriter(req.ExecID, "", a.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(req.ExecID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
@@ -177,7 +178,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 		return "", llmusage.FromTotal(0), err
 	}
 
-	sw := llmstream.NewWriter(req.ExecID, "", a.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(req.ExecID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
 	disableTools := req.DisableTools || (!req.Followup && req.ChatMode != models.ChatModePlan && llmcontracts.RuntimeToolsFromContext(ctx) == nil)

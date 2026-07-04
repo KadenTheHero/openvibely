@@ -433,9 +433,11 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					// User just sent a message: reset scroll tracking and pin to bottom.
 					if (tracker) tracker.resetOnUserSend();
 				}
-					// Buffer for accumulating streaming content
-					var textBuffer = '';
-					var renderScheduled = false;
+						// Buffer for accumulating streaming content
+						var textBuffer = '';
+						var streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;
+						function utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }
+						var renderScheduled = false;
 					var lastRenderedLength = 0;
 						function renderBufferedOutput(force) {
 							if (!window.renderStreamingContent) {
@@ -491,7 +493,9 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 
 						var streamRetryCount = 0;
 						var eventSource = null;
-						function connectExecutionStream() {						eventSource = new EventSource('/events/chat/' + execId);
+						function connectExecutionStream() {
+							var streamOffset = utf8ByteLength(textBuffer);
+							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
 						if (!isThread && window.registerChatStreamEventSource) {
 							window.registerChatStreamEventSource(execId, eventSource);
 						}
@@ -652,7 +656,7 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 					</div>
 				}
 				<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
-				<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-length={ fmt.Sprintf("%d", jsStringLength(NormalizeDisplayMarkers(partialContent))) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
+				<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-byte-length={ fmt.Sprintf("%d", len(partialContent)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
 			<script>
 				(function() {
 					var el = document.currentScript.previousElementSibling;
@@ -705,9 +709,11 @@ templ _initThreadStreamingScript() {
 
 				var execId = container.getAttribute('data-exec-id');
 				var messagesId = container.getAttribute('data-messages-container');
-				var pauseTarget = container.getAttribute('data-pause-polling-target');
-				var initialLength = parseInt(container.getAttribute('data-initial-length') || '0', 10);
-				var cumulativeContent = '';
+					var pauseTarget = container.getAttribute('data-pause-polling-target');
+					var cumulativeContent = container.getAttribute('data-raw-content') || '';
+					var streamOffset = parseInt(container.getAttribute('data-initial-byte-length') || '0', 10) || 0;
+					var streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;
+					function utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }
 
 				// Find streaming dots by ID (reliable across morph swaps and inline script siblings)
 				var streamingDots = document.getElementById('streaming-dots-resume-' + execId);
@@ -861,23 +867,23 @@ templ _initThreadStreamingScript() {
 						var idx = window._threadEventSources.indexOf(es);
 						if (idx >= 0) window._threadEventSources.splice(idx, 1);
 					}
-					function connectResumeExecutionStream() {					eventSource = new EventSource('/events/chat/' + execId);
-					// Track EventSource globally so sidebar navigation can close it
-					if (!window._threadEventSources) window._threadEventSources = [];
+						function connectResumeExecutionStream() {
+							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
+						// Track EventSource globally so sidebar navigation can close it
+						if (!window._threadEventSources) window._threadEventSources = [];
 					window._threadEventSources.push(eventSource);
 
-					eventSource.onmessage = function(event) {
-						cumulativeContent += event.data;
-						if (cumulativeContent.length >= initialLength) {
+						eventSource.onmessage = function(event) {
+							cumulativeContent += event.data;
+							streamOffset += utf8ByteLength(event.data);
 							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 							if (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {
-							thinkingIndicator.classList.add('hidden');
-							container.classList.remove('hidden');
-							if (streamingDots) streamingDots.classList.remove('hidden');
-						}
-						renderCumulativeContent(false);
-					}
-				};
+								thinkingIndicator.classList.add('hidden');
+								container.classList.remove('hidden');
+								if (streamingDots) streamingDots.classList.remove('hidden');
+							}
+							renderCumulativeContent(false);
+					};
 
 						eventSource.addEventListener('done', function(event) {
 							var terminalStatus = event && event.data ? event.data : 'completed';

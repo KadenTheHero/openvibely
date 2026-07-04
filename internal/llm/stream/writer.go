@@ -7,8 +7,13 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/repository"
 )
+
+type ExecutionStreamPublisher interface {
+	Publish(event events.ExecutionStreamEvent)
+}
 
 // Writer wraps a bytes.Buffer and periodically flushes accumulated
 // output to the database so the UI can display progress in real time.
@@ -22,6 +27,7 @@ type Writer struct {
 	taskID        string
 	repo          *repository.ExecutionRepo
 	ctx           context.Context
+	publisher     ExecutionStreamPublisher
 	lastFlush     time.Time
 	interval      time.Duration
 	dirty         bool // true when buf has unflushed content
@@ -32,11 +38,16 @@ type Writer struct {
 }
 
 func NewWriter(execID, taskID string, repo *repository.ExecutionRepo, ctx context.Context, interval time.Duration) *Writer {
+	return NewWriterWithPublisher(execID, taskID, repo, ctx, interval, nil)
+}
+
+func NewWriterWithPublisher(execID, taskID string, repo *repository.ExecutionRepo, ctx context.Context, interval time.Duration, publisher ExecutionStreamPublisher) *Writer {
 	sw := &Writer{
 		execID:    execID,
 		taskID:    taskID,
 		repo:      repo,
 		ctx:       ctx,
+		publisher: publisher,
 		interval:  interval,
 		lastFlush: time.Now(),
 		done:      make(chan struct{}),
@@ -90,8 +101,8 @@ func (w *Writer) periodicFlush() {
 }
 
 func (w *Writer) Write(p []byte) (int, error) {
+	var event *events.ExecutionStreamEvent
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	n, err := w.buf.Write(p)
 	// Raw token content is debug-only; it is noisy at info level and may
 	// contain sensitive model output. Operational metadata (flush counts,
@@ -99,6 +110,14 @@ func (w *Writer) Write(p []byte) (int, error) {
 	// Uncomment to log raw streamed LLM content when debugging stream issues:
 	// applog.Debugf("[agent-svc] streamingWriter received %d bytes exec=%s task=%s: %q", n, w.execID, w.taskID, string(p))
 	w.dirty = true
+	if n > 0 && w.publisher != nil && w.execID != "" {
+		event = &events.ExecutionStreamEvent{
+			ExecID: w.execID,
+			Type:   events.ExecutionStreamDelta,
+			Delta:  string(p[:n]),
+			Offset: w.buf.Len(),
+		}
+	}
 	// Eagerly flush if enough time has passed since last flush
 	if time.Since(w.lastFlush) >= w.interval {
 		if w.repo != nil && w.execID != "" {
@@ -110,6 +129,10 @@ func (w *Writer) Write(p []byte) (int, error) {
 		}
 		w.dirty = false
 		w.lastFlush = time.Now()
+	}
+	w.mu.Unlock()
+	if event != nil {
+		w.publisher.Publish(*event)
 	}
 	return n, err
 }

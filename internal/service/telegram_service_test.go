@@ -875,7 +875,7 @@ func TestTelegramService_CompleteExecution_Success(t *testing.T) {
 	}
 	require.NoError(t, execRepo.Create(ctx, exec))
 
-	completeExecution := channelCompletionFunc("telegram", execRepo, taskRepo, nil)
+	completeExecution := channelCompletionFunc("telegram", execRepo, taskRepo, nil, nil)
 
 	completeExecution(ctx, exec.ID, task.ID, "response output", "", 100, 1000)
 
@@ -929,7 +929,7 @@ func TestTelegramService_CompleteExecution_Failure(t *testing.T) {
 	require.NoError(t, execRepo.Create(ctx, exec))
 
 	promotedProject := ""
-	completeExecution := channelCompletionFunc("telegram", execRepo, taskRepo, func(projectID string) { promotedProject = projectID })
+	completeExecution := channelCompletionFunc("telegram", execRepo, taskRepo, nil, func(projectID string) { promotedProject = projectID })
 
 	completeExecution(ctx, exec.ID, task.ID, "", "something went wrong", 0, 500)
 

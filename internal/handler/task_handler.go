@@ -1381,10 +1381,13 @@ func (h *Handler) CancelTask(c echo.Context) error {
 		h.notifySwarmChildTerminal(c.Request().Context(), taskID)
 	}
 	if h.execRepo != nil {
-		if cancelled, err := h.execRepo.CancelRunningByTask(c.Request().Context(), taskID); err != nil {
+		if cancelledIDs, err := h.execRepo.CancelRunningByTaskReturningIDs(c.Request().Context(), taskID); err != nil {
 			applog.Infof("[handler] CancelTask error cancelling running executions task=%s: %v", taskID, err)
-		} else if cancelled > 0 {
-			applog.Infof("[handler] CancelTask cancelled %d running executions task=%s", cancelled, taskID)
+		} else if len(cancelledIDs) > 0 {
+			applog.Infof("[handler] CancelTask cancelled %d running executions task=%s", len(cancelledIDs), taskID)
+			for _, id := range cancelledIDs {
+				h.publishExecutionTerminal(id, models.ExecCancelled, "cancelled")
+			}
 		}
 	}
 	applog.Infof("[handler] CancelTask cancelled task=%s", taskID)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -1114,9 +1115,9 @@ func formatChannelCapabilities(summaries []chatcontrol.ActionSummary) string {
 	return sb.String()
 }
 
-func channelCompletionFunc(platform string, execRepo *repository.ExecutionRepo, taskRepo *repository.TaskRepo, queuedTurnPromoter func(projectID string)) func(context.Context, string, string, string, string, int, int64) {
+func channelCompletionFunc(platform string, execRepo *repository.ExecutionRepo, taskRepo *repository.TaskRepo, executionStreamHub *events.ExecutionStreamHub, queuedTurnPromoter func(projectID string)) func(context.Context, string, string, string, string, int, int64) {
 	return func(ctx context.Context, execID, taskID, output, errorMessage string, tokensUsed int, durationMs int64) {
-		completeChannelExecution(ctx, channelExecutionCompletionOptions{Platform: platform, ExecRepo: execRepo, TaskRepo: taskRepo, QueuedTurnPromoter: queuedTurnPromoter, ExecID: execID, TaskID: taskID, Output: output, ErrorMessage: errorMessage, TokensUsed: tokensUsed, DurationMs: durationMs})
+		completeChannelExecution(ctx, channelExecutionCompletionOptions{Platform: platform, ExecRepo: execRepo, TaskRepo: taskRepo, ExecutionStreamHub: executionStreamHub, QueuedTurnPromoter: queuedTurnPromoter, ExecID: execID, TaskID: taskID, Output: output, ErrorMessage: errorMessage, TokensUsed: tokensUsed, DurationMs: durationMs})
 	}
 }
 

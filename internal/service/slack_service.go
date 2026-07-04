@@ -94,6 +94,7 @@ type SlackService struct {
 	slackAuthRepo            *repository.SlackAuthRepo
 	agentRepo                *repository.AgentRepo
 	chatBroadcaster          *events.ChatBroadcaster
+	executionStreamHub       *events.ExecutionStreamHub
 	queuedTurnPromoter       func(projectID string)
 	queuedTaskThreadPromoter func(taskID string)
 	channelChatRunner        ChannelChatRunner
@@ -161,6 +162,10 @@ func (s *SlackService) SetCustomPersonalityRepo(repo *repository.CustomPersonali
 
 func (s *SlackService) SetChatBroadcaster(cb *events.ChatBroadcaster) {
 	s.chatBroadcaster = cb
+}
+
+func (s *SlackService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
+	s.executionStreamHub = hub
 }
 
 func (s *SlackService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
@@ -889,7 +894,7 @@ func (s *SlackService) recordQueuedAttachmentFailure(ctx context.Context, projec
 		}
 		return
 	}
-	channelCompletionFunc("slack", s.execRepo, s.taskRepo, s.queuedTurnPromoter)(ctx, exec.ID, task.ID, "", msgText, 0, 0)
+	channelCompletionFunc("slack", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter)(ctx, exec.ID, task.ID, "", msgText, 0, 0)
 	if s.chatBroadcaster != nil {
 		s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, ExecID: exec.ID, TaskID: task.ID, Message: msg.Text, Source: msg.Source, HasAttachments: len(msg.Files) > 0})
 	}
@@ -991,7 +996,7 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 				}
 				return s.slackTaskContextRepo.Upsert(ctx, &models.SlackTaskContext{TaskID: taskID, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID})
 			},
-			CompleteExecution: channelCompletionFunc("slack", s.execRepo, s.taskRepo, s.queuedTurnPromoter),
+			CompleteExecution: channelCompletionFunc("slack", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 			LinkAttachments:   s.linkAttachmentsToExecution, AttachmentContextAndImages: slackAttachmentContextAndImages,
 			ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
 				return s.execRepo.ListChatHistory(ctx, projectID, slackChatHistoryLimit)
@@ -1066,7 +1071,7 @@ func (s *SlackService) slackActionHandlers(projectID string, markerCtx slackMark
 		CustomPersonalityRepo:    s.customPersonalityRepo,
 		ChannelTaskRunner:        s.channelTaskRunner,
 		QueuedTaskThreadPromoter: s.queuedTaskThreadPromoter,
-		CompleteExecution:        channelCompletionFunc("slack", s.execRepo, s.taskRepo, s.queuedTurnPromoter),
+		CompleteExecution:        channelCompletionFunc("slack", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 		ChannelMessageRouter:     s.channelMessageRouter,
 		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: markerCtx.TeamID, SlackChannelID: markerCtx.ChannelID, SlackThreadTS: markerCtx.ThreadTS, SlackUserID: markerCtx.UserID},
 		NewQueuedInput: func(_ *models.Task, runExecutionID, agentID string) *models.ThreadInput {

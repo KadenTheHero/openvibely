@@ -31,10 +31,10 @@ type ProviderAdapter interface {
 var resolvePluginRuntimeBundleFn = agentplugins.ResolveRuntimeBundle
 
 func (s *LLMService) initProviderAdapters() {
-	anthropicAdapter := llmanthropic.New(s.llmConfigRepo, s.execRepo)
-	openaiAdapter := llmopenai.New(s.llmConfigRepo, s.execRepo)
-	openaiCompatibleAdapter := llmopenai_compatible.New(s.execRepo)
-	ollamaAdapter := llmollama.New(s.execRepo)
+	anthropicAdapter := llmanthropic.New(s.llmConfigRepo, s.execRepo, s.executionStreamHub)
+	openaiAdapter := llmopenai.New(s.llmConfigRepo, s.execRepo, s.executionStreamHub)
+	openaiCompatibleAdapter := llmopenai_compatible.New(s.execRepo, s.executionStreamHub)
+	ollamaAdapter := llmollama.New(s.execRepo, s.executionStreamHub)
 	s.providerAdapters = map[models.LLMProvider]ProviderAdapter{
 		models.ProviderAnthropic:        &anthropicProviderAdapter{svc: s, adapter: anthropicAdapter},
 		models.ProviderOpenAI:           &openAIProviderAdapter{svc: s, adapter: openaiAdapter},

@@ -863,7 +863,7 @@ func TestSlackService_CompleteExecution_FailurePromotesQueuedChat(t *testing.T) 
 	require.NoError(t, execRepo.Create(ctx, exec))
 
 	promotedProject := ""
-	completeExecution := channelCompletionFunc("slack", execRepo, taskRepo, func(projectID string) { promotedProject = projectID })
+	completeExecution := channelCompletionFunc("slack", execRepo, taskRepo, nil, func(projectID string) { promotedProject = projectID })
 
 	completeExecution(ctx, exec.ID, task.ID, "", "boom", 0, 10)
 

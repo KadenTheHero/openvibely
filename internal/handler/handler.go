@@ -50,6 +50,7 @@ type Handler struct {
 	broadcaster                *events.Broadcaster
 	chatBroadcaster            *events.ChatBroadcaster
 	fileChangeBroadcaster      *events.FileChangeBroadcaster
+	executionStreamHub         *events.ExecutionStreamHub
 	telegramService            *service.TelegramService
 	emailService               EmailServiceProvider
 	telegramAuthRepo           *repository.TelegramAuthRepo
@@ -276,6 +277,31 @@ func (h *Handler) SetTaskGoalService(svc *service.TaskGoalService) {
 // SetFileChangeBroadcaster sets the file change event broadcaster for real-time file change updates.
 func (h *Handler) SetFileChangeBroadcaster(fcb *events.FileChangeBroadcaster) {
 	h.fileChangeBroadcaster = fcb
+}
+
+func (h *Handler) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
+	h.executionStreamHub = hub
+}
+
+func (h *Handler) publishExecutionTerminal(execID string, status models.ExecutionStatus, errMsg string) {
+	if h == nil || h.executionStreamHub == nil || execID == "" {
+		return
+	}
+	event := events.ExecutionStreamEvent{ExecID: execID}
+	switch status {
+	case models.ExecCompleted:
+		event.Type = events.ExecutionStreamDone
+		event.Status = "completed"
+	case models.ExecCancelled:
+		event.Type = events.ExecutionStreamDone
+		event.Status = "cancelled"
+	case models.ExecFailed:
+		event.Type = events.ExecutionStreamError
+		event.Error = errMsg
+	default:
+		return
+	}
+	h.executionStreamHub.Close(execID, event)
 }
 
 // SetTelegramAuthRepo sets the Telegram authorization repo for managing authorized users.

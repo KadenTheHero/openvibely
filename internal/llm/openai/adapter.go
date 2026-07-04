@@ -40,6 +40,7 @@ func isMaxTokensStopReason(reason string) bool {
 type Adapter struct {
 	llmConfigRepo *repository.LLMConfigRepo
 	execRepo      *repository.ExecutionRepo
+	streamHub     llmstream.ExecutionStreamPublisher
 	oauthRecovery *llmoauth.Manager
 }
 
@@ -304,10 +305,11 @@ func buildOpenAIRuntime(ctx context.Context, workDir string, agentDef *models.Ag
 }
 
 // New creates a new OpenAI adapter.
-func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.ExecutionRepo) *Adapter {
+func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.ExecutionRepo, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
 	return &Adapter{
 		llmConfigRepo: llmConfigRepo,
 		execRepo:      execRepo,
+		streamHub:     streamHub,
 		oauthRecovery: llmoauth.NewManager(llmConfigRepo),
 	}
 }
@@ -417,7 +419,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = composeRuntimeToolFilter(toolFilter, rt, true, models.ChatModeOrchestrate)
 
-	sw := llmstream.NewWriter(execID, "", a.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 	inThinking := false
 
@@ -524,7 +526,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = composeRuntimeToolFilter(toolFilter, rt, isTaskFollowup, chatMode)
 
-	sw := llmstream.NewWriter(execID, "", a.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 	chatInThinking := false
 
@@ -638,7 +640,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = composeRuntimeToolFilter(toolFilter, rt, true, models.ChatModeOrchestrate)
 
-	sw := llmstream.NewWriter(execID, "", a.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || runtimeSkipDefaultTools(rt)
@@ -715,7 +717,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = composeRuntimeToolFilter(toolFilter, rt, isTaskFollowup, chatMode)
 
-	sw := llmstream.NewWriter(execID, "", a.execRepo, ctx, 500*time.Millisecond)
+	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil

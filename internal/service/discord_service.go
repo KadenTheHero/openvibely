@@ -72,6 +72,7 @@ type DiscordService struct {
 	agentRepo                *repository.AgentRepo
 	alertSvc                 *AlertService
 	chatBroadcaster          *events.ChatBroadcaster
+	executionStreamHub       *events.ExecutionStreamHub
 	queuedTurnPromoter       func(projectID string)
 	queuedTaskThreadPromoter func(taskID string)
 	channelChatRunner        ChannelChatRunner
@@ -123,6 +124,9 @@ func NewDiscordService(
 }
 
 func (s *DiscordService) SetChatBroadcaster(cb *events.ChatBroadcaster) { s.chatBroadcaster = cb }
+func (s *DiscordService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
+	s.executionStreamHub = hub
+}
 func (s *DiscordService) SetChatAttachmentRepo(repo *repository.ChatAttachmentRepo) {
 	s.chatAttachmentRepo = repo
 }
@@ -453,7 +457,7 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 				}
 				return s.discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{TaskID: taskID, DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: msg.MessageID, DiscordUserID: msg.UserID})
 			},
-			CompleteExecution: channelCompletionFunc("discord", s.execRepo, s.taskRepo, s.queuedTurnPromoter),
+			CompleteExecution: channelCompletionFunc("discord", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 			LinkAttachments:   s.linkAttachmentsToExecution, AttachmentContextAndImages: discordAttachmentContextAndImages,
 			ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
 				return s.execRepo.ListChatHistory(ctx, projectID, discordChatHistoryLimit)
@@ -537,7 +541,7 @@ func (s *DiscordService) recordQueuedAttachmentFailure(ctx context.Context, proj
 		}
 		return
 	}
-	channelCompletionFunc("discord", s.execRepo, s.taskRepo, s.queuedTurnPromoter)(ctx, exec.ID, task.ID, "", msgText, 0, 0)
+	channelCompletionFunc("discord", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter)(ctx, exec.ID, task.ID, "", msgText, 0, 0)
 	if s.chatBroadcaster != nil {
 		s.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: projectID, ExecID: exec.ID, TaskID: task.ID, Message: msg.Text, Source: msg.Source, AgentName: "", HasAttachments: len(msg.Attachments) > 0})
 	}
@@ -711,7 +715,7 @@ func (s *DiscordService) discordActionHandlers(projectID string, markerCtx disco
 		CustomPersonalityRepo:    s.customPersonalityRepo,
 		ChannelTaskRunner:        s.channelTaskRunner,
 		QueuedTaskThreadPromoter: s.queuedTaskThreadPromoter,
-		CompleteExecution:        channelCompletionFunc("discord", s.execRepo, s.taskRepo, s.queuedTurnPromoter),
+		CompleteExecution:        channelCompletionFunc("discord", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 		ChannelMessageRouter:     s.channelMessageRouter,
 		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginDiscord, DiscordChannelID: markerCtx.ChannelID, DiscordThreadID: markerCtx.ThreadID, DiscordMessageID: markerCtx.MessageID, DiscordUserID: markerCtx.UserID},
 		NewQueuedInput: func(_ *models.Task, runExecutionID, agentID string) *models.ThreadInput {

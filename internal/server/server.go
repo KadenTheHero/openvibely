@@ -368,6 +368,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	broadcaster := events.NewBroadcaster()
 	chatBroadcaster := events.NewChatBroadcaster()
 	fileChangeBroadcaster := events.NewFileChangeBroadcaster()
+	executionStreamHub := events.NewExecutionStreamHub()
 
 	// Repositories
 	projectRepo := repository.NewProjectRepo(db)
@@ -418,6 +419,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 
 	// Services
 	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.SetExecutionStreamHub(executionStreamHub)
 
 	maxWorkers, _ := workerRepo.GetMaxWorkers(context.Background())
 	workerSvc := service.NewWorkerService(llmSvc, maxWorkers, projectRepo)
@@ -555,6 +557,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackSvc.SetUploadsDir(uploadsPath)
 	slackSvc.SetChatAttachmentRepo(chatAttachmentRepo)
 	slackSvc.SetChatBroadcaster(chatBroadcaster)
+	slackSvc.SetExecutionStreamHub(executionStreamHub)
 	slackSvc.SetAlertService(alertSvc)
 	slackSvc.SetTaskGoalService(taskGoalSvc)
 	slackSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
@@ -571,6 +574,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	emailSvc.SetUploadsDir(uploadsPath)
 	emailSvc.SetChatAttachmentRepo(chatAttachmentRepo)
 	emailSvc.SetChatBroadcaster(chatBroadcaster)
+	emailSvc.SetExecutionStreamHub(executionStreamHub)
 	emailSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 	emailSvc.SetAgentRepo(agentRepo)
 	discordSvc := service.NewDiscordService(
@@ -590,6 +594,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	discordSvc.SetUploadsDir(uploadsPath)
 	discordSvc.SetChatAttachmentRepo(chatAttachmentRepo)
 	discordSvc.SetChatBroadcaster(chatBroadcaster)
+	discordSvc.SetExecutionStreamHub(executionStreamHub)
 	discordSvc.SetAlertService(alertSvc)
 	discordSvc.SetTaskGoalService(taskGoalSvc)
 	discordSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
@@ -827,6 +832,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, broadcaster, telegramSvc,
 	)
 	h.SetChatBroadcaster(chatBroadcaster)
+	h.SetExecutionStreamHub(executionStreamHub)
 	h.SetTaskGoalService(taskGoalSvc)
 	workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
 	h.SetFileChangeBroadcaster(fileChangeBroadcaster)
@@ -870,6 +876,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		telegramSvc.SetChannelChatRunner(h.StartChannelChatRun)
 		telegramSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
 		telegramSvc.SetChatBroadcaster(chatBroadcaster)
+		telegramSvc.SetExecutionStreamHub(executionStreamHub)
 		telegramSvc.SetAgentRepo(agentRepo)
 	}
 	if err := slackSvc.Start(); err != nil {

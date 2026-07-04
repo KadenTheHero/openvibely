@@ -80,6 +80,7 @@ type TelegramService struct {
 	llmSvc                   *LLMService
 	workerSvc                *WorkerService
 	chatBroadcaster          *events.ChatBroadcaster
+	executionStreamHub       *events.ExecutionStreamHub
 	queuedTurnPromoter       func(projectID string)
 	queuedTaskThreadPromoter func(taskID string)
 	channelChatRunner        ChannelChatRunner
@@ -155,6 +156,10 @@ func (s *TelegramService) IsRunning() bool {
 // SetChatBroadcaster sets the chat event broadcaster for real-time chat updates.
 func (s *TelegramService) SetChatBroadcaster(cb *events.ChatBroadcaster) {
 	s.chatBroadcaster = cb
+}
+
+func (s *TelegramService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
+	s.executionStreamHub = hub
 }
 
 func (s *TelegramService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
@@ -661,7 +666,7 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 			Task:              &models.Task{Title: fmt.Sprintf("Telegram %s: %s", start.Format("15:04:05.000"), util.Truncate(text, 47)), CreatedVia: models.TaskOriginTelegram, TelegramChatID: chatID},
 			RuntimeTools:      s.buildTelegramActionToolRuntime(projectID, chatID, userID, nil),
 			ChannelChatRunner: s.channelChatRunner,
-			CompleteExecution: channelCompletionFunc("telegram", s.execRepo, s.taskRepo, s.queuedTurnPromoter),
+			CompleteExecution: channelCompletionFunc("telegram", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 			LinkAttachments: func(ctx context.Context, execID string, atts []models.ChatAttachment) ([]models.ChatAttachment, error) {
 				linked, err := s.linkAttachmentsToExecution(ctx, execID, atts)
 				if err != nil {
@@ -1236,7 +1241,7 @@ func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64,
 		CustomPersonalityRepo:    s.customPersonalityRepo,
 		ChannelTaskRunner:        s.channelTaskRunner,
 		QueuedTaskThreadPromoter: s.queuedTaskThreadPromoter,
-		CompleteExecution:        channelCompletionFunc("telegram", s.execRepo, s.taskRepo, s.queuedTurnPromoter),
+		CompleteExecution:        channelCompletionFunc("telegram", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 		ChannelMessageRouter:     s.channelMessageRouter,
 		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginTelegram, TelegramChatID: chatID},
 		NewQueuedInput: func(_ *models.Task, runExecutionID, agentID string) *models.ThreadInput {

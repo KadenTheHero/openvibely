@@ -212,7 +212,7 @@ func TestEmailService_CompleteExecutionUsesSharedChatPromotion(t *testing.T) {
 	require.NoError(t, execRepo.Create(ctx, nonChatExec))
 
 	var promoted []string
-	completeExecution := channelCompletionFunc("email", execRepo, taskRepo, func(projectID string) { promoted = append(promoted, projectID) })
+	completeExecution := channelCompletionFunc("email", execRepo, taskRepo, nil, func(projectID string) { promoted = append(promoted, projectID) })
 
 	completeExecution(ctx, nonChatExec.ID, nonChatTask.ID, "done", "", 1, 10)
 	require.Empty(t, promoted)
