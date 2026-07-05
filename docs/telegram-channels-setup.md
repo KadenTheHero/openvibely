@@ -15,7 +15,7 @@ Why teams use it:
 ## What You Need
 
 - A Telegram bot token from [BotFather](https://t.me/BotFather).
-- A selected project in OpenVibely (for project-scoped authorized users).
+- At least one OpenVibely project to use as the active project context. Telegram Authorized Users are system-level across projects.
 
 ## Add Telegram Channel
 
@@ -35,9 +35,9 @@ After saving, the Telegram card should show connected/running.
 
 If it fails, verify token correctness and that the bot service is running.
 
-## Authorized Users (Project Scoped)
+## Authorized Users (System-Level)
 
-Use `Authorized Users` in the Telegram modal to control who is allowed to interact with the bot for the selected project.
+Use `Authorized Users` in the Telegram modal to control who is allowed to interact with the bot. This inbound allowlist is system-level for the Telegram channel: an authorized Telegram user can use the channel across OpenVibely projects, subject to normal project switching and project existence rules.
 
 - Add users by Telegram username and/or Telegram user ID.
 - Remove users from the list when access should be revoked.
@@ -45,7 +45,7 @@ Use `Authorized Users` in the Telegram modal to control who is allowed to intera
 Why this matters:
 
 - Prevents unauthorized users from creating/running tasks.
-- Keeps project automation scoped to the right people.
+- Lets authorized users switch between projects from Telegram without duplicating the same user in each project.
 
 Important behavior: if no authorized users are configured, bot requests are blocked until users are added.
 
@@ -71,7 +71,7 @@ Optional slash commands shown in UI:
 
 ## Outbound Targets
 
-Chat can send outbound Telegram messages through the `send_message` tool when you save Telegram destinations in `Channels` -> `Outbound Message Targets`. Save the chat ID, optionally add a topic/thread ID, and give it a friendly name such as `alerts` so Chat can target `telegram:#alerts`. These sends reuse the configured Telegram bot.
+Chat can send outbound Telegram messages through the `send_message` tool when you save Telegram destinations in `Channels` -> `Outbound Message Targets`. Outbound Message Targets are project-scoped and separate from system-level inbound Authorized Users. Save the chat ID, optionally add a topic/thread ID, and give it a friendly name such as `alerts` so Chat can target `telegram:#alerts` within the current project. These sends reuse the configured Telegram bot.
 
 ## Task Follow-Ups
 
@@ -80,6 +80,6 @@ Telegram-created work still belongs to the normal OpenVibely task flow. If an au
 ## Troubleshooting
 
 - `Connection failed: Bot is not running`: Save token again from the Telegram modal.
-- Bot receives messages but does nothing: verify the sender is in `Authorized Users` for the selected project.
+- Bot receives messages but does nothing: verify the sender is in the system-level Telegram `Authorized Users` list.
 - Wrong project context: use `/projects` and `/switch` from Telegram.
 - Rich formatting looks wrong or unsupported: edit the Telegram channel and turn off `Telegram Rich Messages V2` to use the legacy formatting fallback.

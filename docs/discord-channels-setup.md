@@ -60,7 +60,7 @@ You need **Manage Server** permission in the Discord server to invite the bot.
 
 ## Add Authorized Users
 
-Discord access is project-scoped and deny-by-default. Messages are rejected until at least one authorized Discord user is added for the selected OpenVibely project.
+Discord inbound access is system-level and deny-by-default. Messages are rejected until at least one authorized Discord user is added; once added, that user can use the Discord channel across OpenVibely projects, subject to normal project switching and project existence rules.
 
 Use numeric Discord user IDs, not usernames or display names:
 
@@ -73,7 +73,7 @@ A value like `jamesdubee_53308` is a username/display handle and will not author
 
 ## Outbound Targets
 
-Chat can send outbound Discord messages through the `send_message` tool when you save Discord destinations in `Channels` -> `Outbound Message Targets`. There are two types of outbound targets:
+Chat can send outbound Discord messages through the `send_message` tool when you save Discord destinations in `Channels` -> `Outbound Message Targets`. Outbound Message Targets are project-scoped and separate from system-level inbound Authorized Users. There are two types of outbound targets:
 
 - **Channel** – paste the Discord channel ID (a long numeric snowflake) and optionally a thread ID, then give it a friendly name such as `ops` so Chat can target `discord:#ops`. For explicit channel references use `discord:channel:<channel_id>` or `discord:channel:<channel_id>:<thread_id>`.
 - **User DM** – paste a Discord user ID (the same long numeric snowflake) to allow agents to send direct messages to that user. User DM targets **do not** require the user to be in Authorized Users; Authorized Users control who can give instructions to OpenVibely, while Outbound Targets control where agents may send messages. To reference a saved user DM target explicitly, use `discord:user:<user_id>`.
@@ -138,6 +138,6 @@ If the bot is online but does not respond:
 
 1. Verify `Message Content Intent` is enabled.
 2. Verify the bot has `View Channels`, `Send Messages`, and `Read Message History` in the target channel.
-3. Verify the Discord user is authorized with the numeric user ID for the selected OpenVibely project.
+3. Verify the Discord user is authorized with their numeric user ID in the system-level Discord Authorized Users list.
 4. In guild channels and threads, mention the bot explicitly.
 5. Confirm the OpenVibely Channels card shows the Discord Gateway as running, not only that a token is configured.

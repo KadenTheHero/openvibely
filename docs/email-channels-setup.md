@@ -8,13 +8,13 @@ OpenVibely can poll a dedicated email inbox with IMAP and reply by SMTP. Email m
 2. Select a provider preset, such as Gmail, Outlook / Microsoft 365, Yahoo Mail, Fastmail, or iCloud Mail.
 3. Enter the dedicated inbox address and app password.
 4. Use `Advanced IMAP/SMTP settings` only when you need custom host or port values.
-5. Add authorized senders for the current project.
+5. Add authorized senders for the Email channel. Authorized senders are system-level across OpenVibely projects, not duplicated per project.
 
 If no authorized senders are configured, access is denied until senders are added. There is no pairing code or PIN exchange flow.
 
 ## Outbound Targets
 
-The Email channel also supports prompt-initiated outbound messages from Chat through the `send_message` tool. Use `Channels` -> `Outbound Message Targets` to save recipient addresses, friendly names such as `client`, an optional home recipient, and an optional default subject. These sends reuse the Email channel's existing SMTP settings; there is no separate outbound SMTP configuration.
+The Email channel also supports prompt-initiated outbound messages from Chat through the `send_message` tool. Use `Channels` -> `Outbound Message Targets` to save recipient addresses, friendly names such as `client`, an optional home recipient, and an optional default subject. Outbound Message Targets are project-scoped and separate from system-level inbound Authorized Senders. These sends reuse the Email channel's existing SMTP settings; there is no separate outbound SMTP configuration.
 
 ## Behavior
 
