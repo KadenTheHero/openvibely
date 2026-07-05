@@ -87,3 +87,82 @@ func TestSettingsContent_RendersSlackMenuCardAndModal(t *testing.T) {
 		t.Fatal("expected manual token fallback guidance in modal")
 	}
 }
+func TestSettingsContent_RendersSystemLevelInboundAuthorizationCopy(t *testing.T) {
+	var buf bytes.Buffer
+	err := SettingsContent(
+		"telegram-token",
+		false,
+		nil,
+		nil,
+		nil,
+		"project-1",
+		true,
+		true,
+		service.GitHubConnectionStatus{},
+		service.GitHubAuthModePAT,
+		"",
+		"",
+		"",
+		"",
+		false,
+		false,
+		service.SlackConnectionStatus{},
+		"",
+		"",
+		"",
+		"",
+		service.SlackBotTokenSourceOAuth,
+		false,
+		false,
+		false,
+		false,
+		true,
+		service.DiscordConnectionStatus{},
+		"",
+		true,
+		service.EmailConnectionStatus{},
+		nil,
+		"",
+		true,
+		true,
+		false,
+		"60",
+		true,
+		false,
+		true,
+		true,
+		true,
+		nil,
+		nil,
+		nil,
+		nil,
+		false,
+	).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	out := buf.String()
+	for _, expected := range []string{
+		"Authorized Telegram users are system-level for this channel and can use Telegram across projects.",
+		"Authorized Slack users are system-level for this channel and can use Slack across projects.",
+		"Authorized Discord users are system-level for this channel and can use Discord across projects.",
+		"Authorized email senders are system-level for this channel and can use Email across projects.",
+		"Authorized Users control who can talk to OpenVibely. Outbound targets control where agents may send messages.",
+	} {
+		if !strings.Contains(out, expected) {
+			t.Fatalf("expected rendered settings to contain %q", expected)
+		}
+	}
+
+	for _, stale := range []string{
+		"Telegram users for this project",
+		"Slack access to specific users for this project",
+		"Discord access to specific users for this project",
+		"Email access to specific senders for this project",
+	} {
+		if strings.Contains(out, stale) {
+			t.Fatalf("did not expect project-scoped inbound authorization copy %q", stale)
+		}
+	}
+}
