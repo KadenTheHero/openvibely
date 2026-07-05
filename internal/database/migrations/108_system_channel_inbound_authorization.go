@@ -23,7 +23,7 @@ func upSystemChannelInboundAuthorization108(ctx context.Context, tx *sql.Tx) err
 		`DROP INDEX IF EXISTS idx_telegram_auth_unique_user_id`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_telegram_auth_unique_user_id ON telegram_authorized_users(telegram_user_id) WHERE telegram_user_id != 0`,
 		`DROP INDEX IF EXISTS idx_telegram_auth_unique_username`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_telegram_auth_unique_username ON telegram_authorized_users(telegram_username) WHERE telegram_username != ''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_telegram_auth_unique_username ON telegram_authorized_users(lower(telegram_username)) WHERE telegram_username != ''`,
 	}
 
 	if err := dedupeChannelAuthorizationRows108(ctx, tx); err != nil {

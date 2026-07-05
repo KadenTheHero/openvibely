@@ -392,6 +392,37 @@ func TestTelegramAuthRepo_CaseInsensitiveUsername(t *testing.T) {
 	}
 }
 
+func TestTelegramAuthRepo_DoesNotDuplicateLegacyMixedCaseUsername(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTelegramAuthRepo(db)
+	projectRepo := NewProjectRepo(db)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Legacy Mixed Case Username Test"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO telegram_authorized_users (id, project_id, telegram_user_id, telegram_username, display_name, added_by)
+		 VALUES ('legacy-telegram-user', ?, 0, 'AliceUser', '@AliceUser', 'test')`,
+		project.ID)
+	require.NoError(t, err)
+
+	duplicate := &models.TelegramAuthorizedUser{
+		ProjectID:        project.ID,
+		TelegramUserID:   0,
+		TelegramUsername: "aliceuser",
+		DisplayName:      "@aliceuser",
+		AddedBy:          "web",
+	}
+	require.NoError(t, repo.Create(ctx, duplicate))
+
+	users, err := repo.ListByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	assert.Equal(t, "legacy-telegram-user", duplicate.ID)
+	assert.Equal(t, "AliceUser", users[0].TelegramUsername)
+}
+
 func TestTelegramAuthRepo_MultipleUsernameEntries(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTelegramAuthRepo(db)

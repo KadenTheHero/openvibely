@@ -122,6 +122,8 @@ func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
 		INSERT INTO email_authorized_senders (id, project_id, email_address, display_name) VALUES ('email-two', 'project-two', 'SENDER@example.com', 'Two');
 		INSERT INTO telegram_authorized_users (id, project_id, telegram_user_id, telegram_username, display_name) VALUES ('telegram-one', 'project-one', 999, '', 'One');
 		INSERT INTO telegram_authorized_users (id, project_id, telegram_user_id, telegram_username, display_name) VALUES ('telegram-two', 'project-two', 999, '', 'Two');
+		INSERT INTO telegram_authorized_users (id, project_id, telegram_user_id, telegram_username, display_name) VALUES ('telegram-username-one', 'project-one', 0, 'AliceUser', 'One');
+		INSERT INTO telegram_authorized_users (id, project_id, telegram_user_id, telegram_username, display_name) VALUES ('telegram-username-two', 'project-two', 0, 'aliceuser', 'Two');
 	`); err != nil {
 		t.Fatalf("failed to seed duplicate auth rows: %v", err)
 	}
@@ -142,6 +144,10 @@ func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
 	assertSingleAuthRow("discord_authorized_users", `discord_user_id = '123456789012345678'`)
 	assertSingleAuthRow("email_authorized_senders", `lower(email_address) = 'sender@example.com'`)
 	assertSingleAuthRow("telegram_authorized_users", `telegram_user_id = 999`)
+	assertSingleAuthRow("telegram_authorized_users", `lower(telegram_username) = 'aliceuser'`)
+	if _, err := db.Exec(`INSERT INTO telegram_authorized_users (id, project_id, telegram_user_id, telegram_username, display_name) VALUES ('telegram-username-three', 'project-two', 0, 'ALICEUSER', 'Three')`); err == nil {
+		t.Fatal("expected global Telegram username uniqueness to reject mixed-case duplicate")
+	}
 	if _, err := db.Exec(`INSERT INTO channel_targets (id, project_id, platform, name, target_id) VALUES ('target-one', 'project-one', 'email', '', 'one@example.com')`); err != nil {
 		t.Fatalf("channel_targets must remain project-scoped and insertable after auth migration: %v", err)
 	}
