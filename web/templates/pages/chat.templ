@@ -883,6 +883,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 
 					// Set up streaming via EventSource
 					var textBuffer = '';
+					var streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;
+					function utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }
 					var renderScheduled = false;
 					var lastRenderedLength = 0;
 					function renderBufferedOutput(force) {
@@ -918,7 +920,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					var streamRetryCount = 0;
 					var eventSource = null;
 					function connectChatExecutionStream() {
-						eventSource = new EventSource('/events/chat/' + execId);
+						var streamOffset = utf8ByteLength(textBuffer);
+						eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
 						if (window.registerChatStreamEventSource) {
 							window.registerChatStreamEventSource(execId, eventSource);
 						}

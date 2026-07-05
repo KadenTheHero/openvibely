@@ -299,6 +299,47 @@ func TestStreamingWriter_PublishesDeltaImmediatelyWithOffset(t *testing.T) {
 	}
 }
 
+func TestStreamingWriter_WriteDoesNotFlushSynchronouslyWhenIntervalElapsed(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "No Eager Flush", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	if err != nil || agent == nil {
+		t.Fatalf("failed to get default agent: %v", err)
+	}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "test"}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("failed to create execution: %v", err)
+	}
+
+	publisher := &recordingExecutionStreamPublisher{}
+	sw := NewWriterWithPublisher(exec.ID, task.ID, execRepo, ctx, time.Hour, publisher)
+	defer sw.Stop()
+	sw.lastFlush = time.Now().Add(-time.Hour)
+
+	if _, err := sw.Write([]byte("instant")); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	if len(publisher.events) != 1 || publisher.events[0].Delta != "instant" {
+		t.Fatalf("expected immediate publish without waiting for persistence, got %+v", publisher.events)
+	}
+
+	updatedExec, err := execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("failed to get execution: %v", err)
+	}
+	if updatedExec.Output != "" {
+		t.Fatalf("Write should not synchronously flush to DB, got output %q", updatedExec.Output)
+	}
+}
+
 func TestStreamingWriter_DoesNotPublishSeedOrWriteText(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

@@ -175,6 +175,11 @@ func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testin
 	if !strings.Contains(bubbleSection, "contentDiv.id = 'streaming-message-' + execId;") {
 		t.Fatal("live-created assistant stream node must use the same stable id as server-rendered streaming bubbles")
 	}
+	if !strings.Contains(bubbleSection, "function utf8ByteLength(value)") ||
+		!strings.Contains(bubbleSection, "var streamOffset = utf8ByteLength(textBuffer);") ||
+		!strings.Contains(bubbleSection, "'/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset)") {
+		t.Fatal("live-created assistant stream must reconnect with the current UTF-8 byte offset")
+	}
 	if !strings.Contains(bubbleSection, "progressDiv.id = 'mixture-progress-' + execId;") || !strings.Contains(bubbleSection, "innerDiv.appendChild(progressDiv);") {
 		t.Fatal("live-created assistant bubble must include the mixture progress status slot before stream content")
 	}

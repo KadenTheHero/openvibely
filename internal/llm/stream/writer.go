@@ -23,6 +23,7 @@ type Writer struct {
 	buf           bytes.Buffer
 	textBuf       bytes.Buffer // text-only content (no thinking blocks, no tool markers)
 	mu            sync.Mutex
+	flushMu       sync.Mutex
 	execID        string
 	taskID        string
 	repo          *repository.ExecutionRepo
@@ -84,18 +85,25 @@ func (w *Writer) periodicFlush() {
 			return
 		case <-ticker.C:
 			w.mu.Lock()
-			if w.dirty {
-				if w.repo != nil && w.execID != "" {
-					if dbErr := w.repo.UpdateOutput(w.ctx, w.execID, w.buf.String()); dbErr != nil {
-						applog.Infof("[agent-svc] streamingWriter periodic flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
-					} else {
-						applog.Debugf("[agent-svc] streamingWriter periodic flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, w.buf.Len())
-					}
-				}
+			shouldFlush := w.dirty && w.repo != nil && w.execID != ""
+			output := ""
+			totalLen := 0
+			if shouldFlush {
+				output = w.buf.String()
+				totalLen = w.buf.Len()
 				w.dirty = false
 				w.lastFlush = time.Now()
 			}
 			w.mu.Unlock()
+			if shouldFlush {
+				w.flushMu.Lock()
+				if dbErr := w.repo.UpdateOutput(w.ctx, w.execID, output); dbErr != nil {
+					applog.Infof("[agent-svc] streamingWriter periodic flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
+				} else {
+					applog.Debugf("[agent-svc] streamingWriter periodic flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, totalLen)
+				}
+				w.flushMu.Unlock()
+			}
 		}
 	}
 }
@@ -118,18 +126,6 @@ func (w *Writer) Write(p []byte) (int, error) {
 			Offset: w.buf.Len(),
 		}
 	}
-	// Eagerly flush if enough time has passed since last flush
-	if time.Since(w.lastFlush) >= w.interval {
-		if w.repo != nil && w.execID != "" {
-			if dbErr := w.repo.UpdateOutput(w.ctx, w.execID, w.buf.String()); dbErr != nil {
-				applog.Infof("[agent-svc] streamingWriter flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
-			} else {
-				applog.Debugf("[agent-svc] streamingWriter flushed to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, w.buf.Len())
-			}
-		}
-		w.dirty = false
-		w.lastFlush = time.Now()
-	}
 	w.mu.Unlock()
 	if event != nil {
 		w.publisher.Publish(*event)
@@ -147,21 +143,30 @@ func (w *Writer) Stop() {
 // original context was canceled (e.g., HTTP client disconnect).
 func (w *Writer) Flush() {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.repo != nil && w.execID != "" {
-		if w.buf.Len() == 0 {
-			applog.Infof("[agent-svc] streamingWriter final flush skipped empty buffer exec=%s task=%s", w.execID, w.taskID)
-			w.dirty = false
-			return
-		}
-		flushCtx := context.WithoutCancel(w.ctx)
-		if dbErr := w.repo.UpdateOutput(flushCtx, w.execID, w.buf.String()); dbErr != nil {
-			applog.Infof("[agent-svc] streamingWriter final flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
-		} else {
-			applog.Infof("[agent-svc] streamingWriter final flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, w.buf.Len())
-		}
+	if w.repo == nil || w.execID == "" {
+		w.dirty = false
+		w.mu.Unlock()
+		return
 	}
+	if w.buf.Len() == 0 {
+		applog.Infof("[agent-svc] streamingWriter final flush skipped empty buffer exec=%s task=%s", w.execID, w.taskID)
+		w.dirty = false
+		w.mu.Unlock()
+		return
+	}
+	output := w.buf.String()
+	totalLen := w.buf.Len()
 	w.dirty = false
+	w.mu.Unlock()
+
+	flushCtx := context.WithoutCancel(w.ctx)
+	w.flushMu.Lock()
+	defer w.flushMu.Unlock()
+	if dbErr := w.repo.UpdateOutput(flushCtx, w.execID, output); dbErr != nil {
+		applog.Infof("[agent-svc] streamingWriter final flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
+	} else {
+		applog.Infof("[agent-svc] streamingWriter final flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, totalLen)
+	}
 }
 
 func (w *Writer) String() string {
