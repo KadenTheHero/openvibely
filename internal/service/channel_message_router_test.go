@@ -376,44 +376,57 @@ func TestChannelMessageRouter_ValidationFailures(t *testing.T) {
 	require.False(t, router.Send(ctx, project.ID, SendMessageRequest{Target: "telegram:-100:abc", Message: "x"}).OK)
 }
 
-// TestChannelMessageRouter_UserDMSyntaxDoesNotRequireAuthorizedUsers verifies that
-// platform:user:<id> sends DMs without requiring the user to be in authorized users.
-func TestChannelMessageRouter_UserDMSyntaxDoesNotRequireAuthorizedUsers(t *testing.T) {
-	ctx, targetRepo, settingsRepo, _, _, _, _, project, router, slack, _, _, discord := setupChannelMessageRouterTest(t)
+// TestChannelMessageRouter_UserDMSyntaxAllowsAuthorizedUsers verifies that
+// platform:user:<id> follows saved-target, authorized-user, then explicit-policy precedence.
+func TestChannelMessageRouter_UserDMSyntaxAllowsAuthorizedUsers(t *testing.T) {
+	ctx, targetRepo, settingsRepo, slackAuthRepo, _, _, discordAuthRepo, project, router, slack, _, _, discord := setupChannelMessageRouterTest(t)
 
-	// slack:user:U... is rejected when the target is not saved and explicit targets are off.
+	// slack:user:U... is rejected when the target is not saved, not authorized, and explicit targets are off.
 	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:user:U0AQYLJR14Y", Message: "hi"})
 	require.False(t, res.OK)
-	require.Contains(t, res.Error, "No saved slack user DM target")
-	require.Empty(t, slack.userID, "slack:user:<id> must not dispatch until saved or explicit targets are enabled")
+	require.Contains(t, res.Error, "No saved or authorized slack user DM target")
+	require.Empty(t, slack.userID, "slack:user:<id> must not dispatch until saved, authorized, or explicit targets are enabled")
 
-	// Enabling explicit targets allows unsaved slack:user:<id> sends without authorized users.
-	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"))
+	// Authorized Slack users can be reached through the canonical DM syntax without saved targets.
+	require.NoError(t, slackAuthRepo.Create(ctx, &models.SlackAuthorizedUser{ProjectID: project.ID, SlackUserID: "U0AQYLJR14Y", DisplayName: "Slack User", AddedBy: "test"}))
 	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:user:U0AQYLJR14Y", Message: "hi"})
-	require.True(t, res.OK, "slack:user:<id> with explicit targets enabled must send as DM: %#v", res)
+	require.True(t, res.OK, "authorized slack:user:<id> must send as DM without explicit targets: %#v", res)
 	require.Equal(t, "U0AQYLJR14Y", slack.userID)
 	require.Empty(t, slack.channelID, "slack:user:<id> must not be treated as a channel ID")
+
+	// Enabling explicit targets still allows unsaved slack:user:<id> sends without authorized users.
+	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"))
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "slack:user:U0BBBBBBB", Message: "hi explicit"})
+	require.True(t, res.OK, "slack:user:<id> with explicit targets enabled must send as DM: %#v", res)
+	require.Equal(t, "U0BBBBBBB", slack.userID)
 
 	// Reset explicit targets for discord test.
 	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+project.ID, "false"))
 
-	// discord:user:<id> is rejected when the target is not saved and explicit targets are off.
+	// discord:user:<id> is rejected when the target is not saved, not authorized, and explicit targets are off.
 	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:user:1518288288572641398", Message: "hi"})
 	require.False(t, res.OK)
-	require.Contains(t, res.Error, "No saved discord user DM target")
+	require.Contains(t, res.Error, "No saved or authorized discord user DM target")
 	require.Empty(t, discord.userID)
 
-	// Enabling explicit targets allows unsaved discord:user:<id> sends without authorized users.
-	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"))
+	// Authorized Discord users can be reached through the canonical DM syntax without saved targets.
+	require.NoError(t, discordAuthRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "1518288288572641398", DisplayName: "Discord User", AddedBy: "test"}))
 	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:user:1518288288572641398", Message: "hi"})
-	require.True(t, res.OK, "discord:user:<id> with explicit targets enabled must send as DM: %#v", res)
+	require.True(t, res.OK, "authorized discord:user:<id> must send as DM without explicit targets: %#v", res)
 	require.Equal(t, "1518288288572641398", discord.userID)
 	require.Empty(t, discord.channelID, "discord:user:<id> must not be treated as a channel ID")
 
-	// Neither user appeared in inbound authorized users; verify no targets were saved.
+	// Enabling explicit targets allows another unsaved discord:user:<id> send without authorized users.
+	require.NoError(t, settingsRepo.Set(ctx, SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"))
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:user:2518288288572641398", Message: "hi explicit"})
+	require.True(t, res.OK, "discord:user:<id> with explicit targets enabled must send as DM: %#v", res)
+	require.Equal(t, "2518288288572641398", discord.userID)
+	require.Empty(t, discord.channelID, "discord:user:<id> must not be treated as a channel ID")
+
+	// Authorized and explicit DM sends must not create saved targets.
 	targets, err := targetRepo.ListByProject(ctx, project.ID)
 	require.NoError(t, err)
-	require.Empty(t, targets, "explicit DM sends must not create saved targets")
+	require.Empty(t, targets, "authorized and explicit DM sends must not create saved targets")
 }
 
 // TestChannelMessageRouter_SavedUserKindTargetRoutesAsDM verifies that saved targets with

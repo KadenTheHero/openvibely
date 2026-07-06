@@ -294,8 +294,8 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 	}
 
 	// Handle explicit user DM syntax: slack:user:<user_id> and discord:user:<user_id>.
-	// These bypass the authorized-user requirement; a saved user-kind target is preferred,
-	// and an explicit DM is allowed when send_message_allow_explicit_targets is enabled.
+	// Saved user-kind targets are preferred, then authorized users are allowed
+	// as direct recipients, then explicit DM policy applies.
 	if (platform == "slack" || platform == "discord") && ref == "user" {
 		userID := strings.TrimSpace(threadID)
 		if userID == "" {
@@ -308,15 +308,18 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 		if platform == "discord" && !discordUserTargetPattern.MatchString(userID) {
 			return resolvedMessageTarget{}, fmt.Errorf("invalid Discord user ID %q; expected a numeric snowflake", userID)
 		}
-		// Prefer a saved user-kind target.
+		// Prefer a saved user-kind target, then allow system-authorized direct users
+		// before falling through to the explicit-target policy.
 		if saved, err := r.targets.FindByTargetAndKind(ctx, projectID, platform, userID, "", "user"); err != nil {
 			return resolvedMessageTarget{}, err
 		} else if saved != nil {
 			return fromStoredTarget(*saved), nil
 		}
-		// Not saved; require explicit-targets setting.
+		if dmTarget, dmErr := r.resolveAuthorizedDirectUserTarget(ctx, projectID, platform, userID); dmErr == nil {
+			return dmTarget, nil
+		}
 		if !r.allowExplicitTargets(ctx, projectID) {
-			return resolvedMessageTarget{}, fmt.Errorf("No saved %s user DM target for %s; add it in Outbound Message Targets or call send_message with action=list", platform, userID)
+			return resolvedMessageTarget{}, fmt.Errorf("No saved or authorized %s user DM target for %s; add it in Outbound Message Targets or call send_message with action=list", platform, userID)
 		}
 		return resolvedMessageTarget{Platform: platform, TargetKind: "user", TargetID: userID, DirectUser: true}, nil
 	}
