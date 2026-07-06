@@ -183,6 +183,7 @@ func New(
 	var swarmSvc *service.SwarmService
 	if taskSvc != nil && taskRepo != nil {
 		swarmSvc = service.NewSwarmService(taskSvc, taskRepo, execRepo, workerSvc)
+		swarmSvc.SetModelSelectionRepos(llmConfigRepo, projectRepo)
 		taskSvc.SetSwarmService(swarmSvc)
 		if schedulerSvc != nil {
 			schedulerSvc.SetSwarmPlannerStarter(swarmSvc)

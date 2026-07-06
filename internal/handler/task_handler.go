@@ -2144,7 +2144,35 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		return render(c, http.StatusOK, components.TaskThreadEarlierMessages(task, executions, chatAttachmentsByExec, hasEarlier, limit))
 	}
 
-	return render(c, http.StatusOK, components.TaskThreadView(task, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit))
+	renderTask := h.taskThreadRenderTaskWithEffectiveAgent(c.Request().Context(), task)
+	return render(c, http.StatusOK, components.TaskThreadView(renderTask, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit))
+}
+
+func (h *Handler) taskThreadRenderTaskWithEffectiveAgent(ctx context.Context, task *models.Task) *models.Task {
+	if task == nil || task.AgentID != nil || h.llmConfigRepo == nil {
+		return task
+	}
+	resolvedID := ""
+	if h.projectRepo != nil && strings.TrimSpace(task.ProjectID) != "" {
+		project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
+		if err == nil && project != nil && project.DefaultAgentConfigID != nil && strings.TrimSpace(*project.DefaultAgentConfigID) != "" {
+			candidateID := strings.TrimSpace(*project.DefaultAgentConfigID)
+			if agent, agentErr := h.llmConfigRepo.GetByID(ctx, candidateID); agentErr == nil && agent != nil {
+				resolvedID = candidateID
+			}
+		}
+	}
+	if resolvedID == "" {
+		if agent, err := h.llmConfigRepo.GetDefault(ctx); err == nil && agent != nil {
+			resolvedID = agent.ID
+		}
+	}
+	if resolvedID == "" {
+		return task
+	}
+	renderTask := *task
+	renderTask.AgentID = &resolvedID
+	return &renderTask
 }
 
 // TaskThreadPendingInputs returns the current pending-inputs composer fragment for a task.

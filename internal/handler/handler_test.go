@@ -5039,6 +5039,51 @@ func TestHandler_GetTaskThread_ServerRendersSelectedComposerModelLabel(t *testin
 	assert.Contains(t, body, `>Opus Worker (claude-opus-4-1)</span>`)
 }
 
+func TestHandler_GetTaskThread_ServerRendersSwarmChildProjectDefaultModelLabel(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	globalAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Global Default"
+		a.Model = "global-default"
+	})
+	projectAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Project Swarm Worker"
+		a.Model = "claude-project-swarm"
+		a.IsDefault = false
+	})
+	project := createProject(t, h, "Swarm Thread Selected Model Project")
+	project.DefaultAgentConfigID = &projectAgent.ID
+	require.NoError(t, h.projectRepo.Update(context.Background(), project))
+
+	parent := createTask(t, h, project.ID, "Swarm Parent", func(tk *models.Task) {
+		tk.Status = models.StatusBlocked
+		tk.Category = models.CategoryActive
+		tk.AgentID = nil
+		tk.SwarmRole = models.SwarmRoleParent
+	})
+	worker := createTask(t, h, project.ID, "Swarm Worker", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.AgentID = nil
+		tk.ParentTaskID = &parent.ID
+		tk.SwarmRole = models.SwarmRoleWorker
+	})
+	createExec(t, h, worker.ID, projectAgent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Running swarm child prompt"
+	})
+
+	rec := htmxGet(e, "/tasks/"+worker.ID+"/thread")
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, `id="task-thread-form-agent-select"`)
+	assert.Contains(t, body, `data-current-value="`+projectAgent.ID+`"`)
+	assert.Contains(t, body, `value="`+projectAgent.ID+`"`)
+	assert.Contains(t, body, `>Project Swarm Worker (claude-project-swarm)</span>`)
+	assert.NotContains(t, body, `data-current-value="`+globalAgent.ID+`"`)
+	assert.NotContains(t, body, `data-current-value="auto"`)
+}
+
 func TestHandler_GetTaskThread_PollsWhenActivePending(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	project := createProject(t, h, "Pending Thread Polling Project")

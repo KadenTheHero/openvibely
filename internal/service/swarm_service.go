@@ -68,14 +68,50 @@ type PlannerWorker struct {
 var ErrSwarmRoleActive = errors.New("swarm role already has an active execution")
 
 type SwarmService struct {
-	taskSvc   *TaskService
-	taskRepo  *repository.TaskRepo
-	execRepo  *repository.ExecutionRepo
-	workerSvc *WorkerService
+	taskSvc       *TaskService
+	taskRepo      *repository.TaskRepo
+	execRepo      *repository.ExecutionRepo
+	workerSvc     *WorkerService
+	llmConfigRepo *repository.LLMConfigRepo
+	projectRepo   *repository.ProjectRepo
 }
 
 func NewSwarmService(taskSvc *TaskService, taskRepo *repository.TaskRepo, execRepo *repository.ExecutionRepo, workerSvc *WorkerService) *SwarmService {
 	return &SwarmService{taskSvc: taskSvc, taskRepo: taskRepo, execRepo: execRepo, workerSvc: workerSvc}
+}
+
+func (s *SwarmService) SetModelSelectionRepos(llmConfigRepo *repository.LLMConfigRepo, projectRepo *repository.ProjectRepo) {
+	if s == nil {
+		return
+	}
+	s.llmConfigRepo = llmConfigRepo
+	s.projectRepo = projectRepo
+}
+
+func (s *SwarmService) resolveAssignedAgentID(ctx context.Context, projectID string, requested *string) *string {
+	if requested != nil {
+		trimmed := strings.TrimSpace(*requested)
+		if trimmed != "" && trimmed != "auto" && trimmed != "default" {
+			return &trimmed
+		}
+	}
+	if s == nil || s.llmConfigRepo == nil {
+		return requested
+	}
+	if strings.TrimSpace(projectID) != "" && s.projectRepo != nil {
+		project, err := s.projectRepo.GetByID(ctx, projectID)
+		if err == nil && project != nil && project.DefaultAgentConfigID != nil && strings.TrimSpace(*project.DefaultAgentConfigID) != "" {
+			id := strings.TrimSpace(*project.DefaultAgentConfigID)
+			if agent, agentErr := s.llmConfigRepo.GetByID(ctx, id); agentErr == nil && agent != nil {
+				return &id
+			}
+		}
+	}
+	if agent, err := s.llmConfigRepo.GetDefault(ctx); err == nil && agent != nil {
+		id := agent.ID
+		return &id
+	}
+	return requested
 }
 
 func (s *SwarmService) CreateSwarmTask(ctx context.Context, req CreateSwarmTaskRequest) (*models.Task, error) {
@@ -100,6 +136,7 @@ func (s *SwarmService) CreateSwarmTask(ctx context.Context, req CreateSwarmTaskR
 	if req.WorkerIsolation == "" {
 		req.WorkerIsolation = "worktree"
 	}
+	req.AgentID = s.resolveAssignedAgentID(ctx, req.ProjectID, req.AgentID)
 	cfg := models.SwarmConfig{
 		Mode:                             "autonomous",
 		DefaultWorkerIsolation:           req.WorkerIsolation,

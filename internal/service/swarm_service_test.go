@@ -61,6 +61,62 @@ func TestSwarmServiceCreateAndApplyPlannerOutput(t *testing.T) {
 	}
 }
 
+func TestSwarmServiceCreateAssignsProjectDefaultModelToChildren(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskSvc := NewTaskService(taskRepo, nil, nil)
+	svc := NewSwarmService(taskSvc, taskRepo, nil, nil)
+	svc.SetModelSelectionRepos(llmConfigRepo, projectRepo)
+
+	globalAgent := &models.LLMConfig{Name: "Global Default", Provider: models.ProviderTest, Model: "global-default", MaxTokens: 4096, IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, globalAgent); err != nil {
+		t.Fatalf("create global model: %v", err)
+	}
+	projectAgent := &models.LLMConfig{Name: "Project Swarm Model", Provider: models.ProviderTest, Model: "project-swarm", MaxTokens: 4096, IsDefault: false}
+	if err := llmConfigRepo.Create(ctx, projectAgent); err != nil {
+		t.Fatalf("create project model: %v", err)
+	}
+	project := &models.Project{Name: "Swarm Model Project", DefaultAgentConfigID: &projectAgent.ID}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: project.ID, Title: "Build export", Prompt: "Build export", MaxWorkers: 1, WorkerIsolation: "worktree", ReviewerEnabled: true, MergerEnabled: true})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	if parent.AgentID == nil || *parent.AgentID != projectAgent.ID {
+		t.Fatalf("parent agent id = %v, want project default %s", parent.AgentID, projectAgent.ID)
+	}
+	planner, err := taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+	if planner.AgentID == nil || *planner.AgentID != projectAgent.ID {
+		t.Fatalf("planner agent id = %v, want project default %s", planner.AgentID, projectAgent.ID)
+	}
+
+	output := PlannerOutput{Workers: []PlannerWorker{{Title: "Worker", Prompt: "Do work", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", MergerPrompt: "Merge"}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, output); err != nil {
+		t.Fatalf("ApplyPlannerOutput: %v", err)
+	}
+	children, err := taskRepo.ListSwarmChildren(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("ListSwarmChildren: %v", err)
+	}
+	for _, child := range children {
+		if child.AgentID == nil || *child.AgentID != projectAgent.ID {
+			t.Fatalf("child %s role=%s agent id = %v, want project default %s", child.ID, child.SwarmRole, child.AgentID, projectAgent.ID)
+		}
+	}
+	if parent.AgentID != nil && *parent.AgentID == globalAgent.ID {
+		t.Fatalf("parent used global default %s instead of project default %s", globalAgent.ID, projectAgent.ID)
+	}
+}
+
 func TestSwarmServiceApplyPlannerOutputAllowsOverlappingWorktreeScopes(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)
