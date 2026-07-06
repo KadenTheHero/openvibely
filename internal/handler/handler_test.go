@@ -1432,6 +1432,47 @@ func TestHandler_ListTasks_KanbanBoard(t *testing.T) {
 	assertContains(t, rec, "kanban-board")
 }
 
+func TestHandler_ListTasks_AttachesSwarmChildrenWhenIncludeChildrenRequested(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	parent := &models.Task{
+		ProjectID:   "default",
+		Title:       "Full Page Swarm Parent",
+		Category:    models.CategoryActive,
+		Status:      models.StatusBlocked,
+		Prompt:      "coordinate swarm work",
+		SwarmRole:   models.SwarmRoleParent,
+		SwarmStatus: "planning",
+	}
+	require.NoError(t, h.taskRepo.Create(ctx, parent))
+	child := &models.Task{
+		ProjectID:     "default",
+		Title:         "Full Page Running Worker",
+		Category:      models.CategoryActive,
+		Status:        models.StatusRunning,
+		Prompt:        "do swarm work",
+		ParentTaskID:  &parent.ID,
+		SwarmRole:     models.SwarmRoleWorker,
+		SwarmStatus:   "running",
+		SwarmSequence: 1,
+	}
+	require.NoError(t, h.taskRepo.Create(ctx, child))
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id=default&include_swarm_children=true", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+	runningDropzone := kanbanDropzoneHTML(body, "running")
+	pendingDropzone := kanbanDropzoneHTML(body, "pending")
+	require.NotEmpty(t, runningDropzone, "expected running dropzone in full-page kanban response")
+	require.NotEmpty(t, pendingDropzone, "expected pending dropzone in full-page kanban response")
+	assert.Contains(t, runningDropzone, `data-task-id="`+parent.ID+`"`)
+	assert.NotContains(t, pendingDropzone, `data-task-id="`+parent.ID+`"`)
+	assert.NotContains(t, body, `data-task-id="`+child.ID+`"`, "swarm child should be attached to parent, not rendered as a top-level card")
+}
+
 func TestHandler_UpdateTask(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()

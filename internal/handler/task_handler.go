@@ -204,9 +204,7 @@ func (h *Handler) ListTasks(c echo.Context) error {
 			applog.Infof("[handler] ListTasks error: %v", err)
 			return err
 		}
-		if c.QueryParam("include_swarm_children") != "true" {
-			tasks = service.AttachSwarmChildren(tasks)
-		}
+		tasks = service.AttachSwarmChildren(tasks)
 		applog.Infof("[handler] ListTasks found %d tasks", len(tasks))
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
@@ -223,9 +221,7 @@ func (h *Handler) ListTasks(c echo.Context) error {
 		applog.Infof("[handler] ListTasks error: %v", err)
 		return err
 	}
-	if c.QueryParam("include_swarm_children") != "true" {
-		tasks = service.AttachSwarmChildren(tasks)
-	}
+	tasks = service.AttachSwarmChildren(tasks)
 	applog.Infof("[handler] ListTasks found %d tasks", len(tasks))
 
 	project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
