@@ -181,6 +181,50 @@ func TestTaskPullRequestServiceOpenForTaskReusesExistingRecordAndPersistsIssueMe
 	}
 }
 
+func TestTaskPullRequestServiceOpenForTaskClearsStaleIssueURLWhenIssueNumberChanges(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Existing PR Stale Issue URL Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Existing PR Stale Issue URL", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/existing-stale-issue-url"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	oldIssueNumber := 123
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 24, PRURL: "https://github.com/openvibely/openvibely/pull/24", PRState: "open", IssueNumber: &oldIssueNumber, IssueURL: "https://github.com/openvibely/openvibely/issues/123"}); err != nil {
+		t.Fatalf("seed PR record: %v", err)
+	}
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			return nil, fmt.Errorf("should not create")
+		},
+	}, prRepo)
+	newIssueNumber := 456
+
+	result, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{IssueNumber: &newIssueNumber})
+	if err != nil {
+		t.Fatalf("OpenForTask: %v", err)
+	}
+	if !result.ReusedExistingRecord || result.PullRequest.Number != 24 {
+		t.Fatalf("expected existing PR reuse, got %#v", result)
+	}
+	if result.Record.IssueNumber == nil || *result.Record.IssueNumber != 456 || result.Record.IssueURL != "" {
+		t.Fatalf("expected result record with new issue number and cleared URL, got %#v", result.Record)
+	}
+	persisted, err := prRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByTaskID: %v", err)
+	}
+	if persisted == nil || persisted.IssueNumber == nil || *persisted.IssueNumber != 456 || persisted.IssueURL != "" {
+		t.Fatalf("expected persisted issue number with cleared stale URL, got %#v", persisted)
+	}
+}
+
 func TestTaskPullRequestServiceOpenForTaskRecoversAlreadyExistsByFindingPR(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

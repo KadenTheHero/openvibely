@@ -3357,10 +3357,11 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	if err := taskRepo.UpdateWorktreeInfo(ctx, existingPRTask.ID, "", "task/existing-runtime-pr"); err != nil {
 		t.Fatalf("update existing PR task worktree branch: %v", err)
 	}
-	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: existingPRTask.ID, PRNumber: 202, PRURL: "https://github.com/openvibely/openvibely/pull/202", PRState: "open"}); err != nil {
+	oldIssueNumber := 99
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: existingPRTask.ID, PRNumber: 202, PRURL: "https://github.com/openvibely/openvibely/pull/202", PRState: "open", IssueNumber: &oldIssueNumber, IssueURL: "https://github.com/openvibely/openvibely/issues/99"}); err != nil {
 		t.Fatalf("seed existing runtime PR: %v", err)
 	}
-	out, handled, isErr, err = rt.Executor(ctx, "github_open_pull_request", []byte(fmt.Sprintf(`{"task_id":"%s","issue_number":100,"issue_url":"https://github.com/openvibely/openvibely/issues/100"}`, existingPRTask.ID)))
+	out, handled, isErr, err = rt.Executor(ctx, "github_open_pull_request", []byte(fmt.Sprintf(`{"task_id":"%s","issue_number":100}`, existingPRTask.ID)))
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected existing PR reuse success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
@@ -3371,8 +3372,8 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	if err != nil {
 		t.Fatalf("lookup existing runtime task PR: %v", err)
 	}
-	if record == nil || record.PRNumber != 202 || record.IssueNumber == nil || *record.IssueNumber != 100 || record.IssueURL != "https://github.com/openvibely/openvibely/issues/100" {
-		t.Fatalf("expected existing runtime PR issue metadata, got %#v", record)
+	if record == nil || record.PRNumber != 202 || record.IssueNumber == nil || *record.IssueNumber != 100 || record.IssueURL != "" {
+		t.Fatalf("expected existing runtime PR issue number with stale URL cleared, got %#v", record)
 	}
 
 	out, handled, isErr, err = rt.Executor(ctx, "github_is_actor_authorized", []byte(`{"github_login":"alice"}`))
