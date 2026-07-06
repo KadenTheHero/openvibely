@@ -1506,6 +1506,64 @@ func TestHandler_UpdateTaskCategory_RemovesFromCurrentView(t *testing.T) {
 	}
 }
 
+func TestHandler_UpdateTaskCategory_AttachesSwarmChildrenForKanbanRefresh(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	parent := &models.Task{
+		ProjectID:   "default",
+		Title:       "Swarm Parent With Active Child",
+		Category:    models.CategoryActive,
+		Status:      models.StatusBlocked,
+		Prompt:      "coordinate swarm work",
+		SwarmRole:   models.SwarmRoleParent,
+		SwarmStatus: "planning",
+	}
+	require.NoError(t, h.taskRepo.Create(ctx, parent))
+	child := &models.Task{
+		ProjectID:     "default",
+		Title:         "Running Worker Child",
+		Category:      models.CategoryActive,
+		Status:        models.StatusRunning,
+		Prompt:        "do swarm work",
+		ParentTaskID:  &parent.ID,
+		SwarmRole:     models.SwarmRoleWorker,
+		SwarmStatus:   "running",
+		SwarmSequence: 1,
+	}
+	require.NoError(t, h.taskRepo.Create(ctx, child))
+	other := createTask(t, h, "default", "Unrelated Backlog Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusPending
+	})
+
+	form := url.Values{}
+	form.Set("category", "completed")
+	rec := htmxPatch(e, "/tasks/"+other.ID+"/category", form)
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	runningDropzone := kanbanDropzoneHTML(body, "running")
+	pendingDropzone := kanbanDropzoneHTML(body, "pending")
+	require.NotEmpty(t, runningDropzone, "expected running dropzone in kanban response")
+	require.NotEmpty(t, pendingDropzone, "expected pending dropzone in kanban response")
+	assert.Contains(t, runningDropzone, `data-task-id="`+parent.ID+`"`)
+	assert.NotContains(t, pendingDropzone, `data-task-id="`+parent.ID+`"`)
+	assert.NotContains(t, body, `data-task-id="`+child.ID+`"`, "swarm child should be attached to parent, not rendered as a top-level card")
+}
+
+func kanbanDropzoneHTML(body, status string) string {
+	marker := `data-status="` + status + `"`
+	idx := strings.Index(body, marker)
+	if idx == -1 {
+		return ""
+	}
+	next := strings.Index(body[idx+len(marker):], `data-status="`)
+	if next == -1 {
+		return body[idx:]
+	}
+	return body[idx : idx+len(marker)+next]
+}
+
 func TestHandler_UpdateTaskCategory_RunningActiveToCompletedStaysCompleted(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()

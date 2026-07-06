@@ -1397,6 +1397,9 @@ func AttachSwarmChildren(tasks []models.Task) []models.Task {
 	for i := range out {
 		if out[i].SwarmRole == models.SwarmRoleParent {
 			children := childrenByParent[out[i].ID]
+			if len(children) == 0 {
+				children = out[i].SwarmChildren
+			}
 			sort.SliceStable(children, func(a, b int) bool {
 				if children[a].SwarmSequence != children[b].SwarmSequence {
 					return children[a].SwarmSequence < children[b].SwarmSequence

@@ -11,6 +11,20 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestAttachSwarmChildrenPreservesPreviouslyAttachedChildren(t *testing.T) {
+	parent := models.Task{ID: "parent", SwarmRole: models.SwarmRoleParent}
+	child := models.Task{ID: "child", SwarmRole: models.SwarmRoleWorker, Status: models.StatusRunning, SwarmSequence: 1}
+	parent.SwarmChildren = []models.Task{child}
+
+	attached := AttachSwarmChildren([]models.Task{parent})
+	if len(attached) != 1 {
+		t.Fatalf("expected one top-level task, got %d", len(attached))
+	}
+	if len(attached[0].SwarmChildren) != 1 || attached[0].SwarmChildren[0].ID != child.ID {
+		t.Fatalf("expected attached child to be preserved, got %#v", attached[0].SwarmChildren)
+	}
+}
+
 func TestSwarmServiceCreateAndApplyPlannerOutput(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)

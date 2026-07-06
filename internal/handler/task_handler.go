@@ -177,6 +177,7 @@ func selectableTaskAgentDefinitions(agentDefs []models.Agent) []models.Agent {
 }
 
 func (h *Handler) renderKanbanBoard(c echo.Context, tasks []models.Task, projectID string, sortPrefs taskSortPreferences, llmModels []models.LLMConfig) error {
+	tasks = service.AttachSwarmChildren(tasks)
 	agentDefs := h.listAgentDefinitions(c.Request().Context())
 	return render(c, http.StatusOK, components.KanbanBoard(tasks, projectID, sortPrefs.Backlog, sortPrefs.Completed, llmModels, agentDefs))
 }
