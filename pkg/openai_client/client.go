@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,7 +19,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 const (
@@ -610,9 +608,9 @@ func parseStreamingResponse(body io.Reader, onDelta func(string), suppressToolMa
 		}
 	}
 
-	var sanitizer *openAIStreamSanitizer
+	var emitter *openAITextStreamEmitter
 	if !suppressToolMarkers {
-		sanitizer = newOpenAIStreamSanitizer(emit)
+		emitter = newOpenAITextStreamEmitter(emit)
 	}
 
 	for scanner.Scan() {
@@ -639,15 +637,22 @@ func parseStreamingResponse(body io.Reader, onDelta func(string), suppressToolMa
 		case "response.output_text.delta":
 			delta := stringFromAny(ev["delta"])
 			if delta != "" {
-				if sanitizer != nil {
-					sanitizer.Write(delta)
+				if emitter != nil {
+					emitter.Write(delta)
 				} else {
 					emit(delta)
 				}
 			}
+		case "response.function_call_arguments.delta", "response.output_item.added":
+			if emitter != nil {
+				emitter.FlushBoundary()
+			}
 		case "response.output_item.done":
 			if suppressToolMarkers {
 				continue
+			}
+			if emitter != nil {
+				emitter.FlushBoundary()
 			}
 			if item, ok := ev["item"].(map[string]any); ok {
 				for _, marker := range openAIOutputItemMarkers(item, callNames) {
@@ -669,8 +674,8 @@ func parseStreamingResponse(body io.Reader, onDelta func(string), suppressToolMa
 		return nil, err
 	}
 
-	if sanitizer != nil {
-		sanitizer.Flush()
+	if emitter != nil {
+		emitter.Flush()
 	}
 
 	resp := &Response{Text: outputText.String()}
@@ -980,275 +985,25 @@ func openAIIsMarkerChunk(text string) bool {
 	return strings.Contains(text, "[Using tool:") || strings.Contains(text, "[Tool ") || strings.Contains(text, "[/Tool]")
 }
 
-const openAIStreamSanitizerTail = 32
-
-type openAIStreamSanitizer struct {
-	pending strings.Builder
-	emit    func(string)
+type openAITextStreamEmitter struct {
+	emit func(string)
 }
 
-func newOpenAIStreamSanitizer(emit func(string)) *openAIStreamSanitizer {
-	return &openAIStreamSanitizer{emit: emit}
+func newOpenAITextStreamEmitter(emit func(string)) *openAITextStreamEmitter {
+	return &openAITextStreamEmitter{emit: emit}
 }
 
-func (s *openAIStreamSanitizer) Write(delta string) {
+func (s *openAITextStreamEmitter) Write(delta string) {
 	if delta == "" {
 		return
 	}
-	s.pending.WriteString(delta)
-	s.drain(false)
+	s.emit(delta)
 }
 
-func (s *openAIStreamSanitizer) Flush() {
-	s.drain(true)
-	if s.pending.Len() > 0 {
-		s.emit(s.pending.String())
-		s.pending.Reset()
-	}
+func (s *openAITextStreamEmitter) Flush() {
 }
 
-func (s *openAIStreamSanitizer) drain(final bool) {
-	current := s.pending.String()
-	s.pending.Reset()
-
-	for len(current) > 0 {
-		idx := openAINextToolSyntaxIndex(current)
-		if idx == -1 {
-			if final {
-				s.emit(current)
-				current = ""
-				break
-			}
-			if len(current) <= openAIStreamSanitizerTail {
-				break
-			}
-			flushLen := len(current) - openAIStreamSanitizerTail
-			flushLen = openAIUTF8SafePrefixLen(current, flushLen)
-			if flushLen <= 0 {
-				break
-			}
-			s.emit(current[:flushLen])
-			current = current[flushLen:]
-			break
-		}
-
-		if idx > 0 {
-			s.emit(current[:idx])
-			current = current[idx:]
-		}
-
-		consumed, replacement, handled, needMore := openAIParseToolSnippet(current)
-		if needMore {
-			if final {
-				s.emit(current)
-				current = ""
-			}
-			break
-		}
-
-		if handled && consumed > 0 {
-			if replacement != "" {
-				s.emit(replacement)
-			}
-			current = current[consumed:]
-			continue
-		}
-
-		_, size := utf8.DecodeRuneInString(current)
-		if size <= 0 {
-			size = 1
-		}
-		s.emit(current[:size])
-		current = current[size:]
-	}
-
-	s.pending.WriteString(current)
-}
-
-// openAIUTF8SafePrefixLen returns the largest prefix length <= n that does not
-// split a UTF-8 encoded rune.
-func openAIUTF8SafePrefixLen(s string, n int) int {
-	if n <= 0 {
-		return 0
-	}
-	if n >= len(s) {
-		return len(s)
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return n
-}
-
-func openAINextToolSyntaxIndex(s string) int {
-	tokens := []string{"<tool", "```bash", "bash -lc '", "{"}
-	best := -1
-	for _, token := range tokens {
-		if idx := strings.Index(s, token); idx >= 0 && (best == -1 || idx < best) {
-			best = idx
-		}
-	}
-	return best
-}
-
-func openAIParseToolSnippet(input string) (consumed int, replacement string, handled bool, needMore bool) {
-	leading := len(input) - len(strings.TrimLeft(input, " \t\r\n"))
-	if leading > 0 {
-		input = input[leading:]
-	}
-	if input == "" {
-		return 0, "", false, false
-	}
-
-	if strings.HasPrefix(input, "<tool_call>") {
-		const openTag = "<tool_call>"
-		const closeTag = "</tool_call>"
-		end := strings.Index(input, closeTag)
-		if end == -1 {
-			return 0, "", false, true
-		}
-		payload := strings.TrimSpace(input[len(openTag):end])
-		return leading + end + len(closeTag), openAIToolMarkerFromToolCallPayload(payload), true, false
-	}
-
-	if strings.HasPrefix(input, "<tool") {
-		const closeTag = "</tool>"
-		end := strings.Index(input, closeTag)
-		if end == -1 {
-			return 0, "", false, true
-		}
-		block := input[:end+len(closeTag)]
-		name, detail, ok := openAIParseToolTag(block)
-		if !ok {
-			return 0, "", false, false
-		}
-		return leading + end + len(closeTag), openAIFormatUsingToolMarker(name, detail), true, false
-	}
-
-	if strings.HasPrefix(input, "```bash") {
-		const openTag = "```bash"
-		const closeTag = "```"
-		end := strings.Index(input[len(openTag):], closeTag)
-		if end == -1 {
-			return 0, "", false, true
-		}
-		body := input[len(openTag) : len(openTag)+end]
-		command := openAIFirstNonEmptyLine(body)
-		return leading + len(openTag) + end + len(closeTag), openAIFormatUsingToolMarker("bash", command), true, false
-	}
-
-	if strings.HasPrefix(input, "bash -lc '") {
-		const prefix = "bash -lc '"
-		rest := input[len(prefix):]
-		end := strings.Index(rest, "'")
-		if end == -1 {
-			return 0, "", false, true
-		}
-		command := strings.TrimSpace(rest[:end])
-		return leading + len(prefix) + end + 1, openAIFormatUsingToolMarker("bash", command), true, false
-	}
-
-	if strings.HasPrefix(input, "{") {
-		raw, consumedJSON, complete := openAIParseJSONObjectPrefix(input)
-		if !complete {
-			return 0, "", false, true
-		}
-		if consumedJSON <= 0 {
-			return 0, "", false, false
-		}
-		if marker, ok := openAIMarkerFromJSONObject(raw); ok {
-			return leading + consumedJSON, marker, true, false
-		}
-		// Not a recognized tool invocation JSON object; pass it through unchanged.
-		return leading + consumedJSON, raw, true, false
-	}
-
-	return 0, "", false, false
-}
-
-func openAIParseToolTag(block string) (name string, detail string, ok bool) {
-	const closeTag = "</tool>"
-	if !strings.HasSuffix(block, closeTag) {
-		return "", "", false
-	}
-	openEnd := strings.Index(block, ">")
-	if openEnd == -1 {
-		return "", "", false
-	}
-	openTag := block[:openEnd+1]
-	inner := strings.TrimSpace(block[openEnd+1 : len(block)-len(closeTag)])
-
-	name = "tool"
-	if idx := strings.Index(openTag, `name="`); idx != -1 {
-		rest := openTag[idx+len(`name="`):]
-		if end := strings.Index(rest, `"`); end != -1 {
-			candidate := strings.TrimSpace(rest[:end])
-			if candidate != "" {
-				name = candidate
-			}
-		}
-	}
-	return name, openAITrimDetail(inner, openAIToolDetailMaxLen), true
-}
-
-func openAIParseJSONObjectPrefix(input string) (raw string, consumed int, complete bool) {
-	decoder := json.NewDecoder(strings.NewReader(input))
-	decoder.UseNumber()
-
-	var obj map[string]any
-	if err := decoder.Decode(&obj); err != nil {
-		if errors.Is(err, io.EOF) || strings.Contains(strings.ToLower(err.Error()), "unexpected eof") {
-			return "", 0, false
-		}
-		return "", 0, true
-	}
-	offset := int(decoder.InputOffset())
-	if offset <= 0 || offset > len(input) {
-		return "", 0, true
-	}
-	return input[:offset], offset, true
-}
-
-func openAIMarkerFromJSONObject(raw string) (string, bool) {
-	var obj map[string]any
-	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
-		return "", false
-	}
-
-	if name := strings.TrimSpace(stringFromAny(obj["name"])); name != "" {
-		return openAIFormatUsingToolMarker(name, openAIToolDetailFromArguments(name, obj["arguments"])), true
-	}
-
-	if tool := strings.TrimSpace(stringFromAny(obj["tool"])); tool != "" {
-		return openAIFormatUsingToolMarker(tool, openAIToolDetailFromMap(tool, obj)), true
-	}
-
-	if cmd := strings.TrimSpace(firstNonEmpty(stringFromAny(obj["cmd"]), stringFromAny(obj["command"]))); cmd != "" {
-		return openAIFormatUsingToolMarker("bash", cmd), true
-	}
-
-	return "", false
-}
-
-func openAIToolMarkerFromToolCallPayload(payload string) string {
-	payload = strings.TrimSpace(payload)
-	if payload == "" {
-		return ""
-	}
-	if marker, ok := openAIMarkerFromJSONObject(payload); ok {
-		return marker
-	}
-	return ""
-}
-
-func openAIFirstNonEmptyLine(text string) string {
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			return openAITrimDetail(line, openAIToolDetailMaxLen)
-		}
-	}
-	return ""
+func (s *openAITextStreamEmitter) FlushBoundary() {
 }
 
 func buildInputItems(history []Message, attachments []*FileAttachment) ([]any, error) {

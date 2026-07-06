@@ -98,6 +98,53 @@ func TestParseAgenticStream_WithToolUse(t *testing.T) {
 	}
 }
 
+func TestParseAgenticStream_StreamsTextAtFunctionCallBoundary(t *testing.T) {
+	pr, pw := io.Pipe()
+	client := &Client{auth: &StoredAuth{APIKey: "test"}}
+	textCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+
+	go func() {
+		_, err := client.parseAgenticStreamWithToolCallbacks(pr, func(text string) {
+			select {
+			case textCh <- text:
+			default:
+			}
+		}, nil, nil, nil)
+		errCh <- err
+	}()
+
+	_, _ = pw.Write([]byte(buildSSE([]string{
+		`{"type":"response.output_text.delta","delta":"I'll inspect that now."}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","call_id":"call_1","name":"read_file"}}`,
+	})))
+
+	select {
+	case got := <-textCh:
+		if got != "I'll inspect that now." {
+			t.Fatalf("unexpected text callback: %q", got)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("text did not stream at function-call boundary")
+	}
+
+	_, _ = pw.Write([]byte(buildSSE([]string{
+		`{"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"file_path\":\"main.go\"}"}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"call_1","name":"read_file"}}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":10,"output_tokens":5}}}`,
+	})))
+	_ = pw.Close()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("parseAgenticStreamWithToolCallbacks: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("parser did not finish")
+	}
+}
+
 func TestParseAgenticStream_FunctionCallMissingDoneArgumentsUsesDeltas(t *testing.T) {
 	stream := buildSSE([]string{
 		`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","call_id":"call_1","name":"read_file"}}`,

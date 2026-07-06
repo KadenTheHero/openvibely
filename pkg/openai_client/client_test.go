@@ -13,7 +13,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 )
 
 func TestRefreshToken(t *testing.T) {
@@ -320,6 +319,96 @@ func TestSend_StreamingPreservesSpacesInDeltas(t *testing.T) {
 	}
 }
 
+func TestParseStreamingResponse_StreamsSmallDeltaBeforeCompletion(t *testing.T) {
+	pr, pw := io.Pipe()
+	textCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+
+	go func() {
+		_, err := parseStreamingResponse(pr, func(text string) {
+			select {
+			case textCh <- text:
+			default:
+			}
+		}, false)
+		errCh <- err
+	}()
+
+	_, _ = pw.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n"))
+
+	select {
+	case got := <-textCh:
+		if got != "ok" {
+			t.Fatalf("unexpected delta: %q", got)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("small delta did not stream before completion")
+	}
+
+	_, _ = pw.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"))
+	_ = pw.Close()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("parseStreamingResponse: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("parser did not finish")
+	}
+}
+
+func TestParseStreamingResponse_StreamsTextBeforeToolDone(t *testing.T) {
+	pr, pw := io.Pipe()
+	textCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+
+	go func() {
+		_, err := parseStreamingResponse(pr, func(text string) {
+			select {
+			case textCh <- text:
+			default:
+			}
+		}, false)
+		errCh <- err
+	}()
+
+	_, _ = pw.Write([]byte(strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"I'll inspect that now."}`,
+		``,
+		`data: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","call_id":"call_1","name":"read_file"}}`,
+		``,
+		`data: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"file_path\":\"main.go\"}"}`,
+		``,
+	}, "\n")))
+
+	select {
+	case got := <-textCh:
+		if got != "I'll inspect that now." {
+			t.Fatalf("unexpected delta: %q", got)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("text did not stream before tool done")
+	}
+
+	_, _ = pw.Write([]byte(strings.Join([]string{
+		`data: {"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"call_1","name":"read_file","arguments":"{\"file_path\":\"main.go\"}"}}`,
+		``,
+		`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":1,"output_tokens":1}}}`,
+		``,
+	}, "\n")))
+	_ = pw.Close()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("parseStreamingResponse: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("parser did not finish")
+	}
+}
+
 func TestSend_StreamingFormatsToolItems(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -363,7 +452,7 @@ func TestSend_StreamingFormatsToolItems(t *testing.T) {
 	}
 }
 
-func TestSend_StreamingSanitizesPseudoToolText(t *testing.T) {
+func TestSend_StreamingKeepsPseudoToolTextPlain(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte(
@@ -401,45 +490,80 @@ func TestSend_StreamingSanitizesPseudoToolText(t *testing.T) {
 	}
 
 	got := streamed.String()
-	if strings.Contains(got, "{\"tool\"") || strings.Contains(got, "<tool name=") || strings.Contains(got, "bash -lc 'ls -la'") {
-		t.Fatalf("streamed output still contains raw pseudo-tool syntax: %q", got)
+	if !strings.Contains(got, "{\"tool\":\"list_files\",\"path\":\".\"}") {
+		t.Fatalf("streamed output missing plain JSON-like text: %q", got)
 	}
-	if !strings.Contains(got, "[Using tool: Glob | .]") {
-		t.Fatalf("streamed output missing list_files marker: %q", got)
+	if !strings.Contains(got, "bash -lc 'ls -la'") {
+		t.Fatalf("streamed output missing plain bash-like text: %q", got)
 	}
-	if !strings.Contains(got, "[Using tool: Bash | ls -la]") {
-		t.Fatalf("streamed output missing bash marker: %q", got)
+	if !strings.Contains(got, "<tool name=\"bash\">ls -la</tool>") {
+		t.Fatalf("streamed output missing plain XML-like text: %q", got)
 	}
-	if strings.Count(got, "[Using tool: Bash | ls -la]") != 1 {
-		t.Fatalf("expected exactly one bash marker, got output: %q", got)
+	if strings.Contains(got, "[Using tool:") {
+		t.Fatalf("pseudo-tool text should not create tool markers: %q", got)
 	}
-	if !strings.Contains(resp.Text, "[Using tool: Glob | .]") {
-		t.Fatalf("response text missing tool marker: %q", resp.Text)
+	if resp.Text != got {
+		t.Fatalf("response text mismatch: got %q, streamed %q", resp.Text, got)
 	}
 }
 
-func TestOpenAIStreamSanitizer_DoesNotSplitUTF8Runes(t *testing.T) {
+func TestOpenAITextStreamEmitter_EmitsImmediately(t *testing.T) {
 	var emitted []string
-	sanitizer := newOpenAIStreamSanitizer(func(text string) {
+	emitter := newOpenAITextStreamEmitter(func(text string) {
 		emitted = append(emitted, text)
 	})
 
-	delta := strings.Repeat("a", 7) + "I\u2019" + "ve" + strings.Repeat("x", 28)
-	sanitizer.Write(delta)
-	sanitizer.Flush()
-
-	if len(emitted) < 2 {
-		t.Fatalf("expected sanitizer to emit multiple chunks, got %d", len(emitted))
+	delta := "ok"
+	emitter.Write(delta)
+	if strings.Join(emitted, "") != delta {
+		t.Fatalf("delta should emit immediately, got %q", emitted)
 	}
-	for i, chunk := range emitted {
-		if !utf8.ValidString(chunk) {
-			t.Fatalf("chunk %d is invalid UTF-8: %q", i, chunk)
-		}
-	}
+}
 
-	got := strings.Join(emitted, "")
-	if got != delta {
-		t.Fatalf("joined output mismatch: got %q, want %q", got, delta)
+func TestOpenAITextStreamEmitter_FlushBoundaryIsNoopAfterImmediateEmit(t *testing.T) {
+	var emitted []string
+	emitter := newOpenAITextStreamEmitter(func(text string) {
+		emitted = append(emitted, text)
+	})
+
+	emitter.Write("I'll inspect that now.")
+	emitter.FlushBoundary()
+	if strings.Join(emitted, "") != "I'll inspect that now." {
+		t.Fatalf("plain text should already be emitted once, got %q", emitted)
+	}
+}
+
+func TestOpenAITextStreamEmitter_PseudoToolTextEmitsImmediately(t *testing.T) {
+	var emitted []string
+	emitter := newOpenAITextStreamEmitter(func(text string) {
+		emitted = append(emitted, text)
+	})
+
+	emitter.Write(`{"tool":"bash","command":"`)
+	emitter.FlushBoundary()
+	if strings.Join(emitted, "") != `{"tool":"bash","command":"` {
+		t.Fatalf("pseudo-tool text should emit as plain text, got %q", emitted)
+	}
+}
+
+func TestParseStreamingResponse_OrdersTextBeforeToolMarker(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"I'll inspect that now."}`,
+		``,
+		`data: {"type":"response.output_item.done","item":{"type":"function_call","name":"read_file","arguments":"{\"file_path\":\"main.go\"}"}}`,
+		``,
+		`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":1,"output_tokens":1}}}`,
+		``,
+	}, "\n")
+
+	resp, err := parseStreamingResponse(strings.NewReader(stream), nil, false)
+	if err != nil {
+		t.Fatalf("parseStreamingResponse: %v", err)
+	}
+	textIdx := strings.Index(resp.Text, "I'll inspect that now.")
+	toolIdx := strings.Index(resp.Text, "[Using tool: Read | main.go]")
+	if textIdx == -1 || toolIdx == -1 || textIdx > toolIdx {
+		t.Fatalf("expected text before tool marker, got %q", resp.Text)
 	}
 }
 

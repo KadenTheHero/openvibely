@@ -1114,7 +1114,7 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 	// bool value indicates whether the emitted tool-use had display detail.
 	providerNativeToolUseEmitted := make(map[string]bool)
 
-	sanitizer := newOpenAIStreamSanitizer(func(text string) {
+	emitter := newOpenAITextStreamEmitter(func(text string) {
 		textBuilder.WriteString(text)
 		if onText != nil {
 			onText(text)
@@ -1150,7 +1150,7 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 		case "response.output_text.delta":
 			delta := stringFromAny(ev["delta"])
 			if delta != "" {
-				sanitizer.Write(delta)
+				emitter.Write(delta)
 			}
 		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 			if onThinking != nil {
@@ -1167,6 +1167,7 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 			}
 
 		case "response.function_call_arguments.delta":
+			emitter.FlushBoundary()
 			// Incremental function call argument building
 			idx := intFromAny(ev["output_index"])
 			delta := stringFromAny(ev["delta"])
@@ -1180,11 +1181,13 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 				itemType := stringFromAny(item["type"])
 				idx := intFromAny(ev["output_index"])
 				if itemType == "function_call" {
+					emitter.FlushBoundary()
 					fnCalls[idx] = &fnCallState{
 						callID: stringFromAny(item["call_id"]),
 						name:   stringFromAny(item["name"]),
 					}
 				} else if isProviderNativeOutputItem(itemType) {
+					emitter.FlushBoundary()
 					// Provider-native tool items can carry query/url details on
 					// the .added event and only status on .done; surface use details
 					// as soon as we see them.
@@ -1210,6 +1213,7 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 				itemType := stringFromAny(item["type"])
 				switch itemType {
 				case "function_call":
+					emitter.FlushBoundary()
 					callID := stringFromAny(item["call_id"])
 					name := stringFromAny(item["name"])
 					fc := fnCalls[intFromAny(ev["output_index"])]
@@ -1293,7 +1297,7 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 		return nil, err
 	}
 
-	sanitizer.Flush()
+	emitter.Flush()
 
 	result.text = textBuilder.String()
 	if completed != nil {
