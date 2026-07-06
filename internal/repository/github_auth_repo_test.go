@@ -24,7 +24,7 @@ func TestGitHubAuthRepoAuthorizedActorsDenyByDefaultAndNormalize(t *testing.T) {
 	userID := int64(12345)
 	actor := &models.GitHubAuthorizedActor{
 		GitHubUserID: &userID,
-		GitHubLogin:  " Alice ",
+		GitHubLogin:  " @Alice ",
 		DisplayName:  "Alice",
 		Permission:   "approve",
 		AddedBy:      "test",
@@ -36,7 +36,7 @@ func TestGitHubAuthRepoAuthorizedActorsDenyByDefaultAndNormalize(t *testing.T) {
 		t.Fatalf("expected normalized login alice, got %q", actor.GitHubLogin)
 	}
 
-	for _, login := range []string{"alice", "ALICE", " Alice "} {
+	for _, login := range []string{"alice", "ALICE", " Alice ", "@alice", " @ALICE "} {
 		authorized, err := repo.IsActorAuthorized(ctx, login)
 		if err != nil {
 			t.Fatalf("check authorization for %q: %v", login, err)
@@ -51,7 +51,7 @@ func TestGitHubAuthRepoAuthorizedActorsDenyByDefaultAndNormalize(t *testing.T) {
 		t.Fatal("expected unknown GitHub actor to be unauthorized")
 	}
 
-	updated := &models.GitHubAuthorizedActor{GitHubLogin: "ALICE", DisplayName: "Alice Updated", Permission: "admin", AddedBy: "test-update"}
+	updated := &models.GitHubAuthorizedActor{GitHubLogin: "@ALICE", DisplayName: "Alice Updated", Permission: "admin", AddedBy: "test-update"}
 	if err := repo.UpsertAuthorizedActor(ctx, updated); err != nil {
 		t.Fatalf("update authorized actor: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestGitHubAuthRepoProjectInboxStoresSimpleScheduledTaskAssignee(t *testing.
 	inbox := &models.GitHubProjectInbox{
 		ProjectID:    "proj-github-inbox-one",
 		GitHubUserID: &userID,
-		GitHubLogin:  " Dev-Bot ",
+		GitHubLogin:  " @Dev-Bot ",
 		AgentID:      &agentID,
 		Enabled:      true,
 	}

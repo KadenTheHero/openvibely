@@ -9,9 +9,12 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-// NormalizeGitHubLogin trims a GitHub login and lowercases it for authorization and inbox matching.
+// NormalizeGitHubLogin trims a GitHub login, strips a leading @ mention marker, and lowercases it for authorization and inbox matching.
 func NormalizeGitHubLogin(login string) string {
-	return strings.ToLower(strings.TrimSpace(login))
+	normalized := strings.TrimSpace(login)
+	normalized = strings.TrimPrefix(normalized, "@")
+	normalized = strings.TrimSpace(normalized)
+	return strings.ToLower(normalized)
 }
 
 // GitHubAuthRepo handles database operations for GitHub authorized actors and project inbox identities.
