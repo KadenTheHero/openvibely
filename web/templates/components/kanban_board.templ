@@ -44,10 +44,33 @@ func filterActiveColumn(tasks []models.Task) []models.Task {
 	return result
 }
 
+func hasActiveSwarmChild(task models.Task) bool {
+	if task.SwarmRole != models.SwarmRoleParent {
+		return false
+	}
+	for _, child := range task.SwarmChildren {
+		switch child.Status {
+		case models.StatusRunning, models.StatusPending, models.StatusQueued, models.StatusBlocked:
+			return true
+		}
+	}
+	return false
+}
+
+func activeBoardStatus(task models.Task) models.TaskStatus {
+	if models.IsTerminalStatus(task.Status) || task.Status == models.StatusBlocked {
+		return task.Status
+	}
+	if hasActiveSwarmChild(task) {
+		return models.StatusRunning
+	}
+	return task.Status
+}
+
 func filterRunningTasks(tasks []models.Task) []models.Task {
 	var running []models.Task
 	for _, task := range tasks {
-		if task.Status == models.StatusRunning {
+		if activeBoardStatus(task) == models.StatusRunning {
 			running = append(running, task)
 		}
 	}
@@ -60,7 +83,8 @@ func filterPendingTasks(tasks []models.Task) []models.Task {
 		// Include only genuinely active queued/pending work. Terminal failed/cancelled
 		// tasks are normalized out of Active by finalization and should not render
 		// under the Queued dropzone if a stale row still has category=active.
-		if task.Status == models.StatusPending || task.Status == models.StatusQueued || task.Status == models.StatusBlocked {
+		switch activeBoardStatus(task) {
+		case models.StatusPending, models.StatusQueued, models.StatusBlocked:
 			pending = append(pending, task)
 		}
 	}
@@ -70,7 +94,8 @@ func filterPendingTasks(tasks []models.Task) []models.Task {
 func countActiveDisplayedTasks(tasks []models.Task) int {
 	count := 0
 	for _, task := range tasks {
-		if task.Status == models.StatusRunning || task.Status == models.StatusPending || task.Status == models.StatusQueued || task.Status == models.StatusBlocked {
+		switch activeBoardStatus(task) {
+		case models.StatusRunning, models.StatusPending, models.StatusQueued, models.StatusBlocked:
 			count++
 		}
 	}

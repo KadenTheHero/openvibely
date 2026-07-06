@@ -233,6 +233,61 @@ func TestKanbanBoard_DoesNotRenderActiveCancelledTaskAsQueued(t *testing.T) {
 	}
 }
 
+func TestKanbanBoard_RendersSwarmParentWithRunningChildInProgress(t *testing.T) {
+	parentID := "swarm-parent"
+	tasks := []models.Task{
+		{
+			ID:          parentID,
+			ProjectID:   "default",
+			Title:       "Swarm Parent",
+			Category:    models.CategoryActive,
+			Status:      models.StatusPending,
+			SwarmRole:   models.SwarmRoleParent,
+			SwarmStatus: "coordinating",
+			SwarmChildren: []models.Task{
+				{
+					ID:           "worker-running",
+					ProjectID:    "default",
+					Title:        "Running Worker",
+					Category:     models.CategoryActive,
+					Status:       models.StatusRunning,
+					ParentTaskID: &parentID,
+					SwarmRole:    models.SwarmRoleWorker,
+				},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := KanbanBoard(tasks, "default", "", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render kanban board: %v", err)
+	}
+	body := buf.String()
+	inProgress := activeStatusDropZone(t, body, "running")
+	queued := activeStatusDropZone(t, body, "pending")
+
+	if !strings.Contains(inProgress, "Swarm Parent") {
+		t.Fatalf("expected swarm parent with running child in In Progress dropzone, got %s", inProgress)
+	}
+	if strings.Contains(queued, "Swarm Parent") {
+		t.Fatalf("swarm parent with running child should not render as queued, got %s", queued)
+	}
+}
+
+func activeStatusDropZone(t *testing.T, body, status string) string {
+	t.Helper()
+	marker := `data-drop-type="status" data-status="` + status + `" data-category="active"`
+	start := strings.Index(body, marker)
+	if start == -1 {
+		t.Fatalf("expected active status dropzone %q in %s", status, body)
+	}
+	next := strings.Index(body[start+len(marker):], `data-drop-type="status"`)
+	if next == -1 {
+		return body[start:]
+	}
+	return body[start : start+len(marker)+next]
+}
+
 func TestTaskCard_HasMobileSafeActionsAndReadableText(t *testing.T) {
 	task := models.Task{
 		ID:        "task-1",
