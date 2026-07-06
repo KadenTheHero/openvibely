@@ -98,6 +98,12 @@ type GitHubServiceProvider interface {
 	PushBranch(ctx context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error
 	FindPullRequestByBranch(ctx context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error)
+	CreateIssue(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error)
+	GetIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error)
+	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssueWithPullRequest, error)
+	FindPullRequestForIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubPullRequest, error)
+	CommentOnIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error
+	AddLabelsToIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, labels []string) error
 }
 
 type SlackServiceProvider interface {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -477,5 +478,84 @@ func TestListAssignedIssuesWithPullRequestsSkipsIssuesWithoutAssociatedPR(t *tes
 	}
 	if items[0].PullRequest.Number != 42 {
 		t.Fatalf("expected associated PR #42, got #%d", items[0].PullRequest.Number)
+	}
+}
+
+func TestGitHubIssueAPIMethods(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	var sawCreate, sawGet, sawComment, sawLabels bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/issues":
+			sawCreate = true
+			body, _ := io.ReadAll(r.Body)
+			text := string(body)
+			if strings.Contains(text, "openvibely:") {
+				t.Fatalf("issue creation must not send prefixed labels: %s", text)
+			}
+			if !strings.Contains(text, `"labels":["bug","approved"]`) || !strings.Contains(text, `"assignees":["dev-bot"]`) {
+				t.Fatalf("unexpected create issue payload: %s", text)
+			}
+			_, _ = w.Write([]byte(`{"number":7,"html_url":"https://github.com/openvibely/openvibely/issues/7","title":"Bug","body":"Fix it","state":"open","user":{"login":"alice"},"assignees":[{"login":"dev-bot"}],"labels":[{"name":"bug"},{"name":"approved"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/issues/7":
+			sawGet = true
+			_, _ = w.Write([]byte(`{"number":7,"html_url":"https://github.com/openvibely/openvibely/issues/7","title":"Bug","body":"Fix it","state":"open","user":{"login":"alice"},"assignees":[{"login":"dev-bot"}],"labels":[{"name":"bug"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/issues/7/comments":
+			sawComment = true
+			body, _ := io.ReadAll(r.Body)
+			if !strings.Contains(string(body), `"body":"working on it"`) {
+				t.Fatalf("unexpected comment payload: %s", string(body))
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":1}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/issues/7/labels":
+			sawLabels = true
+			body, _ := io.ReadAll(r.Body)
+			text := string(body)
+			if text != `{"labels":["in-progress","pr-opened"]}` {
+				t.Fatalf("unexpected labels payload: %s", text)
+			}
+			_, _ = w.Write([]byte(`[{"name":"in-progress"},{"name":"pr-opened"}]`))
+		default:
+			t.Fatalf("unexpected GitHub API request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
+	created, err := svc.CreateIssue(ctx, repo, GitHubCreateIssueRequest{Title: "Bug", Body: "Fix it", Labels: []string{"bug", "approved", "bug", ""}, Assignees: []string{"dev-bot"}})
+	if err != nil {
+		t.Fatalf("CreateIssue returned error: %v", err)
+	}
+	if created.Number != 7 || created.UserLogin != "alice" || len(created.Labels) != 2 {
+		t.Fatalf("unexpected created issue: %#v", created)
+	}
+	issue, err := svc.GetIssue(ctx, repo, 7)
+	if err != nil {
+		t.Fatalf("GetIssue returned error: %v", err)
+	}
+	if issue.Number != 7 || issue.Title != "Bug" {
+		t.Fatalf("unexpected issue: %#v", issue)
+	}
+	if err := svc.CommentOnIssue(ctx, repo, 7, "working on it"); err != nil {
+		t.Fatalf("CommentOnIssue returned error: %v", err)
+	}
+	if err := svc.AddLabelsToIssue(ctx, repo, 7, []string{"in-progress", "pr-opened", "in-progress"}); err != nil {
+		t.Fatalf("AddLabelsToIssue returned error: %v", err)
+	}
+	if !sawCreate || !sawGet || !sawComment || !sawLabels {
+		t.Fatalf("expected all issue API endpoints to be called create=%v get=%v comment=%v labels=%v", sawCreate, sawGet, sawComment, sawLabels)
 	}
 }

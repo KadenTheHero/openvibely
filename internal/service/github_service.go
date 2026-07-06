@@ -129,6 +129,13 @@ type GitHubCreatePullRequestRequest struct {
 	Draft bool
 }
 
+type GitHubCreateIssueRequest struct {
+	Title     string
+	Body      string
+	Labels    []string
+	Assignees []string
+}
+
 type runGitFunc func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error)
 
 type githubAppConfig struct {
@@ -587,6 +594,132 @@ func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoR
 	return &GitHubPullRequest{Number: created.Number, URL: created.URL, State: created.State}, nil
 }
 
+func (s *GitHubService) CreateIssue(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreateIssueRequest) (*GitHubIssue, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("repository reference is required")
+	}
+	createReq.Title = strings.TrimSpace(createReq.Title)
+	if createReq.Title == "" {
+		return nil, fmt.Errorf("issue title is required")
+	}
+
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	payload := map[string]any{"title": createReq.Title}
+	if strings.TrimSpace(createReq.Body) != "" {
+		payload["body"] = createReq.Body
+	}
+	if labels := cleanGitHubStringList(createReq.Labels); len(labels) > 0 {
+		payload["labels"] = labels
+	}
+	if assignees := cleanGitHubStringList(createReq.Assignees); len(assignees) > 0 {
+		payload["assignees"] = assignees
+	}
+	body, _ := json.Marshal(payload)
+
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	s.applyGitHubHeaders(req, token)
+	req.Header.Set("Content-Type", "application/json")
+
+	var raw githubIssueAPI
+	if err := s.doGitHubJSON(req, &raw); err != nil {
+		return nil, err
+	}
+	issue := raw.toIssue()
+	return &issue, nil
+}
+
+func (s *GitHubService) GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("repository reference is required")
+	}
+	if issueNumber <= 0 {
+		return nil, fmt.Errorf("issue number is required")
+	}
+
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), issueNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.applyGitHubHeaders(req, token)
+
+	var raw githubIssueAPI
+	if err := s.doGitHubJSON(req, &raw); err != nil {
+		return nil, err
+	}
+	issue := raw.toIssue()
+	return &issue, nil
+}
+
+func (s *GitHubService) CommentOnIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, bodyText string) error {
+	if repo == nil {
+		return fmt.Errorf("repository reference is required")
+	}
+	if issueNumber <= 0 {
+		return fmt.Errorf("issue number is required")
+	}
+	bodyText = strings.TrimSpace(bodyText)
+	if bodyText == "" {
+		return fmt.Errorf("comment body is required")
+	}
+
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+
+	payload, _ := json.Marshal(map[string]string{"body": bodyText})
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), issueNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	s.applyGitHubHeaders(req, token)
+	req.Header.Set("Content-Type", "application/json")
+	return s.doGitHubJSON(req, nil)
+}
+
+func (s *GitHubService) AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, labels []string) error {
+	if repo == nil {
+		return fmt.Errorf("repository reference is required")
+	}
+	if issueNumber <= 0 {
+		return fmt.Errorf("issue number is required")
+	}
+	cleaned := cleanGitHubStringList(labels)
+	if len(cleaned) == 0 {
+		return fmt.Errorf("at least one label is required")
+	}
+
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+
+	payload, _ := json.Marshal(map[string][]string{"labels": cleaned})
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d/labels", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), issueNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	s.applyGitHubHeaders(req, token)
+	req.Header.Set("Content-Type", "application/json")
+	return s.doGitHubJSON(req, nil)
+}
+
 func (s *GitHubService) ListAssignedIssues(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssue, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository reference is required")
@@ -683,6 +816,20 @@ func (s *GitHubService) ListAssignedIssuesWithPullRequests(ctx context.Context, 
 		items = append(items, GitHubIssueWithPullRequest{Issue: issue, PullRequest: *pr})
 	}
 	return items, nil
+}
+
+func cleanGitHubStringList(items []string) []string {
+	out := make([]string, 0, len(items))
+	seen := map[string]bool{}
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 type githubIssueAPI struct {

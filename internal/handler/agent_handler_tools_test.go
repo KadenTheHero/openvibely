@@ -16,13 +16,19 @@ func TestDefaultAgentToolsIncludesSelectedMemoryView(t *testing.T) {
 	}
 }
 
-func TestNormalizeAgentToolsKeepsRuntimeMessagingAndTaskGoalTools(t *testing.T) {
+func TestNormalizeAgentToolsKeepsRuntimeMessagingGitHubAndTaskGoalTools(t *testing.T) {
 	input := []string{
 		"get_task_goal",
 		"mark_task_goal_achieved",
 		"report_task_goal_blocked",
 		"send_to_task",
 		"send_message",
+		"github_create_issue",
+		"github_get_issue",
+		"github_list_assigned_issues_with_prs",
+		"github_comment_on_issue",
+		"github_add_issue_labels",
+		"github_link_task_to_issue",
 	}
 
 	tools := normalizeAgentTools(input)

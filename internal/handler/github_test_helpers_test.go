@@ -8,16 +8,22 @@ import (
 )
 
 type fakeGitHubService struct {
-	statusFn      func(ctx context.Context) (service.GitHubConnectionStatus, error)
-	connectURLFn  func(ctx context.Context) (string, error)
-	callbackFn    func(ctx context.Context, installationID string) error
-	disconnectFn  func(ctx context.Context) error
-	cloneFn       func(ctx context.Context, projectID, repoURL string) (string, string, error)
-	recloneFn     func(ctx context.Context, projectID, currentRepoPath, repoURL string) (string, string, error)
-	resolveRepoFn func(ctx context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error)
-	pushBranchFn  func(ctx context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error
-	findPRFn      func(ctx context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error)
-	createPRFn    func(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error)
+	statusFn               func(ctx context.Context) (service.GitHubConnectionStatus, error)
+	connectURLFn           func(ctx context.Context) (string, error)
+	callbackFn             func(ctx context.Context, installationID string) error
+	disconnectFn           func(ctx context.Context) error
+	cloneFn                func(ctx context.Context, projectID, repoURL string) (string, string, error)
+	recloneFn              func(ctx context.Context, projectID, currentRepoPath, repoURL string) (string, string, error)
+	resolveRepoFn          func(ctx context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error)
+	pushBranchFn           func(ctx context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error
+	findPRFn               func(ctx context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error)
+	createPRFn             func(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error)
+	createIssueFn          func(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error)
+	getIssueFn             func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error)
+	listAssignedIssuesPRFn func(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssueWithPullRequest, error)
+	findIssuePRFn          func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubPullRequest, error)
+	commentOnIssueFn       func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error
+	addLabelsToIssueFn     func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, labels []string) error
 }
 
 func (f *fakeGitHubService) GetConnectionStatus(ctx context.Context) (service.GitHubConnectionStatus, error) {
@@ -88,4 +94,46 @@ func (f *fakeGitHubService) CreatePullRequest(ctx context.Context, repo *service
 		return f.createPRFn(ctx, repo, createReq)
 	}
 	return nil, fmt.Errorf("create PR not configured")
+}
+
+func (f *fakeGitHubService) CreateIssue(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error) {
+	if f != nil && f.createIssueFn != nil {
+		return f.createIssueFn(ctx, repo, createReq)
+	}
+	return nil, fmt.Errorf("create issue not configured")
+}
+
+func (f *fakeGitHubService) GetIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error) {
+	if f != nil && f.getIssueFn != nil {
+		return f.getIssueFn(ctx, repo, issueNumber)
+	}
+	return nil, fmt.Errorf("get issue not configured")
+}
+
+func (f *fakeGitHubService) ListAssignedIssuesWithPullRequests(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssueWithPullRequest, error) {
+	if f != nil && f.listAssignedIssuesPRFn != nil {
+		return f.listAssignedIssuesPRFn(ctx, repo, assignee)
+	}
+	return nil, fmt.Errorf("list assigned issues with PRs not configured")
+}
+
+func (f *fakeGitHubService) FindPullRequestForIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubPullRequest, error) {
+	if f != nil && f.findIssuePRFn != nil {
+		return f.findIssuePRFn(ctx, repo, issueNumber)
+	}
+	return nil, nil
+}
+
+func (f *fakeGitHubService) CommentOnIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error {
+	if f != nil && f.commentOnIssueFn != nil {
+		return f.commentOnIssueFn(ctx, repo, issueNumber, bodyText)
+	}
+	return fmt.Errorf("comment on issue not configured")
+}
+
+func (f *fakeGitHubService) AddLabelsToIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, labels []string) error {
+	if f != nil && f.addLabelsToIssueFn != nil {
+		return f.addLabelsToIssueFn(ctx, repo, issueNumber, labels)
+	}
+	return fmt.Errorf("add labels to issue not configured")
 }

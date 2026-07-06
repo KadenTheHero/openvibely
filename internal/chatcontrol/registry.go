@@ -89,6 +89,7 @@ const (
 	DomainProjects    Domain = "projects"
 	DomainSettings    Domain = "settings"
 	DomainMessaging   Domain = "messaging"
+	DomainGitHub      Domain = "github"
 	DomainMemory      Domain = "memory"
 	DomainChat        Domain = "chat"
 )
@@ -137,6 +138,13 @@ const createSwarmTaskParams = `{"type":"object","properties":{"title":{"type":"s
 const editTaskParams = `{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog","scheduled"]},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string"},"agent_id":{"type":"string"},"agent_config_id":{"type":"string"},"chain":` + chainSchemaProperties + `,"attachments":{"type":"array","items":{"type":"string"}}},"required":["id"],"additionalProperties":false}`
 
 const sendMessageParams = `{"type":"object","properties":{"action":{"type":"string","enum":["send","list"],"description":"send delivers a message. list returns configured outbound targets including their target_kind."},"target":{"type":"string","description":"Delivery target. Format: platform, platform:#target-name, platform:target_id, or platform:target_id:thread_id. Saved outbound targets and home targets are preferred first. Authorized channel users/senders can be used as direct recipients, including email:person@example.com for an authorized Email sender, telegram:123456789 for an authorized Telegram numeric user ID, and slack:user:U123... or discord:user:1518288288572641398 for direct messages. Arbitrary unsaved explicit targets require the project policy. For Discord channel sends use discord:channel:<channel_id> or discord:channel:<channel_id>:<thread_id>. Prefer saved/named targets; call action=list to see configured targets."},"message":{"type":"string","description":"Text to send."},"subject":{"type":"string","description":"Optional subject for email targets. Ignored by chat platforms."}},"additionalProperties":false}`
+
+const githubCreateIssueParams = `{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as suggestion, bug, approved, in-progress. Do not use an openvibely: prefix."},"assignees":{"type":"array","items":{"type":"string"}}},"required":["title"],"additionalProperties":false}`
+const githubIssueNumberParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1}},"required":["issue_number"],"additionalProperties":false}`
+const githubListAssignedIssuesParams = `{"type":"object","properties":{"assignee":{"type":"string","description":"GitHub login assigned to the issue inbox."}},"required":["assignee"],"additionalProperties":false}`
+const githubCommentIssueParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"body":{"type":"string"}},"required":["issue_number","body"],"additionalProperties":false}`
+const githubAddLabelsParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as approved, in-progress, pr-opened. Do not use an openvibely: prefix."}},"required":["issue_number","labels"],"additionalProperties":false}`
+const githubLinkTaskIssueParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"issue_number":{"type":"integer","minimum":1}},"required":["issue_number"],"additionalProperties":false}`
 
 // registry is the canonical list of all chat-controllable actions.
 // Order matters for prompt/documentation consistency.
@@ -296,6 +304,67 @@ var registry = []ActionDef{
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(sendMessageParams),
+	},
+	// --- GitHub domain ---
+	{
+		Name:         "github_create_issue",
+		Description:  "Create a GitHub issue in the current project's repository using plain labels such as suggestion, bug, approved, in-progress, or pr-opened. Labels must not use an openvibely: prefix.",
+		Domain:       DomainGitHub,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(githubCreateIssueParams),
+	},
+	{
+		Name:         "github_get_issue",
+		Description:  "Read a GitHub issue from the current project's repository, including body, creator, assignees, and labels.",
+		Domain:       DomainGitHub,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(githubIssueNumberParams),
+	},
+	{
+		Name:         "github_list_assigned_issues_with_prs",
+		Description:  "List open GitHub issues assigned to a login only when each issue already has an associated pull request. Assigned issues without an associated PR are skipped by automation.",
+		Domain:       DomainGitHub,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(githubListAssignedIssuesParams),
+	},
+	{
+		Name:         "github_comment_on_issue",
+		Description:  "Post a comment to a GitHub issue in the current project's repository.",
+		Domain:       DomainGitHub,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(githubCommentIssueParams),
+	},
+	{
+		Name:         "github_add_issue_labels",
+		Description:  "Add plain labels to a GitHub issue, such as approved, in-progress, task-created, pr-opened, blocked, bug, performance, or duplication. Do not use an openvibely: prefix.",
+		Domain:       DomainGitHub,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(githubAddLabelsParams),
+	},
+	{
+		Name:         "github_link_task_to_issue",
+		Description:  "Persist an issue-to-task/PR link for the current project. The issue must already have an associated pull request; otherwise the link is skipped and no task work should start.",
+		Domain:       DomainGitHub,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(githubLinkTaskIssueParams),
 	},
 	// --- Schedules domain (RW in orchestrate) ---
 	{
@@ -556,6 +625,10 @@ func allSurfaces() []Surface {
 
 func bothModes() []models.ChatMode {
 	return []models.ChatMode{models.ChatModeOrchestrate, models.ChatModePlan}
+}
+
+func webAPISurfaces() []Surface {
+	return []Surface{SurfaceWeb, SurfaceAPI}
 }
 
 // ---- Public query API ----

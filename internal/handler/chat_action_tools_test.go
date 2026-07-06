@@ -8,6 +8,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -416,5 +417,88 @@ func TestWebAPISwitchProject_IsInformationalOnly(t *testing.T) {
 		if count != 0 {
 			t.Errorf("web/API switch_project must not write to %s: found %d row(s)", table, count)
 		}
+	}
+}
+
+func TestGitHubLinkTaskToIssueSkipsWithoutAssociatedPR(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "GitHub Loop", RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Fix issue", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+		},
+		getIssueFn: func(_ context.Context, _ *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error) {
+			return &service.GitHubIssue{Number: issueNumber, URL: "https://github.com/openvibely/openvibely/issues/77", Title: "Issue"}, nil
+		},
+		findIssuePRFn: func(_ context.Context, _ *service.GitHubRepoRef, issueNumber int) (*service.GitHubPullRequest, error) {
+			return nil, nil
+		},
+	})
+	params := streamingResponseParams{ProjectID: project.ID}
+	out, err := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["github_link_task_to_issue"](ctx, json.RawMessage(`{"task_id":"`+task.ID+`","issue_number":77}`))
+	if err != nil {
+		t.Fatalf("github_link_task_to_issue returned error: %v", err)
+	}
+	if !strings.Contains(out, `"skipped":true`) || !strings.Contains(out, "associated pull request") {
+		t.Fatalf("expected skipped-without-pr result, got %s", out)
+	}
+	record, err := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("lookup task PR record: %v", err)
+	}
+	if record != nil {
+		t.Fatalf("expected no task PR record when issue has no associated PR, got %#v", record)
+	}
+}
+
+func TestGitHubLinkTaskToIssuePersistsAssociatedPR(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "GitHub Loop", RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Fix issue", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+		},
+		getIssueFn: func(_ context.Context, _ *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error) {
+			return &service.GitHubIssue{Number: issueNumber, URL: "https://github.com/openvibely/openvibely/issues/77", Title: "Issue"}, nil
+		},
+		findIssuePRFn: func(_ context.Context, _ *service.GitHubRepoRef, issueNumber int) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 88, URL: "https://github.com/openvibely/openvibely/pull/88", State: "open"}, nil
+		},
+	})
+	params := streamingResponseParams{ProjectID: project.ID}
+	out, err := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["github_link_task_to_issue"](ctx, json.RawMessage(`{"task_id":"`+task.ID+`","issue_number":77}`))
+	if err != nil {
+		t.Fatalf("github_link_task_to_issue returned error: %v", err)
+	}
+	if !strings.Contains(out, `"ok":true`) || !strings.Contains(out, `"issue_number":77`) {
+		t.Fatalf("expected linked result, got %s", out)
+	}
+	record, err := h.taskPullRequestRepo.GetByIssueNumber(ctx, 77)
+	if err != nil {
+		t.Fatalf("lookup task PR record: %v", err)
+	}
+	if record == nil || record.TaskID != task.ID || record.PRNumber != 88 || record.IssueNumber == nil || *record.IssueNumber != 77 {
+		t.Fatalf("unexpected task PR record: %#v", record)
+	}
+	if record.IssueURL != "https://github.com/openvibely/openvibely/issues/77" {
+		t.Fatalf("unexpected issue URL: %q", record.IssueURL)
 	}
 }
