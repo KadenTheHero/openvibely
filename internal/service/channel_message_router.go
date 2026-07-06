@@ -49,7 +49,7 @@ type outboundDiscordDMSender interface {
 }
 
 type outboundAuthorizedUserStore interface {
-	IsAuthorizedForProject(ctx context.Context, projectID, userID string) (bool, error)
+	IsAuthorized(ctx context.Context, projectID, userID string) (bool, error)
 }
 
 type outboundAuthorizedUserAnywhereStore interface {
@@ -62,6 +62,7 @@ type ChannelMessageRouter struct {
 	email        outboundEmailSender
 	discord      outboundDiscordSender
 	slackAuth    outboundAuthorizedUserStore
+	emailAuth    outboundAuthorizedUserStore
 	discordAuth  outboundAuthorizedUserStore
 	targets      channelTargetStore
 	settings     *repository.SettingsRepo
@@ -107,6 +108,9 @@ func (r *ChannelMessageRouter) SetEmailService(svc outboundEmailSender)       { 
 func (r *ChannelMessageRouter) SetDiscordService(svc outboundDiscordSender)   { r.discord = svc }
 func (r *ChannelMessageRouter) SetSlackAuthStore(store outboundAuthorizedUserStore) {
 	r.slackAuth = store
+}
+func (r *ChannelMessageRouter) SetEmailAuthStore(store outboundAuthorizedUserStore) {
+	r.emailAuth = store
 }
 func (r *ChannelMessageRouter) SetDiscordAuthStore(store outboundAuthorizedUserStore) {
 	r.discordAuth = store
@@ -378,12 +382,17 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 			return resolvedMessageTarget{}, fmt.Errorf("Bare Discord snowflake targets are ambiguous; save the channel target or use discord:channel:<channel_id>:<thread_id>")
 		}
 	}
+	if platform == "email" && threadID == "" {
+		emailTarget, emailErr := r.resolveAuthorizedEmailTarget(ctx, projectID, ref)
+		if emailErr == nil {
+			return emailTarget, nil
+		}
+	}
 	if !r.allowExplicitTargets(ctx, projectID) {
 		return resolvedMessageTarget{}, fmt.Errorf("Explicit %s target is not saved for this project; call send_message with action=list", platform)
 	}
-	return resolvedMessageTarget{Platform: platform, TargetKind: "channel", TargetID: ref, ThreadID: threadID}, nil
+	return resolvedMessageTarget{Platform: platform, TargetKind: defaultResolvedTargetKind(platform), TargetID: ref, ThreadID: threadID}, nil
 }
-
 func (r *ChannelMessageRouter) dispatch(ctx context.Context, req SendMessageRequest, target resolvedMessageTarget) SendMessageResult {
 	switch target.Platform {
 	case "slack":
@@ -547,20 +556,41 @@ func (r *ChannelMessageRouter) resolveAuthorizedDirectUserTarget(ctx context.Con
 	if store == nil {
 		return resolvedMessageTarget{}, fmt.Errorf("%s authorized-user store is not configured", platform)
 	}
-	allowed, err := store.IsAuthorizedForProject(ctx, projectID, userID)
+	allowed, err := store.IsAuthorized(ctx, projectID, userID)
 	if err != nil {
 		return resolvedMessageTarget{}, err
 	}
 	if !allowed {
-		return resolvedMessageTarget{}, fmt.Errorf("%s user is not authorized for outbound direct messages in this project", platform)
+		return resolvedMessageTarget{}, fmt.Errorf("%s user is not authorized for outbound direct messages", platform)
 	}
 	return resolvedMessageTarget{Platform: platform, TargetKind: "user", TargetID: userID, DirectUser: true}, nil
+}
+
+func (r *ChannelMessageRouter) resolveAuthorizedEmailTarget(ctx context.Context, projectID, emailAddress string) (resolvedMessageTarget, error) {
+	store := r.authorizedUserStore("email")
+	if store == nil {
+		return resolvedMessageTarget{}, fmt.Errorf("email authorized-sender store is not configured")
+	}
+	normalized, err := NormalizeOutboundEmailForTarget(emailAddress)
+	if err != nil {
+		return resolvedMessageTarget{}, err
+	}
+	allowed, err := store.IsAuthorized(ctx, projectID, normalized)
+	if err != nil {
+		return resolvedMessageTarget{}, err
+	}
+	if !allowed {
+		return resolvedMessageTarget{}, fmt.Errorf("email recipient is not an authorized sender")
+	}
+	return resolvedMessageTarget{Platform: "email", TargetKind: "email", TargetID: normalized}, nil
 }
 
 func (r *ChannelMessageRouter) authorizedUserStore(platform string) outboundAuthorizedUserStore {
 	switch platform {
 	case "slack":
 		return r.slackAuth
+	case "email":
+		return r.emailAuth
 	case "discord":
 		return r.discordAuth
 	default:
@@ -583,6 +613,17 @@ func NormalizeOutboundEmailForTarget(email string) (string, error) {
 		return "", fmt.Errorf("invalid email recipient")
 	}
 	return repository.NormalizeEmailAddress(addr.Address), nil
+}
+
+func defaultResolvedTargetKind(platform string) string {
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "telegram":
+		return "chat"
+	case "email":
+		return "email"
+	default:
+		return "channel"
+	}
 }
 
 func (r *ChannelMessageRouter) allowExplicitTargets(ctx context.Context, projectID string) bool {

@@ -2035,7 +2035,7 @@ func OutboundTargetsSection(currentProjectID string, targets []models.ChannelTar
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 188, "\"><div><div class=\"pr-10\"><h3 class=\"card-title\">Outbound Message Targets</h3></div><div class=\"alert alert-info mt-3 mb-4 text-sm\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-5 h-5\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">Saved destinations for send_message</p><p class=\"text-xs opacity-80 mt-1\">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, `discord:#ops`, or `email:#client`. For Slack and Discord user DMs, add a User DM target here — that is separate from Authorized Users (who can control OpenVibely).</p><p class=\"text-xs opacity-70 mt-1\">Authorized Users control who can talk to OpenVibely. Outbound targets control where agents may send messages. Adding someone as an outbound DM target does not let them control OpenVibely.</p></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 188, "\"><div><div class=\"pr-10\"><h3 class=\"card-title\">Outbound Message Targets</h3></div><div class=\"alert alert-info mt-3 mb-4 text-sm\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-5 h-5\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">Saved destinations for send_message</p><p class=\"text-xs opacity-80 mt-1\">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, `discord:#ops`, or `email:#client`. Saved targets and Home targets are preferred first.</p><p class=\"text-xs opacity-70 mt-1\">Authorized channel users/senders can also be direct recipients, such as authorized Email senders or Slack/Discord user DMs. Other arbitrary unsaved targets require the project policy below.</p></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2047,7 +2047,7 @@ func OutboundTargetsSection(currentProjectID string, targets []models.ChannelTar
 			var templ_7745c5c3_Var86 string
 			templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.JoinStringErrs(notice)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2134, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 2135, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var86))
 			if templ_7745c5c3_Err != nil {

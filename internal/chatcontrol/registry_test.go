@@ -21,7 +21,7 @@ func TestRegistry_AllActionsHaveValidJSON(t *testing.T) {
 	}
 }
 
-func TestRegistry_SendMessageTargetDescriptionMentionsAuthorizedUserDMs(t *testing.T) {
+func TestRegistry_SendMessageTargetDescriptionMentionsAuthorizedRecipients(t *testing.T) {
 	def := Get("send_message")
 	if def == nil {
 		t.Fatal("send_message action missing")
@@ -37,6 +37,12 @@ func TestRegistry_SendMessageTargetDescriptionMentionsAuthorizedUserDMs(t *testi
 	desc := schema.Properties["target"].Description
 	if !strings.Contains(desc, "slack:user:U123") || !strings.Contains(desc, "discord:user:1518288288572641398") {
 		t.Fatalf("send_message target description should mention user DM syntax, got %q", desc)
+	}
+	if !strings.Contains(desc, "email:person@example.com") || !strings.Contains(desc, "Authorized channel users/senders") {
+		t.Fatalf("send_message target description should mention authorized channel recipients, got %q", desc)
+	}
+	if !strings.Contains(desc, "Saved outbound targets and home targets are preferred first") || !strings.Contains(desc, "Arbitrary unsaved explicit targets require the project policy") {
+		t.Fatalf("send_message target description should explain target authorization precedence, got %q", desc)
 	}
 	if !strings.Contains(desc, "discord:channel:<channel_id>") {
 		t.Fatalf("send_message target description should explain explicit Discord channel disambiguation, got %q", desc)

@@ -568,6 +568,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	channelMessageRouter.SetSlackService(slackSvc)
 	channelMessageRouter.SetSlackAuthStore(slackAuthRepo)
 	channelMessageRouter.SetEmailService(emailSvc)
+	channelMessageRouter.SetEmailAuthStore(emailAuthRepo)
 	slackSvc.SetChannelMessageRouter(channelMessageRouter)
 	emailSvc.SetChannelMessageRouter(channelMessageRouter)
 	emailSvc.SetCustomPersonalityRepo(customPersonalityRepo)
