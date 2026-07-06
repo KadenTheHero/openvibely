@@ -206,6 +206,51 @@ func TestBuildCatalog_LoadsTrackedOpenVibelyProjectGuidance(t *testing.T) {
 	}
 }
 
+func TestBuildCatalog_LoadsGitHubAutonomousSDLCBootstrapSkill(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	repoRoot := filepath.Clean(filepath.Join(wd, "..", ".."))
+	projectRoot := filepath.Join(repoRoot, ".openvibely")
+
+	cat, err := BuildCatalog("t", "", projectRoot)
+	if err != nil {
+		t.Fatalf("build catalog: %v", err)
+	}
+	entry, ok := cat.Lookup("openvibely_github_autonomous_sdlc_bootstrap")
+	if !ok {
+		t.Fatalf("expected tracked GitHub autonomous SDLC bootstrap skill in project catalog")
+	}
+	if entry.Source != SourceProject {
+		t.Fatalf("expected project-scoped GitHub bootstrap skill, got %s", entry.Source)
+	}
+	if !strings.HasPrefix(entry.AbsolutePath, filepath.Join(projectRoot, SkillsDir, "openvibely_github_autonomous_sdlc_bootstrap")) {
+		t.Fatalf("expected GitHub bootstrap skill under project .openvibely/skills, got %s", entry.AbsolutePath)
+	}
+	body, err := os.ReadFile(entry.AbsolutePath)
+	if err != nil {
+		t.Fatalf("read GitHub bootstrap skill: %v", err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"visible scheduled OpenVibely tasks",
+		"generic GitHub runtime tools",
+		"Do not create hidden daemon or poller services",
+		"github_get_project_inbox",
+		"github_list_assigned_issues_with_prs",
+		"github_open_pull_request",
+		"Never use labels beginning with `openvibely:`",
+		"Assigned GitHub issues without an associated PR must be skipped",
+		"Use `github_get_project_inbox` to get the assignee login",
+		"Use `github_list_assigned_issues_with_prs` for that assignee",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("GitHub bootstrap skill missing %q", want)
+		}
+	}
+}
+
 func TestBuildCatalog_IgnoresMissingRoots(t *testing.T) {
 	cat, err := BuildCatalog("t", "/nonexistent/global", "/nonexistent/project")
 	if err != nil {
