@@ -1029,24 +1029,8 @@ func validatePlannerOutput(output PlannerOutput, parentCfg models.SwarmConfig) e
 		if iso != "read_only" && iso != "worktree" {
 			return fmt.Errorf("code-changing worker %q must use worktree isolation", w.Title)
 		}
-		if isDependentValidationWorker(w) {
-			return fmt.Errorf("worker %q describes validating after other workers complete, which the swarm cannot schedule as a parallel worker; move that validation into reviewer_prompt or merger_prompt instead", w.Title)
-		}
 	}
 	return nil
-}
-
-// dependentValidationLanguage matches worker titles/prompts that describe running
-// only after other workers finish (e.g. "after implementation workers have produced
-// candidate fixes..."). Planner-created workers in the workers array are all submitted
-// as ordinary parallel workers with no inter-worker dependency scheduling, so a worker
-// that encodes this kind of sequencing in natural language will run immediately
-// alongside (or before) the workers it claims to depend on. That validation intent
-// belongs in reviewer_prompt/merger_prompt, which are mechanically phased after workers.
-var dependentValidationLanguage = regexp.MustCompile(`(?i)(after|once|when)\b[^.]{0,80}\bworkers?\b[^.]{0,80}\b(complet\w*|finish\w*|produc\w*|are\s+done|is\s+done)\b`)
-
-func isDependentValidationWorker(w PlannerWorker) bool {
-	return dependentValidationLanguage.MatchString(w.Title) || dependentValidationLanguage.MatchString(w.Prompt)
 }
 
 func validateFollowupPlannerOutput(output PlannerOutput, existing []models.Task, parentCfg models.SwarmConfig) error {
@@ -1070,11 +1054,6 @@ func validateFollowupPlannerOutput(output PlannerOutput, existing []models.Task,
 	}
 	if parentCfg.MaxWorkers > 0 && workerCount+newWorkers > parentCfg.MaxWorkers {
 		return fmt.Errorf("coordinator output would create %d workers, max is %d", workerCount+newWorkers, parentCfg.MaxWorkers)
-	}
-	for _, w := range output.Workers {
-		if isDependentValidationWorker(w) {
-			return fmt.Errorf("worker %q describes validating after other workers complete, which the swarm cannot schedule as a parallel worker; move that validation into reviewer_prompt or merger_prompt instead", w.Title)
-		}
 	}
 	return nil
 }

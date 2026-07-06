@@ -488,6 +488,12 @@ func TestPlannerPromptRoleBoundsPlannerToDelegationOnly(t *testing.T) {
 		"Do not implement the requested feature or bug fix yourself.",
 		"Do not modify, create, delete, format, or regenerate files.",
 		"Do not run build, test, formatter, generator, git, or shell commands.",
+		"Every entry in workers runs immediately and in parallel with every other worker.",
+		"There is no dependency scheduling between workers",
+		"natural-language phrasing like \"after the other workers complete\" or \"once implementation is done\" inside a worker's title/prompt will NOT be enforced.",
+		"Never create a worker whose job is to validate, test, or review the output of other workers in this same plan.",
+		"That work belongs in reviewer_prompt",
+		"Only put independent, immediately-runnable implementation objectives in workers.",
 		"Return exactly one raw JSON object and nothing else.",
 		"Do not wrap the JSON in Markdown fences.",
 		"\"workers\"",
@@ -511,6 +517,11 @@ func TestCoordinatorFollowupPromptRoleBoundsPlannerToDelegationOnly(t *testing.T
 		"Do not implement the follow-up yourself.",
 		"Do not modify, create, delete, format, or regenerate files.",
 		"Do not run build, test, formatter, generator, git, or shell commands.",
+		"Every entry in workers runs immediately and in parallel with every other worker, including carried-forward existing workers.",
+		"There is no dependency scheduling between workers",
+		"natural-language phrasing like \"after the other workers complete\" inside a worker's title/prompt will NOT be enforced.",
+		"Never create or update a worker whose job is to validate, test, or review the output of other workers in this plan.",
+		"That work belongs in reviewer_prompt",
 		"Return exactly one raw JSON object and nothing else.",
 		"Do not wrap the JSON in Markdown fences.",
 		"For existing affected workers, include their existing task_id.",
@@ -657,72 +668,6 @@ func TestSwarmServiceInvalidPlannerExecutionBlocksParent(t *testing.T) {
 	parent, _ = repo.GetByID(context.Background(), parent.ID)
 	if parent.Status != models.StatusBlocked || parent.SwarmStatus != "blocked" {
 		t.Fatalf("parent not blocked: status=%s swarm_status=%s", parent.Status, parent.SwarmStatus)
-	}
-}
-
-func TestValidatePlannerOutputRejectsDependentValidationWorker(t *testing.T) {
-	parentCfg := models.SwarmConfig{MaxWorkers: 4, ReviewerEnabled: true, MergerEnabled: true}
-	output := PlannerOutput{
-		Workers: []PlannerWorker{
-			{Title: "Backend worker", Prompt: "Implement the fix", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true},
-			{Title: "Validation runner", Prompt: "After implementation workers have produced candidate fixes, validate the changes and report results.", WorkerKind: "validation", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true},
-		},
-		ReviewerPrompt: "Review workers",
-		MergerPrompt:   "Integrate workers",
-	}
-	err := validatePlannerOutput(output, parentCfg)
-	if err == nil {
-		t.Fatal("expected validation error for dependent validation worker")
-	}
-	if !strings.Contains(err.Error(), "Validation runner") {
-		t.Fatalf("expected error to reference offending worker, got: %v", err)
-	}
-}
-
-func TestSwarmServiceAppliesPlannerOutputRejectsDependentValidationWorker(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := repository.NewTaskRepo(db, nil)
-	execRepo := repository.NewExecutionRepo(db)
-	taskSvc := NewTaskService(repo, nil, nil)
-	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
-
-	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{ProjectID: "default", Title: "Fix execution stream terminal catch-up", Prompt: "Fix execution stream terminal catch-up", MaxWorkers: 4, ReviewerEnabled: true, MergerEnabled: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	planner, err := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRolePlanner)
-	if err != nil || planner == nil {
-		t.Fatalf("planner missing: %v", err)
-	}
-
-	output := PlannerOutput{
-		Workers: []PlannerWorker{
-			{Title: "Stream worker", Prompt: "Fix catch-up/flush races", WorkerKind: "backend", Ownership: []string{"internal/llm"}, Isolation: "worktree", Required: true},
-			{Title: "Frontend worker", Prompt: "Update stream consumer", WorkerKind: "frontend", Ownership: []string{"web"}, Isolation: "worktree", Required: true},
-			{Title: "Test worker", Prompt: "Add regression tests", WorkerKind: "test", Ownership: []string{"internal/llm"}, Isolation: "worktree", Required: true},
-			{Title: "Validation runner", Prompt: "After implementation workers have produced candidate fixes, run the full test suite and validate the resulting worktree diff.", WorkerKind: "validation", Ownership: []string{"internal/llm"}, Isolation: "worktree", Required: true},
-		},
-		ReviewerPrompt: "Review worker diffs",
-		MergerPrompt:   "Merge accepted worker changes",
-	}
-
-	if err := svc.ApplyPlannerOutput(context.Background(), planner.ID, output); err == nil {
-		t.Fatal("expected ApplyPlannerOutput to reject a validation-only worker in the parallel worker set")
-	}
-
-	children, err := repo.ListSwarmChildren(context.Background(), parent.ID)
-	if err != nil {
-		t.Fatalf("ListSwarmChildren: %v", err)
-	}
-	for _, child := range children {
-		if child.SwarmRole == models.SwarmRoleWorker {
-			t.Fatalf("no worker should have been created/started from a rejected plan, got: %#v", child)
-		}
-	}
-
-	planner, _ = repo.GetByID(context.Background(), planner.ID)
-	if planner.Status != models.StatusFailed || planner.SwarmStatus != "invalid_plan" {
-		t.Fatalf("planner not marked invalid: status=%s swarm_status=%s", planner.Status, planner.SwarmStatus)
 	}
 }
 
