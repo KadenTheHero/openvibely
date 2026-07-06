@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -852,6 +853,7 @@ func TestExecutionRepo_RecoverStaleRunningTaskExecutionsRepairsPendingTaskCrashL
 //     expected_turn_id set, so it should appear in the list.
 //  2. After PreparePendingSteering — expected_turn_id is cleared (row is in-flight),
 //     so it must be hidden from the list.
+//
 // TestExecutionRepo_RecoverStaleRunningTaskExecutionsPreservesRunningScheduledTask
 // is a regression test for a bug where recurring scheduled tasks (e.g. the
 // built-in "System: Memory Consolidation" task and any other cron-style task
@@ -894,6 +896,78 @@ func TestExecutionRepo_RecoverStaleRunningTaskExecutionsPreservesRunningSchedule
 	}
 	if stored.Status != models.ExecRunning {
 		t.Fatalf("expected live scheduled-task execution to remain running, got %s (error=%q)", stored.Status, stored.ErrorMessage)
+	}
+}
+
+func TestExecutionRepo_RecoverStaleRunningTaskExecutionsPreservesActiveSwarmChildWhenParentTerminal(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	taskRepo := NewTaskRepo(db, nil)
+	parent := &models.Task{ProjectID: project.ID, Title: "Swarm parent", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "parent", SwarmRole: models.SwarmRoleParent, SwarmStatus: "current"}
+	if err := taskRepo.Create(ctx, parent); err != nil {
+		t.Fatalf("create swarm parent: %v", err)
+	}
+	child := &models.Task{ProjectID: project.ID, Title: "Swarm worker", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "worker", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker, SwarmStatus: "running"}
+	if err := taskRepo.Create(ctx, child); err != nil {
+		t.Fatalf("create swarm child: %v", err)
+	}
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	liveExec := &models.Execution{TaskID: child.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "still working"}
+	if err := execRepo.Create(ctx, liveExec); err != nil {
+		t.Fatalf("create live execution: %v", err)
+	}
+
+	recovered, err := execRepo.RecoverStaleRunningTaskExecutions(ctx)
+	if err != nil {
+		t.Fatalf("RecoverStaleRunningTaskExecutions: %v", err)
+	}
+	if recovered != 0 {
+		t.Fatalf("expected 0 recovered executions for active swarm child, got %d", recovered)
+	}
+	stored, err := execRepo.GetByID(ctx, liveExec.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored.Status != models.ExecRunning {
+		t.Fatalf("expected active swarm child execution to remain running, got %s (error=%q)", stored.Status, stored.ErrorMessage)
+	}
+}
+
+func TestExecutionRepo_RecoverStaleRunningTaskExecutionsStillRecoversInactiveSwarmChild(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	taskRepo := NewTaskRepo(db, nil)
+	parent := &models.Task{ProjectID: project.ID, Title: "Swarm parent", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "parent", SwarmRole: models.SwarmRoleParent, SwarmStatus: "running"}
+	if err := taskRepo.Create(ctx, parent); err != nil {
+		t.Fatalf("create swarm parent: %v", err)
+	}
+	child := &models.Task{ProjectID: project.ID, Title: "Inactive swarm worker", Category: models.CategoryBacklog, Status: models.StatusRunning, Prompt: "worker", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker, SwarmStatus: "running"}
+	if err := taskRepo.Create(ctx, child); err != nil {
+		t.Fatalf("create inactive swarm child: %v", err)
+	}
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	staleExec := &models.Execution{TaskID: child.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "orphaned work"}
+	if err := execRepo.Create(ctx, staleExec); err != nil {
+		t.Fatalf("create stale execution: %v", err)
+	}
+
+	recovered, err := execRepo.RecoverStaleRunningTaskExecutions(ctx)
+	if err != nil {
+		t.Fatalf("RecoverStaleRunningTaskExecutions: %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("expected 1 recovered execution for inactive swarm child, got %d", recovered)
+	}
+	stored, err := execRepo.GetByID(ctx, staleExec.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored.Status != models.ExecFailed || !strings.Contains(stored.ErrorMessage, "Recovered stale running execution") {
+		t.Fatalf("expected inactive swarm child execution recovered as failed, got status=%s error=%q", stored.Status, stored.ErrorMessage)
 	}
 }
 

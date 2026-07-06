@@ -5373,6 +5373,51 @@ func TestHandler_GetTaskThread_ScheduledTaskExecutionSurvivesStaleRecoverySweep(
 	assert.NotContains(t, body, "Task failed")
 }
 
+func TestHandler_GetTaskThread_SwarmChildExecutionSurvivesParentTerminalStaleRecoverySweep(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Swarm Child Stale Recovery Project")
+	parent := createTask(t, h, project.ID, "Swarm Parent", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.Category = models.CategoryCompleted
+		tk.SwarmRole = models.SwarmRoleParent
+		tk.SwarmStatus = "current"
+		tk.AgentID = &agent.ID
+	})
+	worker := createTask(t, h, project.ID, "Swarm Worker", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.ParentTaskID = &parent.ID
+		tk.SwarmRole = models.SwarmRoleWorker
+		tk.SwarmStatus = "running"
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, worker.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Continue worker implementation"
+	})
+	assert.NoError(t, h.execRepo.UpdateOutput(ctx, exec.ID, "partial worker output"))
+
+	// The parent/container may be terminal while a child execution is still real
+	// runnable work. Stale recovery must not fail the child execution mid-stream.
+	_, err := h.execRepo.RecoverStaleRunningTaskExecutions(ctx)
+	assert.NoError(t, err)
+
+	stored, err := h.execRepo.GetByID(ctx, exec.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, models.ExecRunning, stored.Status, "running swarm child execution must not be reaped because of parent/container state")
+
+	rec := htmxGet(e, "/tasks/"+worker.ID+"/thread")
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, `data-streaming-resume="true"`)
+	assert.Contains(t, body, "partial worker output")
+	assert.NotContains(t, body, "Recovered stale running execution")
+	assert.NotContains(t, body, "Task failed")
+}
+
 // TestHandler_GetTaskThread_MultiTurnOrdering verifies that follow-up messages
 // appear after the original task prompt in the thread timeline (chronological order).
 // This was a bug where GetTask used ListByTask (DESC) instead of ListByTaskChronological (ASC),
