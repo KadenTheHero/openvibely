@@ -539,6 +539,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		cfg.GitHubAppPrivateKey,
 		cfg.ProjectRepoRoot,
 	)
+	llmSvc.SetGitHubIssueRuntimeProvider(githubSvc)
+	llmSvc.SetTaskPullRequestRepo(taskPullRequestRepo)
 	slackSvc := service.NewSlackService(
 		settingsRepo,
 		projectRepo,

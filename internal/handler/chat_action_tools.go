@@ -1209,15 +1209,21 @@ func assignedAgentToolDenied(toolName string, agentDef *models.Agent) bool {
 
 func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 	allowed := map[string]bool{
-		"view_task_thread":  true,
-		"send_to_task":      true,
-		"send_message":      true,
-		"set_task_goal":     true,
-		"clear_task_goal":   true,
-		"get_task_goal":     true,
-		"pause_task_goal":   true,
-		"resume_task_goal":  true,
-		"list_capabilities": true,
+		"view_task_thread":                     true,
+		"send_to_task":                         true,
+		"send_message":                         true,
+		"github_create_issue":                  true,
+		"github_get_issue":                     true,
+		"github_list_assigned_issues_with_prs": true,
+		"github_comment_on_issue":              true,
+		"github_add_issue_labels":              true,
+		"github_link_task_to_issue":            true,
+		"set_task_goal":                        true,
+		"clear_task_goal":                      true,
+		"get_task_goal":                        true,
+		"pause_task_goal":                      true,
+		"resume_task_goal":                     true,
+		"list_capabilities":                    true,
 	}
 	for _, tool := range explicitlyGrantedTaskThreadRuntimeTools(agentDef) {
 		allowed[tool] = true
@@ -1234,8 +1240,6 @@ func explicitlyGrantedTaskThreadRuntimeTools(agentDef *models.Agent) []string {
 		switch strings.ToLower(strings.TrimSpace(tool)) {
 		case "send_message":
 			granted = append(granted, "send_message")
-		case "github_create_issue", "github_get_issue", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_link_task_to_issue":
-			granted = append(granted, strings.ToLower(strings.TrimSpace(tool)))
 		}
 	}
 	granted = append(granted, explicitlyGrantedGoalStatusTools(agentDef)...)

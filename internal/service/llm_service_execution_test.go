@@ -3200,3 +3200,157 @@ func TestLLMService_ExecuteTask_ScopedFilesPrepFailureCompletesExecution(t *test
 		t.Fatalf("expected scoped files error message, got %q", execs[0].ErrorMessage)
 	}
 }
+
+type fakeGitHubIssueRuntimeProvider struct {
+	createIssueFn  func(context.Context, *GitHubRepoRef, GitHubCreateIssueRequest) (*GitHubIssue, error)
+	getIssueFn     func(context.Context, *GitHubRepoRef, int) (*GitHubIssue, error)
+	findPRFn       func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
+	addLabelsFn    func(context.Context, *GitHubRepoRef, int, []string) error
+	listIssuesFn   func(context.Context, *GitHubRepoRef, string) ([]GitHubIssueWithPullRequest, error)
+	commentIssueFn func(context.Context, *GitHubRepoRef, int, string) error
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) CreateIssue(ctx context.Context, repo *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+	if f.createIssueFn != nil {
+		return f.createIssueFn(ctx, repo, req)
+	}
+	return &GitHubIssue{Number: 1, URL: "https://github.com/openvibely/openvibely/issues/1", Title: req.Title, Labels: req.Labels}, nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error) {
+	if f.getIssueFn != nil {
+		return f.getIssueFn(ctx, repo, issueNumber)
+	}
+	return &GitHubIssue{Number: issueNumber, URL: fmt.Sprintf("https://github.com/openvibely/openvibely/issues/%d", issueNumber), Title: "Issue"}, nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) ListAssignedIssuesWithPullRequests(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error) {
+	if f.listIssuesFn != nil {
+		return f.listIssuesFn(ctx, repo, assignee)
+	}
+	return nil, nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) FindPullRequestForIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubPullRequest, error) {
+	if f.findPRFn != nil {
+		return f.findPRFn(ctx, repo, issueNumber)
+	}
+	return nil, nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) CommentOnIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, bodyText string) error {
+	if f.commentIssueFn != nil {
+		return f.commentIssueFn(ctx, repo, issueNumber, bodyText)
+	}
+	return nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, labels []string) error {
+	if f.addLabelsFn != nil {
+		return f.addLabelsFn(ctx, repo, issueNumber, labels)
+	}
+	for _, label := range labels {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(label)), "openvibely:") {
+			return fmt.Errorf("github issue labels must not use openvibely: prefix: %s", strings.TrimSpace(label))
+		}
+	}
+	return nil
+}
+
+func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "GitHub Runtime Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely.git"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Linked Task", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "work"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	provider := &fakeGitHubIssueRuntimeProvider{}
+	rt := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
+		ProjectID:           project.ID,
+		ProjectRepo:         projectRepo,
+		TaskRepo:            taskRepo,
+		TaskPullRequestRepo: prRepo,
+		GitHub:              provider,
+	})
+	if rt == nil || !rt.HasDefinition("github_create_issue") || !rt.HasDefinition("github_get_issue") || !rt.HasDefinition("github_add_issue_labels") || !rt.HasDefinition("github_link_task_to_issue") {
+		t.Fatalf("expected default GitHub runtime definitions for task runs, got %#v", rt)
+	}
+
+	_, handled, isErr, err := rt.Executor(ctx, "github_add_issue_labels", []byte(`{"issue_number":77,"labels":["openvibely:bug"]}`))
+	if !handled || !isErr || err == nil || !strings.Contains(err.Error(), "openvibely:") {
+		t.Fatalf("expected prefixed label rejection handled=%v isErr=%v err=%v", handled, isErr, err)
+	}
+
+	out, handled, isErr, err := rt.Executor(ctx, "github_link_task_to_issue", []byte(fmt.Sprintf(`{"task_id":"%s","issue_number":77}`, task.ID)))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected link skip success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if !strings.Contains(out, `"skipped":true`) || !strings.Contains(out, "no associated pull request") {
+		t.Fatalf("expected skip-without-pr output, got %s", out)
+	}
+	if record, err := prRepo.GetByIssueNumber(ctx, 77); err != nil || record != nil {
+		t.Fatalf("expected no persisted PR link for skipped issue, record=%#v err=%v", record, err)
+	}
+}
+
+func TestLLMServiceExecuteTaskWithAgentExposesGitHubToolsToInitialRuns(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = models.ProviderOpenAI
+	agent.AuthMethod = models.AuthMethodAPIKey
+	agent.APIKey = "test-key"
+	project := &models.Project{Name: "Initial GitHub Runtime Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely.git"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agentDef := &models.Agent{Key: "github_dev_poller", Name: "GitHub Dev Poller", Enabled: true, Tools: []string{"github_get_issue"}}
+	if err := agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Scheduled GitHub poller", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "poll assigned GitHub issues", AgentDefinitionID: &agentDef.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	capture := &captureProviderAdapter{}
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
+	svc.SetAgentRepo(agentRepo)
+	svc.SetGitHubIssueRuntimeProvider(&fakeGitHubIssueRuntimeProvider{})
+	svc.SetTaskPullRequestRepo(prRepo)
+
+	if _, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent); err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	rt := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx)
+	if rt == nil {
+		t.Fatal("expected runtime tools on provider request")
+	}
+	for _, name := range []string{"github_create_issue", "github_get_issue", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_link_task_to_issue"} {
+		if !rt.HasDefinition(name) {
+			t.Fatalf("expected %s on initial task run, got %#v", name, rt.Definitions)
+		}
+	}
+}

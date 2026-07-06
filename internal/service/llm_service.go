@@ -66,6 +66,8 @@ type LLMService struct {
 	executionStreamHub       *events.ExecutionStreamHub
 	queuedTaskThreadPromoter func(taskID string)
 	channelMessageRouter     *ChannelMessageRouter
+	githubIssueRuntime       GitHubIssueRuntimeProvider
+	taskPullRequestRepo      *repository.TaskPullRequestRepo
 	// globalSkillRoot is the parent directory holding <root>/agents for global
 	// agents/skills. It is used for catalog construction and bounded skill
 	// mutation writes; agents themselves remain user-managed.
@@ -181,6 +183,14 @@ func (s *LLMService) SetChannelMessageRouter(router *ChannelMessageRouter) {
 	s.channelMessageRouter = router
 }
 
+func (s *LLMService) SetGitHubIssueRuntimeProvider(provider GitHubIssueRuntimeProvider) {
+	s.githubIssueRuntime = provider
+}
+
+func (s *LLMService) SetTaskPullRequestRepo(repo *repository.TaskPullRequestRepo) {
+	s.taskPullRequestRepo = repo
+}
+
 func (s *LLMService) taskSendMessageRuntimeTools(task models.Task) *llmcontracts.RuntimeTools {
 	if s == nil || s.channelMessageRouter == nil || strings.TrimSpace(task.ProjectID) == "" {
 		return nil
@@ -204,6 +214,20 @@ func (s *LLMService) taskSendMessageRuntimeTools(task models.Task) *llmcontracts
 			},
 		}),
 	}
+}
+
+func (s *LLMService) taskActionRuntimeTools(task models.Task) *llmcontracts.RuntimeTools {
+	if s == nil {
+		return nil
+	}
+	githubTools := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
+		ProjectID:           task.ProjectID,
+		ProjectRepo:         s.projectRepo,
+		TaskRepo:            s.taskRepo,
+		TaskPullRequestRepo: s.taskPullRequestRepo,
+		GitHub:              s.githubIssueRuntime,
+	})
+	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), githubTools)
 }
 
 func (s *LLMService) promoteQueuedTaskThreadAfterCompletion(taskID string) {
@@ -605,7 +629,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	}
 	var taskActionTools *llmcontracts.RuntimeTools
 	if supportsRuntimeChatActionTools(agent) {
-		taskActionTools = s.taskSendMessageRuntimeTools(task)
+		taskActionTools = s.taskActionRuntimeTools(task)
 	}
 	runtimeToolsActive := false
 	if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil || taskActionTools != nil {
