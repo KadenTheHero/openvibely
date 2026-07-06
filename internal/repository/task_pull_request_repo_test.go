@@ -1,0 +1,51 @@
+package repository
+
+import (
+	"context"
+	"testing"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
+)
+
+func TestTaskPullRequestRepoGetByIssueNumber(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskPullRequestRepo(db)
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO projects (id, name, description, repo_path, repo_url) VALUES ('proj-pr-issue', 'PR Issue Project', '', '/tmp/repo', 'https://github.com/openvibely/openvibely')`); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO tasks (id, project_id, title, category, status) VALUES ('task-pr-issue', 'proj-pr-issue', 'Task', 'active', 'pending')`); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	issueNumber := 123
+	record := &models.TaskPullRequest{
+		TaskID:      "task-pr-issue",
+		PRNumber:    456,
+		PRURL:       "https://github.com/openvibely/openvibely/pull/456",
+		PRState:     "open",
+		IssueNumber: &issueNumber,
+		IssueURL:    "https://github.com/openvibely/openvibely/issues/123",
+	}
+	if err := repo.Upsert(ctx, record); err != nil {
+		t.Fatalf("upsert task pull request: %v", err)
+	}
+
+	got, err := repo.GetByIssueNumber(ctx, issueNumber)
+	if err != nil {
+		t.Fatalf("get by issue number: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected task pull request for issue number")
+	}
+	if got.TaskID != "task-pr-issue" || got.PRNumber != 456 {
+		t.Fatalf("unexpected record: %#v", got)
+	}
+	if got.IssueNumber == nil || *got.IssueNumber != issueNumber {
+		t.Fatalf("expected issue number %d, got %#v", issueNumber, got.IssueNumber)
+	}
+	if got.IssueURL != "https://github.com/openvibely/openvibely/issues/123" {
+		t.Fatalf("unexpected issue URL: %q", got.IssueURL)
+	}
+}

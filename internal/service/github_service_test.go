@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"testing"
@@ -401,4 +403,79 @@ func envContainsValue(env []string, value string) bool {
 		}
 	}
 	return false
+}
+
+func TestDefaultGitHubSDLCLabelsDoNotUseProductPrefix(t *testing.T) {
+	for _, label := range DefaultGitHubSDLCLabels {
+		if strings.HasPrefix(label, "openvibely:") {
+			t.Fatalf("default GitHub SDLC label must not use openvibely prefix: %q", label)
+		}
+	}
+}
+
+func TestListAssignedIssuesWithPullRequestsSkipsIssuesWithoutAssociatedPR(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	var issueListPath string
+	var timelinePaths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/openvibely/openvibely/issues":
+			issueListPath = r.URL.RawQuery
+			if r.URL.Query().Get("assignee") != "dev-bot" {
+				t.Fatalf("expected assignee query dev-bot, got %q", r.URL.Query().Get("assignee"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{"number":1,"html_url":"https://github.com/openvibely/openvibely/issues/1","title":"No PR","state":"open","user":{"login":"alice"},"assignees":[{"login":"dev-bot"}],"labels":[{"name":"bug"}]},
+				{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","title":"Has PR","state":"open","user":{"login":"alice"},"assignees":[{"login":"dev-bot"}],"labels":[{"name":"approved"}]},
+				{"number":3,"html_url":"https://github.com/openvibely/openvibely/pull/3","title":"PR issue object","state":"open","pull_request":{}}
+			]`))
+		case "/repos/openvibely/openvibely/issues/1/timeline":
+			timelinePaths = append(timelinePaths, r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[]`))
+		case "/repos/openvibely/openvibely/issues/2/timeline":
+			timelinePaths = append(timelinePaths, r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{"source":{"issue":{"number":42,"html_url":"https://github.com/openvibely/openvibely/pull/42","state":"open","pull_request":{}}}}
+			]`))
+		default:
+			t.Fatalf("unexpected GitHub API path: %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
+
+	items, err := svc.ListAssignedIssuesWithPullRequests(ctx, repo, "dev-bot")
+	if err != nil {
+		t.Fatalf("ListAssignedIssuesWithPullRequests returned error: %v", err)
+	}
+	if issueListPath == "" {
+		t.Fatal("expected assigned issues endpoint to be called")
+	}
+	if len(timelinePaths) != 2 {
+		t.Fatalf("expected timeline lookup only for two non-PR issues, got %d paths %v", len(timelinePaths), timelinePaths)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected only issues with associated PRs, got %d: %#v", len(items), items)
+	}
+	if items[0].Issue.Number != 2 {
+		t.Fatalf("expected issue 2 to be returned, got issue %d", items[0].Issue.Number)
+	}
+	if items[0].PullRequest.Number != 42 {
+		t.Fatalf("expected associated PR #42, got #%d", items[0].PullRequest.Number)
+	}
 }

@@ -87,8 +87,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 108 {
-		t.Fatalf("max goose version = %d, want 108", maxVersion)
+	if maxVersion != 109 {
+		t.Fatalf("max goose version = %d, want 109", maxVersion)
 	}
 }
 
@@ -239,8 +239,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 108 {
-		t.Fatalf("max goose version = %d, want 108", maxVersion)
+	if maxVersion != 109 {
+		t.Fatalf("max goose version = %d, want 109", maxVersion)
 	}
 }
 
@@ -531,6 +531,30 @@ func TestMigrations_GitHubRepoURLAndTaskPullRequests(t *testing.T) {
 		t.Fatal("expected projects table to include repo_url column")
 	}
 
+	prRows, err := db.Query("PRAGMA table_info(task_pull_requests)")
+	if err != nil {
+		t.Fatalf("failed to inspect task_pull_requests table: %v", err)
+	}
+	defer prRows.Close()
+	prColumns := map[string]bool{}
+	for prRows.Next() {
+		var cid int
+		var name string
+		var colType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := prRows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("failed to scan task_pull_requests column: %v", err)
+		}
+		prColumns[name] = true
+	}
+	for _, column := range []string{"issue_number", "issue_url"} {
+		if !prColumns[column] {
+			t.Fatalf("expected task_pull_requests table to include %s column", column)
+		}
+	}
+
 	// Ensure task_pull_requests exists and enforces task_id uniqueness/FK by insertion
 	_, err = db.Exec(`INSERT INTO projects (id, name, description, repo_path, repo_url) VALUES ('gh-proj', 'GH Project', '', '/tmp/repo', 'https://github.com/openvibely/openvibely')`)
 	if err != nil {
@@ -540,9 +564,17 @@ func TestMigrations_GitHubRepoURLAndTaskPullRequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to insert task: %v", err)
 	}
-	_, err = db.Exec(`INSERT INTO task_pull_requests (task_id, pr_number, pr_url, pr_state) VALUES ('gh-task', 10, 'https://github.com/openvibely/openvibely/pull/10', 'open')`)
+	_, err = db.Exec(`INSERT INTO task_pull_requests (task_id, pr_number, pr_url, pr_state, issue_number, issue_url) VALUES ('gh-task', 10, 'https://github.com/openvibely/openvibely/pull/10', 'open', 20, 'https://github.com/openvibely/openvibely/issues/20')`)
 	if err != nil {
 		t.Fatalf("failed to insert task pull request: %v", err)
+	}
+	var issueNumber int
+	var issueURL string
+	if err := db.QueryRow(`SELECT issue_number, issue_url FROM task_pull_requests WHERE task_id = 'gh-task'`).Scan(&issueNumber, &issueURL); err != nil {
+		t.Fatalf("failed to query task pull request issue metadata: %v", err)
+	}
+	if issueNumber != 20 || issueURL != "https://github.com/openvibely/openvibely/issues/20" {
+		t.Fatalf("unexpected issue metadata: number=%d url=%q", issueNumber, issueURL)
 	}
 	_, err = db.Exec(`INSERT INTO task_pull_requests (task_id, pr_number, pr_url, pr_state) VALUES ('gh-task', 11, 'https://github.com/openvibely/openvibely/pull/11', 'open')`)
 	if err == nil {
@@ -678,8 +710,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 108 {
-		t.Fatalf("max goose version = %d, want 108", maxVersion)
+	if maxVersion != 109 {
+		t.Fatalf("max goose version = %d, want 109", maxVersion)
 	}
 }
 
@@ -1030,8 +1062,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 108 {
-		t.Fatalf("max goose version = %d, want 108", maxVersion)
+	if maxVersion != 109 {
+		t.Fatalf("max goose version = %d, want 109", maxVersion)
 	}
 }
 

@@ -71,6 +71,56 @@ type GitHubPullRequest struct {
 	State  string
 }
 
+type GitHubIssue struct {
+	Number    int
+	URL       string
+	Title     string
+	Body      string
+	State     string
+	UserLogin string
+	Assignees []string
+	Labels    []string
+}
+
+type GitHubIssueWithPullRequest struct {
+	Issue       GitHubIssue
+	PullRequest GitHubPullRequest
+}
+
+const (
+	GitHubLabelSuggestion     = "suggestion"
+	GitHubLabelApproved       = "approved"
+	GitHubLabelInProgress     = "in-progress"
+	GitHubLabelTaskCreated    = "task-created"
+	GitHubLabelPROpened       = "pr-opened"
+	GitHubLabelBlocked        = "blocked"
+	GitHubLabelNeedsHuman     = "needs-human"
+	GitHubLabelDone           = "done"
+	GitHubLabelDuplicate      = "duplicate"
+	GitHubLabelBug            = "bug"
+	GitHubLabelFeature        = "feature"
+	GitHubLabelPerformance    = "performance"
+	GitHubLabelDuplication    = "duplication"
+	GitHubLabelSecurityReview = "security-review"
+)
+
+var DefaultGitHubSDLCLabels = []string{
+	GitHubLabelSuggestion,
+	GitHubLabelApproved,
+	GitHubLabelInProgress,
+	GitHubLabelTaskCreated,
+	GitHubLabelPROpened,
+	GitHubLabelBlocked,
+	GitHubLabelNeedsHuman,
+	GitHubLabelDone,
+	GitHubLabelDuplicate,
+	GitHubLabelBug,
+	GitHubLabelFeature,
+	GitHubLabelPerformance,
+	GitHubLabelDuplication,
+	GitHubLabelSecurityReview,
+}
+
 type GitHubCreatePullRequestRequest struct {
 	Title string
 	Body  string
@@ -535,6 +585,157 @@ func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoR
 	}
 
 	return &GitHubPullRequest{Number: created.Number, URL: created.URL, State: created.State}, nil
+}
+
+func (s *GitHubService) ListAssignedIssues(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssue, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("repository reference is required")
+	}
+	assignee = strings.TrimSpace(assignee)
+	if assignee == "" {
+		return nil, fmt.Errorf("assignee is required")
+	}
+
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	query := url.Values{}
+	query.Set("state", "open")
+	query.Set("assignee", assignee)
+	query.Set("per_page", "100")
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues?%s", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), query.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.applyGitHubHeaders(req, token)
+
+	var raw []githubIssueAPI
+	if err := s.doGitHubJSON(req, &raw); err != nil {
+		return nil, err
+	}
+
+	issues := make([]GitHubIssue, 0, len(raw))
+	for _, item := range raw {
+		if item.PullRequest != nil {
+			continue
+		}
+		issues = append(issues, item.toIssue())
+	}
+	return issues, nil
+}
+
+func (s *GitHubService) FindPullRequestForIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubPullRequest, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("repository reference is required")
+	}
+	if issueNumber <= 0 {
+		return nil, fmt.Errorf("issue number is required")
+	}
+
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d/timeline?per_page=100", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), issueNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.applyGitHubHeaders(req, token)
+	req.Header.Set("Accept", "application/vnd.github.mockingbird-preview+json")
+
+	var events []githubIssueTimelineEventAPI
+	if err := s.doGitHubJSON(req, &events); err != nil {
+		return nil, err
+	}
+
+	for _, event := range events {
+		if event.Source.Issue.PullRequest == nil || event.Source.Issue.Number <= 0 {
+			continue
+		}
+		return &GitHubPullRequest{
+			Number: event.Source.Issue.Number,
+			URL:    strings.TrimSpace(event.Source.Issue.HTMLURL),
+			State:  strings.TrimSpace(event.Source.Issue.State),
+		}, nil
+	}
+	return nil, nil
+}
+
+func (s *GitHubService) ListAssignedIssuesWithPullRequests(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error) {
+	issues, err := s.ListAssignedIssues(ctx, repo, assignee)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]GitHubIssueWithPullRequest, 0, len(issues))
+	for _, issue := range issues {
+		pr, err := s.FindPullRequestForIssue(ctx, repo, issue.Number)
+		if err != nil {
+			return nil, err
+		}
+		if pr == nil {
+			continue
+		}
+		items = append(items, GitHubIssueWithPullRequest{Issue: issue, PullRequest: *pr})
+	}
+	return items, nil
+}
+
+type githubIssueAPI struct {
+	Number int    `json:"number"`
+	URL    string `json:"html_url"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	State  string `json:"state"`
+	User   struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	Assignees []struct {
+		Login string `json:"login"`
+	} `json:"assignees"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+	PullRequest *struct{} `json:"pull_request"`
+}
+
+func (i githubIssueAPI) toIssue() GitHubIssue {
+	issue := GitHubIssue{
+		Number:    i.Number,
+		URL:       strings.TrimSpace(i.URL),
+		Title:     strings.TrimSpace(i.Title),
+		Body:      i.Body,
+		State:     strings.TrimSpace(i.State),
+		UserLogin: strings.TrimSpace(i.User.Login),
+		Assignees: make([]string, 0, len(i.Assignees)),
+		Labels:    make([]string, 0, len(i.Labels)),
+	}
+	for _, assignee := range i.Assignees {
+		if login := strings.TrimSpace(assignee.Login); login != "" {
+			issue.Assignees = append(issue.Assignees, login)
+		}
+	}
+	for _, label := range i.Labels {
+		if name := strings.TrimSpace(label.Name); name != "" {
+			issue.Labels = append(issue.Labels, name)
+		}
+	}
+	return issue
+}
+
+type githubIssueTimelineEventAPI struct {
+	Source struct {
+		Issue struct {
+			Number      int       `json:"number"`
+			HTMLURL     string    `json:"html_url"`
+			State       string    `json:"state"`
+			PullRequest *struct{} `json:"pull_request"`
+		} `json:"issue"`
+	} `json:"source"`
 }
 
 func ParseGitHubRepoURL(raw string) (GitHubRepoRef, error) {
