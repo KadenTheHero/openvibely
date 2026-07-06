@@ -58,7 +58,7 @@ func hasActiveSwarmChild(task models.Task) bool {
 }
 
 func activeBoardStatus(task models.Task) models.TaskStatus {
-	if models.IsTerminalStatus(task.Status) || task.Status == models.StatusBlocked {
+	if models.IsTerminalStatus(task.Status) {
 		return task.Status
 	}
 	if hasActiveSwarmChild(task) {
