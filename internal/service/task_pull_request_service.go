@@ -68,6 +68,11 @@ func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *model
 		return nil, fmt.Errorf("checking existing pull request: %w", err)
 	}
 	if existingPR != nil {
+		if mergeTaskPullRequestIssueMetadata(existingPR, opts) {
+			if err := s.repo.Upsert(ctx, existingPR); err != nil {
+				return nil, fmt.Errorf("saving pull request issue metadata: %w", err)
+			}
+		}
 		return &OpenTaskPullRequestResult{
 			PullRequest:          taskPullRequestRecordToGitHubPR(existingPR),
 			Record:               existingPR,
@@ -169,6 +174,23 @@ func (s *TaskPullRequestService) buildCreatePullRequestRequest(project *models.P
 		Base:  base,
 		Draft: opts.Draft,
 	}
+}
+
+func mergeTaskPullRequestIssueMetadata(record *models.TaskPullRequest, opts OpenTaskPullRequestOptions) bool {
+	if record == nil {
+		return false
+	}
+	changed := false
+	if opts.IssueNumber != nil && (record.IssueNumber == nil || *record.IssueNumber != *opts.IssueNumber) {
+		issueNumber := *opts.IssueNumber
+		record.IssueNumber = &issueNumber
+		changed = true
+	}
+	if issueURL := strings.TrimSpace(opts.IssueURL); issueURL != "" && record.IssueURL != issueURL {
+		record.IssueURL = issueURL
+		changed = true
+	}
+	return changed
 }
 
 func taskPullRequestRecordToGitHubPR(record *models.TaskPullRequest) *GitHubPullRequest {

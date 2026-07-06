@@ -133,6 +133,54 @@ func TestTaskPullRequestServiceOpenForTaskReusesExistingRecord(t *testing.T) {
 	}
 }
 
+func TestTaskPullRequestServiceOpenForTaskReusesExistingRecordAndPersistsIssueMetadata(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Existing PR Metadata Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Existing PR Metadata", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/existing-metadata"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 23, PRURL: "https://github.com/openvibely/openvibely/pull/23", PRState: "open"}); err != nil {
+		t.Fatalf("seed PR record: %v", err)
+	}
+	createCalls := 0
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			createCalls++
+			return nil, fmt.Errorf("should not create")
+		},
+	}, prRepo)
+	issueNumber := 123
+
+	result, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{
+		IssueNumber: &issueNumber,
+		IssueURL:    "https://github.com/openvibely/openvibely/issues/123",
+	})
+	if err != nil {
+		t.Fatalf("OpenForTask: %v", err)
+	}
+	if !result.ReusedExistingRecord || result.PullRequest.Number != 23 || createCalls != 0 {
+		t.Fatalf("expected existing PR reuse, result=%#v createCalls=%d", result, createCalls)
+	}
+	if result.Record.IssueNumber == nil || *result.Record.IssueNumber != 123 || result.Record.IssueURL == "" {
+		t.Fatalf("expected result record issue metadata, got %#v", result.Record)
+	}
+	persisted, err := prRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByTaskID: %v", err)
+	}
+	if persisted == nil || persisted.IssueNumber == nil || *persisted.IssueNumber != 123 || persisted.IssueURL != "https://github.com/openvibely/openvibely/issues/123" {
+		t.Fatalf("expected persisted issue metadata, got %#v", persisted)
+	}
+}
+
 func TestTaskPullRequestServiceOpenForTaskRecoversAlreadyExistsByFindingPR(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
