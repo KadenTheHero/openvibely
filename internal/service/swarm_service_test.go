@@ -1626,6 +1626,55 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleReviewerCompletion(t *testing.T
 	}
 }
 
+func TestSwarmServiceRecomputeParentStatusMovesBlockedParentToBacklogWhenNoChildrenRunnable(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, parent, children := newCompletedSwarmForServiceTest(t, ctx)
+
+	if err := repo.UpdateStatus(ctx, parent.ID, models.StatusBlocked); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateCategory(ctx, parent.ID, models.CategoryActive); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_review", parent.SwarmConfig, parent.SwarmSequence); err != nil {
+		t.Fatal(err)
+	}
+	for role, child := range children {
+		if child == nil || role == models.SwarmRoleParent {
+			continue
+		}
+		if role == models.SwarmRoleReviewer || role == models.SwarmRoleMerger {
+			if err := repo.UpdateStatus(ctx, child.ID, models.StatusCancelled); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.UpdateCategory(ctx, child.ID, models.CategoryBacklog); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err := repo.UpdateStatus(ctx, child.ID, models.StatusCompleted); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.UpdateCategory(ctx, child.ID, models.CategoryCompleted); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := svc.RecomputeParentStatus(ctx, parent.ID); err != nil {
+		t.Fatalf("RecomputeParentStatus: %v", err)
+	}
+	updatedParent, err := repo.GetByID(ctx, parent.ID)
+	if err != nil || updatedParent == nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	if updatedParent.Status != models.StatusBlocked {
+		t.Fatalf("expected parent to remain blocked without runnable children, got %s", updatedParent.Status)
+	}
+	if updatedParent.Category != models.CategoryBacklog {
+		t.Fatalf("expected blocked parent with no runnable children to move to backlog, got %s", updatedParent.Category)
+	}
+}
+
 func TestSwarmServiceRecomputeParentStatusDoesNotLetStaleMergerOverrideActiveWork(t *testing.T) {
 	ctx := context.Background()
 	repo, svc, parent, children := newCompletedSwarmForServiceTest(t, ctx)

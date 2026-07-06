@@ -853,14 +853,14 @@ func (s *SwarmService) RecomputeParentStatus(ctx context.Context, parentTaskID s
 	}
 
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
-	status := models.StatusPending
-	anyActive := false
+	status := models.StatusBlocked
+	anyRunnable := false
 	anyFailed := false
 	anyBlocked := false
 	for _, child := range children {
 		switch child.Status {
 		case models.StatusRunning, models.StatusPending, models.StatusQueued:
-			anyActive = true
+			anyRunnable = true
 		case models.StatusFailed:
 			anyFailed = true
 		case models.StatusBlocked:
@@ -868,7 +868,7 @@ func (s *SwarmService) RecomputeParentStatus(ctx context.Context, parentTaskID s
 		}
 	}
 	switch {
-	case anyActive:
+	case anyRunnable:
 		status = models.StatusRunning
 	case anyFailed:
 		status = models.StatusFailed
@@ -896,6 +896,9 @@ func (s *SwarmService) RecomputeParentStatus(ctx context.Context, parentTaskID s
 	}
 	if status == models.StatusCompleted && parent.Category != models.CategoryCompleted {
 		return s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryCompleted)
+	}
+	if status == models.StatusBlocked && !anyRunnable && parent.Category == models.CategoryActive {
+		return s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryBacklog)
 	}
 	return nil
 }

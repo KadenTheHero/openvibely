@@ -19,7 +19,7 @@ func filterByCategory(tasks []models.Task, cat models.TaskCategory) []models.Tas
 		if models.IsSwarmChildRole(t.SwarmRole) {
 			continue
 		}
-		if t.Category == cat {
+		if boardCategory(t) == cat {
 			result = append(result, t)
 		}
 	}
@@ -35,33 +35,40 @@ func filterActiveColumn(tasks []models.Task) []models.Task {
 		if models.IsSwarmChildRole(t.SwarmRole) {
 			continue
 		}
-		if t.Category == models.CategoryActive {
+		if boardCategory(t) == models.CategoryActive {
 			result = append(result, t)
-		} else if t.Category == models.CategoryScheduled && t.Status == models.StatusRunning {
+		} else if boardCategory(t) == models.CategoryScheduled && t.Status == models.StatusRunning {
 			result = append(result, t)
 		}
 	}
 	return result
 }
 
-func hasActiveSwarmChild(task models.Task) bool {
+func hasRunnableSwarmChild(task models.Task) bool {
 	if task.SwarmRole != models.SwarmRoleParent {
 		return false
 	}
 	for _, child := range task.SwarmChildren {
 		switch child.Status {
-		case models.StatusRunning, models.StatusPending, models.StatusQueued, models.StatusBlocked:
+		case models.StatusRunning, models.StatusPending, models.StatusQueued:
 			return true
 		}
 	}
 	return false
 }
 
+func boardCategory(task models.Task) models.TaskCategory {
+	if task.SwarmRole == models.SwarmRoleParent && task.Category == models.CategoryActive && task.Status == models.StatusBlocked && !hasRunnableSwarmChild(task) {
+		return models.CategoryBacklog
+	}
+	return task.Category
+}
+
 func activeBoardStatus(task models.Task) models.TaskStatus {
 	if models.IsTerminalStatus(task.Status) {
 		return task.Status
 	}
-	if hasActiveSwarmChild(task) {
+	if hasRunnableSwarmChild(task) {
 		return models.StatusRunning
 	}
 	return task.Status

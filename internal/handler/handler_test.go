@@ -1547,6 +1547,63 @@ func TestHandler_UpdateTaskCategory_RemovesFromCurrentView(t *testing.T) {
 	}
 }
 
+func TestHandler_ListTasks_DoesNotRenderBlockedSwarmParentAsActiveQueuedWhenNoChildrenRunnable(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	parent := &models.Task{
+		ProjectID:   "default",
+		Title:       "Swarm Parent With No Runnable Children",
+		Category:    models.CategoryActive,
+		Status:      models.StatusBlocked,
+		Prompt:      "coordinate swarm work",
+		SwarmRole:   models.SwarmRoleParent,
+		SwarmStatus: "needs_review",
+	}
+	require.NoError(t, h.taskRepo.Create(ctx, parent))
+	completedWorker := &models.Task{
+		ProjectID:     "default",
+		Title:         "Completed Worker Child",
+		Category:      models.CategoryCompleted,
+		Status:        models.StatusCompleted,
+		Prompt:        "finished swarm work",
+		ParentTaskID:  &parent.ID,
+		SwarmRole:     models.SwarmRoleWorker,
+		SwarmStatus:   "completed",
+		SwarmSequence: 1,
+	}
+	require.NoError(t, h.taskRepo.Create(ctx, completedWorker))
+	cancelledReviewer := &models.Task{
+		ProjectID:     "default",
+		Title:         "Cancelled Reviewer Child",
+		Category:      models.CategoryBacklog,
+		Status:        models.StatusCancelled,
+		Prompt:        "review swarm work",
+		ParentTaskID:  &parent.ID,
+		SwarmRole:     models.SwarmRoleReviewer,
+		SwarmStatus:   "followup_pending",
+		SwarmSequence: 2,
+	}
+	require.NoError(t, h.taskRepo.Create(ctx, cancelledReviewer))
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id=default&include_swarm_children=true", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+	runningDropzone := kanbanDropzoneHTML(body, "running")
+	pendingDropzone := kanbanDropzoneHTML(body, "pending")
+	backlogColumn := kanbanCategoryColumnHTML(body, "backlog")
+	require.NotEmpty(t, runningDropzone, "expected running dropzone in kanban response")
+	require.NotEmpty(t, pendingDropzone, "expected pending dropzone in kanban response")
+	require.NotEmpty(t, backlogColumn, "expected backlog column in kanban response")
+	assert.NotContains(t, runningDropzone, `data-task-id="`+parent.ID+`"`)
+	assert.NotContains(t, pendingDropzone, `data-task-id="`+parent.ID+`"`)
+	assert.Contains(t, backlogColumn, `data-task-id="`+parent.ID+`"`)
+	assert.NotContains(t, body, `data-task-id="`+completedWorker.ID+`"`, "swarm child should be attached to parent, not rendered as a top-level card")
+	assert.NotContains(t, body, `data-task-id="`+cancelledReviewer.ID+`"`, "swarm child should be attached to parent, not rendered as a top-level card")
+}
+
 func TestHandler_UpdateTaskCategory_AttachesSwarmChildrenForKanbanRefresh(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
@@ -1599,6 +1656,19 @@ func kanbanDropzoneHTML(body, status string) string {
 		return ""
 	}
 	next := strings.Index(body[idx+len(marker):], `data-status="`)
+	if next == -1 {
+		return body[idx:]
+	}
+	return body[idx : idx+len(marker)+next]
+}
+
+func kanbanCategoryColumnHTML(body, category string) string {
+	marker := `data-category="` + category + `"`
+	idx := strings.Index(body, marker)
+	if idx == -1 {
+		return ""
+	}
+	next := strings.Index(body[idx+len(marker):], `data-category="`)
 	if next == -1 {
 		return body[idx:]
 	}
