@@ -481,6 +481,39 @@ func TestListAssignedIssuesWithPullRequestsSkipsIssuesWithoutAssociatedPR(t *tes
 	}
 }
 
+func TestGitHubIssueLabelsRejectOpenVibelyPrefixBeforeTransport(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		t.Fatalf("prefixed labels must be rejected before GitHub transport, got %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
+
+	if _, err := svc.CreateIssue(ctx, repo, GitHubCreateIssueRequest{Title: "Bug", Labels: []string{"bug", " openvibely:bug "}}); err == nil || !strings.Contains(err.Error(), "openvibely:") {
+		t.Fatalf("expected prefixed create label rejection, got %v", err)
+	}
+	if err := svc.AddLabelsToIssue(ctx, repo, 7, []string{"OpenVibely:approved"}); err == nil || !strings.Contains(err.Error(), "openvibely:") {
+		t.Fatalf("expected prefixed add-label rejection, got %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("expected no GitHub API calls for rejected labels, got %d", calls)
+	}
+}
+
 func TestGitHubIssueAPIMethods(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)

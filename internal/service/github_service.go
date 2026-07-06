@@ -612,7 +612,11 @@ func (s *GitHubService) CreateIssue(ctx context.Context, repo *GitHubRepoRef, cr
 	if strings.TrimSpace(createReq.Body) != "" {
 		payload["body"] = createReq.Body
 	}
-	if labels := cleanGitHubStringList(createReq.Labels); len(labels) > 0 {
+	labels, err := cleanGitHubIssueLabels(createReq.Labels)
+	if err != nil {
+		return nil, err
+	}
+	if len(labels) > 0 {
 		payload["labels"] = labels
 	}
 	if assignees := cleanGitHubStringList(createReq.Assignees); len(assignees) > 0 {
@@ -699,7 +703,10 @@ func (s *GitHubService) AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRe
 	if issueNumber <= 0 {
 		return fmt.Errorf("issue number is required")
 	}
-	cleaned := cleanGitHubStringList(labels)
+	cleaned, err := cleanGitHubIssueLabels(labels)
+	if err != nil {
+		return err
+	}
 	if len(cleaned) == 0 {
 		return fmt.Errorf("at least one label is required")
 	}
@@ -816,6 +823,16 @@ func (s *GitHubService) ListAssignedIssuesWithPullRequests(ctx context.Context, 
 		items = append(items, GitHubIssueWithPullRequest{Issue: issue, PullRequest: *pr})
 	}
 	return items, nil
+}
+
+func cleanGitHubIssueLabels(items []string) ([]string, error) {
+	labels := cleanGitHubStringList(items)
+	for _, label := range labels {
+		if strings.HasPrefix(strings.ToLower(label), "openvibely:") {
+			return nil, fmt.Errorf("GitHub issue labels must not use the openvibely: prefix: %s", label)
+		}
+	}
+	return labels, nil
 }
 
 func cleanGitHubStringList(items []string) []string {
