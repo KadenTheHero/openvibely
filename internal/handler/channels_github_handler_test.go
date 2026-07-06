@@ -235,6 +235,22 @@ func TestChannelsGitHubRemove(t *testing.T) {
 	}
 }
 
+func assertGitHubRuntimeSettingsFragmentResponse(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if got := rec.Header().Get("HX-Trigger"); got != "" {
+		t.Fatalf("expected github runtime fragment response not to trigger channels refresh, got HX-Trigger=%q", got)
+	}
+	if got := rec.Header().Get("HX-Refresh"); got != "" {
+		t.Fatalf("expected github runtime fragment response not to refresh page, got HX-Refresh=%q", got)
+	}
+	if got := rec.Header().Get("Location"); got != "" {
+		t.Fatalf("expected github runtime fragment response not to redirect, got Location=%q", got)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `id="github-runtime-settings"`) {
+		t.Fatalf("expected github runtime settings fragment, got: %s", body)
+	}
+}
+
 func TestGitHubRuntimeSettingsRoutesAuthorizeActors(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 
@@ -248,7 +264,7 @@ func TestGitHubRuntimeSettingsRoutesAuthorizeActors(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
-	assertChannelsRefreshTrigger(t, rec)
+	assertGitHubRuntimeSettingsFragmentResponse(t, rec)
 	body := rec.Body.String()
 	if !strings.Contains(body, "@alice") {
 		t.Fatalf("expected normalized login in fragment, got: %s", body)
@@ -285,7 +301,7 @@ func TestGitHubRuntimeSettingsRoutesAuthorizeActors(t *testing.T) {
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("expected delete status 200, got %d (%s)", deleteRec.Code, deleteRec.Body.String())
 	}
-	assertChannelsRefreshTrigger(t, deleteRec)
+	assertGitHubRuntimeSettingsFragmentResponse(t, deleteRec)
 	authorized, err = h.githubAuthRepo.IsActorAuthorized(context.Background(), "alice")
 	if err != nil {
 		t.Fatalf("checking deleted actor: %v", err)
@@ -307,7 +323,7 @@ func TestGitHubProjectInboxRouteStoresProjectScopedNormalizedLogin(t *testing.T)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
-	assertChannelsRefreshTrigger(t, rec)
+	assertGitHubRuntimeSettingsFragmentResponse(t, rec)
 	body := rec.Body.String()
 	if !strings.Contains(body, "@dev-bot") {
 		t.Fatalf("expected normalized inbox login in fragment, got: %s", body)
@@ -334,6 +350,7 @@ func TestGitHubProjectInboxRouteStoresProjectScopedNormalizedLogin(t *testing.T)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected disable status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
+	assertGitHubRuntimeSettingsFragmentResponse(t, rec)
 	inbox, err = h.githubAuthRepo.GetEnabledProjectInbox(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("get disabled inbox: %v", err)

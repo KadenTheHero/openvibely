@@ -69,7 +69,6 @@ func (h *Handler) AddGitHubAuthorizedActor(c echo.Context) error {
 	if err := h.githubAuthRepo.UpsertAuthorizedActor(c.Request().Context(), actor); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to add GitHub authorized actor: "+err.Error())
 	}
-	c.Response().Header().Set("HX-Trigger", channelsRefreshTrigger)
 	return h.renderGitHubRuntimeSettings(c, projectID)
 }
 
@@ -85,7 +84,6 @@ func (h *Handler) RemoveGitHubAuthorizedActor(c echo.Context) error {
 	if err := h.githubAuthRepo.DeleteAuthorizedActor(c.Request().Context(), c.Param("id")); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to remove GitHub authorized actor: "+err.Error())
 	}
-	c.Response().Header().Set("HX-Trigger", channelsRefreshTrigger)
 	return h.renderGitHubRuntimeSettings(c, projectID)
 }
 
@@ -110,6 +108,5 @@ func (h *Handler) SaveGitHubProjectInbox(c echo.Context) error {
 	if err := h.githubAuthRepo.UpsertProjectInbox(c.Request().Context(), inbox); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save GitHub project inbox: "+err.Error())
 	}
-	c.Response().Header().Set("HX-Trigger", channelsRefreshTrigger)
 	return h.renderGitHubRuntimeSettings(c, projectID)
 }
