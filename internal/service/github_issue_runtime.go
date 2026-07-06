@@ -14,6 +14,9 @@ import (
 
 type GitHubIssueRuntimeProvider interface {
 	ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error)
+	PushBranch(ctx context.Context, repoPath, worktreePath, branch string, repo *GitHubRepoRef) error
+	FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error)
+	CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 	CreateIssue(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreateIssueRequest) (*GitHubIssue, error)
 	GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error)
 	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error)
@@ -40,12 +43,17 @@ type githubCreateIssueRuntimeInput struct {
 
 type githubIssueRuntimeInput struct {
 	IssueNumber int      `json:"issue_number"`
+	IssueURL    string   `json:"issue_url"`
 	Assignee    string   `json:"assignee"`
 	GitHubLogin string   `json:"github_login"`
 	Body        string   `json:"body"`
 	Labels      []string `json:"labels"`
 	TaskID      string   `json:"task_id"`
 	Title       string   `json:"title"`
+	PRTitle     string   `json:"pr_title"`
+	PRBody      string   `json:"pr_body"`
+	Base        string   `json:"base"`
+	Draft       bool     `json:"draft"`
 }
 
 func buildGitHubIssueRuntimeTools(opts githubIssueRuntimeOptions) *llmcontracts.RuntimeTools {
@@ -221,16 +229,60 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "task_id": task.ID, "issue_number": issueNumber, "issue_url": issueURL, "pull_request": pr})
 		},
+		"github_open_pull_request": func(ctx context.Context, input json.RawMessage) (string, error) {
+			if opts.TaskPullRequestRepo == nil {
+				return "", fmt.Errorf("task pull request repository unavailable")
+			}
+			if opts.TaskRepo == nil {
+				return "", fmt.Errorf("task repository unavailable")
+			}
+			var req githubIssueRuntimeInput
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			project, err := resolveGitHubRuntimeProject(ctx, opts)
+			if err != nil {
+				return "", err
+			}
+			task, err := resolveGitHubRuntimeTask(ctx, opts.TaskRepo, opts.ProjectID, req.TaskID, req.Title)
+			if err != nil {
+				return "", err
+			}
+			var issueNumber *int
+			if req.IssueNumber > 0 {
+				issueNumber = &req.IssueNumber
+			}
+			result, err := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo).OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{
+				Title:       req.PRTitle,
+				Body:        req.PRBody,
+				Base:        req.Base,
+				Draft:       req.Draft,
+				IssueNumber: issueNumber,
+				IssueURL:    req.IssueURL,
+			})
+			if err != nil {
+				return "", err
+			}
+			return githubIssueRuntimeJSON(map[string]any{"ok": true, "task_id": task.ID, "pull_request": result.PullRequest, "reused_existing_record": result.ReusedExistingRecord, "reused_remote": result.ReusedRemote, "created": result.Created})
+		},
 	}
 }
 
-func resolveGitHubRepoForRuntimeTool(ctx context.Context, opts githubIssueRuntimeOptions) (*GitHubRepoRef, error) {
+func resolveGitHubRuntimeProject(ctx context.Context, opts githubIssueRuntimeOptions) (*models.Project, error) {
 	project, err := opts.ProjectRepo.GetByID(ctx, opts.ProjectID)
 	if err != nil {
 		return nil, err
 	}
 	if project == nil {
 		return nil, fmt.Errorf("current project not found")
+	}
+	return project, nil
+}
+
+func resolveGitHubRepoForRuntimeTool(ctx context.Context, opts githubIssueRuntimeOptions) (*GitHubRepoRef, error) {
+	project, err := resolveGitHubRuntimeProject(ctx, opts)
+	if err != nil {
+		return nil, err
 	}
 	return opts.GitHub.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
 }

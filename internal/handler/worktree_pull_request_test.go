@@ -325,7 +325,7 @@ func TestCreateTaskPullRequest_CreatePRAlreadyExistsRecoversByFindingPR(t *testi
 	if !strings.Contains(trigger, "openvibelyToast") {
 		t.Fatalf("expected openvibelyToast trigger, got %s", trigger)
 	}
-	if !strings.Contains(trigger, "GitHub PR created (#88)") {
+	if !strings.Contains(trigger, "GitHub PR reused (#88)") {
 		t.Fatalf("expected recovered success toast, got %s", trigger)
 	}
 

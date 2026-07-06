@@ -3208,10 +3208,34 @@ type fakeGitHubIssueRuntimeProvider struct {
 	addLabelsFn    func(context.Context, *GitHubRepoRef, int, []string) error
 	listIssuesFn   func(context.Context, *GitHubRepoRef, string) ([]GitHubIssueWithPullRequest, error)
 	commentIssueFn func(context.Context, *GitHubRepoRef, int, string) error
+	pushBranchFn   func(context.Context, string, string, string, *GitHubRepoRef) error
+	findBranchPRFn func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error)
+	createPRFn     func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) PushBranch(ctx context.Context, repoPath, worktreePath, branch string, repo *GitHubRepoRef) error {
+	if f.pushBranchFn != nil {
+		return f.pushBranchFn(ctx, repoPath, worktreePath, branch, repo)
+	}
+	return nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
+	if f.findBranchPRFn != nil {
+		return f.findBranchPRFn(ctx, repo, branch)
+	}
+	return nil, nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, req GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+	if f.createPRFn != nil {
+		return f.createPRFn(ctx, repo, req)
+	}
+	return &GitHubPullRequest{Number: 101, URL: "https://github.com/openvibely/openvibely/pull/101", State: "open"}, nil
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) CreateIssue(ctx context.Context, repo *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
@@ -3285,7 +3309,7 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 		GitHubAuthRepo:      repository.NewGitHubAuthRepo(db),
 		GitHub:              provider,
 	})
-	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_add_issue_labels", "github_link_task_to_issue"} {
+	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request"} {
 		if rt == nil || !rt.HasDefinition(name) {
 			t.Fatalf("expected %s in default GitHub runtime definitions for task runs, got %#v", name, rt)
 		}
@@ -3305,6 +3329,25 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	}
 	if record, err := prRepo.GetByIssueNumber(ctx, 77); err != nil || record != nil {
 		t.Fatalf("expected no persisted PR link for skipped issue, record=%#v err=%v", record, err)
+	}
+
+	task.WorktreeBranch = "task/runtime-pr"
+	if err := taskRepo.UpdateWorktreeInfo(ctx, task.ID, "", task.WorktreeBranch); err != nil {
+		t.Fatalf("update task worktree branch: %v", err)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_open_pull_request", []byte(fmt.Sprintf(`{"task_id":"%s","pr_title":"Runtime PR","pr_body":"Opened from runtime","base":"main","issue_number":99,"issue_url":"https://github.com/openvibely/openvibely/issues/99"}`, task.ID)))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected open PR success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if !strings.Contains(out, `"created":true`) || !strings.Contains(out, `"pull_request"`) {
+		t.Fatalf("expected open PR output, got %s", out)
+	}
+	record, err := prRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("lookup opened task PR: %v", err)
+	}
+	if record == nil || record.PRNumber != 101 || record.IssueNumber == nil || *record.IssueNumber != 99 {
+		t.Fatalf("unexpected opened task PR record: %#v", record)
 	}
 
 	out, handled, isErr, err = rt.Executor(ctx, "github_is_actor_authorized", []byte(`{"github_login":"alice"}`))
@@ -3371,7 +3414,7 @@ func TestLLMServiceExecuteTaskWithAgentExposesGitHubToolsToInitialRuns(t *testin
 	if rt == nil {
 		t.Fatal("expected runtime tools on provider request")
 	}
-	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_link_task_to_issue"} {
+	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request"} {
 		if !rt.HasDefinition(name) {
 			t.Fatalf("expected %s on initial task run, got %#v", name, rt.Definitions)
 		}

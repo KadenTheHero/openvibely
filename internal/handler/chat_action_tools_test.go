@@ -503,6 +503,57 @@ func TestGitHubLinkTaskToIssuePersistsAssociatedPR(t *testing.T) {
 	}
 }
 
+func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "GitHub PR Runtime", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Open PR", Prompt: "prompt", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/runtime-open-pr", MergeTargetBranch: "main"}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+	var createdReq service.GitHubCreatePullRequestRequest
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+		},
+		pushBranchFn: func(_ context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error {
+			if branch != task.WorktreeBranch {
+				t.Fatalf("unexpected pushed branch %q", branch)
+			}
+			return nil
+		},
+		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {
+			return nil, nil
+		},
+		createPRFn: func(_ context.Context, repo *service.GitHubRepoRef, req service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
+			createdReq = req
+			return &service.GitHubPullRequest{Number: 123, URL: "https://github.com/openvibely/openvibely/pull/123", State: "open"}, nil
+		},
+	})
+	params := streamingResponseParams{ProjectID: project.ID}
+	out, err := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["github_open_pull_request"](ctx, json.RawMessage(`{"task_id":"`+task.ID+`","pr_title":"Runtime PR","pr_body":"Runtime body","base":"develop","draft":true,"issue_number":77,"issue_url":"https://github.com/openvibely/openvibely/issues/77"}`))
+	if err != nil {
+		t.Fatalf("github_open_pull_request returned error: %v", err)
+	}
+	if !strings.Contains(out, `"created":true`) || !strings.Contains(out, `"pull_request"`) {
+		t.Fatalf("expected created PR output, got %s", out)
+	}
+	if createdReq.Title != "Runtime PR" || createdReq.Body != "Runtime body" || createdReq.Base != "develop" || !createdReq.Draft || createdReq.Head != task.WorktreeBranch {
+		t.Fatalf("unexpected create PR request: %#v", createdReq)
+	}
+	record, err := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("lookup task PR: %v", err)
+	}
+	if record == nil || record.PRNumber != 123 || record.IssueNumber == nil || *record.IssueNumber != 77 {
+		t.Fatalf("unexpected persisted PR record: %#v", record)
+	}
+}
+
 func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()

@@ -1,0 +1,179 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
+)
+
+type TaskPullRequestGitHubProvider interface {
+	ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error)
+	PushBranch(ctx context.Context, repoPath, worktreePath, branch string, repo *GitHubRepoRef) error
+	FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error)
+	CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
+}
+
+type TaskPullRequestService struct {
+	github TaskPullRequestGitHubProvider
+	repo   *repository.TaskPullRequestRepo
+}
+
+type OpenTaskPullRequestOptions struct {
+	Title         string
+	Body          string
+	Base          string
+	Draft         bool
+	CommitMessage string
+	IssueNumber   *int
+	IssueURL      string
+}
+
+type OpenTaskPullRequestResult struct {
+	PullRequest          *GitHubPullRequest
+	Record               *models.TaskPullRequest
+	ReusedExistingRecord bool
+	ReusedRemote         bool
+	Created              bool
+}
+
+func NewTaskPullRequestService(github TaskPullRequestGitHubProvider, repo *repository.TaskPullRequestRepo) *TaskPullRequestService {
+	return &TaskPullRequestService{github: github, repo: repo}
+}
+
+func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) (*OpenTaskPullRequestResult, error) {
+	if task == nil {
+		return nil, fmt.Errorf("task is required")
+	}
+	if project == nil {
+		return nil, fmt.Errorf("project is required")
+	}
+	if strings.TrimSpace(task.WorktreeBranch) == "" {
+		return nil, fmt.Errorf("task has no worktree branch")
+	}
+	if s == nil || s.github == nil {
+		return nil, fmt.Errorf("github integration is not configured")
+	}
+	if s.repo == nil {
+		return nil, fmt.Errorf("task pull request repository not available")
+	}
+	if strings.TrimSpace(project.RepoPath) == "" {
+		return nil, fmt.Errorf("project has no repository path configured")
+	}
+
+	existingPR, err := s.repo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("checking existing pull request: %w", err)
+	}
+	if existingPR != nil {
+		return &OpenTaskPullRequestResult{
+			PullRequest:          taskPullRequestRecordToGitHubPR(existingPR),
+			Record:               existingPR,
+			ReusedExistingRecord: true,
+		}, nil
+	}
+
+	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolving repository: %w", err)
+	}
+
+	if strings.TrimSpace(task.WorktreePath) != "" {
+		commitMessage := strings.TrimSpace(opts.CommitMessage)
+		if commitMessage == "" {
+			commitMessage = BuildWorktreeCommitMessage(task.WorktreePath, WorktreeCommitMessageContext{Phase: WorktreeCommitPhaseMerge, TaskTitle: task.Title})
+		}
+		if err := CommitWorktreeChanges(task.WorktreePath, commitMessage); err != nil {
+			return nil, fmt.Errorf("committing changes: %w", err)
+		}
+	}
+
+	if err := s.github.PushBranch(ctx, project.RepoPath, task.WorktreePath, task.WorktreeBranch, repoRef); err != nil {
+		return nil, fmt.Errorf("pushing branch: %w", err)
+	}
+
+	foundPR, err := s.github.FindPullRequestByBranch(ctx, repoRef, task.WorktreeBranch)
+	if err != nil {
+		return nil, fmt.Errorf("finding pull request: %w", err)
+	}
+
+	pr := foundPR
+	created := false
+	if pr == nil {
+		createReq := s.buildCreatePullRequestRequest(project, task, opts)
+		pr, err = s.github.CreatePullRequest(ctx, repoRef, createReq)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "pull request already exists") {
+				retryPR, findErr := s.github.FindPullRequestByBranch(ctx, repoRef, task.WorktreeBranch)
+				if findErr == nil && retryPR != nil {
+					pr = retryPR
+				} else {
+					return nil, fmt.Errorf("creating pull request: %w", err)
+				}
+			} else {
+				return nil, fmt.Errorf("creating pull request: %w", err)
+			}
+		} else {
+			created = true
+		}
+	}
+	if pr == nil {
+		return nil, fmt.Errorf("pull request was not created or found")
+	}
+
+	record := &models.TaskPullRequest{
+		TaskID:      task.ID,
+		PRNumber:    pr.Number,
+		PRURL:       pr.URL,
+		PRState:     pr.State,
+		IssueNumber: opts.IssueNumber,
+		IssueURL:    strings.TrimSpace(opts.IssueURL),
+	}
+	if err := s.repo.Upsert(ctx, record); err != nil {
+		return nil, fmt.Errorf("saving pull request record: %w", err)
+	}
+
+	return &OpenTaskPullRequestResult{
+		PullRequest:  pr,
+		Record:       record,
+		ReusedRemote: foundPR != nil || !created,
+		Created:      created,
+	}, nil
+}
+
+func (s *TaskPullRequestService) buildCreatePullRequestRequest(project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) GitHubCreatePullRequestRequest {
+	title := strings.TrimSpace(opts.Title)
+	if title == "" {
+		title = task.Title
+	}
+	body := strings.TrimSpace(opts.Body)
+	if body == "" {
+		body = fmt.Sprintf("Automated pull request for task `%s`.\n\nTask title: %s\nTask ID: %s\n\nGenerated by OpenVibely.", task.Title, task.Title, task.ID)
+	}
+	base := strings.TrimSpace(opts.Base)
+	if base == "" {
+		base = strings.TrimSpace(task.MergeTargetBranch)
+	}
+	if base == "" {
+		base = GetDefaultBranch(project.RepoPath)
+	}
+	if base == "" {
+		base = "main"
+	}
+	return GitHubCreatePullRequestRequest{
+		Title: title,
+		Body:  body,
+		Head:  task.WorktreeBranch,
+		Base:  base,
+		Draft: opts.Draft,
+	}
+}
+
+func taskPullRequestRecordToGitHubPR(record *models.TaskPullRequest) *GitHubPullRequest {
+	if record == nil {
+		return nil
+	}
+	return &GitHubPullRequest{Number: record.PRNumber, URL: record.PRURL, State: record.PRState}
+}

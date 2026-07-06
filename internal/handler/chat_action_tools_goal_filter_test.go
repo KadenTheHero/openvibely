@@ -45,7 +45,7 @@ func TestFilterTaskThreadRuntimeToolDefs_GoalStatusToolsRequireExplicitGrant(t *
 	if !ungranted["send_message"] {
 		t.Fatalf("task agents should get send_message by default: %+v", ungranted)
 	}
-	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_link_task_to_issue"] {
+	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_link_task_to_issue"] || !ungranted["github_open_pull_request"] {
 		t.Fatalf("task agents should get GitHub issue tools by default: %+v", ungranted)
 	}
 	if ungranted["memory_view"] {
@@ -85,7 +85,7 @@ func TestFilterTaskThreadCapabilitySummaries_GoalStatusToolsRequireExplicitGrant
 	if !ungranted["send_message"] {
 		t.Fatalf("task agents should advertise send_message by default: %+v", ungranted)
 	}
-	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_link_task_to_issue"] {
+	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_link_task_to_issue"] || !ungranted["github_open_pull_request"] {
 		t.Fatalf("task agents should advertise GitHub issue tools by default: %+v", ungranted)
 	}
 
