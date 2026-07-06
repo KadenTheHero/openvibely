@@ -1,0 +1,138 @@
+package components
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+func githubActorPermissionLabel(permission string) string {
+	switch strings.ToLower(strings.TrimSpace(permission)) {
+	case "admin":
+		return "Admin"
+	case "approve":
+		return "Approve"
+	default:
+		return "Triage"
+	}
+}
+
+func githubProjectInboxLogin(inbox *models.GitHubProjectInbox) string {
+	if inbox == nil {
+		return ""
+	}
+	return inbox.GitHubLogin
+}
+
+func githubDisplayLogin(login string) string {
+	login = strings.TrimSpace(login)
+	if login == "" {
+		return ""
+	}
+	return "@" + login
+}
+
+// GitHubRuntimeSettings renders generic GitHub trust and inbox configuration for runtime tools.
+templ GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models.GitHubProjectInbox, projectID string) {
+	<div id="github-runtime-settings" class="space-y-5">
+		<div>
+			<h4 class="font-semibold text-sm mb-2 flex items-center gap-2">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+				</svg>
+				Authorized Actors
+			</h4>
+			<p class="text-xs opacity-60 mb-3">
+				Authorized GitHub actors are system-level trust identities. Runtime prompts can use <code class="bg-base-300 px-1 rounded">github_is_actor_authorized</code> to fail closed before acting on GitHub requests.
+			</p>
+			if len(actors) == 0 {
+				<p class="text-sm opacity-50 italic mb-3">No authorized actors configured. GitHub actor checks deny by default.</p>
+			} else {
+				<div class="space-y-2 mb-3">
+					for _, actor := range actors {
+						<div class="flex items-center justify-between bg-base-200 rounded-lg px-3 py-2 gap-3">
+							<div class="flex items-center gap-2 min-w-0">
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+								</svg>
+								<span class="text-sm font-medium truncate">{ actor.DisplayName }</span>
+								<span class="text-xs opacity-50 truncate">{ githubDisplayLogin(actor.GitHubLogin) }</span>
+								<span class="badge badge-sm badge-ghost">{ githubActorPermissionLabel(actor.Permission) }</span>
+							</div>
+							<button
+								type="button"
+								class="btn btn-ghost btn-xs text-error shrink-0"
+								hx-delete={ fmt.Sprintf("/channels/github/authorized-actors/%s?project_id=%s", actor.ID, projectID) }
+								hx-target="#github-runtime-settings"
+								hx-swap="outerHTML"
+								hx-confirm="Remove this authorized GitHub actor?"
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+								</svg>
+							</button>
+						</div>
+					}
+				</div>
+			}
+			<div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto_auto] gap-2" id="github-authorized-actors-add-controls">
+				<input type="hidden" name="project_id" value={ projectID }/>
+				<input type="text" name="github_login" placeholder="GitHub login, e.g. @alice" class="input input-bordered input-sm"/>
+				<input type="text" name="display_name" placeholder="Display name (optional)" class="input input-bordered input-sm"/>
+				<select name="permission" class="select select-bordered select-sm">
+					<option value="triage">Triage</option>
+					<option value="approve">Approve</option>
+					<option value="admin">Admin</option>
+				</select>
+				<button
+					type="button"
+					class="btn btn-primary btn-sm"
+					hx-post="/channels/github/authorized-actors"
+					hx-target="#github-runtime-settings"
+					hx-swap="outerHTML"
+					hx-include="#github-authorized-actors-add-controls"
+				>
+					Add
+				</button>
+			</div>
+		</div>
+
+		<div class="divider my-2"></div>
+
+		<div>
+			<h4 class="font-semibold text-sm mb-2 flex items-center gap-2">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+				</svg>
+				Project Inbox Assignee
+			</h4>
+			<p class="text-xs opacity-60 mb-3">
+				This project-scoped GitHub login is the assignee identity prompt-driven scheduled tasks can query with <code class="bg-base-300 px-1 rounded">github_get_project_inbox</code> before using generic GitHub issue tools.
+			</p>
+			<form id="github-project-inbox-form" hx-post="/channels/github/project-inbox" hx-target="#github-runtime-settings" hx-swap="outerHTML" class="space-y-3">
+				<input type="hidden" name="project_id" value={ projectID }/>
+				<div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-end">
+					<label class="form-control">
+						<span class="label"><span class="label-text">GitHub Assignee Login</span></span>
+						<input type="text" name="github_login" class="input input-bordered input-sm" placeholder="e.g. @dev-bot" value={ githubProjectInboxLogin(inbox) } required/>
+					</label>
+					<label class="label cursor-pointer justify-start gap-3 pb-2">
+						<input type="checkbox" class="toggle toggle-primary" name="enabled" value="true" if inbox == nil || inbox.Enabled { checked }/>
+						<span class="label-text">Enabled</span>
+					</label>
+				</div>
+				<div class="flex items-center justify-between gap-3">
+					<div class="text-xs opacity-60">
+						if inbox != nil {
+								Configured as <span class="font-mono">{ githubDisplayLogin(inbox.GitHubLogin) }</span>.
+						} else {
+							No project inbox assignee configured.
+						}
+					</div>
+					<button type="submit" class="btn btn-primary btn-sm">Save Inbox</button>
+				</div>
+			</form>
+		</div>
+	</div>
+}

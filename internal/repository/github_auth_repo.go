@@ -132,7 +132,7 @@ func (r *GitHubAuthRepo) DeleteAuthorizedActor(ctx context.Context, id string) e
 	return nil
 }
 
-// UpsertProjectInbox configures the GitHub assignee identity a project's visible scheduled poller should watch.
+// UpsertProjectInbox configures the GitHub assignee identity a project's prompt-driven tasks can query.
 func (r *GitHubAuthRepo) UpsertProjectInbox(ctx context.Context, inbox *models.GitHubProjectInbox) error {
 	if inbox == nil {
 		return fmt.Errorf("github project inbox is required")

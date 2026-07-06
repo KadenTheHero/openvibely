@@ -234,3 +234,134 @@ func TestChannelsGitHubRemove(t *testing.T) {
 		t.Fatalf("expected github settings cleared, got id=%q slug=%q key=%q pat=%q mode=%q", appID, appSlug, privateKey, pat, authMode)
 	}
 }
+
+func TestGitHubRuntimeSettingsRoutesAuthorizeActors(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("project_id", "default")
+	form.Set("github_login", " @Alice ")
+	form.Set("display_name", "Alice")
+	form.Set("permission", "approve")
+
+	rec := htmxPost(e, "/channels/github/authorized-actors", form)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	assertChannelsRefreshTrigger(t, rec)
+	body := rec.Body.String()
+	if !strings.Contains(body, "@alice") {
+		t.Fatalf("expected normalized login in fragment, got: %s", body)
+	}
+	if !strings.Contains(body, "Approve") {
+		t.Fatalf("expected permission label in fragment, got: %s", body)
+	}
+	authorized, err := h.githubAuthRepo.IsActorAuthorized(context.Background(), "alice")
+	if err != nil {
+		t.Fatalf("checking stored actor: %v", err)
+	}
+	if !authorized {
+		t.Fatal("expected normalized actor to authorize plain login")
+	}
+	authorized, err = h.githubAuthRepo.IsActorAuthorized(context.Background(), "@ALICE")
+	if err != nil {
+		t.Fatalf("checking @ actor: %v", err)
+	}
+	if !authorized {
+		t.Fatal("expected stored actor to authorize @ login")
+	}
+
+	actors, err := h.githubAuthRepo.ListAuthorizedActors(context.Background())
+	if err != nil {
+		t.Fatalf("list actors: %v", err)
+	}
+	if len(actors) != 1 {
+		t.Fatalf("expected one actor, got %d", len(actors))
+	}
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/channels/github/authorized-actors/"+actors[0].ID+"?project_id=default", nil)
+	deleteReq.Header.Set("HX-Request", "true")
+	deleteRec := httptest.NewRecorder()
+	e.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected delete status 200, got %d (%s)", deleteRec.Code, deleteRec.Body.String())
+	}
+	assertChannelsRefreshTrigger(t, deleteRec)
+	authorized, err = h.githubAuthRepo.IsActorAuthorized(context.Background(), "alice")
+	if err != nil {
+		t.Fatalf("checking deleted actor: %v", err)
+	}
+	if authorized {
+		t.Fatal("expected actor to be unauthorized after delete")
+	}
+}
+
+func TestGitHubProjectInboxRouteStoresProjectScopedNormalizedLogin(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("project_id", "default")
+	form.Set("github_login", " @Dev-Bot ")
+	form.Set("enabled", "true")
+
+	rec := htmxPost(e, "/channels/github/project-inbox", form)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	assertChannelsRefreshTrigger(t, rec)
+	body := rec.Body.String()
+	if !strings.Contains(body, "@dev-bot") {
+		t.Fatalf("expected normalized inbox login in fragment, got: %s", body)
+	}
+	inbox, err := h.githubAuthRepo.GetEnabledProjectInbox(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("get inbox: %v", err)
+	}
+	if inbox == nil || inbox.GitHubLogin != "dev-bot" {
+		t.Fatalf("expected enabled dev-bot inbox, got %#v", inbox)
+	}
+	other, err := h.githubAuthRepo.GetProjectInbox(context.Background(), "other-project")
+	if err != nil {
+		t.Fatalf("get other inbox: %v", err)
+	}
+	if other != nil {
+		t.Fatalf("expected project-scoped inbox, got other project row %#v", other)
+	}
+
+	disabled := url.Values{}
+	disabled.Set("project_id", "default")
+	disabled.Set("github_login", "@Dev-Bot")
+	rec = htmxPost(e, "/channels/github/project-inbox", disabled)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected disable status 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	inbox, err = h.githubAuthRepo.GetEnabledProjectInbox(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("get disabled inbox: %v", err)
+	}
+	if inbox != nil {
+		t.Fatalf("expected disabled inbox to be hidden from enabled lookup, got %#v", inbox)
+	}
+}
+
+func TestChannelsPageRendersGitHubRuntimeSettingsLazyHook(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetGitHubService(&fakeGitHubService{
+		statusFn: func(ctx context.Context) (service.GitHubConnectionStatus, error) {
+			return service.GitHubConnectionStatus{Configured: true, Connected: true, AuthMode: service.GitHubAuthModePAT}, nil
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "/channels/github/runtime-settings?project_id=default") {
+		t.Fatalf("expected github runtime settings lazy endpoint in page")
+	}
+	if !strings.Contains(body, "Loading GitHub runtime settings") {
+		t.Fatalf("expected github runtime settings loading placeholder")
+	}
+}

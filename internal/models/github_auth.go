@@ -13,7 +13,7 @@ type GitHubAuthorizedActor struct {
 	AddedBy      string    `json:"added_by"`
 }
 
-// GitHubProjectInbox stores the GitHub assignee identity a project's scheduled GitHub poller should watch.
+// GitHubProjectInbox stores the project-scoped GitHub assignee identity prompt-driven tasks can query.
 type GitHubProjectInbox struct {
 	ProjectID    string    `json:"project_id"`
 	GitHubUserID *int64    `json:"github_user_id,omitempty"`

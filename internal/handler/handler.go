@@ -659,6 +659,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Channels (Integrations)
 	e.GET("/channels", h.handleChannels)
+	e.GET("/channels/github/runtime-settings", h.GitHubRuntimeSettingsFragment)
 	e.POST("/channels/telegram", h.handleTelegramSave)
 	e.POST("/channels/telegram/test", h.handleTelegramTest)
 	e.POST("/channels/telegram/remove", h.handleTelegramRemove)
@@ -695,6 +696,11 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/personality/custom/:key", h.GetCustomPersonality)
 	e.PUT("/personality/custom/:key", h.UpdateCustomPersonality)
 	e.DELETE("/personality/custom/:key", h.DeleteCustomPersonality)
+
+	// GitHub runtime trust and inbox settings
+	e.POST("/channels/github/authorized-actors", h.AddGitHubAuthorizedActor)
+	e.DELETE("/channels/github/authorized-actors/:id", h.RemoveGitHubAuthorizedActor)
+	e.POST("/channels/github/project-inbox", h.SaveGitHubProjectInbox)
 
 	// Telegram authorized users
 	e.GET("/channels/telegram/authorized-users", h.ListTelegramAuthorizedUsers)

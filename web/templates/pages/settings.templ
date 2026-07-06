@@ -872,12 +872,27 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 								</button>
 							</div>
 						</div>
+							</div>
+						<div class="modal-action">
+							<button type="button" class="btn" onclick="closeGitHubConfigModal()">Cancel</button>
+							<button type="submit" class="btn btn-primary">Save GitHub Settings</button>
 						</div>
-					<div class="modal-action">
-						<button type="button" class="btn" onclick="closeGitHubConfigModal()">Cancel</button>
-						<button type="submit" class="btn btn-primary">Save GitHub Settings</button>
-					</div>
-				</form>
+					</form>
+					if currentProjectID != "" {
+						<div class="divider"></div>
+						<div
+							id="github-runtime-settings"
+							hx-get={ "/channels/github/runtime-settings?project_id=" + currentProjectID }
+							hx-trigger="load"
+							hx-target="this"
+							hx-swap="outerHTML"
+						>
+							<div class="flex items-center gap-2 text-sm opacity-70">
+								<span class="loading loading-spinner loading-xs"></span>
+								<span>Loading GitHub runtime settings...</span>
+							</div>
+						</div>
+					}
 			</div>
 			<form method="dialog" class="modal-backdrop">
 				<button>close</button>

@@ -67,8 +67,10 @@ func setupTestHandlerWithDB(t *testing.T) (*Handler, *echo.Echo, *repository.LLM
 	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
 	discordAuthRepo := repository.NewDiscordAuthRepo(db)
 	discordTaskContextRepo := repository.NewDiscordTaskContextRepo(db)
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
 
 	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
+	h.SetGitHubAuthRepo(githubAuthRepo)
 	h.SetSlackAuthRepo(slackAuthRepo)
 	h.SetEmailAuthRepo(emailAuthRepo)
 	h.SetEmailTaskContextRepo(emailTaskContextRepo)
