@@ -3376,6 +3376,29 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 		t.Fatalf("expected existing runtime PR issue number with stale URL cleared, got %#v", record)
 	}
 
+	existingURLTask := &models.Task{ProjectID: project.ID, Title: "Existing Runtime PR URL", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "work"}
+	if err := taskRepo.Create(ctx, existingURLTask); err != nil {
+		t.Fatalf("create existing URL PR task: %v", err)
+	}
+	if err := taskRepo.UpdateWorktreeInfo(ctx, existingURLTask.ID, "", "task/existing-runtime-pr-url"); err != nil {
+		t.Fatalf("update existing URL PR task worktree branch: %v", err)
+	}
+	oldURLIssueNumber := 123
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: existingURLTask.ID, PRNumber: 203, PRURL: "https://github.com/openvibely/openvibely/pull/203", PRState: "open", IssueNumber: &oldURLIssueNumber, IssueURL: "https://github.com/openvibely/openvibely/issues/123"}); err != nil {
+		t.Fatalf("seed existing URL runtime PR: %v", err)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_open_pull_request", []byte(fmt.Sprintf(`{"task_id":"%s","issue_url":"https://github.com/openvibely/openvibely/issues/456"}`, existingURLTask.ID)))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected existing PR URL reuse success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	record, err = prRepo.GetByTaskID(ctx, existingURLTask.ID)
+	if err != nil {
+		t.Fatalf("lookup existing URL runtime task PR: %v", err)
+	}
+	if record == nil || record.PRNumber != 203 || record.IssueNumber != nil || record.IssueURL != "https://github.com/openvibely/openvibely/issues/456" {
+		t.Fatalf("expected existing runtime PR issue URL with stale number cleared, got %#v", record)
+	}
+
 	out, handled, isErr, err = rt.Executor(ctx, "github_is_actor_authorized", []byte(`{"github_login":"alice"}`))
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected authorization check success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)

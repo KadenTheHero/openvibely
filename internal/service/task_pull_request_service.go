@@ -192,6 +192,9 @@ func mergeTaskPullRequestIssueMetadata(record *models.TaskPullRequest, opts Open
 	}
 	if issueURL != "" && record.IssueURL != issueURL {
 		record.IssueURL = issueURL
+		if opts.IssueNumber == nil && record.IssueNumber != nil {
+			record.IssueNumber = nil
+		}
 		changed = true
 	}
 	return changed
