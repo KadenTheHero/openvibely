@@ -56,12 +56,17 @@ type outboundAuthorizedUserAnywhereStore interface {
 	IsAuthorizedAnywhere(ctx context.Context, userID string) (bool, error)
 }
 
+type outboundTelegramAuthorizedUserStore interface {
+	IsAuthorized(ctx context.Context, projectID string, telegramUserID int64, username string) (bool, error)
+}
+
 type ChannelMessageRouter struct {
 	slack        outboundSlackSender
 	telegram     outboundTelegramSender
 	email        outboundEmailSender
 	discord      outboundDiscordSender
 	slackAuth    outboundAuthorizedUserStore
+	telegramAuth outboundTelegramAuthorizedUserStore
 	emailAuth    outboundAuthorizedUserStore
 	discordAuth  outboundAuthorizedUserStore
 	targets      channelTargetStore
@@ -108,6 +113,9 @@ func (r *ChannelMessageRouter) SetEmailService(svc outboundEmailSender)       { 
 func (r *ChannelMessageRouter) SetDiscordService(svc outboundDiscordSender)   { r.discord = svc }
 func (r *ChannelMessageRouter) SetSlackAuthStore(store outboundAuthorizedUserStore) {
 	r.slackAuth = store
+}
+func (r *ChannelMessageRouter) SetTelegramAuthStore(store outboundTelegramAuthorizedUserStore) {
+	r.telegramAuth = store
 }
 func (r *ChannelMessageRouter) SetEmailAuthStore(store outboundAuthorizedUserStore) {
 	r.emailAuth = store
@@ -388,6 +396,12 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 			return emailTarget, nil
 		}
 	}
+	if platform == "telegram" && threadID == "" {
+		telegramTarget, telegramErr := r.resolveAuthorizedTelegramTarget(ctx, projectID, ref)
+		if telegramErr == nil {
+			return telegramTarget, nil
+		}
+	}
 	if !r.allowExplicitTargets(ctx, projectID) {
 		return resolvedMessageTarget{}, fmt.Errorf("Explicit %s target is not saved for this project; call send_message with action=list", platform)
 	}
@@ -583,6 +597,24 @@ func (r *ChannelMessageRouter) resolveAuthorizedEmailTarget(ctx context.Context,
 		return resolvedMessageTarget{}, fmt.Errorf("email recipient is not an authorized sender")
 	}
 	return resolvedMessageTarget{Platform: "email", TargetKind: "email", TargetID: normalized}, nil
+}
+
+func (r *ChannelMessageRouter) resolveAuthorizedTelegramTarget(ctx context.Context, projectID, ref string) (resolvedMessageTarget, error) {
+	if r.telegramAuth == nil {
+		return resolvedMessageTarget{}, fmt.Errorf("telegram authorized-user store is not configured")
+	}
+	userID, err := strconv.ParseInt(strings.TrimSpace(ref), 10, 64)
+	if err != nil || userID <= 0 {
+		return resolvedMessageTarget{}, fmt.Errorf("telegram authorized direct recipients require a positive numeric user id")
+	}
+	allowed, err := r.telegramAuth.IsAuthorized(ctx, projectID, userID, "")
+	if err != nil {
+		return resolvedMessageTarget{}, err
+	}
+	if !allowed {
+		return resolvedMessageTarget{}, fmt.Errorf("telegram user is not authorized for outbound direct messages")
+	}
+	return resolvedMessageTarget{Platform: "telegram", TargetKind: "chat", TargetID: strconv.FormatInt(userID, 10)}, nil
 }
 
 func (r *ChannelMessageRouter) authorizedUserStore(platform string) outboundAuthorizedUserStore {

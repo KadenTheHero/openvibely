@@ -136,7 +136,7 @@ const createSwarmTaskParams = `{"type":"object","properties":{"title":{"type":"s
 // editTaskParams is the full JSON Schema for the edit_task tool.
 const editTaskParams = `{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog","scheduled"]},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string"},"agent_id":{"type":"string"},"agent_config_id":{"type":"string"},"chain":` + chainSchemaProperties + `,"attachments":{"type":"array","items":{"type":"string"}}},"required":["id"],"additionalProperties":false}`
 
-const sendMessageParams = `{"type":"object","properties":{"action":{"type":"string","enum":["send","list"],"description":"send delivers a message. list returns configured outbound targets including their target_kind."},"target":{"type":"string","description":"Delivery target. Format: platform, platform:#target-name, platform:target_id, or platform:target_id:thread_id. Saved outbound targets and home targets are preferred first. Authorized channel users/senders can be used as direct recipients, including email:person@example.com for an authorized Email sender and slack:user:U123... or discord:user:1518288288572641398 for direct messages. Arbitrary unsaved explicit targets require the project policy. For Discord channel sends use discord:channel:<channel_id> or discord:channel:<channel_id>:<thread_id>. Prefer saved/named targets; call action=list to see configured targets."},"message":{"type":"string","description":"Text to send."},"subject":{"type":"string","description":"Optional subject for email targets. Ignored by chat platforms."}},"additionalProperties":false}`
+const sendMessageParams = `{"type":"object","properties":{"action":{"type":"string","enum":["send","list"],"description":"send delivers a message. list returns configured outbound targets including their target_kind."},"target":{"type":"string","description":"Delivery target. Format: platform, platform:#target-name, platform:target_id, or platform:target_id:thread_id. Saved outbound targets and home targets are preferred first. Authorized channel users/senders can be used as direct recipients, including email:person@example.com for an authorized Email sender, telegram:123456789 for an authorized Telegram numeric user ID, and slack:user:U123... or discord:user:1518288288572641398 for direct messages. Arbitrary unsaved explicit targets require the project policy. For Discord channel sends use discord:channel:<channel_id> or discord:channel:<channel_id>:<thread_id>. Prefer saved/named targets; call action=list to see configured targets."},"message":{"type":"string","description":"Text to send."},"subject":{"type":"string","description":"Optional subject for email targets. Ignored by chat platforms."}},"additionalProperties":false}`
 
 // registry is the canonical list of all chat-controllable actions.
 // Order matters for prompt/documentation consistency.
@@ -296,7 +296,8 @@ var registry = []ActionDef{
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(sendMessageParams),
-	}, // --- Schedules domain (RW in orchestrate) ---
+	},
+	// --- Schedules domain (RW in orchestrate) ---
 	{
 		Name:         "schedule_task",
 		Description:  "Create a schedule for a task.",

@@ -567,6 +567,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	llmSvc.SetChannelMessageRouter(channelMessageRouter)
 	channelMessageRouter.SetSlackService(slackSvc)
 	channelMessageRouter.SetSlackAuthStore(slackAuthRepo)
+	channelMessageRouter.SetTelegramAuthStore(telegramAuthRepo)
 	channelMessageRouter.SetEmailService(emailSvc)
 	channelMessageRouter.SetEmailAuthStore(emailAuthRepo)
 	slackSvc.SetChannelMessageRouter(channelMessageRouter)

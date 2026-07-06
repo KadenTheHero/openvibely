@@ -2128,7 +2128,7 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 					<div>
 						<p class="font-semibold">Saved destinations for send_message</p>
 						<p class="text-xs opacity-80 mt-1">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, `discord:#ops`, or `email:#client`. Saved targets and Home targets are preferred first.</p>
-						<p class="text-xs opacity-70 mt-1">Authorized channel users/senders can also be direct recipients, such as authorized Email senders or Slack/Discord user DMs. Other arbitrary unsaved targets require the project policy below.</p>
+						<p class="text-xs opacity-70 mt-1">Authorized channel users/senders can also be direct recipients, such as authorized Email senders, Telegram numeric user IDs, or Slack/Discord user DMs. Other arbitrary unsaved targets require the project policy below.</p>
 					</div>
 				</div>
 				if notice != "" {

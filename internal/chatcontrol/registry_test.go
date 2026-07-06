@@ -38,7 +38,7 @@ func TestRegistry_SendMessageTargetDescriptionMentionsAuthorizedRecipients(t *te
 	if !strings.Contains(desc, "slack:user:U123") || !strings.Contains(desc, "discord:user:1518288288572641398") {
 		t.Fatalf("send_message target description should mention user DM syntax, got %q", desc)
 	}
-	if !strings.Contains(desc, "email:person@example.com") || !strings.Contains(desc, "Authorized channel users/senders") {
+	if !strings.Contains(desc, "email:person@example.com") || !strings.Contains(desc, "telegram:123456789") || !strings.Contains(desc, "Authorized channel users/senders") {
 		t.Fatalf("send_message target description should mention authorized channel recipients, got %q", desc)
 	}
 	if !strings.Contains(desc, "Saved outbound targets and home targets are preferred first") || !strings.Contains(desc, "Arbitrary unsaved explicit targets require the project policy") {
