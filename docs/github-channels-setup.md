@@ -11,6 +11,7 @@ Why this matters:
 - Lets OpenVibely use app-managed credentials for private repositories.
 - Enables authenticated Git operations and PR-related actions.
 - Keeps credentials centralized in one place.
+- Provides the generic GitHub runtime settings used by prompt-driven scheduled tasks.
 
 GitHub URL project creation can still clone through your local `git` CLI when no PAT or GitHub App token is configured. That fallback supports public repositories and private repositories your local Git environment can already access. Configure this channel when you want OpenVibely-managed credentials or PR workflows.
 
@@ -55,6 +56,16 @@ Why choose GitHub App:
 - Better for centralized/cloud-style multi-user deployments.
 - Uses installation-based auth model instead of user PATs.
 
+## GitHub Runtime Settings
+
+After configuring GitHub credentials, open the GitHub settings modal and use `GitHub Runtime Settings` for prompt-driven task workflows.
+
+- `Authorized Actors` are GitHub users who may approve or trigger automated fixing. This is separate from the PAT or GitHub App credential used for API operations.
+- `Project Inbox Assignee` is the GitHub login that scheduled tasks can query with `github_get_project_inbox` before checking assigned issues.
+- User-facing GitHub logins can be entered as `alice` or `@alice`; OpenVibely stores the normalized plain login.
+
+For the visible scheduled-task pattern, see the [GitHub Autonomous SDLC User Guide](./github-autonomous-sdlc-user-guide.md).
+
 ## Card Actions
 
 From the GitHub card menu:
@@ -74,9 +85,10 @@ The card shows one of:
 
 ## How This Relates To Other Pages
 
-- `/channels` configures GitHub integration/auth.
+- `/channels` configures GitHub integration/auth and GitHub runtime trust/inbox settings.
 - Project repository source (`repo_url`/clone behavior) is managed in project settings.
-- Task PR creation is done from task `Changes` tab.
+- Task PR creation is done from task `Changes` tab or the generic `github_open_pull_request` runtime tool when available.
+- Prompt-driven scheduled GitHub mailbox loops are described in the [GitHub Autonomous SDLC User Guide](./github-autonomous-sdlc-user-guide.md).
 
 ## Troubleshooting
 

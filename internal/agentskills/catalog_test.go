@@ -251,6 +251,75 @@ func TestBuildCatalog_LoadsGitHubAutonomousSDLCBootstrapSkill(t *testing.T) {
 	}
 }
 
+func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	repoRoot := filepath.Clean(filepath.Join(wd, "..", ".."))
+
+	skillPath := filepath.Join(repoRoot, ".openvibely", SkillsDir, "openvibely_github_autonomous_sdlc_bootstrap", SkillFile)
+	skillBody, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read GitHub bootstrap skill: %v", err)
+	}
+	skillText := string(skillBody)
+
+	guidePath := filepath.Join(repoRoot, "docs", "github-autonomous-sdlc-user-guide.md")
+	guideBody, err := os.ReadFile(guidePath)
+	if err != nil {
+		t.Fatalf("read GitHub autonomous SDLC guide: %v", err)
+	}
+	guideText := string(guideBody)
+
+	for _, want := range []string{
+		"visible scheduled OpenVibely tasks",
+		"generic GitHub runtime tools",
+		"Do not create hidden daemon or poller services",
+		"github_get_project_inbox",
+		"github_list_assigned_issues_with_prs",
+		"github_open_pull_request",
+		"Never use labels beginning with `openvibely:`",
+		"Assigned GitHub issues without an associated PR must be skipped",
+	} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("GitHub bootstrap skill missing %q", want)
+		}
+	}
+
+	for _, want := range []string{
+		"There is no hidden GitHub poller daemon",
+		"GitHub Runtime Settings",
+		"github_get_project_inbox",
+		"github_list_assigned_issues_with_prs",
+		"github_is_actor_authorized",
+		"github_open_pull_request",
+		"Never use labels beginning with `openvibely:`",
+		"Assigned GitHub issues without an associated PR must be skipped",
+		"Do not use `github_open_pull_request` as a loophole",
+	} {
+		if !strings.Contains(guideText, want) {
+			t.Fatalf("GitHub autonomous SDLC guide missing %q", want)
+		}
+	}
+
+	indexBody, err := os.ReadFile(filepath.Join(repoRoot, "docs", "user-guides.md"))
+	if err != nil {
+		t.Fatalf("read user guide index: %v", err)
+	}
+	if !strings.Contains(string(indexBody), "[GitHub Autonomous SDLC User Guide](./github-autonomous-sdlc-user-guide.md)") {
+		t.Fatalf("user guide index does not link GitHub autonomous SDLC guide")
+	}
+
+	githubSetupBody, err := os.ReadFile(filepath.Join(repoRoot, "docs", "github-channels-setup.md"))
+	if err != nil {
+		t.Fatalf("read GitHub channel setup guide: %v", err)
+	}
+	if !strings.Contains(string(githubSetupBody), "[GitHub Autonomous SDLC User Guide](./github-autonomous-sdlc-user-guide.md)") {
+		t.Fatalf("GitHub channel setup guide does not link GitHub autonomous SDLC guide")
+	}
+}
+
 func TestBuildCatalog_IgnoresMissingRoots(t *testing.T) {
 	cat, err := BuildCatalog("t", "/nonexistent/global", "/nonexistent/project")
 	if err != nil {
