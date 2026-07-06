@@ -11,6 +11,7 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -288,6 +289,12 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"github_get_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubGetIssueTool(ctx, params.ProjectID, input)
 		},
+		"github_get_project_inbox": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeGitHubGetProjectInboxTool(ctx, params.ProjectID, input)
+		},
+		"github_is_actor_authorized": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeGitHubIsActorAuthorizedTool(ctx, input)
+		},
 		"github_list_assigned_issues_with_prs": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubListAssignedIssuesWithPRsTool(ctx, params.ProjectID, input)
 		},
@@ -488,6 +495,7 @@ type githubCreateIssueToolInput struct {
 type githubIssueToolInput struct {
 	IssueNumber int      `json:"issue_number"`
 	Assignee    string   `json:"assignee"`
+	GitHubLogin string   `json:"github_login"`
 	Body        string   `json:"body"`
 	Labels      []string `json:"labels"`
 	TaskID      string   `json:"task_id"`
@@ -541,6 +549,36 @@ func (h *Handler) executeGitHubGetIssueTool(ctx context.Context, projectID strin
 		return "", err
 	}
 	return githubToolJSON(map[string]any{"ok": true, "issue": issue})
+}
+
+func (h *Handler) executeGitHubGetProjectInboxTool(ctx context.Context, projectID string, _ json.RawMessage) (string, error) {
+	if h.githubAuthRepo == nil {
+		return "", fmt.Errorf("github auth repository unavailable")
+	}
+	inbox, err := h.githubAuthRepo.GetEnabledProjectInbox(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	return githubToolJSON(map[string]any{"ok": true, "configured": inbox != nil, "inbox": inbox})
+}
+
+func (h *Handler) executeGitHubIsActorAuthorizedTool(ctx context.Context, input json.RawMessage) (string, error) {
+	if h.githubAuthRepo == nil {
+		return "", fmt.Errorf("github auth repository unavailable")
+	}
+	var req githubIssueToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	login := strings.TrimSpace(req.GitHubLogin)
+	if login == "" {
+		return "", fmt.Errorf("github_login is required")
+	}
+	authorized, err := h.githubAuthRepo.IsActorAuthorized(ctx, login)
+	if err != nil {
+		return "", err
+	}
+	return githubToolJSON(map[string]any{"ok": true, "github_login": repository.NormalizeGitHubLogin(login), "authorized": authorized})
 }
 
 func (h *Handler) executeGitHubListAssignedIssuesWithPRsTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
@@ -1214,6 +1252,8 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"send_message":                         true,
 		"github_create_issue":                  true,
 		"github_get_issue":                     true,
+		"github_get_project_inbox":             true,
+		"github_is_actor_authorized":           true,
 		"github_list_assigned_issues_with_prs": true,
 		"github_comment_on_issue":              true,
 		"github_add_issue_labels":              true,

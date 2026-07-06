@@ -87,8 +87,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 109 {
-		t.Fatalf("max goose version = %d, want 109", maxVersion)
+	if maxVersion != 110 {
+		t.Fatalf("max goose version = %d, want 110", maxVersion)
 	}
 }
 
@@ -239,8 +239,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 109 {
-		t.Fatalf("max goose version = %d, want 109", maxVersion)
+	if maxVersion != 110 {
+		t.Fatalf("max goose version = %d, want 110", maxVersion)
 	}
 }
 
@@ -710,8 +710,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 109 {
-		t.Fatalf("max goose version = %d, want 109", maxVersion)
+	if maxVersion != 110 {
+		t.Fatalf("max goose version = %d, want 110", maxVersion)
 	}
 }
 
@@ -1062,8 +1062,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 109 {
-		t.Fatalf("max goose version = %d, want 109", maxVersion)
+	if maxVersion != 110 {
+		t.Fatalf("max goose version = %d, want 110", maxVersion)
 	}
 }
 
@@ -1211,4 +1211,51 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	// Teardown
 	os.Exit(code)
+}
+
+func TestMigration110_GitHubAuthorizationAndProjectInbox(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "github-auth-110.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("failed to set dialect: %v", err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("failed to run migrations: %v", err)
+	}
+	for _, table := range []string{"github_authorized_actors", "github_project_inboxes"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatalf("failed to inspect table %s: %v", table, err)
+		}
+		if count != 1 {
+			t.Fatalf("expected table %s to exist", table)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO github_authorized_actors (github_login, permission) VALUES ('Alice', 'approve')`); err != nil {
+		t.Fatalf("expected github authorized actor insert: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO github_authorized_actors (github_login, permission) VALUES ('alice', 'approve')`); err == nil {
+		t.Fatal("expected mixed-case duplicate github actor login to be rejected")
+	}
+	if _, err := db.Exec(`INSERT INTO github_authorized_actors (github_login, permission) VALUES ('bob', 'owner')`); err == nil {
+		t.Fatal("expected invalid github actor permission to be rejected")
+	}
+	for _, id := range []string{"github-inbox-project-one", "github-inbox-project-two"} {
+		if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES (?, ?, '', '')`, id, id); err != nil {
+			t.Fatalf("failed to insert project %s: %v", id, err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO github_project_inboxes (project_id, github_login) VALUES ('github-inbox-project-one', 'dev-bot')`); err != nil {
+		t.Fatalf("expected first project inbox insert: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO github_project_inboxes (project_id, github_login) VALUES ('github-inbox-project-two', 'DEV-BOT')`); err != nil {
+		t.Fatalf("same GitHub inbox login should be reusable by another project: %v", err)
+	}
 }

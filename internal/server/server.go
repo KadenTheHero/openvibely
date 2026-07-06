@@ -503,6 +503,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 
 	settingsRepo := repository.NewSettingsRepo(db)
 	taskPullRequestRepo := repository.NewTaskPullRequestRepo(db)
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
 	webhookRepo := repository.NewWebhookRepo(db)
 
 	// Seed Slack settings from env when provided (useful for bootstrapping local setup).
@@ -540,6 +541,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		cfg.ProjectRepoRoot,
 	)
 	llmSvc.SetGitHubIssueRuntimeProvider(githubSvc)
+	llmSvc.SetGitHubAuthRepo(githubAuthRepo)
 	llmSvc.SetTaskPullRequestRepo(taskPullRequestRepo)
 	slackSvc := service.NewSlackService(
 		settingsRepo,
@@ -856,6 +858,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetAgentSkillRoot(globalSkillRoot)
 	h.SetAgentLibraryMaintenanceService(agentLibraryMaintenanceSvc)
 	h.SetTaskPullRequestRepo(taskPullRequestRepo)
+	h.SetGitHubAuthRepo(githubAuthRepo)
 	h.SetGitHubService(githubSvc)
 	h.SetSlackService(slackSvc)
 	h.SetDiscordService(discordSvc)

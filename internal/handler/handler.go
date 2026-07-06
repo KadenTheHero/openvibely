@@ -66,6 +66,7 @@ type Handler struct {
 	lifecycleRepo              *repository.LifecycleRepo
 	worktreeSvc                *service.WorktreeService
 	taskPullRequestRepo        *repository.TaskPullRequestRepo
+	githubAuthRepo             *repository.GitHubAuthRepo
 	githubSvc                  GitHubServiceProvider
 	slackSvc                   SlackServiceProvider
 	discordSvc                 DiscordServiceProvider
@@ -379,6 +380,10 @@ func (h *Handler) SetWorktreeService(svc *service.WorktreeService) {
 // SetTaskPullRequestRepo sets the task pull request repo for task PR records.
 func (h *Handler) SetTaskPullRequestRepo(repo *repository.TaskPullRequestRepo) {
 	h.taskPullRequestRepo = repo
+}
+
+func (h *Handler) SetGitHubAuthRepo(repo *repository.GitHubAuthRepo) {
+	h.githubAuthRepo = repo
 }
 
 // SetGitHubService sets the GitHub service used for auth/import/PR flows.

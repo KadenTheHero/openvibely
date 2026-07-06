@@ -25,6 +25,8 @@ func TestNormalizeAgentToolsKeepsRuntimeMessagingGitHubAndTaskGoalTools(t *testi
 		"send_message",
 		"github_create_issue",
 		"github_get_issue",
+		"github_get_project_inbox",
+		"github_is_actor_authorized",
 		"github_list_assigned_issues_with_prs",
 		"github_comment_on_issue",
 		"github_add_issue_labels",

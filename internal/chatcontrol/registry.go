@@ -145,6 +145,7 @@ const githubListAssignedIssuesParams = `{"type":"object","properties":{"assignee
 const githubCommentIssueParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"body":{"type":"string"}},"required":["issue_number","body"],"additionalProperties":false}`
 const githubAddLabelsParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as approved, in-progress, pr-opened. Do not use an openvibely: prefix."}},"required":["issue_number","labels"],"additionalProperties":false}`
 const githubLinkTaskIssueParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"issue_number":{"type":"integer","minimum":1}},"required":["issue_number"],"additionalProperties":false}`
+const githubActorAuthorizedParams = `{"type":"object","properties":{"github_login":{"type":"string","description":"GitHub login to check against the configured authorized actor list."}},"required":["github_login"],"additionalProperties":false}`
 
 // registry is the canonical list of all chat-controllable actions.
 // Order matters for prompt/documentation consistency.
@@ -325,6 +326,26 @@ var registry = []ActionDef{
 		AllowedModes: bothModes(),
 		Surfaces:     webAPISurfaces(),
 		Parameters:   json.RawMessage(githubIssueNumberParams),
+	},
+	{
+		Name:         "github_get_project_inbox",
+		Description:  "Read the current project's configured GitHub inbox assignee login. Scheduled or manual GitHub issue checks can use this login with github_list_assigned_issues_with_prs.",
+		Domain:       DomainGitHub,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+	},
+	{
+		Name:         "github_is_actor_authorized",
+		Description:  "Check whether a GitHub login is explicitly authorized to approve or trigger GitHub-backed automation. Missing or empty authorization lists deny by default.",
+		Domain:       DomainGitHub,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(githubActorAuthorizedParams),
 	},
 	{
 		Name:         "github_list_assigned_issues_with_prs",

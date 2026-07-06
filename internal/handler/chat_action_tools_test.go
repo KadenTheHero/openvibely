@@ -502,3 +502,44 @@ func TestGitHubLinkTaskToIssuePersistsAssociatedPR(t *testing.T) {
 		t.Fatalf("unexpected issue URL: %q", record.IssueURL)
 	}
 }
+
+func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "GitHub Inbox", RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	authRepo := repository.NewGitHubAuthRepo(db)
+	h.SetGitHubAuthRepo(authRepo)
+	if err := authRepo.UpsertProjectInbox(ctx, &models.GitHubProjectInbox{ProjectID: project.ID, GitHubLogin: "Dev-Bot", Enabled: true}); err != nil {
+		t.Fatalf("configure github inbox: %v", err)
+	}
+	if err := authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "Alice", Permission: "approve"}); err != nil {
+		t.Fatalf("configure authorized actor: %v", err)
+	}
+
+	params := streamingResponseParams{ProjectID: project.ID}
+	handlers := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	out, err := handlers["github_get_project_inbox"](ctx, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("github_get_project_inbox returned error: %v", err)
+	}
+	if !strings.Contains(out, `"configured":true`) || !strings.Contains(out, `"github_login":"dev-bot"`) {
+		t.Fatalf("expected configured inbox output, got %s", out)
+	}
+	out, err = handlers["github_is_actor_authorized"](ctx, json.RawMessage(`{"github_login":"ALICE"}`))
+	if err != nil {
+		t.Fatalf("github_is_actor_authorized returned error: %v", err)
+	}
+	if !strings.Contains(out, `"authorized":true`) || !strings.Contains(out, `"github_login":"alice"`) {
+		t.Fatalf("expected authorized actor output, got %s", out)
+	}
+	out, err = handlers["github_is_actor_authorized"](ctx, json.RawMessage(`{"github_login":"bob"}`))
+	if err != nil {
+		t.Fatalf("github_is_actor_authorized unknown returned error: %v", err)
+	}
+	if !strings.Contains(out, `"authorized":false`) {
+		t.Fatalf("expected deny-by-default output for unknown actor, got %s", out)
+	}
+}

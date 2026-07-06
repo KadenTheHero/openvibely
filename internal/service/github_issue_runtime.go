@@ -27,6 +27,7 @@ type githubIssueRuntimeOptions struct {
 	ProjectRepo         *repository.ProjectRepo
 	TaskRepo            *repository.TaskRepo
 	TaskPullRequestRepo *repository.TaskPullRequestRepo
+	GitHubAuthRepo      *repository.GitHubAuthRepo
 	GitHub              GitHubIssueRuntimeProvider
 }
 
@@ -40,6 +41,7 @@ type githubCreateIssueRuntimeInput struct {
 type githubIssueRuntimeInput struct {
 	IssueNumber int      `json:"issue_number"`
 	Assignee    string   `json:"assignee"`
+	GitHubLogin string   `json:"github_login"`
 	Body        string   `json:"body"`
 	Labels      []string `json:"labels"`
 	TaskID      string   `json:"task_id"`
@@ -103,6 +105,34 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				return "", err
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue": issue})
+		},
+		"github_get_project_inbox": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			if opts.GitHubAuthRepo == nil {
+				return "", fmt.Errorf("github auth repository unavailable")
+			}
+			inbox, err := opts.GitHubAuthRepo.GetEnabledProjectInbox(ctx, opts.ProjectID)
+			if err != nil {
+				return "", err
+			}
+			return githubIssueRuntimeJSON(map[string]any{"ok": true, "configured": inbox != nil, "inbox": inbox})
+		},
+		"github_is_actor_authorized": func(ctx context.Context, input json.RawMessage) (string, error) {
+			if opts.GitHubAuthRepo == nil {
+				return "", fmt.Errorf("github auth repository unavailable")
+			}
+			var req githubIssueRuntimeInput
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			login := strings.TrimSpace(req.GitHubLogin)
+			if login == "" {
+				return "", fmt.Errorf("github_login is required")
+			}
+			authorized, err := opts.GitHubAuthRepo.IsActorAuthorized(ctx, login)
+			if err != nil {
+				return "", err
+			}
+			return githubIssueRuntimeJSON(map[string]any{"ok": true, "github_login": repository.NormalizeGitHubLogin(login), "authorized": authorized})
 		},
 		"github_list_assigned_issues_with_prs": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req githubIssueRuntimeInput

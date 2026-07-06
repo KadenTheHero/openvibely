@@ -67,6 +67,7 @@ type LLMService struct {
 	queuedTaskThreadPromoter func(taskID string)
 	channelMessageRouter     *ChannelMessageRouter
 	githubIssueRuntime       GitHubIssueRuntimeProvider
+	githubAuthRepo           *repository.GitHubAuthRepo
 	taskPullRequestRepo      *repository.TaskPullRequestRepo
 	// globalSkillRoot is the parent directory holding <root>/agents for global
 	// agents/skills. It is used for catalog construction and bounded skill
@@ -187,6 +188,10 @@ func (s *LLMService) SetGitHubIssueRuntimeProvider(provider GitHubIssueRuntimePr
 	s.githubIssueRuntime = provider
 }
 
+func (s *LLMService) SetGitHubAuthRepo(repo *repository.GitHubAuthRepo) {
+	s.githubAuthRepo = repo
+}
+
 func (s *LLMService) SetTaskPullRequestRepo(repo *repository.TaskPullRequestRepo) {
 	s.taskPullRequestRepo = repo
 }
@@ -225,6 +230,7 @@ func (s *LLMService) taskActionRuntimeTools(task models.Task) *llmcontracts.Runt
 		ProjectRepo:         s.projectRepo,
 		TaskRepo:            s.taskRepo,
 		TaskPullRequestRepo: s.taskPullRequestRepo,
+		GitHubAuthRepo:      s.githubAuthRepo,
 		GitHub:              s.githubIssueRuntime,
 	})
 	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), githubTools)
