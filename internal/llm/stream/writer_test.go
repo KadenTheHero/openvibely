@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -58,6 +59,100 @@ func TestStreamingWriter_PeriodicFlush(t *testing.T) {
 	}
 	if updatedExec.Output != "hello world" {
 		t.Errorf("expected DB output %q after periodic flush, got %q", "hello world", updatedExec.Output)
+	}
+}
+
+type fakeExecutionOutputRepo struct {
+	mu      sync.Mutex
+	output  string
+	writes  []string
+	updated chan string
+}
+
+func (r *fakeExecutionOutputRepo) GetByID(ctx context.Context, id string) (*models.Execution, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return &models.Execution{ID: id, Output: r.output}, nil
+}
+
+func (r *fakeExecutionOutputRepo) UpdateOutput(ctx context.Context, id string, output string) error {
+	r.mu.Lock()
+	r.output = output
+	r.writes = append(r.writes, output)
+	r.mu.Unlock()
+	if r.updated != nil {
+		r.updated <- output
+	}
+	return nil
+}
+
+func (r *fakeExecutionOutputRepo) snapshot() (string, []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	writes := append([]string(nil), r.writes...)
+	return r.output, writes
+}
+
+func TestStreamingWriter_PeriodicCannotOverwriteNewerFinalFlush(t *testing.T) {
+	repo := &fakeExecutionOutputRepo{updated: make(chan string, 2)}
+	sw := newWriterWithOutputRepo("exec-1", "task-1", repo, context.Background(), time.Hour, nil)
+	defer sw.Stop()
+
+	periodicSnapshot := make(chan string, 1)
+	releasePeriodicWrite := make(chan struct{})
+	sw.afterPeriodicSnapshot = func(output string) {
+		periodicSnapshot <- output
+		<-releasePeriodicWrite
+	}
+
+	if _, err := sw.Write([]byte("hello")); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	periodicDone := make(chan struct{})
+	go func() {
+		sw.flushPeriodicOnce()
+		close(periodicDone)
+	}()
+
+	select {
+	case got := <-periodicSnapshot:
+		if got != "hello" {
+			t.Fatalf("expected periodic to snapshot %q before final output, got %q", "hello", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("periodic flush did not take initial snapshot")
+	}
+
+	if _, err := sw.Write([]byte(" world")); err != nil {
+		t.Fatalf("second write failed: %v", err)
+	}
+
+	finalDone := make(chan struct{})
+	go func() {
+		sw.Flush()
+		close(finalDone)
+	}()
+
+	close(releasePeriodicWrite)
+
+	select {
+	case <-periodicDone:
+	case <-time.After(time.Second):
+		t.Fatal("periodic flush did not complete")
+	}
+	select {
+	case <-finalDone:
+	case <-time.After(time.Second):
+		t.Fatal("final flush did not complete")
+	}
+
+	output, writes := repo.snapshot()
+	if output != "hello world" {
+		t.Fatalf("expected persisted output to remain %q, got %q (writes=%q)", "hello world", output, writes)
+	}
+	if len(writes) != 2 || writes[0] != "hello" || writes[1] != "hello world" {
+		t.Fatalf("expected stale periodic write to be followed by final full write, got writes=%q", writes)
 	}
 }
 

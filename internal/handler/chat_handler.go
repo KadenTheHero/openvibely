@@ -860,24 +860,32 @@ func (h *Handler) writeExecutionTerminalSSE(c echo.Context, exec *models.Executi
 	}
 }
 
-func (h *Handler) catchUpExecutionSSE(ctx context.Context, c echo.Context, execID string, sentLen *int, appendTerminal bool) (bool, error) {
+func (h *Handler) replayExecutionOutputSSE(ctx context.Context, c echo.Context, execID string, sentLen *int) (*models.Execution, error) {
 	exec, err := h.execRepo.GetByID(ctx, execID)
+	if err != nil {
+		return nil, err
+	}
+	if exec == nil {
+		return nil, fmt.Errorf("execution not found")
+	}
+	start := clampOffsetToUTF8Boundary(*sentLen, exec.Output)
+	if len(exec.Output) > start {
+		writeSSEData(c, exec.Output[start:])
+		c.Response().Flush()
+		*sentLen = len(exec.Output)
+	}
+	return exec, nil
+}
+
+func (h *Handler) catchUpExecutionSSE(ctx context.Context, c echo.Context, execID string, sentLen *int, appendTerminal bool) (bool, error) {
+	exec, err := h.replayExecutionOutputSSE(ctx, c, execID, sentLen)
 	if err != nil {
 		return false, err
 	}
-	if exec == nil {
-		return false, fmt.Errorf("execution not found")
-	}
-	if exec.Status == models.ExecRunning || appendTerminal {
-		start := clampOffsetToUTF8Boundary(*sentLen, exec.Output)
-		if len(exec.Output) > start {
-			writeSSEData(c, exec.Output[start:])
-			c.Response().Flush()
-			*sentLen = len(exec.Output)
+	if appendTerminal || exec.Status != models.ExecRunning {
+		if h.writeExecutionTerminalSSE(c, exec) {
+			return true, nil
 		}
-	}
-	if h.writeExecutionTerminalSSE(c, exec) {
-		return true, nil
 	}
 	return false, nil
 }
@@ -1050,6 +1058,12 @@ func (h *Handler) ChatStreamSSE(c echo.Context) error {
 				c.Response().Flush()
 				return nil
 			case events.ExecutionStreamError:
+				if _, err := h.replayExecutionOutputSSE(ctx, c, execID, &sentLen); err != nil {
+					applog.Infof("[handler] ChatStreamSSE exec=%s error catch-up error: %v", execID, err)
+					writeChatSSEEvent(c, "error", err.Error())
+					c.Response().Flush()
+					return nil
+				}
 				writeChatSSEEvent(c, "error", ev.Error)
 				c.Response().Flush()
 				return nil

@@ -8,8 +8,14 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
+
+type executionOutputRepo interface {
+	GetByID(ctx context.Context, id string) (*models.Execution, error)
+	UpdateOutput(ctx context.Context, id string, output string) error
+}
 
 type ExecutionStreamPublisher interface {
 	Publish(event events.ExecutionStreamEvent)
@@ -20,22 +26,23 @@ type ExecutionStreamPublisher interface {
 // It runs a background goroutine that flushes on a timer, ensuring output
 // is visible even during long pauses (e.g., while a tool is running).
 type Writer struct {
-	buf           bytes.Buffer
-	textBuf       bytes.Buffer // text-only content (no thinking blocks, no tool markers)
-	mu            sync.Mutex
-	flushMu       sync.Mutex
-	execID        string
-	taskID        string
-	repo          *repository.ExecutionRepo
-	ctx           context.Context
-	publisher     ExecutionStreamPublisher
-	lastFlush     time.Time
-	interval      time.Duration
-	dirty         bool // true when buf has unflushed content
-	done          chan struct{}
-	isError       bool   // true if CLI result event had is_error=true
-	resultSubtype string // subtype from CLI result event (e.g. "error_max_turns")
-	sessionID     string // CLI session ID for --resume on subsequent calls
+	buf                   bytes.Buffer
+	textBuf               bytes.Buffer // text-only content (no thinking blocks, no tool markers)
+	mu                    sync.Mutex
+	flushMu               sync.Mutex
+	execID                string
+	taskID                string
+	repo                  executionOutputRepo
+	ctx                   context.Context
+	publisher             ExecutionStreamPublisher
+	lastFlush             time.Time
+	interval              time.Duration
+	dirty                 bool // true when buf has unflushed content
+	afterPeriodicSnapshot func(string)
+	done                  chan struct{}
+	isError               bool   // true if CLI result event had is_error=true
+	resultSubtype         string // subtype from CLI result event (e.g. "error_max_turns")
+	sessionID             string // CLI session ID for --resume on subsequent calls
 }
 
 func NewWriter(execID, taskID string, repo *repository.ExecutionRepo, ctx context.Context, interval time.Duration) *Writer {
@@ -43,6 +50,14 @@ func NewWriter(execID, taskID string, repo *repository.ExecutionRepo, ctx contex
 }
 
 func NewWriterWithPublisher(execID, taskID string, repo *repository.ExecutionRepo, ctx context.Context, interval time.Duration, publisher ExecutionStreamPublisher) *Writer {
+	var outputRepo executionOutputRepo
+	if repo != nil {
+		outputRepo = repo
+	}
+	return newWriterWithOutputRepo(execID, taskID, outputRepo, ctx, interval, publisher)
+}
+
+func newWriterWithOutputRepo(execID, taskID string, repo executionOutputRepo, ctx context.Context, interval time.Duration, publisher ExecutionStreamPublisher) *Writer {
 	sw := &Writer{
 		execID:    execID,
 		taskID:    taskID,
@@ -84,26 +99,34 @@ func (w *Writer) periodicFlush() {
 		case <-w.ctx.Done():
 			return
 		case <-ticker.C:
-			w.mu.Lock()
-			shouldFlush := w.dirty && w.repo != nil && w.execID != ""
-			output := ""
-			totalLen := 0
-			if shouldFlush {
-				output = w.buf.String()
-				totalLen = w.buf.Len()
-				w.dirty = false
-				w.lastFlush = time.Now()
-			}
-			w.mu.Unlock()
-			if shouldFlush {
-				w.flushMu.Lock()
-				if dbErr := w.repo.UpdateOutput(w.ctx, w.execID, output); dbErr != nil {
-					applog.Infof("[agent-svc] streamingWriter periodic flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
-				} else {
-					applog.Debugf("[agent-svc] streamingWriter periodic flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, totalLen)
-				}
-				w.flushMu.Unlock()
-			}
+			w.flushPeriodicOnce()
+		}
+	}
+}
+
+func (w *Writer) flushPeriodicOnce() {
+	w.flushMu.Lock()
+	defer w.flushMu.Unlock()
+
+	w.mu.Lock()
+	shouldFlush := w.dirty && w.repo != nil && w.execID != ""
+	output := ""
+	totalLen := 0
+	if shouldFlush {
+		output = w.buf.String()
+		totalLen = w.buf.Len()
+		w.dirty = false
+		w.lastFlush = time.Now()
+	}
+	w.mu.Unlock()
+	if shouldFlush && w.afterPeriodicSnapshot != nil {
+		w.afterPeriodicSnapshot(output)
+	}
+	if shouldFlush {
+		if dbErr := w.repo.UpdateOutput(w.ctx, w.execID, output); dbErr != nil {
+			applog.Infof("[agent-svc] streamingWriter periodic flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
+		} else {
+			applog.Debugf("[agent-svc] streamingWriter periodic flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, totalLen)
 		}
 	}
 }
@@ -142,6 +165,9 @@ func (w *Writer) Stop() {
 // It uses a detached context so the write succeeds even if the
 // original context was canceled (e.g., HTTP client disconnect).
 func (w *Writer) Flush() {
+	w.flushMu.Lock()
+	defer w.flushMu.Unlock()
+
 	w.mu.Lock()
 	if w.repo == nil || w.execID == "" {
 		w.dirty = false
@@ -160,8 +186,6 @@ func (w *Writer) Flush() {
 	w.mu.Unlock()
 
 	flushCtx := context.WithoutCancel(w.ctx)
-	w.flushMu.Lock()
-	defer w.flushMu.Unlock()
 	if dbErr := w.repo.UpdateOutput(flushCtx, w.execID, output); dbErr != nil {
 		applog.Infof("[agent-svc] streamingWriter final flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
 	} else {
