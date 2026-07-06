@@ -1029,8 +1029,24 @@ func validatePlannerOutput(output PlannerOutput, parentCfg models.SwarmConfig) e
 		if iso != "read_only" && iso != "worktree" {
 			return fmt.Errorf("code-changing worker %q must use worktree isolation", w.Title)
 		}
+		if isDependentValidationWorker(w) {
+			return fmt.Errorf("worker %q describes validating after other workers complete, which the swarm cannot schedule as a parallel worker; move that validation into reviewer_prompt or merger_prompt instead", w.Title)
+		}
 	}
 	return nil
+}
+
+// dependentValidationLanguage matches worker titles/prompts that describe running
+// only after other workers finish (e.g. "after implementation workers have produced
+// candidate fixes..."). Planner-created workers in the workers array are all submitted
+// as ordinary parallel workers with no inter-worker dependency scheduling, so a worker
+// that encodes this kind of sequencing in natural language will run immediately
+// alongside (or before) the workers it claims to depend on. That validation intent
+// belongs in reviewer_prompt/merger_prompt, which are mechanically phased after workers.
+var dependentValidationLanguage = regexp.MustCompile(`(?i)(after|once|when)\b[^.]{0,80}\bworkers?\b[^.]{0,80}\b(complet\w*|finish\w*|produc\w*|are\s+done|is\s+done)\b`)
+
+func isDependentValidationWorker(w PlannerWorker) bool {
+	return dependentValidationLanguage.MatchString(w.Title) || dependentValidationLanguage.MatchString(w.Prompt)
 }
 
 func validateFollowupPlannerOutput(output PlannerOutput, existing []models.Task, parentCfg models.SwarmConfig) error {
@@ -1054,6 +1070,11 @@ func validateFollowupPlannerOutput(output PlannerOutput, existing []models.Task,
 	}
 	if parentCfg.MaxWorkers > 0 && workerCount+newWorkers > parentCfg.MaxWorkers {
 		return fmt.Errorf("coordinator output would create %d workers, max is %d", workerCount+newWorkers, parentCfg.MaxWorkers)
+	}
+	for _, w := range output.Workers {
+		if isDependentValidationWorker(w) {
+			return fmt.Errorf("worker %q describes validating after other workers complete, which the swarm cannot schedule as a parallel worker; move that validation into reviewer_prompt or merger_prompt instead", w.Title)
+		}
 	}
 	return nil
 }
@@ -1250,13 +1271,17 @@ Role boundaries:
 - Do not investigate the repository beyond what is necessary to name high-level ownership and read/write scopes.
 - Delegate all implementation, verification, review, and merge work to workers, reviewer, and merger through the JSON fields.
 
+Worker scheduling constraint:
+- Every entry in workers runs immediately and in parallel with every other worker. There is no dependency scheduling between workers: you cannot make one worker wait for another worker to finish, and natural-language phrasing like "after the other workers complete" or "once implementation is done" inside a worker's title/prompt will NOT be enforced.
+- Never create a worker whose job is to validate, test, or review the output of other workers in this same plan. That work belongs in reviewer_prompt (runs only after all required workers complete) and merger_prompt (runs only after the reviewer). Only put independent, immediately-runnable implementation objectives in workers.
+
 Output contract:
 - Return exactly one raw JSON object and nothing else.
 - Do not wrap the JSON in Markdown fences.
 - Do not include progress notes, tool transcripts, analysis, or prose outside the JSON object.
 - The JSON object must contain workers and may contain reviewer_prompt, merger_prompt, and notes.
 
-Create up to %d workers. Each worker must have a bounded objective, clear ownership, and an isolation mode. Prefer non-overlapping write scopes.
+Create up to %d workers. Each worker must have a bounded objective, clear ownership, and an isolation mode that can start immediately without waiting on any other worker. Prefer non-overlapping write scopes.
 
 JSON schema:
 	{"workers":[{"title":"Backend worker","prompt":"Implement API/service changes...","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","write_scope":["internal/service"],"read_scope":["."],"required":true}],"reviewer_prompt":"Review worker diffs...","merger_prompt":"Merge accepted worker outputs...","notes":"Optional short plan summary."}`, parentPrompt, maxWorkers)
@@ -1279,6 +1304,10 @@ Role boundaries:
 - Do not run build, test, formatter, generator, git, or shell commands.
 - Do not investigate the repository beyond what is necessary to name affected workers and high-level scopes.
 - Delegate all implementation, verification, review, and merge work to workers, reviewer, and merger through the JSON fields.
+
+Worker scheduling constraint:
+- Every entry in workers runs immediately and in parallel with every other worker, including carried-forward existing workers. There is no dependency scheduling between workers: natural-language phrasing like "after the other workers complete" inside a worker's title/prompt will NOT be enforced.
+- Never create or update a worker whose job is to validate, test, or review the output of other workers in this plan. That work belongs in reviewer_prompt (runs only after all required workers complete) and merger_prompt (runs only after the reviewer).
 
 Output contract:
 - Return exactly one raw JSON object and nothing else.

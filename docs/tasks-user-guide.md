@@ -46,6 +46,8 @@ Optional: enable `Auto-merge to target branch on completion` for git worktree fl
 
 Enable `Swarm mode` in the task dialog when a job should be split across planner, worker, reviewer, and merger child tasks. OpenVibely creates a swarm parent card plus real child tasks, so each worker keeps its own thread, diff, retry, follow-up, and worktree context.
 
+Workers created by the planner all start in parallel as soon as the plan is applied; there is no dependency ordering between workers, so a worker cannot wait for another worker to finish first. Validation of the combined worker output happens only in the reviewer and merger phases, which run after all required workers complete.
+
 Defaults:
 
 - `Max workers`: `3`, configurable from `1` to `8`.
