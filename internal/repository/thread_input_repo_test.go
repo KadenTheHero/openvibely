@@ -899,7 +899,7 @@ func TestExecutionRepo_RecoverStaleRunningTaskExecutionsPreservesRunningSchedule
 	}
 }
 
-func TestExecutionRepo_RecoverStaleRunningTaskExecutionsPreservesActiveSwarmChildWhenParentTerminal(t *testing.T) {
+func TestExecutionRepo_CreateDirectTaskFollowupReactivatesSwarmChildBeforeRecovery(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	project := createThreadInputProject(t, ctx, db)
@@ -908,15 +908,15 @@ func TestExecutionRepo_RecoverStaleRunningTaskExecutionsPreservesActiveSwarmChil
 	if err := taskRepo.Create(ctx, parent); err != nil {
 		t.Fatalf("create swarm parent: %v", err)
 	}
-	child := &models.Task{ProjectID: project.ID, Title: "Swarm worker", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "worker", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker, SwarmStatus: "running"}
+	child := &models.Task{ProjectID: project.ID, Title: "Completed swarm worker", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "worker", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker, SwarmStatus: "completed"}
 	if err := taskRepo.Create(ctx, child); err != nil {
 		t.Fatalf("create swarm child: %v", err)
 	}
 	agent := createThreadInputLLMConfig(t, ctx, db)
 	execRepo := NewExecutionRepo(db)
-	liveExec := &models.Execution{TaskID: child.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "still working"}
-	if err := execRepo.Create(ctx, liveExec); err != nil {
-		t.Fatalf("create live execution: %v", err)
+	liveExec := &models.Execution{TaskID: child.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "channel follow-up", IsFollowup: true}
+	if err := execRepo.CreateDirectTaskFollowup(ctx, liveExec); err != nil {
+		t.Fatalf("CreateDirectTaskFollowup: %v", err)
 	}
 
 	recovered, err := execRepo.RecoverStaleRunningTaskExecutions(ctx)
@@ -924,14 +924,57 @@ func TestExecutionRepo_RecoverStaleRunningTaskExecutionsPreservesActiveSwarmChil
 		t.Fatalf("RecoverStaleRunningTaskExecutions: %v", err)
 	}
 	if recovered != 0 {
-		t.Fatalf("expected 0 recovered executions for active swarm child, got %d", recovered)
+		t.Fatalf("expected 0 recovered executions for reactivated swarm child follow-up, got %d", recovered)
 	}
 	stored, err := execRepo.GetByID(ctx, liveExec.ID)
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
 	if stored.Status != models.ExecRunning {
-		t.Fatalf("expected active swarm child execution to remain running, got %s (error=%q)", stored.Status, stored.ErrorMessage)
+		t.Fatalf("expected active swarm child follow-up execution to remain running, got %s (error=%q)", stored.Status, stored.ErrorMessage)
+	}
+	updatedChild, err := taskRepo.GetByID(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetByID child: %v", err)
+	}
+	if updatedChild.Status != models.StatusQueued || updatedChild.Category != models.CategoryActive {
+		t.Fatalf("expected child reactivated before execution was exposed, got status=%s category=%s", updatedChild.Status, updatedChild.Category)
+	}
+}
+
+func TestExecutionRepo_RecoverStaleRunningTaskExecutionsReproducesDirectFollowupRace(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	taskRepo := NewTaskRepo(db, nil)
+	parent := &models.Task{ProjectID: project.ID, Title: "Swarm parent", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "parent", SwarmRole: models.SwarmRoleParent, SwarmStatus: "current"}
+	if err := taskRepo.Create(ctx, parent); err != nil {
+		t.Fatalf("create swarm parent: %v", err)
+	}
+	child := &models.Task{ProjectID: project.ID, Title: "Completed swarm worker", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "worker", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker, SwarmStatus: "completed"}
+	if err := taskRepo.Create(ctx, child); err != nil {
+		t.Fatalf("create swarm child: %v", err)
+	}
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	liveExec := &models.Execution{TaskID: child.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "direct follow-up", IsFollowup: true}
+	if err := execRepo.Create(ctx, liveExec); err != nil {
+		t.Fatalf("create live execution with old direct-start ordering: %v", err)
+	}
+
+	recovered, err := execRepo.RecoverStaleRunningTaskExecutions(ctx)
+	if err != nil {
+		t.Fatalf("RecoverStaleRunningTaskExecutions: %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("expected old direct-start ordering to reproduce 1 stale recovery, got %d", recovered)
+	}
+	stored, err := execRepo.GetByID(ctx, liveExec.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored.Status != models.ExecFailed || !strings.Contains(stored.ErrorMessage, "Recovered stale running execution") {
+		t.Fatalf("expected old direct-start race to fail execution with stale recovery error, got status=%s error=%q", stored.Status, stored.ErrorMessage)
 	}
 }
 

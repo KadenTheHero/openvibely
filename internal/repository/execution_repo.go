@@ -188,6 +188,41 @@ func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
 	return nil
 }
 
+func (r *ExecutionRepo) CreateDirectTaskFollowup(ctx context.Context, e *models.Execution) error {
+	if e == nil {
+		return fmt.Errorf("execution is required")
+	}
+	isFollowup := 0
+	if e.IsFollowup {
+		isFollowup = 1
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("starting direct task follow-up transaction: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE tasks
+		SET status = CASE WHEN status IN ('running', 'queued') THEN status ELSE 'queued' END,
+		    category = 'active',
+		    updated_at = datetime('now')
+		WHERE id = ?`, e.TaskID); err != nil {
+		return fmt.Errorf("reactivating task for direct follow-up: %w", err)
+	}
+	if err := tx.QueryRowContext(ctx,
+		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
+		 VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?)
+		 RETURNING id, started_at`,
+		e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup).
+		Scan(&e.ID, &e.StartedAt); err != nil {
+		return fmt.Errorf("creating direct task follow-up execution: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing direct task follow-up execution: %w", err)
+	}
+	return nil
+}
+
 func (r *ExecutionRepo) UpdateOutput(ctx context.Context, id string, output string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE executions SET output = ? WHERE id = ?`, output, id)

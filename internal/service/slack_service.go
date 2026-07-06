@@ -1085,9 +1085,6 @@ func (s *SlackService) slackActionHandlers(projectID string, markerCtx slackMark
 			opts.OnPromotionRecheckSkipped = func(_ context.Context, task *models.Task, input *models.ThreadInput, err error) {
 				applog.Infof("[slack] send_to_task task=%s input=%s promotion recheck skipped: %v", task.ID, input.ID, err)
 			}
-			opts.OnUpdateCategoryError = func(_ context.Context, task *models.Task, err error) {
-				applog.Infof("[slack] runtime send_to_task error updating category for task %s: %v", task.ID, err)
-			}
 		},
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{

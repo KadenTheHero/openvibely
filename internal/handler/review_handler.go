@@ -211,7 +211,7 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 		PromptSent:    reviewMessage,
 		IsFollowup:    true,
 	}
-	if err := h.execRepo.Create(c.Request().Context(), exec); err != nil {
+	if err := h.execRepo.CreateDirectTaskFollowup(c.Request().Context(), exec); err != nil {
 		applog.Infof("[handler] SubmitReview error creating execution: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
 	}
@@ -222,22 +222,8 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 	}
 
 	applog.Infof("[handler] SubmitReview created review exec=%s for task=%s with %d comments", exec.ID, taskID, len(comments))
-
-	// Set status to "queued" (same pattern as TaskThreadSend — processStreamingResponse
-	// will acquire worker slots and transition to "running").
-	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
-		applog.Infof("[handler] SubmitReview setting task=%s status=queued (was %s)", taskID, task.Status)
-		if err := h.taskRepo.UpdateStatus(c.Request().Context(), taskID, models.StatusQueued); err != nil {
-			applog.Infof("[handler] SubmitReview error setting status: %v", err)
-			h.completeWithFailure(c.Request().Context(), exec.ID, taskID, err.Error(), 0)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to update task status")
-		}
-	}
-	// Always move to active category so the task appears in the Active column
-	if task.Category != models.CategoryActive {
-		if err := h.taskRepo.UpdateCategory(c.Request().Context(), taskID, models.CategoryActive); err != nil {
-			applog.Infof("[handler] SubmitReview error updating category: %v", err)
-		}
+	if updatedTask, getErr := h.taskRepo.GetByID(c.Request().Context(), taskID); getErr == nil && updatedTask != nil {
+		task = updatedTask
 	}
 
 	// Build system context and spawn LLM processing

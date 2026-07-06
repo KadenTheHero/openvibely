@@ -72,7 +72,6 @@ type channelTaskThreadSendOptions struct {
 	FilterHistory              func([]models.Execution, string) []models.Execution
 	OnBindQueuedInputSkipped   func(context.Context, *models.Task, *models.ThreadInput, error)
 	OnPromotionRecheckSkipped  func(context.Context, *models.Task, *models.ThreadInput, error)
-	OnUpdateCategoryError      func(context.Context, *models.Task, error)
 	QueueUnavailableResult     func(*models.Task) string
 	ErrorResult                func(string, ...any) string
 	QueueErrorResult           func(*models.Task, error) string
@@ -80,7 +79,6 @@ type channelTaskThreadSendOptions struct {
 	AgentSelectionErrorResult  func(*models.Task, error) string
 	ExecutionCreateErrorResult func(*models.Task, error) string
 	RunnerUnavailableResult    func(*models.Task, string) string
-	UpdateStatusErrorResult    func(*models.Task, error) string
 	QueuedResult               func(*models.Task) string
 	StartedResult              func(*models.Task) string
 }
@@ -526,7 +524,7 @@ func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts chann
 	if opts.ExecRepo == nil {
 		return formatErr("Error creating follow-up execution for %q: execution repository not configured", task.Title)
 	}
-	if err := opts.ExecRepo.Create(ctx, exec); err != nil {
+	if err := opts.ExecRepo.CreateDirectTaskFollowup(ctx, exec); err != nil {
 		if opts.ExecutionCreateErrorResult != nil {
 			return opts.ExecutionCreateErrorResult(task, err)
 		}
@@ -554,21 +552,8 @@ func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts chann
 	if opts.TaskRepo == nil {
 		return formatErr("Error updating task %q: task repository not configured", task.Title)
 	}
-	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
-		if err := opts.TaskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued); err != nil {
-			if opts.CompleteExecution != nil {
-				opts.CompleteExecution(ctx, exec.ID, task.ID, "", err.Error(), 0, 0)
-			}
-			if opts.UpdateStatusErrorResult != nil {
-				return opts.UpdateStatusErrorResult(task, err)
-			}
-			return formatErr("Error updating task %q: %v", task.Title, err)
-		}
-	}
-	if task.Category != models.CategoryActive {
-		if err := opts.TaskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil && opts.OnUpdateCategoryError != nil {
-			opts.OnUpdateCategoryError(ctx, task, err)
-		}
+	if updatedTask, getErr := opts.TaskRepo.GetByID(ctx, task.ID); getErr == nil && updatedTask != nil {
+		task = updatedTask
 	}
 	opts.ChannelTaskRunner(context.Background(), ChannelTaskRunRequest{ExecID: exec.ID, TaskID: task.ID, ProjectID: task.ProjectID, Message: opts.Message, Agent: *agent, ChatHistory: priorHistory, SystemContext: systemContext, Surface: opts.Surface, ReplyContext: opts.ReplyContext})
 	if opts.StartedResult != nil {

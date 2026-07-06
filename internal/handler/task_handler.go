@@ -1968,7 +1968,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		PromptSent:    message,
 		IsFollowup:    true,
 	}
-	if err := h.execRepo.Create(c.Request().Context(), exec); err != nil {
+	if err := h.execRepo.CreateDirectTaskFollowup(c.Request().Context(), exec); err != nil {
 		applog.Infof("[handler] TaskThreadSend error creating execution: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
 	}
@@ -1996,23 +1996,11 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	h.resumeUserStoppedGoalForManualStart(c.Request().Context(), taskID, models.TaskOriginWeb, "")
 	h.reactivateAchievedGoalForManualFollowup(c.Request().Context(), taskID, models.TaskOriginWeb, "")
 
-	// Set task status/category now that execution creation and attachment
-	// processing have succeeded. Worktree resolution and full execution-history
-	// loading are deferred into the goroutine (DeferHistoryLoad) so this handler
-	// can return to the browser immediately regardless of execution count.
-	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
-		applog.Infof("[handler] TaskThreadSend setting task=%s status=queued (was %s)", taskID, task.Status)
-		if err := h.taskRepo.UpdateStatus(c.Request().Context(), taskID, models.StatusQueued); err != nil {
-			applog.Infof("[handler] TaskThreadSend error setting status: %v", err)
-			h.completeWithFailure(c.Request().Context(), exec.ID, taskID, err.Error(), 0)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to update task status")
-		}
-	}
-	if task.Category != models.CategoryActive {
-		applog.Infof("[handler] TaskThreadSend moving task=%s to active (was %s)", taskID, task.Category)
-		if err := h.taskRepo.UpdateCategory(c.Request().Context(), taskID, models.CategoryActive); err != nil {
-			applog.Infof("[handler] TaskThreadSend error updating category: %v", err)
-		}
+	// CreateDirectTaskFollowup reactivated the task atomically before exposing the
+	// running execution, so no stale-recovery sweep can observe a terminal task
+	// owning a live follow-up. Refresh the local task copy used by the goroutine.
+	if updatedTask, getErr := h.taskRepo.GetByID(c.Request().Context(), taskID); getErr == nil && updatedTask != nil {
+		task = updatedTask
 	}
 
 	// Spawn LLM processing goroutine (acquires per-model worker slot in processStreamingResponse).

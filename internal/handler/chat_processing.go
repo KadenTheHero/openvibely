@@ -1255,22 +1255,15 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		PromptSent:    failed.PromptSent,
 		IsFollowup:    true,
 	}
-	if err := h.execRepo.Create(ctx, exec); err != nil {
+	if err := h.execRepo.CreateDirectTaskFollowup(ctx, exec); err != nil {
 		return err
 	}
 	if err := h.applySwarmChildFollowupRetryStart(ctx, task, failed.PromptSent); err != nil {
 		h.completeWithFailure(ctx, exec.ID, taskID, err.Error(), 0)
 		return err
 	}
-	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued); err != nil {
-		h.completeWithFailure(ctx, exec.ID, taskID, err.Error(), 0)
-		return err
-	}
-	if task.Category != models.CategoryActive {
-		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryActive); err != nil {
-			h.completeWithFailure(ctx, exec.ID, taskID, err.Error(), 0)
-			return err
-		}
+	if updatedTask, getErr := h.taskRepo.GetByID(ctx, taskID); getErr == nil && updatedTask != nil {
+		task = updatedTask
 	}
 	if h.broadcaster != nil {
 		h.broadcaster.Publish(events.TaskEvent{

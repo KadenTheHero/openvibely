@@ -1255,9 +1255,6 @@ func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64,
 			opts.OnPromotionRecheckSkipped = func(_ context.Context, task *models.Task, input *models.ThreadInput, err error) {
 				applog.Infof("[telegram] send_to_task task=%s input=%s promotion recheck skipped: %v", task.ID, input.ID, err)
 			}
-			opts.OnUpdateCategoryError = func(_ context.Context, task *models.Task, err error) {
-				applog.Infof("[telegram] runtime send_to_task error updating category for task %s: %v", task.ID, err)
-			}
 			opts.ActiveLookupErrorResult = func(task *models.Task, err error) string {
 				return fmt.Sprintf("checking active turn for task %q: %v", task.Title, err)
 			}
@@ -1272,9 +1269,6 @@ func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64,
 			}
 			opts.RunnerUnavailableResult = func(task *models.Task, msg string) string {
 				return fmt.Sprintf("sending message to task %q: %s", task.Title, msg)
-			}
-			opts.UpdateStatusErrorResult = func(task *models.Task, err error) string {
-				return fmt.Sprintf("updating task %q: %v", task.Title, err)
 			}
 		},
 		ResultAdapter: telegramSendToTaskActionResult,

@@ -5373,11 +5373,12 @@ func TestHandler_GetTaskThread_ScheduledTaskExecutionSurvivesStaleRecoverySweep(
 	assert.NotContains(t, body, "Task failed")
 }
 
-func TestHandler_GetTaskThread_SwarmChildExecutionSurvivesParentTerminalStaleRecoverySweep(t *testing.T) {
+func TestHandler_GetTaskThread_ChannelSwarmChildFollowupSurvivesStaleRecoverySweep(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
 	ctx := context.Background()
 	agent := createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "Swarm Child Stale Recovery Project")
+	project := createProject(t, h, "Channel Swarm Child Stale Recovery Project")
 	parent := createTask(t, h, project.ID, "Swarm Parent", func(tk *models.Task) {
 		tk.Status = models.StatusCompleted
 		tk.Category = models.CategoryCompleted
@@ -5386,27 +5387,37 @@ func TestHandler_GetTaskThread_SwarmChildExecutionSurvivesParentTerminalStaleRec
 		tk.AgentID = &agent.ID
 	})
 	worker := createTask(t, h, project.ID, "Swarm Worker", func(tk *models.Task) {
-		tk.Status = models.StatusRunning
-		tk.Category = models.CategoryActive
+		tk.Status = models.StatusCompleted
+		tk.Category = models.CategoryCompleted
 		tk.ParentTaskID = &parent.ID
 		tk.SwarmRole = models.SwarmRoleWorker
-		tk.SwarmStatus = "running"
+		tk.SwarmStatus = "completed"
 		tk.AgentID = &agent.ID
 	})
-	exec := createExec(t, h, worker.ID, agent.ID, func(ex *models.Execution) {
-		ex.Status = models.ExecRunning
-		ex.PromptSent = "Continue worker implementation"
+	exec := &models.Execution{TaskID: worker.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Continue worker implementation", IsFollowup: true}
+	assert.NoError(t, h.execRepo.CreateDirectTaskFollowup(ctx, exec))
+	h.StartChannelTaskRun(ctx, service.ChannelTaskRunRequest{
+		ExecID:    exec.ID,
+		TaskID:    worker.ID,
+		ProjectID: project.ID,
+		Message:   "Continue worker implementation",
+		Agent:     *agent,
+		Surface:   "slack",
+		ReplyContext: service.ChannelReplyContext{
+			Source:         models.TaskOriginSlack,
+			SlackChannelID: "Cswarm",
+			SlackThreadTS:  "1710000000.900000",
+			SlackUserID:    "Uswarm",
+		},
 	})
 	assert.NoError(t, h.execRepo.UpdateOutput(ctx, exec.ID, "partial worker output"))
 
-	// The parent/container may be terminal while a child execution is still real
-	// runnable work. Stale recovery must not fail the child execution mid-stream.
 	_, err := h.execRepo.RecoverStaleRunningTaskExecutions(ctx)
 	assert.NoError(t, err)
 
 	stored, err := h.execRepo.GetByID(ctx, exec.ID)
 	assert.NoError(t, err)
-	assert.Equal(t, models.ExecRunning, stored.Status, "running swarm child execution must not be reaped because of parent/container state")
+	assert.Equal(t, models.ExecRunning, stored.Status, "direct channel swarm child follow-up must not be reaped during startup")
 
 	rec := htmxGet(e, "/tasks/"+worker.ID+"/thread")
 	assertCode(t, rec, http.StatusOK)

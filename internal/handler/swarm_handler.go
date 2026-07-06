@@ -148,23 +148,15 @@ func (h *Handler) acceptSwarmChildFollowup(c echo.Context, task *models.Task, me
 		PromptSent:    message,
 		IsFollowup:    true,
 	}
-	if err := h.execRepo.Create(ctx, exec); err != nil {
+	if err := h.execRepo.CreateDirectTaskFollowup(ctx, exec); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
 	}
 	if err := h.applySwarmChildFollowupStart(ctx, task, message); err != nil {
 		h.completeWithFailure(ctx, exec.ID, task.ID, err.Error(), 0)
 		return err
 	}
-	if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
-		if err := h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued); err != nil {
-			h.completeWithFailure(ctx, exec.ID, task.ID, err.Error(), 0)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to update task status")
-		}
-	}
-	if task.Category != models.CategoryActive {
-		if err := h.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to update task category")
-		}
+	if updatedTask, getErr := h.taskRepo.GetByID(ctx, task.ID); getErr == nil && updatedTask != nil {
+		task = updatedTask
 	}
 	go h.processStreamingResponse(streamingResponseParams{
 		ExecID:           exec.ID,
