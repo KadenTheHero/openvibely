@@ -66,7 +66,7 @@ After configuring GitHub credentials, open the GitHub settings modal and use `Gi
 - With GitHub App auth, add the real GitHub user or bot that should receive OpenVibely work to `Authorized Users`, then assign issues to that account.
 - User-facing GitHub logins can be entered as `alice` or `@alice`; OpenVibely stores the normalized plain login.
 - GitHub issue API tools default to the current project repository, but can accept `repo_url` when a prompt names a specific GitHub repository URL. This applies to issue create/read/list/comment/label tools.
-- Pull request tools remain tied to the current OpenVibely task/project because they push task worktree branches and persist task PR records.
+- Pull request tools remain tied to the current OpenVibely task/project because they publish task worktree branches through the configured GitHub token/API and persist task PR records.
 
 For the visible scheduled-task pattern, see the [GitHub Autonomous SDLC User Guide](./github-autonomous-sdlc-user-guide.md).
 
