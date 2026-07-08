@@ -822,15 +822,15 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						</div>
 						<div class="form-control mb-3">
 							<label class="label"><span class="label-text">GitHub Personal Access Token</span></label>
-								@components.SecretInput(components.SecretInputConfig{
-									ID:           "github_pat",
-									Name:         "github_pat",
-									Value:        githubPATValue,
-									Class:        "input input-bordered w-full pr-10 font-mono text-xs",
-									Placeholder:  githubPATPlaceholder(githubHasPAT),
-									AutoComplete: "off",
-									AriaLabel:    "Toggle token visibility",
-								})
+							@components.SecretInput(components.SecretInputConfig{
+								ID:           "github_pat",
+								Name:         "github_pat",
+								Value:        githubPATValue,
+								Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+								Placeholder:  githubPATPlaceholder(githubHasPAT),
+								AutoComplete: "off",
+								AriaLabel:    "Toggle token visibility",
+							})
 						</div>
 					</div>
 
@@ -838,14 +838,14 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						<div class="alert mb-3 text-sm">
 							GitHub App mode is for advanced/cloud deployments where one app installation is shared by your deployment.
 						</div>
-					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">GitHub App ID</span></label>
-						<input type="text" name="github_app_id" class="input input-bordered" value={ githubAppID }/>
-					</div>
-					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">GitHub App Slug</span></label>
-						<input type="text" name="github_app_slug" class="input input-bordered" value={ githubAppSlug }/>
-					</div>
+						<div class="form-control mb-3">
+							<label class="label"><span class="label-text">GitHub App ID</span></label>
+							<input type="text" name="github_app_id" class="input input-bordered" value={ githubAppID }/>
+						</div>
+						<div class="form-control mb-3">
+							<label class="label"><span class="label-text">GitHub App Slug</span></label>
+							<input type="text" name="github_app_slug" class="input input-bordered" value={ githubAppSlug }/>
+						</div>
 						<div class="form-control mb-3">
 							<label class="label"><span class="label-text">GitHub App Private Key (PEM)</span></label>
 							<div class="relative">
@@ -858,9 +858,9 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 								<button
 									type="button"
 									class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-2 h-8 min-h-0 px-2"
-										onclick="toggleSecretTextareaVisibility('github_app_private_key', this)"
-										aria-label="Toggle private key visibility"
-										aria-pressed="false"
+									onclick="toggleSecretTextareaVisibility('github_app_private_key', this)"
+									aria-label="Toggle private key visibility"
+									aria-pressed="false"
 								>
 									<svg class="eye-open h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
@@ -872,12 +872,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 								</button>
 							</div>
 						</div>
-							</div>
-						<div class="modal-action">
-							<button type="button" class="btn" onclick="closeGitHubConfigModal()">Cancel</button>
-							<button type="submit" class="btn btn-primary">Save GitHub Settings</button>
-						</div>
-					</form>
+					</div>
 					if currentProjectID != "" {
 						<div class="divider"></div>
 						<div
@@ -893,6 +888,11 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							</div>
 						</div>
 					}
+					<div class="modal-action sticky bottom-0 z-10 border-t border-base-300 bg-base-100 py-3">
+						<button type="button" class="btn" onclick="closeGitHubConfigModal()">Cancel</button>
+						<button type="submit" class="btn btn-primary">Save GitHub Settings</button>
+					</div>
+				</form>
 			</div>
 			<form method="dialog" class="modal-backdrop">
 				<button>close</button>

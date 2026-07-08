@@ -397,4 +397,16 @@ func TestChannelsPageRendersGitHubRuntimeSettingsLazyHook(t *testing.T) {
 	if !strings.Contains(body, "Loading GitHub runtime settings") {
 		t.Fatalf("expected github runtime settings loading placeholder")
 	}
+	runtimeIdx := strings.Index(body, `id="github-runtime-settings"`)
+	saveIdx := strings.Index(body, "Save GitHub Settings")
+	cancelIdx := strings.Index(body, `onclick="closeGitHubConfigModal()">Cancel`)
+	if runtimeIdx == -1 || saveIdx == -1 || cancelIdx == -1 {
+		t.Fatalf("expected github modal runtime settings plus cancel/save actions")
+	}
+	if runtimeIdx > saveIdx || runtimeIdx > cancelIdx {
+		t.Fatalf("expected github runtime settings to render before modal Cancel/Save actions so the footer stays last")
+	}
+	if !strings.Contains(body, `modal-action sticky bottom-0`) {
+		t.Fatalf("expected github modal Cancel/Save actions to use the sticky modal footer placement")
+	}
 }
