@@ -151,7 +151,7 @@ func TestToolDefsForContext_OrchestrateWeb(t *testing.T) {
 	// Must have new read actions
 	mustContain(t, names, "get_alert", "get_model", "get_personality", "get_current_project", "memory_view")
 	// Must have GitHub mailbox actions on web/API surfaces.
-	mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request")
+	mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request")
 	// Must have thread tools when requested
 	mustContain(t, names, "view_task_thread", "send_to_task")
 }
@@ -174,7 +174,7 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 	mustNotContain(t, names, "create_task", "edit_task", "execute_tasks",
 		"set_personality", "schedule_task", "delete_schedule", "modify_schedule",
 		"create_alert", "delete_alert", "toggle_alert", "switch_project",
-		"set_chat_mode", "send_to_task", "send_message", "github_create_issue", "github_comment_on_issue", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request")
+		"set_chat_mode", "send_to_task", "send_message", "github_create_issue", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request")
 
 	// Must have read actions
 	mustContain(t, names, "list_projects", "list_models", "list_alerts",
@@ -208,12 +208,12 @@ func TestGitHubToolDefsOnlyExposeOnWebAndAPI(t *testing.T) {
 	for _, surface := range []Surface{SurfaceWeb, SurfaceAPI} {
 		defs := ToolDefsForContext(models.ChatModeOrchestrate, surface, true)
 		names := toolDefNames(defs)
-		mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request")
+		mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request")
 	}
 	for _, surface := range []Surface{SurfaceSlack, SurfaceTelegram, SurfaceDiscord, SurfaceEmail} {
 		defs := ToolDefsForContext(models.ChatModeOrchestrate, surface, true)
 		names := toolDefNames(defs)
-		mustNotContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request")
+		mustNotContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request")
 	}
 }
 
@@ -318,7 +318,7 @@ func TestRegistry_CoversCoreActions(t *testing.T) {
 		"get_chat_mode", "set_chat_mode", "list_capabilities",
 		"get_alert", "get_model", "get_personality", "get_current_project",
 		"memory_view", "send_message",
-		"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request",
+		"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request",
 	}
 	names := map[string]bool{}
 	for _, a := range Registry() {

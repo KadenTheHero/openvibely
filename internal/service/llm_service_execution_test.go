@@ -3380,7 +3380,7 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 		GitHubAuthRepo:      repository.NewGitHubAuthRepo(db),
 		GitHub:              provider,
 	})
-	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request"} {
+	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_add_issue_labels", "github_open_pull_request"} {
 		if rt == nil || !rt.HasDefinition(name) {
 			t.Fatalf("expected %s in default GitHub runtime definitions for task runs, got %#v", name, rt)
 		}
@@ -3439,17 +3439,6 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	_, handled, isErr, err = rt.Executor(ctx, "github_add_issue_labels", []byte(`{"issue_number":77,"labels":["openvibely:bug"]}`))
 	if !handled || !isErr || err == nil || !strings.Contains(err.Error(), "openvibely:") {
 		t.Fatalf("expected prefixed label rejection handled=%v isErr=%v err=%v", handled, isErr, err)
-	}
-
-	out, handled, isErr, err = rt.Executor(ctx, "github_link_task_to_issue", []byte(fmt.Sprintf(`{"task_id":"%s","issue_number":77}`, task.ID)))
-	if !handled || isErr || err != nil {
-		t.Fatalf("expected link skip success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
-	}
-	if !strings.Contains(out, `"skipped":true`) || !strings.Contains(out, "no associated pull request") {
-		t.Fatalf("expected skip-without-pr output, got %s", out)
-	}
-	if record, err := prRepo.GetByIssueNumber(ctx, 77); err != nil || record != nil {
-		t.Fatalf("expected no persisted PR link for skipped issue, record=%#v err=%v", record, err)
 	}
 
 	task.WorktreeBranch = "task/runtime-pr"
@@ -3588,7 +3577,7 @@ func TestLLMServiceExecuteTaskWithAgentExposesGitHubToolsToInitialRuns(t *testin
 	if rt == nil {
 		t.Fatal("expected runtime tools on provider request")
 	}
-	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request"} {
+	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request"} {
 		if !rt.HasDefinition(name) {
 			t.Fatalf("expected %s on initial task run, got %#v", name, rt.Definitions)
 		}

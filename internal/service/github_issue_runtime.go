@@ -236,47 +236,6 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber, "labels": req.Labels})
 		},
-		"github_link_task_to_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
-			if opts.TaskPullRequestRepo == nil {
-				return "", fmt.Errorf("task pull request repository unavailable")
-			}
-			if opts.TaskRepo == nil {
-				return "", fmt.Errorf("task repository unavailable")
-			}
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			task, err := resolveGitHubRuntimeTask(ctx, opts.TaskRepo, opts.ProjectID, req.TaskID, req.Title)
-			if err != nil {
-				return "", err
-			}
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
-			if err != nil {
-				return "", err
-			}
-			issue, err := opts.GitHub.GetIssue(ctx, repo, req.IssueNumber)
-			if err != nil {
-				return "", err
-			}
-			pr, err := opts.GitHub.FindPullRequestForIssue(ctx, repo, req.IssueNumber)
-			if err != nil {
-				return "", err
-			}
-			if pr == nil {
-				return githubIssueRuntimeJSON(map[string]any{"ok": false, "skipped": true, "issue_number": req.IssueNumber, "reason": "assigned issue has no associated pull request"})
-			}
-			issueNumber := req.IssueNumber
-			issueURL := ""
-			if issue != nil {
-				issueURL = issue.URL
-			}
-			record := &models.TaskPullRequest{TaskID: task.ID, PRNumber: pr.Number, PRURL: pr.URL, PRState: pr.State, IssueNumber: &issueNumber, IssueURL: issueURL}
-			if err := opts.TaskPullRequestRepo.Upsert(ctx, record); err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "task_id": task.ID, "issue_number": issueNumber, "issue_url": issueURL, "pull_request": pr})
-		},
 		"github_open_pull_request": func(ctx context.Context, input json.RawMessage) (string, error) {
 			if opts.TaskPullRequestRepo == nil {
 				return "", fmt.Errorf("task pull request repository unavailable")

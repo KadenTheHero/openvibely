@@ -146,7 +146,6 @@ const githubListAssignedIssuesParams = `{"type":"object","properties":{"assignee
 const githubListMyAssignedIssuesParams = `{"type":"object","properties":{` + githubRepoURLProperty + `},"additionalProperties":false}`
 const githubCommentIssueParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"body":{"type":"string"},` + githubRepoURLProperty + `},"required":["issue_number","body"],"additionalProperties":false}`
 const githubAddLabelsParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as approved, in-progress, pr-opened. Do not use an openvibely: prefix."},` + githubRepoURLProperty + `},"required":["issue_number","labels"],"additionalProperties":false}`
-const githubLinkTaskIssueParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"issue_number":{"type":"integer","minimum":1}},"required":["issue_number"],"additionalProperties":false}`
 const githubOpenPullRequestParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"pr_title":{"type":"string","description":"Optional pull request title. Defaults to the task title."},"pr_body":{"type":"string","description":"Optional pull request body. Defaults to an OpenVibely task summary."},"base":{"type":"string","description":"Optional target branch. Defaults to the task merge target or repository default branch."},"draft":{"type":"boolean"},"issue_number":{"type":"integer","minimum":1,"description":"Optional GitHub issue number to persist on the task PR record."},"issue_url":{"type":"string","description":"Optional GitHub issue URL to persist on the task PR record."}},"additionalProperties":false}`
 const githubActorAuthorizedParams = `{"type":"object","properties":{"github_login":{"type":"string","description":"GitHub login to check against the configured authorized actor list."}},"required":["github_login"],"additionalProperties":false}`
 
@@ -398,16 +397,6 @@ var registry = []ActionDef{
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     webAPISurfaces(),
 		Parameters:   json.RawMessage(githubAddLabelsParams),
-	},
-	{
-		Name:         "github_link_task_to_issue",
-		Description:  "Persist an issue-to-task/PR link for the current project. The issue must already have an associated pull request; otherwise the link is skipped and no task work should start.",
-		Domain:       DomainGitHub,
-		Access:       AccessWrite,
-		Sensitivity:  SensitivityNormal,
-		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
-		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(githubLinkTaskIssueParams),
 	},
 	{
 		Name:         "github_open_pull_request",

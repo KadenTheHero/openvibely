@@ -52,7 +52,7 @@ For each returned issue, inspect it with `github_get_issue`. Apply the user's wo
 
 Treat an eligible issue as actionable when it is assigned to the PAT owner or one of the configured Authorized Users and has any explicit human approval signal required by your workflow.
 
-For actionable issues, create or link visible OpenVibely work using task/thread/goal tools available in this run, then call `github_link_task_to_issue` when a concrete task and associated PR are known. Comment concise status on the issue with `github_comment_on_issue`.
+For actionable issues, create or continue visible OpenVibely work using task/thread/goal tools available in this run. Comment concise status on the issue with `github_comment_on_issue`.
 
 Use unprefixed labels only, such as `task-created`, `in-progress`, `blocked`, `needs-human`, and `pr-opened`. Never use labels beginning with `openvibely:`.
 
