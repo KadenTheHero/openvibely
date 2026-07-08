@@ -400,7 +400,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_open_pull_request",
-		Description:  "Open or reuse a GitHub pull request for an existing OpenVibely task worktree branch, push the branch, and persist the task PR record.",
+		Description:  "Open or reuse a GitHub pull request for an existing OpenVibely task worktree branch by publishing the branch through the configured GitHub channel token/API, then persist the task PR record.",
 		Domain:       DomainGitHub,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
