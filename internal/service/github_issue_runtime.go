@@ -46,6 +46,7 @@ type githubCreateIssueRuntimeInput struct {
 type githubIssueRuntimeInput struct {
 	IssueNumber int      `json:"issue_number"`
 	IssueURL    string   `json:"issue_url"`
+	RepoURL     string   `json:"repo_url"`
 	Assignee    string   `json:"assignee"`
 	GitHubLogin string   `json:"github_login"`
 	Body        string   `json:"body"`
@@ -106,7 +107,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}
@@ -154,8 +155,12 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "github_login": repository.NormalizeGitHubLogin(login), "authorized": authorized})
 		},
-		"github_list_my_assigned_issues": func(ctx context.Context, _ json.RawMessage) (string, error) {
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+		"github_list_my_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req githubIssueRuntimeInput
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}
@@ -174,7 +179,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if assignee == "" {
 				return "", fmt.Errorf("assignee is required")
 			}
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}
@@ -192,7 +197,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if strings.TrimSpace(req.Assignee) == "" {
 				return "", fmt.Errorf("assignee is required")
 			}
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}
@@ -322,6 +327,13 @@ func resolveGitHubRuntimeProject(ctx context.Context, opts githubIssueRuntimeOpt
 }
 
 func resolveGitHubRepoForRuntimeTool(ctx context.Context, opts githubIssueRuntimeOptions) (*GitHubRepoRef, error) {
+	return resolveGitHubRepoForRuntimeToolURL(ctx, opts, "")
+}
+
+func resolveGitHubRepoForRuntimeToolURL(ctx context.Context, opts githubIssueRuntimeOptions, repoURL string) (*GitHubRepoRef, error) {
+	if strings.TrimSpace(repoURL) != "" {
+		return opts.GitHub.ResolveRepo(ctx, repoURL, "")
+	}
 	project, err := resolveGitHubRuntimeProject(ctx, opts)
 	if err != nil {
 		return nil, err

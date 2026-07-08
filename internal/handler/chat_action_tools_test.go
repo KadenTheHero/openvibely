@@ -572,18 +572,32 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	var sawMyAssignedIssues bool
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
-			if repoURL != project.RepoURL {
-				t.Fatalf("expected project repo URL %q, got %q", project.RepoURL, repoURL)
+			switch repoURL {
+			case project.RepoURL:
+				return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+			case "https://github.com/example/other":
+				if strings.TrimSpace(repoPath) != "" {
+					t.Fatalf("expected explicit repo_url lookup to avoid local repo path, got %q", repoPath)
+				}
+				return &service.GitHubRepoRef{Owner: "example", Name: "other"}, nil
+			default:
+				t.Fatalf("unexpected repo URL %q", repoURL)
+				return nil, nil
 			}
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
 		},
 		listMyAssignedIssuesFn: func(_ context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error) {
 			sawMyAssignedIssues = true
+			if repo.Owner == "example" && repo.Name == "other" {
+				return &service.GitHubAuthenticatedUser{Login: "channel-user", Source: service.GitHubAuthModePAT}, []service.GitHubIssue{{Number: 7, URL: "https://github.com/example/other/issues/7", Title: "Explicit URL", State: "open", Assignees: []string{"channel-user"}}}, nil
+			}
 			return &service.GitHubAuthenticatedUser{Login: "channel-user", Source: service.GitHubAuthModePAT}, []service.GitHubIssue{{Number: 5, URL: "https://github.com/openvibely/openvibely/issues/5", Title: "Testing", State: "open", Assignees: []string{"channel-user"}}}, nil
 		},
 		listAssignedIssuesFn: func(_ context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssue, error) {
 			if assignee != "Dev-Bot" {
 				t.Fatalf("expected explicit assignee Dev-Bot, got %q", assignee)
+			}
+			if repo.Owner == "example" && repo.Name == "other" {
+				return []service.GitHubIssue{{Number: 8, URL: "https://github.com/example/other/issues/8", Title: "Explicit assignee URL", State: "open", Assignees: []string{"dev-bot"}}}, nil
 			}
 			return []service.GitHubIssue{{Number: 6, URL: "https://github.com/openvibely/openvibely/issues/6", Title: "Override", State: "open", Assignees: []string{"dev-bot"}}}, nil
 		},
@@ -625,5 +639,19 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	}
 	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"Number":6`) {
 		t.Fatalf("expected explicit-assignee assigned issues output, got %s", out)
+	}
+	out, err = handlers["github_list_my_assigned_issues"](ctx, json.RawMessage(`{"repo_url":"https://github.com/example/other"}`))
+	if err != nil {
+		t.Fatalf("github_list_my_assigned_issues with repo_url returned error: %v", err)
+	}
+	if !strings.Contains(out, `"Number":7`) || !strings.Contains(out, `"https://github.com/example/other/issues/7"`) {
+		t.Fatalf("expected explicit repo_url my-assigned issues output, got %s", out)
+	}
+	out, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"Dev-Bot","repo_url":"https://github.com/example/other"}`))
+	if err != nil {
+		t.Fatalf("github_list_assigned_issues with repo_url returned error: %v", err)
+	}
+	if !strings.Contains(out, `"Number":8`) || !strings.Contains(out, `"https://github.com/example/other/issues/8"`) {
+		t.Fatalf("expected explicit repo_url assigned issues output, got %s", out)
 	}
 }

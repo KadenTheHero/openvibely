@@ -504,6 +504,7 @@ type githubCreateIssueToolInput struct {
 type githubIssueToolInput struct {
 	IssueNumber int      `json:"issue_number"`
 	IssueURL    string   `json:"issue_url"`
+	RepoURL     string   `json:"repo_url"`
 	Assignee    string   `json:"assignee"`
 	GitHubLogin string   `json:"github_login"`
 	Body        string   `json:"body"`
@@ -517,8 +518,15 @@ type githubIssueToolInput struct {
 }
 
 func (h *Handler) resolveGitHubRepoForTool(ctx context.Context, projectID string) (*service.GitHubRepoRef, error) {
+	return h.resolveGitHubRepoForToolURL(ctx, projectID, "")
+}
+
+func (h *Handler) resolveGitHubRepoForToolURL(ctx context.Context, projectID, repoURL string) (*service.GitHubRepoRef, error) {
 	if h.githubSvc == nil {
 		return nil, fmt.Errorf("github service unavailable")
+	}
+	if strings.TrimSpace(repoURL) != "" {
+		return h.githubSvc.ResolveRepo(ctx, repoURL, "")
 	}
 	if h.projectRepo == nil {
 		return nil, fmt.Errorf("project repository unavailable")
@@ -554,7 +562,7 @@ func (h *Handler) executeGitHubGetIssueTool(ctx context.Context, projectID strin
 	if err := json.Unmarshal(input, &req); err != nil {
 		return "", err
 	}
-	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}
@@ -605,8 +613,12 @@ func (h *Handler) executeGitHubIsActorAuthorizedTool(ctx context.Context, input 
 	return githubToolJSON(map[string]any{"ok": true, "github_login": repository.NormalizeGitHubLogin(login), "authorized": authorized})
 }
 
-func (h *Handler) executeGitHubListMyAssignedIssuesTool(ctx context.Context, projectID string, _ json.RawMessage) (string, error) {
-	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+func (h *Handler) executeGitHubListMyAssignedIssuesTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	var req githubIssueToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}
@@ -626,7 +638,7 @@ func (h *Handler) executeGitHubListAssignedIssuesTool(ctx context.Context, proje
 	if assignee == "" {
 		return "", fmt.Errorf("assignee is required")
 	}
-	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}
@@ -645,7 +657,7 @@ func (h *Handler) executeGitHubListAssignedIssuesWithPRsTool(ctx context.Context
 	if strings.TrimSpace(req.Assignee) == "" {
 		return "", fmt.Errorf("assignee is required")
 	}
-	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}

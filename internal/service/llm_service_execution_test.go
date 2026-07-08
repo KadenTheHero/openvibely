@@ -3202,6 +3202,7 @@ func TestLLMService_ExecuteTask_ScopedFilesPrepFailureCompletesExecution(t *test
 }
 
 type fakeGitHubIssueRuntimeProvider struct {
+	resolveRepoFn        func(context.Context, string, string) (*GitHubRepoRef, error)
 	createIssueFn        func(context.Context, *GitHubRepoRef, GitHubCreateIssueRequest) (*GitHubIssue, error)
 	getIssueFn           func(context.Context, *GitHubRepoRef, int) (*GitHubIssue, error)
 	findPRFn             func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
@@ -3216,6 +3217,9 @@ type fakeGitHubIssueRuntimeProvider struct {
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+	if f.resolveRepoFn != nil {
+		return f.resolveRepoFn(ctx, repoURL, repoPath)
+	}
 	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
 }
 
@@ -3316,7 +3320,34 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 		t.Fatalf("create task: %v", err)
 	}
 
-	provider := &fakeGitHubIssueRuntimeProvider{}
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+			switch repoURL {
+			case project.RepoURL:
+				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+			case "https://github.com/example/other":
+				if strings.TrimSpace(repoPath) != "" {
+					t.Fatalf("expected explicit repo_url lookup to avoid local repo path, got %q", repoPath)
+				}
+				return &GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other"}, nil
+			default:
+				t.Fatalf("unexpected repo URL %q", repoURL)
+				return nil, nil
+			}
+		},
+		listMyIssuesFn: func(_ context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+			if repo.Owner == "example" && repo.Name == "other" {
+				return &GitHubAuthenticatedUser{Login: "channel-user", Source: GitHubAuthModePAT}, []GitHubIssue{{Number: 7, URL: "https://github.com/example/other/issues/7", Title: "Explicit URL", State: "open", Assignees: []string{"channel-user"}}}, nil
+			}
+			return &GitHubAuthenticatedUser{Login: "channel-user", Source: GitHubAuthModePAT}, []GitHubIssue{{Number: 5, URL: "https://github.com/openvibely/openvibely/issues/5", Title: "Testing", State: "open", Assignees: []string{"channel-user"}}}, nil
+		},
+		listAssignedIssuesFn: func(_ context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssue, error) {
+			if repo.Owner == "example" && repo.Name == "other" {
+				return []GitHubIssue{{Number: 8, URL: "https://github.com/example/other/issues/8", Title: "Explicit assignee URL", State: "open", Assignees: []string{assignee}}}, nil
+			}
+			return []GitHubIssue{{Number: 6, URL: "https://github.com/openvibely/openvibely/issues/6", Title: "Override", State: "open", Assignees: []string{assignee}}}, nil
+		},
+	}
 	rt := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
 		ProjectID:           project.ID,
 		ProjectRepo:         projectRepo,
@@ -3344,6 +3375,20 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	}
 	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"Number":6`) {
 		t.Fatalf("expected explicit assigned issues output, got %s", out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_list_my_assigned_issues", []byte(`{"repo_url":"https://github.com/example/other"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected explicit repo_url my assigned issues success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if !strings.Contains(out, `"Number":7`) || !strings.Contains(out, `"https://github.com/example/other/issues/7"`) {
+		t.Fatalf("expected explicit repo_url my assigned issues output, got %s", out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_list_assigned_issues", []byte(`{"assignee":"Dev-Bot","repo_url":"https://github.com/example/other"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected explicit repo_url assigned issues success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if !strings.Contains(out, `"Number":8`) || !strings.Contains(out, `"https://github.com/example/other/issues/8"`) {
+		t.Fatalf("expected explicit repo_url assigned issues output, got %s", out)
 	}
 
 	_, handled, isErr, err = rt.Executor(ctx, "github_add_issue_labels", []byte(`{"issue_number":77,"labels":["openvibely:bug"]}`))
