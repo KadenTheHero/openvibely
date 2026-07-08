@@ -637,7 +637,11 @@ func TestPublishBranchUsesGitHubAPIWithoutGitPush(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git rev-parse main: %v", err)
 	}
-	baseSHA := strings.TrimSpace(string(baseOut))
+	localBaseSHA := strings.TrimSpace(string(baseOut))
+	remoteBaseSHA := "1111111111111111111111111111111111111111"
+	if remoteBaseSHA == localBaseSHA {
+		t.Fatal("test requires distinct local and remote base shas")
+	}
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("updated\n"), 0o644); err != nil {
 		t.Fatalf("write tracked file: %v", err)
 	}
@@ -656,7 +660,9 @@ func TestPublishBranchUsesGitHubAPIWithoutGitPush(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+baseSHA:
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/main":
+			_, _ = w.Write([]byte(`{"object":{"sha":"` + remoteBaseSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBaseSHA:
 			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/blobs":
 			_, _ = io.Copy(io.Discard, r.Body)
@@ -671,7 +677,7 @@ func TestPublishBranchUsesGitHubAPIWithoutGitPush(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/commits":
 			body, _ := io.ReadAll(r.Body)
 			commitPayload = string(body)
-			if !strings.Contains(commitPayload, `"message":"Publish via API"`) || !strings.Contains(commitPayload, `"tree":"new-tree"`) || !strings.Contains(commitPayload, baseSHA) {
+			if !strings.Contains(commitPayload, `"message":"Publish via API"`) || !strings.Contains(commitPayload, `"tree":"new-tree"`) || !strings.Contains(commitPayload, remoteBaseSHA) || strings.Contains(commitPayload, localBaseSHA) {
 				t.Fatalf("unexpected commit payload: %s", commitPayload)
 			}
 			_, _ = w.Write([]byte(`{"sha":"new-commit"}`))

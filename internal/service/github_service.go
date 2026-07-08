@@ -564,27 +564,23 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		return fmt.Errorf("repository path is required")
 	}
 
-	baseSHA, err := localCommitSHA(ctx, dir, baseBranch)
-	if err != nil {
-		return fmt.Errorf("resolving base commit: %w", err)
-	}
 	changes, err := collectGitHubBranchChanges(ctx, dir, baseBranch)
 	if err != nil {
 		return err
-	}
-	if len(changes) == 0 {
-		branchSHA, err := localCommitSHA(ctx, dir, branch)
-		if err == nil && branchSHA != "" && branchSHA != baseSHA {
-			return s.publishExistingLocalCommit(ctx, repo, branch, branchSHA, false)
-		}
-		return s.publishExistingLocalCommit(ctx, repo, branch, baseSHA, false)
 	}
 
 	token, err := s.createOperationAccessToken(ctx)
 	if err != nil {
 		return err
 	}
-	baseTreeSHA, err := s.githubCommitTreeSHA(ctx, token, repo, baseSHA)
+	remoteBaseSHA, err := s.githubBranchCommitSHA(ctx, token, repo, baseBranch)
+	if err != nil {
+		return fmt.Errorf("resolving remote base branch %q: %w", baseBranch, err)
+	}
+	if len(changes) == 0 {
+		return s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, remoteBaseSHA, false)
+	}
+	baseTreeSHA, err := s.githubCommitTreeSHA(ctx, token, repo, remoteBaseSHA)
 	if err != nil {
 		return err
 	}
@@ -592,7 +588,7 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 	if err != nil {
 		return err
 	}
-	commitSHA, err := s.createGitHubCommit(ctx, token, repo, message, treeSHA, baseSHA, publishReq.CommitterName, publishReq.CommitterEmail)
+	commitSHA, err := s.createGitHubCommit(ctx, token, repo, message, treeSHA, remoteBaseSHA, publishReq.CommitterName, publishReq.CommitterEmail)
 	if err != nil {
 		return err
 	}
@@ -638,6 +634,31 @@ func (s *GitHubService) publishExistingLocalCommitWithToken(ctx context.Context,
 	s.applyGitHubHeaders(createReq, token)
 	createReq.Header.Set("Content-Type", "application/json")
 	return s.doGitHubJSON(createReq, nil)
+}
+
+func (s *GitHubService) githubBranchCommitSHA(ctx context.Context, token string, repo *GitHubRepoRef, branch string) (string, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return "", fmt.Errorf("branch is required")
+	}
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/git/ref/heads/%s", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), pathEscapeGitRef(branch))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	s.applyGitHubHeaders(req, token)
+	var payload struct {
+		Object struct {
+			SHA string `json:"sha"`
+		} `json:"object"`
+	}
+	if err := s.doGitHubJSON(req, &payload); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(payload.Object.SHA) == "" {
+		return "", fmt.Errorf("branch commit sha is empty")
+	}
+	return strings.TrimSpace(payload.Object.SHA), nil
 }
 
 func (s *GitHubService) githubCommitTreeSHA(ctx context.Context, token string, repo *GitHubRepoRef, commitSHA string) (string, error) {

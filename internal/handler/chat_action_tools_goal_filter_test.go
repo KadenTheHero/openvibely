@@ -69,6 +69,20 @@ func TestFilterTaskThreadRuntimeToolDefs_GoalStatusToolsRequireExplicitGrant(t *
 	}
 }
 
+func TestFilterTaskThreadRuntimeToolDefs_HaveWebHandlers(t *testing.T) {
+	defs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), nil, true)
+	handlers := (&Handler{}).chatActionHandlers(streamingResponseParams{ExecID: "exec", ProjectID: "project", IsTaskFollowup: true}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+	for _, def := range defs {
+		if def.Name == "memory_view" {
+			continue
+		}
+		if _, ok := handlers[def.Name]; !ok {
+			t.Fatalf("task-thread web runtime advertised %s without a handler", def.Name)
+		}
+	}
+}
+
 func TestFilterTaskThreadCapabilitySummaries_GoalStatusToolsRequireExplicitGrant(t *testing.T) {
 	summaries := chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 
