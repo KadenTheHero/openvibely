@@ -662,6 +662,9 @@ func TestPublishBranchUsesGitHubAPIWithoutGitPush(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/main":
 			_, _ = w.Write([]byte(`{"object":{"sha":"` + remoteBaseSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/task/api-publish":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Reference does not exist"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBaseSHA:
 			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/blobs":
@@ -723,6 +726,187 @@ func TestPublishBranchUsesGitHubAPIWithoutGitPush(t *testing.T) {
 	}
 	if treePayload == "" || commitPayload == "" || refPayload == "" {
 		t.Fatalf("expected tree, commit, and ref API calls paths=%v", paths)
+	}
+}
+
+func TestPublishBranchParentsExistingRemoteTaskBranch(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	repoDir := createTestGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("updated again\n"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+
+	remoteBaseSHA := "1111111111111111111111111111111111111111"
+	remoteBranchSHA := "2222222222222222222222222222222222222222"
+	var commitPayload string
+	var refPayload string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer ghp_test" {
+			t.Fatalf("expected PAT bearer auth, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/main":
+			_, _ = w.Write([]byte(`{"object":{"sha":"` + remoteBaseSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/task/api-publish":
+			_, _ = w.Write([]byte(`{"object":{"sha":"` + remoteBranchSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBaseSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/blobs":
+			_, _ = io.Copy(io.Discard, r.Body)
+			_, _ = w.Write([]byte(`{"sha":"blob-readme"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/trees":
+			body, _ := io.ReadAll(r.Body)
+			if !strings.Contains(string(body), `"base_tree":"base-tree"`) || !strings.Contains(string(body), `"path":"README.md"`) {
+				t.Fatalf("unexpected tree payload: %s", string(body))
+			}
+			_, _ = w.Write([]byte(`{"sha":"new-tree"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/commits":
+			body, _ := io.ReadAll(r.Body)
+			commitPayload = string(body)
+			if !strings.Contains(commitPayload, remoteBranchSHA) || strings.Contains(commitPayload, remoteBaseSHA) {
+				t.Fatalf("expected existing remote branch parent, got commit payload: %s", commitPayload)
+			}
+			_, _ = w.Write([]byte(`{"sha":"new-commit"}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
+			body, _ := io.ReadAll(r.Body)
+			refPayload = string(body)
+			if !strings.Contains(refPayload, `"sha":"new-commit"`) || !strings.Contains(refPayload, `"force":false`) {
+				t.Fatalf("unexpected ref payload: %s", refPayload)
+			}
+			_, _ = w.Write([]byte(`{"ref":"refs/heads/task/api-publish","object":{"sha":"new-commit"}}`))
+		default:
+			t.Fatalf("unexpected GitHub API request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	svc.runGit = func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		if len(args) > 0 && (args[0] == "add" || args[0] == "commit" || args[0] == "push") {
+			t.Fatalf("PublishBranch must not invoke git %s", args[0])
+		}
+		return defaultRunGit(ctx, dir, extraEnv, args...)
+	}
+	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+		RepoPath:      repoDir,
+		Branch:        "task/api-publish",
+		BaseBranch:    "main",
+		CommitMessage: "Publish existing branch via API",
+	}); err != nil {
+		t.Fatalf("PublishBranch returned error: %v", err)
+	}
+	if commitPayload == "" || refPayload == "" {
+		t.Fatalf("expected commit and ref API calls")
+	}
+}
+
+func TestPublishBranchRetriesWithLatestRemoteBranchParentOnNonFastForward(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	repoDir := createTestGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("updated after race\n"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+
+	remoteBaseSHA := "1111111111111111111111111111111111111111"
+	staleBranchSHA := "2222222222222222222222222222222222222222"
+	latestBranchSHA := "3333333333333333333333333333333333333333"
+	refGets := 0
+	commitPosts := 0
+	patches := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer ghp_test" {
+			t.Fatalf("expected PAT bearer auth, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/main":
+			_, _ = w.Write([]byte(`{"object":{"sha":"` + remoteBaseSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/task/api-publish":
+			refGets++
+			sha := staleBranchSHA
+			if refGets > 1 {
+				sha = latestBranchSHA
+			}
+			_, _ = w.Write([]byte(`{"object":{"sha":"` + sha + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBaseSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/blobs":
+			_, _ = io.Copy(io.Discard, r.Body)
+			_, _ = w.Write([]byte(`{"sha":"blob-readme"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/trees":
+			_, _ = io.Copy(io.Discard, r.Body)
+			_, _ = w.Write([]byte(`{"sha":"new-tree"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/commits":
+			commitPosts++
+			body, _ := io.ReadAll(r.Body)
+			text := string(body)
+			if commitPosts == 1 && (!strings.Contains(text, staleBranchSHA) || strings.Contains(text, latestBranchSHA)) {
+				t.Fatalf("expected first commit to parent stale branch, got: %s", text)
+			}
+			if commitPosts == 2 && (!strings.Contains(text, latestBranchSHA) || strings.Contains(text, staleBranchSHA)) {
+				t.Fatalf("expected retry commit to parent latest branch, got: %s", text)
+			}
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"sha":"new-commit-%d"}`, commitPosts)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
+			patches++
+			body, _ := io.ReadAll(r.Body)
+			text := string(body)
+			if !strings.Contains(text, `"force":false`) {
+				t.Fatalf("unexpected forced ref update: %s", text)
+			}
+			if patches == 1 {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_, _ = w.Write([]byte(`{"message":"Update is not a fast forward"}`))
+				return
+			}
+			if !strings.Contains(text, `"sha":"new-commit-2"`) {
+				t.Fatalf("expected retry commit ref update, got: %s", text)
+			}
+			_, _ = w.Write([]byte(`{"ref":"refs/heads/task/api-publish","object":{"sha":"new-commit-2"}}`))
+		default:
+			t.Fatalf("unexpected GitHub API request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	svc.runGit = func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		if len(args) > 0 && (args[0] == "add" || args[0] == "commit" || args[0] == "push") {
+			t.Fatalf("PublishBranch must not invoke git %s", args[0])
+		}
+		return defaultRunGit(ctx, dir, extraEnv, args...)
+	}
+	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+		RepoPath:      repoDir,
+		Branch:        "task/api-publish",
+		BaseBranch:    "main",
+		CommitMessage: "Publish retry via API",
+	}); err != nil {
+		t.Fatalf("PublishBranch returned error: %v", err)
+	}
+	if refGets != 2 || commitPosts != 2 || patches != 2 {
+		t.Fatalf("expected ref retry flow, got refGets=%d commitPosts=%d patches=%d", refGets, commitPosts, patches)
 	}
 }
 

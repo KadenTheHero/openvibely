@@ -577,7 +577,13 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 	if err != nil {
 		return fmt.Errorf("resolving remote base branch %q: %w", baseBranch, err)
 	}
-	if len(changes) == 0 {
+	parentSHA := remoteBaseSHA
+	if remoteBranchSHA, err := s.githubBranchCommitSHA(ctx, token, repo, branch); err == nil {
+		parentSHA = remoteBranchSHA
+	} else if !isGitHubRefMissingError(err) {
+		return fmt.Errorf("resolving remote publish branch %q: %w", branch, err)
+	}
+	if len(changes) == 0 && parentSHA == remoteBaseSHA {
 		return s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, remoteBaseSHA, false)
 	}
 	baseTreeSHA, err := s.githubCommitTreeSHA(ctx, token, repo, remoteBaseSHA)
@@ -588,11 +594,28 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 	if err != nil {
 		return err
 	}
-	commitSHA, err := s.createGitHubCommit(ctx, token, repo, message, treeSHA, remoteBaseSHA, publishReq.CommitterName, publishReq.CommitterEmail)
+	commitSHA, err := s.createGitHubCommit(ctx, token, repo, message, treeSHA, parentSHA, publishReq.CommitterName, publishReq.CommitterEmail)
 	if err != nil {
 		return err
 	}
-	return s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, commitSHA, false)
+	if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, commitSHA, false); err != nil {
+		if !isGitHubNonFastForwardError(err) {
+			return err
+		}
+		latestBranchSHA, refErr := s.githubBranchCommitSHA(ctx, token, repo, branch)
+		if refErr != nil {
+			return fmt.Errorf("refreshing remote publish branch %q after non-fast-forward update rejection: %w", branch, refErr)
+		}
+		if latestBranchSHA == parentSHA {
+			return err
+		}
+		retryCommitSHA, retryErr := s.createGitHubCommit(ctx, token, repo, message, treeSHA, latestBranchSHA, publishReq.CommitterName, publishReq.CommitterEmail)
+		if retryErr != nil {
+			return retryErr
+		}
+		return s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, retryCommitSHA, false)
+	}
+	return nil
 }
 
 func (s *GitHubService) publishExistingLocalCommit(ctx context.Context, repo *GitHubRepoRef, branch, sha string, force bool) error {
@@ -771,6 +794,14 @@ func isGitHubRefMissingError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "github api request failed (404)") || strings.Contains(msg, "reference does not exist")
+}
+
+func isGitHubNonFastForwardError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "github api request failed (422)") && strings.Contains(msg, "not a fast forward")
 }
 
 func pathEscapeGitRef(ref string) string {
