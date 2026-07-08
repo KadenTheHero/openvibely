@@ -569,11 +569,21 @@ func (h *Handler) executeGitHubGetProjectInboxTool(ctx context.Context, projectI
 	if h.githubAuthRepo == nil {
 		return "", fmt.Errorf("github auth repository unavailable")
 	}
-	inbox, err := h.githubAuthRepo.GetEnabledProjectInbox(ctx, projectID)
+	actors, err := h.githubAuthRepo.ListAuthorizedInboxAssignees(ctx)
 	if err != nil {
 		return "", err
 	}
-	return githubToolJSON(map[string]any{"ok": true, "configured": inbox != nil, "inbox": inbox})
+	assignees := make([]string, 0, len(actors))
+	for _, actor := range actors {
+		if login := repository.NormalizeGitHubLogin(actor.GitHubLogin); login != "" {
+			assignees = append(assignees, login)
+		}
+	}
+	legacyInbox, err := h.githubAuthRepo.GetEnabledProjectInbox(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	return githubToolJSON(map[string]any{"ok": true, "configured": len(assignees) > 0, "assignees": assignees, "authorized_users": actors, "legacy_inbox": legacyInbox})
 }
 
 func (h *Handler) executeGitHubIsActorAuthorizedTool(ctx context.Context, input json.RawMessage) (string, error) {

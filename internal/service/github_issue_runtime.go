@@ -120,11 +120,21 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if opts.GitHubAuthRepo == nil {
 				return "", fmt.Errorf("github auth repository unavailable")
 			}
-			inbox, err := opts.GitHubAuthRepo.GetEnabledProjectInbox(ctx, opts.ProjectID)
+			actors, err := opts.GitHubAuthRepo.ListAuthorizedInboxAssignees(ctx)
 			if err != nil {
 				return "", err
 			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "configured": inbox != nil, "inbox": inbox})
+			assignees := make([]string, 0, len(actors))
+			for _, actor := range actors {
+				if login := repository.NormalizeGitHubLogin(actor.GitHubLogin); login != "" {
+					assignees = append(assignees, login)
+				}
+			}
+			legacyInbox, err := opts.GitHubAuthRepo.GetEnabledProjectInbox(ctx, opts.ProjectID)
+			if err != nil {
+				return "", err
+			}
+			return githubIssueRuntimeJSON(map[string]any{"ok": true, "configured": len(assignees) > 0, "assignees": assignees, "authorized_users": actors, "legacy_inbox": legacyInbox})
 		},
 		"github_is_actor_authorized": func(ctx context.Context, input json.RawMessage) (string, error) {
 			if opts.GitHubAuthRepo == nil {

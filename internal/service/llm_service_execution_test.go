@@ -3437,15 +3437,19 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	if !strings.Contains(out, `"authorized":false`) {
 		t.Fatalf("expected deny-by-default authorization output, got %s", out)
 	}
-	if err := repository.NewGitHubAuthRepo(db).UpsertProjectInbox(ctx, &models.GitHubProjectInbox{ProjectID: project.ID, GitHubLogin: "Dev-Bot", Enabled: true}); err != nil {
-		t.Fatalf("configure github project inbox: %v", err)
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	if err := githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "Dev-Bot", Permission: "triage"}); err != nil {
+		t.Fatalf("configure github authorized user: %v", err)
+	}
+	if err := githubAuthRepo.UpsertProjectInbox(ctx, &models.GitHubProjectInbox{ProjectID: project.ID, GitHubLogin: "Legacy-Bot", Enabled: true}); err != nil {
+		t.Fatalf("configure legacy github project inbox: %v", err)
 	}
 	out, handled, isErr, err = rt.Executor(ctx, "github_get_project_inbox", []byte(`{}`))
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected project inbox tool success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
-	if !strings.Contains(out, `"configured":true`) || !strings.Contains(out, `"github_login":"dev-bot"`) {
-		t.Fatalf("expected configured inbox output, got %s", out)
+	if !strings.Contains(out, `"configured":true`) || !strings.Contains(out, `"assignees":["dev-bot"]`) || !strings.Contains(out, `"legacy_inbox"`) || !strings.Contains(out, `"github_login":"legacy-bot"`) {
+		t.Fatalf("expected authorized-user assignee output with legacy inbox metadata, got %s", out)
 	}
 }
 

@@ -595,8 +595,8 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("github_get_project_inbox returned error: %v", err)
 	}
-	if !strings.Contains(out, `"configured":true`) || !strings.Contains(out, `"github_login":"dev-bot"`) {
-		t.Fatalf("expected configured inbox output, got %s", out)
+	if !strings.Contains(out, `"configured":true`) || !strings.Contains(out, `"assignees":["alice"]`) || !strings.Contains(out, `"legacy_inbox"`) || !strings.Contains(out, `"github_login":"dev-bot"`) {
+		t.Fatalf("expected authorized-user assignee output with legacy inbox metadata, got %s", out)
 	}
 	out, err = handlers["github_is_actor_authorized"](ctx, json.RawMessage(`{"github_login":"ALICE"}`))
 	if err != nil {

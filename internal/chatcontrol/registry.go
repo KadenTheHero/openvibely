@@ -331,7 +331,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_get_project_inbox",
-		Description:  "Read the current project's optional GitHub inbox assignee override. Use this with github_list_assigned_issues for GitHub App installs or custom mailbox accounts.",
+		Description:  "List GitHub Authorized Users as issue assignee candidates for the current project. Use these logins with github_list_assigned_issues for GitHub App or custom mailbox setups.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -341,7 +341,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_is_actor_authorized",
-		Description:  "Check whether a GitHub login is on the optional project authorization allowlist. This does not choose which issues OpenVibely scans. Missing or empty authorization lists deny by default.",
+		Description:  "Check whether a GitHub login is in the GitHub Authorized Users list. Missing or empty authorization lists deny by default.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -361,7 +361,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_list_assigned_issues",
-		Description:  "List open GitHub issues in the current project's repository assigned to the provided GitHub login. Pull request objects are omitted. Use this with an explicit Project Inbox Assignee override or GitHub App setup.",
+		Description:  "List open GitHub issues in the current project's repository assigned to the provided GitHub login. Pull request objects are omitted. For GitHub App/custom setups, pass a login from github_get_project_inbox.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,

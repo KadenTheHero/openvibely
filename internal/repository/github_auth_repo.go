@@ -27,12 +27,24 @@ func NewGitHubAuthRepo(db *sql.DB) *GitHubAuthRepo {
 	return &GitHubAuthRepo{db: db}
 }
 
-// ListAuthorizedActors returns all system-level GitHub actors on the optional authorization allowlist.
+// ListAuthorizedActors returns all system-level GitHub users on the authorization allowlist.
 func (r *GitHubAuthRepo) ListAuthorizedActors(ctx context.Context) ([]models.GitHubAuthorizedActor, error) {
-	rows, err := r.db.QueryContext(ctx,
+	return r.listAuthorizedActors(ctx,
 		`SELECT id, github_user_id, github_login, display_name, permission, added_at, added_by
 		 FROM github_authorized_actors
 		 ORDER BY added_at ASC`)
+}
+
+// ListAuthorizedInboxAssignees returns authorized GitHub users that scheduled tasks may scan for assigned issues.
+func (r *GitHubAuthRepo) ListAuthorizedInboxAssignees(ctx context.Context) ([]models.GitHubAuthorizedActor, error) {
+	return r.listAuthorizedActors(ctx,
+		`SELECT id, github_user_id, github_login, display_name, permission, added_at, added_by
+		 FROM github_authorized_actors
+		 ORDER BY lower(github_login) ASC`)
+}
+
+func (r *GitHubAuthRepo) listAuthorizedActors(ctx context.Context, query string) ([]models.GitHubAuthorizedActor, error) {
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list github authorized actors: %w", err)
 	}

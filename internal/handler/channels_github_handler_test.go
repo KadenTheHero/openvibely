@@ -252,17 +252,15 @@ func assertGitHubRuntimeSettingsFragmentResponse(t *testing.T, rec *httptest.Res
 	}
 	for _, want := range []string{
 		"Authorized Users",
-		"GitHub users allowed to use GitHub-triggered automation checks, matching the Authorized Users concept in other channels.",
-		"This is separate from where issues are assigned.",
-		"Issue Inbox Assignee",
-		"The GitHub user or bot that receives issues OpenVibely scheduled tasks should inspect.",
-		"GitHub App/custom setups should set this explicitly.",
+		"GitHub users allowed for this channel.",
+		"Scheduled GitHub tasks can scan issues assigned to these users",
+		"authorization checks use the same list",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected github runtime settings fragment to include %q, got: %s", want, body)
 		}
 	}
-	for _, old := range []string{"Optional Authorized Users", "Project Inbox Assignee Override", "Approve"} {
+	for _, old := range []string{"Optional Authorized Users", "Project Inbox Assignee Override", "Issue Inbox Assignee", "Approve"} {
 		if strings.Contains(body, old) {
 			t.Fatalf("did not expect confusing github runtime copy %q, got: %s", old, body)
 		}
@@ -320,7 +318,7 @@ func TestGitHubRuntimeSettingsRoutesAuthorizeActors(t *testing.T) {
 		t.Fatalf("expected delete status 200, got %d (%s)", deleteRec.Code, deleteRec.Body.String())
 	}
 	assertGitHubRuntimeSettingsFragmentResponse(t, deleteRec)
-	if body := deleteRec.Body.String(); !strings.Contains(body, "No authorized users configured. GitHub authorization checks deny by default.") {
+	if body := deleteRec.Body.String(); !strings.Contains(body, "No authorized users configured. GitHub authorization checks deny by default, and GitHub App/custom issue scanning has no assignee to use.") {
 		t.Fatalf("expected empty authorized users message after delete, got: %s", body)
 	}
 	authorized, err = h.githubAuthRepo.IsActorAuthorized(context.Background(), "alice")
@@ -345,10 +343,6 @@ func TestGitHubProjectInboxRouteStoresProjectScopedNormalizedLogin(t *testing.T)
 		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
 	assertGitHubRuntimeSettingsFragmentResponse(t, rec)
-	body := rec.Body.String()
-	if !strings.Contains(body, "@dev-bot") {
-		t.Fatalf("expected normalized inbox login in fragment, got: %s", body)
-	}
 	inbox, err := h.githubAuthRepo.GetEnabledProjectInbox(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("get inbox: %v", err)

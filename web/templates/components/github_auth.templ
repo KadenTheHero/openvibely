@@ -7,13 +7,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func githubProjectInboxLogin(inbox *models.GitHubProjectInbox) string {
-	if inbox == nil {
-		return ""
-	}
-	return inbox.GitHubLogin
-}
-
 func githubDisplayLogin(login string) string {
 	login = strings.TrimSpace(login)
 	if login == "" {
@@ -22,7 +15,7 @@ func githubDisplayLogin(login string) string {
 	return "@" + login
 }
 
-// GitHubRuntimeSettings renders GitHub authorized users and issue inbox configuration for runtime tools.
+// GitHubRuntimeSettings renders GitHub authorized users for runtime tools.
 templ GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models.GitHubProjectInbox, projectID string) {
 	<div id="github-runtime-settings" class="space-y-5">
 		<div>
@@ -33,10 +26,10 @@ templ GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models
 				Authorized Users
 			</h4>
 			<p class="text-xs opacity-60 mb-3">
-				GitHub users allowed to use GitHub-triggered automation checks, matching the Authorized Users concept in other channels. This is separate from where issues are assigned.
+				GitHub users allowed for this channel. Scheduled GitHub tasks can scan issues assigned to these users, and authorization checks use the same list.
 			</p>
 			if len(actors) == 0 {
-				<p class="text-sm opacity-50 italic mb-3">No authorized users configured. GitHub authorization checks deny by default.</p>
+				<p class="text-sm opacity-50 italic mb-3">No authorized users configured. GitHub authorization checks deny by default, and GitHub App/custom issue scanning has no assignee to use.</p>
 			} else {
 				<div class="space-y-2 mb-3">
 					for _, actor := range actors {
@@ -80,42 +73,6 @@ templ GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models
 					Add
 				</button>
 			</div>
-		</div>
-
-		<div class="divider my-2"></div>
-
-		<div>
-			<h4 class="font-semibold text-sm mb-2 flex items-center gap-2">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-				</svg>
-				Issue Inbox Assignee
-			</h4>
-			<p class="text-xs opacity-60 mb-3">
-				The GitHub user or bot that receives issues OpenVibely scheduled tasks should inspect. PAT setups usually use the PAT owner automatically; GitHub App/custom setups should set this explicitly.
-			</p>
-			<form id="github-project-inbox-form" hx-post="/channels/github/project-inbox" hx-target="#github-runtime-settings" hx-swap="outerHTML" class="space-y-3">				<input type="hidden" name="project_id" value={ projectID }/>
-				<div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-end">
-					<label class="form-control">
-						<span class="label"><span class="label-text">GitHub Assignee Login</span></span>
-						<input type="text" name="github_login" class="input input-bordered input-sm" placeholder="optional, e.g. @dev-bot" value={ githubProjectInboxLogin(inbox) }/>
-					</label>
-					<label class="label cursor-pointer justify-start gap-3 pb-2">
-						<input type="checkbox" class="toggle toggle-primary" name="enabled" value="true" if inbox == nil || inbox.Enabled { checked }/>
-						<span class="label-text">Enabled</span>
-					</label>
-				</div>
-				<div class="flex items-center justify-between gap-3">
-					<div class="text-xs opacity-60">
-						if inbox != nil {
-							Configured as <span class="font-mono">{ githubDisplayLogin(inbox.GitHubLogin) }</span>.
-						} else {
-							No project inbox assignee configured.
-						}
-					</div>
-					<button type="submit" class="btn btn-primary btn-sm">Save Inbox</button>
-				</div>
-			</form>
 		</div>
 	</div>
 }

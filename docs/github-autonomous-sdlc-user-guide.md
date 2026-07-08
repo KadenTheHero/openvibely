@@ -19,12 +19,12 @@ Before creating the loop:
 
 1. Create or select the OpenVibely project for the repository.
 2. Configure GitHub in `/channels` using a PAT or GitHub App.
-3. For PAT setups, assign GitHub issues to the PAT owner when you want OpenVibely scheduled tasks to notice them.
-4. For GitHub App setups, open `GitHub Runtime Settings` in the GitHub channel settings modal and set `Issue Inbox Assignee` to the GitHub user or bot that should receive work.
-5. Use `Authorized Users` the same way as other channels: GitHub users allowed by explicit authorization checks. Authorized users are separate from the issue inbox.
+3. Add the GitHub user or bot accounts OpenVibely should trust under `Authorized Users` in GitHub Runtime Settings.
+4. For PAT setups, assign GitHub issues to the PAT owner when you want OpenVibely scheduled tasks to notice them.
+5. For GitHub App setups, assign issues to one of the configured Authorized Users; do not assign issues to an organization installation account.
 6. Ensure the scheduled task's model/provider supports runtime tool calls.
 
-A PAT identifies a real GitHub user, so scheduled tasks can call `github_list_my_assigned_issues` to find issues assigned to that user. A GitHub App installation may be installed on an organization, which is not an issue assignee; use `github_get_project_inbox` plus `github_list_assigned_issues` with the configured override for GitHub App setups.
+A PAT identifies a real GitHub user, so scheduled tasks can call `github_list_my_assigned_issues` to find issues assigned to that user. A GitHub App installation may be installed on an organization, which is not an issue assignee; use `github_get_project_inbox` to read the Authorized Users and pass those logins to `github_list_assigned_issues`.
 
 ## Minimum Visible Loop
 
@@ -33,7 +33,7 @@ Start with two scheduled tasks before adding more finders/fixers.
 | Task | Cadence | Purpose |
 |---|---:|---|
 | `GitHub Offering Manager: Vision Suggestions` | Daily | Reads project vision/source files and opens suggestion issues only. |
-| `GitHub Dev Inbox` | Hourly | Checks open issues assigned to the PAT user or configured Project Inbox Assignee override and links/updates eligible work. |
+| `GitHub Dev Inbox` | Hourly | Checks open issues assigned to the PAT user or configured GitHub Authorized Users and links/updates eligible work. |
 
 You can later add bug, performance, duplication, and loop-auditor tasks using the same pattern.
 
@@ -44,11 +44,11 @@ Create a visible scheduled task with a prompt like:
 ```text
 Check GitHub for implementation mailbox work for this project.
 
-If this project uses a PAT, call `github_list_my_assigned_issues` to list open issues assigned to the PAT owner. If this project uses GitHub App mode or an explicit mailbox account, call `github_get_project_inbox`; when it is configured, pass that assignee to `github_list_assigned_issues`. If GitHub credentials or the required assignee are missing, stop and explain the missing configuration.
+If this project uses a PAT, call `github_list_my_assigned_issues` to list open issues assigned to the PAT owner. If this project uses GitHub App mode or custom mailbox accounts, call `github_get_project_inbox` to get Authorized Users; pass each returned assignee login to `github_list_assigned_issues`. If GitHub credentials or Authorized Users are missing, stop and explain the missing configuration.
 
 For each returned issue, inspect it with `github_get_issue`. Apply the user's workflow eligibility rule before creating implementation work. If this workflow still requires an associated PR before automation may touch an assigned issue, use `github_list_assigned_issues_with_prs` for the same assignee and skip assigned issues that have no associated PR according to that tool result.
 
-Treat an eligible issue as actionable when it is assigned to the PAT owner or configured Project Inbox Assignee and has any explicit human approval signal required by your workflow.
+Treat an eligible issue as actionable when it is assigned to the PAT owner or one of the configured Authorized Users and has any explicit human approval signal required by your workflow.
 
 For actionable issues, create or link visible OpenVibely work using task/thread/goal tools available in this run, then call `github_link_task_to_issue` when a concrete task and associated PR are known. Comment concise status on the issue with `github_comment_on_issue`.
 
@@ -71,7 +71,7 @@ Open GitHub suggestion issues only. Use `github_create_issue` with unprefixed la
 Include enough context for a human to approve, reject, or assign the issue. Avoid duplicates by searching or inspecting existing visible work when the available tools allow it.
 ```
 
-Offering and finder tasks should open issues only. Implementation and fixer tasks should act on issues assigned to the PAT owner or configured Project Inbox Assignee, plus any explicit human approval signal required by your workflow.
+Offering and finder tasks should open issues only. Implementation and fixer tasks should act on issues assigned to the PAT owner or configured Authorized Users, plus any explicit human approval signal required by your workflow.
 
 ## Labels
 
@@ -105,8 +105,8 @@ Never use labels beginning with `openvibely:`. OpenVibely rejects that prefix in
 
 ## Troubleshooting
 
-- Dev Inbox stops with missing GitHub account: configure a PAT, or configure a GitHub App plus Project Inbox Assignee override.
-- Dev Inbox refuses work: make sure the issue is assigned to the PAT owner or configured Project Inbox Assignee, and apply any expected human approval label.
+- Dev Inbox stops with missing GitHub account: configure a PAT, or add the GitHub App mailbox user/bot to Authorized Users.
+- Dev Inbox refuses work: make sure the issue is assigned to the PAT owner or configured Authorized Users, and apply any expected human approval label.
 - Assigned issue is skipped: verify it has the associated PR signal required by the current workflow rule.
 - PR creation fails: check that the task has a worktree branch and that GitHub credentials can push branches and open PRs.
 - Labels are rejected: remove any `openvibely:` prefix and use the plain label vocabulary above.

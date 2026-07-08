@@ -828,7 +828,7 @@ func (s *GitHubService) ListAuthenticatedAssignedIssues(ctx context.Context, rep
 		return nil, nil, err
 	}
 	if user.Source == GitHubAuthModeApp {
-		return nil, nil, fmt.Errorf("github_list_my_assigned_issues requires a PAT user token; GitHub App installations can be installed on organizations and do not identify an assignable issue user. Configure a Project Inbox Assignee override and call github_list_assigned_issues with that assignee")
+		return nil, nil, fmt.Errorf("github_list_my_assigned_issues requires a PAT user token; GitHub App installations can be installed on organizations and do not identify an assignable issue user. Add the real issue assignee account to GitHub Authorized Users, call github_get_project_inbox, then call github_list_assigned_issues with each returned assignee")
 	}
 	token, err := s.createOperationAccessToken(ctx)
 	if err != nil {

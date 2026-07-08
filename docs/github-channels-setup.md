@@ -60,10 +60,10 @@ Why choose GitHub App:
 
 After configuring GitHub credentials, open the GitHub settings modal and use `GitHub Runtime Settings` for prompt-driven task workflows.
 
-- `Authorized Users` works like the Authorized Users list in other channels: GitHub users allowed by GitHub authorization checks.
-- `Issue Inbox Assignee` is where OpenVibely looks for assigned GitHub issues.
-- With PAT auth, scheduled tasks can usually find open issues assigned to the PAT owner without setting an inbox assignee.
-- With GitHub App auth, set `Issue Inbox Assignee` to the GitHub user or bot that should receive issues for OpenVibely to inspect.
+- `Authorized Users` works like the Authorized Users list in other channels: GitHub users allowed for this channel.
+- Scheduled GitHub tasks can scan issues assigned to Authorized Users.
+- With PAT auth, scheduled tasks can also find open issues assigned to the PAT owner directly.
+- With GitHub App auth, add the real GitHub user or bot that should receive OpenVibely work to `Authorized Users`, then assign issues to that account.
 - User-facing GitHub logins can be entered as `alice` or `@alice`; OpenVibely stores the normalized plain login.
 
 For the visible scheduled-task pattern, see the [GitHub Autonomous SDLC User Guide](./github-autonomous-sdlc-user-guide.md).
