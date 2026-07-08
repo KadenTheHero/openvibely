@@ -811,6 +811,122 @@ func TestPublishBranchParentsExistingRemoteTaskBranch(t *testing.T) {
 	}
 }
 
+func TestPublishBranchNoOpsWhenNoChangesAndRemoteTaskBranchExists(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	repoDir := createTestGitRepo(t)
+	remoteBaseSHA := "1111111111111111111111111111111111111111"
+	remoteBranchSHA := "2222222222222222222222222222222222222222"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer ghp_test" {
+			t.Fatalf("expected PAT bearer auth, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/main":
+			_, _ = w.Write([]byte(`{"object":{"sha":"` + remoteBaseSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/task/api-publish":
+			_, _ = w.Write([]byte(`{"object":{"sha":"` + remoteBranchSHA + `"}}`))
+		default:
+			t.Fatalf("unexpected GitHub API request for no-op publish: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	svc.runGit = func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		if len(args) > 0 && (args[0] == "add" || args[0] == "commit" || args[0] == "push") {
+			t.Fatalf("PublishBranch must not invoke git %s", args[0])
+		}
+		return defaultRunGit(ctx, dir, extraEnv, args...)
+	}
+	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+		RepoPath:      repoDir,
+		Branch:        "task/api-publish",
+		BaseBranch:    "main",
+		CommitMessage: "No-op publish via API",
+	}); err != nil {
+		t.Fatalf("PublishBranch returned error: %v", err)
+	}
+}
+
+func TestPublishBranchCreatesRemoteBranchAtBaseWhenNoChangesAndBranchAbsent(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	repoDir := createTestGitRepo(t)
+	remoteBaseSHA := "1111111111111111111111111111111111111111"
+	var sawCreateRef bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer ghp_test" {
+			t.Fatalf("expected PAT bearer auth, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/main":
+			_, _ = w.Write([]byte(`{"object":{"sha":"` + remoteBaseSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/task/api-publish":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Reference does not exist"}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
+			body, _ := io.ReadAll(r.Body)
+			text := string(body)
+			if !strings.Contains(text, `"sha":"`+remoteBaseSHA+`"`) || !strings.Contains(text, `"force":false`) {
+				t.Fatalf("unexpected ref update payload: %s", text)
+			}
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Reference does not exist"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/refs":
+			sawCreateRef = true
+			body, _ := io.ReadAll(r.Body)
+			text := string(body)
+			if !strings.Contains(text, `"ref":"refs/heads/task/api-publish"`) || !strings.Contains(text, `"sha":"`+remoteBaseSHA+`"`) {
+				t.Fatalf("unexpected create-ref payload: %s", text)
+			}
+			_, _ = w.Write([]byte(`{"ref":"refs/heads/task/api-publish","object":{"sha":"` + remoteBaseSHA + `"}}`))
+		default:
+			t.Fatalf("unexpected GitHub API request for empty branch publish: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	svc.runGit = func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		if len(args) > 0 && (args[0] == "add" || args[0] == "commit" || args[0] == "push") {
+			t.Fatalf("PublishBranch must not invoke git %s", args[0])
+		}
+		return defaultRunGit(ctx, dir, extraEnv, args...)
+	}
+	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+		RepoPath:      repoDir,
+		Branch:        "task/api-publish",
+		BaseBranch:    "main",
+		CommitMessage: "Create empty branch via API",
+	}); err != nil {
+		t.Fatalf("PublishBranch returned error: %v", err)
+	}
+	if !sawCreateRef {
+		t.Fatal("expected branch ref creation")
+	}
+}
+
 func TestPublishBranchRetriesWithLatestRemoteBranchParentOnNonFastForward(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)

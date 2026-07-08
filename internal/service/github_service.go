@@ -578,12 +578,17 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		return fmt.Errorf("resolving remote base branch %q: %w", baseBranch, err)
 	}
 	parentSHA := remoteBaseSHA
-	if remoteBranchSHA, err := s.githubBranchCommitSHA(ctx, token, repo, branch); err == nil {
-		parentSHA = remoteBranchSHA
+	remoteBranchSHA := ""
+	if sha, err := s.githubBranchCommitSHA(ctx, token, repo, branch); err == nil {
+		remoteBranchSHA = sha
+		parentSHA = sha
 	} else if !isGitHubRefMissingError(err) {
 		return fmt.Errorf("resolving remote publish branch %q: %w", branch, err)
 	}
-	if len(changes) == 0 && parentSHA == remoteBaseSHA {
+	if len(changes) == 0 {
+		if remoteBranchSHA != "" {
+			return nil
+		}
 		return s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, remoteBaseSHA, false)
 	}
 	baseTreeSHA, err := s.githubCommitTreeSHA(ctx, token, repo, remoteBaseSHA)
