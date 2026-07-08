@@ -17,7 +17,7 @@ func NormalizeGitHubLogin(login string) string {
 	return strings.ToLower(normalized)
 }
 
-// GitHubAuthRepo handles database operations for GitHub authorized actors and project inbox identities.
+// GitHubAuthRepo handles database operations for GitHub authorized users and project inbox assignees.
 type GitHubAuthRepo struct {
 	db *sql.DB
 }
@@ -132,7 +132,7 @@ func (r *GitHubAuthRepo) DeleteAuthorizedActor(ctx context.Context, id string) e
 	return nil
 }
 
-// UpsertProjectInbox configures the GitHub assignee identity a project's prompt-driven tasks can query.
+// UpsertProjectInbox configures the authorized GitHub inbox assignee whose assigned issues a project's scheduled tasks inspect.
 func (r *GitHubAuthRepo) UpsertProjectInbox(ctx context.Context, inbox *models.GitHubProjectInbox) error {
 	if inbox == nil {
 		return fmt.Errorf("github project inbox is required")

@@ -2,7 +2,7 @@ package models
 
 import "time"
 
-// GitHubAuthorizedActor represents a GitHub user authorized to approve or trigger GitHub-backed automation.
+// GitHubAuthorizedActor represents a GitHub user trusted as an authorized OpenVibely GitHub inbox assignee.
 type GitHubAuthorizedActor struct {
 	ID           string    `json:"id"`
 	GitHubUserID *int64    `json:"github_user_id,omitempty"`
@@ -13,7 +13,7 @@ type GitHubAuthorizedActor struct {
 	AddedBy      string    `json:"added_by"`
 }
 
-// GitHubProjectInbox stores the project-scoped GitHub assignee identity prompt-driven tasks can query.
+// GitHubProjectInbox stores the project-scoped GitHub authorized user whose assigned issues scheduled tasks should inspect.
 type GitHubProjectInbox struct {
 	ProjectID    string    `json:"project_id"`
 	GitHubUserID *int64    `json:"github_user_id,omitempty"`

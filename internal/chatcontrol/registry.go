@@ -340,7 +340,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_is_actor_authorized",
-		Description:  "Check whether a GitHub login is explicitly authorized to approve or trigger GitHub-backed automation. Missing or empty authorization lists deny by default.",
+		Description:  "Check whether a GitHub login is explicitly authorized as a trusted OpenVibely GitHub inbox assignee. Missing or empty authorization lists deny by default.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -348,8 +348,7 @@ var registry = []ActionDef{
 		Surfaces:     webAPISurfaces(),
 		Parameters:   json.RawMessage(githubActorAuthorizedParams),
 	},
-	{
-		Name:         "github_list_assigned_issues_with_prs",
+	{Name: "github_list_assigned_issues_with_prs",
 		Description:  "List open GitHub issues assigned to a login only when each issue already has an associated pull request. Assigned issues without an associated PR are skipped by automation.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,

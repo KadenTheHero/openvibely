@@ -87,7 +87,7 @@ func (h *Handler) RemoveGitHubAuthorizedActor(c echo.Context) error {
 	return h.renderGitHubRuntimeSettings(c, projectID)
 }
 
-// SaveGitHubProjectInbox stores the project-scoped GitHub assignee identity for runtime prompts/tools.
+// SaveGitHubProjectInbox stores the project-scoped authorized GitHub inbox assignee for runtime prompts/tools.
 func (h *Handler) SaveGitHubProjectInbox(c echo.Context) error {
 	if h.githubAuthRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "GitHub auth not configured")

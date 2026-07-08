@@ -20,24 +20,24 @@ Keep the setup generic. Use existing OpenVibely tasks, task goals, schedules, ta
 - GitHub tools are reusable capabilities, not SDLC-only APIs. Use `github_get_project_inbox`, `github_is_actor_authorized`, `github_create_issue`, `github_get_issue`, `github_list_assigned_issues_with_prs`, `github_comment_on_issue`, `github_add_issue_labels`, `github_link_task_to_issue`, and `github_open_pull_request` when available.
 - GitHub labels must be unprefixed. Never use labels beginning with `openvibely:`. Use labels such as `suggestion`, `approved`, `in-progress`, `task-created`, `pr-opened`, `blocked`, `needs-human`, `done`, `duplicate`, `bug`, `feature`, `performance`, and `duplication`.
 - Assigned GitHub issues without an associated PR must be skipped by automation unless the user explicitly changes that workflow rule. Use `github_list_assigned_issues_with_prs` and `github_link_task_to_issue`; do not use `github_open_pull_request` as a loophole to start work on an ineligible assigned issue.
-- Human trust is separate from API credentials. Use configured GitHub authorized actors for approval/trigger decisions and the project inbox assignee for mailbox polling.
-- Offering/finder tasks open GitHub issues only. Implementation/fixer tasks act only on authorized or explicitly approved issues and open or reuse PRs for OpenVibely task branches.
+- Human trust is separate from API credentials. The normal authority signal is assignment to the configured Authorized User / Project Inbox Assignee for this OpenVibely GitHub channel.
+- Offering/finder tasks open GitHub issues only. Implementation/fixer tasks act on issues assigned to that configured inbox account, or on issues with an explicit human approval signal required by the user's workflow, and open or reuse PRs for OpenVibely task branches.
 
 ## Bootstrap Steps
 
-1. Confirm the current project, repository, GitHub credentials, configured project inbox assignee, and authorized GitHub actors. Ask only for missing inputs.
+1. Confirm the current project, repository, GitHub credentials, and the GitHub account configured as both Authorized User and Project Inbox Assignee. Ask only for missing inputs.
 2. Create or update visible tasks and persisted goals for the desired loop. Prefer a small starting set before adding every possible finder/fixer.
 3. Create recurring schedules with `schedule_task`; usually daily for suggestion/finder tasks and hourly for inbox/fixer tasks.
 4. Put the behavior in each task prompt. Prompts should tell the agent which generic GitHub tools to call, which labels/auth checks to apply, what to skip, and what visible task/comment/PR updates to make.
-5. Report exactly which tasks, goals, schedules, labels, actors, and inbox settings were created or still need user action.
+5. Report exactly which tasks, goals, schedules, labels, Authorized User, and Project Inbox Assignee settings were created or still need user action.
 
 ## Suggested Visible Tasks
 
 - `GitHub Offering Manager: Vision Suggestions`, daily. Reads the project vision/source-of-truth files and opens suggestion issues only.
-- `GitHub Dev Inbox`, hourly. Checks the configured project inbox assignee, reconciles assigned issues with associated PRs, skips issues with no associated PR, verifies authorization/approval, links eligible issues to OpenVibely work, and comments status.
+- `GitHub Dev Inbox`, hourly. Checks the configured Authorized User / Project Inbox Assignee, reconciles assigned issues with associated PRs, skips issues with no associated PR, links eligible issues to OpenVibely work, and comments status.
 - `GitHub Bug Finder`, daily. Audits a focused component and opens bug issues only.
-- `GitHub Bug Fixer`, hourly or daily. Acts only on authorized or approved bug issues and opens/reuses PRs for implementation tasks.
-- `GitHub Loop Auditor`, weekly. Reviews stale labels, blocked work, duplicate tasks, missing issue/task/PR links, and unauthorized triggers.
+- `GitHub Bug Fixer`, hourly or daily. Acts on eligible issues assigned to the configured inbox account and opens/reuses PRs for implementation tasks.
+- `GitHub Loop Auditor`, weekly. Reviews stale labels, blocked work, duplicate tasks, missing issue/task/PR links, and unexpected GitHub assignments.
 
 ## Prompt Pattern For Dev Inbox
 
@@ -50,7 +50,7 @@ Use `github_get_project_inbox` to get the assignee login. If no inbox is configu
 
 Use `github_list_assigned_issues_with_prs` for that assignee. Skip any assigned issue that has no associated PR according to the tool result. Do not create implementation work for skipped issues.
 
-For each eligible issue, inspect the issue with `github_get_issue`. Treat the issue as actionable only if it is explicitly approved or the relevant actor is authorized according to `github_is_actor_authorized`.
+For each eligible issue, inspect the issue with `github_get_issue`. Treat the issue as actionable when it is assigned to the configured Authorized User / Project Inbox Assignee, or when the issue has an explicit human approval signal required by the user's workflow.
 
 For actionable issues, create or link visible OpenVibely work using task/thread/goal tools available in this run, then call `github_link_task_to_issue` when a concrete task and associated PR are known. Comment concise status on the issue with `github_comment_on_issue`.
 
@@ -76,4 +76,4 @@ Include enough context for a human to approve, reject, or assign the issue. Avoi
 - Do not create or mutate agents unless the user explicitly asks and the available tool surface supports it. Prefer visible tasks, goals, schedules, and configured GitHub identities.
 - Do not treat GitHub API credentials as authorization for human-triggered auto-fix work.
 - Do not rely on prompt memory for dedupe or status. Use visible GitHub issues, comments, labels, task goals, task threads, and PR records.
-- Do not claim the bootstrap is complete if required GitHub tools, credentials, inbox identity, authorized actors, or schedules are missing.
+- Do not claim the bootstrap is complete if required GitHub tools, credentials, Authorized User / Project Inbox Assignee configuration, or schedules are missing.
