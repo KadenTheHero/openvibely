@@ -19,12 +19,11 @@ Before creating the loop:
 
 1. Create or select the OpenVibely project for the repository.
 2. Configure GitHub in `/channels` using a PAT or GitHub App.
-3. Open the GitHub channel settings modal and configure `GitHub Runtime Settings`.
-4. Add the GitHub account that should receive OpenVibely work as an Authorized User.
-5. Set Project Inbox Assignee to that same authorized GitHub account. Assign GitHub issues to this user when you want this OpenVibely project to pick them up.
-6. Ensure the scheduled task's model/provider supports runtime tool calls.
+3. Assign GitHub issues to the GitHub account configured by the GitHub channel token or GitHub App installation when you want OpenVibely scheduled tasks to notice them.
+4. Optionally open the GitHub channel settings modal and configure `GitHub Runtime Settings` for extra trust checks or an explicit override inbox account.
+5. Ensure the scheduled task's model/provider supports runtime tool calls.
 
-GitHub operation credentials and GitHub authorization identities are separate. A token or GitHub App lets OpenVibely call GitHub APIs; the Authorized User/Project Inbox Assignee is the GitHub account whose assigned issues this project treats as its inbox.
+A token or GitHub App lets OpenVibely call GitHub APIs. The default Dev Inbox path uses that configured GitHub account directly: scheduled tasks call `github_list_my_assigned_issues` to find open issues assigned to the channel account.
 
 ## Minimum Visible Loop
 
@@ -33,7 +32,7 @@ Start with two scheduled tasks before adding more finders/fixers.
 | Task | Cadence | Purpose |
 |---|---:|---|
 | `GitHub Offering Manager: Vision Suggestions` | Daily | Reads project vision/source files and opens suggestion issues only. |
-| `GitHub Dev Inbox` | Hourly | Checks the configured GitHub inbox assignee and links/updates eligible work. |
+| `GitHub Dev Inbox` | Hourly | Checks open issues assigned to the GitHub account configured for the channel and links/updates eligible work. |
 
 You can later add bug, performance, duplication, and loop-auditor tasks using the same pattern.
 
@@ -44,11 +43,11 @@ Create a visible scheduled task with a prompt like:
 ```text
 Check GitHub for implementation mailbox work for this project.
 
-Use `github_get_project_inbox` to get the assignee login. If no inbox is configured, stop and explain the missing configuration.
+Use `github_list_my_assigned_issues` to list open issues assigned to the GitHub account configured for this OpenVibely project's GitHub channel credentials. If GitHub credentials are missing or the account cannot be resolved, stop and explain the missing configuration.
 
-Use `github_list_assigned_issues_with_prs` for that assignee. Skip any assigned issue that has no associated PR according to the tool result. Do not create implementation work for skipped issues.
+For each returned issue, inspect it with `github_get_issue`. Apply the user's workflow eligibility rule before creating implementation work. If this workflow still requires an associated PR before automation may touch an assigned issue, use `github_list_assigned_issues_with_prs` for the same assignee and skip assigned issues that have no associated PR according to that tool result.
 
-For each eligible issue, inspect the issue with `github_get_issue`. Treat the issue as actionable when it is assigned to the configured Authorized User / Project Inbox Assignee, or when the issue has an explicit human approval signal required by your workflow.
+Treat an eligible issue as actionable when it is assigned to the configured GitHub channel account and has any explicit human approval signal required by your workflow.
 
 For actionable issues, create or link visible OpenVibely work using task/thread/goal tools available in this run, then call `github_link_task_to_issue` when a concrete task and associated PR are known. Comment concise status on the issue with `github_comment_on_issue`.
 
@@ -71,7 +70,7 @@ Open GitHub suggestion issues only. Use `github_create_issue` with unprefixed la
 Include enough context for a human to approve, reject, or assign the issue. Avoid duplicates by searching or inspecting existing visible work when the available tools allow it.
 ```
 
-Offering and finder tasks should open issues only. Implementation and fixer tasks should act on issues assigned to the configured Authorized User / Project Inbox Assignee, or on issues with an explicit human approval signal required by your workflow.
+Offering and finder tasks should open issues only. Implementation and fixer tasks should act on issues assigned to the GitHub account configured for the channel, or on issues with an explicit human approval signal required by your workflow.
 
 ## Labels
 
@@ -105,8 +104,8 @@ Never use labels beginning with `openvibely:`. OpenVibely rejects that prefix in
 
 ## Troubleshooting
 
-- Dev Inbox stops with missing inbox: configure `Project Inbox Assignee` in GitHub Runtime Settings.
-- Dev Inbox refuses work: make sure the issue is assigned to the configured Authorized User / Project Inbox Assignee, or apply the expected human approval label.
+- Dev Inbox stops with missing GitHub account: configure the GitHub channel token or GitHub App installation.
+- Dev Inbox refuses work: make sure the issue is assigned to the GitHub account configured for the channel, or apply the expected human approval label.
 - Assigned issue is skipped: verify it has the associated PR signal required by the current workflow rule.
 - PR creation fails: check that the task has a worktree branch and that GitHub credentials can push branches and open PRs.
 - Labels are rejected: remove any `openvibely:` prefix and use the plain label vocabulary above.

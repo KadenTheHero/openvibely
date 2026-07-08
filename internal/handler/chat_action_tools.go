@@ -295,6 +295,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"github_is_actor_authorized": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubIsActorAuthorizedTool(ctx, input)
 		},
+		"github_list_my_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeGitHubListMyAssignedIssuesTool(ctx, params.ProjectID, input)
+		},
 		"github_list_assigned_issues_with_prs": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubListAssignedIssuesWithPRsTool(ctx, params.ProjectID, input)
 		},
@@ -587,6 +590,18 @@ func (h *Handler) executeGitHubIsActorAuthorizedTool(ctx context.Context, input 
 		return "", err
 	}
 	return githubToolJSON(map[string]any{"ok": true, "github_login": repository.NormalizeGitHubLogin(login), "authorized": authorized})
+}
+
+func (h *Handler) executeGitHubListMyAssignedIssuesTool(ctx context.Context, projectID string, _ json.RawMessage) (string, error) {
+	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	user, issues, err := h.githubSvc.ListAuthenticatedAssignedIssues(ctx, repo)
+	if err != nil {
+		return "", err
+	}
+	return githubToolJSON(map[string]any{"ok": true, "account": user, "issues": issues})
 }
 
 func (h *Handler) executeGitHubListAssignedIssuesWithPRsTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
@@ -1306,6 +1321,7 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"github_get_issue":                     true,
 		"github_get_project_inbox":             true,
 		"github_is_actor_authorized":           true,
+		"github_list_my_assigned_issues":       true,
 		"github_list_assigned_issues_with_prs": true,
 		"github_comment_on_issue":              true,
 		"github_add_issue_labels":              true,

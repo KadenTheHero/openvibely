@@ -20,6 +20,7 @@ type fakeGitHubService struct {
 	createPRFn             func(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error)
 	createIssueFn          func(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error)
 	getIssueFn             func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error)
+	listMyAssignedIssuesFn func(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error)
 	listAssignedIssuesPRFn func(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssueWithPullRequest, error)
 	findIssuePRFn          func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubPullRequest, error)
 	commentOnIssueFn       func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error
@@ -108,6 +109,13 @@ func (f *fakeGitHubService) GetIssue(ctx context.Context, repo *service.GitHubRe
 		return f.getIssueFn(ctx, repo, issueNumber)
 	}
 	return nil, fmt.Errorf("get issue not configured")
+}
+
+func (f *fakeGitHubService) ListAuthenticatedAssignedIssues(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error) {
+	if f != nil && f.listMyAssignedIssuesFn != nil {
+		return f.listMyAssignedIssuesFn(ctx, repo)
+	}
+	return nil, nil, fmt.Errorf("list my assigned issues not configured")
 }
 
 func (f *fakeGitHubService) ListAssignedIssuesWithPullRequests(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssueWithPullRequest, error) {

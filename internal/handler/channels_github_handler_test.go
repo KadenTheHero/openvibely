@@ -252,11 +252,11 @@ func assertGitHubRuntimeSettingsFragmentResponse(t *testing.T, rec *httptest.Res
 	}
 	for _, want := range []string{
 		"Authorized Users",
-		"GitHub users OpenVibely trusts as this project’s GitHub inbox assignee.",
-		"Issues assigned to this authorized user are the work OpenVibely scheduled tasks should notice.",
-		"Project Inbox Assignee",
-		"Use the same authorized GitHub user here.",
-		"Assign GitHub issues to this user when you want this OpenVibely project to pick them up.",
+		"Optional trust list for GitHub accounts.",
+		"The basic Dev Inbox checks issues assigned to the GitHub account configured by the channel token or GitHub App.",
+		"Project Inbox Assignee Override",
+		"Optional override. Leave this blank for the normal path",
+		"assign issues to the GitHub account configured by this channel’s token or GitHub App.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected github runtime settings fragment to include %q, got: %s", want, body)
@@ -315,7 +315,7 @@ func TestGitHubRuntimeSettingsRoutesAuthorizeActors(t *testing.T) {
 		t.Fatalf("expected delete status 200, got %d (%s)", deleteRec.Code, deleteRec.Body.String())
 	}
 	assertGitHubRuntimeSettingsFragmentResponse(t, deleteRec)
-	if body := deleteRec.Body.String(); !strings.Contains(body, "No authorized users configured. GitHub inbox checks deny by default.") {
+	if body := deleteRec.Body.String(); !strings.Contains(body, "No optional trusted users configured. Trust-list checks deny by default.") {
 		t.Fatalf("expected empty authorized users message after delete, got: %s", body)
 	}
 	authorized, err = h.githubAuthRepo.IsActorAuthorized(context.Background(), "alice")
@@ -361,7 +361,8 @@ func TestGitHubProjectInboxRouteStoresProjectScopedNormalizedLogin(t *testing.T)
 
 	disabled := url.Values{}
 	disabled.Set("project_id", "default")
-	disabled.Set("github_login", "@Dev-Bot")
+	disabled.Set("github_login", "")
+	disabled.Set("enabled", "true")
 	rec = htmxPost(e, "/channels/github/project-inbox", disabled)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected disable status 200, got %d (%s)", rec.Code, rec.Body.String())

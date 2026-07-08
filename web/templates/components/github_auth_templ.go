@@ -63,12 +63,12 @@ func GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models.
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"github-runtime-settings\" class=\"space-y-5\"><div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"></path></svg> Authorized Users</h4><p class=\"text-xs opacity-60 mb-3\">GitHub users OpenVibely trusts as this project’s GitHub inbox assignee. Issues assigned to this authorized user are the work OpenVibely scheduled tasks should notice.</p>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"github-runtime-settings\" class=\"space-y-5\"><div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"></path></svg> Authorized Users</h4><p class=\"text-xs opacity-60 mb-3\">Optional trust list for GitHub accounts. The basic Dev Inbox checks issues assigned to the GitHub account configured by the channel token or GitHub App.</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(actors) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<p class=\"text-sm opacity-50 italic mb-3\">No authorized users configured. GitHub inbox checks deny by default.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<p class=\"text-sm opacity-50 italic mb-3\">No optional trusted users configured. Trust-list checks deny by default.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -153,7 +153,7 @@ func GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models.
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\"> <input type=\"text\" name=\"github_login\" placeholder=\"GitHub login, e.g. @alice\" class=\"input input-bordered input-sm\"> <input type=\"text\" name=\"display_name\" placeholder=\"Display name (optional)\" class=\"input input-bordered input-sm\"> <select name=\"permission\" class=\"select select-bordered select-sm\"><option value=\"triage\">Triage</option> <option value=\"approve\">Approve</option> <option value=\"admin\">Admin</option></select> <button type=\"button\" class=\"btn btn-primary btn-sm\" hx-post=\"/channels/github/authorized-actors\" hx-target=\"#github-runtime-settings\" hx-swap=\"outerHTML\" hx-include=\"#github-authorized-actors-add-controls\">Add</button></div></div><div class=\"divider my-2\"></div><div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z\"></path></svg> Project Inbox Assignee</h4><p class=\"text-xs opacity-60 mb-3\">Use the same authorized GitHub user here. Assign GitHub issues to this user when you want this OpenVibely project to pick them up.</p><form id=\"github-project-inbox-form\" hx-post=\"/channels/github/project-inbox\" hx-target=\"#github-runtime-settings\" hx-swap=\"outerHTML\" class=\"space-y-3\"><input type=\"hidden\" name=\"project_id\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\"> <input type=\"text\" name=\"github_login\" placeholder=\"GitHub login, e.g. @alice\" class=\"input input-bordered input-sm\"> <input type=\"text\" name=\"display_name\" placeholder=\"Display name (optional)\" class=\"input input-bordered input-sm\"> <select name=\"permission\" class=\"select select-bordered select-sm\"><option value=\"triage\">Triage</option> <option value=\"approve\">Approve</option> <option value=\"admin\">Admin</option></select> <button type=\"button\" class=\"btn btn-primary btn-sm\" hx-post=\"/channels/github/authorized-actors\" hx-target=\"#github-runtime-settings\" hx-swap=\"outerHTML\" hx-include=\"#github-authorized-actors-add-controls\">Add</button></div></div><div class=\"divider my-2\"></div><div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z\"></path></svg> Project Inbox Assignee Override</h4><p class=\"text-xs opacity-60 mb-3\">Optional override. Leave this blank for the normal path: assign issues to the GitHub account configured by this channel’s token or GitHub App.</p><form id=\"github-project-inbox-form\" hx-post=\"/channels/github/project-inbox\" hx-target=\"#github-runtime-settings\" hx-swap=\"outerHTML\" class=\"space-y-3\"><input type=\"hidden\" name=\"project_id\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -166,20 +166,20 @@ func GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models.
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\"><div class=\"grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-end\"><label class=\"form-control\"><span class=\"label\"><span class=\"label-text\">GitHub Assignee Login</span></span> <input type=\"text\" name=\"github_login\" class=\"input input-bordered input-sm\" placeholder=\"e.g. @dev-bot\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\"><div class=\"grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-end\"><label class=\"form-control\"><span class=\"label\"><span class=\"label-text\">GitHub Assignee Login</span></span> <input type=\"text\" name=\"github_login\" class=\"input input-bordered input-sm\" placeholder=\"optional, e.g. @dev-bot\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubProjectInboxLogin(inbox))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/github_auth.templ`, Line: 118, Col: 149}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/github_auth.templ`, Line: 118, Col: 160}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" required></label> <label class=\"label cursor-pointer justify-start gap-3 pb-2\"><input type=\"checkbox\" class=\"toggle toggle-primary\" name=\"enabled\" value=\"true\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\"></label> <label class=\"label cursor-pointer justify-start gap-3 pb-2\"><input type=\"checkbox\" class=\"toggle toggle-primary\" name=\"enabled\" value=\"true\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

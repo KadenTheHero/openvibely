@@ -237,13 +237,12 @@ func TestBuildCatalog_LoadsGitHubAutonomousSDLCBootstrapSkill(t *testing.T) {
 		"visible scheduled OpenVibely tasks",
 		"generic GitHub runtime tools",
 		"Do not create hidden daemon or poller services",
-		"github_get_project_inbox",
+		"github_list_my_assigned_issues",
 		"github_list_assigned_issues_with_prs",
 		"github_open_pull_request",
 		"Never use labels beginning with `openvibely:`",
 		"Assigned GitHub issues without an associated PR must be skipped",
-		"Use `github_get_project_inbox` to get the assignee login",
-		"Use `github_list_assigned_issues_with_prs` for that assignee",
+		"Use `github_list_my_assigned_issues` to list open issues assigned to the GitHub account configured for this OpenVibely project's GitHub channel credentials",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("GitHub bootstrap skill missing %q", want)
@@ -276,7 +275,7 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"visible scheduled OpenVibely tasks",
 		"generic GitHub runtime tools",
 		"Do not create hidden daemon or poller services",
-		"github_get_project_inbox",
+		"github_list_my_assigned_issues",
 		"github_list_assigned_issues_with_prs",
 		"github_open_pull_request",
 		"Never use labels beginning with `openvibely:`",
@@ -290,10 +289,9 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	for _, want := range []string{
 		"There is no hidden GitHub poller daemon",
 		"GitHub Runtime Settings",
-		"github_get_project_inbox",
+		"github_list_my_assigned_issues",
 		"github_list_assigned_issues_with_prs",
-		"Authorized User / Project Inbox Assignee",
-		"Set Project Inbox Assignee to that same authorized GitHub account",
+		"GitHub account configured by the GitHub channel token or GitHub App",
 		"github_open_pull_request",
 		"Never use labels beginning with `openvibely:`",
 		"Assigned GitHub issues without an associated PR must be skipped",

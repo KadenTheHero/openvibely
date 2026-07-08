@@ -481,6 +481,72 @@ func TestListAssignedIssuesWithPullRequestsSkipsIssuesWithoutAssociatedPR(t *tes
 	}
 }
 
+func TestListAuthenticatedAssignedIssuesUsesConfiguredTokenUser(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	var sawUser bool
+	var issueListQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/user":
+			sawUser = true
+			if got := r.Header.Get("Authorization"); got != "Bearer ghp_test" {
+				t.Fatalf("expected PAT bearer auth for /user, got %q", got)
+			}
+			_, _ = w.Write([]byte(`{"login":"channel-user"}`))
+		case "/repos/openvibely/openvibely/issues":
+			issueListQuery = r.URL.RawQuery
+			if got := r.URL.Query().Get("assignee"); got != "channel-user" {
+				t.Fatalf("expected authenticated channel user assignee, got %q", got)
+			}
+			if got := r.URL.Query().Get("state"); got != "open" {
+				t.Fatalf("expected open issue query, got state=%q", got)
+			}
+			_, _ = w.Write([]byte(`[
+				{"number":5,"html_url":"https://github.com/openvibely/openvibely/issues/5","title":"Testing","state":"open","user":{"login":"alice"},"assignees":[{"login":"channel-user"}],"labels":[{"name":"bug"}]},
+				{"number":6,"html_url":"https://github.com/openvibely/openvibely/pull/6","title":"PR object","state":"open","pull_request":{}}
+			]`))
+		default:
+			t.Fatalf("unexpected GitHub API path: %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
+
+	user, issues, err := svc.ListAuthenticatedAssignedIssues(ctx, repo)
+	if err != nil {
+		t.Fatalf("ListAuthenticatedAssignedIssues returned error: %v", err)
+	}
+	if !sawUser || issueListQuery == "" {
+		t.Fatalf("expected /user and assigned issues endpoints, sawUser=%v query=%q", sawUser, issueListQuery)
+	}
+	if user == nil || user.Login != "channel-user" || user.Source != GitHubAuthModePAT {
+		t.Fatalf("unexpected authenticated user: %#v", user)
+	}
+	if len(issues) != 1 || issues[0].Number != 5 || issues[0].Title != "Testing" {
+		t.Fatalf("expected only real open issue assigned to token user, got %#v", issues)
+	}
+	cachedLogin, err := settingsRepo.Get(ctx, GitHubSettingPATUserLogin)
+	if err != nil {
+		t.Fatalf("get cached PAT login: %v", err)
+	}
+	if cachedLogin != "channel-user" {
+		t.Fatalf("expected PAT login cache to be updated, got %q", cachedLogin)
+	}
+}
+
 func TestGitHubIssueLabelsRejectOpenVibelyPrefixBeforeTransport(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)

@@ -60,8 +60,9 @@ Why choose GitHub App:
 
 After configuring GitHub credentials, open the GitHub settings modal and use `GitHub Runtime Settings` for prompt-driven task workflows.
 
-- `Authorized Users` are the GitHub users OpenVibely trusts for this project inbox. Use the GitHub account that should receive OpenVibely work.
-- `Project Inbox Assignee` should be that same authorized GitHub user. Assign GitHub issues to this user when you want this OpenVibely project to pick them up.
+- By default, scheduled tasks can find open issues assigned to the GitHub account configured by the channel token or GitHub App.
+- `Authorized Users` is an optional trust list for workflows that need extra human/account checks.
+- `Project Inbox Assignee Override` is optional. Leave it blank unless you intentionally want scheduled prompts to use a different GitHub assignee than the channel account.
 - This is separate from the PAT or GitHub App credential used for API operations. User-facing GitHub logins can be entered as `alice` or `@alice`; OpenVibely stores the normalized plain login.
 
 For the visible scheduled-task pattern, see the [GitHub Autonomous SDLC User Guide](./github-autonomous-sdlc-user-guide.md).

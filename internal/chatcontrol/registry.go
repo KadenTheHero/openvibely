@@ -142,6 +142,7 @@ const sendMessageParams = `{"type":"object","properties":{"action":{"type":"stri
 const githubCreateIssueParams = `{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as suggestion, bug, approved, in-progress. Do not use an openvibely: prefix."},"assignees":{"type":"array","items":{"type":"string"}}},"required":["title"],"additionalProperties":false}`
 const githubIssueNumberParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1}},"required":["issue_number"],"additionalProperties":false}`
 const githubListAssignedIssuesParams = `{"type":"object","properties":{"assignee":{"type":"string","description":"GitHub login assigned to the issue inbox."}},"required":["assignee"],"additionalProperties":false}`
+const githubListMyAssignedIssuesParams = `{"type":"object","properties":{},"additionalProperties":false}`
 const githubCommentIssueParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"body":{"type":"string"}},"required":["issue_number","body"],"additionalProperties":false}`
 const githubAddLabelsParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as approved, in-progress, pr-opened. Do not use an openvibely: prefix."}},"required":["issue_number","labels"],"additionalProperties":false}`
 const githubLinkTaskIssueParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"issue_number":{"type":"integer","minimum":1}},"required":["issue_number"],"additionalProperties":false}`
@@ -330,7 +331,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_get_project_inbox",
-		Description:  "Read the current project's configured GitHub inbox assignee login. Scheduled or manual GitHub issue checks can use this login with github_list_assigned_issues_with_prs.",
+		Description:  "Read the current project's optional GitHub inbox assignee override. Most scheduled issue checks can use github_list_my_assigned_issues instead, which uses the GitHub channel account.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -347,6 +348,16 @@ var registry = []ActionDef{
 		AllowedModes: bothModes(),
 		Surfaces:     webAPISurfaces(),
 		Parameters:   json.RawMessage(githubActorAuthorizedParams),
+	},
+	{
+		Name:         "github_list_my_assigned_issues",
+		Description:  "List open GitHub issues in the current project's repository assigned to the GitHub account configured for the channel token or GitHub App installation. Pull request objects are omitted.",
+		Domain:       DomainGitHub,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(githubListMyAssignedIssuesParams),
 	},
 	{Name: "github_list_assigned_issues_with_prs",
 		Description:  "List open GitHub issues assigned to a login only when each issue already has an associated pull request. Assigned issues without an associated PR are skipped by automation.",

@@ -87,6 +87,11 @@ type GitHubIssueWithPullRequest struct {
 	PullRequest GitHubPullRequest
 }
 
+type GitHubAuthenticatedUser struct {
+	Login  string `json:"login"`
+	Source string `json:"source"`
+}
+
 const (
 	GitHubLabelSuggestion     = "suggestion"
 	GitHubLabelApproved       = "approved"
@@ -727,6 +732,80 @@ func (s *GitHubService) AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRe
 	return s.doGitHubJSON(req, nil)
 }
 
+func (s *GitHubService) GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error) {
+	appCfg, err := s.getAppConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	mode, err := s.resolveAuthMode(ctx, appCfg)
+	if err != nil {
+		return nil, err
+	}
+	if mode == GitHubAuthModeApp {
+		if s.settingsRepo == nil {
+			return nil, fmt.Errorf("settings repository not configured")
+		}
+		login, err := s.settingsRepo.Get(ctx, githubSettingAccountLogin)
+		if err != nil {
+			return nil, err
+		}
+		login = strings.TrimSpace(login)
+		if login == "" {
+			installationID, err := s.settingsRepo.Get(ctx, githubSettingInstallationID)
+			if err != nil {
+				return nil, err
+			}
+			login, accountType, err := s.fetchInstallationAccountMetadata(ctx, strings.TrimSpace(installationID))
+			if err != nil {
+				return nil, err
+			}
+			login = strings.TrimSpace(login)
+			_ = s.settingsRepo.Set(ctx, githubSettingAccountLogin, login)
+			_ = s.settingsRepo.Set(ctx, githubSettingAccountType, strings.TrimSpace(accountType))
+		}
+		if login == "" {
+			return nil, fmt.Errorf("github app account login is unavailable")
+		}
+		return &GitHubAuthenticatedUser{Login: login, Source: GitHubAuthModeApp}, nil
+	}
+
+	if s.settingsRepo != nil {
+		stored, err := s.settingsRepo.Get(ctx, GitHubSettingPATUserLogin)
+		if err != nil {
+			return nil, err
+		}
+		if login := strings.TrimSpace(stored); login != "" {
+			return &GitHubAuthenticatedUser{Login: login, Source: GitHubAuthModePAT}, nil
+		}
+	}
+
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+	endpoint := fmt.Sprintf("%s/user", s.apiBaseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.applyGitHubHeaders(req, token)
+
+	var resp struct {
+		Login string `json:"login"`
+	}
+	if err := s.doGitHubJSON(req, &resp); err != nil {
+		return nil, err
+	}
+	login := strings.TrimSpace(resp.Login)
+	if login == "" {
+		return nil, fmt.Errorf("github authenticated user login is unavailable")
+	}
+	if s.settingsRepo != nil {
+		_ = s.settingsRepo.Set(ctx, GitHubSettingPATUserLogin, login)
+	}
+	return &GitHubAuthenticatedUser{Login: login, Source: GitHubAuthModePAT}, nil
+}
+
 func (s *GitHubService) ListAssignedIssues(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssue, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository reference is required")
@@ -739,6 +818,33 @@ func (s *GitHubService) ListAssignedIssues(ctx context.Context, repo *GitHubRepo
 	token, err := s.createOperationAccessToken(ctx)
 	if err != nil {
 		return nil, err
+	}
+	return s.listAssignedIssuesWithToken(ctx, repo, assignee, token)
+}
+
+func (s *GitHubService) ListAuthenticatedAssignedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+	user, err := s.GetAuthenticatedUser(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	issues, err := s.listAssignedIssuesWithToken(ctx, repo, user.Login, token)
+	if err != nil {
+		return nil, nil, err
+	}
+	return user, issues, nil
+}
+
+func (s *GitHubService) listAssignedIssuesWithToken(ctx context.Context, repo *GitHubRepoRef, assignee, token string) ([]GitHubIssue, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("repository reference is required")
+	}
+	assignee = strings.TrimSpace(assignee)
+	if assignee == "" {
+		return nil, fmt.Errorf("assignee is required")
 	}
 
 	query := url.Values{}

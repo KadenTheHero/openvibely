@@ -569,6 +569,19 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	if err := authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "Alice", Permission: "approve"}); err != nil {
 		t.Fatalf("configure authorized actor: %v", err)
 	}
+	var sawMyAssignedIssues bool
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
+			if repoURL != project.RepoURL {
+				t.Fatalf("expected project repo URL %q, got %q", project.RepoURL, repoURL)
+			}
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+		},
+		listMyAssignedIssuesFn: func(_ context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error) {
+			sawMyAssignedIssues = true
+			return &service.GitHubAuthenticatedUser{Login: "channel-user", Source: service.GitHubAuthModePAT}, []service.GitHubIssue{{Number: 5, URL: "https://github.com/openvibely/openvibely/issues/5", Title: "Testing", State: "open", Assignees: []string{"channel-user"}}}, nil
+		},
+	})
 
 	params := streamingResponseParams{ProjectID: project.ID}
 	handlers := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
@@ -592,5 +605,12 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	}
 	if !strings.Contains(out, `"authorized":false`) {
 		t.Fatalf("expected deny-by-default output for unknown actor, got %s", out)
+	}
+	out, err = handlers["github_list_my_assigned_issues"](ctx, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("github_list_my_assigned_issues returned error: %v", err)
+	}
+	if !sawMyAssignedIssues || !strings.Contains(out, `"login":"channel-user"`) || !strings.Contains(out, `"Number":5`) {
+		t.Fatalf("expected authenticated assigned issues output, saw=%v out=%s", sawMyAssignedIssues, out)
 	}
 }

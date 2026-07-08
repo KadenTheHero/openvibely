@@ -98,7 +98,17 @@ func (h *Handler) SaveGitHubProjectInbox(c echo.Context) error {
 	}
 	githubLogin := repository.NormalizeGitHubLogin(c.FormValue("github_login"))
 	if githubLogin == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "GitHub login is required")
+		existing, err := h.githubAuthRepo.GetProjectInbox(c.Request().Context(), projectID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load GitHub project inbox: "+err.Error())
+		}
+		if existing != nil {
+			existing.Enabled = false
+			if err := h.githubAuthRepo.UpsertProjectInbox(c.Request().Context(), existing); err != nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save GitHub project inbox: "+err.Error())
+			}
+		}
+		return h.renderGitHubRuntimeSettings(c, projectID)
 	}
 	inbox := &models.GitHubProjectInbox{
 		ProjectID:   projectID,

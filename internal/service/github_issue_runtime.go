@@ -19,6 +19,7 @@ type GitHubIssueRuntimeProvider interface {
 	CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 	CreateIssue(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreateIssueRequest) (*GitHubIssue, error)
 	GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error)
+	ListAuthenticatedAssignedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
 	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error)
 	FindPullRequestForIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubPullRequest, error)
 	CommentOnIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, bodyText string) error
@@ -141,6 +142,17 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				return "", err
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "github_login": repository.NormalizeGitHubLogin(login), "authorized": authorized})
+		},
+		"github_list_my_assigned_issues": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+			if err != nil {
+				return "", err
+			}
+			user, issues, err := opts.GitHub.ListAuthenticatedAssignedIssues(ctx, repo)
+			if err != nil {
+				return "", err
+			}
+			return githubIssueRuntimeJSON(map[string]any{"ok": true, "account": user, "issues": issues})
 		},
 		"github_list_assigned_issues_with_prs": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req githubIssueRuntimeInput
