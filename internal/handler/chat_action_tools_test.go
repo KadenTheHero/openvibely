@@ -581,6 +581,12 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 			sawMyAssignedIssues = true
 			return &service.GitHubAuthenticatedUser{Login: "channel-user", Source: service.GitHubAuthModePAT}, []service.GitHubIssue{{Number: 5, URL: "https://github.com/openvibely/openvibely/issues/5", Title: "Testing", State: "open", Assignees: []string{"channel-user"}}}, nil
 		},
+		listAssignedIssuesFn: func(_ context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssue, error) {
+			if assignee != "Dev-Bot" {
+				t.Fatalf("expected explicit assignee Dev-Bot, got %q", assignee)
+			}
+			return []service.GitHubIssue{{Number: 6, URL: "https://github.com/openvibely/openvibely/issues/6", Title: "Override", State: "open", Assignees: []string{"dev-bot"}}}, nil
+		},
 	})
 
 	params := streamingResponseParams{ProjectID: project.ID}
@@ -612,5 +618,12 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	}
 	if !sawMyAssignedIssues || !strings.Contains(out, `"login":"channel-user"`) || !strings.Contains(out, `"Number":5`) {
 		t.Fatalf("expected authenticated assigned issues output, saw=%v out=%s", sawMyAssignedIssues, out)
+	}
+	out, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"Dev-Bot"}`))
+	if err != nil {
+		t.Fatalf("github_list_assigned_issues returned error: %v", err)
+	}
+	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"Number":6`) {
+		t.Fatalf("expected explicit-assignee assigned issues output, got %s", out)
 	}
 }

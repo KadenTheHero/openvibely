@@ -253,10 +253,10 @@ func assertGitHubRuntimeSettingsFragmentResponse(t *testing.T, rec *httptest.Res
 	for _, want := range []string{
 		"Authorized Users",
 		"Optional trust list for GitHub accounts.",
-		"The basic Dev Inbox checks issues assigned to the GitHub account configured by the channel token or GitHub App.",
+		"Basic PAT setups can list issues assigned to the PAT owner; GitHub App setups should use the assignee override below.",
 		"Project Inbox Assignee Override",
-		"Optional override. Leave this blank for the normal path",
-		"assign issues to the GitHub account configured by this channel’s token or GitHub App.",
+		"Optional assignee for advanced setups.",
+		"Use this for GitHub App installs or whenever OpenVibely should check issues assigned to a specific GitHub user or bot.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected github runtime settings fragment to include %q, got: %s", want, body)

@@ -298,6 +298,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"github_list_my_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubListMyAssignedIssuesTool(ctx, params.ProjectID, input)
 		},
+		"github_list_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeGitHubListAssignedIssuesTool(ctx, params.ProjectID, input)
+		},
 		"github_list_assigned_issues_with_prs": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubListAssignedIssuesWithPRsTool(ctx, params.ProjectID, input)
 		},
@@ -602,6 +605,26 @@ func (h *Handler) executeGitHubListMyAssignedIssuesTool(ctx context.Context, pro
 		return "", err
 	}
 	return githubToolJSON(map[string]any{"ok": true, "account": user, "issues": issues})
+}
+
+func (h *Handler) executeGitHubListAssignedIssuesTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	var req githubIssueToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	assignee := strings.TrimSpace(req.Assignee)
+	if assignee == "" {
+		return "", fmt.Errorf("assignee is required")
+	}
+	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	issues, err := h.githubSvc.ListAssignedIssues(ctx, repo, assignee)
+	if err != nil {
+		return "", err
+	}
+	return githubToolJSON(map[string]any{"ok": true, "assignee": repository.NormalizeGitHubLogin(assignee), "issues": issues})
 }
 
 func (h *Handler) executeGitHubListAssignedIssuesWithPRsTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
@@ -1322,6 +1345,7 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"github_get_project_inbox":             true,
 		"github_is_actor_authorized":           true,
 		"github_list_my_assigned_issues":       true,
+		"github_list_assigned_issues":          true,
 		"github_list_assigned_issues_with_prs": true,
 		"github_comment_on_issue":              true,
 		"github_add_issue_labels":              true,

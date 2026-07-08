@@ -3202,16 +3202,17 @@ func TestLLMService_ExecuteTask_ScopedFilesPrepFailureCompletesExecution(t *test
 }
 
 type fakeGitHubIssueRuntimeProvider struct {
-	createIssueFn  func(context.Context, *GitHubRepoRef, GitHubCreateIssueRequest) (*GitHubIssue, error)
-	getIssueFn     func(context.Context, *GitHubRepoRef, int) (*GitHubIssue, error)
-	findPRFn       func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
-	addLabelsFn    func(context.Context, *GitHubRepoRef, int, []string) error
-	listMyIssuesFn func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
-	listIssuesPRFn func(context.Context, *GitHubRepoRef, string) ([]GitHubIssueWithPullRequest, error)
-	commentIssueFn func(context.Context, *GitHubRepoRef, int, string) error
-	pushBranchFn   func(context.Context, string, string, string, *GitHubRepoRef) error
-	findBranchPRFn func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error)
-	createPRFn     func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
+	createIssueFn        func(context.Context, *GitHubRepoRef, GitHubCreateIssueRequest) (*GitHubIssue, error)
+	getIssueFn           func(context.Context, *GitHubRepoRef, int) (*GitHubIssue, error)
+	findPRFn             func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
+	addLabelsFn          func(context.Context, *GitHubRepoRef, int, []string) error
+	listMyIssuesFn       func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
+	listAssignedIssuesFn func(context.Context, *GitHubRepoRef, string) ([]GitHubIssue, error)
+	listIssuesPRFn       func(context.Context, *GitHubRepoRef, string) ([]GitHubIssueWithPullRequest, error)
+	commentIssueFn       func(context.Context, *GitHubRepoRef, int, string) error
+	pushBranchFn         func(context.Context, string, string, string, *GitHubRepoRef) error
+	findBranchPRFn       func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error)
+	createPRFn           func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
@@ -3258,6 +3259,13 @@ func (f *fakeGitHubIssueRuntimeProvider) ListAuthenticatedAssignedIssues(ctx con
 		return f.listMyIssuesFn(ctx, repo)
 	}
 	return &GitHubAuthenticatedUser{Login: "channel-user", Source: GitHubAuthModePAT}, []GitHubIssue{{Number: 5, URL: "https://github.com/openvibely/openvibely/issues/5", Title: "Testing", State: "open", Assignees: []string{"channel-user"}}}, nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) ListAssignedIssues(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssue, error) {
+	if f.listAssignedIssuesFn != nil {
+		return f.listAssignedIssuesFn(ctx, repo, assignee)
+	}
+	return []GitHubIssue{{Number: 6, URL: "https://github.com/openvibely/openvibely/issues/6", Title: "Override", State: "open", Assignees: []string{assignee}}}, nil
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) ListAssignedIssuesWithPullRequests(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error) {
@@ -3317,7 +3325,7 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 		GitHubAuthRepo:      repository.NewGitHubAuthRepo(db),
 		GitHub:              provider,
 	})
-	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request"} {
+	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request"} {
 		if rt == nil || !rt.HasDefinition(name) {
 			t.Fatalf("expected %s in default GitHub runtime definitions for task runs, got %#v", name, rt)
 		}
@@ -3329,6 +3337,13 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	}
 	if !strings.Contains(out, `"login":"channel-user"`) || !strings.Contains(out, `"Number":5`) {
 		t.Fatalf("expected authenticated assigned issues output, got %s", out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_list_assigned_issues", []byte(`{"assignee":"Dev-Bot"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected explicit assigned issues success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"Number":6`) {
+		t.Fatalf("expected explicit assigned issues output, got %s", out)
 	}
 
 	_, handled, isErr, err = rt.Executor(ctx, "github_add_issue_labels", []byte(`{"issue_number":77,"labels":["openvibely:bug"]}`))
@@ -3479,7 +3494,7 @@ func TestLLMServiceExecuteTaskWithAgentExposesGitHubToolsToInitialRuns(t *testin
 	if rt == nil {
 		t.Fatal("expected runtime tools on provider request")
 	}
-	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request"} {
+	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request"} {
 		if !rt.HasDefinition(name) {
 			t.Fatalf("expected %s on initial task run, got %#v", name, rt.Definitions)
 		}

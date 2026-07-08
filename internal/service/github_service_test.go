@@ -547,6 +547,43 @@ func TestListAuthenticatedAssignedIssuesUsesConfiguredTokenUser(t *testing.T) {
 	}
 }
 
+func TestListAuthenticatedAssignedIssuesRejectsGitHubAppInstallationAccount(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModeApp); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, githubSettingAccountLogin, "openvibely-org"); err != nil {
+		t.Fatalf("set app account login: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, githubSettingAccountType, "Organization"); err != nil {
+		t.Fatalf("set app account type: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, githubSettingInstallationID, "123"); err != nil {
+		t.Fatalf("set installation id: %v", err)
+	}
+
+	var sawIssueList bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawIssueList = true
+		t.Fatalf("github_list_my_assigned_issues must not query issues with GitHub App installation account %s", r.URL.String())
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
+
+	_, _, err := svc.ListAuthenticatedAssignedIssues(ctx, repo)
+	if err == nil || !strings.Contains(err.Error(), "requires a PAT user token") || !strings.Contains(err.Error(), "github_list_assigned_issues") {
+		t.Fatalf("expected GitHub App guidance error, got %v", err)
+	}
+	if sawIssueList {
+		t.Fatalf("expected no GitHub issue-list request for GitHub App installation account")
+	}
+}
+
 func TestGitHubIssueLabelsRejectOpenVibelyPrefixBeforeTransport(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)

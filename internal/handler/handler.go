@@ -102,6 +102,7 @@ type GitHubServiceProvider interface {
 	CreateIssue(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error)
 	GetIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error)
 	ListAuthenticatedAssignedIssues(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error)
+	ListAssignedIssues(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssue, error)
 	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssueWithPullRequest, error)
 	FindPullRequestForIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubPullRequest, error)
 	CommentOnIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error
