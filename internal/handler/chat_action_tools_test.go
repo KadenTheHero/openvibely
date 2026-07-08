@@ -570,6 +570,7 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 		t.Fatalf("configure authorized actor: %v", err)
 	}
 	var sawMyAssignedIssues bool
+	var createdRepo, commentedRepo, labeledRepo string
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			switch repoURL {
@@ -579,7 +580,7 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 				if strings.TrimSpace(repoPath) != "" {
 					t.Fatalf("expected explicit repo_url lookup to avoid local repo path, got %q", repoPath)
 				}
-				return &service.GitHubRepoRef{Owner: "example", Name: "other"}, nil
+				return &service.GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other"}, nil
 			default:
 				t.Fatalf("unexpected repo URL %q", repoURL)
 				return nil, nil
@@ -600,6 +601,24 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 				return []service.GitHubIssue{{Number: 8, URL: "https://github.com/example/other/issues/8", Title: "Explicit assignee URL", State: "open", Assignees: []string{"dev-bot"}}}, nil
 			}
 			return []service.GitHubIssue{{Number: 6, URL: "https://github.com/openvibely/openvibely/issues/6", Title: "Override", State: "open", Assignees: []string{"dev-bot"}}}, nil
+		},
+		createIssueFn: func(_ context.Context, repo *service.GitHubRepoRef, req service.GitHubCreateIssueRequest) (*service.GitHubIssue, error) {
+			createdRepo = repo.FullName
+			return &service.GitHubIssue{Number: 9, URL: "https://github.com/example/other/issues/9", Title: req.Title, State: "open", Labels: req.Labels, Assignees: req.Assignees}, nil
+		},
+		commentOnIssueFn: func(_ context.Context, repo *service.GitHubRepoRef, issueNumber int, body string) error {
+			commentedRepo = repo.FullName
+			if issueNumber != 9 || body != "Looks good" {
+				t.Fatalf("unexpected comment input issue=%d body=%q", issueNumber, body)
+			}
+			return nil
+		},
+		addLabelsToIssueFn: func(_ context.Context, repo *service.GitHubRepoRef, issueNumber int, labels []string) error {
+			labeledRepo = repo.FullName
+			if issueNumber != 9 || len(labels) != 1 || labels[0] != "approved" {
+				t.Fatalf("unexpected labels input issue=%d labels=%v", issueNumber, labels)
+			}
+			return nil
 		},
 	})
 
@@ -653,5 +672,26 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	}
 	if !strings.Contains(out, `"Number":8`) || !strings.Contains(out, `"https://github.com/example/other/issues/8"`) {
 		t.Fatalf("expected explicit repo_url assigned issues output, got %s", out)
+	}
+	out, err = handlers["github_create_issue"](ctx, json.RawMessage(`{"title":"URL issue","body":"Created by URL","labels":["bug"],"assignees":["dev-bot"],"repo_url":"https://github.com/example/other"}`))
+	if err != nil {
+		t.Fatalf("github_create_issue with repo_url returned error: %v", err)
+	}
+	if createdRepo != "example/other" || !strings.Contains(out, `"Number":9`) || !strings.Contains(out, `"https://github.com/example/other/issues/9"`) {
+		t.Fatalf("expected explicit repo_url create output repo=%q out=%s", createdRepo, out)
+	}
+	out, err = handlers["github_comment_on_issue"](ctx, json.RawMessage(`{"issue_number":9,"body":"Looks good","repo_url":"https://github.com/example/other"}`))
+	if err != nil {
+		t.Fatalf("github_comment_on_issue with repo_url returned error: %v", err)
+	}
+	if commentedRepo != "example/other" || !strings.Contains(out, `"issue_number":9`) {
+		t.Fatalf("expected explicit repo_url comment output repo=%q out=%s", commentedRepo, out)
+	}
+	out, err = handlers["github_add_issue_labels"](ctx, json.RawMessage(`{"issue_number":9,"labels":["approved"],"repo_url":"https://github.com/example/other"}`))
+	if err != nil {
+		t.Fatalf("github_add_issue_labels with repo_url returned error: %v", err)
+	}
+	if labeledRepo != "example/other" || !strings.Contains(out, `"labels":["approved"]`) {
+		t.Fatalf("expected explicit repo_url label output repo=%q out=%s", labeledRepo, out)
 	}
 }

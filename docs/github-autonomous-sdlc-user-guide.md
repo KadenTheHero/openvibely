@@ -26,6 +26,8 @@ Before creating the loop:
 
 A PAT identifies a real GitHub user, so scheduled tasks can call `github_list_my_assigned_issues` to find issues assigned to that user. A GitHub App installation may be installed on an organization, which is not an issue assignee; use `github_get_project_inbox` to read the Authorized Users and pass those logins to `github_list_assigned_issues`.
 
+GitHub issue API tools default to the current project repository, but prompts may pass `repo_url` when they name a specific GitHub repository URL. This applies to issue create/read/list/comment/label tools. Pull request tools remain tied to the current OpenVibely task/project because they push task worktree branches and persist task PR records.
+
 ## Minimum Visible Loop
 
 Start with two scheduled tasks before adding more finders/fixers.

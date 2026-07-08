@@ -41,6 +41,7 @@ type githubCreateIssueRuntimeInput struct {
 	Body      string   `json:"body"`
 	Labels    []string `json:"labels"`
 	Assignees []string `json:"assignees"`
+	RepoURL   string   `json:"repo_url"`
 }
 
 type githubIssueRuntimeInput struct {
@@ -92,7 +93,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}
@@ -212,7 +213,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}
@@ -226,7 +227,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}

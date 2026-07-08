@@ -499,6 +499,7 @@ type githubCreateIssueToolInput struct {
 	Body      string   `json:"body"`
 	Labels    []string `json:"labels"`
 	Assignees []string `json:"assignees"`
+	RepoURL   string   `json:"repo_url"`
 }
 
 type githubIssueToolInput struct {
@@ -546,7 +547,7 @@ func (h *Handler) executeGitHubCreateIssueTool(ctx context.Context, projectID st
 	if err := json.Unmarshal(input, &req); err != nil {
 		return "", err
 	}
-	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}
@@ -673,7 +674,7 @@ func (h *Handler) executeGitHubCommentOnIssueTool(ctx context.Context, projectID
 	if err := json.Unmarshal(input, &req); err != nil {
 		return "", err
 	}
-	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}
@@ -688,7 +689,7 @@ func (h *Handler) executeGitHubAddIssueLabelsTool(ctx context.Context, projectID
 	if err := json.Unmarshal(input, &req); err != nil {
 		return "", err
 	}
-	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}

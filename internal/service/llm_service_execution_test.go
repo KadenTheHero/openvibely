@@ -3320,6 +3320,7 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 		t.Fatalf("create task: %v", err)
 	}
 
+	var createdRepo, commentedRepo, labeledRepo string
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 			switch repoURL {
@@ -3346,6 +3347,29 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 				return []GitHubIssue{{Number: 8, URL: "https://github.com/example/other/issues/8", Title: "Explicit assignee URL", State: "open", Assignees: []string{assignee}}}, nil
 			}
 			return []GitHubIssue{{Number: 6, URL: "https://github.com/openvibely/openvibely/issues/6", Title: "Override", State: "open", Assignees: []string{assignee}}}, nil
+		},
+		createIssueFn: func(_ context.Context, repo *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			createdRepo = repo.FullName
+			return &GitHubIssue{Number: 9, URL: "https://github.com/example/other/issues/9", Title: req.Title, State: "open", Labels: req.Labels, Assignees: req.Assignees}, nil
+		},
+		commentIssueFn: func(_ context.Context, repo *GitHubRepoRef, issueNumber int, body string) error {
+			commentedRepo = repo.FullName
+			if issueNumber != 9 || body != "Looks good" {
+				t.Fatalf("unexpected runtime comment input issue=%d body=%q", issueNumber, body)
+			}
+			return nil
+		},
+		addLabelsFn: func(_ context.Context, repo *GitHubRepoRef, issueNumber int, labels []string) error {
+			for _, label := range labels {
+				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(label)), "openvibely:") {
+					return fmt.Errorf("github issue labels must not use openvibely: prefix: %s", strings.TrimSpace(label))
+				}
+			}
+			labeledRepo = repo.FullName
+			if issueNumber != 9 || len(labels) != 1 || labels[0] != "approved" {
+				t.Fatalf("unexpected runtime labels input issue=%d labels=%v", issueNumber, labels)
+			}
+			return nil
 		},
 	}
 	rt := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
@@ -3389,6 +3413,27 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	}
 	if !strings.Contains(out, `"Number":8`) || !strings.Contains(out, `"https://github.com/example/other/issues/8"`) {
 		t.Fatalf("expected explicit repo_url assigned issues output, got %s", out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_create_issue", []byte(`{"title":"URL issue","body":"Created by URL","labels":["bug"],"assignees":["dev-bot"],"repo_url":"https://github.com/example/other"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected explicit repo_url create issue success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if createdRepo != "example/other" || !strings.Contains(out, `"Number":9`) || !strings.Contains(out, `"https://github.com/example/other/issues/9"`) {
+		t.Fatalf("expected explicit repo_url create output repo=%q out=%s", createdRepo, out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_comment_on_issue", []byte(`{"issue_number":9,"body":"Looks good","repo_url":"https://github.com/example/other"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected explicit repo_url comment success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if commentedRepo != "example/other" || !strings.Contains(out, `"issue_number":9`) {
+		t.Fatalf("expected explicit repo_url comment output repo=%q out=%s", commentedRepo, out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_add_issue_labels", []byte(`{"issue_number":9,"labels":["approved"],"repo_url":"https://github.com/example/other"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected explicit repo_url label success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if labeledRepo != "example/other" || !strings.Contains(out, `"labels":["approved"]`) {
+		t.Fatalf("expected explicit repo_url label output repo=%q out=%s", labeledRepo, out)
 	}
 
 	_, handled, isErr, err = rt.Executor(ctx, "github_add_issue_labels", []byte(`{"issue_number":77,"labels":["openvibely:bug"]}`))

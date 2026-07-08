@@ -139,12 +139,13 @@ const editTaskParams = `{"type":"object","properties":{"id":{"type":"string"},"t
 
 const sendMessageParams = `{"type":"object","properties":{"action":{"type":"string","enum":["send","list"],"description":"send delivers a message. list returns configured outbound targets including their target_kind."},"target":{"type":"string","description":"Delivery target. Format: platform, platform:#target-name, platform:target_id, or platform:target_id:thread_id. Saved outbound targets and home targets are preferred first. Authorized channel users/senders can be used as direct recipients, including email:person@example.com for an authorized Email sender, telegram:123456789 for an authorized Telegram numeric user ID, and slack:user:U123... or discord:user:1518288288572641398 for direct messages. Arbitrary unsaved explicit targets require the project policy. For Discord channel sends use discord:channel:<channel_id> or discord:channel:<channel_id>:<thread_id>. Prefer saved/named targets; call action=list to see configured targets."},"message":{"type":"string","description":"Text to send."},"subject":{"type":"string","description":"Optional subject for email targets. Ignored by chat platforms."}},"additionalProperties":false}`
 
-const githubCreateIssueParams = `{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as suggestion, bug, approved, in-progress. Do not use an openvibely: prefix."},"assignees":{"type":"array","items":{"type":"string"}}},"required":["title"],"additionalProperties":false}`
-const githubIssueNumberParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}},"required":["issue_number"],"additionalProperties":false}`
-const githubListAssignedIssuesParams = `{"type":"object","properties":{"assignee":{"type":"string","description":"GitHub login whose assigned open issues should be listed."},"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}},"required":["assignee"],"additionalProperties":false}`
-const githubListMyAssignedIssuesParams = `{"type":"object","properties":{"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}},"additionalProperties":false}`
-const githubCommentIssueParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"body":{"type":"string"}},"required":["issue_number","body"],"additionalProperties":false}`
-const githubAddLabelsParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as approved, in-progress, pr-opened. Do not use an openvibely: prefix."}},"required":["issue_number","labels"],"additionalProperties":false}`
+const githubRepoURLProperty = `"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}`
+const githubCreateIssueParams = `{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as suggestion, bug, approved, in-progress. Do not use an openvibely: prefix."},"assignees":{"type":"array","items":{"type":"string"}},` + githubRepoURLProperty + `},"required":["title"],"additionalProperties":false}`
+const githubIssueNumberParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},` + githubRepoURLProperty + `},"required":["issue_number"],"additionalProperties":false}`
+const githubListAssignedIssuesParams = `{"type":"object","properties":{"assignee":{"type":"string","description":"GitHub login whose assigned open issues should be listed."},` + githubRepoURLProperty + `},"required":["assignee"],"additionalProperties":false}`
+const githubListMyAssignedIssuesParams = `{"type":"object","properties":{` + githubRepoURLProperty + `},"additionalProperties":false}`
+const githubCommentIssueParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"body":{"type":"string"},` + githubRepoURLProperty + `},"required":["issue_number","body"],"additionalProperties":false}`
+const githubAddLabelsParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as approved, in-progress, pr-opened. Do not use an openvibely: prefix."},` + githubRepoURLProperty + `},"required":["issue_number","labels"],"additionalProperties":false}`
 const githubLinkTaskIssueParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"issue_number":{"type":"integer","minimum":1}},"required":["issue_number"],"additionalProperties":false}`
 const githubOpenPullRequestParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"pr_title":{"type":"string","description":"Optional pull request title. Defaults to the task title."},"pr_body":{"type":"string","description":"Optional pull request body. Defaults to an OpenVibely task summary."},"base":{"type":"string","description":"Optional target branch. Defaults to the task merge target or repository default branch."},"draft":{"type":"boolean"},"issue_number":{"type":"integer","minimum":1,"description":"Optional GitHub issue number to persist on the task PR record."},"issue_url":{"type":"string","description":"Optional GitHub issue URL to persist on the task PR record."}},"additionalProperties":false}`
 const githubActorAuthorizedParams = `{"type":"object","properties":{"github_login":{"type":"string","description":"GitHub login to check against the configured authorized actor list."}},"required":["github_login"],"additionalProperties":false}`
@@ -311,7 +312,7 @@ var registry = []ActionDef{
 	// --- GitHub domain ---
 	{
 		Name:         "github_create_issue",
-		Description:  "Create a GitHub issue in the current project's repository using plain labels such as suggestion, bug, approved, in-progress, or pr-opened. Labels must not use an openvibely: prefix.",
+		Description:  "Create a GitHub issue, defaulting to the current project repository. Pass repo_url to create it in a specific GitHub repository URL. Labels must not use an openvibely: prefix.",
 		Domain:       DomainGitHub,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
@@ -321,7 +322,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_get_issue",
-		Description:  "Read a GitHub issue by number, defaulting to the current project repository. Pass repo_url only for read-only lookup against a specific GitHub repository URL.",
+		Description:  "Read a GitHub issue by number, defaulting to the current project repository. Pass repo_url for a specific GitHub repository URL.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -351,7 +352,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_list_my_assigned_issues",
-		Description:  "List open GitHub issues assigned to the authenticated PAT user configured for the GitHub channel, defaulting to the current project repository. Pass repo_url only for read-only lookup against a specific GitHub repository URL. For GitHub App installations or custom inboxes, use github_list_assigned_issues with an explicit assignee.",
+		Description:  "List open GitHub issues assigned to the authenticated PAT user configured for the GitHub channel, defaulting to the current project repository. Pass repo_url for a specific GitHub repository URL. For GitHub App installations or custom inboxes, use github_list_assigned_issues with an explicit assignee.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -361,7 +362,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_list_assigned_issues",
-		Description:  "List open GitHub issues assigned to the provided GitHub login, defaulting to the current project repository. Pull request objects are omitted. Pass repo_url only for read-only lookup against a specific GitHub repository URL. For GitHub App/custom setups, pass a login from github_get_project_inbox.",
+		Description:  "List open GitHub issues assigned to the provided GitHub login, defaulting to the current project repository. Pull request objects are omitted. Pass repo_url for a specific GitHub repository URL. For GitHub App/custom setups, pass a login from github_get_project_inbox.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -370,7 +371,7 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(githubListAssignedIssuesParams),
 	},
 	{Name: "github_list_assigned_issues_with_prs",
-		Description:  "List open GitHub issues assigned to a login only when each issue already has an associated pull request, defaulting to the current project repository. Pass repo_url only for read-only lookup against a specific GitHub repository URL. Assigned issues without an associated PR are skipped by automation.",
+		Description:  "List open GitHub issues assigned to a login only when each issue already has an associated pull request, defaulting to the current project repository. Pass repo_url for a specific GitHub repository URL. Assigned issues without an associated PR are skipped by automation.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -380,7 +381,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_comment_on_issue",
-		Description:  "Post a comment to a GitHub issue in the current project's repository.",
+		Description:  "Post a comment to a GitHub issue, defaulting to the current project repository. Pass repo_url for a specific GitHub repository URL.",
 		Domain:       DomainGitHub,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
@@ -390,7 +391,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_add_issue_labels",
-		Description:  "Add plain labels to a GitHub issue, such as approved, in-progress, task-created, pr-opened, blocked, bug, performance, or duplication. Do not use an openvibely: prefix.",
+		Description:  "Add plain labels to a GitHub issue, defaulting to the current project repository. Pass repo_url for a specific GitHub repository URL. Do not use an openvibely: prefix.",
 		Domain:       DomainGitHub,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
