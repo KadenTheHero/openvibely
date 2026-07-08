@@ -7,17 +7,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func githubActorPermissionLabel(permission string) string {
-	switch strings.ToLower(strings.TrimSpace(permission)) {
-	case "admin":
-		return "Admin"
-	case "approve":
-		return "Approve"
-	default:
-		return "Triage"
-	}
-}
-
 func githubProjectInboxLogin(inbox *models.GitHubProjectInbox) string {
 	if inbox == nil {
 		return ""
@@ -33,7 +22,7 @@ func githubDisplayLogin(login string) string {
 	return "@" + login
 }
 
-// GitHubRuntimeSettings renders generic GitHub trust and inbox configuration for runtime tools.
+// GitHubRuntimeSettings renders generic GitHub authorization and inbox configuration for runtime tools.
 templ GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models.GitHubProjectInbox, projectID string) {
 	<div id="github-runtime-settings" class="space-y-5">
 		<div>
@@ -41,13 +30,13 @@ templ GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
 				</svg>
-				Authorized Users
+				Optional Authorized Users
 			</h4>
 			<p class="text-xs opacity-60 mb-3">
-				Optional trust list for GitHub accounts. Basic PAT setups can list issues assigned to the PAT owner; GitHub App setups should use the assignee override below.
+				Optional allowlist for prompts that explicitly ask whether a GitHub user is allowed. This does not decide which issues OpenVibely scans.
 			</p>
 			if len(actors) == 0 {
-				<p class="text-sm opacity-50 italic mb-3">No optional trusted users configured. Trust-list checks deny by default.</p>
+				<p class="text-sm opacity-50 italic mb-3">No optional authorized users configured. Authorization checks deny by default.</p>
 			} else {
 				<div class="space-y-2 mb-3">
 					for _, actor := range actors {
@@ -58,7 +47,6 @@ templ GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models
 								</svg>
 								<span class="text-sm font-medium truncate">{ actor.DisplayName }</span>
 								<span class="text-xs opacity-50 truncate">{ githubDisplayLogin(actor.GitHubLogin) }</span>
-								<span class="badge badge-sm badge-ghost">{ githubActorPermissionLabel(actor.Permission) }</span>
 							</div>
 							<button
 								type="button"
@@ -76,15 +64,11 @@ templ GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models
 					}
 				</div>
 			}
-			<div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto_auto] gap-2" id="github-authorized-actors-add-controls">
+			<div class="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2" id="github-authorized-actors-add-controls">
 				<input type="hidden" name="project_id" value={ projectID }/>
+				<input type="hidden" name="permission" value="triage"/>
 				<input type="text" name="github_login" placeholder="GitHub login, e.g. @alice" class="input input-bordered input-sm"/>
 				<input type="text" name="display_name" placeholder="Display name (optional)" class="input input-bordered input-sm"/>
-				<select name="permission" class="select select-bordered select-sm">
-					<option value="triage">Triage</option>
-					<option value="approve">Approve</option>
-					<option value="admin">Admin</option>
-				</select>
 				<button
 					type="button"
 					class="btn btn-primary btn-sm"
@@ -108,7 +92,7 @@ templ GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models
 				Project Inbox Assignee Override
 			</h4>
 			<p class="text-xs opacity-60 mb-3">
-				Optional assignee for advanced setups. Use this for GitHub App installs or whenever OpenVibely should check issues assigned to a specific GitHub user or bot.
+				Where scheduled tasks should look for GitHub issues when the channel account is not the right assignee. Usually needed for GitHub App installs; optional for PAT setups.
 			</p>
 			<form id="github-project-inbox-form" hx-post="/channels/github/project-inbox" hx-target="#github-runtime-settings" hx-swap="outerHTML" class="space-y-3">
 				<input type="hidden" name="project_id" value={ projectID }/>

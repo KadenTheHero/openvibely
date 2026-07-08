@@ -251,12 +251,12 @@ func assertGitHubRuntimeSettingsFragmentResponse(t *testing.T, rec *httptest.Res
 		t.Fatalf("expected github runtime settings fragment, got: %s", body)
 	}
 	for _, want := range []string{
-		"Authorized Users",
-		"Optional trust list for GitHub accounts.",
-		"Basic PAT setups can list issues assigned to the PAT owner; GitHub App setups should use the assignee override below.",
+		"Optional Authorized Users",
+		"Optional allowlist for prompts that explicitly ask whether a GitHub user is allowed.",
+		"This does not decide which issues OpenVibely scans.",
 		"Project Inbox Assignee Override",
-		"Optional assignee for advanced setups.",
-		"Use this for GitHub App installs or whenever OpenVibely should check issues assigned to a specific GitHub user or bot.",
+		"Where scheduled tasks should look for GitHub issues when the channel account is not the right assignee.",
+		"Usually needed for GitHub App installs; optional for PAT setups.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected github runtime settings fragment to include %q, got: %s", want, body)
@@ -282,8 +282,8 @@ func TestGitHubRuntimeSettingsRoutesAuthorizeActors(t *testing.T) {
 	if !strings.Contains(body, "@alice") {
 		t.Fatalf("expected normalized login in fragment, got: %s", body)
 	}
-	if !strings.Contains(body, "Approve") {
-		t.Fatalf("expected permission label in fragment, got: %s", body)
+	if strings.Contains(body, "Approve") {
+		t.Fatalf("did not expect approval permission jargon in fragment, got: %s", body)
 	}
 	authorized, err := h.githubAuthRepo.IsActorAuthorized(context.Background(), "alice")
 	if err != nil {
@@ -315,7 +315,7 @@ func TestGitHubRuntimeSettingsRoutesAuthorizeActors(t *testing.T) {
 		t.Fatalf("expected delete status 200, got %d (%s)", deleteRec.Code, deleteRec.Body.String())
 	}
 	assertGitHubRuntimeSettingsFragmentResponse(t, deleteRec)
-	if body := deleteRec.Body.String(); !strings.Contains(body, "No optional trusted users configured. Trust-list checks deny by default.") {
+	if body := deleteRec.Body.String(); !strings.Contains(body, "No optional authorized users configured. Authorization checks deny by default.") {
 		t.Fatalf("expected empty authorized users message after delete, got: %s", body)
 	}
 	authorized, err = h.githubAuthRepo.IsActorAuthorized(context.Background(), "alice")

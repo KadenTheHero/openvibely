@@ -62,8 +62,8 @@ After configuring GitHub credentials, open the GitHub settings modal and use `Gi
 
 - With PAT auth, scheduled tasks can find open issues assigned to the PAT owner.
 - With GitHub App auth, set `Project Inbox Assignee Override` to the GitHub user or bot that should receive issues for OpenVibely to inspect.
-- `Authorized Users` is an optional trust list for workflows that need extra human/account checks.
-- The override is separate from the PAT or GitHub App credential used for API operations. User-facing GitHub logins can be entered as `alice` or `@alice`; OpenVibely stores the normalized plain login.
+- `Optional Authorized Users` is only for prompts/tools that explicitly ask whether a GitHub user is allowed. It is not where OpenVibely looks for issues.
+- `Project Inbox Assignee Override` is the issue mailbox override. It is separate from the PAT or GitHub App credential used for API operations. User-facing GitHub logins can be entered as `alice` or `@alice`; OpenVibely stores the normalized plain login.
 
 For the visible scheduled-task pattern, see the [GitHub Autonomous SDLC User Guide](./github-autonomous-sdlc-user-guide.md).
 

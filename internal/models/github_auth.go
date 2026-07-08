@@ -2,7 +2,7 @@ package models
 
 import "time"
 
-// GitHubAuthorizedActor represents a GitHub user trusted as an authorized OpenVibely GitHub inbox assignee.
+// GitHubAuthorizedActor represents a GitHub user on the optional authorization allowlist.
 type GitHubAuthorizedActor struct {
 	ID           string    `json:"id"`
 	GitHubUserID *int64    `json:"github_user_id,omitempty"`

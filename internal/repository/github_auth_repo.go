@@ -27,7 +27,7 @@ func NewGitHubAuthRepo(db *sql.DB) *GitHubAuthRepo {
 	return &GitHubAuthRepo{db: db}
 }
 
-// ListAuthorizedActors returns all system-level GitHub actors authorized to approve or trigger automation.
+// ListAuthorizedActors returns all system-level GitHub actors on the optional authorization allowlist.
 func (r *GitHubAuthRepo) ListAuthorizedActors(ctx context.Context) ([]models.GitHubAuthorizedActor, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, github_user_id, github_login, display_name, permission, added_at, added_by

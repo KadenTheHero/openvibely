@@ -341,7 +341,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_is_actor_authorized",
-		Description:  "Check whether a GitHub login is explicitly authorized as a trusted OpenVibely GitHub inbox assignee. Missing or empty authorization lists deny by default.",
+		Description:  "Check whether a GitHub login is on the optional project authorization allowlist. This does not choose which issues OpenVibely scans. Missing or empty authorization lists deny by default.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
