@@ -20,8 +20,8 @@ Before creating the loop:
 1. Create or select the OpenVibely project for the repository.
 2. Configure GitHub in `/channels` using a PAT or GitHub App.
 3. For PAT setups, assign GitHub issues to the PAT owner when you want OpenVibely scheduled tasks to notice them.
-4. For GitHub App setups, open `GitHub Runtime Settings` in the GitHub channel settings modal and set a `Project Inbox Assignee Override` to the GitHub user or bot that should receive work.
-5. Leave `Optional Authorized Users` empty unless your prompt explicitly checks whether a GitHub user is allowed. Authorized users are not the issue inbox.
+4. For GitHub App setups, open `GitHub Runtime Settings` in the GitHub channel settings modal and set `Issue Inbox Assignee` to the GitHub user or bot that should receive work.
+5. Use `Authorized Users` the same way as other channels: GitHub users allowed by explicit authorization checks. Authorized users are separate from the issue inbox.
 6. Ensure the scheduled task's model/provider supports runtime tool calls.
 
 A PAT identifies a real GitHub user, so scheduled tasks can call `github_list_my_assigned_issues` to find issues assigned to that user. A GitHub App installation may be installed on an organization, which is not an issue assignee; use `github_get_project_inbox` plus `github_list_assigned_issues` with the configured override for GitHub App setups.

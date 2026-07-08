@@ -30,7 +30,7 @@ func githubDisplayLogin(login string) string {
 	return "@" + login
 }
 
-// GitHubRuntimeSettings renders generic GitHub authorization and inbox configuration for runtime tools.
+// GitHubRuntimeSettings renders GitHub authorized users and issue inbox configuration for runtime tools.
 func GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models.GitHubProjectInbox, projectID string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -52,12 +52,12 @@ func GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models.
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"github-runtime-settings\" class=\"space-y-5\"><div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"></path></svg> Optional Authorized Users</h4><p class=\"text-xs opacity-60 mb-3\">Optional allowlist for prompts that explicitly ask whether a GitHub user is allowed. This does not decide which issues OpenVibely scans.</p>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"github-runtime-settings\" class=\"space-y-5\"><div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"></path></svg> Authorized Users</h4><p class=\"text-xs opacity-60 mb-3\">GitHub users allowed to use GitHub-triggered automation checks, matching the Authorized Users concept in other channels. This is separate from where issues are assigned.</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(actors) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<p class=\"text-sm opacity-50 italic mb-3\">No optional authorized users configured. Authorization checks deny by default.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<p class=\"text-sm opacity-50 italic mb-3\">No authorized users configured. GitHub authorization checks deny by default.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -129,14 +129,14 @@ func GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models.
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\"> <input type=\"hidden\" name=\"permission\" value=\"triage\"> <input type=\"text\" name=\"github_login\" placeholder=\"GitHub login, e.g. @alice\" class=\"input input-bordered input-sm\"> <input type=\"text\" name=\"display_name\" placeholder=\"Display name (optional)\" class=\"input input-bordered input-sm\"> <button type=\"button\" class=\"btn btn-primary btn-sm\" hx-post=\"/channels/github/authorized-actors\" hx-target=\"#github-runtime-settings\" hx-swap=\"outerHTML\" hx-include=\"#github-authorized-actors-add-controls\">Add</button></div></div><div class=\"divider my-2\"></div><div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z\"></path></svg> Project Inbox Assignee Override</h4><p class=\"text-xs opacity-60 mb-3\">Where scheduled tasks should look for GitHub issues when the channel account is not the right assignee. Usually needed for GitHub App installs; optional for PAT setups.</p><form id=\"github-project-inbox-form\" hx-post=\"/channels/github/project-inbox\" hx-target=\"#github-runtime-settings\" hx-swap=\"outerHTML\" class=\"space-y-3\"><input type=\"hidden\" name=\"project_id\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\"> <input type=\"hidden\" name=\"permission\" value=\"triage\"> <input type=\"text\" name=\"github_login\" placeholder=\"GitHub login, e.g. @alice\" class=\"input input-bordered input-sm\"> <input type=\"text\" name=\"display_name\" placeholder=\"Display name (optional)\" class=\"input input-bordered input-sm\"> <button type=\"button\" class=\"btn btn-primary btn-sm\" hx-post=\"/channels/github/authorized-actors\" hx-target=\"#github-runtime-settings\" hx-swap=\"outerHTML\" hx-include=\"#github-authorized-actors-add-controls\">Add</button></div></div><div class=\"divider my-2\"></div><div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z\"></path></svg> Issue Inbox Assignee</h4><p class=\"text-xs opacity-60 mb-3\">The GitHub user or bot that receives issues OpenVibely scheduled tasks should inspect. PAT setups usually use the PAT owner automatically; GitHub App/custom setups should set this explicitly.</p><form id=\"github-project-inbox-form\" hx-post=\"/channels/github/project-inbox\" hx-target=\"#github-runtime-settings\" hx-swap=\"outerHTML\" class=\"space-y-3\"><input type=\"hidden\" name=\"project_id\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(projectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/github_auth.templ`, Line: 98, Col: 60}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/github_auth.templ`, Line: 97, Col: 216}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {
@@ -149,7 +149,7 @@ func GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models.
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubProjectInboxLogin(inbox))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/github_auth.templ`, Line: 102, Col: 159}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/github_auth.templ`, Line: 101, Col: 159}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 		if templ_7745c5c3_Err != nil {
@@ -177,7 +177,7 @@ func GitHubRuntimeSettings(actors []models.GitHubAuthorizedActor, inbox *models.
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(githubDisplayLogin(inbox.GitHubLogin))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/github_auth.templ`, Line: 112, Col: 84}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/github_auth.templ`, Line: 111, Col: 84}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {

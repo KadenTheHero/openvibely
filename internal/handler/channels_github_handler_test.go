@@ -251,15 +251,20 @@ func assertGitHubRuntimeSettingsFragmentResponse(t *testing.T, rec *httptest.Res
 		t.Fatalf("expected github runtime settings fragment, got: %s", body)
 	}
 	for _, want := range []string{
-		"Optional Authorized Users",
-		"Optional allowlist for prompts that explicitly ask whether a GitHub user is allowed.",
-		"This does not decide which issues OpenVibely scans.",
-		"Project Inbox Assignee Override",
-		"Where scheduled tasks should look for GitHub issues when the channel account is not the right assignee.",
-		"Usually needed for GitHub App installs; optional for PAT setups.",
+		"Authorized Users",
+		"GitHub users allowed to use GitHub-triggered automation checks, matching the Authorized Users concept in other channels.",
+		"This is separate from where issues are assigned.",
+		"Issue Inbox Assignee",
+		"The GitHub user or bot that receives issues OpenVibely scheduled tasks should inspect.",
+		"GitHub App/custom setups should set this explicitly.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected github runtime settings fragment to include %q, got: %s", want, body)
+		}
+	}
+	for _, old := range []string{"Optional Authorized Users", "Project Inbox Assignee Override", "Approve"} {
+		if strings.Contains(body, old) {
+			t.Fatalf("did not expect confusing github runtime copy %q, got: %s", old, body)
 		}
 	}
 }
@@ -315,7 +320,7 @@ func TestGitHubRuntimeSettingsRoutesAuthorizeActors(t *testing.T) {
 		t.Fatalf("expected delete status 200, got %d (%s)", deleteRec.Code, deleteRec.Body.String())
 	}
 	assertGitHubRuntimeSettingsFragmentResponse(t, deleteRec)
-	if body := deleteRec.Body.String(); !strings.Contains(body, "No optional authorized users configured. Authorization checks deny by default.") {
+	if body := deleteRec.Body.String(); !strings.Contains(body, "No authorized users configured. GitHub authorization checks deny by default.") {
 		t.Fatalf("expected empty authorized users message after delete, got: %s", body)
 	}
 	authorized, err = h.githubAuthRepo.IsActorAuthorized(context.Background(), "alice")
