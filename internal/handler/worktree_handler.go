@@ -263,8 +263,7 @@ func formatTaskPullRequestError(err error) string {
 		prefix string
 		label  string
 	}{
-		{prefix: "committing changes:", label: "Failed to commit changes:"},
-		{prefix: "pushing branch:", label: "Failed to push branch:"},
+		{prefix: "publishing branch:", label: "Failed to publish branch:"},
 		{prefix: "finding pull request:", label: "Failed to find pull request:"},
 		{prefix: "creating pull request:", label: "Failed to create pull request:"},
 		{prefix: "saving pull request record:", label: "Failed to save pull request record:"},

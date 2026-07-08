@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -614,6 +616,107 @@ func TestGitHubIssueLabelsRejectOpenVibelyPrefixBeforeTransport(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("expected no GitHub API calls for rejected labels, got %d", calls)
+	}
+}
+
+func TestPublishBranchUsesGitHubAPIWithoutGitPush(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	repoDir := createTestGitRepo(t)
+	baseCmd := exec.Command("git", "rev-parse", "main")
+	baseCmd.Dir = repoDir
+	baseOut, err := baseCmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse main: %v", err)
+	}
+	baseSHA := strings.TrimSpace(string(baseOut))
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("updated\n"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "new.txt"), []byte("new file\n"), 0o644); err != nil {
+		t.Fatalf("write new file: %v", err)
+	}
+
+	var paths []string
+	var treePayload string
+	var commitPayload string
+	var refPayload string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		if got := r.Header.Get("Authorization"); got != "Bearer ghp_test" {
+			t.Fatalf("expected PAT bearer auth, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+baseSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/blobs":
+			_, _ = io.Copy(io.Discard, r.Body)
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"sha":"blob-%d"}`, len(paths))))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/trees":
+			body, _ := io.ReadAll(r.Body)
+			treePayload = string(body)
+			if !strings.Contains(treePayload, `"base_tree":"base-tree"`) || !strings.Contains(treePayload, `"path":"README.md"`) || !strings.Contains(treePayload, `"path":"new.txt"`) {
+				t.Fatalf("unexpected tree payload: %s", treePayload)
+			}
+			_, _ = w.Write([]byte(`{"sha":"new-tree"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/commits":
+			body, _ := io.ReadAll(r.Body)
+			commitPayload = string(body)
+			if !strings.Contains(commitPayload, `"message":"Publish via API"`) || !strings.Contains(commitPayload, `"tree":"new-tree"`) || !strings.Contains(commitPayload, baseSHA) {
+				t.Fatalf("unexpected commit payload: %s", commitPayload)
+			}
+			_, _ = w.Write([]byte(`{"sha":"new-commit"}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
+			body, _ := io.ReadAll(r.Body)
+			refPayload = string(body)
+			if !strings.Contains(refPayload, `"sha":"new-commit"`) || !strings.Contains(refPayload, `"force":false`) {
+				t.Fatalf("unexpected ref payload: %s", refPayload)
+			}
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Reference does not exist"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/refs":
+			body, _ := io.ReadAll(r.Body)
+			refPayload = string(body)
+			if !strings.Contains(refPayload, `"ref":"refs/heads/task/api-publish"`) || !strings.Contains(refPayload, `"sha":"new-commit"`) {
+				t.Fatalf("unexpected create-ref payload: %s", refPayload)
+			}
+			_, _ = w.Write([]byte(`{"ref":"refs/heads/task/api-publish","object":{"sha":"new-commit"}}`))
+		default:
+			t.Fatalf("unexpected GitHub API request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	svc.runGit = func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		if len(args) > 0 && (args[0] == "add" || args[0] == "commit" || args[0] == "push") {
+			t.Fatalf("PublishBranch must not invoke git %s", args[0])
+		}
+		return defaultRunGit(ctx, dir, extraEnv, args...)
+	}
+	err = svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+		RepoPath:       repoDir,
+		Branch:         "task/api-publish",
+		BaseBranch:     "main",
+		CommitMessage:  "Publish via API",
+		CommitterName:  "OpenVibely Bot",
+		CommitterEmail: "bot@openvibely.ai",
+	})
+	if err != nil {
+		t.Fatalf("PublishBranch returned error: %v", err)
+	}
+	if treePayload == "" || commitPayload == "" || refPayload == "" {
+		t.Fatalf("expected tree, commit, and ref API calls paths=%v", paths)
 	}
 }
 

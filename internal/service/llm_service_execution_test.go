@@ -3211,7 +3211,7 @@ type fakeGitHubIssueRuntimeProvider struct {
 	listAssignedIssuesFn func(context.Context, *GitHubRepoRef, string) ([]GitHubIssue, error)
 	listIssuesPRFn       func(context.Context, *GitHubRepoRef, string) ([]GitHubIssueWithPullRequest, error)
 	commentIssueFn       func(context.Context, *GitHubRepoRef, int, string) error
-	pushBranchFn         func(context.Context, string, string, string, *GitHubRepoRef) error
+	publishBranchFn      func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) error
 	findBranchPRFn       func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error)
 	createPRFn           func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 }
@@ -3223,9 +3223,13 @@ func (f *fakeGitHubIssueRuntimeProvider) ResolveRepo(ctx context.Context, repoUR
 	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
 }
 
-func (f *fakeGitHubIssueRuntimeProvider) PushBranch(ctx context.Context, repoPath, worktreePath, branch string, repo *GitHubRepoRef) error {
-	if f.pushBranchFn != nil {
-		return f.pushBranchFn(ctx, repoPath, worktreePath, branch, repo)
+func (f *fakeGitHubIssueRuntimeProvider) DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error) {
+	return "main", nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) PublishBranch(ctx context.Context, repo *GitHubRepoRef, req GitHubPublishBranchRequest) error {
+	if f.publishBranchFn != nil {
+		return f.publishBranchFn(ctx, repo, req)
 	}
 	return nil
 }

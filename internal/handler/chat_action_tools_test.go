@@ -437,9 +437,9 @@ func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
 		},
-		pushBranchFn: func(_ context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error {
-			if branch != task.WorktreeBranch {
-				t.Fatalf("unexpected pushed branch %q", branch)
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
+			if publishReq.Branch != task.WorktreeBranch {
+				t.Fatalf("unexpected published branch %q", publishReq.Branch)
 			}
 			return nil
 		},

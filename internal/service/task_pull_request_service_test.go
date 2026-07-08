@@ -12,10 +12,11 @@ import (
 )
 
 type fakeTaskPullRequestGitHubProvider struct {
-	resolveRepoFn func(context.Context, string, string) (*GitHubRepoRef, error)
-	pushBranchFn  func(context.Context, string, string, string, *GitHubRepoRef) error
-	findPRFn      func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error)
-	createPRFn    func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
+	resolveRepoFn   func(context.Context, string, string) (*GitHubRepoRef, error)
+	defaultBranchFn func(context.Context, *GitHubRepoRef) (string, error)
+	publishBranchFn func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) error
+	findPRFn        func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error)
+	createPRFn      func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 }
 
 func (f *fakeTaskPullRequestGitHubProvider) ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
@@ -25,9 +26,16 @@ func (f *fakeTaskPullRequestGitHubProvider) ResolveRepo(ctx context.Context, rep
 	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
 }
 
-func (f *fakeTaskPullRequestGitHubProvider) PushBranch(ctx context.Context, repoPath, worktreePath, branch string, repo *GitHubRepoRef) error {
-	if f.pushBranchFn != nil {
-		return f.pushBranchFn(ctx, repoPath, worktreePath, branch, repo)
+func (f *fakeTaskPullRequestGitHubProvider) DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error) {
+	if f.defaultBranchFn != nil {
+		return f.defaultBranchFn(ctx, repo)
+	}
+	return "main", nil
+}
+
+func (f *fakeTaskPullRequestGitHubProvider) PublishBranch(ctx context.Context, repo *GitHubRepoRef, req GitHubPublishBranchRequest) error {
+	if f.publishBranchFn != nil {
+		return f.publishBranchFn(ctx, repo, req)
 	}
 	return nil
 }
@@ -52,11 +60,11 @@ func TestTaskPullRequestServiceOpenForTaskCreatesAndPersistsPR(t *testing.T) {
 	projectRepo := repository.NewProjectRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	prRepo := repository.NewTaskPullRequestRepo(db)
-	var pushedBranch string
+	var publishedReq GitHubPublishBranchRequest
 	var createdReq GitHubCreatePullRequestRequest
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
-		pushBranchFn: func(_ context.Context, repoPath, worktreePath, branch string, repo *GitHubRepoRef) error {
-			pushedBranch = branch
+		publishBranchFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubPublishBranchRequest) error {
+			publishedReq = req
 			return nil
 		},
 		createPRFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
@@ -84,8 +92,8 @@ func TestTaskPullRequestServiceOpenForTaskCreatesAndPersistsPR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenForTask: %v", err)
 	}
-	if !result.Created || result.PullRequest.Number != 77 || pushedBranch != task.WorktreeBranch {
-		t.Fatalf("unexpected result=%#v pushedBranch=%q", result, pushedBranch)
+	if !result.Created || result.PullRequest.Number != 77 || publishedReq.Branch != task.WorktreeBranch || publishedReq.BaseBranch != "develop" {
+		t.Fatalf("unexpected result=%#v publishedReq=%#v", result, publishedReq)
 	}
 	if createdReq.Title != "Custom PR" || createdReq.Body != "Custom body" || createdReq.Head != task.WorktreeBranch || createdReq.Base != "develop" || !createdReq.Draft {
 		t.Fatalf("unexpected create request: %#v", createdReq)

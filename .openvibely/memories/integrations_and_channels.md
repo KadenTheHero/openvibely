@@ -53,6 +53,7 @@ GitHub facts:
 - GitHub URL local fallback clones run non-interactively with `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=true`, and `SSH_ASKPASS=true`, matching other remote git operations so SSH/private-repo credential or host-key prompts fail clearly instead of blocking.
 - GitHub URL project creation shows in-flight clone progress in the New Project create button with spinner text `Cloning repository...` while the HTMX create/clone request is active.
 - Task Changes supports one-click PR creation, one PR per task, and reuse of existing task/remote-branch PRs.
+- `github_open_pull_request` publishes task branch commits through GitHub API operations with the configured GitHub channel token, then uses the Pull Requests API for lookup/create/reuse; it must not run local `git add`, `git commit`, or `git push` for PR branch publication.
 
 Webhook facts:
 - Inbound route is `POST /webhooks/inbound/:pathToken`.

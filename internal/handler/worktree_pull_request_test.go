@@ -54,7 +54,7 @@ func TestCreateTaskPullRequest_CreatesAndPersistsPR(t *testing.T) {
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", CloneURL: "https://github.com/openvibely/openvibely.git", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
-		pushBranchFn: func(_ context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error {
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
 			return nil
 		},
 		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {
@@ -103,14 +103,16 @@ func TestCreateTaskPullRequest_CreatesAndPersistsPR(t *testing.T) {
 	}
 }
 
-func TestCreateTaskPullRequest_CommitsDirtyWorktreeWithDiffSummaryMessage(t *testing.T) {
+func TestCreateTaskPullRequest_PublishesDirtyWorktreeWithDiffSummaryMessage(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+	var publishedReq service.GitHubPublishBranchRequest
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", CloneURL: "https://github.com/openvibely/openvibely.git", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
-		pushBranchFn: func(_ context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error {
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
+			publishedReq = publishReq
 			return nil
 		},
 		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {
@@ -153,15 +155,17 @@ func TestCreateTaskPullRequest_CommitsDirtyWorktreeWithDiffSummaryMessage(t *tes
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
-	if status := runGit(t, repoDir, "status", "--porcelain"); status != "" {
-		t.Fatalf("expected clean repo after PR prep commit, got %q", status)
+	if status := runGit(t, repoDir, "status", "--porcelain"); !strings.Contains(status, "?? analytics.templ") {
+		t.Fatalf("expected local worktree to remain dirty after API branch publish, got %q", status)
 	}
-	subject := runGit(t, repoDir, "log", "-1", "--pretty=%s")
-	if subject != "Add analytics template" {
-		t.Fatalf("expected diff-derived PR prep commit subject, got %q", subject)
+	if publishedReq.Branch != "task/pr-prep" || publishedReq.BaseBranch != "main" {
+		t.Fatalf("unexpected publish request: %#v", publishedReq)
 	}
-	if strings.Contains(subject, "Task updates") || strings.Contains(subject, "Create PR") {
-		t.Fatalf("expected no static task PR-prep wording, got %q", subject)
+	if publishedReq.CommitMessage != "Add analytics template" {
+		t.Fatalf("expected diff-derived API commit subject, got %q", publishedReq.CommitMessage)
+	}
+	if strings.Contains(publishedReq.CommitMessage, "Task updates") || strings.Contains(publishedReq.CommitMessage, "Create PR") {
+		t.Fatalf("expected no static task PR-prep wording, got %q", publishedReq.CommitMessage)
 	}
 }
 
@@ -241,7 +245,7 @@ func TestCreateTaskPullRequest_NoGitHubServiceShowsToast(t *testing.T) {
 	}
 }
 
-func TestCreateTaskPullRequest_PushBranchFailureShowsToast(t *testing.T) {
+func TestCreateTaskPullRequest_PublishBranchFailureShowsToast(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
 
@@ -249,16 +253,16 @@ func TestCreateTaskPullRequest_PushBranchFailureShowsToast(t *testing.T) {
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
 		},
-		pushBranchFn: func(_ context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error {
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
 			return fmt.Errorf("authentication failed: bad credentials")
 		},
 	})
 
-	project := &models.Project{Name: "Push Fail Project", RepoPath: "/tmp/repo", RepoURL: "https://github.com/openvibely/openvibely"}
+	project := &models.Project{Name: "Publish Fail Project", RepoPath: "/tmp/repo", RepoURL: "https://github.com/openvibely/openvibely"}
 	if err := h.projectSvc.Create(context.Background(), project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	task := &models.Task{ProjectID: project.ID, Title: "Push Fail", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/push-fail"}
+	task := &models.Task{ProjectID: project.ID, Title: "Publish Fail", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/publish-fail"}
 	if err := h.taskRepo.Create(context.Background(), task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
@@ -275,8 +279,8 @@ func TestCreateTaskPullRequest_PushBranchFailureShowsToast(t *testing.T) {
 	if !strings.Contains(trigger, "openvibelyToast") {
 		t.Fatalf("expected openvibelyToast trigger, got %s", trigger)
 	}
-	if !strings.Contains(trigger, "push branch") {
-		t.Fatalf("expected toast about push failure, got %s", trigger)
+	if !strings.Contains(trigger, "publish branch") {
+		t.Fatalf("expected toast about publish failure, got %s", trigger)
 	}
 }
 
@@ -289,7 +293,7 @@ func TestCreateTaskPullRequest_CreatePRAlreadyExistsRecoversByFindingPR(t *testi
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
 		},
-		pushBranchFn: func(_ context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error {
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
 			return nil
 		},
 		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {
@@ -346,7 +350,7 @@ func TestCreateTaskPullRequest_CreatePRFailureShowsToast(t *testing.T) {
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
 		},
-		pushBranchFn: func(_ context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error {
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
 			return nil
 		},
 		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {

@@ -15,7 +15,8 @@ type fakeGitHubService struct {
 	cloneFn                func(ctx context.Context, projectID, repoURL string) (string, string, error)
 	recloneFn              func(ctx context.Context, projectID, currentRepoPath, repoURL string) (string, string, error)
 	resolveRepoFn          func(ctx context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error)
-	pushBranchFn           func(ctx context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error
+	defaultBranchFn        func(ctx context.Context, repo *service.GitHubRepoRef) (string, error)
+	publishBranchFn        func(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error
 	findPRFn               func(ctx context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error)
 	createPRFn             func(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error)
 	createIssueFn          func(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error)
@@ -77,9 +78,16 @@ func (f *fakeGitHubService) ResolveRepo(ctx context.Context, repoURL, repoPath s
 	return nil, fmt.Errorf("resolve repo not configured")
 }
 
-func (f *fakeGitHubService) PushBranch(ctx context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error {
-	if f != nil && f.pushBranchFn != nil {
-		return f.pushBranchFn(ctx, repoPath, worktreePath, branch, repo)
+func (f *fakeGitHubService) DefaultBranch(ctx context.Context, repo *service.GitHubRepoRef) (string, error) {
+	if f != nil && f.defaultBranchFn != nil {
+		return f.defaultBranchFn(ctx, repo)
+	}
+	return "main", nil
+}
+
+func (f *fakeGitHubService) PublishBranch(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
+	if f != nil && f.publishBranchFn != nil {
+		return f.publishBranchFn(ctx, repo, publishReq)
 	}
 	return nil
 }

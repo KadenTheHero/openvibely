@@ -11,7 +11,8 @@ import (
 
 type TaskPullRequestGitHubProvider interface {
 	ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error)
-	PushBranch(ctx context.Context, repoPath, worktreePath, branch string, repo *GitHubRepoRef) error
+	DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error)
+	PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) error
 	FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 }
@@ -85,18 +86,24 @@ func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *model
 		return nil, fmt.Errorf("resolving repository: %w", err)
 	}
 
-	if strings.TrimSpace(task.WorktreePath) != "" {
-		commitMessage := strings.TrimSpace(opts.CommitMessage)
-		if commitMessage == "" {
-			commitMessage = BuildWorktreeCommitMessage(task.WorktreePath, WorktreeCommitMessageContext{Phase: WorktreeCommitPhaseMerge, TaskTitle: task.Title})
-		}
-		if err := CommitWorktreeChanges(task.WorktreePath, commitMessage); err != nil {
-			return nil, fmt.Errorf("committing changes: %w", err)
-		}
+	createReq := s.buildCreatePullRequestRequest(ctx, project, task, opts, repoRef)
+	commitMessage := strings.TrimSpace(opts.CommitMessage)
+	if commitMessage == "" && strings.TrimSpace(task.WorktreePath) != "" {
+		commitMessage = BuildWorktreeCommitMessage(task.WorktreePath, WorktreeCommitMessageContext{Phase: WorktreeCommitPhaseMerge, TaskTitle: task.Title})
 	}
-
-	if err := s.github.PushBranch(ctx, project.RepoPath, task.WorktreePath, task.WorktreeBranch, repoRef); err != nil {
-		return nil, fmt.Errorf("pushing branch: %w", err)
+	if commitMessage == "" {
+		commitMessage = fmt.Sprintf("Prepare task %s", task.ID)
+	}
+	if err := s.github.PublishBranch(ctx, repoRef, GitHubPublishBranchRequest{
+		RepoPath:       project.RepoPath,
+		WorktreePath:   task.WorktreePath,
+		Branch:         task.WorktreeBranch,
+		BaseBranch:     createReq.Base,
+		CommitMessage:  commitMessage,
+		CommitterName:  "OpenVibely Bot",
+		CommitterEmail: "bot@openvibely.ai",
+	}); err != nil {
+		return nil, fmt.Errorf("publishing branch: %w", err)
 	}
 
 	foundPR, err := s.github.FindPullRequestByBranch(ctx, repoRef, task.WorktreeBranch)
@@ -107,7 +114,6 @@ func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *model
 	pr := foundPR
 	created := false
 	if pr == nil {
-		createReq := s.buildCreatePullRequestRequest(project, task, opts)
 		pr, err = s.github.CreatePullRequest(ctx, repoRef, createReq)
 		if err != nil {
 			if strings.Contains(strings.ToLower(err.Error()), "pull request already exists") {
@@ -148,7 +154,7 @@ func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *model
 	}, nil
 }
 
-func (s *TaskPullRequestService) buildCreatePullRequestRequest(project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) GitHubCreatePullRequestRequest {
+func (s *TaskPullRequestService) buildCreatePullRequestRequest(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions, repoRef *GitHubRepoRef) GitHubCreatePullRequestRequest {
 	title := strings.TrimSpace(opts.Title)
 	if title == "" {
 		title = task.Title
@@ -160,6 +166,11 @@ func (s *TaskPullRequestService) buildCreatePullRequestRequest(project *models.P
 	base := strings.TrimSpace(opts.Base)
 	if base == "" {
 		base = strings.TrimSpace(task.MergeTargetBranch)
+	}
+	if base == "" && s.github != nil && repoRef != nil {
+		if defaultBranch, err := s.github.DefaultBranch(ctx, repoRef); err == nil {
+			base = strings.TrimSpace(defaultBranch)
+		}
 	}
 	if base == "" {
 		base = GetDefaultBranch(project.RepoPath)
