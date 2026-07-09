@@ -3263,6 +3263,10 @@ func (f *fakeGitHubIssueRuntimeProvider) GetIssue(ctx context.Context, repo *Git
 	return &GitHubIssue{Number: issueNumber, URL: fmt.Sprintf("https://github.com/openvibely/openvibely/issues/%d", issueNumber), Title: "Issue"}, nil
 }
 
+func (f *fakeGitHubIssueRuntimeProvider) GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error) {
+	return &GitHubAuthenticatedUser{Login: "channel-user", Source: GitHubAuthModePAT}, nil
+}
+
 func (f *fakeGitHubIssueRuntimeProvider) ListAuthenticatedAssignedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
 	if f.listMyIssuesFn != nil {
 		return f.listMyIssuesFn(ctx, repo)

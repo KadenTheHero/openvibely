@@ -93,6 +93,7 @@ type GitHubPullRequestFeedback struct {
 	ID          string    `json:"id"`
 	NodeID      string    `json:"node_id"`
 	AuthorLogin string    `json:"author_login"`
+	AuthorType  string    `json:"author_type,omitempty"`
 	Body        string    `json:"body"`
 	URL         string    `json:"url"`
 	State       string    `json:"state,omitempty"`
@@ -1593,6 +1594,7 @@ type githubIssueCommentAPI struct {
 	CreatedAt time.Time `json:"created_at"`
 	User      struct {
 		Login string `json:"login"`
+		Type  string `json:"type"`
 	} `json:"user"`
 }
 
@@ -1602,6 +1604,7 @@ func (c githubIssueCommentAPI) toFeedback() GitHubPullRequestFeedback {
 		ID:          strconv.FormatInt(c.ID, 10),
 		NodeID:      strings.TrimSpace(c.NodeID),
 		AuthorLogin: strings.TrimSpace(c.User.Login),
+		AuthorType:  strings.TrimSpace(c.User.Type),
 		Body:        c.Body,
 		URL:         strings.TrimSpace(c.URL),
 		CreatedAt:   c.CreatedAt,
@@ -1617,6 +1620,7 @@ type githubPullRequestReviewAPI struct {
 	SubmittedAt time.Time `json:"submitted_at"`
 	User        struct {
 		Login string `json:"login"`
+		Type  string `json:"type"`
 	} `json:"user"`
 }
 
@@ -1626,10 +1630,10 @@ func (r githubPullRequestReviewAPI) toFeedback() GitHubPullRequestFeedback {
 		ID:          strconv.FormatInt(r.ID, 10),
 		NodeID:      strings.TrimSpace(r.NodeID),
 		AuthorLogin: strings.TrimSpace(r.User.Login),
-		Body:        r.Body,
-		URL:         strings.TrimSpace(r.URL),
-		State:       strings.TrimSpace(r.State),
-		CreatedAt:   r.SubmittedAt,
+		AuthorType:  strings.TrimSpace(r.User.Type),
+		Body:        r.Body, URL: strings.TrimSpace(r.URL),
+		State:     strings.TrimSpace(r.State),
+		CreatedAt: r.SubmittedAt,
 	}
 }
 
@@ -1643,6 +1647,7 @@ type githubPullRequestReviewCommentAPI struct {
 	CreatedAt time.Time `json:"created_at"`
 	User      struct {
 		Login string `json:"login"`
+		Type  string `json:"type"`
 	} `json:"user"`
 }
 
@@ -1652,11 +1657,11 @@ func (c githubPullRequestReviewCommentAPI) toFeedback() GitHubPullRequestFeedbac
 		ID:          strconv.FormatInt(c.ID, 10),
 		NodeID:      strings.TrimSpace(c.NodeID),
 		AuthorLogin: strings.TrimSpace(c.User.Login),
+		AuthorType:  strings.TrimSpace(c.User.Type),
 		Body:        c.Body,
 		URL:         strings.TrimSpace(c.URL),
-		Path:        strings.TrimSpace(c.Path),
-		Line:        c.Line,
-		CreatedAt:   c.CreatedAt,
+		Path:        strings.TrimSpace(c.Path), Line: c.Line,
+		CreatedAt: c.CreatedAt,
 	}
 }
 

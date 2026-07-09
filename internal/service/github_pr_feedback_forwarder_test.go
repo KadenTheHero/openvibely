@@ -12,8 +12,16 @@ import (
 )
 
 type fakePRFeedbackProvider struct {
-	items []GitHubPullRequestFeedback
-	calls int
+	authenticatedUser *GitHubAuthenticatedUser
+	items             []GitHubPullRequestFeedback
+	calls             int
+}
+
+func (f *fakePRFeedbackProvider) GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error) {
+	if f.authenticatedUser != nil {
+		return f.authenticatedUser, nil
+	}
+	return &GitHubAuthenticatedUser{Login: "openvibely", Source: GitHubAuthModePAT}, nil
 }
 
 func (f *fakePRFeedbackProvider) ListPullRequestFeedback(ctx context.Context, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
@@ -39,15 +47,19 @@ func TestGitHubPRFeedbackForwarderQueuesAuthorizedFeedbackOnce(t *testing.T) {
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "Alice", Permission: "triage", AddedBy: "test"}); err != nil {
-		t.Fatalf("authorize actor: %v", err)
+	for _, login := range []string{"Alice", "openvibely", "ci-bot"} {
+		if err := authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: login, Permission: "triage", AddedBy: "test"}); err != nil {
+			t.Fatalf("authorize actor %s: %v", login, err)
+		}
 	}
 	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 42, PRURL: "https://github.com/openvibely/openvibely/pull/42", PRState: "open"}); err != nil {
 		t.Fatalf("upsert pr: %v", err)
 	}
 	provider := &fakePRFeedbackProvider{items: []GitHubPullRequestFeedback{
-		{Kind: "issue_comment", ID: "100", AuthorLogin: "alice", Body: "Please add tests.", URL: "https://github.com/openvibely/openvibely/pull/42#issuecomment-100", CreatedAt: time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)},
-		{Kind: "review_comment", ID: "101", AuthorLogin: "mallory", Body: "Unauthorized steer", URL: "https://github.com/openvibely/openvibely/pull/42#discussion_r101", CreatedAt: time.Date(2026, 7, 9, 11, 0, 0, 0, time.UTC)},
+		{Kind: "issue_comment", ID: "100", AuthorLogin: "alice", AuthorType: "User", Body: "Please add tests.", URL: "https://github.com/openvibely/openvibely/pull/42#issuecomment-100", CreatedAt: time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)},
+		{Kind: "review_comment", ID: "101", AuthorLogin: "mallory", AuthorType: "User", Body: "Unauthorized steer", URL: "https://github.com/openvibely/openvibely/pull/42#discussion_r101", CreatedAt: time.Date(2026, 7, 9, 11, 0, 0, 0, time.UTC)},
+		{Kind: "issue_comment", ID: "102", AuthorLogin: "openvibely", AuthorType: "User", Body: "Self-authored bot steer", URL: "https://github.com/openvibely/openvibely/pull/42#issuecomment-102", CreatedAt: time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)},
+		{Kind: "review", ID: "103", AuthorLogin: "ci-bot", AuthorType: "Bot", Body: "Automated review", State: "commented", URL: "https://github.com/openvibely/openvibely/pull/42#pullrequestreview-103", CreatedAt: time.Date(2026, 7, 9, 13, 0, 0, 0, time.UTC)},
 	}}
 
 	forwarder := NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo, threadInputRepo)
@@ -55,7 +67,7 @@ func TestGitHubPRFeedbackForwarderQueuesAuthorizedFeedbackOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("forward feedback: %v", err)
 	}
-	if len(result.Forwarded) != 1 || result.SkippedUnauthorized != 1 || result.SkippedDuplicate != 0 {
+	if len(result.Forwarded) != 1 || result.SkippedUnauthorized != 1 || result.SkippedSelfOrBot != 2 || result.SkippedDuplicate != 0 {
 		t.Fatalf("unexpected result: %#v", result)
 	}
 	pending, err := threadInputRepo.ListPendingForTask(ctx, task.ID)

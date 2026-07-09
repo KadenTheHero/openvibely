@@ -11,6 +11,7 @@ import (
 )
 
 type GitHubPRFeedbackProvider interface {
+	GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error)
 	ListPullRequestFeedback(ctx context.Context, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error)
 }
 
@@ -27,6 +28,7 @@ type GitHubPRFeedbackForwardResult struct {
 	ScannedPullRequests int                               `json:"scanned_pull_requests"`
 	Forwarded           []GitHubPRFeedbackForwardedResult `json:"forwarded"`
 	SkippedUnauthorized int                               `json:"skipped_unauthorized"`
+	SkippedSelfOrBot    int                               `json:"skipped_self_or_bot"`
 	SkippedDuplicate    int                               `json:"skipped_duplicate"`
 	SkippedEmpty        int                               `json:"skipped_empty"`
 }
@@ -59,6 +61,14 @@ func (f *GitHubPRFeedbackForwarder) ForwardAuthorizedFeedback(ctx context.Contex
 	if projectID == "" {
 		return nil, fmt.Errorf("project id is required")
 	}
+	authenticatedUser, err := f.github.GetAuthenticatedUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	selfLogin := ""
+	if authenticatedUser != nil {
+		selfLogin = repository.NormalizeGitHubLogin(authenticatedUser.Login)
+	}
 	prs, err := f.prRepo.ListOpenByProjectID(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -83,6 +93,10 @@ func (f *GitHubPRFeedbackForwarder) ForwardAuthorizedFeedback(ctx context.Contex
 			author := repository.NormalizeGitHubLogin(item.AuthorLogin)
 			if author == "" {
 				result.SkippedUnauthorized++
+				continue
+			}
+			if isGitHubPRFeedbackSelfOrBot(author, item.AuthorType, selfLogin) {
+				result.SkippedSelfOrBot++
 				continue
 			}
 			authorized, err := f.authRepo.IsActorAuthorized(ctx, author)
@@ -146,6 +160,15 @@ func (f *GitHubPRFeedbackForwarder) ForwardAuthorizedFeedback(ctx context.Contex
 		}
 	}
 	return result, nil
+}
+
+func isGitHubPRFeedbackSelfOrBot(authorLogin, authorType, selfLogin string) bool {
+	authorLogin = repository.NormalizeGitHubLogin(authorLogin)
+	selfLogin = repository.NormalizeGitHubLogin(selfLogin)
+	if authorLogin != "" && selfLogin != "" && authorLogin == selfLogin {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(authorType), "Bot")
 }
 
 func formatGitHubPRFeedbackForTask(prNumber int, item GitHubPullRequestFeedback) string {
