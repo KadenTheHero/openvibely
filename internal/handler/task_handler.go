@@ -1279,9 +1279,13 @@ func (h *Handler) DeleteTask(c echo.Context) error {
 	}
 	applog.Infof("[handler] DeleteTask success id=%s", taskID)
 
-	// If redirect=list (from task detail page), redirect to task list
+	// If redirect=list (from task detail page), redirect to the safe return target.
 	if isHTMX(c) && c.QueryParam("redirect") == "list" {
-		c.Response().Header().Set("HX-Redirect", "/tasks?project_id="+projectID)
+		redirectURL := "/tasks?project_id=" + projectID
+		if c.QueryParam("return_to") == "schedule" {
+			redirectURL = "/schedule?project_id=" + projectID
+		}
+		c.Response().Header().Set("HX-Redirect", redirectURL)
 		return c.NoContent(http.StatusOK)
 	}
 

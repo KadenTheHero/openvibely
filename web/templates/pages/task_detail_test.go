@@ -719,6 +719,38 @@ func TestTaskDetailContent_ThreadTabRestoresPerTaskScrollState(t *testing.T) {
 	}
 }
 
+func TestTaskDetailContent_DeleteButtonCarriesScheduleReturnContext(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-schedule-delete",
+		Title:     "Scheduled Task",
+		ProjectID: "project-1",
+		Status:    models.StatusPending,
+		Category:  models.CategoryScheduled,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	output := buf.String()
+
+	if !strings.Contains(output, `id="delete-task-confirm-button"`) {
+		t.Fatal("expected delete confirmation button to have a stable id for return-context wiring")
+	}
+	if !strings.Contains(output, `hx-delete="/tasks/task-schedule-delete?redirect=list"`) {
+		t.Fatal("expected default delete flow to keep redirecting to tasks list")
+	}
+	if !strings.Contains(output, `data-schedule-delete-url="/tasks/task-schedule-delete?redirect=list&amp;return_to=schedule"`) {
+		t.Fatal("expected safe schedule return token on delete button")
+	}
+	if !strings.Contains(output, `from === 'schedule' && deleteBtn.dataset.scheduleDeleteUrl`) {
+		t.Fatal("expected script to activate schedule delete return only from schedule context")
+	}
+	if !strings.Contains(output, `deleteBtn.setAttribute('hx-delete', deleteBtn.dataset.scheduleDeleteUrl)`) {
+		t.Fatal("expected script to update the HTMX delete endpoint for schedule-origin task details")
+	}
+}
+
 func TestTaskDetailContent_RunAtFieldsClickablePickerAffordance(t *testing.T) {
 	task := &models.Task{
 		ID:        "task-schedule-1",

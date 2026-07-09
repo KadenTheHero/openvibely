@@ -86,6 +86,13 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 							}
 						}
 					}
+					var deleteBtn = document.getElementById('delete-task-confirm-button');
+					if (deleteBtn && from === 'schedule' && deleteBtn.dataset.scheduleDeleteUrl) {
+						deleteBtn.setAttribute('hx-delete', deleteBtn.dataset.scheduleDeleteUrl);
+						if (typeof htmx !== 'undefined') {
+							htmx.process(deleteBtn);
+						}
+					}
 				})();
 			</script>
 		</div>
@@ -133,9 +140,12 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 										<button class="btn btn-ghost btn-sm">Cancel</button>
 									</form>
 									<button
+										id="delete-task-confirm-button"
 										class="btn btn-error btn-sm"
 										hx-delete={ fmt.Sprintf("/tasks/%s?redirect=list", task.ID) }
 										hx-swap="none"
+										data-delete-url={ fmt.Sprintf("/tasks/%s?redirect=list", task.ID) }
+										data-schedule-delete-url={ fmt.Sprintf("/tasks/%s?redirect=list&return_to=schedule", task.ID) }
 									>
 										Delete
 									</button>
