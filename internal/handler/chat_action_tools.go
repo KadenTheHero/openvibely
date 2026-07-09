@@ -715,6 +715,14 @@ func (h *Handler) executeGitHubForwardPRFeedbackToTasksTool(ctx context.Context,
 	if err != nil {
 		return "", err
 	}
+	seen := map[string]bool{}
+	for _, forwarded := range result.Forwarded {
+		if strings.TrimSpace(forwarded.TaskID) == "" || seen[forwarded.TaskID] {
+			continue
+		}
+		seen[forwarded.TaskID] = true
+		h.PromoteQueuedTaskThreadInput(forwarded.TaskID)
+	}
 	return githubToolJSON(map[string]any{"ok": true, "result": result})
 }
 

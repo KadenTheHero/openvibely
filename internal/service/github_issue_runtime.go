@@ -31,14 +31,15 @@ type GitHubIssueRuntimeProvider interface {
 }
 
 type githubIssueRuntimeOptions struct {
-	ProjectID            string
-	ProjectRepo          *repository.ProjectRepo
-	TaskRepo             *repository.TaskRepo
-	TaskPullRequestRepo  *repository.TaskPullRequestRepo
-	GitHubPRFeedbackRepo *repository.GitHubPRFeedbackRepo
-	GitHubAuthRepo       *repository.GitHubAuthRepo
-	ThreadInputRepo      *repository.ThreadInputRepo
-	GitHub               GitHubIssueRuntimeProvider
+	ProjectID                string
+	ProjectRepo              *repository.ProjectRepo
+	TaskRepo                 *repository.TaskRepo
+	TaskPullRequestRepo      *repository.TaskPullRequestRepo
+	GitHubPRFeedbackRepo     *repository.GitHubPRFeedbackRepo
+	GitHubAuthRepo           *repository.GitHubAuthRepo
+	ThreadInputRepo          *repository.ThreadInputRepo
+	GitHub                   GitHubIssueRuntimeProvider
+	AfterPRFeedbackForwarded func(taskID string)
 }
 
 type githubCreateIssueRuntimeInput struct {
@@ -303,6 +304,16 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			result, err := NewGitHubPRFeedbackForwarder(opts.GitHub, opts.TaskPullRequestRepo, opts.GitHubPRFeedbackRepo, opts.GitHubAuthRepo, opts.ThreadInputRepo).ForwardAuthorizedFeedback(ctx, opts.ProjectID, repo)
 			if err != nil {
 				return "", err
+			}
+			if opts.AfterPRFeedbackForwarded != nil {
+				seen := map[string]bool{}
+				for _, forwarded := range result.Forwarded {
+					if strings.TrimSpace(forwarded.TaskID) == "" || seen[forwarded.TaskID] {
+						continue
+					}
+					seen[forwarded.TaskID] = true
+					opts.AfterPRFeedbackForwarded(forwarded.TaskID)
+				}
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "result": result})
 		},

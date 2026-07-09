@@ -236,14 +236,15 @@ func (s *LLMService) taskActionRuntimeTools(task models.Task) *llmcontracts.Runt
 		return nil
 	}
 	githubTools := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
-		ProjectID:            task.ProjectID,
-		ProjectRepo:          s.projectRepo,
-		TaskRepo:             s.taskRepo,
-		TaskPullRequestRepo:  s.taskPullRequestRepo,
-		GitHubPRFeedbackRepo: s.githubPRFeedbackRepo,
-		GitHubAuthRepo:       s.githubAuthRepo,
-		ThreadInputRepo:      s.threadInputRepo,
-		GitHub:               s.githubIssueRuntime,
+		ProjectID:                task.ProjectID,
+		ProjectRepo:              s.projectRepo,
+		TaskRepo:                 s.taskRepo,
+		TaskPullRequestRepo:      s.taskPullRequestRepo,
+		GitHubPRFeedbackRepo:     s.githubPRFeedbackRepo,
+		GitHubAuthRepo:           s.githubAuthRepo,
+		ThreadInputRepo:          s.threadInputRepo,
+		GitHub:                   s.githubIssueRuntime,
+		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
 	})
 	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools)
 }

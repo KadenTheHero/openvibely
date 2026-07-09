@@ -3552,6 +3552,67 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	}
 }
 
+func TestGitHubIssueRuntimeForwardPRFeedbackPromotesLinkedTasks(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+
+	project := &models.Project{Name: "GitHub Feedback Runtime", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely.git"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Completed PR Task", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "done"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "dubee", Permission: "triage", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize actor: %v", err)
+	}
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 4, PRURL: "https://github.com/openvibely/openvibely/pull/4", PRState: "open"}); err != nil {
+		t.Fatalf("seed pr: %v", err)
+	}
+
+	provider := &fakeGitHubIssueRuntimeProvider{
+		listPRFeedbackFn: func(_ context.Context, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
+			if repo.FullName != "openvibely/openvibely" || prNumber != 4 {
+				t.Fatalf("unexpected feedback lookup repo=%#v pr=%d", repo, prNumber)
+			}
+			return []GitHubPullRequestFeedback{{Kind: "issue_comment", ID: "4921937310", AuthorLogin: "dubee", AuthorType: "User", Body: "This branch has conflicts", URL: "https://github.com/openvibely/openvibely/pull/4#issuecomment-4921937310", CreatedAt: time.Date(2026, 7, 9, 5, 44, 10, 0, time.UTC)}}, nil
+		},
+	}
+	var promoted []string
+	rt := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
+		ProjectID:                project.ID,
+		ProjectRepo:              projectRepo,
+		TaskRepo:                 taskRepo,
+		TaskPullRequestRepo:      prRepo,
+		GitHubPRFeedbackRepo:     feedbackRepo,
+		GitHubAuthRepo:           githubAuthRepo,
+		ThreadInputRepo:          threadInputRepo,
+		GitHub:                   provider,
+		AfterPRFeedbackForwarded: func(taskID string) { promoted = append(promoted, taskID) },
+	})
+	out, handled, isErr, err := rt.Executor(ctx, "github_forward_pr_feedback_to_tasks", []byte(`{}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected feedback forward success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if len(promoted) != 1 || promoted[0] != task.ID {
+		t.Fatalf("expected linked task promoted once, got %#v", promoted)
+	}
+	pending, err := threadInputRepo.ListPendingForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(pending) != 1 || !strings.Contains(pending[0].Content, "This branch has conflicts") {
+		t.Fatalf("expected queued conflict feedback, got %#v", pending)
+	}
+}
+
 func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
