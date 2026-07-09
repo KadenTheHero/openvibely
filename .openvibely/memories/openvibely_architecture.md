@@ -4,7 +4,7 @@ type: project
 created: 2026-05-09
 updated: 2026-07-03
 source: consolidation
-source_id: memory_consolidation_2026_07_01; 11090658cf527d60fc9af73c9c89b573
+source_id: memory_consolidation_2026_07_06
 confidence: high
 title: OpenVibely Architecture
 ---

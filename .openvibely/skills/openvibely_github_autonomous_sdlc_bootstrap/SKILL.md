@@ -2,10 +2,10 @@
 kind: openvibely.agent_skill
 version: 1
 skill:
-  key: openvibely_github_autonomous_sdlc_bootstrap
-  name: OpenVibely GitHub Autonomous SDLC Bootstrap
-  scope: project
-  description: Bootstrap a GitHub-backed, prompt-driven autonomous SDLC loop using generic GitHub tools and visible OpenVibely tasks, goals, and schedules.
+    key: openvibely_github_autonomous_sdlc_bootstrap
+    name: OpenVibely GitHub Autonomous SDLC Bootstrap
+    scope: project
+    description: Bootstrap a GitHub-backed, prompt-driven autonomous SDLC loop using generic GitHub tools and visible OpenVibely tasks, goals, and schedules.
 ---
 
 # OpenVibely GitHub Autonomous SDLC Bootstrap
@@ -18,6 +18,7 @@ Keep the setup generic. Use existing OpenVibely tasks, task goals, schedules, ta
 
 - Scheduled tasks are the loop engine. Create or update visible scheduled OpenVibely tasks with prompts that say exactly what GitHub mailbox work to perform.
 - GitHub tools are reusable capabilities, not SDLC-only APIs. For PAT setups, use `github_list_my_assigned_issues` to find open issues assigned to the authenticated PAT user. For GitHub App setups, do not treat the installation owner or organization as an issue assignee; add the real GitHub user or bot that should receive work to Authorized Users, read those assignee candidates with `github_get_project_inbox`, and pass each login to `github_list_assigned_issues`. When a prompt names a specific GitHub repository URL, pass `repo_url` to issue create/read/list/comment/label tools. Use `github_is_actor_authorized`, `github_create_issue`, `github_get_issue`, `github_list_assigned_issues_with_prs`, `github_comment_on_issue`, `github_add_issue_labels`, and `github_open_pull_request` when available.
+- GitHub PR publication for implementation tasks should use `github_open_pull_request`, not ad hoc `git push` or GitHub CLI fallback. The tool is current-project/task scoped, publishes the task worktree branch through the configured GitHub token/API, then opens or reuses the PR and persists task PR metadata. The Changes tab Create PR button uses the same backend path with UI defaults; the runtime tool can additionally pass PR title/body/base/draft and issue metadata.
 - GitHub labels must be unprefixed. Never use labels beginning with `openvibely:`. Use labels such as `suggestion`, `approved`, `in-progress`, `task-created`, `pr-opened`, `blocked`, `needs-human`, `done`, `duplicate`, `bug`, `feature`, `performance`, and `duplication`.
 - Assigned GitHub issues without an associated PR must be skipped by automation unless the user explicitly changes that workflow rule. Use `github_list_assigned_issues_with_prs` to enforce PR-only eligibility; do not use `github_open_pull_request` as a loophole to start work on an ineligible assigned issue.
 - Human trust is separate from API credentials. PAT credentials identify a real GitHub user for default assignment polling. GitHub App credentials identify an installation and may be installed on an organization, so App setups use Authorized Users as the real issue assignee accounts to poll.
@@ -56,7 +57,7 @@ For actionable issues, create or continue visible OpenVibely work using task/thr
 
 Use unprefixed labels only, such as `task-created`, `in-progress`, `blocked`, `needs-human`, and `pr-opened`. Never use labels beginning with `openvibely:`.
 
-When implementation work is complete in a task branch, use `github_open_pull_request` for that task and include issue metadata so the task PR record stays linked.
+When implementation work is complete in a task branch, use `github_open_pull_request` for that task and include issue metadata so the task PR record stays linked. Do not use local `git push` or GitHub CLI as a fallback if the tool fails; report the tool error so GitHub token/API publication can be fixed.
 ```
 
 ## Prompt Pattern For Offering Manager

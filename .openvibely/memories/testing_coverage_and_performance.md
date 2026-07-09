@@ -2,9 +2,9 @@
 name: testing_coverage_and_performance
 type: project
 created: 2026-06-07
-updated: 2026-07-03
+updated: 2026-07-08
 source: consolidation
-source_id: memory_consolidation_2026_07_01
+source_id: memory_consolidation_2026_07_08
 confidence: high
 title: Testing Coverage and Performance
 ---
@@ -27,7 +27,6 @@ Durable coverage priorities:
 - Existing tests are mostly not wrong; the durable issue is narrow breadth, not excessive count. Avoid blanket `t.Parallel()` changes around shared DB setup.
 - Outbound DM permissions coverage is in place for Discord user-DM target persistence, saved Discord user-DM test dispatch, Authorized Users add/delete isolation from outbound targets, and outbound target save/delete isolation from Slack/Discord authorized users.
 - Channel project-switch persistence coverage is in place for Slack and Telegram runtime `switch_project` writes plus later active-project resolution. Web/API `switch_project` is guarded as informational-only and must not write Discord/Slack/Telegram/Email active-project tables.
-- Email project-switch regression coverage (added 2026-07-02 alongside the `NormalizeEmailAddress` display-name fix, extended 2026-07-03) lives in `internal/repository/email_auth_repo_test.go`, `internal/repository/email_sender_project_repo_test.go`, and `internal/service/email_service_test.go`. It covers RFC display-name sender authorization, mailbox-only authorized-sender storage, `email_sender_projects` normalization, runtime `switch_project` to a target project, saved-project revalidation, fallback when the saved project is missing/unauthorized, and session-identity normalization so display-name and mailbox-only senders share the same saved active-project row. Tests use non-private `example.com` addresses, not real user emails.
 - The canonical outbound direct-message target syntax in chat-control assertions is `platform:user:<id>`.
 
 Runtime and validation facts:
