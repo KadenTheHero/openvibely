@@ -65,10 +65,6 @@ always_use:
 
 [OpenVibely Channel Integrations Workflow](openvibely_channel_integrations_workflow/SKILL.md) — Implement and debug OpenVibely GitHub, Slack, Telegram, Discord, Email, and inbound webhook integrations with shared chat/task-thread behavior.
 
-## openvibely_github_autonomous_sdlc_bootstrap
-
-[OpenVibely GitHub Autonomous SDLC Bootstrap](openvibely_github_autonomous_sdlc_bootstrap/SKILL.md) — Bootstrap a GitHub-backed, prompt-driven autonomous SDLC loop using generic GitHub tools and visible OpenVibely tasks, goals, and schedules.
-
 ## openvibely_lifecycle_hook_workflow
 
 [OpenVibely Lifecycle Hook Workflow](openvibely_lifecycle_hook_workflow/SKILL.md) — Implement and debug OpenVibely lifecycle hooks, lifecycle agents, hook output contracts, runtime tools, and hook prompt chaining.

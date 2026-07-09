@@ -2,9 +2,9 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-07-08
-source: consolidation
-source_id: memory_consolidation_2026_07_08
+updated: 2026-07-09
+source: after_complete_memory_update
+source_id: a7e8ff17f79ab7e721b50dafcbd0099a
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -40,6 +40,7 @@ Routes, modes, and runtime actions:
 - Task creation can happen through marker compatibility, runtime action surfaces, or local app APIs depending on active runtime. When `[CREATE_TASK]` block markers are the exposed creation path for a turn, task-management guidance should use that contract; non-running/backlog task creation should set `"category": "backlog"`.
 - Chat task creation distinguishes Agent definitions from model configs: `agent` names a selectable/enabled Agent, while `agent_id` is internal model-config selection.
 - Chat-control task/schedule automation should respect schema semantics: task `priority` uses `1=Low`, `2=Normal`, `3=High`, `4=Urgent`; scheduled task `days` values are short weekday keys; `edit_task` needs a real task ID; `schedule_task` moves the target task into `scheduled`, so bootstrap flows needing immediate work should schedule then explicitly execute when appropriate.
+- Task-thread follow-up runtime filters intentionally expose visible bootstrap controls such as `create_task`, `create_swarm_task`, `schedule_task`, `delete_schedule`, and `modify_schedule` alongside thread, goal, GitHub, and `list_capabilities` tools when runtime tools are supported. This lets standalone bootstrap skills selected by task lifecycle routing create/update visible tasks and schedules from the task thread instead of stopping with missing scheduling support.
 - `send_message` is an Orchestrate-mode write runtime tool for sending outbound Slack, Telegram, Email, and Discord messages through configured project channel targets. It is runtime-tool-only; no `[SEND_MESSAGE]` marker fallback is currently supported. Normal task execution and task-thread follow-ups expose/advertise a narrow default `send_message` runtime only when the selected provider/auth path supports runtime tools, so tasks can send completion messages without requiring an explicit agent-tool grant. Runtime-tool-incapable provider/auth paths still cannot call it and must retain legacy task-creation marker fallback.
 
 Swarm task facts:
