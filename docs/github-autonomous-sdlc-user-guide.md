@@ -143,7 +143,7 @@ Never use labels beginning with `openvibely:`. OpenVibely rejects that prefix in
 
 - Dev Inbox stops with missing GitHub account: configure a PAT, or add the GitHub App mailbox user/bot to Authorized Users.
 - Dev Inbox refuses work: make sure the issue is assigned to the PAT owner or configured Authorized Users, and remove any stale prompt text that also requires an existing PR or `approved` label.
-- Assigned issue is skipped: verify the Dev Inbox task goal/prompt treats assignment as approval for the normal issue-to-task-to-PR flow.
+- Assigned issue is skipped: verify the Dev Inbox scheduled task prompt treats assignment as approval for the normal issue-to-task-to-PR flow and creates a distinct implementation task with an appropriate task-specific goal. Do not set a persisted goal on the Dev Inbox scheduled task itself.
 - PR creation fails: check that the task has a worktree branch and that GitHub credentials allow API-backed branch publication and PR creation.
 - Labels are rejected: remove any `openvibely:` prefix and use the plain label vocabulary above.
 

@@ -94,7 +94,7 @@ Do not modify code, do not create OpenVibely implementation tasks, and do not op
 
 - Do not create hidden services or background workers for the GitHub loop.
 - Do not make GitHub runtime tools explicit-agent-grant-only as part of this setup; scheduled tasks need the generic GitHub tools when GitHub is configured and the provider supports runtime tool calls.
-- Do not create or mutate agents unless the user explicitly asks and the available tool surface supports it. Prefer visible tasks, goals, schedules, and configured GitHub identities.
+- Do not create or mutate agents unless the user explicitly asks and the available tool surface supports it. Prefer visible tasks, schedules, prompts, and configured GitHub identities; do not add persisted goals to recurring loop tasks.
 - Do not treat GitHub API credentials as authorization for human-triggered auto-fix work.
-- Do not rely on prompt memory for dedupe or status. Use visible GitHub issues, comments, labels, task goals, task threads, and PR records.
+- Do not rely on prompt memory for dedupe or status. Use visible GitHub issues, comments, labels, task threads, schedules, and implementation-task goals for per-issue work records.
 - Do not claim the bootstrap is complete if required GitHub tools, channel credentials, or schedules are missing.
