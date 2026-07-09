@@ -17,6 +17,49 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestResolveRepoUsesUpstreamWhenOriginMissing(t *testing.T) {
+	ctx := context.Background()
+	repoDir := createTestGitRepo(t)
+	cmd := exec.Command("git", "remote", "add", "upstream", "git@github.com:openvibely/openvibely.git")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("add upstream: %v\n%s", err, out)
+	}
+
+	svc := NewGitHubService(nil, "", "", "", "")
+	got, err := svc.ResolveRepo(ctx, "", repoDir)
+	if err != nil {
+		t.Fatalf("ResolveRepo returned error: %v", err)
+	}
+	if got.FullName != "openvibely/openvibely" {
+		t.Fatalf("expected upstream GitHub repo, got %+v", got)
+	}
+}
+
+func TestResolveRepoFallsBackToFirstGitHubRemote(t *testing.T) {
+	ctx := context.Background()
+	repoDir := createTestGitRepo(t)
+	cmd := exec.Command("git", "remote", "add", "mirror", "https://gitlab.com/example/not-this.git")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("add mirror: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "remote", "add", "fork", "https://github.com/example/fork.git")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("add fork: %v\n%s", err, out)
+	}
+
+	svc := NewGitHubService(nil, "", "", "", "")
+	got, err := svc.ResolveRepo(ctx, "", repoDir)
+	if err != nil {
+		t.Fatalf("ResolveRepo returned error: %v", err)
+	}
+	if got.FullName != "example/fork" {
+		t.Fatalf("expected fallback GitHub remote, got %+v", got)
+	}
+}
+
 func TestParseGitHubRepoURL(t *testing.T) {
 	tests := []struct {
 		name      string

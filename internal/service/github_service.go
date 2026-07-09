@@ -494,19 +494,71 @@ func (s *GitHubService) ResolveRepo(ctx context.Context, repoURL, repoPath strin
 		return nil, fmt.Errorf("project has no repository path")
 	}
 
-	out, err := s.runGit(ctx, repoPath, nil, "remote", "get-url", "origin")
-	if err != nil {
-		return nil, fmt.Errorf("reading origin remote: %w", err)
-	}
-	remoteURL := strings.TrimSpace(string(out))
-	if remoteURL == "" {
-		return nil, fmt.Errorf("project repository has no origin remote")
-	}
-	repo, err := ParseGitHubRepoURL(remoteURL)
+	repo, remoteName, err := s.resolveRepoFromGitRemotes(ctx, repoPath)
 	if err != nil {
 		return nil, err
 	}
-	return &repo, nil
+	if repo.FullName == "" {
+		return nil, fmt.Errorf("project repository remote %q is not a GitHub repository", remoteName)
+	}
+	return repo, nil
+}
+
+func (s *GitHubService) resolveRepoFromGitRemotes(ctx context.Context, repoPath string) (*GitHubRepoRef, string, error) {
+	remotesOut, err := s.runGit(ctx, repoPath, nil, "remote")
+	if err != nil {
+		return nil, "", fmt.Errorf("listing git remotes: %w", err)
+	}
+	seen := map[string]bool{}
+	remoteNames := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(remotesOut)), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		remoteNames = append(remoteNames, name)
+	}
+	if len(remoteNames) == 0 {
+		return nil, "", fmt.Errorf("project repository has no git remotes")
+	}
+
+	preferred := []string{"origin", "upstream"}
+	ordered := make([]string, 0, len(remoteNames)+len(preferred))
+	for _, name := range preferred {
+		if seen[name] {
+			ordered = append(ordered, name)
+		}
+	}
+	for _, name := range remoteNames {
+		if name != "origin" && name != "upstream" {
+			ordered = append(ordered, name)
+		}
+	}
+
+	var lastErr error
+	for _, name := range ordered {
+		out, err := s.runGit(ctx, repoPath, nil, "remote", "get-url", name)
+		if err != nil {
+			lastErr = fmt.Errorf("reading %s remote: %w", name, err)
+			continue
+		}
+		remoteURL := strings.TrimSpace(string(out))
+		if remoteURL == "" {
+			lastErr = fmt.Errorf("project repository remote %q has no URL", name)
+			continue
+		}
+		repo, err := ParseGitHubRepoURL(remoteURL)
+		if err != nil {
+			lastErr = fmt.Errorf("project repository remote %q is not a GitHub repository: %w", name, err)
+			continue
+		}
+		return &repo, name, nil
+	}
+	if lastErr != nil {
+		return nil, "", lastErr
+	}
+	return nil, "", fmt.Errorf("project repository has no GitHub remotes")
 }
 
 func (s *GitHubService) DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error) {

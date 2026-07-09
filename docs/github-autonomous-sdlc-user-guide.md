@@ -30,7 +30,7 @@ GitHub issue API tools default to the current project repository, but prompts ma
 
 ## Bootstrap Skill
 
-OpenVibely bundles `openvibely_github_autonomous_sdlc_bootstrap` as a reusable global skill. In any project with GitHub configured, start from an orchestrate-capable chat or task turn and ask:
+OpenVibely bundles `openvibely_github_autonomous_sdlc_bootstrap` as a reusable global skill. In any project with GitHub configured, create or run a visible bootstrap task/task-thread turn so lifecycle routing can select the skill, then ask:
 
 ```text
 Use the OpenVibely GitHub Autonomous SDLC Bootstrap skill to set up the GitHub SDLC loop for this project. Create the visible scheduled tasks, goals, and schedules needed. Use the current project GitHub channel configuration. Report anything missing.

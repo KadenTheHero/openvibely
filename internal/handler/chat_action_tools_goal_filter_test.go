@@ -72,6 +72,22 @@ func TestFilterTaskThreadRuntimeToolDefs_GoalStatusToolsRequireExplicitGrant(t *
 func TestFilterTaskThreadRuntimeToolDefs_HaveWebHandlers(t *testing.T) {
 	defs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), nil, true)
 	handlers := (&Handler{}).chatActionHandlers(streamingResponseParams{ExecID: "exec", ProjectID: "project", IsTaskFollowup: true}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	advertised := toolDefNameSet(defs)
+
+	for _, name := range []string{
+		"github_get_project_inbox",
+		"github_list_my_assigned_issues",
+		"github_list_assigned_issues",
+		"github_list_assigned_issues_with_prs",
+		"github_open_pull_request",
+	} {
+		if !advertised[name] {
+			t.Fatalf("task-thread web runtime did not advertise required GitHub tool %s", name)
+		}
+		if _, ok := handlers[name]; !ok {
+			t.Fatalf("task-thread web runtime advertised %s without a handler", name)
+		}
+	}
 
 	for _, def := range defs {
 		if def.Name == "memory_view" {
