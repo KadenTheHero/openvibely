@@ -68,18 +68,6 @@ func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *model
 	if err != nil {
 		return nil, fmt.Errorf("checking existing pull request: %w", err)
 	}
-	if existingPR != nil {
-		if mergeTaskPullRequestIssueMetadata(existingPR, opts) {
-			if err := s.repo.Upsert(ctx, existingPR); err != nil {
-				return nil, fmt.Errorf("saving pull request issue metadata: %w", err)
-			}
-		}
-		return &OpenTaskPullRequestResult{
-			PullRequest:          taskPullRequestRecordToGitHubPR(existingPR),
-			Record:               existingPR,
-			ReusedExistingRecord: true,
-		}, nil
-	}
 
 	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
 	if err != nil {
@@ -104,6 +92,18 @@ func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *model
 		CommitterEmail: "bot@openvibely.ai",
 	}); err != nil {
 		return nil, fmt.Errorf("publishing branch: %w", err)
+	}
+	if existingPR != nil {
+		if mergeTaskPullRequestIssueMetadata(existingPR, opts) {
+			if err := s.repo.Upsert(ctx, existingPR); err != nil {
+				return nil, fmt.Errorf("saving pull request issue metadata: %w", err)
+			}
+		}
+		return &OpenTaskPullRequestResult{
+			PullRequest:          taskPullRequestRecordToGitHubPR(existingPR),
+			Record:               existingPR,
+			ReusedExistingRecord: true,
+		}, nil
 	}
 
 	foundPR, err := s.github.FindPullRequestByBranch(ctx, repoRef, task.WorktreeBranch)

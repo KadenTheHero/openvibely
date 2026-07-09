@@ -125,7 +125,14 @@ func TestTaskPullRequestServiceOpenForTaskReusesExistingRecord(t *testing.T) {
 		t.Fatalf("seed PR record: %v", err)
 	}
 	createCalls := 0
+	publishCalls := 0
+	var publishedReq GitHubPublishBranchRequest
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		publishBranchFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubPublishBranchRequest) error {
+			publishCalls++
+			publishedReq = req
+			return nil
+		},
 		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
 			createCalls++
 			return nil, fmt.Errorf("should not create")
@@ -136,8 +143,8 @@ func TestTaskPullRequestServiceOpenForTaskReusesExistingRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenForTask: %v", err)
 	}
-	if !result.ReusedExistingRecord || result.PullRequest.Number != 22 || createCalls != 0 {
-		t.Fatalf("expected existing PR reuse, result=%#v createCalls=%d", result, createCalls)
+	if !result.ReusedExistingRecord || result.PullRequest.Number != 22 || createCalls != 0 || publishCalls != 1 || publishedReq.Branch != task.WorktreeBranch {
+		t.Fatalf("expected existing PR reuse with branch publish, result=%#v createCalls=%d publishCalls=%d publishedReq=%#v", result, createCalls, publishCalls, publishedReq)
 	}
 }
 

@@ -175,7 +175,17 @@ func TestCreateTaskPullRequest_ReusesExistingTaskPR(t *testing.T) {
 	h.SetTaskPullRequestRepo(prRepo)
 
 	createCalls := 0
+	publishCalls := 0
+	var publishedReq service.GitHubPublishBranchRequest
 	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+		},
+		publishBranchFn: func(_ context.Context, _ *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
+			publishCalls++
+			publishedReq = publishReq
+			return nil
+		},
 		createPRFn: func(_ context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
 			createCalls++
 			return &service.GitHubPullRequest{Number: 1, URL: "https://github.com/x/y/pull/1", State: "open"}, nil
@@ -200,10 +210,13 @@ func TestCreateTaskPullRequest_ReusesExistingTaskPR(t *testing.T) {
 	e.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
+		t.Fatalf("expected status 200, got %d body=%q trigger=%q", rec.Code, rec.Body.String(), rec.Header().Get("HX-Trigger"))
 	}
 	if createCalls != 0 {
 		t.Fatalf("expected create PR not to run, got %d calls", createCalls)
+	}
+	if publishCalls != 1 || publishedReq.Branch != task.WorktreeBranch {
+		t.Fatalf("expected existing PR branch to be published once, publishCalls=%d publishedReq=%#v", publishCalls, publishedReq)
 	}
 	trigger := rec.Header().Get("HX-Trigger")
 	if !strings.Contains(trigger, "openvibelyToast") {
