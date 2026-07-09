@@ -47,7 +47,7 @@ Useful starting points:
 
 ### Prerequisite
 
-- Go `1.26.4+`
+- Go `1.26.5+`
 
 ### Fresh Clone
 
