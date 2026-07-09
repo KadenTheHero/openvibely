@@ -28,6 +28,16 @@ A PAT identifies a real GitHub user, so scheduled tasks can call `github_list_my
 
 GitHub issue API tools default to the current project repository, but prompts may pass `repo_url` when they name a specific GitHub repository URL. This applies to issue create/read/list/comment/label tools. Pull request tools remain tied to the current OpenVibely task/project because they publish task worktree branches through the configured GitHub token/API and persist task PR records.
 
+## Bootstrap Skill
+
+OpenVibely bundles `openvibely_github_autonomous_sdlc_bootstrap` as a reusable global skill. In any project with GitHub configured, start from an orchestrate-capable chat or task turn and ask:
+
+```text
+Use the OpenVibely GitHub Autonomous SDLC Bootstrap skill to set up the GitHub SDLC loop for this project. Create the visible scheduled tasks, goals, and schedules needed. Use the current project GitHub channel configuration. Report anything missing.
+```
+
+The skill creates or updates normal visible tasks and schedules; it does not start a hidden daemon.
+
 ## Minimum Visible Loop
 
 Start with two scheduled tasks before adding more finders/fixers.
