@@ -108,6 +108,9 @@ type channelUtilityActionHandlerOptions struct {
 func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"create_task": func(ctx context.Context, input json.RawMessage) (string, error) {
+			if opts.TaskSvc == nil {
+				return "", fmt.Errorf("create_task: task service unavailable")
+			}
 			var req TaskCreationRequest
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err

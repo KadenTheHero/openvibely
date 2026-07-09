@@ -213,11 +213,11 @@ func (s *LLMService) taskSendMessageRuntimeTools(task models.Task) *llmcontracts
 	}
 	return &llmcontracts.RuntimeTools{
 		Definitions: filtered,
-		Executor: chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, map[string]chatcontrol.RuntimeActionHandler{
+		Executor: chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, map[string]chatcontrol.RuntimeActionHandler{
 			"send_message": func(ctx context.Context, input json.RawMessage) (string, error) {
 				return ExecuteSendMessageTool(ctx, s.channelMessageRouter.WithAuditContext(string(chatcontrol.SurfaceWeb), "task"), task.ProjectID, input)
 			},
-		}),
+		}, map[string]bool{"send_message": true}),
 	}
 }
 
@@ -233,7 +233,55 @@ func (s *LLMService) taskActionRuntimeTools(task models.Task) *llmcontracts.Runt
 		GitHubAuthRepo:      s.githubAuthRepo,
 		GitHub:              s.githubIssueRuntime,
 	})
-	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), githubTools)
+	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools)
+}
+
+func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.RuntimeTools {
+	if s == nil || strings.TrimSpace(task.ProjectID) == "" {
+		return nil
+	}
+	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, false)
+	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, 5)
+	allowed := map[string]bool{
+		"create_task":       true,
+		"create_swarm_task": true,
+		"schedule_task":     true,
+		"delete_schedule":   true,
+		"modify_schedule":   true,
+		"list_capabilities": true,
+	}
+	for _, def := range defs {
+		if allowed[strings.ToLower(strings.TrimSpace(def.Name))] {
+			filtered = append(filtered, def)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
+		ProjectID:     task.ProjectID,
+		TaskSvc:       s.taskSvc,
+		SwarmSvc:      nil,
+		LLMConfigRepo: s.llmConfigRepo,
+	})
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		ProjectID:             task.ProjectID,
+		TaskRepo:              s.taskRepo,
+		ScheduleRepo:          s.scheduleRepo,
+		LLMConfigRepo:         s.llmConfigRepo,
+		AgentRepo:             s.agentRepo,
+		SettingsRepo:          nil,
+		CustomPersonalityRepo: nil,
+		ProjectRepo:           s.projectRepo,
+		AlertSvc:              s.alertSvc,
+	}))
+	handlers["list_capabilities"] = func(_ context.Context, _ json.RawMessage) (string, error) {
+		return formatChannelCapabilities(chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)), nil
+	}
+	return &llmcontracts.RuntimeTools{
+		Definitions: filtered,
+		Executor:    chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, handlers, allowed),
+	}
 }
 
 func (s *LLMService) promoteQueuedTaskThreadAfterCompletion(taskID string) {

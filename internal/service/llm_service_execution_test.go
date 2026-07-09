@@ -3536,7 +3536,7 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	}
 }
 
-func TestLLMServiceExecuteTaskWithAgentExposesGitHubToolsToInitialRuns(t *testing.T) {
+func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
@@ -3570,6 +3570,7 @@ func TestLLMServiceExecuteTaskWithAgentExposesGitHubToolsToInitialRuns(t *testin
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
 	svc.SetAgentRepo(agentRepo)
+	svc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
 	svc.SetGitHubIssueRuntimeProvider(&fakeGitHubIssueRuntimeProvider{})
 	svc.SetGitHubAuthRepo(githubAuthRepo)
 	svc.SetTaskPullRequestRepo(prRepo)
@@ -3581,9 +3582,45 @@ func TestLLMServiceExecuteTaskWithAgentExposesGitHubToolsToInitialRuns(t *testin
 	if rt == nil {
 		t.Fatal("expected runtime tools on provider request")
 	}
-	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request"} {
+	for _, name := range []string{"create_task", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request"} {
 		if !rt.HasDefinition(name) {
 			t.Fatalf("expected %s on initial task run, got %#v", name, rt.Definitions)
 		}
+	}
+	out, handled, isErr, err := rt.Executor(ctx, "github_get_project_inbox", []byte(`{}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected github_get_project_inbox handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if !strings.Contains(out, `"ok":true`) {
+		t.Fatalf("expected project inbox success output, got %s", out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "list_capabilities", []byte(`{}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected list_capabilities handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if !strings.Contains(out, "schedule_task") || !strings.Contains(out, "github_get_project_inbox") {
+		t.Fatalf("expected capabilities to include bootstrap tools, got %s", out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "create_task", []byte(`{"title":"Created loop task","prompt":"loop prompt"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected create_task handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	created, err := taskRepo.GetByProjectAndTitle(ctx, project.ID, "Created loop task")
+	if err != nil || created == nil {
+		t.Fatalf("expected created loop task, task=%#v err=%v out=%s", created, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "schedule_task", []byte(`{"title":"Created loop task","time":"09:30","repeat":"daily"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected schedule_task handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if !strings.Contains(out, "Scheduled task") {
+		t.Fatalf("expected schedule output, got %s", out)
+	}
+	schedules, err := scheduleRepo.ListByTask(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("list schedules: %v", err)
+	}
+	if len(schedules) != 1 {
+		t.Fatalf("expected one schedule, got %d", len(schedules))
 	}
 }

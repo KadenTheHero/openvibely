@@ -72,7 +72,7 @@ func buildGitHubIssueRuntimeTools(opts githubIssueRuntimeOptions) *llmcontracts.
 	handlers := buildGitHubIssueRuntimeHandlers(opts)
 	return &llmcontracts.RuntimeTools{
 		Definitions: defs,
-		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, handlers),
+		Executor:    chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, handlers, runtimeToolDefinitionSet(defs)),
 	}
 }
 
@@ -85,6 +85,17 @@ func gitHubIssueRuntimeToolDefs() []llmcontracts.RuntimeToolDefinition {
 		}
 	}
 	return filtered
+}
+
+func runtimeToolDefinitionSet(defs []llmcontracts.RuntimeToolDefinition) map[string]bool {
+	out := make(map[string]bool, len(defs))
+	for _, def := range defs {
+		name := strings.ToLower(strings.TrimSpace(def.Name))
+		if name != "" {
+			out[name] = true
+		}
+	}
+	return out
 }
 
 func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]chatcontrol.RuntimeActionHandler {
