@@ -3606,34 +3606,50 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	if !strings.Contains(out, "schedule_task") || !strings.Contains(out, "github_get_project_inbox") {
 		t.Fatalf("expected capabilities to include bootstrap tools, got %s", out)
 	}
-	out, handled, isErr, err = rt.Executor(ctx, "create_task", []byte(`{"title":"Created loop task","prompt":"loop prompt"}`))
+	out, handled, isErr, err = rt.Executor(ctx, "create_task", []byte(`{"title":"Implement GitHub issue #42","prompt":"Implement assigned GitHub issue #42 and open a PR."}`))
 	if !handled || isErr || err != nil {
-		t.Fatalf("expected create_task handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+		t.Fatalf("expected create_task handler for implementation task on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
-	created, err := taskRepo.GetByProjectAndTitle(ctx, project.ID, "Created loop task")
-	if err != nil || created == nil {
-		t.Fatalf("expected created loop task, task=%#v err=%v out=%s", created, err, out)
+	implementationTask, err := taskRepo.GetByProjectAndTitle(ctx, project.ID, "Implement GitHub issue #42")
+	if err != nil || implementationTask == nil {
+		t.Fatalf("expected created implementation task, task=%#v err=%v out=%s", implementationTask, err, out)
 	}
-	out, handled, isErr, err = rt.Executor(ctx, "set_task_goal", []byte(`{"title":"Created loop task","goal":"Maintain the visible GitHub SDLC loop."}`))
+	out, handled, isErr, err = rt.Executor(ctx, "set_task_goal", []byte(`{"title":"Implement GitHub issue #42","goal":"Implement assigned GitHub issue #42 and open a GitHub PR."}`))
 	if !handled || isErr || err != nil {
-		t.Fatalf("expected set_task_goal handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+		t.Fatalf("expected set_task_goal handler for implementation task on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
-	goal, err := goalSvc.GetGoal(ctx, created.ID)
-	if err != nil || goal == nil || goal.Objective != "Maintain the visible GitHub SDLC loop." {
-		t.Fatalf("expected persisted goal for created loop task, goal=%#v err=%v out=%s", goal, err, out)
+	goal, err := goalSvc.GetGoal(ctx, implementationTask.ID)
+	if err != nil || goal == nil || goal.Objective != "Implement assigned GitHub issue #42 and open a GitHub PR." {
+		t.Fatalf("expected persisted goal for implementation task, goal=%#v err=%v out=%s", goal, err, out)
 	}
-	out, handled, isErr, err = rt.Executor(ctx, "schedule_task", []byte(`{"title":"Created loop task","time":"09:30","repeat":"daily"}`))
+
+	out, handled, isErr, err = rt.Executor(ctx, "create_task", []byte(`{"title":"GitHub Dev Inbox","prompt":"Poll assigned GitHub issues and create implementation tasks."}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected create_task handler for scheduled loop task on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	loopTask, err := taskRepo.GetByProjectAndTitle(ctx, project.ID, "GitHub Dev Inbox")
+	if err != nil || loopTask == nil {
+		t.Fatalf("expected created loop task, task=%#v err=%v out=%s", loopTask, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "schedule_task", []byte(`{"title":"GitHub Dev Inbox","time":"09:30","repeat":"daily"}`))
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected schedule_task handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
 	if !strings.Contains(out, "Scheduled task") {
 		t.Fatalf("expected schedule output, got %s", out)
 	}
-	schedules, err := scheduleRepo.ListByTask(ctx, created.ID)
+	schedules, err := scheduleRepo.ListByTask(ctx, loopTask.ID)
 	if err != nil {
 		t.Fatalf("list schedules: %v", err)
 	}
 	if len(schedules) != 1 {
 		t.Fatalf("expected one schedule, got %d", len(schedules))
+	}
+	loopGoal, err := goalSvc.GetGoal(ctx, loopTask.ID)
+	if err != nil {
+		t.Fatalf("get loop task goal: %v", err)
+	}
+	if loopGoal != nil {
+		t.Fatalf("expected scheduled loop task to have no persisted goal, got %#v", loopGoal)
 	}
 }
