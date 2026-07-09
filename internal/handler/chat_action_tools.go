@@ -313,6 +313,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"github_open_pull_request": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubOpenPullRequestTool(ctx, params, input)
 		},
+		"github_forward_pr_feedback_to_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeGitHubForwardPRFeedbackToTasksTool(ctx, params.ProjectID, input)
+		},
 		"set_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeSetTaskGoalTool(ctx, params, input)
 		},
@@ -694,6 +697,25 @@ func (h *Handler) executeGitHubAddIssueLabelsTool(ctx context.Context, projectID
 		return "", err
 	}
 	return githubToolJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber, "labels": req.Labels})
+}
+
+func (h *Handler) executeGitHubForwardPRFeedbackToTasksTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	if h.taskPullRequestRepo == nil || h.githubPRFeedbackRepo == nil || h.githubAuthRepo == nil || h.threadInputRepo == nil {
+		return "", fmt.Errorf("github pr feedback forwarding dependencies unavailable")
+	}
+	var req githubIssueToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
+	if err != nil {
+		return "", err
+	}
+	result, err := service.NewGitHubPRFeedbackForwarder(h.githubSvc, h.taskPullRequestRepo, h.githubPRFeedbackRepo, h.githubAuthRepo, h.threadInputRepo).ForwardAuthorizedFeedback(ctx, projectID, repo)
+	if err != nil {
+		return "", err
+	}
+	return githubToolJSON(map[string]any{"ok": true, "result": result})
 }
 
 func (h *Handler) executeGitHubOpenPullRequestTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
@@ -1329,6 +1351,7 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"github_comment_on_issue":              true,
 		"github_add_issue_labels":              true,
 		"github_open_pull_request":             true,
+		"github_forward_pr_feedback_to_tasks":  true,
 		"set_task_goal":                        true,
 		"clear_task_goal":                      true,
 		"get_task_goal":                        true,

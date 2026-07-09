@@ -39,7 +39,7 @@ Keep the setup generic. Use existing OpenVibely tasks, schedules, task threads, 
 ## Suggested Visible Tasks
 
 - `GitHub Offering Manager: Vision Suggestions`, daily. Reads the project vision/source-of-truth files and opens suggestion issues only.
-- `GitHub Dev Inbox`, hourly. Uses `github_list_my_assigned_issues` for PAT setups or `github_get_project_inbox` plus `github_list_assigned_issues` for GitHub App/custom setups, treats assignment as approval, creates/continues one visible implementation task per actionable issue, and comments status.
+- `GitHub Dev Inbox`, hourly. Calls `github_forward_pr_feedback_to_tasks` so authorized PR review feedback reaches linked implementation tasks, then uses `github_list_my_assigned_issues` for PAT setups or `github_get_project_inbox` plus `github_list_assigned_issues` for GitHub App/custom setups, treats assignment as approval, creates/continues one visible implementation task per actionable issue, and comments status.
 - `GitHub Bug Finder`, daily. Chooses a focused project component, audits it for likely defects, and opens GitHub bug issues only.
 - `GitHub Optimization Finder`, daily. Chooses a focused project component or workflow, looks for measurable performance/efficiency opportunities, and opens GitHub performance issues only.
 - `GitHub Redundancy Finder`, daily. Chooses a focused project component, looks for duplicated/redundant code that could become a generic abstraction, and opens GitHub duplication issues only.
@@ -50,7 +50,9 @@ Keep the setup generic. Use existing OpenVibely tasks, schedules, task threads, 
 Use a prompt like this when creating the Dev Inbox scheduled task:
 
 ```text
-Check GitHub for implementation mailbox work for this project.
+Check GitHub for implementation mailbox work and PR review feedback for this project.
+
+First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users on OpenVibely-created task PRs. This tool forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback. If the tool reports missing feedback dependencies, report that PR feedback routing is unavailable but continue normal issue inbox polling.
 
 If this project uses a PAT, call `github_list_my_assigned_issues` to list open issues assigned to the PAT owner. If this project uses GitHub App mode or custom mailbox accounts, call `github_get_project_inbox` to get Authorized Users; pass each returned assignee login to `github_list_assigned_issues`. If GitHub credentials or Authorized Users are missing, stop and explain the missing configuration.
 

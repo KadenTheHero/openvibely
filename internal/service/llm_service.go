@@ -70,6 +70,7 @@ type LLMService struct {
 	githubIssueRuntime       GitHubIssueRuntimeProvider
 	githubAuthRepo           *repository.GitHubAuthRepo
 	taskPullRequestRepo      *repository.TaskPullRequestRepo
+	githubPRFeedbackRepo     *repository.GitHubPRFeedbackRepo
 	// globalSkillRoot is the parent directory holding <root>/agents for global
 	// agents/skills. It is used for catalog construction and bounded skill
 	// mutation writes; agents themselves remain user-managed.
@@ -201,6 +202,10 @@ func (s *LLMService) SetTaskPullRequestRepo(repo *repository.TaskPullRequestRepo
 	s.taskPullRequestRepo = repo
 }
 
+func (s *LLMService) SetGitHubPRFeedbackRepo(repo *repository.GitHubPRFeedbackRepo) {
+	s.githubPRFeedbackRepo = repo
+}
+
 func (s *LLMService) taskSendMessageRuntimeTools(task models.Task) *llmcontracts.RuntimeTools {
 	if s == nil || s.channelMessageRouter == nil || strings.TrimSpace(task.ProjectID) == "" {
 		return nil
@@ -231,12 +236,14 @@ func (s *LLMService) taskActionRuntimeTools(task models.Task) *llmcontracts.Runt
 		return nil
 	}
 	githubTools := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
-		ProjectID:           task.ProjectID,
-		ProjectRepo:         s.projectRepo,
-		TaskRepo:            s.taskRepo,
-		TaskPullRequestRepo: s.taskPullRequestRepo,
-		GitHubAuthRepo:      s.githubAuthRepo,
-		GitHub:              s.githubIssueRuntime,
+		ProjectID:            task.ProjectID,
+		ProjectRepo:          s.projectRepo,
+		TaskRepo:             s.taskRepo,
+		TaskPullRequestRepo:  s.taskPullRequestRepo,
+		GitHubPRFeedbackRepo: s.githubPRFeedbackRepo,
+		GitHubAuthRepo:       s.githubAuthRepo,
+		ThreadInputRepo:      s.threadInputRepo,
+		GitHub:               s.githubIssueRuntime,
 	})
 	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools)
 }

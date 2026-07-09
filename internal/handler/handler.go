@@ -66,6 +66,7 @@ type Handler struct {
 	lifecycleRepo              *repository.LifecycleRepo
 	worktreeSvc                *service.WorktreeService
 	taskPullRequestRepo        *repository.TaskPullRequestRepo
+	githubPRFeedbackRepo       *repository.GitHubPRFeedbackRepo
 	githubAuthRepo             *repository.GitHubAuthRepo
 	githubSvc                  GitHubServiceProvider
 	slackSvc                   SlackServiceProvider
@@ -106,6 +107,7 @@ type GitHubServiceProvider interface {
 	ListAssignedIssues(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssue, error)
 	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssueWithPullRequest, error)
 	FindPullRequestForIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubPullRequest, error)
+	ListPullRequestFeedback(ctx context.Context, repo *service.GitHubRepoRef, prNumber int) ([]service.GitHubPullRequestFeedback, error)
 	CommentOnIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error
 	AddLabelsToIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, labels []string) error
 }
@@ -383,6 +385,10 @@ func (h *Handler) SetWorktreeService(svc *service.WorktreeService) {
 // SetTaskPullRequestRepo sets the task pull request repo for task PR records.
 func (h *Handler) SetTaskPullRequestRepo(repo *repository.TaskPullRequestRepo) {
 	h.taskPullRequestRepo = repo
+}
+
+func (h *Handler) SetGitHubPRFeedbackRepo(repo *repository.GitHubPRFeedbackRepo) {
+	h.githubPRFeedbackRepo = repo
 }
 
 func (h *Handler) SetGitHubAuthRepo(repo *repository.GitHubAuthRepo) {

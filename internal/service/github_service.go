@@ -88,6 +88,19 @@ type GitHubIssueWithPullRequest struct {
 	PullRequest GitHubPullRequest
 }
 
+type GitHubPullRequestFeedback struct {
+	Kind        string    `json:"kind"`
+	ID          string    `json:"id"`
+	NodeID      string    `json:"node_id"`
+	AuthorLogin string    `json:"author_login"`
+	Body        string    `json:"body"`
+	URL         string    `json:"url"`
+	State       string    `json:"state,omitempty"`
+	Path        string    `json:"path,omitempty"`
+	Line        int       `json:"line,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 type GitHubAuthenticatedUser struct {
 	Login  string `json:"login"`
 	Source string `json:"source"`
@@ -1225,6 +1238,96 @@ func (s *GitHubService) CommentOnIssue(ctx context.Context, repo *GitHubRepoRef,
 	return s.doGitHubJSON(req, nil)
 }
 
+func (s *GitHubService) ListPullRequestFeedback(ctx context.Context, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("repository reference is required")
+	}
+	if prNumber <= 0 {
+		return nil, fmt.Errorf("pull request number is required")
+	}
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var feedback []GitHubPullRequestFeedback
+	issueComments, err := s.listPullRequestIssueComments(ctx, token, repo, prNumber)
+	if err != nil {
+		return nil, err
+	}
+	feedback = append(feedback, issueComments...)
+	reviews, err := s.listPullRequestReviews(ctx, token, repo, prNumber)
+	if err != nil {
+		return nil, err
+	}
+	feedback = append(feedback, reviews...)
+	reviewComments, err := s.listPullRequestReviewComments(ctx, token, repo, prNumber)
+	if err != nil {
+		return nil, err
+	}
+	feedback = append(feedback, reviewComments...)
+	sort.SliceStable(feedback, func(i, j int) bool {
+		return feedback[i].CreatedAt.Before(feedback[j].CreatedAt)
+	})
+	return feedback, nil
+}
+
+func (s *GitHubService) listPullRequestIssueComments(ctx context.Context, token string, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), prNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.applyGitHubHeaders(req, token)
+	var raw []githubIssueCommentAPI
+	if err := s.doGitHubJSON(req, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]GitHubPullRequestFeedback, 0, len(raw))
+	for _, item := range raw {
+		out = append(out, item.toFeedback())
+	}
+	return out, nil
+}
+
+func (s *GitHubService) listPullRequestReviews(ctx context.Context, token string, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews?per_page=100", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), prNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.applyGitHubHeaders(req, token)
+	var raw []githubPullRequestReviewAPI
+	if err := s.doGitHubJSON(req, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]GitHubPullRequestFeedback, 0, len(raw))
+	for _, item := range raw {
+		if fb := item.toFeedback(); strings.TrimSpace(fb.Body) != "" || strings.TrimSpace(fb.State) != "" {
+			out = append(out, fb)
+		}
+	}
+	return out, nil
+}
+
+func (s *GitHubService) listPullRequestReviewComments(ctx context.Context, token string, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/comments?per_page=100", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), prNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.applyGitHubHeaders(req, token)
+	var raw []githubPullRequestReviewCommentAPI
+	if err := s.doGitHubJSON(req, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]GitHubPullRequestFeedback, 0, len(raw))
+	for _, item := range raw {
+		out = append(out, item.toFeedback())
+	}
+	return out, nil
+}
+
 func (s *GitHubService) AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, labels []string) error {
 	if repo == nil {
 		return fmt.Errorf("repository reference is required")
@@ -1480,6 +1583,81 @@ func cleanGitHubStringList(items []string) []string {
 		out = append(out, trimmed)
 	}
 	return out
+}
+
+type githubIssueCommentAPI struct {
+	ID        int64     `json:"id"`
+	NodeID    string    `json:"node_id"`
+	URL       string    `json:"html_url"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"created_at"`
+	User      struct {
+		Login string `json:"login"`
+	} `json:"user"`
+}
+
+func (c githubIssueCommentAPI) toFeedback() GitHubPullRequestFeedback {
+	return GitHubPullRequestFeedback{
+		Kind:        "issue_comment",
+		ID:          strconv.FormatInt(c.ID, 10),
+		NodeID:      strings.TrimSpace(c.NodeID),
+		AuthorLogin: strings.TrimSpace(c.User.Login),
+		Body:        c.Body,
+		URL:         strings.TrimSpace(c.URL),
+		CreatedAt:   c.CreatedAt,
+	}
+}
+
+type githubPullRequestReviewAPI struct {
+	ID          int64     `json:"id"`
+	NodeID      string    `json:"node_id"`
+	URL         string    `json:"html_url"`
+	Body        string    `json:"body"`
+	State       string    `json:"state"`
+	SubmittedAt time.Time `json:"submitted_at"`
+	User        struct {
+		Login string `json:"login"`
+	} `json:"user"`
+}
+
+func (r githubPullRequestReviewAPI) toFeedback() GitHubPullRequestFeedback {
+	return GitHubPullRequestFeedback{
+		Kind:        "review",
+		ID:          strconv.FormatInt(r.ID, 10),
+		NodeID:      strings.TrimSpace(r.NodeID),
+		AuthorLogin: strings.TrimSpace(r.User.Login),
+		Body:        r.Body,
+		URL:         strings.TrimSpace(r.URL),
+		State:       strings.TrimSpace(r.State),
+		CreatedAt:   r.SubmittedAt,
+	}
+}
+
+type githubPullRequestReviewCommentAPI struct {
+	ID        int64     `json:"id"`
+	NodeID    string    `json:"node_id"`
+	URL       string    `json:"html_url"`
+	Body      string    `json:"body"`
+	Path      string    `json:"path"`
+	Line      int       `json:"line"`
+	CreatedAt time.Time `json:"created_at"`
+	User      struct {
+		Login string `json:"login"`
+	} `json:"user"`
+}
+
+func (c githubPullRequestReviewCommentAPI) toFeedback() GitHubPullRequestFeedback {
+	return GitHubPullRequestFeedback{
+		Kind:        "review_comment",
+		ID:          strconv.FormatInt(c.ID, 10),
+		NodeID:      strings.TrimSpace(c.NodeID),
+		AuthorLogin: strings.TrimSpace(c.User.Login),
+		Body:        c.Body,
+		URL:         strings.TrimSpace(c.URL),
+		Path:        strings.TrimSpace(c.Path),
+		Line:        c.Line,
+		CreatedAt:   c.CreatedAt,
+	}
 }
 
 type githubIssueAPI struct {

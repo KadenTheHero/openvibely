@@ -87,8 +87,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 110 {
-		t.Fatalf("max goose version = %d, want 110", maxVersion)
+	if maxVersion != 111 {
+		t.Fatalf("max goose version = %d, want 111", maxVersion)
 	}
 }
 
@@ -239,8 +239,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 110 {
-		t.Fatalf("max goose version = %d, want 110", maxVersion)
+	if maxVersion != 111 {
+		t.Fatalf("max goose version = %d, want 111", maxVersion)
 	}
 }
 
@@ -580,6 +580,22 @@ func TestMigrations_GitHubRepoURLAndTaskPullRequests(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected UNIQUE constraint failure for duplicate task_id in task_pull_requests")
 	}
+	var prRecordID string
+	if err := db.QueryRow(`SELECT id FROM task_pull_requests WHERE task_id = 'gh-task'`).Scan(&prRecordID); err != nil {
+		t.Fatalf("failed to query task pull request id: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO thread_inputs (id, scope, project_id, task_id, input_mode, input_status, content, queue_position) VALUES ('gh-feedback-input', 'task_thread', 'gh-proj', 'gh-task', 'queued', 'pending', 'Review feedback', 1)`)
+	if err != nil {
+		t.Fatalf("failed to insert thread input for feedback link: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO github_pr_feedback_forwarded (task_pull_request_id, task_id, repo_full_name, pr_number, feedback_kind, github_id, author_login, html_url, body, created_at, queued_thread_input_id) VALUES (?, 'gh-task', 'openvibely/openvibely', 10, 'issue_comment', '100', 'alice', 'https://github.com/openvibely/openvibely/pull/10#issuecomment-100', 'Looks good', '2026-07-09T00:00:00Z', 'gh-feedback-input')`, prRecordID)
+	if err != nil {
+		t.Fatalf("failed to insert forwarded github pr feedback: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO github_pr_feedback_forwarded (task_pull_request_id, task_id, repo_full_name, pr_number, feedback_kind, github_id, author_login, created_at) VALUES (?, 'gh-task', 'openvibely/openvibely', 10, 'issue_comment', '100', 'alice', '2026-07-09T00:00:00Z')`, prRecordID)
+	if err == nil {
+		t.Fatal("expected UNIQUE constraint failure for duplicate forwarded github pr feedback")
+	}
 }
 
 func TestMigration082_NormalizesUnreleasedSkillCuratorNames(t *testing.T) {
@@ -710,8 +726,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 110 {
-		t.Fatalf("max goose version = %d, want 110", maxVersion)
+	if maxVersion != 111 {
+		t.Fatalf("max goose version = %d, want 111", maxVersion)
 	}
 }
 
@@ -1062,8 +1078,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 110 {
-		t.Fatalf("max goose version = %d, want 110", maxVersion)
+	if maxVersion != 111 {
+		t.Fatalf("max goose version = %d, want 111", maxVersion)
 	}
 }
 

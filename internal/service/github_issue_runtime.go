@@ -24,17 +24,20 @@ type GitHubIssueRuntimeProvider interface {
 	ListAssignedIssues(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssue, error)
 	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error)
 	FindPullRequestForIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubPullRequest, error)
+	ListPullRequestFeedback(ctx context.Context, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error)
 	CommentOnIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, bodyText string) error
 	AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, labels []string) error
 }
 
 type githubIssueRuntimeOptions struct {
-	ProjectID           string
-	ProjectRepo         *repository.ProjectRepo
-	TaskRepo            *repository.TaskRepo
-	TaskPullRequestRepo *repository.TaskPullRequestRepo
-	GitHubAuthRepo      *repository.GitHubAuthRepo
-	GitHub              GitHubIssueRuntimeProvider
+	ProjectID            string
+	ProjectRepo          *repository.ProjectRepo
+	TaskRepo             *repository.TaskRepo
+	TaskPullRequestRepo  *repository.TaskPullRequestRepo
+	GitHubPRFeedbackRepo *repository.GitHubPRFeedbackRepo
+	GitHubAuthRepo       *repository.GitHubAuthRepo
+	ThreadInputRepo      *repository.ThreadInputRepo
+	GitHub               GitHubIssueRuntimeProvider
 }
 
 type githubCreateIssueRuntimeInput struct {
@@ -283,6 +286,24 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				return "", err
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "task_id": task.ID, "pull_request": result.PullRequest, "reused_existing_record": result.ReusedExistingRecord, "reused_remote": result.ReusedRemote, "created": result.Created})
+		},
+		"github_forward_pr_feedback_to_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
+			if opts.TaskPullRequestRepo == nil || opts.GitHubPRFeedbackRepo == nil || opts.GitHubAuthRepo == nil || opts.ThreadInputRepo == nil {
+				return "", fmt.Errorf("github pr feedback forwarding dependencies unavailable")
+			}
+			var req githubIssueRuntimeInput
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
+			if err != nil {
+				return "", err
+			}
+			result, err := NewGitHubPRFeedbackForwarder(opts.GitHub, opts.TaskPullRequestRepo, opts.GitHubPRFeedbackRepo, opts.GitHubAuthRepo, opts.ThreadInputRepo).ForwardAuthorizedFeedback(ctx, opts.ProjectID, repo)
+			if err != nil {
+				return "", err
+			}
+			return githubIssueRuntimeJSON(map[string]any{"ok": true, "result": result})
 		},
 	}
 }

@@ -45,7 +45,7 @@ Start with two scheduled tasks before adding more scanner/finder loops.
 | Task | Cadence | Purpose |
 |---|---:|---|
 | `GitHub Offering Manager: Vision Suggestions` | Daily | Reads project vision/source files and opens suggestion issues only. |
-| `GitHub Dev Inbox` | Hourly | Checks open issues assigned to the PAT user or configured GitHub Authorized Users and links/updates eligible work. |
+| `GitHub Dev Inbox` | Hourly | Forwards authorized PR comments/reviews to linked implementation tasks, then checks open issues assigned to the PAT user or configured GitHub Authorized Users and links/updates eligible work. |
 
 You can later add Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks using the same pattern. These finder tasks open GitHub issues only; Dev Inbox remains the path that turns assigned issues into implementation tasks.
 
@@ -61,7 +61,9 @@ Initial setup order:
 Create a visible scheduled task with a prompt like:
 
 ```text
-Check GitHub for implementation mailbox work for this project.
+Check GitHub for implementation mailbox work and PR review feedback for this project.
+
+First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users on OpenVibely-created task PRs. This tool forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback. If the tool reports missing feedback dependencies, report that PR feedback routing is unavailable but continue normal issue inbox polling.
 
 If this project uses a PAT, call `github_list_my_assigned_issues` to list open issues assigned to the PAT owner. If this project uses GitHub App mode or custom mailbox accounts, call `github_get_project_inbox` to get Authorized Users; pass each returned assignee login to `github_list_assigned_issues`. If GitHub credentials or Authorized Users are missing, stop and explain the missing configuration.
 

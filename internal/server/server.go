@@ -504,6 +504,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 
 	settingsRepo := repository.NewSettingsRepo(db)
 	taskPullRequestRepo := repository.NewTaskPullRequestRepo(db)
+	githubPRFeedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
 	githubAuthRepo := repository.NewGitHubAuthRepo(db)
 	webhookRepo := repository.NewWebhookRepo(db)
 
@@ -544,6 +545,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	llmSvc.SetGitHubIssueRuntimeProvider(githubSvc)
 	llmSvc.SetGitHubAuthRepo(githubAuthRepo)
 	llmSvc.SetTaskPullRequestRepo(taskPullRequestRepo)
+	llmSvc.SetGitHubPRFeedbackRepo(githubPRFeedbackRepo)
 	slackSvc := service.NewSlackService(
 		settingsRepo,
 		projectRepo,
@@ -859,6 +861,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetAgentSkillRoot(globalSkillRoot)
 	h.SetAgentLibraryMaintenanceService(agentLibraryMaintenanceSvc)
 	h.SetTaskPullRequestRepo(taskPullRequestRepo)
+	h.SetGitHubPRFeedbackRepo(githubPRFeedbackRepo)
 	h.SetGitHubAuthRepo(githubAuthRepo)
 	h.SetGitHubService(githubSvc)
 	h.SetSlackService(slackSvc)

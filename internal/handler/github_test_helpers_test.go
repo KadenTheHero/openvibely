@@ -25,6 +25,7 @@ type fakeGitHubService struct {
 	listAssignedIssuesFn   func(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssue, error)
 	listAssignedIssuesPRFn func(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssueWithPullRequest, error)
 	findIssuePRFn          func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubPullRequest, error)
+	listPRFeedbackFn       func(ctx context.Context, repo *service.GitHubRepoRef, prNumber int) ([]service.GitHubPullRequestFeedback, error)
 	commentOnIssueFn       func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error
 	addLabelsToIssueFn     func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, labels []string) error
 }
@@ -146,6 +147,13 @@ func (f *fakeGitHubService) FindPullRequestForIssue(ctx context.Context, repo *s
 		return f.findIssuePRFn(ctx, repo, issueNumber)
 	}
 	return nil, nil
+}
+
+func (f *fakeGitHubService) ListPullRequestFeedback(ctx context.Context, repo *service.GitHubRepoRef, prNumber int) ([]service.GitHubPullRequestFeedback, error) {
+	if f != nil && f.listPRFeedbackFn != nil {
+		return f.listPRFeedbackFn(ctx, repo, prNumber)
+	}
+	return nil, fmt.Errorf("list pull request feedback not configured")
 }
 
 func (f *fakeGitHubService) CommentOnIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error {
