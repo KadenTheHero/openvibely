@@ -3548,6 +3548,8 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	agentRepo := repository.NewAgentRepo(db)
 	prRepo := repository.NewTaskPullRequestRepo(db)
 	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	goalRepo := repository.NewTaskGoalRepo(db)
+	goalSvc := NewTaskGoalService(goalRepo, taskRepo, nil)
 
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	agent.Provider = models.ProviderOpenAI
@@ -3570,7 +3572,10 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
 	svc.SetAgentRepo(agentRepo)
-	svc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
+	taskSvc.SetTaskGoalService(goalSvc)
+	svc.SetTaskService(taskSvc)
+	svc.SetTaskGoalService(goalSvc)
 	svc.SetGitHubIssueRuntimeProvider(&fakeGitHubIssueRuntimeProvider{})
 	svc.SetGitHubAuthRepo(githubAuthRepo)
 	svc.SetTaskPullRequestRepo(prRepo)
@@ -3582,7 +3587,7 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	if rt == nil {
 		t.Fatal("expected runtime tools on provider request")
 	}
-	for _, name := range []string{"create_task", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request"} {
+	for _, name := range []string{"create_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request"} {
 		if !rt.HasDefinition(name) {
 			t.Fatalf("expected %s on initial task run, got %#v", name, rt.Definitions)
 		}
@@ -3608,6 +3613,14 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	created, err := taskRepo.GetByProjectAndTitle(ctx, project.ID, "Created loop task")
 	if err != nil || created == nil {
 		t.Fatalf("expected created loop task, task=%#v err=%v out=%s", created, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "set_task_goal", []byte(`{"title":"Created loop task","goal":"Maintain the visible GitHub SDLC loop."}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected set_task_goal handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	goal, err := goalSvc.GetGoal(ctx, created.ID)
+	if err != nil || goal == nil || goal.Objective != "Maintain the visible GitHub SDLC loop." {
+		t.Fatalf("expected persisted goal for created loop task, goal=%#v err=%v out=%s", goal, err, out)
 	}
 	out, handled, isErr, err = rt.Executor(ctx, "schedule_task", []byte(`{"title":"Created loop task","time":"09:30","repeat":"daily"}`))
 	if !handled || isErr || err != nil {

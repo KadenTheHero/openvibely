@@ -51,6 +51,7 @@ type LLMService struct {
 	mutationRecorder         func(models.Task) agentlibrary.MutationRecorder
 	alertSvc                 *AlertService
 	taskSvc                  *TaskService
+	taskGoalSvc              *TaskGoalService
 	worktreeSvc              *WorktreeService
 	telegramSvc              *TelegramService
 	slackSvc                 *SlackService
@@ -111,6 +112,10 @@ func (s *LLMService) SetAlertService(alertSvc *AlertService) {
 // (LLMService -> TaskService -> WorkerService -> LLMService).
 func (s *LLMService) SetTaskService(taskSvc *TaskService) {
 	s.taskSvc = taskSvc
+}
+
+func (s *LLMService) SetTaskGoalService(taskGoalSvc *TaskGoalService) {
+	s.taskGoalSvc = taskGoalSvc
 }
 
 // SetWorktreeService sets the worktree service for task isolation.
@@ -240,11 +245,16 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 	if s == nil || strings.TrimSpace(task.ProjectID) == "" {
 		return nil
 	}
-	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, false)
+	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
 	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, 5)
 	allowed := map[string]bool{
 		"create_task":       true,
 		"create_swarm_task": true,
+		"set_task_goal":     true,
+		"clear_task_goal":   true,
+		"get_task_goal":     true,
+		"pause_task_goal":   true,
+		"resume_task_goal":  true,
 		"schedule_task":     true,
 		"delete_schedule":   true,
 		"modify_schedule":   true,
@@ -264,6 +274,11 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		SwarmSvc:      nil,
 		LLMConfigRepo: s.llmConfigRepo,
 	})
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{
+		ProjectID:   task.ProjectID,
+		TaskRepo:    s.taskRepo,
+		TaskGoalSvc: s.taskGoalSvc,
+	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
 		ProjectID:             task.ProjectID,
 		TaskRepo:              s.taskRepo,

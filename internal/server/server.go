@@ -432,6 +432,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	taskSvc.SetAgentRepo(agentRepo)
 	taskSvc.SetTaskGoalService(taskGoalSvc)
+	llmSvc.SetTaskGoalService(taskGoalSvc)
 	workerSvc.SetTaskGoalService(taskGoalSvc)
 	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 	alertSvc := service.NewAlertService(alertRepo, broadcaster)
