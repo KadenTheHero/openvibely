@@ -36,24 +36,24 @@ OpenVibely bundles `openvibely_github_autonomous_sdlc_bootstrap` as a reusable g
 Use the OpenVibely GitHub Autonomous SDLC Bootstrap skill to set up the GitHub SDLC loop for this project. Create the visible scheduled tasks, goals, and schedules needed. Use the current project GitHub channel configuration. Report anything missing.
 ```
 
-The skill creates or updates normal visible tasks and schedules; it does not start a hidden daemon. Setup should create one visible task per loop role and schedule that same task, not create separate standalone runner tasks plus scheduled duplicates. The first setup action should create/run `GitHub Offering Manager: Vision Suggestions` immediately so it can open initial suggestion issues, then attach its daily schedule and create the Dev Inbox, Bug Fixer, and auditor/finder schedules afterward.
+The skill creates or updates normal visible tasks and schedules; it does not start a hidden daemon. Setup should create one visible task per loop role and schedule that same task, not create separate standalone runner tasks plus scheduled duplicates. The first setup action should create/run `GitHub Offering Manager: Vision Suggestions` immediately so it can open initial suggestion issues, then attach its daily schedule and create the Dev Inbox, Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor schedules afterward.
 
 ## Minimum Visible Loop
 
-Start with two scheduled tasks before adding more finders/fixers.
+Start with two scheduled tasks before adding more scanner/finder loops.
 
 | Task | Cadence | Purpose |
 |---|---:|---|
 | `GitHub Offering Manager: Vision Suggestions` | Daily | Reads project vision/source files and opens suggestion issues only. |
 | `GitHub Dev Inbox` | Hourly | Checks open issues assigned to the PAT user or configured GitHub Authorized Users and links/updates eligible work. |
 
-You can later add bug, performance, duplication, and loop-auditor tasks using the same pattern.
+You can later add Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks using the same pattern. These finder tasks open GitHub issues only; Dev Inbox remains the path that turns assigned issues into implementation tasks.
 
 Initial setup order:
 
 1. Create `GitHub Offering Manager: Vision Suggestions` first and run that same task immediately. If no explicit run-existing-task action is available, create it as `active` for the first run, then attach the daily schedule to that same task after the creation/start action is accepted.
-2. Create `GitHub Dev Inbox`, `GitHub Bug Fixer`, and optional auditor/finder loop tasks as their own scheduled tasks, set their goals, and attach their recurring schedules.
-3. Do not create separate standalone one-off runner tasks in addition to the scheduled loop tasks. Do not immediately start Dev Inbox or fixer tasks during bootstrap unless the user explicitly asks for an immediate poll/fix pass.
+2. Create `GitHub Dev Inbox`, `GitHub Bug Finder`, `GitHub Optimization Finder`, `GitHub Redundancy Finder`, and optional Loop Auditor tasks as their own scheduled tasks, set their goals, and attach their recurring schedules.
+3. Do not create separate standalone one-off runner tasks in addition to the scheduled loop tasks. Do not immediately start Dev Inbox or scanner/finder tasks during bootstrap unless the user explicitly asks for an immediate poll/scan pass.
 
 ## Dev Inbox Prompt Pattern
 
@@ -89,7 +89,24 @@ Open GitHub suggestion issues only. Use `github_create_issue` with unprefixed la
 Include enough context for a human to approve, reject, or assign the issue. Avoid duplicates by searching or inspecting existing visible work when the available tools allow it.
 ```
 
-Offering and finder tasks should open issues only. Implementation and fixer tasks should act on issues assigned to the PAT owner or configured Authorized Users. Add labels such as `approved`, `feature`, or `bug` when useful for human organization, but assignment is the default approval signal for entering the implementation mailbox.
+Offering, Bug Finder, Optimization Finder, and Redundancy Finder tasks should open issues only. They should not modify code, create OpenVibely implementation tasks, or open PRs. Dev Inbox acts on issues assigned to the PAT owner or configured Authorized Users and creates the implementation tasks that later open PRs. Add labels such as `approved`, `feature`, `bug`, `performance`, or `duplication` when useful for human organization, but assignment is the default approval signal for entering the implementation mailbox.
+
+## Finder Prompt Pattern
+
+Create separate visible scheduled tasks for bug, optimization, and redundancy discovery with prompts like:
+
+```text
+Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
+
+Look only for issues in this task's scope:
+- Bug Finder: likely defects, edge-case failures, broken behavior, or missing tests that indicate a bug.
+- Optimization Finder: measurable performance, latency, memory, build, or workflow efficiency improvements.
+- Redundancy Finder: duplicated or redundant code that could be made generic without over-engineering.
+
+Open GitHub issues only using `github_create_issue` with unprefixed labels matching the scope, such as `bug`, `performance`, or `duplication`. Include the inspected component, evidence, risk, and suggested acceptance criteria.
+
+Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.
+```
 
 ## Labels
 
