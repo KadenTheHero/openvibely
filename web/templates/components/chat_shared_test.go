@@ -1618,6 +1618,58 @@ func TestRenderStreamingContent_RemovesWhitespacePreWrap(t *testing.T) {
 	}
 }
 
+func TestRenderStreamingContent_PairsRepeatedToolResultsFIFOAndUsesStableToolIDs(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatAutoScrollScript().Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	}
+
+	content := buf.String()
+	for _, want := range []string{
+		"var toolUseQueues = {}",
+		"toolUseQueues[usingName].push(segments[si])",
+		"for (var sk = 0; sk < queue.length; sk++)",
+		"segments[si].toolRenderID = 'tool-' + segments[si].index + '-' + toolRenderOrdinal++",
+		"wrap.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
+		"outScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("renderStreamingContent missing repeated-tool boundary logic %q", want)
+		}
+	}
+
+	if strings.Contains(content, "for (var sk = si - 1; sk >= 0; sk--)") {
+		t.Fatal("renderStreamingContent must not pair tool results with the newest previous same-name tool")
+	}
+}
+
+func TestRenderStreamingContent_PreservesToolScrollByStableToolID(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatAutoScrollScript().Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	}
+
+	content := buf.String()
+	for _, want := range []string{
+		"var prevToolBodyScrollStates = {}",
+		"var toolID = el.getAttribute('data-tool-render-id') || ''",
+		"var rowKind = el.getAttribute('data-tool-row') || ''",
+		"prevToolBodyScrollStates[toolID + ':' + rowKind]",
+		"inScroll.setAttribute('data-tool-row', 'in')",
+		"outScroll.setAttribute('data-tool-row', 'out')",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("renderStreamingContent missing stable tool scroll-state logic %q", want)
+		}
+	}
+
+	if strings.Contains(content, "prevToolBodyScrollStates.push") || strings.Contains(content, "prevToolBodyScrollStates[idx]") {
+		t.Fatal("renderStreamingContent must not preserve tool output scroll state by positional index")
+	}
+}
+
 // TestRenderStreamingContent_PreservesThinkingOpenState verifies that
 // renderStreamingContent saves and restores the open/closed state of
 // thinking <details> sections across re-renders (so polling/morph updates
@@ -2737,12 +2789,16 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 	content := buf.String()
 
 	required := []string{
-		"var prevToolBodyScrollStates = []",
+		"var prevToolBodyScrollStates = {}",
 		"container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el)",
+		"var toolID = el.getAttribute('data-tool-render-id') || ''",
+		"var rowKind = el.getAttribute('data-tool-row') || ''",
 		"var scrollableY = el.getAttribute('data-scrollable-y') === 'true' || el.scrollHeight > el.clientHeight + 1",
 		"var pinned = !scrollableY || (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2",
 		"inScroll.className = 'stream-tool-body-scroll'",
 		"outScroll.className = 'stream-tool-body-scroll'",
+		"inScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
+		"outScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
 		"el.setAttribute('data-scrollable-y', 'true')",
 		"el.removeAttribute('data-scrollable-y')",
 		"el.scrollTop = el.scrollHeight",
