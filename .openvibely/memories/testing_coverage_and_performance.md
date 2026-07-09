@@ -2,9 +2,9 @@
 name: testing_coverage_and_performance
 type: project
 created: 2026-06-07
-updated: 2026-07-08
-source: consolidation
-source_id: memory_consolidation_2026_07_08
+updated: 2026-07-09
+source: after_complete_memory_update
+source_id: 5e2f64df7cb867d549abf9d044450714
 confidence: high
 title: Testing Coverage and Performance
 ---
@@ -36,7 +36,7 @@ Runtime and validation facts:
 - `pkg/openai_client` and `pkg/anthropic_client` retry logic have a package-level `clockAfter = time.After` seam so tests can bypass real retry sleeps without changing production behavior.
 - A shared handler `TestMain` DB was deliberately not implemented because many handler tests mutate/query global/default/list state; `NewTestDB` already caches migrations and a shared DB would need transaction rollback isolation to be safe.
 - Prefer `make test`, `make test-cover`, or `go test ./... -count=1 -timeout 120s` for authoritative full validation. Raw 60s full-suite runs can time out in `internal/handler` or `internal/service` under load.
-- Full-suite failures may include unrelated/environmental desktop/config PATH issues, macOS Wails linker warnings, occasional SQLite-lock failures, date-sensitive handler reschedule tests, or plugin marketplace clone/network timeouts in `internal/agentplugins`/`internal/server`; distinguish repeatable touched-scope regressions from existing/environmental failure modes before attributing them to recent changes. When default temp-dir runs hang during plugin marketplace cloning, rerunning the full suite with `TMPDIR=/private/tmp` has been the stable validation path.
+- Full-suite failures may include unrelated/environmental desktop/config PATH issues, macOS Wails linker warnings, occasional SQLite-lock failures, date-sensitive handler reschedule tests, plugin marketplace clone/network timeouts in `internal/agentplugins`/`internal/server`, or the missing `.openvibely/skills/openvibely_github_autonomous_sdlc_bootstrap/SKILL.md` fixture causing `internal/agentskills` failures; distinguish repeatable touched-scope regressions from existing/environmental failure modes before attributing them to recent changes. When default temp-dir runs hang during plugin marketplace cloning, rerunning the full suite with `TMPDIR=/private/tmp` has been the stable validation path.
 - Handler `NewTestContext` now calls `h.SetLocalRepoPathEnabled(true)`, matching older `setupHandlerTest` default. Tests needing local paths disabled should explicitly call `tc.handler.SetLocalRepoPathEnabled(false)` after creating context.
 - Chat mode selector tests should reflect the custom portal select implementation: hidden form input updates are driven by `chat-select-change` custom events carrying `e.detail.value`, not native `change` events or `this.value`.
 - `internal/service` tests can intentionally emit malformed-JSON logs when exercising error paths; treat them as expected unless paired with a failing assertion/package result.

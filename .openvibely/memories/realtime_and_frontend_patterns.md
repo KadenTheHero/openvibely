@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-07-08
-source: consolidation
-source_id: memory_consolidation_2026_07_08
+updated: 2026-07-09
+source: after_complete_memory_update
+source_id: 5e2f64df7cb867d549abf9d044450714
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -57,6 +57,7 @@ Chat/thread rendering facts:
 - Chat/thread markdown rendering escapes raw HTML-like tags outside fenced/inline code before markdown parsing.
 - Chat and Task Thread composers share sent-message history navigation in the common composer template. History persists in localStorage, is capped at 50 entries, uses separate global-chat and per-task keys, and restores the pre-navigation draft when navigating past newest or pressing Escape.
 - Chat/task-thread tool result output should remain full-fidelity: canonical stream `tool_result` markers are not display-truncated, and shared rendering uses bounded responsive scroll containers that avoid trapping page/thread scrolling.
+- Chat/task-thread tool-call rendering must keep output boundaries per execution segment. Persisted/streamed tool markers currently identify results by tool name/status rather than provider call ID, so repeated same-tool cards, such as adjacent Bash calls, use stable per-tool render IDs, FIFO pairing of matching tool results, and scroll-state restoration keyed by tool render ID plus IN/OUT row rather than by tool name or positional index.
 - Plan-mode read-only repo exploration tool cards remain visible during live streams and refreshes.
 - Task-thread scroll thrashing during running executions was caused by stale recovery incorrectly terminalizing an execution while the background writer continued streaming, so polling alternated the DOM between streaming and terminal-error variants. Treat similar violent jump-to-top/auto-scroll loops as likely execution-state corruption first, not pure frontend scroll logic; see `chat_thread_system.md` for the stale-recovery/swarm-child race semantics.
 - `GetTaskThread` polling/morph fragments must be fully server-rendered for state that must survive in-place swaps. JS-only hydration can be wiped by the next poll; the model selector fixed this by server-rendering the selected label into the button.
@@ -72,12 +73,14 @@ Responsive and shared UI contracts:
 - Task detail completion UI state is split across independently refreshed fragments: status/metrics polling updates the badge, while state-dependent action controls live in `#task-detail-actions` and are refreshed through `/tasks/:taskId/detail-actions`.
 - Completed task Thread views include a server-rendered next-step CTA after the terminal status line. It opens the existing Changes tab when stored execution diff output is present, calls out merge actions only when task merge state indicates pending/failed/conflict, and falls back to no-diff/no-output guidance without implying mergeable changes.
 - Task Changes/diff surfaces must stay viewport-contained on 320px-class screens with wrapping flex rows, shrink-safe long paths/branch labels, and separate overflow boundaries for Changed Files and Worktree Changes lists. Current known gap from the 2026-06-14 audit: long filenames in diff-viewer Changed Files badge lists and long branch/target labels in the Worktree Changes header still need stronger containment.
+- Changes-tab Actions dropdowns need an explicit high stacking context above sticky diff file headers (`z-20`) and viewport max-width containment; using DaisyUI's low default-style `z-[1]` menu layering can leave Local/GitHub merge actions obscured by the diff surface.
 - Tasks page uses server-rendered kanban board/task-card templ components. Responsive contract: one-column stacked board/cards on phones, two columns around tablet widths, three columns on desktop, no phantom fourth column, no global fixed one-third column width, independent mobile dropzone scrolling, no page-level horizontal overflow, mobile-safe wrapping, at least 44px touch targets, compact desktop card density, and the `+ Add Task` header action colocated beside the title like Models `+ Add Model`.
 - Active kanban queued/pending dropzones should render only real active pending/queued/blocked work; terminal `failed`/`cancelled` task rows must not be displayed as queued work even as a defensive fallback for stale durable state.
 - In the Completed column, Date newest/oldest sorting is completion-time sorting via nullable `tasks.completed_at`; Backlog date sorting remains creation-time sorting. UI/tests should keep backlog and completed sort semantics distinct.
 - Responsive card pages such as Models, Agents, Alerts, Channels, and Personality should keep page roots, grids, cards, badges, and inner content shrink-safe with `max-w-full`/`min-w-0` containment. Long badge values need truncation within the badge row rather than expanding the card/grid.
 - Goal edit controls belong in the task edit dialog; verified-state Git worktree actions can remain on the details surface.
 - Schedule UI surfaces should clearly distinguish disabled schedules, and dynamic task-loop wakeups should remain visually distinct from fixed schedules.
+- Task detail pages opened from the Schedules page use `from=schedule` as the origin context. Destructive task delete flows should preserve that context with a whitelisted internal return token such as `return_to=schedule`, not arbitrary return URLs, so deleting from a schedules-origin detail flow returns to `/schedule` instead of the default Tasks page. The delete button return-context wiring must be present after the confirm button exists in rendered DOM; an inline script placed before the modal button can miss normal/full-page loads even when HTMX swaps appear to work.
 - Chat/thread/task-result links share global link token `--ov-link-color: #7480ff`.
 - Left sidebar navigation preserves hover-only highlight behavior unless the product intentionally redesigns selected nav state.
 - Mobile sidebar navigation uses DaisyUI drawer checkbox `#sidebar-toggle`; selecting a nav option should close the drawer only after HTMX has accepted/sent the request. The mobile drawer overlay and panel must layer above sticky page content, with the panel above the overlay.
