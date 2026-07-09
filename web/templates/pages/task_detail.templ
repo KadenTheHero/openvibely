@@ -86,13 +86,6 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 							}
 						}
 					}
-					var deleteBtn = document.getElementById('delete-task-confirm-button');
-					if (deleteBtn && from === 'schedule' && deleteBtn.dataset.scheduleDeleteUrl) {
-						deleteBtn.setAttribute('hx-delete', deleteBtn.dataset.scheduleDeleteUrl);
-						if (typeof htmx !== 'undefined') {
-							htmx.process(deleteBtn);
-						}
-					}
 				})();
 			</script>
 		</div>
@@ -150,12 +143,25 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 										Delete
 									</button>
 								</div>
-							</div>
-							<form method="dialog" class="modal-backdrop">
-								<button>close</button>
-							</form>
-						</dialog>
-					</div>
+								</div>
+								<form method="dialog" class="modal-backdrop">
+									<button>close</button>
+								</form>
+							</dialog>
+							<script>
+								(function() {
+									var params = new URLSearchParams(window.location.search);
+									if (params.get('from') !== 'schedule') return;
+									var deleteBtn = document.getElementById('delete-task-confirm-button');
+									if (deleteBtn && deleteBtn.dataset.scheduleDeleteUrl) {
+										deleteBtn.setAttribute('hx-delete', deleteBtn.dataset.scheduleDeleteUrl);
+										if (typeof htmx !== 'undefined') {
+											htmx.process(deleteBtn);
+										}
+									}
+								})();
+							</script>
+						</div>
 					<!-- Edit Form -->
 					<div id="task-detail-edit" class="hidden flex-1 overflow-y-auto min-h-0">
 						<form

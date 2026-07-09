@@ -743,11 +743,16 @@ func TestTaskDetailContent_DeleteButtonCarriesScheduleReturnContext(t *testing.T
 	if !strings.Contains(output, `data-schedule-delete-url="/tasks/task-schedule-delete?redirect=list&amp;return_to=schedule"`) {
 		t.Fatal("expected safe schedule return token on delete button")
 	}
-	if !strings.Contains(output, `from === 'schedule' && deleteBtn.dataset.scheduleDeleteUrl`) {
+	if !strings.Contains(output, `if (params.get('from') !== 'schedule') return;`) {
 		t.Fatal("expected script to activate schedule delete return only from schedule context")
 	}
-	if !strings.Contains(output, `deleteBtn.setAttribute('hx-delete', deleteBtn.dataset.scheduleDeleteUrl)`) {
+	buttonIndex := strings.Index(output, `id="delete-task-confirm-button"`)
+	scriptIndex := strings.Index(output, `deleteBtn.setAttribute('hx-delete', deleteBtn.dataset.scheduleDeleteUrl)`)
+	if scriptIndex == -1 {
 		t.Fatal("expected script to update the HTMX delete endpoint for schedule-origin task details")
+	}
+	if scriptIndex < buttonIndex {
+		t.Fatal("expected schedule delete return script to run after the delete button exists")
 	}
 }
 
