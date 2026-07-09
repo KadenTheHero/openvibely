@@ -2,9 +2,9 @@
 name: product_vision_and_autonomy
 type: project
 created: 2026-06-10
-updated: 2026-07-08
-source: consolidation
-source_id: memory_consolidation_2026_07_07
+updated: 2026-07-09
+source: after_complete_memory_update
+source_id: a7e8ff17f79ab7e721b50dafcbd0099a
 confidence: high
 title: Product Vision and Reviewable Autonomy
 ---
@@ -29,8 +29,8 @@ Recursive bootstrap skill direction:
 - The skill should behave as an easy button: short prompts such as “make this project autonomous” or “loop on this vision” should be enough.
 - The skill should use real OpenVibely control-plane tools to create/update the priority inbox, autonomous driver task, persisted goals, triage/audit/implementation/repair/review tasks, recurring schedules, dynamic wakeup guidance, task chaining, and curator loops; it should not merely describe the loop.
 - Source-of-truth file selection should be conservative: use explicit file paths or a single obvious canonical root file. If vision/spec/defect files are missing or ambiguous, ask the user which exact file(s) to use rather than guessing or creating a generic discovery task.
-- Direct setup must run from project Chat in Orchestrate mode because task-thread follow-ups are intentionally constrained from creating, editing, or scheduling tasks.
-- Indexed standalone skills still do not automatically kick in from ordinary interactive Chat prompts: interactive Chat uses recall-only memory preparation and does not run Skill Curator selected-skill routing or expose `skill_view`. “Make this project autonomous” needs manual skill selection/invocation or a product change that adds Chat standalone-skill routing.
+- Direct setup for bootstrap skills should run from a visible task or task-thread follow-up where lifecycle routing can select standalone skills and expose `skill_view`; ordinary interactive Chat does not run standalone skill routing today. Initial task runs now have runtime-tool-capable bootstrap support for visible task creation, persisted task goals, schedules, capabilities, and GitHub inbox/issue/PR tools when dependencies are wired and the provider supports runtime tools.
+- Indexed standalone skills still do not automatically kick in from ordinary interactive Chat prompts: interactive Chat uses recall-only memory preparation and does not run Skill Curator selected-skill routing or expose `skill_view`. “Make this project autonomous” needs a visible bootstrap task/task-thread invocation or a product change that adds Chat standalone-skill routing.
 - The tool contract should stay aligned with actual chat-control capabilities and avoid fictional orchestration APIs; current bootstrap idempotency is limited because there is no generic `list_tasks`/`list_schedules` action, and several goal/task actions require real task IDs rather than titles.
 - A successful bootstrap should produce visible OpenVibely objects, not just guidance: a User Priority Inbox, an Autonomous Project Driver, User Priority Triage, focused audit tasks, recurring schedules, safe initial executions when allowed, generated user-priority implementation tasks, and chained review/audit follow-ups.
 - The autonomous-loop skill should describe task coordination as mediated orchestration, not task-to-task communication.
