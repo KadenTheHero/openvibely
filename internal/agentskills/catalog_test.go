@@ -229,6 +229,9 @@ func TestBuiltInGitHubAutonomousSDLCBootstrapSkillContent(t *testing.T) {
 		"Never use labels beginning with `openvibely:`",
 		"Assignment to the configured OpenVibely GitHub inbox identity is the default human approval signal to start work",
 		"Assigned issues do not need an existing PR before automation may create OpenVibely implementation tasks",
+		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
+		"If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR",
+		"then call `set_task_goal` for the created task so it implements the issue",
 		"For PAT setups, use `github_list_my_assigned_issues` to find open issues assigned to the authenticated PAT user",
 		"For GitHub App setups, do not treat the installation owner or organization as an issue assignee",
 	} {
@@ -270,6 +273,9 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"Never use labels beginning with `openvibely:`",
 		"Assignment to the configured OpenVibely GitHub inbox identity is the default human approval signal to start work",
 		"Assigned issues do not need an existing PR before automation may create OpenVibely implementation tasks",
+		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
+		"If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR",
+		"then call `set_task_goal` for the created task so it implements the issue",
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("GitHub bootstrap skill missing %q", want)
@@ -288,6 +294,9 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"Never use labels beginning with `openvibely:`",
 		"Assignment to the PAT owner or configured Authorized User is the default approval signal",
 		"assigned issues do not need an existing PR first",
+		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
+		"If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR",
+		"then call `set_task_goal` for the created task so it implements the issue",
 	} {
 		if !strings.Contains(guideText, want) {
 			t.Fatalf("GitHub autonomous SDLC guide missing %q", want)
