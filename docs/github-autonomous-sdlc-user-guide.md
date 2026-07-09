@@ -58,9 +58,9 @@ Check GitHub for implementation mailbox work for this project.
 
 If this project uses a PAT, call `github_list_my_assigned_issues` to list open issues assigned to the PAT owner. If this project uses GitHub App mode or custom mailbox accounts, call `github_get_project_inbox` to get Authorized Users; pass each returned assignee login to `github_list_assigned_issues`. If GitHub credentials or Authorized Users are missing, stop and explain the missing configuration.
 
-For each returned issue, inspect it with `github_get_issue`. Apply the user's workflow eligibility rule before creating implementation work. If this workflow still requires an associated PR before automation may touch an assigned issue, use `github_list_assigned_issues_with_prs` for the same assignee and skip assigned issues that have no associated PR according to that tool result.
+For each returned issue, inspect it with `github_get_issue`. Treat assignment to the PAT owner or one of the configured Authorized Users as the user's approval to start implementation work, even when the issue has no associated PR yet. Do not call `github_list_assigned_issues_with_prs` as a default eligibility gate; use it only if you explicitly want a PR-associated-issues-only workflow.
 
-Treat an eligible issue as actionable when it is assigned to the PAT owner or one of the configured Authorized Users and has any explicit human approval signal required by your workflow.
+Treat an eligible issue as actionable when it is assigned to the PAT owner or one of the configured Authorized Users. Optional labels such as `approved`, `feature`, `bug`, `performance`, or `duplication` may refine priority/scope, but do not require an `approved` label unless your workflow explicitly says to require one.
 
 For actionable issues, create or continue visible OpenVibely work using task/thread/goal tools available in this run. Comment concise status on the issue with `github_comment_on_issue`.
 
@@ -83,7 +83,7 @@ Open GitHub suggestion issues only. Use `github_create_issue` with unprefixed la
 Include enough context for a human to approve, reject, or assign the issue. Avoid duplicates by searching or inspecting existing visible work when the available tools allow it.
 ```
 
-Offering and finder tasks should open issues only. Implementation and fixer tasks should act on issues assigned to the PAT owner or configured Authorized Users, plus any explicit human approval signal required by your workflow.
+Offering and finder tasks should open issues only. Implementation and fixer tasks should act on issues assigned to the PAT owner or configured Authorized Users. Add labels such as `approved`, `feature`, or `bug` when useful for human organization, but assignment is the default approval signal for entering the implementation mailbox.
 
 ## Labels
 
@@ -110,16 +110,16 @@ Never use labels beginning with `openvibely:`. OpenVibely rejects that prefix in
 
 - Scheduled tasks are the loop engine; do not create hidden GitHub poller daemons.
 - GitHub tools are generic reusable capabilities, not SDLC-only APIs.
-- Assigned GitHub issues without an associated PR must be skipped unless the workflow is explicitly changed.
-- Do not use `github_open_pull_request` as a loophole to start automation for an assigned issue that the mailbox eligibility rule would otherwise skip.
-- Do not treat GitHub API credentials as human authorization.
+- Assignment to the PAT owner or configured Authorized User is the default approval signal for OpenVibely to create implementation work; assigned issues do not need an existing PR first.
+- Use `github_list_assigned_issues_with_prs` only for explicit PR-associated-issues-only workflows, not for the normal issue-to-task-to-PR flow.
+- Do not treat GitHub API credentials alone as human authorization; the issue must be assigned to the configured inbox identity.
 - Keep each implementation task tied to visible issue/task/PR state so humans can review and merge in GitHub.
 
 ## Troubleshooting
 
 - Dev Inbox stops with missing GitHub account: configure a PAT, or add the GitHub App mailbox user/bot to Authorized Users.
-- Dev Inbox refuses work: make sure the issue is assigned to the PAT owner or configured Authorized Users, and apply any expected human approval label.
-- Assigned issue is skipped: verify it has the associated PR signal required by the current workflow rule.
+- Dev Inbox refuses work: make sure the issue is assigned to the PAT owner or configured Authorized Users, and remove any stale prompt text that also requires an existing PR or `approved` label.
+- Assigned issue is skipped: verify the Dev Inbox task goal/prompt treats assignment as approval for the normal issue-to-task-to-PR flow.
 - PR creation fails: check that the task has a worktree branch and that GitHub credentials allow API-backed branch publication and PR creation.
 - Labels are rejected: remove any `openvibely:` prefix and use the plain label vocabulary above.
 
