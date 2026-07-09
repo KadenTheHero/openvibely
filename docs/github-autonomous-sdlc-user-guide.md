@@ -10,7 +10,7 @@ Why this matters:
 
 - GitHub issues stay the durable inbox for suggestions, approved work, blockers, and status.
 - GitHub PRs stay the review and merge boundary.
-- OpenVibely tasks, goals, schedules, threads, and worktrees remain visible and inspectable.
+- OpenVibely tasks, schedules, threads, and worktrees remain visible and inspectable; persisted goals are for implementation tasks or explicit goal-driven work, not the default recurrence mechanism for scheduled loops.
 - Humans keep control of approval, prioritization, review, merge, credentials, and release decisions.
 
 ## Prerequisites
@@ -33,7 +33,7 @@ GitHub issue API tools default to the current project repository, but prompts ma
 OpenVibely bundles `openvibely_github_autonomous_sdlc_bootstrap` as a reusable global skill. In any project with GitHub configured, create or run a visible bootstrap task/task-thread turn so lifecycle routing can select the skill, then ask:
 
 ```text
-Use the OpenVibely GitHub Autonomous SDLC Bootstrap skill to set up the GitHub SDLC loop for this project. Create the visible scheduled tasks, goals, and schedules needed. Use the current project GitHub channel configuration. Report anything missing.
+Use the OpenVibely GitHub Autonomous SDLC Bootstrap skill to set up the GitHub SDLC loop for this project. Create the visible scheduled loop tasks and schedules needed. Do not set persisted goals on recurring loop tasks; schedules drive the loop. Use the current project GitHub channel configuration. Report anything missing.
 ```
 
 The skill creates or updates normal visible tasks and schedules; it does not start a hidden daemon. Setup should create one visible task per loop role and schedule that same task, not create separate standalone runner tasks plus scheduled duplicates. The first setup action should create/run `GitHub Offering Manager: Vision Suggestions` immediately so it can open initial suggestion issues, then attach its daily schedule and create the Dev Inbox, Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor schedules afterward.
@@ -52,8 +52,9 @@ You can later add Bug Finder, Optimization Finder, Redundancy Finder, and Loop A
 Initial setup order:
 
 1. Create `GitHub Offering Manager: Vision Suggestions` first and run that same task immediately. If no explicit run-existing-task action is available, create it as `active` for the first run, then attach the daily schedule to that same task after the creation/start action is accepted.
-2. Create `GitHub Dev Inbox`, `GitHub Bug Finder`, `GitHub Optimization Finder`, `GitHub Redundancy Finder`, and optional Loop Auditor tasks as their own scheduled tasks, set their goals, and attach their recurring schedules.
+2. Create `GitHub Dev Inbox`, `GitHub Bug Finder`, `GitHub Optimization Finder`, `GitHub Redundancy Finder`, and optional Loop Auditor tasks as their own scheduled tasks and attach their recurring schedules without setting persisted task goals.
 3. Do not create separate standalone one-off runner tasks in addition to the scheduled loop tasks. Do not immediately start Dev Inbox or scanner/finder tasks during bootstrap unless the user explicitly asks for an immediate poll/scan pass.
+4. Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues, or when the user explicitly asks for goal-driven continuation.
 
 ## Dev Inbox Prompt Pattern
 

@@ -5,18 +5,18 @@ skill:
     key: openvibely_github_autonomous_sdlc_bootstrap
     name: OpenVibely GitHub Autonomous SDLC Bootstrap
     scope: global
-    description: Bootstrap a GitHub-backed, prompt-driven autonomous SDLC loop using generic GitHub tools and visible OpenVibely tasks, goals, and schedules.
+    description: Bootstrap a GitHub-backed, prompt-driven autonomous SDLC loop using generic GitHub tools and visible OpenVibely tasks and schedules.
 ---
 
 # OpenVibely GitHub Autonomous SDLC Bootstrap
 
 Use this skill when the user asks to automate a project with GitHub, use GitHub issues as a mailbox, or set up reviewable GitHub issue-to-task-to-PR development.
 
-Keep the setup generic. Use existing OpenVibely tasks, task goals, schedules, task threads, and generic GitHub runtime tools. Do not create hidden daemon or poller services, workflow-specific database state, or bespoke SDLC-only backends when a visible scheduled task prompt and reusable tools are enough.
+Keep the setup generic. Use existing OpenVibely tasks, schedules, task threads, and generic GitHub runtime tools. Do not create hidden daemon or poller services, workflow-specific database state, or bespoke SDLC-only backends when a visible scheduled task prompt and reusable tools are enough. Recurring loop tasks should be driven by their schedules and prompt text, not persisted task goals, unless the user explicitly asks for goal-driven continuation.
 
 ## Required Direction
 
-- Scheduled tasks are the loop engine. Create or update visible scheduled OpenVibely tasks with prompts that say exactly what GitHub mailbox work to perform.
+- Scheduled tasks are the loop engine. Create or update visible scheduled OpenVibely tasks with prompts that say exactly what GitHub mailbox work to perform. Do not set persisted task goals on recurring loop tasks by default; their recurrence comes from `schedule_task`, not Goal Agent continuation.
 - Bootstrap setup should run from a visible task or task-thread follow-up so lifecycle routing can select this skill and expose `skill_view`; ordinary Chat may have Orchestrate actions but does not run standalone skill routing today. If a user starts in Chat, create a small bootstrap task and continue setup there rather than claiming the skill was applied in Chat.
 - GitHub tools are reusable capabilities, not SDLC-only APIs. For PAT setups, use `github_list_my_assigned_issues` to find open issues assigned to the authenticated PAT user. For GitHub App setups, do not treat the installation owner or organization as an issue assignee; add the real GitHub user or bot that should receive work to Authorized Users, read those assignee candidates with `github_get_project_inbox`, and pass each login to `github_list_assigned_issues`. When a prompt names a specific GitHub repository URL, pass `repo_url` to issue create/read/list/comment/label tools. Use `github_is_actor_authorized`, `github_create_issue`, `github_get_issue`, `github_list_assigned_issues_with_prs`, `github_comment_on_issue`, `github_add_issue_labels`, and `github_open_pull_request` when available.
 - GitHub PR publication for implementation tasks should use `github_open_pull_request`, not ad hoc `git push` or GitHub CLI fallback. The tool is current-project/task scoped, publishes the task worktree branch through the configured GitHub token/API, then opens or reuses the PR and persists task PR metadata. The Changes tab Create PR button uses the same backend path with UI defaults; the runtime tool can additionally pass PR title/body/base/draft and issue metadata.
@@ -28,12 +28,13 @@ Keep the setup generic. Use existing OpenVibely tasks, task goals, schedules, ta
 ## Bootstrap Steps
 
 1. Confirm the current project, repository, and GitHub credentials. Ask only for missing inputs.
-2. Create one visible OpenVibely task per loop role; do not create separate one-off setup/runner tasks in addition to the scheduled loop tasks. The task you schedule is the task that owns the loop prompt and goal.
-3. Create `GitHub Offering Manager: Vision Suggestions` first and make it run immediately before creating downstream implementation schedules. If the current runtime cannot explicitly execute an existing task, create this task as `active` for its first run, wait for that setup action to be accepted, then attach its daily recurring schedule to the same task. Do not create a second standalone Vision Suggestions task for the immediate run.
-4. After the Vision Suggestions task is created for its immediate first run, create the Dev Inbox plus optional Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks as the scheduled loop tasks themselves, set persisted goals on those tasks, and attach their recurring schedules. Do not start Dev Inbox or scanner/finder tasks as extra one-off setup work unless the user explicitly asks for an immediate poll/scan pass.
+2. Create one visible OpenVibely task per loop role; do not create separate one-off setup/runner tasks in addition to the scheduled loop tasks. The task you schedule is the task that owns the loop prompt. Do not call `set_task_goal` for recurring loop tasks during bootstrap.
+3. Create `GitHub Offering Manager: Vision Suggestions` first and make it run immediately before creating downstream implementation schedules. If the current runtime cannot explicitly execute an existing task, create this task as `active` for its first run, wait for that setup action to be accepted, then attach its daily recurring schedule to the same task. Do not create a second standalone Vision Suggestions task for the immediate run, and do not set a persisted goal on this recurring loop task.
+4. After the Vision Suggestions task is created for its immediate first run, create the Dev Inbox plus optional Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks as the scheduled loop tasks themselves and attach their recurring schedules without setting persisted task goals. Do not start Dev Inbox or scanner/finder tasks as extra one-off setup work unless the user explicitly asks for an immediate poll/scan pass.
 5. Create recurring schedules with `schedule_task`; usually daily for suggestion/finder/scanner tasks, hourly for Dev Inbox, and weekly for auditor tasks. Reuse the same task IDs/titles for schedules rather than duplicating tasks.
 6. Put the behavior in each task prompt. Prompts should tell the agent which generic GitHub tools to call, which labels/auth checks to apply, what to skip, and what visible task/comment/PR updates to make.
-7. Report exactly which tasks, goals, schedules, labels, and GitHub credential/settings dependencies were created or still need user action.
+7. Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues, or when the user explicitly asks for a goal-driven task. Do not use persisted goals to make scheduled loop tasks recur.
+8. Report exactly which tasks, schedules, labels, and GitHub credential/settings dependencies were created or still need user action.
 
 ## Suggested Visible Tasks
 
