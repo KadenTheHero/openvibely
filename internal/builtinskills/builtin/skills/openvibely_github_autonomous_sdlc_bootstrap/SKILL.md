@@ -28,10 +28,12 @@ Keep the setup generic. Use existing OpenVibely tasks, task goals, schedules, ta
 ## Bootstrap Steps
 
 1. Confirm the current project, repository, and GitHub credentials. Ask only for missing inputs.
-2. Create or update visible tasks and persisted goals for the desired loop. Prefer a small starting set before adding every possible finder/fixer.
-3. Create recurring schedules with `schedule_task`; usually daily for suggestion/finder tasks and hourly for inbox/fixer tasks.
-4. Put the behavior in each task prompt. Prompts should tell the agent which generic GitHub tools to call, which labels/auth checks to apply, what to skip, and what visible task/comment/PR updates to make.
-5. Report exactly which tasks, goals, schedules, labels, and GitHub credential/settings dependencies were created or still need user action.
+2. Create one visible OpenVibely task per loop role; do not create separate one-off setup/runner tasks in addition to the scheduled loop tasks. The task you schedule is the task that owns the loop prompt and goal.
+3. Create `GitHub Offering Manager: Vision Suggestions` first and make it run immediately before creating downstream implementation schedules. If the current runtime cannot explicitly execute an existing task, create this task as `active` for its first run, wait for that setup action to be accepted, then attach its daily recurring schedule to the same task. Do not create a second standalone Vision Suggestions task for the immediate run.
+4. After the Vision Suggestions task is created for its immediate first run, create the Dev Inbox, Bug Fixer, and optional auditor/finder tasks as the scheduled loop tasks themselves, set persisted goals on those tasks, and attach their recurring schedules. Do not start Dev Inbox or fixer tasks as extra one-off setup work unless the user explicitly asks for an immediate poll/fix run.
+5. Create recurring schedules with `schedule_task`; usually daily for suggestion/finder tasks, hourly for inbox/fixer tasks, and weekly for auditor tasks. Reuse the same task IDs/titles for schedules rather than duplicating tasks.
+6. Put the behavior in each task prompt. Prompts should tell the agent which generic GitHub tools to call, which labels/auth checks to apply, what to skip, and what visible task/comment/PR updates to make.
+7. Report exactly which tasks, goals, schedules, labels, and GitHub credential/settings dependencies were created or still need user action.
 
 ## Suggested Visible Tasks
 

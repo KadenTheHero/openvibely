@@ -36,7 +36,7 @@ OpenVibely bundles `openvibely_github_autonomous_sdlc_bootstrap` as a reusable g
 Use the OpenVibely GitHub Autonomous SDLC Bootstrap skill to set up the GitHub SDLC loop for this project. Create the visible scheduled tasks, goals, and schedules needed. Use the current project GitHub channel configuration. Report anything missing.
 ```
 
-The skill creates or updates normal visible tasks and schedules; it does not start a hidden daemon.
+The skill creates or updates normal visible tasks and schedules; it does not start a hidden daemon. Setup should create one visible task per loop role and schedule that same task, not create separate standalone runner tasks plus scheduled duplicates. The first setup action should create/run `GitHub Offering Manager: Vision Suggestions` immediately so it can open initial suggestion issues, then attach its daily schedule and create the Dev Inbox, Bug Fixer, and auditor/finder schedules afterward.
 
 ## Minimum Visible Loop
 
@@ -48,6 +48,12 @@ Start with two scheduled tasks before adding more finders/fixers.
 | `GitHub Dev Inbox` | Hourly | Checks open issues assigned to the PAT user or configured GitHub Authorized Users and links/updates eligible work. |
 
 You can later add bug, performance, duplication, and loop-auditor tasks using the same pattern.
+
+Initial setup order:
+
+1. Create `GitHub Offering Manager: Vision Suggestions` first and run that same task immediately. If no explicit run-existing-task action is available, create it as `active` for the first run, then attach the daily schedule to that same task after the creation/start action is accepted.
+2. Create `GitHub Dev Inbox`, `GitHub Bug Fixer`, and optional auditor/finder loop tasks as their own scheduled tasks, set their goals, and attach their recurring schedules.
+3. Do not create separate standalone one-off runner tasks in addition to the scheduled loop tasks. Do not immediately start Dev Inbox or fixer tasks during bootstrap unless the user explicitly asks for an immediate poll/fix pass.
 
 ## Dev Inbox Prompt Pattern
 
