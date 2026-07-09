@@ -59,6 +59,26 @@ func TestTaskChangesWorktreeContent_HeaderLabelsStayContained(t *testing.T) {
 	}
 }
 
+func TestTaskChangesWorktreeContent_ActionsDropdownLayersAboveDiffHeaders(t *testing.T) {
+	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
+
+	var buf bytes.Buffer
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `<div class="dropdown dropdown-end relative z-[60] flex-shrink-0" id="changes-actions-dropdown">`) {
+		t.Fatal("expected Actions dropdown to establish a stacking context above sticky diff headers")
+	}
+	if !strings.Contains(out, `<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-52 max-w-[calc(100vw-2rem)] border border-base-300">`) {
+		t.Fatal("expected Actions menu content to layer above diff content and stay viewport-contained")
+	}
+	legacyActionsSnippet := `<div class="dropdown dropdown-end flex-shrink-0" id="changes-actions-dropdown"><div tabindex="0" role="button" class="btn btn-primary btn-sm whitespace-nowrap">Actions <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></div><ul tabindex="0" class="dropdown-content z-[1] menu`
+	if strings.Contains(out, legacyActionsSnippet) {
+		t.Fatal("Actions dropdown must not use the previous low z-index that allowed sticky diff headers to cover it")
+	}
+}
+
 func TestTaskChangesWorktreeContent_RendersCreatePRInGitHubSection(t *testing.T) {
 	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
 	var buf bytes.Buffer
