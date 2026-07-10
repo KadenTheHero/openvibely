@@ -40,6 +40,15 @@ func TestCodexReasoningEffort_ConfiguredEffortWins(t *testing.T) {
 	}
 }
 
+func TestCodexReasoningEffort_NewModelLevels(t *testing.T) {
+	if got := CodexReasoningEffort("gpt-5.6-sol", "max"); got != "max" {
+		t.Fatalf("expected Sol to preserve max, got %q", got)
+	}
+	if got := CodexReasoningEffort("gpt-5.6-sol", "ultra"); got != "high" {
+		t.Fatalf("expected unsupported ultra to fall back to high, got %q", got)
+	}
+}
+
 func TestCodexExecArgs_IncludesReasoningOverride(t *testing.T) {
 	t.Setenv("OPENVIBELY_CODEX_REASONING_EFFORT", "low")
 

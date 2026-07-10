@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -419,11 +420,15 @@ func (h *Handler) CreateModel(c echo.Context) error {
 		workerTimeout = 0
 	}
 
+	model := c.FormValue("model")
+	if provider == models.ProviderOpenAI {
+		model = normalizeOpenAIModel(model)
+	}
 	a := &models.LLMConfig{
 		Name:            c.FormValue("name"),
 		Provider:        provider,
-		Model:           c.FormValue("model"),
-		ReasoningEffort: normalizeProviderReasoningEffort(provider, reasoningEffort),
+		Model:           model,
+		ReasoningEffort: normalizeProviderReasoningEffort(provider, model, reasoningEffort),
 		APIKey:          c.FormValue("api_key"),
 		Temperature:     temp,
 		IsDefault:       isDefault,
@@ -463,9 +468,6 @@ func (h *Handler) CreateModel(c echo.Context) error {
 	}
 	if a.Provider == "" {
 		a.Provider = models.ProviderAnthropic
-	}
-	if a.Provider == models.ProviderOpenAI {
-		a.Model = normalizeOpenAIModel(a.Model)
 	}
 	applog.Infof("[handler] CreateModel name=%q provider=%s model=%s auth_method=%s temp=%.1f default=%v",
 		a.Name, a.Provider, a.Model, a.AuthMethod, a.Temperature, a.IsDefault)
@@ -522,10 +524,10 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 	agent.AuthMethod = authMethod
 
 	agent.Model = c.FormValue("model")
-	agent.ReasoningEffort = normalizeProviderReasoningEffort(provider, c.FormValue("reasoning_effort"))
 	if agent.Provider == models.ProviderOpenAI {
 		agent.Model = normalizeOpenAIModel(agent.Model)
 	}
+	agent.ReasoningEffort = normalizeProviderReasoningEffort(provider, agent.Model, c.FormValue("reasoning_effort"))
 	if agent.Provider == models.ProviderOpenAICompatible {
 		agent.Model = strings.TrimSpace(agent.Model)
 	}
@@ -737,10 +739,10 @@ func (h *Handler) buildModelWorkerStats(agents []models.LLMConfig) map[string]in
 	return stats
 }
 
-func normalizeProviderReasoningEffort(provider models.LLMProvider, value string) string {
+func normalizeProviderReasoningEffort(provider models.LLMProvider, model, value string) string {
 	switch provider {
 	case models.ProviderOpenAI:
-		return normalizeOpenAIReasoningEffort(value)
+		return normalizeOpenAIReasoningEffort(model, value)
 	case models.ProviderAnthropic:
 		return normalizeAnthropicEffort(value)
 	default:
@@ -748,13 +750,12 @@ func normalizeProviderReasoningEffort(provider models.LLMProvider, value string)
 	}
 }
 
-func normalizeOpenAIReasoningEffort(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "low", "medium", "high", "xhigh":
-		return strings.ToLower(strings.TrimSpace(value))
-	default:
-		return ""
+func normalizeOpenAIReasoningEffort(model, value string) string {
+	effort := llmprompt.NormalizeReasoningEffortValue(value)
+	if llmprompt.StringInSlice(effort, llmprompt.CodexSupportedReasoningEfforts(model)) {
+		return effort
 	}
+	return ""
 }
 
 func normalizeAnthropicEffort(value string) string {
@@ -865,7 +866,10 @@ func (h *Handler) ListOllamaAvailableModels(c echo.Context) error {
 
 func normalizeOpenAIModel(value string) string {
 	switch strings.TrimSpace(value) {
-	case "gpt-5.5",
+	case "gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna",
+		"gpt-5.5",
 		"gpt-5.5-pro",
 		"gpt-5.4",
 		"gpt-5.4-mini",
@@ -879,6 +883,6 @@ func normalizeOpenAIModel(value string) string {
 		"gpt-5-codex-mini":
 		return strings.TrimSpace(value)
 	default:
-		return "gpt-5.5"
+		return "gpt-5.6-sol"
 	}
 }

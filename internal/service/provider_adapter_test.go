@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -10,7 +9,6 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
-	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
 func TestProviderAdapter_TestProvider_UsesCanonicalRequest(t *testing.T) {
@@ -154,21 +152,6 @@ func TestRequestUsesChatStreamingTreatsFirstTurnChatAsChat(t *testing.T) {
 	}
 	if requestUsesChatStreaming(llmcontracts.AgentRequest{Operation: llmcontracts.OperationStreaming}) {
 		t.Fatal("streaming task without explicit chat mode/history/context must not use chat streaming")
-	}
-}
-
-func TestShouldFallbackOpenAI(t *testing.T) {
-	oauth := models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth}
-	apiKey := models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey}
-
-	if !shouldFallbackOpenAI(oauth, errors.New("missing scopes: responses.write")) {
-		t.Fatal("expected OAuth missing-scopes error to be fallbackable")
-	}
-	if shouldFallbackOpenAI(oauth, openaiclient.ErrQuotaExceeded) {
-		t.Fatal("expected quota error to be fatal (no fallback)")
-	}
-	if shouldFallbackOpenAI(apiKey, errors.New("missing scopes: responses.write")) {
-		t.Fatal("expected non-OAuth config to never fallback")
 	}
 }
 

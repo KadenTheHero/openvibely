@@ -552,6 +552,10 @@ func openAIAutoCompactionTokenLimit(model string) int {
 
 func openAIModelContextWindow(model string) (int, bool) {
 	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna":
+		return 372000, true
 	case "gpt-5.5",
 		"gpt-5.5-pro",
 		"gpt-5.4",
@@ -601,6 +605,14 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 	if len(reasoningPayload) > 0 {
 		payload["reasoning"] = reasoningPayload
 	}
+	if isChatGPTOAuth && isResponsesLiteWebsocketModel(opts.Model) {
+		if len(reasoningPayload) == 0 {
+			reasoningPayload["effort"] = "medium"
+		}
+		reasoningPayload["context"] = "all_turns"
+		payload["reasoning"] = reasoningPayload
+		payload["parallel_tool_calls"] = false
+	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -620,6 +632,9 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 		c.applyAuthHeaders(httpReq, isChatGPTOAuth)
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "application/json")
+		if isChatGPTOAuth && isResponsesLiteWebsocketModel(opts.Model) {
+			httpReq.Header.Set("x-openai-internal-codex-responses-lite", "true")
+		}
 		return httpReq, nil
 	}
 
@@ -1043,6 +1058,16 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 		payload["truncation"] = "auto"
 	}
 
+	if isChatGPTOAuth && isResponsesLiteWebsocketModel(opts.Model) {
+		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
+		body, wsErr := c.openResponsesWebsocketStream(ctx, wsPayload)
+		if wsErr != nil {
+			return nil, wsErr
+		}
+		defer body.Close()
+		return c.parseAgenticStreamWithToolCallbacks(body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult)
+	}
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -1253,6 +1278,7 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 					// Text message items are handled via deltas
 					result.outputItems = append(result.outputItems, item)
 				case "reasoning":
+					result.outputItems = append(result.outputItems, item)
 					if onThinking != nil {
 						if text := openAIReasoningTextFromItem(item); text != "" {
 							onThinking(text)
@@ -1281,11 +1307,8 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 				}
 			}
 
-		case "response.error", "error":
-			if msg := extractErrorMessage(ev); msg != "" {
-				return nil, fmt.Errorf("stream error: %s", msg)
-			}
-			return nil, fmt.Errorf("stream error: unknown")
+		case "response.failed", "response.incomplete", "response.error", "error":
+			return nil, responsesStreamTerminalError(typ, ev)
 
 		case "response.completed":
 			if m, ok := ev["response"].(map[string]any); ok {
@@ -1423,7 +1446,8 @@ func providerNativeOutputItemKey(item map[string]any, outputIndex int) string {
 // field; gpt-5.2+ families support it.
 func openAIModelSupportsWebSearch(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
-	return strings.HasPrefix(m, "gpt-5.5") ||
+	return strings.HasPrefix(m, "gpt-5.6") ||
+		strings.HasPrefix(m, "gpt-5.5") ||
 		strings.HasPrefix(m, "gpt-5.4") ||
 		strings.HasPrefix(m, "gpt-5.3") ||
 		strings.HasPrefix(m, "gpt-5.2")

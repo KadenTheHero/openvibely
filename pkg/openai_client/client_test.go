@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 func TestRefreshToken(t *testing.T) {
@@ -107,6 +110,10 @@ func TestSend_NonStreaming(t *testing.T) {
 		if body["model"] != "gpt-5.3-codex" {
 			t.Fatalf("model = %v, want gpt-5.3-codex", body["model"])
 		}
+		reasoning, _ := body["reasoning"].(map[string]any)
+		if reasoning["effort"] != "xhigh" {
+			t.Fatalf("reasoning.effort = %v, want xhigh", reasoning["effort"])
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -144,7 +151,7 @@ func TestSend_NonStreaming(t *testing.T) {
 	resp, err := client.Send(context.Background(), "Hello", &SendOptions{
 		Model:           "gpt-5.3-codex",
 		MaxOutputTokens: 128,
-		ReasoningEffort: "xhigh", // should be ignored (unsupported for API)
+		ReasoningEffort: "xhigh",
 	})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
@@ -210,8 +217,8 @@ func TestSend_OAuthUsesChatGPTBackendAndAccountHeader(t *testing.T) {
 		if got := r.Header.Get("originator"); got != "codex_cli_rs" {
 			t.Fatalf("originator header = %q, want codex_cli_rs", got)
 		}
-		if got := r.URL.Query().Get("client_version"); got != "0.0.0" {
-			t.Fatalf("client_version query = %q, want 0.0.0", got)
+		if got := r.URL.Query().Get("client_version"); got != "0.144.0" {
+			t.Fatalf("client_version query = %q, want 0.144.0", got)
 		}
 		if got := r.Header.Get("session_id"); got == "" {
 			t.Fatalf("session_id header should be set")
@@ -242,6 +249,12 @@ func TestSend_OAuthUsesChatGPTBackendAndAccountHeader(t *testing.T) {
 		if got, ok := body["stream"].(bool); !ok || !got {
 			t.Fatalf("stream = %#v, want true", body["stream"])
 		}
+		if got := body["model"]; got != "gpt-5.6-terra" {
+			t.Fatalf("model = %#v, want gpt-5.6-terra", got)
+		}
+		if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "" {
+			t.Fatalf("responses-lite header = %q, want omitted for HTTP SSE", got)
+		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte(
@@ -260,7 +273,7 @@ func TestSend_OAuthUsesChatGPTBackendAndAccountHeader(t *testing.T) {
 	// Ensure OAuth token is treated as valid and no refresh request is made.
 	client := NewWithOAuthToken(testOAuthJWT("org_test_123"), "refresh-token", time.Now().Add(2*time.Hour).UnixMilli(), "org_test_123")
 	resp, err := client.Send(context.Background(), "Hello", &SendOptions{
-		Model: "gpt-5.3-codex",
+		Model: "gpt-5.6-terra",
 	})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
@@ -278,6 +291,160 @@ func TestExtractChatGPTAccountID(t *testing.T) {
 	}
 	if got := ExtractChatGPTAccountID("not-a-jwt"); got != "" {
 		t.Fatalf("extractChatGPTAccountID invalid token = %q, want empty", got)
+	}
+}
+
+func TestSend_OAuthLunaUsesResponsesLiteWebSocket(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("path = %q, want /responses", r.URL.Path)
+		}
+		if got := r.Header.Get("OpenAI-Beta"); got != openAIResponsesWebsocketBeta {
+			t.Fatalf("OpenAI-Beta = %q", got)
+		}
+		if got := r.Header.Get("ChatGPT-Account-ID"); got != "org_test" {
+			t.Fatalf("ChatGPT-Account-ID = %q", got)
+		}
+		if r.Header.Get("session-id") == "" || r.Header.Get("thread-id") == "" {
+			t.Fatalf("missing Codex session headers")
+		}
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		_, data, err := conn.Read(r.Context())
+		if err != nil {
+			t.Errorf("read request: %v", err)
+			return
+		}
+		var request map[string]any
+		if err := json.Unmarshal(data, &request); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		if request["type"] != "response.create" || request["model"] != "gpt-5.6-luna" {
+			t.Errorf("request type/model = %v/%v", request["type"], request["model"])
+		}
+		if _, ok := request["tools"]; ok {
+			t.Error("top-level tools must be omitted for Responses Lite")
+		}
+		input, _ := request["input"].([]any)
+		if len(input) < 3 || input[0].(map[string]any)["type"] != "additional_tools" || input[1].(map[string]any)["role"] != "developer" {
+			t.Errorf("unexpected Lite input prefix: %#v", input)
+		}
+		metadata, _ := request["client_metadata"].(map[string]any)
+		if metadata[responsesLiteMetadataKey] != "true" {
+			t.Errorf("Responses Lite metadata = %#v", metadata)
+		}
+		events := []string{
+			`{"type":"response.output_text.delta","delta":"ok"}`,
+			`{"type":"response.completed","response":{"model":"gpt-5.6-luna","status":"completed","usage":{"input_tokens":2,"output_tokens":1}}}`,
+		}
+		for _, event := range events {
+			if err := conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+				t.Errorf("write event: %v", err)
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	original := OpenAIChatGPTAPIBaseURL
+	OpenAIChatGPTAPIBaseURL = srv.URL
+	defer func() { OpenAIChatGPTAPIBaseURL = original }()
+
+	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
+	resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "gpt-5.6-luna"})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if resp.Text != "ok" || resp.Model != "gpt-5.6-luna" {
+		t.Fatalf("response = %#v", resp)
+	}
+}
+
+func TestSend_OAuthLunaWebSocketFailedEventReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			t.Errorf("read request: %v", err)
+			return
+		}
+		failed := `{"type":"response.failed","response":{"status":"failed","error":{"code":"context_length_exceeded","message":"input is too large"}}}`
+		if err := conn.Write(r.Context(), websocket.MessageText, []byte(failed)); err != nil {
+			t.Errorf("write failed event: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	original := OpenAIChatGPTAPIBaseURL
+	OpenAIChatGPTAPIBaseURL = srv.URL
+	defer func() { OpenAIChatGPTAPIBaseURL = original }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
+	_, err := client.Send(ctx, "Hello", &SendOptions{Model: "gpt-5.6-luna"})
+	if err == nil || !strings.Contains(err.Error(), "input is too large") {
+		t.Fatalf("Send error = %v, want backend failure", err)
+	}
+	if !strings.Contains(err.Error(), "context_length_exceeded") {
+		t.Fatalf("Send error = %v, want backend error code", err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Send waited for context deadline: %v", err)
+	}
+}
+
+func TestSend_OAuthLunaLive(t *testing.T) {
+	if os.Getenv("OPENVIBELY_LIVE_OPENAI") != "1" {
+		t.Skip("set OPENVIBELY_LIVE_OPENAI=1 to run")
+	}
+	token := os.Getenv("OPENVIBELY_LIVE_OPENAI_TOKEN")
+	if token == "" {
+		t.Fatal("OPENVIBELY_LIVE_OPENAI_TOKEN is required")
+	}
+	client := NewWithOAuthToken(
+		token,
+		os.Getenv("OPENVIBELY_LIVE_OPENAI_REFRESH_TOKEN"),
+		time.Now().Add(2*time.Hour).UnixMilli(),
+		os.Getenv("OPENVIBELY_LIVE_OPENAI_ACCOUNT_ID"),
+	)
+	resp, err := client.Send(context.Background(), "Reply with only the number: 4+4", &SendOptions{
+		Model:           "gpt-5.6-luna",
+		ReasoningEffort: "medium",
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if strings.TrimSpace(resp.Text) != "8" {
+		t.Fatalf("Text = %q, want 8", resp.Text)
+	}
+
+	agenticClient := NewWithOAuthToken(
+		token,
+		os.Getenv("OPENVIBELY_LIVE_OPENAI_REFRESH_TOKEN"),
+		time.Now().Add(2*time.Hour).UnixMilli(),
+		os.Getenv("OPENVIBELY_LIVE_OPENAI_ACCOUNT_ID"),
+	)
+	agenticResp, err := agenticClient.SendAgentic(context.Background(), "Reply with only the number: 4+4", &AgenticOptions{
+		Model:           "gpt-5.6-luna",
+		ReasoningEffort: "medium",
+		DisableTools:    true,
+		MaxTurns:        1,
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if strings.TrimSpace(agenticResp.Text) != "8" {
+		t.Fatalf("agentic Text = %q, want 8", agenticResp.Text)
 	}
 }
 

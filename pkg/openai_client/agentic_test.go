@@ -60,6 +60,68 @@ func TestParseAgenticStream_TextOnly(t *testing.T) {
 	}
 }
 
+func TestParseAgenticStream_PreservesEncryptedReasoningForNextTurn(t *testing.T) {
+	stream := buildSSE([]string{
+		`{"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","encrypted_content":"encrypted-state","summary":[]}}`,
+		`{"type":"response.output_item.done","output_index":1,"item":{"id":"call_1","type":"function_call","call_id":"call_1","name":"read_file","arguments":"{}"}}`,
+		`{"type":"response.completed","response":{"status":"completed","model":"gpt-5.6-luna"}}`,
+	})
+
+	client := &Client{auth: &StoredAuth{APIKey: "test"}}
+	result, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatalf("parseAgenticStream: %v", err)
+	}
+	if len(result.outputItems) != 2 {
+		t.Fatalf("outputItems = %#v, want reasoning and function call", result.outputItems)
+	}
+	reasoning, _ := result.outputItems[0].(map[string]any)
+	if reasoning["type"] != "reasoning" || reasoning["encrypted_content"] != "encrypted-state" {
+		t.Fatalf("reasoning output item = %#v", reasoning)
+	}
+}
+
+func TestCompactAgenticInputItems_OAuthLunaUsesResponsesLiteContract(t *testing.T) {
+	var gotHeader string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses/compact" {
+			t.Fatalf("path = %q, want /responses/compact", r.URL.Path)
+		}
+		gotHeader = r.Header.Get("x-openai-internal-codex-responses-lite")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode compact body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"output":[{"type":"compaction","encrypted_content":"summary"}]}`))
+	}))
+	defer srv.Close()
+
+	original := OpenAIChatGPTAPIBaseURL
+	OpenAIChatGPTAPIBaseURL = srv.URL
+	defer func() { OpenAIChatGPTAPIBaseURL = original }()
+
+	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
+	items := []any{map[string]any{"type": "message", "role": "user", "content": "hello"}}
+	_, _, err := client.compactAgenticInputItems(context.Background(), items, DefaultTools(), &AgenticOptions{
+		Model:           "gpt-5.6-luna",
+		ReasoningEffort: "max",
+	}, true)
+	if err != nil {
+		t.Fatalf("compactAgenticInputItems: %v", err)
+	}
+	if gotHeader != "true" {
+		t.Fatalf("Responses Lite header = %q, want true", gotHeader)
+	}
+	reasoning, _ := gotBody["reasoning"].(map[string]any)
+	if reasoning["context"] != "all_turns" || reasoning["effort"] != "max" {
+		t.Fatalf("reasoning = %#v", reasoning)
+	}
+	if parallel, ok := gotBody["parallel_tool_calls"].(bool); !ok || parallel {
+		t.Fatalf("parallel_tool_calls = %#v, want false", gotBody["parallel_tool_calls"])
+	}
+}
+
 func TestParseAgenticStream_WithToolUse(t *testing.T) {
 	stream := buildSSE([]string{
 		`{"type":"response.output_text.delta","delta":"Let me read that file."}`,
@@ -417,9 +479,9 @@ func TestSendAgentic_ReasoningSummaryPayload(t *testing.T) {
 
 	client := NewWithAPIKey("sk-test")
 	_, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
-		Model:            "gpt-5.3-codex",
+		Model:            "gpt-5.6-sol",
 		DisableTools:     true,
-		ReasoningEffort:  "high",
+		ReasoningEffort:  "max",
 		ReasoningSummary: "auto",
 	})
 	if err != nil {
@@ -428,8 +490,8 @@ func TestSendAgentic_ReasoningSummaryPayload(t *testing.T) {
 	if gotReasoning == nil {
 		t.Fatal("expected reasoning payload")
 	}
-	if got := strings.TrimSpace(stringFromAny(gotReasoning["effort"])); got != "high" {
-		t.Fatalf("reasoning.effort = %q, want %q", got, "high")
+	if got := strings.TrimSpace(stringFromAny(gotReasoning["effort"])); got != "max" {
+		t.Fatalf("reasoning.effort = %q, want %q", got, "max")
 	}
 	if got := strings.TrimSpace(stringFromAny(gotReasoning["summary"])); got != "auto" {
 		t.Fatalf("reasoning.summary = %q, want %q", got, "auto")
@@ -937,8 +999,18 @@ func TestSendAgentic_OAuthUsesCorrectEndpoint(t *testing.T) {
 		if got := r.Header.Get("originator"); got != "codex_cli_rs" {
 			t.Errorf("originator = %q, want codex_cli_rs", got)
 		}
-		if got := r.URL.Query().Get("client_version"); got != "0.0.0" {
-			t.Errorf("client_version = %q, want 0.0.0", got)
+		if got := r.URL.Query().Get("client_version"); got != "0.144.0" {
+			t.Errorf("client_version = %q, want 0.144.0", got)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if got := body["model"]; got != "gpt-5.6-terra" {
+			t.Fatalf("model = %#v, want gpt-5.6-terra", got)
+		}
+		if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "" {
+			t.Fatalf("responses-lite header = %q, want omitted for HTTP SSE", got)
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -955,7 +1027,7 @@ func TestSendAgentic_OAuthUsesCorrectEndpoint(t *testing.T) {
 
 	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
-		Model:        "gpt-5.3-codex",
+		Model:        "gpt-5.6-terra",
 		DisableTools: true,
 	})
 	if err != nil {
@@ -1324,13 +1396,19 @@ func TestSendAgentic_AutoCompactionOAuthUsesOAuthRequestShape(t *testing.T) {
 		if got := r.Header.Get("originator"); got != "codex_cli_rs" {
 			t.Fatalf("originator = %q, want codex_cli_rs", got)
 		}
-		if got := r.URL.Query().Get("client_version"); got != "0.0.0" {
-			t.Fatalf("client_version = %q, want 0.0.0", got)
+		if got := r.URL.Query().Get("client_version"); got != "0.144.0" {
+			t.Fatalf("client_version = %q, want 0.144.0", got)
 		}
 
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
+		}
+		if got := body["model"]; got != "gpt-5.6-sol" {
+			t.Fatalf("model = %#v, want gpt-5.6-sol", got)
+		}
+		if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "" {
+			t.Fatalf("responses-lite header = %q, want omitted for HTTP SSE", got)
 		}
 		if strings.HasSuffix(r.URL.Path, "/responses/compact") {
 			if _, ok := body["store"]; ok {
@@ -1388,7 +1466,7 @@ func TestSendAgentic_AutoCompactionOAuthUsesOAuthRequestShape(t *testing.T) {
 	client.History = []Message{{Role: "user", Content: "oauth history"}}
 
 	resp, err := client.SendAgentic(context.Background(), "continue", &AgenticOptions{
-		Model:                    "gpt-5.3-codex",
+		Model:                    "gpt-5.6-sol",
 		DisableTools:             true,
 		AutoCompaction:           true,
 		CompactionTokenThreshold: 1,
@@ -2042,6 +2120,18 @@ func TestOpenAIAutoCompactionTokenLimit_UsesEffectiveContextPercent(t *testing.T
 	}
 }
 
+func TestOpenAIAutoCompactionTokenLimit_GPT56UsesExpandedContext(t *testing.T) {
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		t.Run(model, func(t *testing.T) {
+			got := openAIAutoCompactionTokenLimit(model)
+			want := (372000 * 95) / 100
+			if got != want {
+				t.Fatalf("openAIAutoCompactionTokenLimit(%q) = %d, want %d", model, got, want)
+			}
+		})
+	}
+}
+
 func TestNormalizedCompactionThresholdForModel_CapsToModelLimit(t *testing.T) {
 	modelLimit := openAIAutoCompactionTokenLimit("gpt-5.3-codex")
 	got := normalizedCompactionThresholdForModel(modelLimit+50000, "gpt-5.3-codex")
@@ -2423,6 +2513,9 @@ func TestOpenAIModelSupportsWebSearch(t *testing.T) {
 		model    string
 		expected bool
 	}{
+		{"gpt-5.6-sol", true},
+		{"gpt-5.6-terra", true},
+		{"gpt-5.6-luna", true},
 		{"gpt-5.4", true},
 		{"gpt-5.4-mini", true},
 		{"GPT-5.4", true},

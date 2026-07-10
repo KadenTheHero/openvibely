@@ -867,7 +867,7 @@ func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAt
 
 func reasoningEffort(value string) string {
 	switch llmprompt.NormalizeReasoningEffortValue(value) {
-	case "low", "medium", "high":
+	case "low", "medium", "high", "xhigh", "max":
 		return llmprompt.NormalizeReasoningEffortValue(value)
 	default:
 		return "high"

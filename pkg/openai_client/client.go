@@ -23,13 +23,13 @@ import (
 
 const (
 	// DefaultModel is the fallback model when no model is provided.
-	DefaultModel = "gpt-5.5"
+	DefaultModel = "gpt-5.6-sol"
 
 	defaultModelRequestTimeout = 10 * time.Minute
 
 	openAIOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 	// ChatGPT Codex backend requires this query parameter.
-	openAIOAuthClientVersion = "0.0.0"
+	openAIOAuthClientVersion = "0.144.0"
 	// Matches Codex CLI originator for ChatGPT OAuth-backed calls.
 	openAIOAuthOriginator = "codex_cli_rs"
 )
@@ -411,6 +411,22 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		payload["tool_choice"] = "none"
 	}
 
+	if isChatGPTOAuth && isResponsesLiteWebsocketModel(opts.Model) {
+		payload["stream"] = true
+		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
+		body, wsErr := c.openResponsesWebsocketStream(ctx, wsPayload)
+		if wsErr != nil {
+			return nil, wsErr
+		}
+		defer body.Close()
+		result, wsErr := parseStreamingResponse(body, opts.OnDelta, opts.SuppressToolMarkers)
+		if wsErr != nil {
+			return nil, wsErr
+		}
+		c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
+		return result, nil
+	}
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -659,11 +675,8 @@ func parseStreamingResponse(body io.Reader, onDelta func(string), suppressToolMa
 					emit(marker)
 				}
 			}
-		case "response.error", "error":
-			if msg := extractErrorMessage(ev); msg != "" {
-				return nil, fmt.Errorf("stream error: %s", msg)
-			}
-			return nil, fmt.Errorf("stream error: unknown")
+		case "response.failed", "response.incomplete", "response.error", "error":
+			return nil, responsesStreamTerminalError(typ, ev)
 		case "response.completed":
 			if m, ok := ev["response"].(map[string]any); ok {
 				completed = m
@@ -1060,7 +1073,7 @@ func roleForMessage(role string) string {
 
 func normalizeReasoningEffort(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "low", "medium", "high":
+	case "low", "medium", "high", "xhigh", "max":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return ""
@@ -1239,6 +1252,35 @@ func extractErrorMessage(ev map[string]any) string {
 		return code
 	}
 	return ""
+}
+
+func responsesStreamTerminalError(eventType string, ev map[string]any) error {
+	if response, ok := ev["response"].(map[string]any); ok {
+		if errObj, ok := response["error"].(map[string]any); ok {
+			code := stringFromAny(errObj["code"])
+			message := stringFromAny(errObj["message"])
+			switch {
+			case code != "" && message != "":
+				return fmt.Errorf("stream error: %s: %s", code, message)
+			case code != "":
+				return fmt.Errorf("stream error: %s", code)
+			case message != "":
+				return fmt.Errorf("stream error: %s", message)
+			}
+		}
+		if msg := extractErrorMessage(response); msg != "" {
+			return fmt.Errorf("stream error: %s", msg)
+		}
+		if details, ok := response["incomplete_details"].(map[string]any); ok {
+			if reason := stringFromAny(details["reason"]); reason != "" {
+				return fmt.Errorf("stream error: incomplete response: %s", reason)
+			}
+		}
+	}
+	if msg := extractErrorMessage(ev); msg != "" {
+		return fmt.Errorf("stream error: %s", msg)
+	}
+	return fmt.Errorf("stream error: %s", strings.TrimSpace(eventType))
 }
 
 func stringFromAny(v any) string {

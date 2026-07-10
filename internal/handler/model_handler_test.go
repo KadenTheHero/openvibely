@@ -2190,6 +2190,9 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 		input string
 		want  string
 	}{
+		{"gpt-5.6-sol", "gpt-5.6-sol"},
+		{"gpt-5.6-terra", "gpt-5.6-terra"},
+		{"gpt-5.6-luna", "gpt-5.6-luna"},
 		{"gpt-5.5", "gpt-5.5"},
 		{"gpt-5.5-pro", "gpt-5.5-pro"},
 		{"gpt-5.4", "gpt-5.4"},
@@ -2202,9 +2205,9 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 		{"gpt-5.1-codex-mini", "gpt-5.1-codex-mini"},
 		{"gpt-5-codex", "gpt-5-codex"},
 		{"gpt-5-codex-mini", "gpt-5-codex-mini"},
-		{"", "gpt-5.5"},              // empty defaults to latest
-		{"invalid-model", "gpt-5.5"}, // unknown defaults to latest
-		{"  gpt-5.5  ", "gpt-5.5"},   // whitespace trimmed
+		{"", "gpt-5.6-sol"},              // empty defaults to latest
+		{"invalid-model", "gpt-5.6-sol"}, // unknown defaults to latest
+		{"  gpt-5.5  ", "gpt-5.5"},       // whitespace trimmed
 	}
 
 	for _, tt := range tests {
@@ -2221,20 +2224,23 @@ func TestNormalizeProviderReasoningEffort(t *testing.T) {
 	tests := []struct {
 		name     string
 		provider models.LLMProvider
+		model    string
 		input    string
 		want     string
 	}{
-		{"openai xhigh", models.ProviderOpenAI, "xhigh", "xhigh"},
-		{"openai rejects max", models.ProviderOpenAI, "max", ""},
-		{"anthropic max", models.ProviderAnthropic, "max", "max"},
-		{"anthropic rejects xhigh", models.ProviderAnthropic, "xhigh", ""},
-		{"ollama clears effort", models.ProviderOllama, "high", ""},
+		{"openai xhigh", models.ProviderOpenAI, "gpt-5.6-sol", "xhigh", "xhigh"},
+		{"openai max", models.ProviderOpenAI, "gpt-5.6-sol", "max", "max"},
+		{"openai rejects max for older model", models.ProviderOpenAI, "gpt-5.4-mini", "max", ""},
+		{"openai rejects ultra", models.ProviderOpenAI, "gpt-5.6-sol", "ultra", ""},
+		{"anthropic max", models.ProviderAnthropic, "claude-opus-4-6", "max", "max"},
+		{"anthropic rejects xhigh", models.ProviderAnthropic, "claude-opus-4-6", "xhigh", ""},
+		{"ollama clears effort", models.ProviderOllama, "llama", "high", ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeProviderReasoningEffort(tt.provider, tt.input); got != tt.want {
-				t.Fatalf("normalizeProviderReasoningEffort(%q, %q) = %q, want %q", tt.provider, tt.input, got, tt.want)
+			if got := normalizeProviderReasoningEffort(tt.provider, tt.model, tt.input); got != tt.want {
+				t.Fatalf("normalizeProviderReasoningEffort(%q, %q, %q) = %q, want %q", tt.provider, tt.model, tt.input, got, tt.want)
 			}
 		})
 	}

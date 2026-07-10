@@ -39,6 +39,9 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 
 	// JS modelOptionsByProvider entries
 	for _, model := range []string{
+		"gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna",
 		"gpt-5.5",
 		"gpt-5.5-pro",
 		"gpt-5.4-mini",

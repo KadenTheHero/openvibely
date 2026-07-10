@@ -11,9 +11,12 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-const CodexDefaultModel = "gpt-5.5"
+const CodexDefaultModel = "gpt-5.6-sol"
 
 var CodexSupportedReasoningEffortsByModel = map[string][]string{
+	"gpt-5.6-sol":         {"low", "medium", "high", "xhigh", "max"},
+	"gpt-5.6-terra":       {"low", "medium", "high", "xhigh", "max"},
+	"gpt-5.6-luna":        {"low", "medium", "high", "xhigh", "max"},
 	"gpt-5.5":             {"low", "medium", "high", "xhigh"},
 	"gpt-5.5-pro":         {"low", "medium", "high", "xhigh"},
 	"gpt-5.4":             {"low", "medium", "high", "xhigh"},
@@ -77,7 +80,7 @@ func CodexSupportedReasoningEfforts(model string) []string {
 
 func NormalizeReasoningEffortValue(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "low", "medium", "high", "xhigh":
+	case "low", "medium", "high", "xhigh", "max":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return ""

@@ -676,7 +676,7 @@ func TestHandler_CreateModel_Normalization(t *testing.T) {
 		wantReasoning string
 	}{
 		{"openai_preserves_gpt54", "openai", "gpt-5.4", "xhigh", "gpt-5.4", "xhigh"},
-		{"openai_normalizes_unknown", "openai", "unknown-model", "high", "gpt-5.5", "high"},
+		{"openai_normalizes_unknown", "openai", "unknown-model", "high", "gpt-5.6-sol", "high"},
 		{"non_openai_preserves", "anthropic", "claude-opus-4-6", "xhigh", "claude-opus-4-6", ""},
 	}
 	for _, tc := range cases {
