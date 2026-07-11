@@ -18,6 +18,7 @@ type TaskPullRequestGitHubProvider interface {
 }
 
 type taskPullRequestBranchReplacer interface {
+	GetPullRequest(ctx context.Context, repo *GitHubRepoRef, number int) (*GitHubPullRequest, error)
 	ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error
 }
 
@@ -87,6 +88,23 @@ func (s *TaskPullRequestService) ReplaceBranchHeadForTask(ctx context.Context, p
 	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolving repository: %w", err)
+	}
+	linkedPR, err := replacer.GetPullRequest(ctx, repoRef, existingPR.PRNumber)
+	if err != nil {
+		return nil, fmt.Errorf("fetching linked pull request: %w", err)
+	}
+	if linkedPR == nil {
+		return nil, fmt.Errorf("linked pull request #%d was not found", existingPR.PRNumber)
+	}
+	expectedRepo := strings.TrimSpace(repoRef.FullName)
+	if expectedRepo == "" {
+		expectedRepo = strings.Trim(strings.TrimSpace(repoRef.Owner)+"/"+strings.TrimSpace(repoRef.Name), "/")
+	}
+	if expectedRepo == "" || !strings.EqualFold(strings.TrimSpace(linkedPR.HeadRepoFullName), expectedRepo) {
+		return nil, fmt.Errorf("linked pull request #%d head repository %q does not match project repository %q", existingPR.PRNumber, linkedPR.HeadRepoFullName, expectedRepo)
+	}
+	if strings.TrimSpace(linkedPR.HeadRef) != strings.TrimSpace(task.WorktreeBranch) {
+		return nil, fmt.Errorf("linked pull request #%d head branch %q does not match task worktree branch %q", existingPR.PRNumber, linkedPR.HeadRef, task.WorktreeBranch)
 	}
 	if err := replacer.ReplaceBranchHead(ctx, repoRef, GitHubReplaceBranchHeadRequest{
 		WorktreePath: task.WorktreePath,

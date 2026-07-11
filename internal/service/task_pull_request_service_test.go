@@ -16,6 +16,7 @@ type fakeTaskPullRequestGitHubProvider struct {
 	defaultBranchFn     func(context.Context, *GitHubRepoRef) (string, error)
 	publishBranchFn     func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) error
 	replaceBranchHeadFn func(context.Context, *GitHubRepoRef, GitHubReplaceBranchHeadRequest) error
+	getPullRequestFn    func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
 	findPRFn            func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error)
 	createPRFn          func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 }
@@ -46,6 +47,13 @@ func (f *fakeTaskPullRequestGitHubProvider) ReplaceBranchHead(ctx context.Contex
 		return f.replaceBranchHeadFn(ctx, repo, req)
 	}
 	return nil
+}
+
+func (f *fakeTaskPullRequestGitHubProvider) GetPullRequest(ctx context.Context, repo *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
+	if f.getPullRequestFn != nil {
+		return f.getPullRequestFn(ctx, repo, number)
+	}
+	return &GitHubPullRequest{Number: number, URL: fmt.Sprintf("https://github.com/openvibely/openvibely/pull/%d", number), State: "open", HeadRef: "task/clean-history", HeadRepoFullName: "openvibely/openvibely"}, nil
 }
 
 func (f *fakeTaskPullRequestGitHubProvider) FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
@@ -95,6 +103,113 @@ func TestTaskPullRequestServiceReplaceBranchHeadForTaskUsesLinkedPRAndTaskBranch
 	}
 	if got.PRNumber != 4 || gotReq.WorktreePath != task.WorktreePath || gotReq.Branch != task.WorktreeBranch || gotReq.ExpectedHead != expected {
 		t.Fatalf("unexpected record/request: record=%#v request=%#v", got, gotReq)
+	}
+}
+
+func TestTaskPullRequestServiceReplaceBranchHeadForTaskRejectsLinkedPRHeadMismatch(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Replacement Guard Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Replacement guard", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: t.TempDir(), WorktreeBranch: "task/clean-history"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 4, PRURL: "https://github.com/openvibely/openvibely/pull/4", PRState: "open"}); err != nil {
+		t.Fatalf("seed PR record: %v", err)
+	}
+	replaceCalled := false
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: number, HeadRef: "task/different-branch", HeadRepoFullName: "openvibely/openvibely"}, nil
+		},
+		replaceBranchHeadFn: func(_ context.Context, _ *GitHubRepoRef, _ GitHubReplaceBranchHeadRequest) error {
+			replaceCalled = true
+			return nil
+		},
+	}, prRepo)
+
+	_, err := svc.ReplaceBranchHeadForTask(ctx, project, task, strings.Repeat("a", 40))
+	if err == nil || !strings.Contains(err.Error(), "head branch") {
+		t.Fatalf("expected linked PR head mismatch error, got %v", err)
+	}
+	if replaceCalled {
+		t.Fatal("branch replacement must not run when linked PR head differs")
+	}
+}
+
+func TestTaskPullRequestServiceReplaceBranchHeadForTaskRejectsLinkedPRHeadRepositoryMismatch(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Fork Guard Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Fork guard", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: t.TempDir(), WorktreeBranch: "task/clean-history"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 4, PRURL: "https://github.com/openvibely/openvibely/pull/4", PRState: "open"}); err != nil {
+		t.Fatalf("seed PR record: %v", err)
+	}
+	replaceCalled := false
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: number, HeadRef: task.WorktreeBranch, HeadRepoFullName: "contributor/openvibely"}, nil
+		},
+		replaceBranchHeadFn: func(_ context.Context, _ *GitHubRepoRef, _ GitHubReplaceBranchHeadRequest) error {
+			replaceCalled = true
+			return nil
+		},
+	}, prRepo)
+
+	_, err := svc.ReplaceBranchHeadForTask(ctx, project, task, strings.Repeat("a", 40))
+	if err == nil || !strings.Contains(err.Error(), "head repository") {
+		t.Fatalf("expected linked PR head repository mismatch error, got %v", err)
+	}
+	if replaceCalled {
+		t.Fatal("branch replacement must not run when linked PR head repository differs")
+	}
+}
+
+func TestTaskPullRequestServiceReplaceBranchHeadForTaskFailsClosedWhenLinkedPRCannotBeFetched(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Replacement Guard Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Replacement guard", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: t.TempDir(), WorktreeBranch: "task/clean-history"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 4, PRURL: "https://github.com/openvibely/openvibely/pull/4", PRState: "open"}); err != nil {
+		t.Fatalf("seed PR record: %v", err)
+	}
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		getPullRequestFn: func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
+			return nil, fmt.Errorf("github unavailable")
+		},
+		replaceBranchHeadFn: func(context.Context, *GitHubRepoRef, GitHubReplaceBranchHeadRequest) error {
+			t.Fatal("branch replacement must not run when linked PR cannot be fetched")
+			return nil
+		},
+	}, prRepo)
+
+	_, err := svc.ReplaceBranchHeadForTask(ctx, project, task, strings.Repeat("a", 40))
+	if err == nil || !strings.Contains(err.Error(), "fetching linked pull request") {
+		t.Fatalf("expected linked PR fetch error, got %v", err)
 	}
 }
 

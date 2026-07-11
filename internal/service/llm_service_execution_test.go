@@ -3539,6 +3539,7 @@ type fakeGitHubIssueRuntimeProvider struct {
 	commentIssueFn       func(context.Context, *GitHubRepoRef, int, string) error
 	publishBranchFn      func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) error
 	replaceBranchHeadFn  func(context.Context, *GitHubRepoRef, GitHubReplaceBranchHeadRequest) error
+	getPullRequestFn     func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
 	findBranchPRFn       func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error)
 	createPRFn           func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 }
@@ -3566,6 +3567,13 @@ func (f *fakeGitHubIssueRuntimeProvider) ReplaceBranchHead(ctx context.Context, 
 		return f.replaceBranchHeadFn(ctx, repo, req)
 	}
 	return nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) GetPullRequest(ctx context.Context, repo *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
+	if f.getPullRequestFn != nil {
+		return f.getPullRequestFn(ctx, repo, number)
+	}
+	return nil, fmt.Errorf("get PR not configured")
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
@@ -3722,6 +3730,12 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 				t.Fatalf("unexpected runtime labels input issue=%d labels=%v", issueNumber, labels)
 			}
 			return nil
+		},
+		getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
+			if number != 202 {
+				return nil, fmt.Errorf("unexpected pull request #%d", number)
+			}
+			return &GitHubPullRequest{Number: number, HeadRef: "task/existing-runtime-pr", HeadRepoFullName: "openvibely/openvibely"}, nil
 		},
 		replaceBranchHeadFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error {
 			replacementReq = req

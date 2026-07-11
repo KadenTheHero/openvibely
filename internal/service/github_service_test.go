@@ -451,6 +451,40 @@ func envContainsValue(env []string, value string) bool {
 	return false
 }
 
+func TestGetPullRequestReturnsHeadRefFromResolvedRepository(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/repos/openvibely/openvibely-hosted/pulls/4" {
+			t.Fatalf("unexpected GitHub API request: %s %s", r.Method, r.URL.String())
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer ghp_test" {
+			t.Fatalf("expected configured PAT bearer auth, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number":4,"html_url":"https://github.com/openvibely/openvibely-hosted/pull/4","state":"open","head":{"ref":"task/clean-history","repo":{"full_name":"openvibely/openvibely-hosted"}}}`))
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	pr, err := svc.GetPullRequest(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely-hosted"}, 4)
+	if err != nil {
+		t.Fatalf("GetPullRequest: %v", err)
+	}
+	if pr.Number != 4 || pr.HeadRef != "task/clean-history" || pr.HeadRepoFullName != "openvibely/openvibely-hosted" {
+		t.Fatalf("unexpected pull request: %#v", pr)
+	}
+}
+
 func TestDefaultGitHubSDLCLabelsDoNotUseProductPrefix(t *testing.T) {
 	for _, label := range DefaultGitHubSDLCLabels {
 		if strings.HasPrefix(label, "openvibely:") {

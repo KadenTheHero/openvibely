@@ -18,6 +18,7 @@ type fakeGitHubService struct {
 	defaultBranchFn        func(ctx context.Context, repo *service.GitHubRepoRef) (string, error)
 	publishBranchFn        func(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error
 	replaceBranchHeadFn    func(ctx context.Context, repo *service.GitHubRepoRef, req service.GitHubReplaceBranchHeadRequest) error
+	getPullRequestFn       func(ctx context.Context, repo *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error)
 	findPRFn               func(ctx context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error)
 	createPRFn             func(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error)
 	createIssueFn          func(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error)
@@ -100,6 +101,13 @@ func (f *fakeGitHubService) ReplaceBranchHead(ctx context.Context, repo *service
 		return f.replaceBranchHeadFn(ctx, repo, req)
 	}
 	return nil
+}
+
+func (f *fakeGitHubService) GetPullRequest(ctx context.Context, repo *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error) {
+	if f != nil && f.getPullRequestFn != nil {
+		return f.getPullRequestFn(ctx, repo, number)
+	}
+	return nil, fmt.Errorf("get PR not configured")
 }
 
 func (f *fakeGitHubService) FindPullRequestByBranch(ctx context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {

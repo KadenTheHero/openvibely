@@ -67,9 +67,11 @@ type GitHubRepoRef struct {
 }
 
 type GitHubPullRequest struct {
-	Number int
-	URL    string
-	State  string
+	Number           int
+	URL              string
+	State            string
+	HeadRef          string
+	HeadRepoFullName string
 }
 
 type GitHubIssue struct {
@@ -1158,6 +1160,42 @@ func gitHubTreeMode(ctx context.Context, dir, relPath string) string {
 		}
 	}
 	return "100644"
+}
+
+func (s *GitHubService) GetPullRequest(ctx context.Context, repo *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("repository reference is required")
+	}
+	if number <= 0 {
+		return nil, fmt.Errorf("pull request number must be positive")
+	}
+
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), number)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.applyGitHubHeaders(req, token)
+
+	var pr struct {
+		Number int    `json:"number"`
+		URL    string `json:"html_url"`
+		State  string `json:"state"`
+		Head   struct {
+			Ref  string `json:"ref"`
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
+	}
+	if err := s.doGitHubJSON(req, &pr); err != nil {
+		return nil, err
+	}
+	return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, State: pr.State, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName}, nil
 }
 
 func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
