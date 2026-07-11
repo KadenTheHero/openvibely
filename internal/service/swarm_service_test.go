@@ -250,6 +250,108 @@ func TestSwarmServicePlannerCallbackPersistsApplicationError(t *testing.T) {
 	}
 }
 
+func TestSwarmServiceFollowupPlannerApplicationErrorPreservesRetryRouting(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Retry follow-up plan", Prompt: "Build export", MaxWorkers: 1})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+	initialOutput := PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Build backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, initialOutput); err != nil {
+		t.Fatalf("apply initial plan: %v", err)
+	}
+	worker, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	if err != nil || worker == nil {
+		t.Fatalf("worker missing: worker=%#v err=%v", worker, err)
+	}
+	if err := repo.UpdateStatus(ctx, worker.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("complete worker: %v", err)
+	}
+	if err := svc.HandleParentFollowup(ctx, parent.ID, "Update the backend"); err != nil {
+		t.Fatalf("HandleParentFollowup: %v", err)
+	}
+	planner, err = repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("coordinating planner missing: planner=%#v err=%v", planner, err)
+	}
+	followupJSON := fmt.Sprintf(`{"workers":[{"task_id":%q,"title":"Backend worker","prompt":"Update backend","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","required":true}]}`, worker.ID)
+	exec := &models.Execution{TaskID: planner.ID, Status: models.ExecRunning, PromptSent: planner.Prompt}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create follow-up planner execution: %v", err)
+	}
+	if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, followupJSON, "", 0, 1); err != nil {
+		t.Fatalf("complete follow-up planner execution: %v", err)
+	}
+	if err := repo.UpdateStatus(ctx, planner.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("complete planner task: %v", err)
+	}
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := svc.applyCompletedPlannerExecution(cancelled, planner); !errors.Is(err, context.Canceled) {
+		t.Fatalf("first application error = %v, want context canceled", err)
+	}
+	failedPlanner, err := repo.GetByID(ctx, planner.ID)
+	if err != nil || failedPlanner == nil {
+		t.Fatalf("load failed planner: planner=%#v err=%v", failedPlanner, err)
+	}
+	failedParent, err := repo.GetByID(ctx, parent.ID)
+	if err != nil || failedParent == nil {
+		t.Fatalf("load failed parent: parent=%#v err=%v", failedParent, err)
+	}
+	if failedPlanner.SwarmStatus != "coordinating" || failedParent.SwarmStatus != "needs_coordination" {
+		t.Fatalf("follow-up phase was lost after failure: planner=%q parent=%q", failedPlanner.SwarmStatus, failedParent.SwarmStatus)
+	}
+
+	if err := svc.applyCompletedPlannerExecution(ctx, failedPlanner); err != nil {
+		t.Fatalf("retry completed follow-up output: %v", err)
+	}
+	updatedWorker, err := repo.GetByID(ctx, worker.ID)
+	if err != nil || updatedWorker == nil {
+		t.Fatalf("load updated worker: worker=%#v err=%v", updatedWorker, err)
+	}
+	workerCfg, _ := models.ParseSwarmConfig(updatedWorker.SwarmConfig)
+	if updatedWorker.Status != models.StatusPending || updatedWorker.SwarmStatus != "rerun_pending" || workerCfg.RerunGeneration != 2 {
+		t.Fatalf("retry did not apply as follow-up: worker=%#v cfg=%#v", updatedWorker, workerCfg)
+	}
+	children, err := repo.ListSwarmChildren(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("ListSwarmChildren: %v", err)
+	}
+	workerCount := 0
+	for _, child := range children {
+		if child.SwarmRole == models.SwarmRoleWorker {
+			workerCount++
+		}
+	}
+	if workerCount != 1 {
+		t.Fatalf("retry created duplicate workers: %d", workerCount)
+	}
+	recoveredPlanner, err := repo.GetByID(ctx, planner.ID)
+	if err != nil || recoveredPlanner == nil {
+		t.Fatalf("load recovered planner: planner=%#v err=%v", recoveredPlanner, err)
+	}
+	recoveredParent, err := repo.GetByID(ctx, parent.ID)
+	if err != nil || recoveredParent == nil {
+		t.Fatalf("load recovered parent: parent=%#v err=%v", recoveredParent, err)
+	}
+	recoveredPlannerCfg, _ := models.ParseSwarmConfig(recoveredPlanner.SwarmConfig)
+	recoveredParentCfg, _ := models.ParseSwarmConfig(recoveredParent.SwarmConfig)
+	if recoveredPlanner.SwarmStatus != "planned" || recoveredPlannerCfg.LastError != "" || recoveredParentCfg.LastError != "" {
+		t.Fatalf("successful retry did not clear failure state: planner=%#v planner_cfg=%#v parent_cfg=%#v", recoveredPlanner, recoveredPlannerCfg, recoveredParentCfg)
+	}
+}
+
 func TestSwarmServiceCreateAssignsProjectDefaultModelToChildren(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

@@ -292,7 +292,7 @@ func (s *SwarmService) ApplyPlannerOutput(ctx context.Context, plannerTaskID str
 	if err != nil {
 		return err
 	}
-	if parent.SwarmStatus == "needs_coordination" && planner.SwarmStatus == "coordinating" {
+	if isFollowupPlannerApplication(planner, parent) {
 		return s.applyFollowupPlannerOutput(ctx, parent, planner, output, existing, parentCfg)
 	}
 	if planner.SwarmStatus == "planned" {
@@ -374,6 +374,7 @@ func (s *SwarmService) applyFollowupPlannerOutput(ctx context.Context, parent *m
 	parentCfg.ReviewerPrompt = output.ReviewerPrompt
 	parentCfg.MergerPrompt = output.MergerPrompt
 	parentCfg.PlannerNotes = output.Notes
+	parentCfg.LastError = ""
 	parentCfg.ReviewedGeneration = 0
 	parentCfg.MergedGeneration = 0
 	parent.SwarmConfig, _ = parentCfg.JSON()
@@ -454,9 +455,28 @@ func (s *SwarmService) applyFollowupPlannerOutput(ctx context.Context, parent *m
 			}
 		}
 	}
-	_ = s.taskRepo.UpdateSwarmFields(ctx, planner.ID, planner.SwarmRole, "planned", planner.SwarmConfig, planner.SwarmSequence)
-	_ = s.taskRepo.UpdateStatus(ctx, planner.ID, models.StatusCompleted)
+	plannerCfg, _ := models.ParseSwarmConfig(planner.SwarmConfig)
+	plannerCfg.LastError = ""
+	planner.SwarmConfig, _ = plannerCfg.JSON()
+	if err := s.taskRepo.UpdateSwarmFields(ctx, planner.ID, planner.SwarmRole, "planned", planner.SwarmConfig, planner.SwarmSequence); err != nil {
+		return err
+	}
+	if err := s.taskRepo.UpdateStatus(ctx, planner.ID, models.StatusCompleted); err != nil {
+		return err
+	}
 	return s.StartReadyWorkers(ctx, parent.ID)
+}
+
+func isFollowupPlannerApplication(planner, parent *models.Task) bool {
+	if planner == nil || parent == nil {
+		return false
+	}
+	plannerCfg, _ := models.ParseSwarmConfig(planner.SwarmConfig)
+	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	if plannerCfg.RerunGeneration <= 1 || plannerCfg.RerunGeneration != parentCfg.Generation {
+		return false
+	}
+	return planner.SwarmStatus == "coordinating" || planner.SwarmStatus == "plan_apply_failed"
 }
 
 func findWorkerBySequence(children []models.Task, sequence int) *models.Task {
@@ -1009,12 +1029,12 @@ func (s *SwarmService) applyCompletedPlannerExecution(ctx context.Context, plann
 	if hasExecutionChildren(children) && planner.SwarmStatus == "planned" {
 		return s.RecomputeParentStatus(ctx, *planner.ParentTaskID)
 	}
-	if hasExecutionChildren(children) && planner.SwarmStatus == "coordinating" {
+	if hasExecutionChildren(children) && planner.SwarmStatus != "planned" {
 		parent, err := s.taskRepo.GetByID(ctx, *planner.ParentTaskID)
 		if err != nil || parent == nil {
 			return err
 		}
-		if parent.SwarmStatus != "needs_coordination" {
+		if !isFollowupPlannerApplication(planner, parent) && planner.SwarmStatus == "coordinating" {
 			return s.RecomputeParentStatus(ctx, *planner.ParentTaskID)
 		}
 	}
@@ -1046,21 +1066,29 @@ func (s *SwarmService) recordPlannerApplicationError(planner *models.Task, cause
 		return
 	}
 	message := fmt.Sprintf("applying planner output: %v", cause)
+	parent, err := s.taskRepo.GetByID(ctx, *storedPlanner.ParentTaskID)
+	if err != nil || parent == nil {
+		return
+	}
+	followup := isFollowupPlannerApplication(storedPlanner, parent)
 
 	plannerCfg, _ := models.ParseSwarmConfig(storedPlanner.SwarmConfig)
 	plannerCfg.LastError = message
 	storedPlanner.SwarmConfig, _ = plannerCfg.JSON()
 	storedPlanner.SwarmStatus = "plan_apply_failed"
+	if followup {
+		storedPlanner.SwarmStatus = "coordinating"
+	}
 	_ = s.taskRepo.UpdateSwarmFields(ctx, storedPlanner.ID, storedPlanner.SwarmRole, storedPlanner.SwarmStatus, storedPlanner.SwarmConfig, storedPlanner.SwarmSequence)
 
-	parent, err := s.taskRepo.GetByID(ctx, *storedPlanner.ParentTaskID)
-	if err != nil || parent == nil {
-		return
-	}
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	parentCfg.LastError = message
 	parent.SwarmConfig, _ = parentCfg.JSON()
-	_ = s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "blocked", parent.SwarmConfig, parent.SwarmSequence)
+	parent.SwarmStatus = "blocked"
+	if followup {
+		parent.SwarmStatus = "needs_coordination"
+	}
+	_ = s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, parent.SwarmStatus, parent.SwarmConfig, parent.SwarmSequence)
 	_ = s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusBlocked)
 }
 
