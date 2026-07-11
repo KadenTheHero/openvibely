@@ -832,6 +832,20 @@ func uniqueAttachmentName(dir, requested string, used map[string]bool) string {
 	}
 }
 
+var (
+	renameAttachmentFile    = os.Rename
+	syncAttachmentDirectory = syncDirectory
+)
+
+func syncDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
 func copyFileAtomically(srcPath, destPath string) error {
 	src, err := os.Open(srcPath)
 	if err != nil {
@@ -852,6 +866,10 @@ func copyFileAtomically(srcPath, destPath string) error {
 		cleanup()
 		return err
 	}
+	if err := tmp.Chmod(0o644); err != nil {
+		cleanup()
+		return err
+	}
 	if err := tmp.Sync(); err != nil {
 		cleanup()
 		return err
@@ -860,13 +878,20 @@ func copyFileAtomically(srcPath, destPath string) error {
 		_ = os.Remove(tmpPath)
 		return err
 	}
-	if err := os.Chmod(tmpPath, 0o644); err != nil {
+	if err := renameAttachmentFile(tmpPath, destPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return err
 	}
-	if err := os.Rename(tmpPath, destPath); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
+	if err := syncAttachmentDirectory(filepath.Dir(destPath)); err != nil {
+		removeErr := os.Remove(destPath)
+		cleanupSyncErr := syncAttachmentDirectory(filepath.Dir(destPath))
+		if removeErr != nil && !os.IsNotExist(removeErr) {
+			return fmt.Errorf("sync destination directory: %w (cleanup remove failed: %v)", err, removeErr)
+		}
+		if cleanupSyncErr != nil {
+			return fmt.Errorf("sync destination directory: %w (cleanup sync failed: %v)", err, cleanupSyncErr)
+		}
+		return fmt.Errorf("sync destination directory: %w", err)
 	}
 	return nil
 }

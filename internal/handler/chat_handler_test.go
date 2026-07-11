@@ -2439,6 +2439,39 @@ func TestCopyChatAttachmentsToTask_AbsolutePathsAccessible(t *testing.T) {
 	assert.Contains(t, updatedTask.Prompt, att.FilePath, "task prompt should contain the absolute file path")
 }
 
+func TestCopyFileAtomically_PublicationFailuresDoNotLeaveDestination(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "Screenshot 2026-07-10 at 9.49.00\u202fPM.png")
+	require.NoError(t, os.WriteFile(source, []byte("png"), 0o644))
+
+	t.Run("rename failure", func(t *testing.T) {
+		destination := filepath.Join(t.TempDir(), filepath.Base(source))
+		originalRename := renameAttachmentFile
+		renameAttachmentFile = func(string, string) error { return errors.New("injected rename failure") }
+		t.Cleanup(func() { renameAttachmentFile = originalRename })
+
+		require.ErrorContains(t, copyFileAtomically(source, destination), "injected rename failure")
+		require.NoFileExists(t, destination)
+	})
+
+	t.Run("directory sync failure", func(t *testing.T) {
+		destination := filepath.Join(t.TempDir(), filepath.Base(source))
+		originalSync := syncAttachmentDirectory
+		calls := 0
+		syncAttachmentDirectory = func(string) error {
+			calls++
+			if calls == 1 {
+				return errors.New("injected directory sync failure")
+			}
+			return nil
+		}
+		t.Cleanup(func() { syncAttachmentDirectory = originalSync })
+
+		require.ErrorContains(t, copyFileAtomically(source, destination), "injected directory sync failure")
+		require.NoFileExists(t, destination)
+		require.Equal(t, 2, calls, "cleanup removal must also be synchronized")
+	})
+}
+
 func TestCopyChatAttachmentsToTask_UnicodeDuplicateAndMissingSourceAreAtomic(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
