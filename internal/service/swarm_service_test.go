@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -112,6 +113,140 @@ func TestSwarmServiceApplyPlannerOutputDisambiguatesExistingWorkerTitle(t *testi
 	}
 	if counts[models.SwarmRoleWorker] != 1 || counts[models.SwarmRoleReviewer] != 1 || counts[models.SwarmRoleMerger] != 1 {
 		t.Fatalf("unexpected children after title collision: %#v", counts)
+	}
+}
+
+func TestSwarmServiceApplyPlannerOutputRecoversPartialCreationAndRepeatedTitleCollisions(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Recover export swarm", Prompt: "Build export", MaxWorkers: 2, WorkerIsolation: "worktree", ReviewerEnabled: true, MergerEnabled: true})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+	parentPrefix := parent.ID[:8]
+	reservedTitles := []string{
+		"Second worker",
+		fmt.Sprintf("Second worker · %s-11", parentPrefix),
+		parent.Title + " · Reviewer",
+		fmt.Sprintf("%s · Reviewer · %s-900", parent.Title, parentPrefix),
+		parent.Title + " · Merger",
+		fmt.Sprintf("%s · Merger · %s-1000", parent.Title, parentPrefix),
+	}
+	for _, title := range reservedTitles {
+		unrelated := &models.Task{ProjectID: parent.ProjectID, Title: title, Prompt: "Unrelated task", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+		if err := taskSvc.Create(ctx, unrelated); err != nil {
+			t.Fatalf("reserve title %q: %v", title, err)
+		}
+	}
+
+	partialWorker := &models.Task{ProjectID: parent.ProjectID, Title: "First worker", Prompt: "Do first part", Category: models.CategoryActive, Status: models.StatusPending, ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker, SwarmStatus: "running", SwarmConfig: `{"required":true,"rerun_generation":1}`, SwarmSequence: 10}
+	if err := taskSvc.Create(ctx, partialWorker); err != nil {
+		t.Fatalf("create partial worker: %v", err)
+	}
+	output := PlannerOutput{Workers: []PlannerWorker{
+		{Title: "First worker", Prompt: "Do first part", WorkerKind: "backend", Ownership: []string{"internal/first"}, Isolation: "worktree", Required: true},
+		{Title: "Second worker", Prompt: "Do second part", WorkerKind: "backend", Ownership: []string{"internal/second"}, Isolation: "worktree", Required: true},
+	}, ReviewerPrompt: "Review", MergerPrompt: "Merge"}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, output); err != nil {
+		t.Fatalf("resume partial planner application: %v", err)
+	}
+
+	children, err := repo.ListSwarmChildren(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("ListSwarmChildren: %v", err)
+	}
+	counts := map[models.SwarmRole]int{}
+	for _, child := range children {
+		counts[child.SwarmRole]++
+		for _, reserved := range reservedTitles {
+			if child.Title == reserved {
+				t.Fatalf("swarm child reused reserved title %q", child.Title)
+			}
+		}
+	}
+	if counts[models.SwarmRoleWorker] != 2 || counts[models.SwarmRoleReviewer] != 1 || counts[models.SwarmRoleMerger] != 1 {
+		t.Fatalf("partial application was not completed exactly once: %#v", counts)
+	}
+	storedPlanner, err := repo.GetByID(ctx, planner.ID)
+	if err != nil || storedPlanner == nil || storedPlanner.SwarmStatus != "planned" {
+		t.Fatalf("planner not terminalized after recovery: planner=%#v err=%v", storedPlanner, err)
+	}
+}
+
+func TestSwarmServiceStartPlannerDisambiguatesRepeatedTitleCollisions(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Deferred collision swarm", Prompt: "Build export", Category: models.CategoryBacklog, MaxWorkers: 1})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	baseTitle := parent.Title + " · Planner"
+	for _, title := range []string{baseTitle, fmt.Sprintf("%s · %s-0", baseTitle, parent.ID[:8])} {
+		unrelated := &models.Task{ProjectID: parent.ProjectID, Title: title, Prompt: "Unrelated task", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+		if err := taskSvc.Create(ctx, unrelated); err != nil {
+			t.Fatalf("reserve title %q: %v", title, err)
+		}
+	}
+	if err := svc.StartPlanner(ctx, parent.ID); err != nil {
+		t.Fatalf("StartPlanner: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+	if planner.Title == baseTitle || planner.Title == fmt.Sprintf("%s · %s-0", baseTitle, parent.ID[:8]) {
+		t.Fatalf("planner title was not disambiguated beyond occupied fallbacks: %q", planner.Title)
+	}
+}
+
+func TestSwarmServicePlannerCallbackPersistsApplicationError(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, repository.NewExecutionRepo(db), nil)
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Planner callback error", Prompt: "Build export", MaxWorkers: 1})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := svc.applyCompletedPlannerExecution(cancelled, planner); !errors.Is(err, context.Canceled) {
+		t.Fatalf("applyCompletedPlannerExecution error = %v, want context canceled", err)
+	}
+
+	storedParent, err := repo.GetByID(ctx, parent.ID)
+	if err != nil || storedParent == nil {
+		t.Fatalf("load parent: parent=%#v err=%v", storedParent, err)
+	}
+	parentCfg, _ := models.ParseSwarmConfig(storedParent.SwarmConfig)
+	if !strings.Contains(parentCfg.LastError, "context canceled") || storedParent.SwarmStatus != "blocked" {
+		t.Fatalf("parent callback failure not persisted: status=%q error=%q", storedParent.SwarmStatus, parentCfg.LastError)
+	}
+	storedPlanner, err := repo.GetByID(ctx, planner.ID)
+	if err != nil || storedPlanner == nil {
+		t.Fatalf("load planner: planner=%#v err=%v", storedPlanner, err)
+	}
+	plannerCfg, _ := models.ParseSwarmConfig(storedPlanner.SwarmConfig)
+	if !strings.Contains(plannerCfg.LastError, "context canceled") || storedPlanner.SwarmStatus != "plan_apply_failed" {
+		t.Fatalf("planner callback failure not persisted: status=%q error=%q", storedPlanner.SwarmStatus, plannerCfg.LastError)
 	}
 }
 
