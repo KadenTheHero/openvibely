@@ -480,6 +480,69 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorCreatesTaskThroughMarker(t *tes
 	time.Sleep(20 * time.Millisecond)
 }
 
+func TestHandler_ChatSend_MixtureOllamaAggregatorPlanModeDoesNotExecuteMarker(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	providerRequests := make(chan map[string]any, 1)
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		providerRequests <- body
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"Plan mode must not create this task\",\"prompt\":\"This marker must remain inert.\"}\n[/CREATE_TASK]"},"done":false}`)
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
+	}))
+	defer providerServer.Close()
+
+	aggregator := &models.LLMConfig{
+		Name: "HTTP Ollama Plan Aggregator", Provider: models.ProviderOllama, Model: "test-model",
+		OllamaBaseURL: providerServer.URL,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
+	mixture := &models.LLMConfig{
+		Name: "HTTP Plan Marker Mixture", Provider: models.ProviderMixture, Model: "mixture",
+		MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, mixture))
+
+	form := url.Values{}
+	form.Set("message", "Plan an investigation task without creating it")
+	form.Set("agent_id", mixture.ID)
+	form.Set("chat_mode", string(models.ChatModePlan))
+	req := httptest.NewRequest(http.MethodPost, "/chat/send", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	select {
+	case providerRequest := <-providerRequests:
+		require.NotContains(t, providerRequest, "tools", "runtime-tool-incapable Plan aggregator must not receive tool definitions")
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for Ollama Plan mixture aggregator request")
+	}
+	require.Eventually(t, func() bool {
+		active, err := h.execRepo.FindLatestActiveChatExecution(ctx, "default")
+		return err == nil && active == nil
+	}, 3*time.Second, 10*time.Millisecond)
+	tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	require.False(t, slices.ContainsFunc(tasks, func(task models.Task) bool {
+		return task.Title == "Plan mode must not create this task"
+	}), "Plan mode must never execute action markers")
+	time.Sleep(20 * time.Millisecond)
+}
+
 func TestHandler_ChatSend_EmptyMessage(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 

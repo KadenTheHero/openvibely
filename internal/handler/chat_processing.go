@@ -367,12 +367,14 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 				params.ExecID, len(defs), chatMode, surface, params.IsTaskFollowup)
 		}
 	}
-	// Fallback: when a provider/auth path has no runtime tool support (e.g.
-	// Claude CLI, Codex CLI, Ollama), we MUST fall back to marker
-	// post-processing so emitted action blocks are actually executed. This
-	// applies to interactive chat and task-thread follow-ups; otherwise the UI
-	// can show an action block that never reaches the task store.
-	if !runtimeToolsInjected && !params.ProcessMarkers {
+	// Plan mode is read-only. Never execute action markers, even when a caller
+	// supplied ProcessMarkers or the provider cannot receive runtime tools.
+	// Other no-tool transports (e.g. Claude CLI, Codex CLI, Ollama) retain
+	// marker fallback so emitted action blocks are executable in Orchestrate
+	// and task-thread turns.
+	if chatMode == models.ChatModePlan {
+		params.ProcessMarkers = false
+	} else if !runtimeToolsInjected && !params.ProcessMarkers {
 		params.ProcessMarkers = true
 		applog.Infof("[handler] processStreamingResponse exec=%s no runtime tools (provider=%s auth=%s followup=%v); enabling marker processing fallback",
 			params.ExecID, params.Agent.Provider, params.Agent.AuthMethod, params.IsTaskFollowup)
