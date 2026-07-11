@@ -546,6 +546,12 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 	if child.SwarmRole == models.SwarmRolePlanner && child.Status == models.StatusCompleted {
 		return s.applyCompletedPlannerExecution(ctx, child)
 	}
+	s.orchestration.Lock()
+	defer s.orchestration.Unlock()
+	child, err = s.taskRepo.GetByID(ctx, childTaskID)
+	if err != nil || child == nil || child.ParentTaskID == nil {
+		return err
+	}
 	parent, err := s.taskRepo.GetByID(ctx, *child.ParentTaskID)
 	if err != nil || parent == nil {
 		return err
@@ -555,6 +561,18 @@ func (s *SwarmService) OnChildCompleted(ctx context.Context, childTaskID string)
 		return err
 	}
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	if child.Status == models.StatusFailed {
+		failedStatus := "failed"
+		if child.SwarmStatus == "followup_pending" || child.SwarmStatus == "followup_failed" {
+			failedStatus = "followup_failed"
+		}
+		if child.SwarmStatus != failedStatus {
+			if err := s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, failedStatus, child.SwarmConfig, child.SwarmSequence); err != nil {
+				return err
+			}
+		}
+		return s.RecomputeParentStatus(ctx, parent.ID)
+	}
 	if child.Status == models.StatusCancelled {
 		return s.handleChildCancelled(ctx, parent, child, parentCfg)
 	}
@@ -771,6 +789,8 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 }
 
 func (s *SwarmService) HandleChildFollowup(ctx context.Context, childTaskID string, message string) error {
+	s.orchestration.Lock()
+	defer s.orchestration.Unlock()
 	child, err := s.taskRepo.GetByID(ctx, childTaskID)
 	if err != nil || child == nil || child.ParentTaskID == nil || !models.IsSwarmChildRole(child.SwarmRole) {
 		return err
@@ -781,12 +801,19 @@ func (s *SwarmService) HandleChildFollowup(ctx context.Context, childTaskID stri
 	}
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	childCfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
+	repairingFailure := child.Status == models.StatusFailed || child.SwarmStatus == "failed" || child.SwarmStatus == "followup_failed"
 	swarmStatus := ""
 	switch child.SwarmRole {
 	case models.SwarmRoleWorker:
-		parentCfg.Generation++
-		if parentCfg.Generation == 0 {
-			parentCfg.Generation = 1
+		if repairingFailure {
+			if parentCfg.Generation <= 0 {
+				parentCfg.Generation = 1
+			}
+		} else {
+			parentCfg.Generation++
+			if parentCfg.Generation == 0 {
+				parentCfg.Generation = 1
+			}
 		}
 		parentCfg.ReviewedGeneration = min(parentCfg.ReviewedGeneration, parentCfg.Generation-1)
 		parentCfg.MergedGeneration = min(parentCfg.MergedGeneration, parentCfg.Generation-1)
@@ -844,8 +871,10 @@ func (s *SwarmService) HandleChildFollowup(ctx context.Context, childTaskID stri
 }
 
 func (s *SwarmService) ReactivateParentForChildFollowupRetry(ctx context.Context, childTaskID string) error {
+	s.orchestration.Lock()
+	defer s.orchestration.Unlock()
 	child, err := s.taskRepo.GetByID(ctx, childTaskID)
-	if err != nil || child == nil || child.ParentTaskID == nil || !models.IsSwarmChildRole(child.SwarmRole) || child.SwarmStatus != "followup_pending" {
+	if err != nil || child == nil || child.ParentTaskID == nil || !models.IsSwarmChildRole(child.SwarmRole) || (child.SwarmStatus != "followup_pending" && child.SwarmStatus != "followup_failed") {
 		return err
 	}
 	parent, err := s.taskRepo.GetByID(ctx, *child.ParentTaskID)
@@ -855,7 +884,13 @@ func (s *SwarmService) ReactivateParentForChildFollowupRetry(ctx context.Context
 	if err := s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning); err != nil {
 		return err
 	}
-	return s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryActive)
+	if err := s.taskRepo.UpdateCategory(ctx, parent.ID, models.CategoryActive); err != nil {
+		return err
+	}
+	if child.SwarmStatus == "followup_failed" {
+		return s.taskRepo.UpdateSwarmFields(ctx, child.ID, child.SwarmRole, "followup_pending", child.SwarmConfig, child.SwarmSequence)
+	}
+	return nil
 }
 
 func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role models.SwarmRole) (*models.Task, error) {

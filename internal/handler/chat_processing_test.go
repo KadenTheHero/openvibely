@@ -3103,7 +3103,7 @@ func TestStartChannelTaskRun_RoutesSwarmChildBeforeSetupFailure(t *testing.T) {
 	updatedWorkerCfg, err := models.ParseSwarmConfig(updatedWorker.SwarmConfig)
 	require.NoError(t, err)
 	assert.Equal(t, updatedParentCfg.Generation, updatedWorkerCfg.RerunGeneration)
-	assert.Equal(t, "followup_pending", updatedWorker.SwarmStatus)
+	assert.Equal(t, "followup_failed", updatedWorker.SwarmStatus)
 	require.Eventually(t, func() bool {
 		failedExec, err := h.execRepo.GetByID(ctx, exec.ID)
 		return err == nil && failedExec != nil && failedExec.Status == models.ExecFailed

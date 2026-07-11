@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAttachSwarmChildrenPreservesPreviouslyAttachedChildren(t *testing.T) {
@@ -2349,5 +2353,185 @@ func TestSwarmServiceRerunRoleRejectsActiveRoleExecutionWithoutRetargeting(t *te
 	}
 	if reviewerAfter.SwarmConfig != reviewerBefore.SwarmConfig || reviewerAfter.SwarmStatus != reviewerBefore.SwarmStatus || reviewerAfter.Status != reviewerBefore.Status {
 		t.Fatalf("reviewer mutated despite rejected active rerun: before=%#v after=%#v", reviewerBefore, reviewerAfter)
+	}
+}
+
+type failedChildRepairFixture struct {
+	t         *testing.T
+	ctx       context.Context
+	repo      *repository.TaskRepo
+	svc       *SwarmService
+	workerSvc *WorkerService
+	parent    *models.Task
+	workers   []*models.Task
+	reviewer  *models.Task
+	merger    *models.Task
+}
+
+func newFailedChildRepairFixture(t *testing.T, workers int, reviewerEnabled, mergerEnabled bool) *failedChildRepairFixture {
+	t.Helper()
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	svc := NewSwarmService(NewTaskService(repo, nil, nil), repo, repository.NewExecutionRepo(db), workerSvc)
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Repair failed child", Prompt: "repair", MaxWorkers: workers, ReviewerEnabled: reviewerEnabled, MergerEnabled: mergerEnabled})
+	require.NoError(t, err)
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	plan := PlannerOutput{ReviewerPrompt: "review", MergerPrompt: "merge"}
+	for i := 0; i < workers; i++ {
+		plan.Workers = append(plan.Workers, PlannerWorker{Title: fmt.Sprintf("Repair worker %d", i), Prompt: "work", WorkerKind: "backend", Ownership: []string{fmt.Sprintf("scope-%d", i)}, Isolation: "worktree", Required: true})
+	}
+	require.NoError(t, svc.ApplyPlannerOutput(ctx, planner.ID, plan))
+	for i := 0; i < workers; i++ {
+		select {
+		case <-workerSvc.Submitted():
+		default:
+			t.Fatal("missing initial worker submission")
+		}
+	}
+	children, err := repo.ListSwarmChildren(ctx, parent.ID)
+	require.NoError(t, err)
+	f := &failedChildRepairFixture{t: t, ctx: ctx, repo: repo, svc: svc, workerSvc: workerSvc, parent: parent}
+	for i := range children {
+		child := children[i]
+		switch child.SwarmRole {
+		case models.SwarmRoleWorker:
+			f.workers = append(f.workers, &child)
+		case models.SwarmRoleReviewer:
+			f.reviewer = &child
+		case models.SwarmRoleMerger:
+			f.merger = &child
+		}
+	}
+	sort.Slice(f.workers, func(i, j int) bool { return f.workers[i].SwarmSequence < f.workers[j].SwarmSequence })
+	return f
+}
+
+func (f *failedChildRepairFixture) terminal(child *models.Task, status models.TaskStatus) {
+	f.t.Helper()
+	require.NoError(f.t, f.repo.UpdateStatus(f.ctx, child.ID, status))
+	require.NoError(f.t, f.svc.OnChildCompleted(f.ctx, child.ID))
+}
+
+func (f *failedChildRepairFixture) assertNoSubmission() {
+	f.t.Helper()
+	select {
+	case task := <-f.workerSvc.Submitted():
+		f.t.Fatalf("unexpected downstream submission: role=%s id=%s", task.SwarmRole, task.ID)
+	default:
+	}
+}
+
+func (f *failedChildRepairFixture) submittedRole(role models.SwarmRole) {
+	f.t.Helper()
+	select {
+	case task := <-f.workerSvc.Submitted():
+		require.Equal(f.t, role, task.SwarmRole)
+	case <-time.After(time.Second):
+		f.t.Fatalf("missing %s submission", role)
+	}
+}
+
+func TestSwarmServiceFailedWorkerFollowupRepairStartsReviewerOnce(t *testing.T) {
+	f := newFailedChildRepairFixture(t, 2, true, true)
+	f.terminal(f.workers[0], models.StatusCompleted)
+	f.terminal(f.workers[1], models.StatusFailed)
+	f.assertNoSubmission()
+
+	require.NoError(t, f.svc.HandleChildFollowup(f.ctx, f.workers[1].ID, "repair failure"))
+	f.terminal(f.workers[1], models.StatusCompleted)
+	f.submittedRole(models.SwarmRoleReviewer)
+	require.NoError(t, f.svc.OnChildCompleted(f.ctx, f.workers[1].ID))
+	f.assertNoSubmission()
+}
+
+func TestSwarmServiceFailedWorkerRepairWaitsForRunningSibling(t *testing.T) {
+	f := newFailedChildRepairFixture(t, 2, true, true)
+	f.terminal(f.workers[0], models.StatusFailed)
+	require.NoError(t, f.svc.HandleChildFollowup(f.ctx, f.workers[0].ID, "repair failure"))
+	f.terminal(f.workers[0], models.StatusCompleted)
+	f.assertNoSubmission()
+	f.terminal(f.workers[1], models.StatusCompleted)
+	f.submittedRole(models.SwarmRoleReviewer)
+}
+
+func TestSwarmServiceFailedWorkerFollowupFailureKeepsReviewerBlocked(t *testing.T) {
+	f := newFailedChildRepairFixture(t, 2, true, true)
+	f.terminal(f.workers[0], models.StatusCompleted)
+	f.terminal(f.workers[1], models.StatusFailed)
+	require.NoError(t, f.svc.HandleChildFollowup(f.ctx, f.workers[1].ID, "repair failure"))
+	f.terminal(f.workers[1], models.StatusFailed)
+	f.assertNoSubmission()
+	reviewer, err := f.repo.GetByID(f.ctx, f.reviewer.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, models.StatusPending, reviewer.Status)
+}
+
+func TestSwarmServiceConcurrentTerminalCallbacksDoNotDuplicateRoles(t *testing.T) {
+	f := newFailedChildRepairFixture(t, 2, true, true)
+	for _, worker := range f.workers {
+		require.NoError(t, f.repo.UpdateStatus(f.ctx, worker.ID, models.StatusCompleted))
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func(id string) { defer wg.Done(); require.NoError(t, f.svc.OnChildCompleted(f.ctx, id)) }(f.workers[i%2].ID)
+		go func() { defer wg.Done(); require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID)) }()
+	}
+	wg.Wait()
+	f.submittedRole(models.SwarmRoleReviewer)
+	f.assertNoSubmission()
+
+	require.NoError(t, f.repo.UpdateStatus(f.ctx, f.reviewer.ID, models.StatusCompleted))
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); require.NoError(t, f.svc.OnChildCompleted(f.ctx, f.reviewer.ID)) }()
+		go func() { defer wg.Done(); require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID)) }()
+	}
+	wg.Wait()
+	f.submittedRole(models.SwarmRoleMerger)
+	f.assertNoSubmission()
+}
+
+func TestSwarmServiceFailedReviewerFollowupRepairStartsMergerOnce(t *testing.T) {
+	f := newFailedChildRepairFixture(t, 1, true, true)
+	f.terminal(f.workers[0], models.StatusCompleted)
+	f.submittedRole(models.SwarmRoleReviewer)
+	f.terminal(f.reviewer, models.StatusFailed)
+	f.assertNoSubmission()
+	require.NoError(t, f.svc.HandleChildFollowup(f.ctx, f.reviewer.ID, "repair review"))
+	f.terminal(f.reviewer, models.StatusCompleted)
+	f.submittedRole(models.SwarmRoleMerger)
+	require.NoError(t, f.svc.OnChildCompleted(f.ctx, f.reviewer.ID))
+	f.assertNoSubmission()
+}
+
+func TestSwarmServiceFailedWorkerRepairHonorsDisabledRoles(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		reviewerEnabled bool
+		mergerEnabled   bool
+		wantRole        models.SwarmRole
+	}{
+		{name: "reviewer disabled", reviewerEnabled: false, mergerEnabled: true, wantRole: models.SwarmRoleMerger},
+		{name: "merger disabled", reviewerEnabled: true, mergerEnabled: false, wantRole: models.SwarmRoleReviewer},
+		{name: "both disabled", reviewerEnabled: false, mergerEnabled: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFailedChildRepairFixture(t, 1, tc.reviewerEnabled, tc.mergerEnabled)
+			f.terminal(f.workers[0], models.StatusFailed)
+			require.NoError(t, f.svc.HandleChildFollowup(f.ctx, f.workers[0].ID, "repair"))
+			f.terminal(f.workers[0], models.StatusCompleted)
+			if tc.wantRole != "" {
+				f.submittedRole(tc.wantRole)
+			} else {
+				f.assertNoSubmission()
+				parent, err := f.repo.GetByID(f.ctx, f.parent.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.StatusCompleted, parent.Status)
+			}
+		})
 	}
 }
