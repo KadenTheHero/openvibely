@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
@@ -204,7 +205,9 @@ func New(
 		if workerSvc != nil {
 			workerSvc.SetOnTaskComplete(func(task models.Task, executionErr error) {
 				if models.IsSwarmChildRole(task.SwarmRole) && swarmSvc != nil {
-					_ = swarmSvc.OnChildCompleted(context.Background(), task.ID)
+					if err := swarmSvc.OnChildCompleted(context.Background(), task.ID); err != nil {
+						applog.Infof("[swarm] completion callback failed task=%s role=%s: %v", task.ID, task.SwarmRole, err)
+					}
 				}
 			})
 		}

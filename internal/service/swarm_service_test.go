@@ -75,6 +75,46 @@ func TestSwarmServiceCreateAndApplyPlannerOutput(t *testing.T) {
 	}
 }
 
+func TestSwarmServiceApplyPlannerOutputDisambiguatesExistingWorkerTitle(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+
+	existing := &models.Task{ProjectID: "default", Title: "Backend worker", Prompt: "Previous unrelated task", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+	if err := taskSvc.Create(ctx, existing); err != nil {
+		t.Fatalf("create existing task: %v", err)
+	}
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export again", Prompt: "Build export", MaxWorkers: 1, WorkerIsolation: "worktree", ReviewerEnabled: true, MergerEnabled: true})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+
+	output := PlannerOutput{Workers: []PlannerWorker{{Title: existing.Title, Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", MergerPrompt: "Merge"}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, output); err != nil {
+		t.Fatalf("ApplyPlannerOutput with an existing worker title: %v", err)
+	}
+	children, err := repo.ListSwarmChildren(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("ListSwarmChildren: %v", err)
+	}
+	counts := map[models.SwarmRole]int{}
+	for _, child := range children {
+		counts[child.SwarmRole]++
+		if child.SwarmRole == models.SwarmRoleWorker && child.Title == existing.Title {
+			t.Fatalf("worker title was not disambiguated: %q", child.Title)
+		}
+	}
+	if counts[models.SwarmRoleWorker] != 1 || counts[models.SwarmRoleReviewer] != 1 || counts[models.SwarmRoleMerger] != 1 {
+		t.Fatalf("unexpected children after title collision: %#v", counts)
+	}
+}
+
 func TestSwarmServiceCreateAssignsProjectDefaultModelToChildren(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

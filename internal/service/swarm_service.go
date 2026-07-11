@@ -305,7 +305,17 @@ func (s *SwarmService) createWorkerFromPlan(ctx context.Context, parent *models.
 		child.WorktreePath = filepath.Join(".worktrees", child.WorktreeBranch)
 	}
 	if err := s.taskSvc.Create(ctx, child); err != nil {
-		return nil, err
+		if !errors.Is(err, ErrDuplicateTask) {
+			return nil, err
+		}
+		parentID := parent.ID
+		if len(parentID) > 8 {
+			parentID = parentID[:8]
+		}
+		child.Title = fmt.Sprintf("%s · %s-%d", worker.Title, parentID, sequence)
+		if err := s.taskSvc.Create(ctx, child); err != nil {
+			return nil, err
+		}
 	}
 	if cfg.Isolation == "worktree" {
 		branch := swarmBranch(parent.Title, worker.WorkerKind, child.ID)
