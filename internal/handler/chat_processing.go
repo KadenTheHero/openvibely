@@ -2080,7 +2080,7 @@ func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectI
 	applog.Infof("[handler] processChatTaskCreations exec=%s found %d task creation requests", execID, len(taskRequests))
 
 	chatAtts, _ := h.chatAttachmentRepo.ListByExecution(ctx, execID)
-	deferredActiveTitles := h.deferActiveTasksWithAttachments(taskRequests, chatAtts)
+	deferredActiveTitles := h.deferActiveTasksWithAttachments(taskRequests, chatAtts, agents)
 
 	createdTasks, summary := h.executeChatTaskCreationsWithAttachments(ctx, taskRequests, projectID, execID, agents)
 	h.applyChannelOriginToCreatedTasks(ctx, createdTasks, firstChannelReply(channelReply))
@@ -2096,7 +2096,8 @@ func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectI
 	return h.appendCreationSummary(output, summary, totalAttachmentsCopied, chatAtts), totalAttachmentsCopied
 }
 
-// deferActiveTasksWithAttachments defers activation of "active" tasks when attachments exist.
+// deferActiveTasksWithAttachments resolves each request's effective category and
+// defers anything that would activate until attachment conversion succeeds.
 // Returns a map of task titles that should be activated after attachment copying.
 func firstChannelReply(replies []service.ChannelReplyContext) service.ChannelReplyContext {
 	if len(replies) == 0 {
@@ -2130,16 +2131,16 @@ func (h *Handler) applyChannelOriginToCreatedTasks(ctx context.Context, tasks []
 	}
 }
 
-func (h *Handler) deferActiveTasksWithAttachments(taskRequests []service.TaskCreationRequest, chatAtts []models.ChatAttachment) map[string]bool {
+func (h *Handler) deferActiveTasksWithAttachments(taskRequests []service.TaskCreationRequest, chatAtts []models.ChatAttachment, agents []models.LLMConfig) map[string]bool {
 	if len(chatAtts) == 0 {
 		return nil
 	}
 
 	deferredActiveTitles := make(map[string]bool)
 	for i := range taskRequests {
-		if taskRequests[i].Category == "active" {
+		if service.EffectiveTaskCreationCategory(taskRequests[i], agents) == models.CategoryActive {
 			deferredActiveTitles[taskRequests[i].Title] = true
-			taskRequests[i].Category = "backlog"
+			taskRequests[i].Category = string(models.CategoryBacklog)
 			applog.Infof("[handler] deferActiveTasksWithAttachments deferred auto-submit for task %q (has attachments)", taskRequests[i].Title)
 		}
 	}

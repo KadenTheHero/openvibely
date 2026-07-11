@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -354,6 +356,53 @@ func TestCreateSwarmTaskRuntimeTool_CreatesParentAndPlanner(t *testing.T) {
 	if err != nil || planner == nil {
 		t.Fatalf("planner child not created: %v", err)
 	}
+}
+
+func TestCreateTaskRuntimeTool_OmittedCategoryAutoStartActivatesAfterAttachmentConversion(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Runtime Attachment Deferral Project")
+	modelConfig := createAgent(t, llmConfigRepo, func(c *models.LLMConfig) {
+		c.AutoStartTasks = true
+	})
+	chatHostTask := createTask(t, h, project.ID, "runtime attachment host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+	})
+	exec := createExec(t, h, chatHostTask.ID, modelConfig.ID)
+
+	fileName := "Screenshot 2026-07-10 at 9.49.00\u202fPM.png"
+	sourceDir := filepath.Join(uploadsDir, "chat", exec.ID)
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	sourcePath := filepath.Join(sourceDir, fileName)
+	require.NoError(t, os.WriteFile(sourcePath, []byte{0x89, 0x50, 0x4e, 0x47}, 0o644))
+	require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+		ExecutionID: exec.ID,
+		FileName:    fileName,
+		FilePath:    sourcePath,
+		MediaType:   "image/png",
+		FileSize:    4,
+	}))
+
+	handlers := h.chatActionHandlers(
+		streamingResponseParams{ExecID: exec.ID, ProjectID: project.ID},
+		nil,
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)
+	output, err := handlers["create_task"](ctx, json.RawMessage(`{"title":"Auto-start runtime task","prompt":"Use the screenshot"}`))
+	require.NoError(t, err)
+	ids := extractTaskIDsFromOutput(output)
+	require.Len(t, ids, 1)
+
+	created, err := h.taskRepo.GetByID(ctx, ids[0])
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.Equal(t, models.CategoryActive, created.Category)
+	attachments, err := h.attachmentRepo.ListByTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.Len(t, attachments, 1)
+	require.Equal(t, fileName, attachments[0].FileName)
+	require.FileExists(t, attachments[0].FilePath)
 }
 
 // TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure is the regression

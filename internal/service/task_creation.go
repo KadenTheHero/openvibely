@@ -69,6 +69,46 @@ func ParseTaskCreations(output string) []TaskCreationRequest {
 	return tasks
 }
 
+// EffectiveTaskCreationCategory resolves the category a task creation request would
+// receive after model selection and auto-start policy are applied.
+func EffectiveTaskCreationCategory(req TaskCreationRequest, availableAgents []models.LLMConfig) models.TaskCategory {
+	selectedAgentID, _ := selectTaskCreationAgent(req, availableAgents)
+	return resolveTaskCreationCategory(req, selectedAgentID, availableAgents)
+}
+
+func selectTaskCreationAgent(req TaskCreationRequest, availableAgents []models.LLMConfig) (string, string) {
+	if req.AgentID != "" {
+		return req.AgentID, ""
+	}
+	if len(availableAgents) > 1 {
+		complexity := AnalyzeComplexity(req.Prompt)
+		if result := SelectLLM(complexity, availableAgents); result != nil {
+			return result.LLMConfig.ID, FormatSelectionSummary(result)
+		}
+	}
+	if len(availableAgents) == 1 {
+		return availableAgents[0].ID, ""
+	}
+	return "", ""
+}
+
+func resolveTaskCreationCategory(req TaskCreationRequest, selectedAgentID string, availableAgents []models.LLMConfig) models.TaskCategory {
+	if req.Category != "" {
+		category := models.TaskCategory(req.Category)
+		if category == models.CategoryActive || category == models.CategoryBacklog {
+			return category
+		}
+		return models.CategoryBacklog
+	}
+
+	for i := range availableAgents {
+		if availableAgents[i].ID == selectedAgentID && availableAgents[i].AutoStartTasks {
+			return models.CategoryActive
+		}
+	}
+	return models.CategoryBacklog
+}
+
 // ExecuteTaskCreations creates tasks from parsed requests and returns a summary.
 // The summary includes task IDs in the format [TASK_ID:id] so the frontend can
 // convert them to clickable links.
@@ -92,56 +132,19 @@ func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreation
 		availableAgents = agents[0]
 	}
 
-	// Build map of agent ID -> config for fast lookups
-	agentConfigMap := make(map[string]*models.LLMConfig)
-	for i := range availableAgents {
-		agentConfigMap[availableAgents[i].ID] = &availableAgents[i]
-	}
-
 	var createdTasks []models.Task
 	var created []string
 	var failed []string
 
 	for _, req := range requests {
-		// Agent selection: explicit > auto-select > default (nil)
-		var selectedAgentID string
-		var selectionInfo string
-		if req.AgentID != "" {
-			selectedAgentID = req.AgentID
-		} else if len(availableAgents) > 1 {
-			complexity := AnalyzeComplexity(req.Prompt)
-			result := SelectLLM(complexity, availableAgents)
-			if result != nil {
-				selectedAgentID = result.LLMConfig.ID
-				selectionInfo = FormatSelectionSummary(result)
-			}
-		} else if len(availableAgents) == 1 {
-			// If only one agent available, use it by default
-			selectedAgentID = availableAgents[0].ID
+		selectedAgentID, selectionInfo := selectTaskCreationAgent(req, availableAgents)
+		if req.AgentID == "" && len(availableAgents) == 1 {
 			applog.Infof("[task-creation] only one agent available, using %s", selectedAgentID)
 		}
 
-		// Determine initial category based on auto-start setting
-		category := models.TaskCategory(req.Category)
-
-		// If no category was specified, apply auto-start logic or default to backlog
-		if req.Category == "" {
-			// Check if selected agent has auto-start enabled
-			if selectedAgentID != "" {
-				if agentConfig, ok := agentConfigMap[selectedAgentID]; ok && agentConfig.AutoStartTasks {
-					category = models.CategoryActive
-					applog.Infof("[task-creation] auto-start enabled for agent %s, setting category to active", selectedAgentID)
-				} else {
-					category = models.CategoryBacklog
-				}
-			} else {
-				category = models.CategoryBacklog
-			}
-		} else {
-			// Category was explicitly set, validate it
-			if category != models.CategoryActive && category != models.CategoryBacklog {
-				category = models.CategoryBacklog
-			}
+		category := resolveTaskCreationCategory(req, selectedAgentID, availableAgents)
+		if req.Category == "" && category == models.CategoryActive {
+			applog.Infof("[task-creation] auto-start enabled for agent %s, setting category to active", selectedAgentID)
 		}
 
 		task := &models.Task{

@@ -206,6 +206,52 @@ func TestExecuteChatTaskCreations(t *testing.T) {
 	}
 }
 
+func TestProcessChatTaskCreations_OmittedCategoryAutoStartDefersWhenAttachmentConversionFails(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Marker Attachment Deferral Project")
+	modelConfig := createAgent(t, llmConfigRepo, func(c *models.LLMConfig) {
+		c.AutoStartTasks = true
+	})
+	chatHostTask := createTask(t, h, project.ID, "marker attachment host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+	})
+	exec := createExec(t, h, chatHostTask.ID, modelConfig.ID)
+
+	missingSource := filepath.Join(uploadsDir, "chat", exec.ID, "Screenshot 2026-07-10 at 9.49.00\u202fPM.png")
+	if err := h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+		ExecutionID: exec.ID,
+		FileName:    filepath.Base(missingSource),
+		FilePath:    missingSource,
+		MediaType:   "image/png",
+		FileSize:    4,
+	}); err != nil {
+		t.Fatalf("create chat attachment metadata: %v", err)
+	}
+
+	output := `[CREATE_TASK]
+{"title":"Auto-start marker task","prompt":"Use the screenshot"}
+[/CREATE_TASK]`
+	updated, copied := h.processChatTaskCreations(ctx, exec.ID, project.ID, output, []models.LLMConfig{*modelConfig})
+	if copied != 0 || !strings.Contains(updated, "Attachment conversion failed") {
+		t.Fatalf("expected failed attachment conversion, copied=%d output=%q", copied, updated)
+	}
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("list project tasks: %v", err)
+	}
+	for i := range tasks {
+		if tasks[i].Title == "Auto-start marker task" {
+			if tasks[i].Category != models.CategoryBacklog {
+				t.Fatalf("attachment-bearing omitted-category task activated before conversion: category=%s", tasks[i].Category)
+			}
+			return
+		}
+	}
+	t.Fatal("expected marker-created task")
+}
+
 func TestProcessChatTaskCreations_AssignsExactNamedAgentDefinitionNotModelConfig(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
