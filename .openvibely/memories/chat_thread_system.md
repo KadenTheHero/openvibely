@@ -2,9 +2,9 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-07-09
+updated: 2026-07-11
 source: after_complete_memory_update
-source_id: a7e8ff17f79ab7e721b50dafcbd0099a
+source_id: 01c7a61dfe44c4f1d95f6010ef604ea0
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -49,6 +49,8 @@ Swarm task facts:
 - `integrator` was renamed to canonical `merger` on 2026-07-04. Legacy persisted `integrator` roles/config/form/API aliases remain intentionally supported and display as Merger; no data migration was required.
 - Planner completion parses the latest completed planner output as JSON, tolerates surrounding transcript/tool text, and applies output idempotently so duplicate callbacks do not create duplicate workers. `ParsePlannerOutputJSON` scans fenced/balanced candidates in true text order and accepts the last valid object with non-empty `workers`.
 - Swarm child `swarm_status` is API-visible durable coordination metadata, not cosmetic. Successful children terminalize to role-appropriate values: planner `planned`, worker `completed`, reviewer `reviewed`, merger `integrated`.
+- Failed worker/reviewer children persist failure-specific coordination states (`failed` or `followup_failed`). A follow-up that repairs a failed prerequisite stays in the current swarm generation rather than advancing it, so completed siblings remain fresh and still-running siblings continue to gate downstream work. Failed-follow-up retries transition `followup_failed` back through `followup_pending`; completion, follow-up, and reconciliation coordination is serialized to prevent duplicate reviewer/merger submission.
+- As of 2026-07-11, `RecomputeParentStatus` durably recovers missed terminal child callbacks by replaying worker, reviewer, and merger transitions in prerequisite order under the orchestration lock. It stamps missing completion generations, preserves failure and running-sibling gates, activates downstream roles exactly once under concurrent/repeated reconciliation, recovers merger result finalization, and distinguishes a current-generation completion awaiting reconciliation from an intentional stale-generation rerun. Focused race tests, the full service package, `go build ./...`, and `TMPDIR=/private/tmp go test ./... -count=1 -timeout 180s` passed. Task `01c7a61dfe44c4f1d95f6010ef604ea0` still requires a fresh separate strict read-only audit before its goal can be considered complete.
 - Reviewer and worker completion auto-submit downstream merger/reviewer children as active/pending so the worker queue cannot prune them. Auto-start and finalization paths must guard against stale child completions overriding fresher pending/running work.
 - All four reviewer/merger enabled/disabled lifecycle combinations are intended to reach a terminal completed parent state: reviewer+merger, reviewer-only, merger-only, and worker-only.
 - Parent task-thread follow-ups affect swarm coordination: affected workers can be targeted, unaffected completed workers carry forward, and reviewer/merger phases rerun when needed.
