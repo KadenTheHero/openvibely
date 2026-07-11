@@ -17,6 +17,7 @@ type fakeGitHubService struct {
 	resolveRepoFn          func(ctx context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error)
 	defaultBranchFn        func(ctx context.Context, repo *service.GitHubRepoRef) (string, error)
 	publishBranchFn        func(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error
+	replaceBranchHeadFn    func(ctx context.Context, repo *service.GitHubRepoRef, req service.GitHubReplaceBranchHeadRequest) error
 	findPRFn               func(ctx context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error)
 	createPRFn             func(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error)
 	createIssueFn          func(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error)
@@ -90,6 +91,13 @@ func (f *fakeGitHubService) DefaultBranch(ctx context.Context, repo *service.Git
 func (f *fakeGitHubService) PublishBranch(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
 	if f != nil && f.publishBranchFn != nil {
 		return f.publishBranchFn(ctx, repo, publishReq)
+	}
+	return nil
+}
+
+func (f *fakeGitHubService) ReplaceBranchHead(ctx context.Context, repo *service.GitHubRepoRef, req service.GitHubReplaceBranchHeadRequest) error {
+	if f != nil && f.replaceBranchHeadFn != nil {
+		return f.replaceBranchHeadFn(ctx, repo, req)
 	}
 	return nil
 }

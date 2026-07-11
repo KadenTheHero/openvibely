@@ -557,6 +557,50 @@ func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {
 	}
 }
 
+func TestGitHubReplacePullRequestBranchRuntimeToolUsesLeaseGuard(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "GitHub PR Replacement", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Replace PR branch", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: t.TempDir(), WorktreeBranch: "task/runtime-replace-pr"}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+	if err := h.taskPullRequestRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 4, PRURL: "https://github.com/openvibely/openvibely/pull/4", PRState: "open"}); err != nil {
+		t.Fatalf("seed PR record: %v", err)
+	}
+
+	var got service.GitHubReplaceBranchHeadRequest
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(_ context.Context, _, _ string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+		},
+		replaceBranchHeadFn: func(_ context.Context, _ *service.GitHubRepoRef, req service.GitHubReplaceBranchHeadRequest) error {
+			got = req
+			return nil
+		},
+	})
+	expected := strings.Repeat("a", 40)
+	params := streamingResponseParams{ProjectID: project.ID}
+	handler := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["github_replace_pull_request_branch"]
+	if _, err := handler(ctx, json.RawMessage(`{"task_id":"`+task.ID+`","expected_head_sha":"`+expected+`"}`)); err == nil || !strings.Contains(err.Error(), "confirm_history_rewrite") {
+		t.Fatalf("expected explicit history rewrite confirmation error, got %v", err)
+	}
+	out, err := handler(ctx, json.RawMessage(`{"task_id":"`+task.ID+`","expected_head_sha":"`+expected+`","confirm_history_rewrite":true}`))
+	if err != nil {
+		t.Fatalf("github_replace_pull_request_branch returned error: %v", err)
+	}
+	if got.WorktreePath != task.WorktreePath || got.Branch != task.WorktreeBranch || got.ExpectedHead != expected {
+		t.Fatalf("unexpected replacement request: %#v", got)
+	}
+	if !strings.Contains(out, `"replaced_branch":"`+task.WorktreeBranch+`"`) || !strings.Contains(out, `"expected_head_sha":"`+expected+`"`) {
+		t.Fatalf("unexpected tool output: %s", out)
+	}
+}
+
 func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()

@@ -3538,6 +3538,7 @@ type fakeGitHubIssueRuntimeProvider struct {
 	listPRFeedbackFn     func(context.Context, *GitHubRepoRef, int) ([]GitHubPullRequestFeedback, error)
 	commentIssueFn       func(context.Context, *GitHubRepoRef, int, string) error
 	publishBranchFn      func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) error
+	replaceBranchHeadFn  func(context.Context, *GitHubRepoRef, GitHubReplaceBranchHeadRequest) error
 	findBranchPRFn       func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error)
 	createPRFn           func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 }
@@ -3556,6 +3557,13 @@ func (f *fakeGitHubIssueRuntimeProvider) DefaultBranch(ctx context.Context, repo
 func (f *fakeGitHubIssueRuntimeProvider) PublishBranch(ctx context.Context, repo *GitHubRepoRef, req GitHubPublishBranchRequest) error {
 	if f.publishBranchFn != nil {
 		return f.publishBranchFn(ctx, repo, req)
+	}
+	return nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error {
+	if f.replaceBranchHeadFn != nil {
+		return f.replaceBranchHeadFn(ctx, repo, req)
 	}
 	return nil
 }
@@ -3664,6 +3672,7 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	}
 
 	var createdRepo, commentedRepo, labeledRepo string
+	var replacementReq GitHubReplaceBranchHeadRequest
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 			switch repoURL {
@@ -3714,6 +3723,10 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 			}
 			return nil
 		},
+		replaceBranchHeadFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error {
+			replacementReq = req
+			return nil
+		},
 	}
 	rt := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
 		ProjectID:            project.ID,
@@ -3725,7 +3738,7 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 		ThreadInputRepo:      threadInputRepo,
 		GitHub:               provider,
 	})
-	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_add_issue_labels", "github_open_pull_request", "github_forward_pr_feedback_to_tasks"} {
+	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
 		if rt == nil || !rt.HasDefinition(name) {
 			t.Fatalf("expected %s in default GitHub runtime definitions for task runs, got %#v", name, rt)
 		}
@@ -3809,7 +3822,8 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	if err := taskRepo.Create(ctx, existingPRTask); err != nil {
 		t.Fatalf("create existing PR task: %v", err)
 	}
-	if err := taskRepo.UpdateWorktreeInfo(ctx, existingPRTask.ID, "", "task/existing-runtime-pr"); err != nil {
+	existingPRWorktree := t.TempDir()
+	if err := taskRepo.UpdateWorktreeInfo(ctx, existingPRTask.ID, existingPRWorktree, "task/existing-runtime-pr"); err != nil {
 		t.Fatalf("update existing PR task worktree branch: %v", err)
 	}
 	oldIssueNumber := 99
@@ -3829,6 +3843,18 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	}
 	if record == nil || record.PRNumber != 202 || record.IssueNumber == nil || *record.IssueNumber != 100 || record.IssueURL != "" {
 		t.Fatalf("expected existing runtime PR issue number with stale URL cleared, got %#v", record)
+	}
+
+	expectedHead := strings.Repeat("a", 40)
+	out, handled, isErr, err = rt.Executor(ctx, "github_replace_pull_request_branch", []byte(fmt.Sprintf(`{"task_id":"%s","expected_head_sha":"%s","confirm_history_rewrite":true}`, existingPRTask.ID, expectedHead)))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected PR branch replacement success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if replacementReq.WorktreePath != existingPRWorktree || replacementReq.Branch != "task/existing-runtime-pr" || replacementReq.ExpectedHead != expectedHead {
+		t.Fatalf("unexpected runtime replacement request: %#v", replacementReq)
+	}
+	if !strings.Contains(out, `"replaced_branch":"task/existing-runtime-pr"`) {
+		t.Fatalf("expected replacement output, got %s", out)
 	}
 
 	existingURLTask := &models.Task{ProjectID: project.ID, Title: "Existing Runtime PR URL", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "work"}
@@ -3993,7 +4019,7 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	if rt == nil {
 		t.Fatal("expected runtime tools on provider request")
 	}
-	for _, name := range []string{"create_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_forward_pr_feedback_to_tasks"} {
+	for _, name := range []string{"create_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
 		if !rt.HasDefinition(name) {
 			t.Fatalf("expected %s on initial task run, got %#v", name, rt.Definitions)
 		}

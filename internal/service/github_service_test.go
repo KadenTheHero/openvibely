@@ -1639,3 +1639,140 @@ func TestGitHubIssueAPIMethods(t *testing.T) {
 		t.Fatalf("expected all issue API endpoints to be called create=%v get=%v comment=%v labels=%v", sawCreate, sawGet, sawComment, sawLabels)
 	}
 }
+
+func TestReplaceBranchHeadUsesAtomicForceWithLease(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set PAT: %v", err)
+	}
+	repoDir := createTestGitRepo(t)
+	checkoutTestBranch(t, repoDir, "task/clean-history")
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	var pushArgs []string
+	var pushEnv []string
+	svc.runGit = func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "push" {
+			pushArgs = append([]string(nil), args...)
+			pushEnv = append([]string(nil), extraEnv...)
+			return []byte("ok"), nil
+		}
+		return defaultRunGit(ctx, dir, extraEnv, args...)
+	}
+
+	expected := strings.Repeat("a", 40)
+	if err := svc.ReplaceBranchHead(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubReplaceBranchHeadRequest{
+		WorktreePath: repoDir,
+		Branch:       "task/clean-history",
+		ExpectedHead: expected,
+	}); err != nil {
+		t.Fatalf("ReplaceBranchHead returned error: %v", err)
+	}
+
+	wantArgs := []string{
+		"push",
+		"--force-with-lease=refs/heads/task/clean-history:" + expected,
+		"https://github.com/openvibely/openvibely.git",
+		"HEAD:refs/heads/task/clean-history",
+	}
+	if strings.Join(pushArgs, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("unexpected push args: %#v", pushArgs)
+	}
+	if joined := strings.Join(pushArgs, " "); strings.Contains(joined, "ghp_test") {
+		t.Fatalf("token leaked into command arguments: %q", joined)
+	}
+	if joined := strings.Join(pushEnv, "\n"); !strings.Contains(joined, "GIT_TERMINAL_PROMPT=0") || !strings.Contains(joined, "AUTHORIZATION: Basic") {
+		t.Fatalf("expected non-interactive token environment, got %#v", pushEnv)
+	}
+}
+
+func TestReplaceBranchHeadRefusesDirtyWorktree(t *testing.T) {
+	ctx := context.Background()
+	repoDir := createTestGitRepo(t)
+	checkoutTestBranch(t, repoDir, "task/clean-history")
+	if err := os.WriteFile(filepath.Join(repoDir, "dirty.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatalf("write dirty file: %v", err)
+	}
+
+	svc := NewGitHubService(nil, "", "", "", "")
+	svc.runGit = func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "push" {
+			t.Fatal("dirty worktree must not be pushed")
+		}
+		return defaultRunGit(ctx, dir, extraEnv, args...)
+	}
+
+	err := svc.ReplaceBranchHead(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubReplaceBranchHeadRequest{
+		WorktreePath: repoDir,
+		Branch:       "task/clean-history",
+		ExpectedHead: strings.Repeat("a", 40),
+	})
+	if err == nil || !strings.Contains(err.Error(), "worktree must be clean") {
+		t.Fatalf("expected clean-worktree error, got %v", err)
+	}
+}
+
+func TestReplaceBranchHeadRefusesMismatchedWorktreeBranch(t *testing.T) {
+	ctx := context.Background()
+	repoDir := createTestGitRepo(t)
+	svc := NewGitHubService(nil, "", "", "", "")
+	svc.runGit = func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "push" {
+			t.Fatal("mismatched worktree branch must not be pushed")
+		}
+		return defaultRunGit(ctx, dir, extraEnv, args...)
+	}
+
+	err := svc.ReplaceBranchHead(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubReplaceBranchHeadRequest{
+		WorktreePath: repoDir,
+		Branch:       "task/clean-history",
+		ExpectedHead: strings.Repeat("a", 40),
+	})
+	if err == nil || !strings.Contains(err.Error(), "must be checked out on task branch") {
+		t.Fatalf("expected worktree branch mismatch error, got %v", err)
+	}
+}
+
+func checkoutTestBranch(t *testing.T, repoDir, branch string) {
+	t.Helper()
+	cmd := exec.Command("git", "checkout", "-b", branch)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout test branch: %v\n%s", err, out)
+	}
+}
+
+func TestReplaceBranchHeadDoesNotBypassFailedLease(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set PAT: %v", err)
+	}
+	repoDir := createTestGitRepo(t)
+	checkoutTestBranch(t, repoDir, "task/clean-history")
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	pushes := 0
+	svc.runGit = func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "push" {
+			pushes++
+			return nil, fmt.Errorf("stale info: rejected")
+		}
+		return defaultRunGit(ctx, dir, extraEnv, args...)
+	}
+
+	err := svc.ReplaceBranchHead(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubReplaceBranchHeadRequest{
+		WorktreePath: repoDir,
+		Branch:       "task/clean-history",
+		ExpectedHead: strings.Repeat("a", 40),
+	})
+	if err == nil || !strings.Contains(err.Error(), "lease-guarded branch replacement") {
+		t.Fatalf("expected guarded replacement error, got %v", err)
+	}
+	if pushes != 1 {
+		t.Fatalf("expected one guarded push attempt, got %d", pushes)
+	}
+}

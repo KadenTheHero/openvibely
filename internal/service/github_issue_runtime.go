@@ -51,19 +51,21 @@ type githubCreateIssueRuntimeInput struct {
 }
 
 type githubIssueRuntimeInput struct {
-	IssueNumber int      `json:"issue_number"`
-	IssueURL    string   `json:"issue_url"`
-	RepoURL     string   `json:"repo_url"`
-	Assignee    string   `json:"assignee"`
-	GitHubLogin string   `json:"github_login"`
-	Body        string   `json:"body"`
-	Labels      []string `json:"labels"`
-	TaskID      string   `json:"task_id"`
-	Title       string   `json:"title"`
-	PRTitle     string   `json:"pr_title"`
-	PRBody      string   `json:"pr_body"`
-	Base        string   `json:"base"`
-	Draft       bool     `json:"draft"`
+	IssueNumber           int      `json:"issue_number"`
+	IssueURL              string   `json:"issue_url"`
+	RepoURL               string   `json:"repo_url"`
+	Assignee              string   `json:"assignee"`
+	GitHubLogin           string   `json:"github_login"`
+	Body                  string   `json:"body"`
+	Labels                []string `json:"labels"`
+	TaskID                string   `json:"task_id"`
+	Title                 string   `json:"title"`
+	PRTitle               string   `json:"pr_title"`
+	PRBody                string   `json:"pr_body"`
+	Base                  string   `json:"base"`
+	Draft                 bool     `json:"draft"`
+	ExpectedHeadSHA       string   `json:"expected_head_sha"`
+	ConfirmHistoryRewrite bool     `json:"confirm_history_rewrite"`
 }
 
 func buildGitHubIssueRuntimeTools(opts githubIssueRuntimeOptions) *llmcontracts.RuntimeTools {
@@ -288,6 +290,40 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				return "", err
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "task_id": task.ID, "pull_request": result.PullRequest, "reused_existing_record": result.ReusedExistingRecord, "reused_remote": result.ReusedRemote, "created": result.Created})
+		},
+		"github_replace_pull_request_branch": func(ctx context.Context, input json.RawMessage) (string, error) {
+			if opts.TaskPullRequestRepo == nil {
+				return "", fmt.Errorf("task pull request repository unavailable")
+			}
+			if opts.TaskRepo == nil {
+				return "", fmt.Errorf("task repository unavailable")
+			}
+			var req githubIssueRuntimeInput
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if !req.ConfirmHistoryRewrite {
+				return "", fmt.Errorf("confirm_history_rewrite must be true to replace pull request branch history")
+			}
+			project, err := resolveGitHubRuntimeProject(ctx, opts)
+			if err != nil {
+				return "", err
+			}
+			task, err := resolveGitHubRuntimeTask(ctx, opts.TaskRepo, opts.ProjectID, req.TaskID, req.Title)
+			if err != nil {
+				return "", err
+			}
+			record, err := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo).ReplaceBranchHeadForTask(ctx, project, task, req.ExpectedHeadSHA)
+			if err != nil {
+				return "", err
+			}
+			return githubIssueRuntimeJSON(map[string]any{
+				"ok":                true,
+				"task_id":           task.ID,
+				"pull_request":      record,
+				"replaced_branch":   task.WorktreeBranch,
+				"expected_head_sha": strings.ToLower(strings.TrimSpace(req.ExpectedHeadSHA)),
+			})
 		},
 		"github_forward_pr_feedback_to_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
 			if opts.TaskPullRequestRepo == nil || opts.GitHubPRFeedbackRepo == nil || opts.GitHubAuthRepo == nil || opts.ThreadInputRepo == nil {

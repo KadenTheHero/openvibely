@@ -147,6 +147,7 @@ const githubListMyAssignedIssuesParams = `{"type":"object","properties":{` + git
 const githubCommentIssueParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"body":{"type":"string"},` + githubRepoURLProperty + `},"required":["issue_number","body"],"additionalProperties":false}`
 const githubAddLabelsParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as approved, in-progress, pr-opened. Do not use an openvibely: prefix."},` + githubRepoURLProperty + `},"required":["issue_number","labels"],"additionalProperties":false}`
 const githubOpenPullRequestParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"pr_title":{"type":"string","description":"Optional pull request title. Defaults to the task title."},"pr_body":{"type":"string","description":"Optional pull request body. Defaults to an OpenVibely task summary."},"base":{"type":"string","description":"Optional target branch. Defaults to the task merge target or repository default branch."},"draft":{"type":"boolean"},"issue_number":{"type":"integer","minimum":1,"description":"Optional GitHub issue number to persist on the task PR record."},"issue_url":{"type":"string","description":"Optional GitHub issue URL to persist on the task PR record."}},"additionalProperties":false}`
+const githubReplacePullRequestBranchParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"expected_head_sha":{"type":"string","pattern":"^[0-9a-fA-F]{40}$","description":"Exact current remote PR branch commit SHA used as the atomic lease guard."},"confirm_history_rewrite":{"type":"boolean","const":true,"description":"Must be true to explicitly confirm replacing shared pull request branch history."}},"required":["expected_head_sha","confirm_history_rewrite"],"additionalProperties":false}`
 const githubForwardPRFeedbackParams = `{"type":"object","properties":{"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}},"additionalProperties":false}`
 const githubActorAuthorizedParams = `{"type":"object","properties":{"github_login":{"type":"string","description":"GitHub login to check against the configured authorized actor list."}},"required":["github_login"],"additionalProperties":false}`
 
@@ -408,6 +409,17 @@ var registry = []ActionDef{
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     webAPISurfaces(),
 		Parameters:   json.RawMessage(githubOpenPullRequestParams),
+	},
+	{
+		Name:              "github_replace_pull_request_branch",
+		Description:       "Destructively replace a linked task pull request branch with the task worktree's clean local HEAD using an atomic force-with-lease guard. Use only for explicitly approved history cleanup, and pass the exact current remote branch SHA.",
+		Domain:            DomainGitHub,
+		Access:            AccessWrite,
+		Sensitivity:       SensitivityDestructive,
+		NeedsConfirmation: true,
+		AllowedModes:      []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:          webAPISurfaces(),
+		Parameters:        json.RawMessage(githubReplacePullRequestBranchParams),
 	},
 	{
 		Name:         "github_forward_pr_feedback_to_tasks",

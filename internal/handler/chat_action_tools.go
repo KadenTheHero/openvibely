@@ -311,6 +311,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"github_open_pull_request": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubOpenPullRequestTool(ctx, params, input)
 		},
+		"github_replace_pull_request_branch": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeGitHubReplacePullRequestBranchTool(ctx, params, input)
+		},
 		"github_forward_pr_feedback_to_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubForwardPRFeedbackToTasksTool(ctx, params.ProjectID, input)
 		},
@@ -501,19 +504,21 @@ type githubCreateIssueToolInput struct {
 }
 
 type githubIssueToolInput struct {
-	IssueNumber int      `json:"issue_number"`
-	IssueURL    string   `json:"issue_url"`
-	RepoURL     string   `json:"repo_url"`
-	Assignee    string   `json:"assignee"`
-	GitHubLogin string   `json:"github_login"`
-	Body        string   `json:"body"`
-	Labels      []string `json:"labels"`
-	TaskID      string   `json:"task_id"`
-	Title       string   `json:"title"`
-	PRTitle     string   `json:"pr_title"`
-	PRBody      string   `json:"pr_body"`
-	Base        string   `json:"base"`
-	Draft       bool     `json:"draft"`
+	IssueNumber           int      `json:"issue_number"`
+	IssueURL              string   `json:"issue_url"`
+	RepoURL               string   `json:"repo_url"`
+	Assignee              string   `json:"assignee"`
+	GitHubLogin           string   `json:"github_login"`
+	Body                  string   `json:"body"`
+	Labels                []string `json:"labels"`
+	TaskID                string   `json:"task_id"`
+	Title                 string   `json:"title"`
+	PRTitle               string   `json:"pr_title"`
+	PRBody                string   `json:"pr_body"`
+	Base                  string   `json:"base"`
+	Draft                 bool     `json:"draft"`
+	ExpectedHeadSHA       string   `json:"expected_head_sha"`
+	ConfirmHistoryRewrite bool     `json:"confirm_history_rewrite"`
 }
 
 func (h *Handler) resolveGitHubRepoForTool(ctx context.Context, projectID string) (*service.GitHubRepoRef, error) {
@@ -766,6 +771,48 @@ func (h *Handler) executeGitHubOpenPullRequestTool(ctx context.Context, params s
 		return "", err
 	}
 	return githubToolJSON(map[string]any{"ok": true, "task_id": task.ID, "pull_request": result.PullRequest, "reused_existing_record": result.ReusedExistingRecord, "reused_remote": result.ReusedRemote, "created": result.Created})
+}
+
+func (h *Handler) executeGitHubReplacePullRequestBranchTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	if h.taskPullRequestRepo == nil {
+		return "", fmt.Errorf("task pull request repository unavailable")
+	}
+	var req githubIssueToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	if !req.ConfirmHistoryRewrite {
+		return "", fmt.Errorf("confirm_history_rewrite must be true to replace pull request branch history")
+	}
+	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	task, err := h.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	if task == nil || task.ProjectID != params.ProjectID {
+		return "", fmt.Errorf("task not found in current project")
+	}
+	project, err := h.projectRepo.GetByID(ctx, params.ProjectID)
+	if err != nil {
+		return "", err
+	}
+	if project == nil {
+		return "", fmt.Errorf("current project not found")
+	}
+	record, err := service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).ReplaceBranchHeadForTask(ctx, project, task, req.ExpectedHeadSHA)
+	if err != nil {
+		return "", err
+	}
+	return githubToolJSON(map[string]any{
+		"ok":                true,
+		"task_id":           task.ID,
+		"pull_request":      record,
+		"replaced_branch":   task.WorktreeBranch,
+		"expected_head_sha": strings.ToLower(strings.TrimSpace(req.ExpectedHeadSHA)),
+	})
 }
 
 func githubToolJSON(payload map[string]any) (string, error) {
@@ -1357,6 +1404,7 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"github_comment_on_issue":              true,
 		"github_add_issue_labels":              true,
 		"github_open_pull_request":             true,
+		"github_replace_pull_request_branch":   true,
 		"github_forward_pr_feedback_to_tasks":  true,
 		"set_task_goal":                        true,
 		"clear_task_goal":                      true,

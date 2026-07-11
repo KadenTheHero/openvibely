@@ -17,6 +17,10 @@ type TaskPullRequestGitHubProvider interface {
 	CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 }
 
+type taskPullRequestBranchReplacer interface {
+	ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error
+}
+
 type TaskPullRequestService struct {
 	github TaskPullRequestGitHubProvider
 	repo   *repository.TaskPullRequestRepo
@@ -42,6 +46,56 @@ type OpenTaskPullRequestResult struct {
 
 func NewTaskPullRequestService(github TaskPullRequestGitHubProvider, repo *repository.TaskPullRequestRepo) *TaskPullRequestService {
 	return &TaskPullRequestService{github: github, repo: repo}
+}
+
+func (s *TaskPullRequestService) ReplaceBranchHeadForTask(ctx context.Context, project *models.Project, task *models.Task, expectedHead string) (*models.TaskPullRequest, error) {
+	if task == nil {
+		return nil, fmt.Errorf("task is required")
+	}
+	if project == nil {
+		return nil, fmt.Errorf("project is required")
+	}
+	if task.ProjectID != "" && project.ID != "" && task.ProjectID != project.ID {
+		return nil, fmt.Errorf("task does not belong to project")
+	}
+	if strings.TrimSpace(task.WorktreePath) == "" {
+		return nil, fmt.Errorf("task has no worktree path")
+	}
+	if strings.TrimSpace(task.WorktreeBranch) == "" {
+		return nil, fmt.Errorf("task has no worktree branch")
+	}
+	if s == nil || s.github == nil {
+		return nil, fmt.Errorf("github integration is not configured")
+	}
+	if s.repo == nil {
+		return nil, fmt.Errorf("task pull request repository not available")
+	}
+	if strings.TrimSpace(project.RepoPath) == "" {
+		return nil, fmt.Errorf("project has no repository path configured")
+	}
+	existingPR, err := s.repo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("checking existing pull request: %w", err)
+	}
+	if existingPR == nil {
+		return nil, fmt.Errorf("task has no linked pull request to replace")
+	}
+	replacer, ok := s.github.(taskPullRequestBranchReplacer)
+	if !ok {
+		return nil, fmt.Errorf("github integration does not support branch replacement")
+	}
+	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolving repository: %w", err)
+	}
+	if err := replacer.ReplaceBranchHead(ctx, repoRef, GitHubReplaceBranchHeadRequest{
+		WorktreePath: task.WorktreePath,
+		Branch:       task.WorktreeBranch,
+		ExpectedHead: expectedHead,
+	}); err != nil {
+		return nil, fmt.Errorf("replacing pull request branch head: %w", err)
+	}
+	return existingPR, nil
 }
 
 func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) (*OpenTaskPullRequestResult, error) {
