@@ -2,12 +2,14 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -308,6 +310,165 @@ func TestHandler_ChatSend(t *testing.T) {
 	if !strings.Contains(body, `title="Stop response"`) || !strings.Contains(body, `/chat/stop?project_id=default`) {
 		t.Error("expected chat send response to turn composer action into stop")
 	}
+}
+
+func TestHandler_ChatSend_MixtureSupportedAggregatorCreatesTaskThroughRuntimeTool(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	providerRequests := make(chan map[string]any, 2)
+	var providerMu sync.Mutex
+	providerCalls := 0
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		providerMu.Lock()
+		providerCalls++
+		call := providerCalls
+		providerMu.Unlock()
+		providerRequests <- body
+		w.Header().Set("Content-Type", "text/event-stream")
+		if call == 1 {
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_create\",\"type\":\"function\",\"function\":{\"name\":\"create_task\",\"arguments\":\"{\\\"title\\\":\\\"HTTP mixture runtime investigation\\\",\\\"prompt\\\":\\\"Investigate runtime task tools through Chat.\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"))
+			return
+		}
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"Task created.\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer providerServer.Close()
+
+	aggregator := &models.LLMConfig{
+		Name: "HTTP Compatible Aggregator", Provider: models.ProviderOpenAICompatible,
+		Model: "provider/model", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key",
+		BaseURL: providerServer.URL + "/v1/", Transport: "chat_completions",
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
+	mixture := &models.LLMConfig{
+		Name: "HTTP Tool-capable Mixture", Provider: models.ProviderMixture, Model: "mixture",
+		MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, mixture))
+
+	pageReq := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	pageRec := httptest.NewRecorder()
+	e.ServeHTTP(pageRec, pageReq)
+	require.Equal(t, http.StatusOK, pageRec.Code)
+	require.Contains(t, pageRec.Body.String(), mixture.Name)
+
+	form := url.Values{}
+	form.Set("message", "Create an investigation task")
+	form.Set("agent_id", mixture.ID)
+	form.Set("chat_mode", string(models.ChatModeOrchestrate))
+	req := httptest.NewRequest(http.MethodPost, "/chat/send", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var firstRequest map[string]any
+	select {
+	case firstRequest = <-providerRequests:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for mixture aggregator request")
+	}
+	tools, _ := firstRequest["tools"].([]any)
+	require.True(t, slices.ContainsFunc(tools, func(raw any) bool {
+		tool, _ := raw.(map[string]any)
+		function, _ := tool["function"].(map[string]any)
+		return function["name"] == "create_task"
+	}), "supported mixture aggregator payload must include create_task")
+
+	select {
+	case <-providerRequests:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for tool-result replay request")
+	}
+	require.Eventually(t, func() bool {
+		tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+		return err == nil && slices.ContainsFunc(tasks, func(task models.Task) bool {
+			return task.Title == "HTTP mixture runtime investigation"
+		})
+	}, 3*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		active, err := h.execRepo.FindLatestActiveChatExecution(ctx, "default")
+		return err == nil && active == nil
+	}, 3*time.Second, 10*time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+}
+
+func TestHandler_ChatSend_MixtureOllamaAggregatorCreatesTaskThroughMarker(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	providerRequests := make(chan map[string]any, 1)
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		providerRequests <- body
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"HTTP mixture marker investigation\",\"prompt\":\"Investigate marker fallback through Ollama.\"}\n[/CREATE_TASK]"},"done":false}`)
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
+	}))
+	defer providerServer.Close()
+
+	aggregator := &models.LLMConfig{
+		Name: "HTTP Ollama Aggregator", Provider: models.ProviderOllama, Model: "test-model",
+		OllamaBaseURL: providerServer.URL,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
+	mixture := &models.LLMConfig{
+		Name: "HTTP Marker Mixture", Provider: models.ProviderMixture, Model: "mixture",
+		MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, mixture))
+
+	form := url.Values{}
+	form.Set("message", "Create an investigation task")
+	form.Set("agent_id", mixture.ID)
+	form.Set("chat_mode", string(models.ChatModeOrchestrate))
+	req := httptest.NewRequest(http.MethodPost, "/chat/send", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var providerRequest map[string]any
+	select {
+	case providerRequest = <-providerRequests:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for Ollama mixture aggregator request")
+	}
+	require.NotContains(t, providerRequest, "tools", "runtime-tool-incapable aggregator must not receive tool definitions")
+	messages, _ := providerRequest["messages"].([]any)
+	require.True(t, slices.ContainsFunc(messages, func(raw any) bool {
+		message, _ := raw.(map[string]any)
+		content, _ := message["content"].(string)
+		return message["role"] == "system" && strings.Contains(content, "[CREATE_TASK]")
+	}), "runtime-tool-incapable aggregator must retain marker guidance")
+	require.Eventually(t, func() bool {
+		tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+		return err == nil && slices.ContainsFunc(tasks, func(task models.Task) bool {
+			return task.Title == "HTTP mixture marker investigation"
+		})
+	}, 3*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		active, err := h.execRepo.FindLatestActiveChatExecution(ctx, "default")
+		return err == nil && active == nil
+	}, 3*time.Second, 10*time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
 }
 
 func TestHandler_ChatSend_EmptyMessage(t *testing.T) {
