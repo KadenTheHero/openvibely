@@ -3,8 +3,8 @@ name: provider_architecture
 type: project
 created: 2026-05-09
 updated: 2026-07-11
-source: after_complete_memory_update
-source_id: f6abd39beca3f1c4a77f21c8cbe28b61
+source: consolidation
+source_id: memory_consolidation_2026_07_11
 confidence: high
 title: Provider Architecture
 ---
@@ -102,4 +102,4 @@ Provider-native tools and runtime tools:
 - Runtime-tool-capable chat-action providers currently include OpenAI API/OAuth, Anthropic API/OAuth, and OpenAI-compatible API-key Chat Completions configs. Default task runtime tools such as `send_message` should attach only for runtime-tool-capable provider/auth paths; unsupported providers/transports must keep legacy marker fallback available instead of disabling markers because unattached tools would be unusable.
 - Anthropic `execBash` runtime-tool calls use a 10-minute default timeout only when no positive timeout is provided. Zero and negative requests normalize to 600 seconds; any positive explicit timeout, shorter or longer than 10 minutes, is preserved without a minimum or maximum cap.
 - Memory tool exposure is a request/tool-profile decision, not a global provider-adapter default. Route-phase Memory Curator recall stays sanitized/no-tools, while update/consolidation hooks may receive scoped memory file tools.
-- Confirmed via live Anthropic OAuth API probes (2026-07-02): Anthropic returns HTTP 400 `invalid_request_error` "You're out of extra usage" specifically when a request's tool list contains the exact three names `skill_view` + `skills_list` + `skill_manage` together (regardless of prompt/token size); removing or renaming any one of the three, or using unrelated three-tool combinations, succeeds normally. This caused spurious `observe_task_for_learning` lifecycle failures on Anthropic-default projects. Root cause is provider-side name-combination fingerprinting/misrouting into a separate "Extra Usage" billing pool, not account quota exhaustion and not a broader third-party-OAuth-harness billing policy. Fix: `internal/llm/anthropic/adapter.go` sends `skills_list` to Anthropic under the wire alias `skill_list` (`anthropicRuntimeToolWireName`/`anthropicRuntimeToolCanonicalName`) while keeping the canonical `skills_list` name everywhere internally (prompts, other providers, tool executor/filter); incoming `skill_list` tool_use calls are translated back to `skills_list` before execution/filtering. This is Anthropic-adapter-local only.
+- Anthropic has a provider-side name-combination collision when the exact wire names `skill_view`, `skills_list`, and `skill_manage` are sent together, which can surface a false “out of extra usage” error. The Anthropic adapter therefore aliases canonical internal `skills_list` to wire name `skill_list` and translates incoming calls back before filtering/execution; keep this workaround adapter-local.

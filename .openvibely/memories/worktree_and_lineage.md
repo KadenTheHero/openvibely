@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-07-08
-source: after_complete_memory_update
-source_id: a7e8ff17f79ab7e721b50dafcbd0099a
+updated: 2026-07-11
+source: consolidation
+source_id: memory_consolidation_2026_07_11
 confidence: high
 title: Worktree and Lineage
 ---
@@ -21,6 +21,7 @@ Durable worktree model:
 - Startup sync uses the task's `MergeTargetBranch` when set, falling back to branch detection only when no target is stored. Without a target it prefers a local `main` branch, then `GetDefaultBranch`; `GetDefaultBranch` uses `origin/HEAD` for branch-name detection, then local `main`, then local `master`, then hardcoded `main`; `upstream/HEAD` is not consulted.
 - Startup sync treats the selected local branch as the source of truth by default; merely having `origin/<branch>` must not cause a fetch, merge, or rebase from that remote-tracking branch. Remote startup sync should only exist behind an explicit user/admin opt-in policy.
 - In repos with local `master` and no local `main`, startup sync should use local `master` when default-branch detection resolves to it. Current caveat: if `origin/HEAD` points to `main` while only local `master` exists, branch-name detection may choose absent `main` and worktree creation/startup merge can fail.
+- Worktree setup fails closed: a repository with a local commit needs no Git remote, but an unborn repository has no commit/tree for `git worktree add`, so task execution and follow-ups must provide initial-commit guidance and never dispatch the coding model in the main checkout. Existing task worktrees or branches remain recoverable if their original base ref was renamed/deleted; operational `rev-parse` failures preserve their real error. Channel-origin and review-submission setup failures promote the next queued follow-up instead of parking it.
 - Changes tab shows worktree branch diff vs target branch when available, falling back to execution diff.
 - Active worktree Changes diffs should represent one net diff from the task's target branch to the current worktree state, including committed, staged, and unstaged tracked changes as a single per-path diff. Untracked files are appended separately when Git cannot include them in that comparison; do not concatenate committed branch diff blocks with `git diff HEAD`.
 - `GetWorktreeDiffWithUncommitted` prefers a live diff against the worktree's actual working tree (`captureWorktreeDiffAgainstTarget`, gated on `isGitWorktreeDir`/`gitRefExists`) and only falls back to the committed-branch `GetWorktreeDiff` when no live worktree is available. This fixed a recurring `[worktree] error getting worktree diff: exit status 128` log spam from the 2-second follow-up diff snapshot loop (`chat_processing.go` `startFollowupDiffSnapshotBroadcast`) that was caused by a stale/mismatched DB `worktree_branch` no longer matching the actual worktree branch. `GetWorktreeDiff`/`captureWorktreeDiffAgainstTarget` still log unexpected `git diff` failures with repo/ref/stderr context; they just no longer fire repeatedly for missing/mismatched refs on the polling path.

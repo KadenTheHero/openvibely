@@ -2,26 +2,22 @@
 name: testing_coverage_and_performance
 type: project
 created: 2026-06-07
-updated: 2026-07-10
+updated: 2026-07-11
 source: consolidation
-source_id: memory_consolidation_2026_07_10
+source_id: memory_consolidation_2026_07_11
 confidence: high
 title: Testing Coverage and Performance
 ---
 
 OpenVibely has a large Go test suite whose measured coverage is limited more by breadth gaps and generated templ output than by lack of test count.
 
-Coverage baseline and decisions:
-- The 2026-06-07 audit found roughly 3k test functions and about 47% unfiltered coverage, with many functions still uncovered despite the high test count.
-- The coverage/test-count mismatch is primarily breadth bias: many granular tests exercise happy paths in already-tested files, while large adjacent files and error/pagination/webhook/retry paths remain unexecuted.
-- `internal/service` and `internal/handler` were the largest durable coverage drains by function count.
-- Major service gaps included `service/llm_service.go` at 0% measured coverage and large uncovered areas in Telegram/workflow/memory/worktree/chat action/routing/worker lifecycle/agent files/project services.
-- Major handler gaps included schedule, project, workflow, collision, analytics, trend, autonomous, backlog, insights, attachment, SSE, and thread-input handlers.
-- Follow-up work added focused tests for many previously untested handler/service areas and raised filtered coverage to roughly the low 60% range.
-- Generated templ `*_templ.go` files are excluded from coverage summaries while template tests still run. Generated templ files significantly drag unfiltered coverage, so `Makefile` and GitHub Actions coverage summaries filter them before reporting.
+Coverage decisions:
+- Test coverage is broad in count but uneven by subsystem: granular happy-path tests cluster in already-tested files while large service/handler files and error, pagination, webhook, and retry paths remain the main gaps.
+- `internal/service` and `internal/handler` are the largest durable coverage drains by function count.
+- Generated templ `*_templ.go` files are excluded from coverage summaries while template tests still run. `Makefile` and GitHub Actions coverage summaries filter generated templ output before reporting.
 
 Durable coverage priorities:
-- Highest-ROI remaining coverage target is still `service/llm_service.go`, a large core file with 0% measured coverage; it requires careful LLM caller mocking to avoid flaky tests.
+- Highest-ROI remaining coverage target is `service/llm_service.go`; it requires careful LLM caller mocking to avoid flaky tests.
 - Expand existing `workflow_service_test.go` and `telegram_service_test.go` beyond happy paths, especially error, pagination, webhook, and retry paths.
 - Add sparse LLM adapter tests for `internal/llm/anthropic`, `internal/llm/openai`, `internal/llm/ollama`, and `internal/llm/workflow`.
 - Existing tests are mostly not wrong; the durable issue is narrow breadth, not excessive count. Avoid blanket `t.Parallel()` changes around shared DB setup.

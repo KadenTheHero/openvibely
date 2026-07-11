@@ -171,3 +171,15 @@ always_use:
 ## openvibely_virtual_model_provider_workflow
 
 [OpenVibely Virtual Model Provider Workflow](openvibely_virtual_model_provider_workflow/SKILL.md) — Implement OpenVibely virtual model providers that orchestrate other configured models without adding external credentials.
+
+## openvibely_attachment_lifecycle_workflow
+
+[OpenVibely Attachment Lifecycle Workflow](openvibely_attachment_lifecycle_workflow/SKILL.md) — Implement and audit durable OpenVibely Chat, task-thread, and task attachment publication, rollback, cleanup, and execution loading.
+
+## openvibely_github_pr_publication_workflow
+
+[OpenVibely GitHub PR Publication Workflow](openvibely_github_pr_publication_workflow/SKILL.md) — Implement and investigate idempotent API-backed task branch publication, PR reuse, and guarded history cleanup.
+
+## openvibely_github_finding_workflow
+
+[OpenVibely GitHub Finding Workflow](openvibely_github_finding_workflow/SKILL.md) — Run focused read-only OpenVibely repository scans and publish actionable findings as GitHub issues.

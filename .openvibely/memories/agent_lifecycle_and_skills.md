@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-07-07
+updated: 2026-07-11
 source: consolidation
-source_id: memory_consolidation_2026_07_07
+source_id: memory_consolidation_2026_07_11
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -41,7 +41,6 @@ Skill Curator facts:
 - Skill-library maintenance may create, patch, consolidate, or archive skills, but agents are user-managed configurations: do not create, edit, archive, route, reassign, or mutate agent metadata/tools/hooks/attachments as part of skill maintenance.
 - Skill Curator consolidation/archive decisions must inspect the full safe package manifest from `skill_view`, including nested files and directories beyond `SKILL.md`; package file actions must explicitly account for safe non-`SKILL.md` contents.
 - Assigned-agent updates are reserved for behavior specific to that agent's role, purpose, private workflow, or selected agent-owned skill. Agent-owned skill mutation uses the server-scoped `agent_skill_manage` path.
-- As of the 2026-07-03 skill-library maintenance pass, the standalone skill catalog was well-organized overall. The only consolidation was folding unique channel-ingress audit checks into `openvibely_channel_integrations_workflow` and archiving the redundant child skill; no other duplicate or obsolete skills were found then.
 
 Lifecycle facts:
 - Lifecycle hooks live around `internal/lifecycle/` and task execution/server setup. Durable concepts include `route_task`, `before_run`, `after_complete`, `scheduled`, task-mode bookkeeping, blocking/non-blocking execution, idempotency/audit rows, recursion prevention, output contracts, and runtime-tool filtering.

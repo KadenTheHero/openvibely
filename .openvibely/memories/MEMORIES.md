@@ -10,5 +10,5 @@
 - [Worktree and Lineage](worktree_and_lineage.md) - Isolated worktrees, path discipline, Changes diffs, merge/recovery behavior, cleanup policy, commit-message direction, chained-task lineage, branch-mismatch diagnoses, and follow-up worktree recovery patterns.
 - [Integrations and Channels](integrations_and_channels.md) - GitHub, inbound webhook, Slack, Telegram, Discord, Email, outbound targets, integration UI conventions, channel-specific production wiring, and GitHub-backed autonomous SDLC primitives.
 - [Usage Analytics](usage_analytics.md) - Local model/skill usage tracking, provider token normalization, Analytics UI/API behavior, skill analytics, OAuth account snapshots, and privacy rules.
-- [Testing Coverage and Performance](testing_coverage_and_performance.md) - Go test-suite coverage baseline, generated templ coverage policy, durable coverage priorities, validation commands, and recurring test caveats.
+- [Testing Coverage and Performance](testing_coverage_and_performance.md) - Go coverage policy, durable test priorities, validation commands, performance seams, and recurring test caveats.
 - [Product Vision and Reviewable Autonomy](product_vision_and_autonomy.md) - `VISION.md` direction, reviewable autonomy boundaries, user-priority handling, recursive self-improvement primitives, and GitHub-centered autonomy direction.
