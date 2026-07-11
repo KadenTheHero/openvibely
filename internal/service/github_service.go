@@ -679,14 +679,15 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		return err
 	}
 	if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, commitSHA, false); err != nil {
-		if !isGitHubNonFastForwardError(err) {
+		nonFastForward := isGitHubNonFastForwardError(err)
+		if !nonFastForward && !isGitHubRefAlreadyExistsError(err) {
 			return err
 		}
 		latestBranchSHA, refErr := s.githubBranchCommitSHA(ctx, token, repo, branch)
 		if refErr != nil {
-			return fmt.Errorf("refreshing remote publish branch %q after non-fast-forward update rejection: %w", branch, refErr)
+			return fmt.Errorf("refreshing remote publish branch %q after update rejection: %w", branch, refErr)
 		}
-		if latestBranchSHA == parentSHA {
+		if nonFastForward && latestBranchSHA == parentSHA {
 			return err
 		}
 		latestBranchTreeSHA, treeErr := s.githubCommitTreeSHA(ctx, token, repo, latestBranchSHA)
@@ -881,6 +882,14 @@ func isGitHubRefMissingError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "github api request failed (404)") || strings.Contains(msg, "reference does not exist")
+}
+
+func isGitHubRefAlreadyExistsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "github api request failed (422)") && strings.Contains(msg, "reference already exists")
 }
 
 func isGitHubNonFastForwardError(err error) bool {

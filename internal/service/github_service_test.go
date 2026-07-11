@@ -1246,6 +1246,179 @@ func TestPublishBranchRetriesWithLatestRemoteBranchParentOnNonFastForward(t *tes
 	}
 }
 
+func TestPublishBranchRetriesAfterConcurrentBranchCreation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	repoDir := createTestGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("updated after create race\n"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+
+	remoteBaseSHA := "1111111111111111111111111111111111111111"
+	concurrentBranchSHA := "2222222222222222222222222222222222222222"
+	branchGets := 0
+	commitPosts := 0
+	patches := 0
+	createRefs := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/main":
+			_, _ = w.Write([]byte(`{"object":{"sha":"` + remoteBaseSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/task/api-publish":
+			branchGets++
+			if branchGets == 1 {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"Reference does not exist"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"object":{"sha":"` + concurrentBranchSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBaseSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+concurrentBranchSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"concurrent-tree"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/blobs":
+			_, _ = w.Write([]byte(`{"sha":"blob-readme"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/trees":
+			_, _ = w.Write([]byte(`{"sha":"desired-tree"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/commits":
+			commitPosts++
+			body, _ := io.ReadAll(r.Body)
+			text := string(body)
+			if commitPosts == 1 && (!strings.Contains(text, remoteBaseSHA) || strings.Contains(text, concurrentBranchSHA)) {
+				t.Fatalf("expected first commit to parent remote base, got: %s", text)
+			}
+			if commitPosts == 2 && (!strings.Contains(text, concurrentBranchSHA) || strings.Contains(text, remoteBaseSHA)) {
+				t.Fatalf("expected retry commit to parent concurrently created branch, got: %s", text)
+			}
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"sha":"new-commit-%d"}`, commitPosts)))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
+			patches++
+			body, _ := io.ReadAll(r.Body)
+			text := string(body)
+			if !strings.Contains(text, `"force":false`) {
+				t.Fatalf("unexpected forced ref update: %s", text)
+			}
+			if patches == 1 {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"Reference does not exist"}`))
+				return
+			}
+			if !strings.Contains(text, `"sha":"new-commit-2"`) {
+				t.Fatalf("expected retry commit ref update, got: %s", text)
+			}
+			_, _ = w.Write([]byte(`{"ref":"refs/heads/task/api-publish","object":{"sha":"new-commit-2"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/refs":
+			createRefs++
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"Reference already exists"}`))
+		default:
+			t.Fatalf("unexpected GitHub API request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+		RepoPath:      repoDir,
+		Branch:        "task/api-publish",
+		BaseBranch:    "main",
+		CommitMessage: "Publish after create race",
+	}); err != nil {
+		t.Fatalf("PublishBranch returned error: %v", err)
+	}
+	if branchGets != 2 || commitPosts != 2 || patches != 2 || createRefs != 1 {
+		t.Fatalf("expected create-ref race retry, got branchGets=%d commitPosts=%d patches=%d createRefs=%d", branchGets, commitPosts, patches, createRefs)
+	}
+}
+
+func TestPublishBranchConcurrentBranchCreationNoOpsWhenDesiredTreeMatches(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	repoDir := createTestGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("published during create race\n"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+
+	remoteBaseSHA := "1111111111111111111111111111111111111111"
+	concurrentBranchSHA := "2222222222222222222222222222222222222222"
+	branchGets := 0
+	commitPosts := 0
+	patches := 0
+	createRefs := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/main":
+			_, _ = w.Write([]byte(`{"object":{"sha":"` + remoteBaseSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/ref/heads/task/api-publish":
+			branchGets++
+			if branchGets == 1 {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"Reference does not exist"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"object":{"sha":"` + concurrentBranchSHA + `"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+remoteBaseSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/git/commits/"+concurrentBranchSHA:
+			_, _ = w.Write([]byte(`{"tree":{"sha":"desired-tree"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/blobs":
+			_, _ = w.Write([]byte(`{"sha":"blob-readme"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/trees":
+			_, _ = w.Write([]byte(`{"sha":"desired-tree"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/commits":
+			commitPosts++
+			if commitPosts > 1 {
+				t.Fatal("create-ref race must not synthesize a duplicate commit when the remote tree matches")
+			}
+			_, _ = w.Write([]byte(`{"sha":"stale-attempt-commit"}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/task/api-publish":
+			patches++
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Reference does not exist"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/refs":
+			createRefs++
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"Reference already exists"}`))
+		default:
+			t.Fatalf("unexpected GitHub API request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+		RepoPath:      repoDir,
+		Branch:        "task/api-publish",
+		BaseBranch:    "main",
+		CommitMessage: "Publish during create race",
+	}); err != nil {
+		t.Fatalf("PublishBranch returned error: %v", err)
+	}
+	if branchGets != 2 || commitPosts != 1 || patches != 1 || createRefs != 1 {
+		t.Fatalf("expected create-ref race to reuse desired tree, got branchGets=%d commitPosts=%d patches=%d createRefs=%d", branchGets, commitPosts, patches, createRefs)
+	}
+}
+
 func TestPublishBranchRaceNoOpsWhenLatestRemoteTreeMatchesDesiredTree(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
