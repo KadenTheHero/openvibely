@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-07-09
-source: after_complete_memory_update
-source_id: 5e2f64df7cb867d549abf9d044450714
+updated: 2026-07-10
+source: consolidation
+source_id: memory_consolidation_2026_07_10
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -49,7 +49,7 @@ Chat/thread rendering facts:
 - `llmstream.Writer` persistence flushes must serialize snapshot plus SQLite `UpdateOutput` write across periodic and final flush paths. Taking an output snapshot before acquiring the shared flush lock can let an older periodic snapshot overwrite a newer final flush; keep `Write` hot-path publication independent of SQLite writes and avoid broad repository-level monotonic-output semantics unless specifically justified.
 - Mixture of Models progress uses backend `mixture_progress` events on the shared live SSE path. Sidebar dispatch fans them to both Chat and task-thread listeners; the UI applies them by `exec_id` to the pending assistant bubble's compact `mixture-progress-<exec_id>` status slot, without appending reference outputs to transcripts. The status hides when aggregator output starts or the stream terminates.
 - Per-execution Chat/task-thread SSE treats `cancelled` as a terminal `done` status. Task-thread UI should show cancellation as a neutral terminal state, refresh the primary composer action from the server, and render cancelled/error state live even if no model text streamed before cancellation.
-- Current known gap from the 2026-06-26 stop/cancel audit: hard-refresh server-rendered task-thread terminal status only has explicit completed/failed labels; cancelled task-thread terminal status is handled live by the streaming UI, and the composer state still returns to Send.
+- Hard-refresh server-rendered task-thread terminal status must stay aligned with live streaming terminal states, including cancelled runs; live UI already treats cancelled as neutral terminal and restores the composer to Send.
 - Prepared/in-flight steering rows should disappear from pending/composer UI on live events and page refreshes even if durable `thread_inputs` status remains `pending`. Chat and task-thread surfaces reconcile stale rows on shared live reconnect via authoritative pending-input fragments.
 - Long Chat and Task Thread histories remain complete in the database but are server-windowed in the UI with scroll-top pagination; initial and older windows default to 30 execution/turn rows and request `limit` is capped at 100.
 - Browser-memory protection depends on removing old transcript execution DOM nodes from the visible window, not hiding them with CSS.
@@ -72,7 +72,7 @@ Responsive and shared UI contracts:
 - Task detail Details tab keeps Prompt, Goal, and Git Worktree in that order with matching card containers. Its main seven-tab row must remain horizontally scrollable/no-wrap on narrow mobile viewports.
 - Task detail completion UI state is split across independently refreshed fragments: status/metrics polling updates the badge, while state-dependent action controls live in `#task-detail-actions` and are refreshed through `/tasks/:taskId/detail-actions`.
 - Completed task Thread views include a server-rendered next-step CTA after the terminal status line. It opens the existing Changes tab when stored execution diff output is present, calls out merge actions only when task merge state indicates pending/failed/conflict, and falls back to no-diff/no-output guidance without implying mergeable changes.
-- Task Changes/diff surfaces must stay viewport-contained on 320px-class screens with wrapping flex rows, shrink-safe long paths/branch labels, and separate overflow boundaries for Changed Files and Worktree Changes lists. Current known gap from the 2026-06-14 audit: long filenames in diff-viewer Changed Files badge lists and long branch/target labels in the Worktree Changes header still need stronger containment.
+- Task Changes/diff surfaces must stay viewport-contained on 320px-class screens with wrapping flex rows, shrink-safe long paths/branch labels, and separate overflow boundaries for Changed Files and Worktree Changes lists. Long filenames in diff-viewer Changed Files badge lists and long branch/target labels in the Worktree Changes header are recurring containment risks.
 - Changes-tab Actions dropdowns need an explicit high stacking context above sticky diff file headers (`z-20`) and viewport max-width containment; using DaisyUI's low default-style `z-[1]` menu layering can leave Local/GitHub merge actions obscured by the diff surface.
 - Tasks page uses server-rendered kanban board/task-card templ components. Responsive contract: one-column stacked board/cards on phones, two columns around tablet widths, three columns on desktop, no phantom fourth column, no global fixed one-third column width, independent mobile dropzone scrolling, no page-level horizontal overflow, mobile-safe wrapping, at least 44px touch targets, compact desktop card density, and the `+ Add Task` header action colocated beside the title like Models `+ Add Model`.
 - Active kanban queued/pending dropzones should render only real active pending/queued/blocked work; terminal `failed`/`cancelled` task rows must not be displayed as queued work even as a defensive fallback for stale durable state.

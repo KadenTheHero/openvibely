@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-07-01
-source: consolidation
-source_id: memory_consolidation_2026_07_01
+updated: 2026-07-10
+source: after_complete_memory_update
+source_id: 896caf65c49495bf58da4ea748e758b3038551f9
 confidence: high
 title: Provider Architecture
 ---
@@ -33,6 +33,9 @@ Provider/model selection facts:
 - Interactive chat selection differs: explicit `agent_id` uses that model config, `agent_id=default` uses the global default, and empty/`auto` triggers complexity/vision-based model selection.
 - `Task.AgentDefinitionID` selects persona/system prompt/skills, not the provider/model.
 - OpenAI supports Responses API, Completions API, and Codex CLI fallback. OpenAI Responses `SendAgentic` does Codex-style client-side history compaction for API key and OAuth flows.
+- OpenAI supports `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; `gpt-5.6-sol` is the default for empty or unknown first-party OpenAI model selections. All three use a 372,000-token context window, support `low`, `medium`, `high`, `xhigh`, and `max` reasoning, and default to `low` for Sol and `medium` for Terra/Luna.
+- The GPT-5.6 Sol/Terra/Luna family uses the Codex Responses Lite request shape for both OpenAI API-key and ChatGPT OAuth configurations. The primary transport is the Responses WebSocket beta, with Responses Lite HTTP streaming fallback when WebSockets are unavailable. Lite request transformation carries all-turn reasoning context, encrypted reasoning content, developer instructions/additional function tools, and strips unsupported hosted web-search/image-generation tools and image detail fields.
+- Responses Lite WebSocket state is conversation-scoped and credential/account-aware rather than shared across every request for one model config. Reusable states serialize turns per conversation, send compatible incremental turns with `previous_response_id`, reconnect a stale reused socket once, avoid replay after partial output, and fall back to HTTP for subsequent turns after an unrecoverable transport failure. The adapter leases active states, bounds the idle cache, closes evicted/private sockets, and prevents credential rotation or OAuth account changes from reusing an old authenticated connection.
 - Anthropic uses `ProviderAnthropic`; OAuth/API key path uses `pkg/anthropicclient`; CLI path uses subprocess. Helpers live in `models/llm_config.go`.
 - Ollama uses `/api/chat`, `ollama_base_url` migration 056, defaulting to `http://localhost:11434`.
 - CLI-backed provider support for Anthropic and OpenAI/Codex remains a backend compatibility path, but CLI auth/options should not be exposed in the user-facing Models setup dialog.
@@ -96,4 +99,3 @@ Provider-native tools and runtime tools:
 - Anthropic `execBash` runtime-tool calls use a 10-minute default timeout only when no positive timeout is provided. Zero and negative requests normalize to 600 seconds; any positive explicit timeout, shorter or longer than 10 minutes, is preserved without a minimum or maximum cap.
 - Memory tool exposure is a request/tool-profile decision, not a global provider-adapter default. Route-phase Memory Curator recall stays sanitized/no-tools, while update/consolidation hooks may receive scoped memory file tools.
 - Confirmed via live Anthropic OAuth API probes (2026-07-02): Anthropic returns HTTP 400 `invalid_request_error` "You're out of extra usage" specifically when a request's tool list contains the exact three names `skill_view` + `skills_list` + `skill_manage` together (regardless of prompt/token size); removing or renaming any one of the three, or using unrelated three-tool combinations, succeeds normally. This caused spurious `observe_task_for_learning` lifecycle failures on Anthropic-default projects. Root cause is provider-side name-combination fingerprinting/misrouting into a separate "Extra Usage" billing pool, not account quota exhaustion and not a broader third-party-OAuth-harness billing policy. Fix: `internal/llm/anthropic/adapter.go` sends `skills_list` to Anthropic under the wire alias `skill_list` (`anthropicRuntimeToolWireName`/`anthropicRuntimeToolCanonicalName`) while keeping the canonical `skills_list` name everywhere internally (prompts, other providers, tool executor/filter); incoming `skill_list` tool_use calls are translated back to `skills_list` before execution/filtering. This is Anthropic-adapter-local only.
-

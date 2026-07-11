@@ -2,9 +2,9 @@
 name: testing_coverage_and_performance
 type: project
 created: 2026-06-07
-updated: 2026-07-09
-source: after_complete_memory_update
-source_id: 5e2f64df7cb867d549abf9d044450714
+updated: 2026-07-10
+source: consolidation
+source_id: memory_consolidation_2026_07_10
 confidence: high
 title: Testing Coverage and Performance
 ---
@@ -40,4 +40,4 @@ Runtime and validation facts:
 - Handler `NewTestContext` now calls `h.SetLocalRepoPathEnabled(true)`, matching older `setupHandlerTest` default. Tests needing local paths disabled should explicitly call `tc.handler.SetLocalRepoPathEnabled(false)` after creating context.
 - Chat mode selector tests should reflect the custom portal select implementation: hidden form input updates are driven by `chat-select-change` custom events carrying `e.detail.value`, not native `change` events or `this.value`.
 - `internal/service` tests can intentionally emit malformed-JSON logs when exercising error paths; treat them as expected unless paired with a failing assertion/package result.
-- `TestTelegramServiceConcurrentUpdateTokenIsSerialized` in `internal/service/telegram_service_test.go` (covers concurrent `UpdateToken` lifecycle serialization) was flaky as of 2026-07-01 (`seenReplacementPollers` could remain empty because `UpdateToken` could return before the test consumed the buffered `started`-poller notification, a test-side race, not a production bug). Fixed on 2026-07-02 by having the test track the last-completed token update, assert the service's current bot token matches it, and wait for that specific current-token poller instead of requiring a notification to be consumed before both `UpdateToken` calls return. Confirmed stable with `-count=20` and `-race -count=10` reruns. When writing concurrency regression tests with buffered notification channels, prefer waiting on the final/current observable state rather than asserting a notification was drained by loop end, since goroutine notification and the operation's completion signal can race.
+- Concurrency regression tests with buffered notification channels should wait on final/current observable state rather than requiring a notification to be drained before an operation returns; goroutine notification delivery and operation completion can race. `TestTelegramServiceConcurrentUpdateTokenIsSerialized` follows this pattern by tracking the last-completed token update, asserting the service's current bot token, and waiting for that specific current-token poller.
