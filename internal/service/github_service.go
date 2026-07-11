@@ -665,6 +665,15 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 	if err != nil {
 		return err
 	}
+	if remoteBranchSHA != "" {
+		remoteBranchTreeSHA, treeErr := s.githubCommitTreeSHA(ctx, token, repo, remoteBranchSHA)
+		if treeErr != nil {
+			return fmt.Errorf("resolving remote publish branch tree %q: %w", branch, treeErr)
+		}
+		if remoteBranchTreeSHA == treeSHA {
+			return nil
+		}
+	}
 	commitSHA, err := s.createGitHubCommit(ctx, token, repo, message, treeSHA, parentSHA, publishReq.CommitterName, publishReq.CommitterEmail)
 	if err != nil {
 		return err
@@ -679,6 +688,13 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		}
 		if latestBranchSHA == parentSHA {
 			return err
+		}
+		latestBranchTreeSHA, treeErr := s.githubCommitTreeSHA(ctx, token, repo, latestBranchSHA)
+		if treeErr != nil {
+			return fmt.Errorf("resolving refreshed remote publish branch tree %q: %w", branch, treeErr)
+		}
+		if latestBranchTreeSHA == treeSHA {
+			return nil
 		}
 		retryCommitSHA, retryErr := s.createGitHubCommit(ctx, token, repo, message, treeSHA, latestBranchSHA, publishReq.CommitterName, publishReq.CommitterEmail)
 		if retryErr != nil {
