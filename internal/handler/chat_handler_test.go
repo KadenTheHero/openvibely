@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -2538,6 +2539,60 @@ func TestProcessAttachmentsWithReturn_MetadataFailurePreservesPendingSession(t *
 	attachments, listErr := h.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
 	require.NoError(t, listErr)
 	require.Empty(t, attachments)
+}
+
+func TestRollbackAttachmentPublications_MetadataDeleteFailureRetainsReferencedFile(t *testing.T) {
+	t.Run("chat attachment", func(t *testing.T) {
+		h, _, llmConfigRepo := setupTestHandler(t)
+		ctx := context.Background()
+		agent := &models.LLMConfig{Name: "Chat rollback agent", Provider: models.ProviderTest, Model: "test", APIKey: "test", MaxTokens: 1024}
+		require.NoError(t, llmConfigRepo.Create(ctx, agent))
+		projects, err := h.projectSvc.List(ctx)
+		require.NoError(t, err)
+		chatTask := &models.Task{ProjectID: projects[0].ID, Title: "Chat rollback", Prompt: "test", Status: models.StatusPending, Category: models.CategoryChat, AgentID: &agent.ID}
+		require.NoError(t, h.taskRepo.Create(ctx, chatTask))
+		exec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "test"}
+		require.NoError(t, h.execRepo.Create(ctx, exec))
+
+		path := filepath.Join(t.TempDir(), "chat-attachment.png")
+		require.NoError(t, os.WriteFile(path, []byte("png"), 0o644))
+		attachment := &models.ChatAttachment{ExecutionID: exec.ID, FileName: filepath.Base(path), FilePath: path, MediaType: "image/png", FileSize: 3}
+		require.NoError(t, h.chatAttachmentRepo.Create(ctx, attachment))
+
+		errs := rollbackAttachmentPublications(ctx, []attachmentPublication{{id: attachment.ID, path: path}}, func(context.Context, string) error {
+			return errors.New("injected chat metadata delete failure")
+		})
+		require.Len(t, errs, 1)
+		persisted, err := h.chatAttachmentRepo.GetByID(ctx, attachment.ID)
+		require.NoError(t, err)
+		require.NotNil(t, persisted)
+		require.FileExists(t, persisted.FilePath, "rollback must retain a file while ChatAttachment metadata still references it")
+	})
+
+	t.Run("task attachment", func(t *testing.T) {
+		h, _, llmConfigRepo := setupTestHandler(t)
+		ctx := context.Background()
+		agent := &models.LLMConfig{Name: "Task rollback agent", Provider: models.ProviderTest, Model: "test", APIKey: "test", MaxTokens: 1024}
+		require.NoError(t, llmConfigRepo.Create(ctx, agent))
+		projects, err := h.projectSvc.List(ctx)
+		require.NoError(t, err)
+		task := &models.Task{ProjectID: projects[0].ID, Title: "Task rollback", Prompt: "test", Status: models.StatusPending, Category: models.CategoryBacklog, AgentID: &agent.ID}
+		require.NoError(t, h.taskRepo.Create(ctx, task))
+
+		path := filepath.Join(t.TempDir(), "task-attachment.png")
+		require.NoError(t, os.WriteFile(path, []byte("png"), 0o644))
+		attachment := &models.Attachment{TaskID: task.ID, FileName: filepath.Base(path), FilePath: path, MediaType: "image/png", FileSize: 3}
+		require.NoError(t, h.attachmentRepo.Create(ctx, attachment))
+
+		errs := rollbackAttachmentPublications(ctx, []attachmentPublication{{id: attachment.ID, path: path}}, func(context.Context, string) error {
+			return errors.New("injected task metadata delete failure")
+		})
+		require.Len(t, errs, 1)
+		persisted, err := h.attachmentRepo.GetByID(ctx, attachment.ID)
+		require.NoError(t, err)
+		require.NotNil(t, persisted)
+		require.FileExists(t, persisted.FilePath, "rollback must retain a file while task Attachment metadata still references it")
+	})
 }
 
 func TestCopyChatAttachmentsToTask_NoAttachments(t *testing.T) {

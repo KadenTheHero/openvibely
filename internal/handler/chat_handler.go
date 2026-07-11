@@ -537,21 +537,10 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 	var attachmentContents []string
 	var imageAttachments []models.Attachment
 	var chatAttachments []models.ChatAttachment
-	type stagedChatAttachment struct {
-		id   string
-		path string
-	}
-	var staged []stagedChatAttachment
+	var staged []attachmentPublication
 	rollback := func() {
-		for i := len(staged) - 1; i >= 0; i-- {
-			if staged[i].id != "" {
-				if deleteErr := h.chatAttachmentRepo.Delete(context.WithoutCancel(ctx), staged[i].id); deleteErr != nil {
-					applog.Infof("[handler] attachment lifecycle stage=rollback-chat-metadata session=%s execution=%s destination=%s error=%v", sessionID, execID, staged[i].path, deleteErr)
-				}
-			}
-			if removeErr := os.Remove(staged[i].path); removeErr != nil && !os.IsNotExist(removeErr) {
-				applog.Infof("[handler] attachment lifecycle stage=rollback-chat-file session=%s execution=%s destination=%s error=%v", sessionID, execID, staged[i].path, removeErr)
-			}
+		for _, rollbackErr := range rollbackAttachmentPublications(ctx, staged, h.chatAttachmentRepo.Delete) {
+			applog.Infof("[handler] attachment lifecycle stage=rollback-chat session=%s execution=%s error=%v", sessionID, execID, rollbackErr)
 		}
 	}
 
@@ -584,7 +573,7 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 			rollback()
 			return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-metadata session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
 		}
-		staged = append(staged, stagedChatAttachment{id: attachment.ID, path: destPath})
+		staged = append(staged, attachmentPublication{id: attachment.ID, path: destPath})
 		chatAttachments = append(chatAttachments, *attachment)
 
 		if isImageFile(file.Name()) {
@@ -720,9 +709,41 @@ func min(a, b int) int {
 	return b
 }
 
+type attachmentPublication struct {
+	id   string
+	path string
+	name string
+}
+
+// rollbackAttachmentPublications preserves the file/metadata invariant during rollback.
+// A file is removed only after its metadata row is successfully deleted; if metadata
+// deletion fails, retaining the file is safer than leaving a persisted broken reference.
+func rollbackAttachmentPublications(
+	ctx context.Context,
+	published []attachmentPublication,
+	deleteMetadata func(context.Context, string) error,
+) []error {
+	var rollbackErrs []error
+	rollbackCtx := context.WithoutCancel(ctx)
+	for i := len(published) - 1; i >= 0; i-- {
+		item := published[i]
+		if item.id != "" {
+			if err := deleteMetadata(rollbackCtx, item.id); err != nil {
+				rollbackErrs = append(rollbackErrs, fmt.Errorf("delete metadata attachment=%s destination=%s: %w", item.id, item.path, err))
+				continue
+			}
+		}
+		if err := os.Remove(item.path); err != nil && !os.IsNotExist(err) {
+			rollbackErrs = append(rollbackErrs, fmt.Errorf("remove file destination=%s: %w", item.path, err))
+		}
+	}
+	return rollbackErrs
+}
+
 // copyChatAttachmentsToTask durably copies all attachments from a chat execution to a task.
-// The batch is published file-first and metadata-second. Any failure rolls back every file and
-// metadata row created by this call, so task execution never observes a partial conversion.
+// The batch is published file-first and metadata-second. Any failure rolls back publications
+// when possible and retains files for metadata rows that cannot be deleted, so task execution
+// never observes a metadata reference to a file removed by rollback.
 func (h *Handler) copyChatAttachmentsToTask(ctx context.Context, executionID, taskID string) (int, error) {
 	chatAttachments, err := h.chatAttachmentRepo.ListByExecution(ctx, executionID)
 	if err != nil {
@@ -737,23 +758,11 @@ func (h *Handler) copyChatAttachmentsToTask(ctx context.Context, executionID, ta
 		return 0, fmt.Errorf("attachment lifecycle stage=create-destination execution=%s task=%s destination=%s: %w", executionID, taskID, taskDir, err)
 	}
 
-	type publishedAttachment struct {
-		id   string
-		path string
-		name string
-	}
-	published := make([]publishedAttachment, 0, len(chatAttachments))
+	published := make([]attachmentPublication, 0, len(chatAttachments))
 	usedNames := make(map[string]bool, len(chatAttachments))
 	rollback := func() {
-		for i := len(published) - 1; i >= 0; i-- {
-			if published[i].id != "" {
-				if deleteErr := h.attachmentRepo.Delete(context.WithoutCancel(ctx), published[i].id); deleteErr != nil {
-					applog.Infof("[handler] attachment lifecycle stage=rollback-metadata execution=%s task=%s destination=%s error=%v", executionID, taskID, published[i].path, deleteErr)
-				}
-			}
-			if removeErr := os.Remove(published[i].path); removeErr != nil && !os.IsNotExist(removeErr) {
-				applog.Infof("[handler] attachment lifecycle stage=rollback-file execution=%s task=%s destination=%s error=%v", executionID, taskID, published[i].path, removeErr)
-			}
+		for _, rollbackErr := range rollbackAttachmentPublications(ctx, published, h.attachmentRepo.Delete) {
+			applog.Infof("[handler] attachment lifecycle stage=rollback execution=%s task=%s error=%v", executionID, taskID, rollbackErr)
 		}
 	}
 
@@ -783,7 +792,7 @@ func (h *Handler) copyChatAttachmentsToTask(ctx context.Context, executionID, ta
 			rollback()
 			return 0, fmt.Errorf("attachment lifecycle stage=persist-metadata execution=%s source=%s task=%s destination=%s: %w", executionID, srcPath, taskID, destPath, err)
 		}
-		published = append(published, publishedAttachment{id: attachment.ID, path: destPath, name: fileName})
+		published = append(published, attachmentPublication{id: attachment.ID, path: destPath, name: fileName})
 		applog.Infof("[handler] attachment lifecycle stage=published execution=%s source=%s task=%s destination=%s attachment=%s", executionID, srcPath, taskID, destPath, attachment.ID)
 	}
 
