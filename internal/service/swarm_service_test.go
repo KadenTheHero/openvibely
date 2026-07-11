@@ -2360,6 +2360,7 @@ type failedChildRepairFixture struct {
 	t         *testing.T
 	ctx       context.Context
 	repo      *repository.TaskRepo
+	execRepo  *repository.ExecutionRepo
 	svc       *SwarmService
 	workerSvc *WorkerService
 	parent    *models.Task
@@ -2373,8 +2374,9 @@ func newFailedChildRepairFixture(t *testing.T, workers int, reviewerEnabled, mer
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 	repo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
 	workerSvc := newTestWorkerService(t)
-	svc := NewSwarmService(NewTaskService(repo, nil, nil), repo, repository.NewExecutionRepo(db), workerSvc)
+	svc := NewSwarmService(NewTaskService(repo, nil, nil), repo, execRepo, workerSvc)
 	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Repair failed child", Prompt: "repair", MaxWorkers: workers, ReviewerEnabled: reviewerEnabled, MergerEnabled: mergerEnabled})
 	require.NoError(t, err)
 	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -2393,7 +2395,7 @@ func newFailedChildRepairFixture(t *testing.T, workers int, reviewerEnabled, mer
 	}
 	children, err := repo.ListSwarmChildren(ctx, parent.ID)
 	require.NoError(t, err)
-	f := &failedChildRepairFixture{t: t, ctx: ctx, repo: repo, svc: svc, workerSvc: workerSvc, parent: parent}
+	f := &failedChildRepairFixture{t: t, ctx: ctx, repo: repo, execRepo: execRepo, svc: svc, workerSvc: workerSvc, parent: parent}
 	for i := range children {
 		child := children[i]
 		switch child.SwarmRole {
@@ -2467,6 +2469,86 @@ func TestSwarmServiceFailedWorkerFollowupFailureKeepsReviewerBlocked(t *testing.
 	reviewer, err := f.repo.GetByID(f.ctx, f.reviewer.ID)
 	require.NoError(t, err)
 	require.NotEqual(t, models.StatusPending, reviewer.Status)
+}
+
+func TestSwarmServiceRecomputeRecoversMissedWorkerCompletionCallback(t *testing.T) {
+	f := newFailedChildRepairFixture(t, 2, true, true)
+	require.NoError(t, f.repo.UpdateStatus(f.ctx, f.workers[0].ID, models.StatusFailed))
+	require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID))
+	f.assertNoSubmission()
+	failedWorker, err := f.repo.GetByID(f.ctx, f.workers[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, "failed", failedWorker.SwarmStatus)
+	require.NoError(t, f.svc.HandleChildFollowup(f.ctx, f.workers[0].ID, "repair failure"))
+	require.NoError(t, f.repo.UpdateStatus(f.ctx, f.workers[0].ID, models.StatusCompleted))
+	f.assertNoSubmission()
+
+	// The repaired worker's callback is lost while its sibling is still running.
+	require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID))
+	f.assertNoSubmission()
+
+	// The sibling's callback is also lost. Concurrent reconciliation must recover
+	// both durable completions and claim the reviewer exactly once.
+	require.NoError(t, f.repo.UpdateStatus(f.ctx, f.workers[1].ID, models.StatusCompleted))
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID))
+		}()
+	}
+	wg.Wait()
+	f.submittedRole(models.SwarmRoleReviewer)
+	f.assertNoSubmission()
+
+	for _, worker := range f.workers {
+		persisted, err := f.repo.GetByID(f.ctx, worker.ID)
+		require.NoError(t, err)
+		cfg, err := models.ParseSwarmConfig(persisted.SwarmConfig)
+		require.NoError(t, err)
+		require.Equal(t, 1, cfg.CompletedGeneration)
+		require.Equal(t, "completed", persisted.SwarmStatus)
+	}
+}
+
+func TestSwarmServiceRecomputeRecoversMissedReviewerCompletionCallback(t *testing.T) {
+	f := newFailedChildRepairFixture(t, 1, true, true)
+	f.terminal(f.workers[0], models.StatusCompleted)
+	f.submittedRole(models.SwarmRoleReviewer)
+	require.NoError(t, f.repo.UpdateStatus(f.ctx, f.reviewer.ID, models.StatusCompleted))
+	f.assertNoSubmission()
+
+	require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID))
+	f.submittedRole(models.SwarmRoleMerger)
+	require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID))
+	f.assertNoSubmission()
+
+	reviewer, err := f.repo.GetByID(f.ctx, f.reviewer.ID)
+	require.NoError(t, err)
+	cfg, err := models.ParseSwarmConfig(reviewer.SwarmConfig)
+	require.NoError(t, err)
+	require.Equal(t, 1, cfg.ReviewedGeneration)
+	require.Equal(t, "reviewed", reviewer.SwarmStatus)
+
+	// Merger completion is durable before its callback; reconciliation must still
+	// publish the result and terminalize the parent without another merger run.
+	mergerExec := &models.Execution{TaskID: f.merger.ID, Status: models.ExecRunning, PromptSent: f.merger.Prompt}
+	require.NoError(t, f.execRepo.Create(f.ctx, mergerExec))
+	require.NoError(t, f.execRepo.Complete(f.ctx, mergerExec.ID, models.ExecCompleted, "recovered merged result", "", 0, 1))
+	require.NoError(t, f.repo.UpdateStatus(f.ctx, f.merger.ID, models.StatusCompleted))
+	require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID))
+	f.assertNoSubmission()
+	merger, err := f.repo.GetByID(f.ctx, f.merger.ID)
+	require.NoError(t, err)
+	mergerCfg, err := models.ParseSwarmConfig(merger.SwarmConfig)
+	require.NoError(t, err)
+	require.Equal(t, 1, mergerCfg.MergedGeneration)
+	require.Equal(t, "integrated", merger.SwarmStatus)
+	parent, err := f.repo.GetByID(f.ctx, f.parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCompleted, parent.Status)
+	require.Equal(t, models.CategoryCompleted, parent.Category)
 }
 
 func TestSwarmServiceConcurrentTerminalCallbacksDoNotDuplicateRoles(t *testing.T) {
