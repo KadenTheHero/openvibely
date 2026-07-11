@@ -99,6 +99,19 @@ type streamingResponseParams struct {
 	steeringOutputCursor   string
 }
 
+func streamingTransportScope(params streamingResponseParams) string {
+	if params.IsTaskFollowup {
+		if strings.TrimSpace(params.TaskID) != "" {
+			return "task:" + strings.TrimSpace(params.TaskID)
+		}
+		return ""
+	}
+	if strings.TrimSpace(params.ProjectID) != "" {
+		return "chat:project:" + strings.TrimSpace(params.ProjectID)
+	}
+	return ""
+}
+
 // processStreamingResponse is the shared goroutine that handles LLM streaming for
 // both chat and task follow-up messages. This function runs asynchronously in a
 // background goroutine, allowing the HTTP handler to return immediately.
@@ -465,8 +478,9 @@ modelLoop:
 			err = ctx.Err()
 			break
 		}
+		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
 		result, err = h.llmSvc.CallAgentDirectStreamingDetailed(
-			ctx, params.Message, requestImageAttachments, params.Agent,
+			requestCtx, params.Message, requestImageAttachments, params.Agent,
 			params.ExecID, params.ChatHistory, params.SystemContext,
 			params.WorkDir, agentDef, params.IsTaskFollowup,
 		)

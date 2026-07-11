@@ -647,6 +647,26 @@ func TestLLMService_CallAgentDirectStreamingDetailed_PreservesFailedHistoryWitho
 	}
 }
 
+func TestLLMService_CallAgentDirectStreamingDetailed_PropagatesTransportScope(t *testing.T) {
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	capture := &captureProviderAdapter{}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
+
+	ctx := llmcontracts.WithTransportScope(context.Background(), "chat:project:project-1")
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test"}
+	if _, err := svc.CallAgentDirectStreamingDetailed(ctx, "hello", nil, agent, "exec-123", nil, "ctx", "/tmp/workdir", nil); err != nil {
+		t.Fatalf("CallAgentDirectStreamingDetailed error: %v", err)
+	}
+
+	requests := capture.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("provider requests = %d, want 1", len(requests))
+	}
+	if got := requests[0].TransportScope; got != "chat:project:project-1" {
+		t.Fatalf("provider transport scope = %q", got)
+	}
+}
+
 func TestLLMService_CallAgentDirectStreamingDetailed_BuildsChatContextFromNormalizedHistory(t *testing.T) {
 	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
 	capture := &captureProviderAdapter{}

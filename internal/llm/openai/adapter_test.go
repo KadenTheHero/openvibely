@@ -13,6 +13,8 @@ import (
 	"github.com/coder/websocket"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/testutil"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
@@ -358,20 +360,36 @@ func TestLeasedResponsesTransportSurvivesConcurrentCachePressure(t *testing.T) {
 	}
 }
 
-func TestChatTransportScope(t *testing.T) {
-	if got := chatTransportScope("", nil); got != "" {
-		t.Fatalf("missing execution ID scope = %q, want isolated state", got)
+func TestInitialTaskAndFollowupShareTransportScope(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	ctx := context.Background()
+	task := &models.Task{
+		ProjectID: "default", Title: "Transport reuse", Category: models.CategoryActive,
+		Status: models.StatusPending, Prompt: "test",
 	}
-	if got := chatTransportScope("current", nil); got != "chat:current" {
-		t.Fatalf("empty history scope = %q", got)
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
 	}
-	history := []models.Execution{{ID: "first"}, {ID: "second"}}
-	if got := chatTransportScope("current", history); got != "chat:first" {
-		t.Fatalf("chat history scope = %q", got)
+	execution := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "initial"}
+	if err := execRepo.Create(ctx, execution); err != nil {
+		t.Fatalf("create execution: %v", err)
 	}
-	history[1].TaskID = "task-1"
-	if got := chatTransportScope("current", history); got != "task:task-1" {
-		t.Fatalf("task history scope = %q", got)
+
+	adapter := New(nil, execRepo, nil)
+	initialScope := adapter.taskTransportScope(ctx, execution.ID)
+	followupScope := "task:" + task.ID
+	if initialScope != "task:"+task.ID || followupScope != initialScope {
+		t.Fatalf("scopes initial=%q followup=%q, want task scope", initialScope, followupScope)
+	}
+	agent := models.LLMConfig{ID: "cfg-1", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, APIKey: "key"}
+	initialState, releaseInitial := adapter.acquireResponsesTransportState(agent, initialScope)
+	releaseInitial()
+	followupState, releaseFollowup := adapter.acquireResponsesTransportState(agent, followupScope)
+	releaseFollowup()
+	if initialState != followupState {
+		t.Fatal("initial task and follow-up did not reuse the same transport state")
 	}
 }
 

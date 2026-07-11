@@ -1493,6 +1493,7 @@ func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, messa
 		Attachments:       attachments,
 		Agent:             agent,
 		ExecID:            execID,
+		TransportScope:    llmcontracts.TransportScopeFromContext(ctx),
 		ChatHistory:       chatHistory,
 		ChatMode:          chatMode,
 		ChatSystemContext: combineAdditionalProjectInstructions(ctx, chatSystemContext),

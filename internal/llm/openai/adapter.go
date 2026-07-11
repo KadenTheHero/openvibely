@@ -399,7 +399,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, agentDef *models.Agent) (string, string, llmcontracts.Usage, error) {
 	applog.Infof("[openai-adapter] CallStreaming model=%s output_budget=%d attachments=%d exec=%s auth_method=%s workDir=%s", agent.Model, openAIAgenticOutputBudget, len(attachments), execID, agent.AuthMethod, workDir)
 
-	client, releaseTransport, err := a.getClient(ctx, agent, "")
+	client, releaseTransport, err := a.getClient(ctx, agent, a.taskTransportScope(ctx, execID))
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), err
 	}
@@ -510,11 +510,12 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 }
 
 // CallChatStreaming makes a streaming OpenAI chat call with history.
-func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, agentDef *models.Agent) (string, llmcontracts.Usage, error) {
+func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID, transportScope string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, agentDef *models.Agent) (string, llmcontracts.Usage, error) {
 	applog.Infof("[openai-adapter] CallChatStreaming model=%s history=%d message_len=%d context_len=%d attachments=%d exec=%s isTaskFollowup=%v auth_method=%s workDir=%s",
 		agent.Model, len(chatHistory), len(message), len(chatSystemContext), len(attachments), execID, isTaskFollowup, agent.AuthMethod, workDir)
 
-	client, releaseTransport, err := a.getClient(ctx, agent, chatTransportScope(execID, chatHistory))
+	transportScope = strings.TrimSpace(transportScope)
+	client, releaseTransport, err := a.getClient(ctx, agent, transportScope)
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
@@ -939,21 +940,20 @@ func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig, transpo
 	return nil, releaseTransport, fmt.Errorf("OpenAI model %q is configured with auth_method=%q; expected api_key or oauth", agent.Name, agent.AuthMethod)
 }
 
-func chatTransportScope(execID string, history []models.Execution) string {
-	for _, execution := range history {
-		if taskID := strings.TrimSpace(execution.TaskID); taskID != "" {
-			return "task:" + taskID
-		}
+func (a *Adapter) taskTransportScope(ctx context.Context, execID string) string {
+	execID = strings.TrimSpace(execID)
+	if execID == "" || a.execRepo == nil {
+		return ""
 	}
-	if len(history) > 0 {
-		if firstID := strings.TrimSpace(history[0].ID); firstID != "" {
-			return "chat:" + firstID
-		}
+	execution, err := a.execRepo.GetByID(ctx, execID)
+	if err != nil {
+		applog.Infof("[openai-adapter] resolve task transport scope exec=%s: %v", execID, err)
+		return ""
 	}
-	if execID = strings.TrimSpace(execID); execID != "" {
-		return "chat:" + execID
+	if execution == nil || strings.TrimSpace(execution.TaskID) == "" {
+		return ""
 	}
-	return ""
+	return "task:" + strings.TrimSpace(execution.TaskID)
 }
 
 func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {

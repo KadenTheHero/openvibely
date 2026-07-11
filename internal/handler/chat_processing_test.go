@@ -28,6 +28,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestStreamingTransportScope(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		params streamingResponseParams
+		want   string
+	}{
+		{name: "project chat", params: streamingResponseParams{ProjectID: "project-1", TaskID: "hidden-chat-task"}, want: "chat:project:project-1"},
+		{name: "task followup", params: streamingResponseParams{ProjectID: "project-1", TaskID: "task-1", IsTaskFollowup: true}, want: "task:task-1"},
+		{name: "task followup missing task", params: streamingResponseParams{ProjectID: "project-1", IsTaskFollowup: true}, want: ""},
+		{name: "missing identity", params: streamingResponseParams{}, want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := streamingTransportScope(tc.params); got != tc.want {
+				t.Fatalf("streamingTransportScope() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 type chatMemoryHookStore struct {
 	hooks []models.AgentLifecycleHook
 	seen  []models.LifecycleWhen
