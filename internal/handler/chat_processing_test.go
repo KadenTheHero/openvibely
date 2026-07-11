@@ -4405,6 +4405,34 @@ func TestProcessStreamingResponse_TerminalSyncConflictIncludesWorktreeWarningCon
 	}
 }
 
+func TestResolveWorktreeWorkDir_UnbornRepoFailsClosed(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	project := &models.Project{Name: "Unborn Followup Project", RepoPath: repoDir}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := createTask(t, h, project.ID, "Unborn followup", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+	})
+	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+
+	workDir, _, err := h.resolveWorktreeWorkDir(ctx, task)
+	if err == nil || !strings.Contains(err.Error(), "repository has no commit for worktree base") {
+		t.Fatalf("expected missing base commit error, got workDir=%q err=%v", workDir, err)
+	}
+	if workDir != "" {
+		t.Fatalf("expected no fallback to main checkout, got %q", workDir)
+	}
+}
+
 func TestResolveWorktreeWorkDir_SyncsExistingWorktreeFromTargetBeforeFollowup(t *testing.T) {
 	h, _, _ := setupTestHandler(t)
 	ctx := context.Background()

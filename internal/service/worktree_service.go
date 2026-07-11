@@ -160,6 +160,11 @@ func (ws *WorktreeService) setupWorktree(ctx context.Context, task *models.Task,
 	if baseRef == "" {
 		return "", "", fmt.Errorf("could not resolve base ref for task %s", task.ID)
 	}
+	verifyBase := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "--quiet", baseRef+"^{commit}")
+	verifyBase.Dir = repoDir
+	if err := verifyBase.Run(); err != nil {
+		return "", "", fmt.Errorf("repository has no commit for worktree base %q; create an initial local commit before running coding tasks", baseRef)
+	}
 
 	// If this is a chained task and we couldn't resolve lineage, log a clear error
 	if !continueFromCurrentTarget && task.ParentTaskID != nil && task.BaseCommitSHA != "" && baseRef != task.BaseCommitSHA {

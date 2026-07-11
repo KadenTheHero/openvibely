@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -2131,6 +2132,98 @@ func TestLLMService_ExecuteTask_MemoryConsolidationUsesNormalExecutionPath(t *te
 	}
 	if execs[0].Output != "memory task response" {
 		t.Fatalf("expected execution output to be model response, got %q", execs[0].Output)
+	}
+}
+
+func TestLLMService_ExecuteTask_GitWorktreeIsolation(t *testing.T) {
+	tests := []struct {
+		name           string
+		prepareRepo    func(t *testing.T) string
+		wantErr        string
+		wantModelCalls int
+	}{
+		{
+			name: "committed local repository without remote uses worktree",
+			prepareRepo: func(t *testing.T) string {
+				return createTestGitRepo(t)
+			},
+			wantModelCalls: 1,
+		},
+		{
+			name: "unborn repository fails closed instead of using main checkout",
+			prepareRepo: func(t *testing.T) string {
+				repoDir := t.TempDir()
+				cmd := exec.Command("git", "init", "-b", "main")
+				cmd.Dir = repoDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git init: %v\n%s", err, out)
+				}
+				return repoDir
+			},
+			wantErr: "repository has no commit for worktree base",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			llmConfigRepo := repository.NewLLMConfigRepo(db)
+			execRepo := repository.NewExecutionRepo(db)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			projectRepo := repository.NewProjectRepo(db)
+			settingsRepo := repository.NewSettingsRepo(db)
+			scheduleRepo := repository.NewScheduleRepo(db)
+			attachmentRepo := repository.NewAttachmentRepo(db)
+
+			repoDir := tt.prepareRepo(t)
+			project := &models.Project{Name: "Worktree Isolation", RepoPath: repoDir}
+			if err := projectRepo.Create(ctx, project); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+			agent := ensureDefaultAgent(t, llmConfigRepo)
+			task := &models.Task{ProjectID: project.ID, Title: "Isolated coding task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "write a file", AgentID: &agent.ID}
+			if err := taskRepo.Create(ctx, task); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+
+			svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+			svc.SetWorktreeService(NewWorktreeService(taskRepo, projectRepo, settingsRepo))
+			mock := &testutil.MockLLMCaller{Response: "done", TextOnly: "done"}
+			svc.SetLLMCaller(mock)
+
+			_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+				}
+			} else if err != nil {
+				t.Fatalf("ExecuteTaskWithAgent: %v", err)
+			}
+			if got := mock.CallCount(); got != tt.wantModelCalls {
+				t.Fatalf("expected %d model calls, got %d", tt.wantModelCalls, got)
+			}
+
+			updated, getErr := taskRepo.GetByID(ctx, task.ID)
+			if getErr != nil {
+				t.Fatalf("get task: %v", getErr)
+			}
+			if tt.wantErr != "" {
+				if updated.Status != models.StatusFailed || updated.WorktreePath != "" {
+					t.Fatalf("expected failed task without worktree metadata, got status=%s path=%q", updated.Status, updated.WorktreePath)
+				}
+				return
+			}
+			if updated.WorktreePath == "" || updated.WorktreePath == repoDir {
+				t.Fatalf("expected isolated worktree path, got %q", updated.WorktreePath)
+			}
+			if got := mock.LastCall().WorkDir; got != updated.WorktreePath {
+				t.Fatalf("expected model workdir %q, got %q", updated.WorktreePath, got)
+			}
+			if remotes, remoteErr := exec.Command("git", "-C", repoDir, "remote").Output(); remoteErr != nil || strings.TrimSpace(string(remotes)) != "" {
+				t.Fatalf("test repository should have no remote, output=%q err=%v", remotes, remoteErr)
+			}
+		})
 	}
 }
 

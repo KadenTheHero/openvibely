@@ -585,7 +585,30 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if useRuntimeWorktree && s.worktreeSvc != nil && repoDir != "" && task.Category != models.CategoryChat && IsGitRepo(repoDir) {
 		wtPath, wtBranch, wtErr := s.worktreeSvc.SetupWorktree(ctx, &task, repoDir)
 		if wtErr != nil {
-			applog.Infof("[agent-svc] ExecuteTaskWithAgent worktree setup failed (using main repo): %v", wtErr)
+			errMsg := fmt.Sprintf("setting up isolated task worktree: %v", wtErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent worktree setup failed task=%s; refusing to use main repo: %v", task.ID, wtErr)
+			if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); completeErr != nil {
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after worktree setup failure: %v", completeErr)
+			} else {
+				s.publishExecutionTerminal(exec.ID, models.ExecFailed, errMsg)
+			}
+			if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after worktree setup failure: %v", statusErr)
+			}
+			if task.Category == models.CategoryActive {
+				if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
+					applog.Infof("[agent-svc] ExecuteTaskWithAgent error moving worktree-setup-failed task to completed category: %v", categoryErr)
+				}
+			}
+			if s.alertSvc != nil {
+				if alertErr := s.alertSvc.CreateTaskFailedAlert(finalizeCtx, task.ProjectID, task.ID, exec.ID, task.Title, errMsg); alertErr != nil {
+					applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating worktree setup failure alert: %v", alertErr)
+				}
+			}
+			exec.Status = models.ExecFailed
+			exec.ErrorMessage = errMsg
+			s.promoteQueuedTaskThreadAfterCompletion(task.ID)
+			return exec, llmcontracts.ChatContext{}, fmt.Errorf("worktree setup failed: %w", wtErr)
 		} else if wtPath != "" {
 			workDir = wtPath
 			task.WorktreePath = wtPath

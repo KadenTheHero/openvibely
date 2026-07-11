@@ -2041,8 +2041,8 @@ func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task)
 
 	wtPath, wtBranch, skipStartupSync, wtErr := h.worktreeSvc.SetupFollowupWorktree(ctx, task, repoDir)
 	if wtErr != nil {
-		applog.Infof("[handler] resolveWorktreeWorkDir worktree setup failed for task %s, using main repo: %v", task.ID, wtErr)
-		return repoDir, "", nil
+		applog.Infof("[handler] resolveWorktreeWorkDir worktree setup failed for task %s; refusing to use main repo: %v", task.ID, wtErr)
+		return "", "", fmt.Errorf("setting up isolated task worktree: %w", wtErr)
 	}
 	task.WorktreePath = wtPath
 	task.WorktreeBranch = wtBranch
