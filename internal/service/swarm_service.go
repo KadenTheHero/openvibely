@@ -230,22 +230,42 @@ func (s *SwarmService) StartPlanner(ctx context.Context, parentTaskID string) er
 	return nil
 }
 
-func (s *SwarmService) createSwarmChild(ctx context.Context, parent *models.Task, child *models.Task) error {
-	baseTitle := child.Title
-	parentID := parent.ID
+func swarmChildTitle(baseTitle, parentID string, sequence, attempt int) string {
 	if len(parentID) > 8 {
 		parentID = parentID[:8]
 	}
+	switch attempt {
+	case 0:
+		return baseTitle
+	case 1:
+		return fmt.Sprintf("%s · %s-%d", baseTitle, parentID, sequence)
+	default:
+		return fmt.Sprintf("%s · %s-%d-%d", baseTitle, parentID, sequence, attempt)
+	}
+}
+
+func (s *SwarmService) createSwarmChild(ctx context.Context, parent *models.Task, child *models.Task) error {
+	baseTitle := child.Title
 	for attempt := 0; ; attempt++ {
-		switch attempt {
-		case 0:
-			child.Title = baseTitle
-		case 1:
-			child.Title = fmt.Sprintf("%s · %s-%d", baseTitle, parentID, child.SwarmSequence)
-		default:
-			child.Title = fmt.Sprintf("%s · %s-%d-%d", baseTitle, parentID, child.SwarmSequence, attempt)
-		}
+		child.Title = swarmChildTitle(baseTitle, parent.ID, child.SwarmSequence, attempt)
 		if err := s.taskSvc.Create(ctx, child); err != nil {
+			if !errors.Is(err, ErrDuplicateTask) {
+				return err
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			continue
+		}
+		return nil
+	}
+}
+
+func (s *SwarmService) updateSwarmChild(ctx context.Context, parent *models.Task, child *models.Task) error {
+	baseTitle := child.Title
+	for attempt := 0; ; attempt++ {
+		child.Title = swarmChildTitle(baseTitle, parent.ID, child.SwarmSequence, attempt)
+		if err := s.taskSvc.Update(ctx, child); err != nil {
 			if !errors.Is(err, ErrDuplicateTask) {
 				return err
 			}
@@ -428,7 +448,7 @@ func (s *SwarmService) applyFollowupPlannerOutput(ctx context.Context, parent *m
 		child.Category = models.CategoryActive
 		child.SwarmStatus = "rerun_pending"
 		child.SwarmConfig, _ = cfg.JSON()
-		if err := s.taskRepo.Update(ctx, &child); err != nil {
+		if err := s.updateSwarmChild(ctx, parent, &child); err != nil {
 			return err
 		}
 		affected[child.ID] = true

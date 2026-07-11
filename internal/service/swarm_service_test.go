@@ -352,6 +352,76 @@ func TestSwarmServiceFollowupPlannerApplicationErrorPreservesRetryRouting(t *tes
 	}
 }
 
+func TestSwarmServiceFollowupPlannerRerunDisambiguatesOccupiedWorkerTitle(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Rerun title collision", Prompt: "Build export", MaxWorkers: 1})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+	initialOutput := PlannerOutput{Workers: []PlannerWorker{{Title: "Original worker", Prompt: "Build backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, initialOutput); err != nil {
+		t.Fatalf("apply initial plan: %v", err)
+	}
+	worker, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	if err != nil || worker == nil {
+		t.Fatalf("worker missing: worker=%#v err=%v", worker, err)
+	}
+	if err := repo.UpdateStatus(ctx, worker.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("complete worker: %v", err)
+	}
+	occupied := &models.Task{ProjectID: parent.ProjectID, Title: "Occupied rerun title", Prompt: "Unrelated task", Category: models.CategoryBacklog, Status: models.StatusPending}
+	if err := taskSvc.Create(ctx, occupied); err != nil {
+		t.Fatalf("create occupied title: %v", err)
+	}
+	occupiedFallback := &models.Task{ProjectID: parent.ProjectID, Title: swarmChildTitle(occupied.Title, parent.ID, worker.SwarmSequence, 1), Prompt: "Another unrelated task", Category: models.CategoryBacklog, Status: models.StatusPending}
+	if err := taskSvc.Create(ctx, occupiedFallback); err != nil {
+		t.Fatalf("create occupied fallback title: %v", err)
+	}
+	if err := svc.HandleParentFollowup(ctx, parent.ID, "Update the backend"); err != nil {
+		t.Fatalf("HandleParentFollowup: %v", err)
+	}
+	planner, err = repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("coordinating planner missing: planner=%#v err=%v", planner, err)
+	}
+
+	followup := PlannerOutput{Workers: []PlannerWorker{{TaskID: worker.ID, Title: occupied.Title, Prompt: "Update backend safely", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, followup); err != nil {
+		t.Fatalf("apply follow-up with occupied title: %v", err)
+	}
+	updated, err := repo.GetByID(ctx, worker.ID)
+	if err != nil || updated == nil {
+		t.Fatalf("load rerun worker: worker=%#v err=%v", updated, err)
+	}
+	cfg, _ := models.ParseSwarmConfig(updated.SwarmConfig)
+	if updated.Title == occupied.Title || updated.Title == occupiedFallback.Title || !strings.HasPrefix(updated.Title, occupied.Title+" · ") {
+		t.Fatalf("rerun title was not disambiguated beyond occupied fallbacks: %q", updated.Title)
+	}
+	if updated.Status != models.StatusPending || updated.SwarmStatus != "rerun_pending" || cfg.RerunGeneration != 2 {
+		t.Fatalf("rerun state not persisted: worker=%#v cfg=%#v", updated, cfg)
+	}
+	if !strings.Contains(updated.Prompt, "Update backend safely") {
+		t.Fatalf("rerun prompt not updated: %q", updated.Prompt)
+	}
+	storedOccupied, err := repo.GetByID(ctx, occupied.ID)
+	if err != nil || storedOccupied == nil || storedOccupied.Title != occupied.Title {
+		t.Fatalf("occupied task was modified: task=%#v err=%v", storedOccupied, err)
+	}
+	storedFallback, err := repo.GetByID(ctx, occupiedFallback.ID)
+	if err != nil || storedFallback == nil || storedFallback.Title != occupiedFallback.Title {
+		t.Fatalf("occupied fallback task was modified: task=%#v err=%v", storedFallback, err)
+	}
+}
+
 func TestSwarmServiceFollowupPlannerRetryReconcilesPartiallyCreatedWorkers(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
