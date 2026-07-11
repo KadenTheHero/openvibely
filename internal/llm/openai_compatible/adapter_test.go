@@ -210,6 +210,79 @@ func TestAdapterChatWithoutRuntimeActionsKeepsMarkerSystemPrompt(t *testing.T) {
 	require.NotContains(t, content, llmprompt.ChatActionToolModeInstructions)
 }
 
+func TestAdapterTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"Task complete.\\n[STATUS: SUCCESS]\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{
+			Name: "create_task", Description: "create a task", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessWrite,
+		}},
+	})
+	adapter := New(nil, nil)
+	_, err := adapter.Call(ctx, llmcontracts.AgentRequest{
+		Ctx: ctx, Operation: llmcontracts.OperationTask, Message: "Investigate the issue",
+		Agent: models.LLMConfig{
+			Name: "Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", Transport: "chat_completions",
+		},
+	}, ".")
+	require.NoError(t, err)
+
+	messages, ok := gotBody["messages"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, messages)
+	user, ok := messages[len(messages)-1].(map[string]any)
+	require.True(t, ok)
+	content, _ := user["content"].(string)
+	require.Contains(t, content, "TASK CREATION TOOL MODE")
+	require.Contains(t, content, "Available runtime task tools: create_task")
+	require.NotContains(t, content, "This is the ONLY way to create a task")
+	require.NotContains(t, content, "To create a task, output this format")
+}
+
+func TestAdapterTaskWithoutRuntimeActionsKeepsMarkerPrompt(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"Task complete.\\n[STATUS: SUCCESS]\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	adapter := New(nil, nil)
+	_, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation: llmcontracts.OperationTask, Message: "Investigate the issue",
+		Agent: models.LLMConfig{
+			Name: "Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", Transport: "chat_completions",
+		},
+	}, ".")
+	require.NoError(t, err)
+
+	messages, ok := gotBody["messages"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, messages)
+	user, ok := messages[len(messages)-1].(map[string]any)
+	require.True(t, ok)
+	content, _ := user["content"].(string)
+	require.Contains(t, content, llmprompt.TaskCreationInstructions)
+	require.NotContains(t, content, "TASK CREATION TOOL MODE")
+}
+
 func TestAdapterToolCallReplaysToolResult(t *testing.T) {
 	requests := 0
 	var secondMessages []any

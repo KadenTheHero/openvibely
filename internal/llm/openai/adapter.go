@@ -241,16 +241,24 @@ func composeRuntimeToolFilter(base func(string) bool, rt *llmcontracts.RuntimeTo
 	}
 }
 
+func runtimeToolNames(rt *llmcontracts.RuntimeTools) []string {
+	if rt == nil {
+		return nil
+	}
+	var names []string
+	for _, def := range rt.Definitions {
+		if name := strings.TrimSpace(def.Name); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, isTaskFollowup bool, chatMode models.ChatMode) string {
 	if rt == nil || isTaskFollowup || chatMode != models.ChatModeOrchestrate {
 		return base
 	}
-	var names []string
-	for _, def := range rt.Definitions {
-		if n := strings.TrimSpace(def.Name); n != "" {
-			names = append(names, n)
-		}
-	}
+	names := runtimeToolNames(rt)
 	if len(names) == 0 {
 		return base
 	}
@@ -405,10 +413,12 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	}
 	defer releaseTransport()
 
+	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
 	fullPrompt += "\n\n" + llmprompt.TaskCreationInstructions
+	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, runtimeToolNames(rt))
 	fullPrompt += "\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
 		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
 		"- If a command failed, a script returned non-zero, or the task could not be completed: [STATUS: FAILED | <describe what went wrong>]\n" +
@@ -427,7 +437,6 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	if effectiveWorkDir == "" {
 		effectiveWorkDir = "."
 	}
-	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildOpenAIRuntime(ctx, effectiveWorkDir, agentDef)
 	defer cleanupRuntime()
 	extraTools = append(extraTools, runtimeOpenAITools(rt)...)
@@ -629,10 +638,12 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	}
 	defer releaseTransport()
 
+	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
 	fullPrompt += "\n\n" + llmprompt.TaskCreationInstructions
+	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, runtimeToolNames(rt))
 	fullPrompt += "\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
 		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
 		"- If a command failed, a script returned non-zero, or the task could not be completed: [STATUS: FAILED | <describe what went wrong>]\n" +
@@ -651,7 +662,6 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	if effectiveWorkDir == "" {
 		effectiveWorkDir = "."
 	}
-	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildOpenAIRuntime(ctx, effectiveWorkDir, agentDef)
 	defer cleanupRuntime()
 	extraTools = append(extraTools, runtimeOpenAITools(rt)...)

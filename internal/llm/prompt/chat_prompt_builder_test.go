@@ -7,6 +7,27 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestApplyTaskCreationToolMode(t *testing.T) {
+	base := "Task objective\n\n" + TaskCreationInstructions
+
+	toolPrompt := ApplyTaskCreationToolMode(base, []string{"Read", "create_task"})
+	if strings.Contains(toolPrompt, TaskCreationInstructions) {
+		t.Fatal("tool-mode task prompt retained marker creation instructions")
+	}
+	if !strings.Contains(toolPrompt, TaskCreationToolModeInstructions) || !strings.Contains(toolPrompt, "Available runtime task tools: Read, create_task") {
+		t.Fatalf("tool-mode task prompt missing runtime guidance: %q", toolPrompt)
+	}
+
+	unrelatedToolPrompt := ApplyTaskCreationToolMode(base, []string{"Read"})
+	if unrelatedToolPrompt != base {
+		t.Fatalf("unrelated runtime tool changed task creation guidance: %q", unrelatedToolPrompt)
+	}
+	noToolPrompt := ApplyTaskCreationToolMode(base, nil)
+	if noToolPrompt != base {
+		t.Fatalf("no-tool task prompt changed marker guidance: %q", noToolPrompt)
+	}
+}
+
 func TestTaskFollowupSystemPrompt(t *testing.T) {
 	if strings.Contains(TaskFollowupSystemPrompt, "task management assistant") {
 		t.Error("TaskFollowupSystemPrompt should NOT contain 'task management assistant' — it should be a coding agent prompt")

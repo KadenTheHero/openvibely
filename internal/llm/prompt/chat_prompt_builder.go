@@ -70,6 +70,31 @@ const ChatActionToolModeInstructions = `TOOL ACTION MODE:
 - After tool calls complete, provide a concise plain-language summary for the user
 - Do not claim an action succeeded unless the tool result confirms success`
 
+// TaskCreationToolModeInstructions replaces initial-task marker guidance when the
+// request has an executable create_task runtime tool.
+const TaskCreationToolModeInstructions = `TASK CREATION TOOL MODE:
+- Do not output [CREATE_TASK] marker blocks
+- Create tasks by calling the provided create_task runtime tool
+- Do not claim a task was created unless the tool result confirms success`
+
+// ApplyTaskCreationToolMode replaces initial-task marker guidance only when the
+// concrete provider request includes create_task.
+func ApplyTaskCreationToolMode(base string, toolNames []string) string {
+	var names []string
+	hasCreateTask := false
+	for _, name := range toolNames {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+			hasCreateTask = hasCreateTask || name == "create_task"
+		}
+	}
+	if !hasCreateTask {
+		return base
+	}
+	base = strings.ReplaceAll(base, TaskCreationInstructions, "")
+	return base + "\n\n" + TaskCreationToolModeInstructions + "\nAvailable runtime task tools: " + strings.Join(names, ", ")
+}
+
 // ApplyChatActionToolMode replaces orchestration marker guidance with runtime-tool
 // guidance when a provider-capable request has non-empty action definitions.
 func ApplyChatActionToolMode(base string, toolNames []string) string {

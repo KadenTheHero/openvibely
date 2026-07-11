@@ -335,16 +335,24 @@ func composeTaskRuntimeToolFilter(base func(string) bool, rt *llmcontracts.Runti
 	return composeRuntimeToolFilter(base, rt, true, models.ChatModeOrchestrate)
 }
 
+func runtimeToolNames(rt *llmcontracts.RuntimeTools) []string {
+	if rt == nil {
+		return nil
+	}
+	var names []string
+	for _, def := range rt.Definitions {
+		if name := strings.TrimSpace(def.Name); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, isTaskFollowup bool, chatMode models.ChatMode) string {
 	if rt == nil || isTaskFollowup || chatMode != models.ChatModeOrchestrate {
 		return base
 	}
-	var names []string
-	for _, def := range rt.Definitions {
-		if n := strings.TrimSpace(def.Name); n != "" {
-			names = append(names, n)
-		}
-	}
+	names := runtimeToolNames(rt)
 	if len(names) == 0 {
 		return base
 	}
@@ -655,7 +663,9 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		return "", "", llmusage.FromTotal(0), err
 	}
 
+	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
+	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, runtimeToolNames(rt))
 	mcAttachments, err := convertAttachments(attachments)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
@@ -664,7 +674,6 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
-	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	extraTools = append(extraTools, runtimeAnthropicTools(rt)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = composeTaskRuntimeToolFilter(toolFilter, rt)

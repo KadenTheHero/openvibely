@@ -18,6 +18,56 @@ import (
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
+func TestCallCompletionsStreamingTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"Task complete.\\n[STATUS: SUCCESS]\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{
+			Name: "create_task", Description: "create a task", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessWrite,
+		}},
+	})
+	adapter := New(nil, nil, nil)
+	_, _, _, err := adapter.CallCompletionsStreaming(ctx, "Investigate the issue", nil, models.LLMConfig{
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
+	}, "", ".", "", nil)
+	if err != nil {
+		t.Fatalf("CallCompletionsStreaming: %v", err)
+	}
+
+	messages, ok := gotBody["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		t.Fatalf("messages = %#v", gotBody["messages"])
+	}
+	user, ok := messages[len(messages)-1].(map[string]any)
+	if !ok {
+		t.Fatalf("user message = %#v", messages[len(messages)-1])
+	}
+	content, _ := user["content"].(string)
+	if !strings.Contains(content, "TASK CREATION TOOL MODE") || !strings.Contains(content, "Available runtime task tools: create_task") {
+		t.Fatalf("task prompt missing runtime tool guidance: %q", content)
+	}
+	if strings.Contains(content, "This is the ONLY way to create a task") || strings.Contains(content, "To create a task, output this format") {
+		t.Fatalf("task prompt retains marker-only guidance: %q", content)
+	}
+}
+
 func TestToolSecondaryInfo_LongBashPreservesLaterContext(t *testing.T) {
 	input := map[string]any{
 		"command": "cd /Users/dubee/go/src/github.com/openvibely/openvibely/.worktrees/task_6a40e9f8fefa53ac8d203aa3fd3a70be && rg -n \"toolSecondaryInfo|truncateToolSecondary|task thread\" internal pkg web/templates/components/chat_shared.templ",
