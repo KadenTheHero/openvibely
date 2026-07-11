@@ -2660,12 +2660,16 @@ func TestLLMService_ExecuteTaskWithAgent_LoadsAttachments(t *testing.T) {
 		t.Fatalf("failed to create task: %v", err)
 	}
 
+	attachmentPath := filepath.Join(t.TempDir(), "test.png")
+	if err := os.WriteFile(attachmentPath, []byte("png"), 0o644); err != nil {
+		t.Fatalf("failed to create attachment file: %v", err)
+	}
 	attachment := &models.Attachment{
 		TaskID:    task.ID,
 		FileName:  "test.png",
-		FilePath:  "/tmp/test.png",
+		FilePath:  attachmentPath,
 		MediaType: "image/png",
-		FileSize:  1024,
+		FileSize:  3,
 	}
 	if err := attachmentRepo.Create(ctx, attachment); err != nil {
 		t.Fatalf("failed to create attachment: %v", err)

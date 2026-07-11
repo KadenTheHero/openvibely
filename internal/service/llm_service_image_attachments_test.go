@@ -13,6 +13,39 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestLLMService_ReconcileMissingTaskAttachmentsRemovesBrokenMetadata(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, events.NewBroadcaster())
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	project := &models.Project{Name: "Broken attachment project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Task with historical broken screenshot", Prompt: "still execute", Category: models.CategoryBacklog, Status: models.StatusPending}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	missing := &models.Attachment{TaskID: task.ID, FileName: "Screenshot 2026-07-10 at 9.49.00\u202fPM.png", FilePath: filepath.Join(t.TempDir(), "missing.png"), MediaType: "image/png", FileSize: 10}
+	if err := attachmentRepo.Create(ctx, missing); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewLLMService(repository.NewLLMConfigRepo(db), repository.NewExecutionRepo(db), taskRepo, projectRepo, nil, attachmentRepo)
+	valid := svc.reconcileMissingTaskAttachments(ctx, task.ID, []models.Attachment{*missing})
+	if len(valid) != 0 {
+		t.Fatalf("expected broken attachment to be excluded from execution, got %#v", valid)
+	}
+	remaining, err := attachmentRepo.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("expected broken metadata cleanup, got %#v", remaining)
+	}
+}
+
 func TestLLMService_ImageAttachments_CLI_ShouldWarnUserNotReadFile(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
@@ -260,7 +293,7 @@ func TestLLMService_ImageAttachments_VisionRouting_Integration(t *testing.T) {
 	}
 
 	// Success: Agent was properly switched to vision-capable agent
-	t.Logf("SUCCESS: Vision routing correctly switched from CLI agent to vision-capable agent: %s (provider=%s, auth=%s)", 
+	t.Logf("SUCCESS: Vision routing correctly switched from CLI agent to vision-capable agent: %s (provider=%s, auth=%s)",
 		visionDecision.Agent.Name, visionDecision.Agent.Provider, visionDecision.Agent.AuthMethod)
 }
 
@@ -365,17 +398,17 @@ func TestLLMService_ImageAttachments_NoVisionAgent_ClearError(t *testing.T) {
 
 	// Now test the CLI attachment instructions to ensure they warn the user
 	instructions := buildAttachmentInstructionsForCLI(attachments)
-	
+
 	// Should contain a warning about vision
 	lowerInstr := strings.ToLower(instructions)
 	if !strings.Contains(lowerInstr, "cannot view") {
 		t.Errorf("Expected CLI instructions to warn 'cannot view' images, got: %s", instructions)
 	}
-	
+
 	if !strings.Contains(lowerInstr, "cli mode") {
 		t.Errorf("Expected CLI instructions to mention 'cli mode', got: %s", instructions)
 	}
-	
+
 	if !strings.Contains(lowerInstr, "vision-capable") {
 		t.Errorf("Expected CLI instructions to suggest 'vision-capable' model, got: %s", instructions)
 	}
@@ -386,13 +419,13 @@ func TestLLMService_ImageAttachments_NoVisionAgent_ClearError(t *testing.T) {
 
 func TestBuildAttachmentInstructions_ShouldNotTellAgentToReadImages(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create test files
 	textPath := filepath.Join(tmpDir, "notes.txt")
 	if err := os.WriteFile(textPath, []byte("test content"), 0644); err != nil {
 		t.Fatalf("Failed to create text file: %v", err)
 	}
-	
+
 	imgPath := filepath.Join(tmpDir, "screenshot.png")
 	if err := os.WriteFile(imgPath, []byte("fake png"), 0644); err != nil {
 		t.Fatalf("Failed to create image file: %v", err)
@@ -405,28 +438,28 @@ func TestBuildAttachmentInstructions_ShouldNotTellAgentToReadImages(t *testing.T
 	}
 
 	result := buildAttachmentInstructionsForCLI(attachments)
-	
+
 	// Should mention text files in the readable section
 	if !strings.Contains(result, "notes.txt") {
 		t.Error("Expected instructions to mention text file")
 	}
-	
+
 	// Should mention image files in a separate warning section
 	if !strings.Contains(result, "screenshot.png") {
 		t.Error("Expected instructions to mention image file")
 	}
-	
+
 	// Should tell agent to examine text files but not images
 	if !strings.Contains(result, "examine these files") {
 		t.Error("Expected instructions to tell agent to examine text files")
 	}
-	
+
 	// Should contain a warning about vision/CLI mode
 	lowerResult := strings.ToLower(result)
 	if !strings.Contains(lowerResult, "cannot view") && !strings.Contains(lowerResult, "cli mode") {
 		t.Errorf("Expected warning about images not being viewable via CLI, got: %s", result)
 	}
-	
+
 	// Should suggest reconfiguring to vision-capable model
 	if !strings.Contains(lowerResult, "vision-capable") {
 		t.Errorf("Expected suggestion to use vision-capable model, got: %s", result)

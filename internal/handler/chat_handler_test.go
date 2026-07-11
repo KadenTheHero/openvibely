@@ -2169,7 +2169,8 @@ func TestProcessAttachments_NoSession(t *testing.T) {
 
 	ctx := context.Background()
 	textContext, imageAttachments, err := h.processAttachments(ctx, "nonexistent-session", "exec-id")
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stage=session-source")
 	assert.Empty(t, textContext)
 	assert.Nil(t, imageAttachments)
 }
@@ -2435,6 +2436,108 @@ func TestCopyChatAttachmentsToTask_AbsolutePathsAccessible(t *testing.T) {
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	assert.Contains(t, updatedTask.Prompt, att.FilePath, "task prompt should contain the absolute file path")
+}
+
+func TestCopyChatAttachmentsToTask_UnicodeDuplicateAndMissingSourceAreAtomic(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := &models.LLMConfig{
+		Name: "Attachment Atomicity Agent", Provider: models.ProviderTest,
+		Model: "test-model", APIKey: "test-key", MaxTokens: 4096, Temperature: 1,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+
+	chatTask := &models.Task{ProjectID: projects[0].ID, Title: "Chat attachment atomicity", Prompt: "test", Status: models.StatusPending, Category: models.CategoryChat, AgentID: &agent.ID}
+	require.NoError(t, h.taskRepo.Create(ctx, chatTask))
+	exec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "test"}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+	target := &models.Task{ProjectID: projects[0].ID, Title: "Unicode screenshot target", Prompt: "inspect screenshot", Status: models.StatusPending, Category: models.CategoryBacklog, AgentID: &agent.ID}
+	require.NoError(t, h.taskRepo.Create(ctx, target))
+
+	tmpDir := t.TempDir()
+	oldUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	defer func() { uploadsDir = oldUploadsDir }()
+
+	chatDir := filepath.Join(tmpDir, "chat", exec.ID)
+	require.NoError(t, os.MkdirAll(chatDir, 0o755))
+	name := "Screenshot 2026-07-10 at 9.49.00\u202fPM.png"
+	source := filepath.Join(chatDir, name)
+	require.NoError(t, os.WriteFile(source, []byte("png-one"), 0o644))
+	for i := 0; i < 2; i++ {
+		require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+			ExecutionID: exec.ID, FileName: name, FilePath: source, MediaType: "image/png", FileSize: 7,
+		}))
+	}
+
+	copied, err := h.copyChatAttachmentsToTask(ctx, exec.ID, target.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, copied)
+	attachments, err := h.attachmentRepo.ListByTask(ctx, target.ID)
+	require.NoError(t, err)
+	require.Len(t, attachments, 2)
+	require.Equal(t, name, attachments[0].FileName)
+	require.Equal(t, "Screenshot 2026-07-10 at 9.49.00\u202fPM-1.png", attachments[1].FileName)
+	for _, att := range attachments {
+		require.FileExists(t, att.FilePath)
+		data, readErr := os.ReadFile(att.FilePath)
+		require.NoError(t, readErr)
+		require.Equal(t, []byte("png-one"), data)
+	}
+
+	missingExec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "missing"}
+	require.NoError(t, h.execRepo.Create(ctx, missingExec))
+	missingPath := filepath.Join(chatDir, "missing.png")
+	rollbackSource := filepath.Join(chatDir, "rollback.png")
+	require.NoError(t, os.WriteFile(rollbackSource, []byte("rollback"), 0o644))
+	require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+		ExecutionID: missingExec.ID, FileName: "rollback.png", FilePath: rollbackSource, MediaType: "image/png", FileSize: 8,
+	}))
+	require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+		ExecutionID: missingExec.ID, FileName: "missing.png", FilePath: missingPath, MediaType: "image/png", FileSize: 10,
+	}))
+	copied, err = h.copyChatAttachmentsToTask(ctx, missingExec.ID, target.ID)
+	require.Error(t, err)
+	require.Zero(t, copied)
+	attachmentsAfterFailure, listErr := h.attachmentRepo.ListByTask(ctx, target.ID)
+	require.NoError(t, listErr)
+	require.Len(t, attachmentsAfterFailure, 2, "failed conversion must not persist attachment metadata")
+	require.NoFileExists(t, filepath.Join(tmpDir, "tasks", target.ID, "rollback.png"), "batch failure must roll back files copied before the failure")
+}
+
+func TestProcessAttachmentsWithReturn_MetadataFailurePreservesPendingSession(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := &models.LLMConfig{Name: "Pending Attachment Agent", Provider: models.ProviderTest, Model: "test", APIKey: "test", MaxTokens: 1024}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	chatTask := &models.Task{ProjectID: projects[0].ID, Title: "Pending attachment rollback", Prompt: "test", Status: models.StatusPending, Category: models.CategoryChat, AgentID: &agent.ID}
+	require.NoError(t, h.taskRepo.Create(ctx, chatTask))
+	exec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "test"}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+
+	tmpDir := t.TempDir()
+	oldUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	defer func() { uploadsDir = oldUploadsDir }()
+	sessionID := "unicode-session"
+	name := "Screenshot 2026-07-10 at 9.49.00\u202fPM.png"
+	pendingPath := filepath.Join(tmpDir, "chat", "pending", sessionID, name)
+	require.NoError(t, os.MkdirAll(filepath.Dir(pendingPath), 0o755))
+	require.NoError(t, os.WriteFile(pendingPath, []byte("png"), 0o644))
+
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	_, _, _, err = h.processAttachmentsWithReturn(cancelledCtx, sessionID, exec.ID)
+	require.Error(t, err)
+	require.FileExists(t, pendingPath, "pending source must survive until metadata commit")
+	require.NoFileExists(t, filepath.Join(tmpDir, "chat", exec.ID, name))
+	attachments, listErr := h.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
+	require.NoError(t, listErr)
+	require.Empty(t, attachments)
 }
 
 func TestCopyChatAttachmentsToTask_NoAttachments(t *testing.T) {

@@ -2085,8 +2085,13 @@ func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectI
 	createdTasks, summary := h.executeChatTaskCreationsWithAttachments(ctx, taskRequests, projectID, execID, agents)
 	h.applyChannelOriginToCreatedTasks(ctx, createdTasks, firstChannelReply(channelReply))
 
-	totalAttachmentsCopied := h.copyAttachmentsToTasks(ctx, execID, createdTasks, chatAtts)
-	h.activateDeferredTasks(ctx, createdTasks, deferredActiveTitles)
+	totalAttachmentsCopied, attachmentsReady := h.copyAttachmentsToTasks(ctx, execID, createdTasks, chatAtts)
+	if attachmentsReady {
+		h.activateDeferredTasks(ctx, createdTasks, deferredActiveTitles)
+	} else {
+		applog.Infof("[handler] attachment lifecycle stage=activation-blocked execution=%s tasks=%d", execID, len(createdTasks))
+		summary += "\nAttachment conversion failed; affected tasks were left in Backlog without broken attachment records."
+	}
 
 	return h.appendCreationSummary(output, summary, totalAttachmentsCopied, chatAtts), totalAttachmentsCopied
 }
@@ -2143,22 +2148,26 @@ func (h *Handler) deferActiveTasksWithAttachments(taskRequests []service.TaskCre
 
 // copyAttachmentsToTasks copies chat attachments to all created tasks.
 // Returns the total count of attachments successfully copied.
-func (h *Handler) copyAttachmentsToTasks(ctx context.Context, execID string, createdTasks []models.Task, chatAtts []models.ChatAttachment) int {
+func (h *Handler) copyAttachmentsToTasks(ctx context.Context, execID string, createdTasks []models.Task, chatAtts []models.ChatAttachment) (int, bool) {
 	if len(createdTasks) == 0 || len(chatAtts) == 0 {
-		return 0
+		return 0, true
 	}
 
 	totalCopied := 0
+	allReady := true
 	for _, task := range createdTasks {
 		copiedCount, err := h.copyChatAttachmentsToTask(ctx, execID, task.ID)
 		if err != nil {
-			applog.Infof("[handler] copyAttachmentsToTasks error copying to task %s: %v", task.ID, err)
-		} else if copiedCount > 0 {
+			allReady = false
+			applog.Infof("[handler] attachment lifecycle stage=convert execution=%s task=%s error=%v", execID, task.ID, err)
+		} else if copiedCount != len(chatAtts) {
+			allReady = false
+			applog.Infof("[handler] attachment lifecycle stage=verify-count execution=%s task=%s expected=%d copied=%d", execID, task.ID, len(chatAtts), copiedCount)
+		} else {
 			totalCopied += copiedCount
-			applog.Infof("[handler] copyAttachmentsToTasks copied %d attachments to task %s", copiedCount, task.ID)
 		}
 	}
-	return totalCopied
+	return totalCopied, allReady
 }
 
 // activateDeferredTasks activates tasks that were deferred due to attachment copying.

@@ -435,6 +435,26 @@ func (s *LLMService) getDefaultAgentForTask(ctx context.Context, projectID strin
 	return s.llmConfigRepo.GetDefault(ctx)
 }
 
+func (s *LLMService) reconcileMissingTaskAttachments(ctx context.Context, taskID string, attachments []models.Attachment) []models.Attachment {
+	valid := make([]models.Attachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		if _, err := os.Stat(attachment.FilePath); err == nil {
+			valid = append(valid, attachment)
+			continue
+		} else if !os.IsNotExist(err) {
+			// Permission and transient filesystem errors remain provider-visible failures.
+			valid = append(valid, attachment)
+			continue
+		}
+
+		applog.Infof("[agent-svc] attachment lifecycle stage=runtime-reconcile task=%s attachment=%s path=%s error=file-not-found", taskID, attachment.ID, attachment.FilePath)
+		if err := s.attachmentRepo.Delete(context.WithoutCancel(ctx), attachment.ID); err != nil {
+			applog.Infof("[agent-svc] attachment lifecycle stage=runtime-reconcile-metadata task=%s attachment=%s path=%s error=%v", taskID, attachment.ID, attachment.FilePath, err)
+		}
+	}
+	return valid
+}
+
 func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task, agent models.LLMConfig) (*models.Execution, error) {
 	exec, _, err := s.executeTaskWithAgent(ctx, task, agent)
 	return exec, err
@@ -530,6 +550,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, llmcontracts.ChatContext{}, fmt.Errorf("loading attachments: %w", err)
 	}
+	attachments = s.reconcileMissingTaskAttachments(ctx, task.ID, attachments)
 	applog.Infof("[agent-svc] ExecuteTaskWithAgent loaded %d attachments for task=%s", len(attachments), task.ID)
 
 	// Vision-aware agent override: if the task has image attachments and the
