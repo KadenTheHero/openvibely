@@ -10,6 +10,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -25,6 +26,31 @@ func supportsRuntimeChatActionTools(agent models.LLMConfig) bool {
 	default:
 		return false
 	}
+}
+
+// SupportsRuntimeChatActionTools reports whether the concrete transport for a
+// model config can receive and execute request-scoped runtime tools. Virtual
+// mixtures inherit this capability only from their configured aggregator.
+func SupportsRuntimeChatActionTools(ctx context.Context, repo *repository.LLMConfigRepo, agent models.LLMConfig) bool {
+	if agent.Provider != models.ProviderMixture {
+		return supportsRuntimeChatActionTools(agent)
+	}
+	if repo == nil {
+		return false
+	}
+	cfg, err := llmmixture.ParseConfig(agent.MixtureConfigJSON)
+	if err != nil {
+		return false
+	}
+	aggregatorID := strings.TrimSpace(cfg.Aggregator.AgentConfigID)
+	if aggregatorID == "" {
+		return false
+	}
+	aggregator, err := repo.GetByID(ctx, aggregatorID)
+	if err != nil || aggregator == nil || aggregator.Provider == models.ProviderMixture {
+		return false
+	}
+	return supportsRuntimeChatActionTools(*aggregator)
 }
 
 type channelActionSummaryCollector struct {

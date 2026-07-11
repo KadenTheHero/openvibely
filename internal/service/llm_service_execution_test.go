@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1662,6 +1664,212 @@ func TestLLMService_ExecuteTaskWithAgent_IncludesSendMessageRuntimeTool(t *testi
 				t.Fatalf("send_message list should execute through task runtime handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
 			}
 		})
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_MixtureSupportedAggregatorReceivesGrantedAndDefaultTools(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	svc.SetAgentRepo(agentRepo)
+	svc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
+	svc.SetChannelMessageRouter(NewChannelMessageRouter(repository.NewChannelTargetRepo(db), repository.NewSettingsRepo(db)))
+	recorder := &recordingMixtureAdapter{responses: map[string]llmcontracts.AgentResult{}, errors: map[string]error{}}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		models.ProviderMixture: &mixtureProviderAdapter{svc: svc},
+		models.ProviderTest:    recorder,
+		models.ProviderOpenAI:  recorder,
+	}
+
+	ref := createMixtureTestConfig(t, llmConfigRepo, "Initial Task Reference", models.ProviderTest, "ref")
+	aggregator := createMixtureTestConfig(t, llmConfigRepo, "Initial Task Aggregator", models.ProviderOpenAI, "gpt-test")
+	recorder.responses[ref.ID] = llmcontracts.AgentResult{Output: "private advice", TextOnlyOutput: "private advice"}
+	aggregatorOutput := "completed\n[CREATE_TASK]{\"title\":\"must not be created\",\"prompt\":\"runtime tools disable markers\"}[/CREATE_TASK]"
+	recorder.responses[aggregator.ID] = llmcontracts.AgentResult{Output: aggregatorOutput, TextOnlyOutput: aggregatorOutput}
+	mixture := &models.LLMConfig{
+		Name: "Initial Task Mixture", Provider: models.ProviderMixture, Model: "mixture",
+		MixtureConfigJSON: `{"enabled":true,"reference_models":[{"agent_config_id":"` + ref.ID + `"}],"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	if err := llmConfigRepo.Create(ctx, mixture); err != nil {
+		t.Fatalf("create mixture: %v", err)
+	}
+	assignedAgent := &models.Agent{ID: "mixture-tool-agent", Key: "mixture_tool_agent", Name: "Mixture Tool Agent", Enabled: true, Tools: []string{"agent_allowed"}}
+	if err := agentRepo.Create(ctx, assignedAgent); err != nil {
+		t.Fatalf("create assigned agent: %v", err)
+	}
+	task := &models.Task{ProjectID: "default", Title: "Initial mixture task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "Create a follow-up task", AgentDefinitionID: &assignedAgent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	grantedTools := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "agent_allowed", Access: llmcontracts.RuntimeToolAccessRead}}}
+	recorder.onCall = func(req llmcontracts.AgentRequest) {
+		if req.Agent.ID != aggregator.ID {
+			return
+		}
+		rt := llmcontracts.RuntimeToolsFromContext(req.Ctx)
+		if rt == nil || rt.Executor == nil {
+			t.Fatalf("aggregator runtime is not executable: %#v", rt)
+		}
+		_, handled, isErr, execErr := rt.Executor(req.Ctx, "create_task", json.RawMessage(`{"title":"Initial mixture runtime child","prompt":"Created through the aggregator runtime.","category":"backlog"}`))
+		if execErr != nil || !handled || isErr {
+			t.Fatalf("create_task execution failed handled=%v isErr=%v err=%v", handled, isErr, execErr)
+		}
+	}
+	callCtx := llmcontracts.WithRuntimeTools(ctx, grantedTools)
+
+	exec, err := svc.ExecuteTaskWithAgent(callCtx, *task, *mixture)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil || exec.Status != models.ExecCompleted {
+		t.Fatalf("expected completed execution, got %#v", exec)
+	}
+
+	requests := recorder.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("expected one reference and one aggregator request, got %d", len(requests))
+	}
+	for _, req := range requests {
+		rt := llmcontracts.RuntimeToolsFromContext(req.Ctx)
+		if req.Agent.ID == ref.ID {
+			if rt != nil {
+				t.Fatalf("reference inherited runtime tools: %#v", rt)
+			}
+			continue
+		}
+		if req.Agent.ID != aggregator.ID {
+			t.Fatalf("unexpected mixture request agent %q", req.Agent.ID)
+		}
+		if req.AgentDefinition == nil || req.AgentDefinition.ID != assignedAgent.ID {
+			t.Fatalf("aggregator did not preserve assigned agent: %#v", req.AgentDefinition)
+		}
+		if rt == nil || !rt.HasDefinition("agent_allowed") || !rt.HasDefinition("create_task") || !rt.HasDefinition("send_message") {
+			t.Fatalf("aggregator missing granted/default runtime tools: %#v", rt)
+		}
+		if rt.HasDefinition("agent_disallowed") {
+			t.Fatalf("aggregator received an ungranted agent tool: %#v", rt)
+		}
+	}
+	tasks, err := taskRepo.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected original task plus runtime-created child, got %d tasks", len(tasks))
+	}
+	foundRuntimeChild := false
+	for _, created := range tasks {
+		if created.Title == "must not be created" {
+			t.Fatalf("runtime-enabled mixture processed marker output: %#v", tasks)
+		}
+		if created.Title == "Initial mixture runtime child" {
+			foundRuntimeChild = true
+		}
+	}
+	if !foundRuntimeChild {
+		t.Fatalf("aggregator runtime did not persist created task: %#v", tasks)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndProcessesMarkers(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+
+	providerRequests := make(chan map[string]any, 1)
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		providerRequests <- body
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"Initial Ollama mixture child\",\"prompt\":\"Created through marker fallback.\"}\n[/CREATE_TASK]"},"done":false}`)
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
+	}))
+	defer providerServer.Close()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	svc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
+	recorder := &recordingMixtureAdapter{responses: map[string]llmcontracts.AgentResult{}, errors: map[string]error{}}
+	ollamaAdapter := svc.providerAdapters[models.ProviderOllama]
+	svc.providerAdapters[models.ProviderTest] = recorder
+	svc.providerAdapters[models.ProviderOllama] = providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		if rt := llmcontracts.RuntimeToolsFromContext(req.Ctx); rt != nil {
+			t.Fatalf("runtime-tool-incapable aggregator inherited tools: %#v", rt)
+		}
+		return ollamaAdapter.Call(req)
+	})
+
+	ref := createMixtureTestConfig(t, llmConfigRepo, "Initial Ollama Reference", models.ProviderTest, "ref")
+	recorder.responses[ref.ID] = llmcontracts.AgentResult{Output: "private advice", TextOnlyOutput: "private advice"}
+	aggregator := &models.LLMConfig{Name: "Initial Ollama Aggregator", Provider: models.ProviderOllama, Model: "test-model", OllamaBaseURL: providerServer.URL}
+	if err := llmConfigRepo.Create(ctx, aggregator); err != nil {
+		t.Fatalf("create Ollama aggregator: %v", err)
+	}
+	mixture := &models.LLMConfig{
+		Name: "Initial Ollama Mixture", Provider: models.ProviderMixture, Model: "mixture",
+		MixtureConfigJSON: `{"enabled":true,"reference_models":[{"agent_config_id":"` + ref.ID + `"}],"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	if err := llmConfigRepo.Create(ctx, mixture); err != nil {
+		t.Fatalf("create mixture: %v", err)
+	}
+	task := &models.Task{ProjectID: "default", Title: "Initial Ollama mixture task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "Create a child task"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	grantedTools := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "agent_allowed", Access: llmcontracts.RuntimeToolAccessRead}}}
+
+	exec, err := svc.ExecuteTaskWithAgent(llmcontracts.WithRuntimeTools(ctx, grantedTools), *task, *mixture)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil || exec.Status != models.ExecCompleted {
+		t.Fatalf("expected completed execution, got %#v", exec)
+	}
+	requests := recorder.Requests()
+	if len(requests) != 1 || requests[0].Agent.ID != ref.ID {
+		t.Fatalf("expected one reference request, got %#v", requests)
+	}
+	if rt := llmcontracts.RuntimeToolsFromContext(requests[0].Ctx); rt != nil {
+		t.Fatalf("reference inherited runtime tools: %#v", rt)
+	}
+	select {
+	case providerRequest := <-providerRequests:
+		if _, exists := providerRequest["tools"]; exists {
+			t.Fatalf("Ollama payload included runtime tools: %#v", providerRequest["tools"])
+		}
+	default:
+		t.Fatal("expected concrete Ollama aggregator request")
+	}
+	tasks, err := taskRepo.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	foundChild := false
+	for _, created := range tasks {
+		if created.Title == "Initial Ollama mixture child" {
+			foundChild = true
+		}
+	}
+	if !foundChild {
+		t.Fatalf("marker fallback did not create child task: %#v", tasks)
 	}
 }
 

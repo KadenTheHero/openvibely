@@ -727,18 +727,23 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			return nil
 		})
 	}
+	runtimeToolsSupported := SupportsRuntimeChatActionTools(callCtx, s.llmConfigRepo, agent)
 	var taskActionTools *llmcontracts.RuntimeTools
-	if supportsRuntimeChatActionTools(agent) {
+	if runtimeToolsSupported {
 		taskActionTools = s.taskActionRuntimeTools(task)
 	}
 	runtimeToolsActive := false
-	if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil || taskActionTools != nil {
-		mergedTools := llmcontracts.CompositeRuntimeTools(runtimeTools, ctxTools, taskActionTools)
-		callCtx = llmcontracts.WithRuntimeTools(callCtx, mergedTools)
-		runtimeToolsActive = mergedTools != nil && len(mergedTools.Definitions) > 0
-		if mergedTools != nil && mergedTools.SkipDefaultTools {
-			projectInstructions = ""
+	if runtimeToolsSupported || agent.Provider != models.ProviderMixture {
+		if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil || taskActionTools != nil {
+			mergedTools := llmcontracts.CompositeRuntimeTools(runtimeTools, ctxTools, taskActionTools)
+			callCtx = llmcontracts.WithRuntimeTools(callCtx, mergedTools)
+			runtimeToolsActive = mergedTools != nil && len(mergedTools.Definitions) > 0
+			if mergedTools != nil && mergedTools.SkipDefaultTools {
+				projectInstructions = ""
+			}
 		}
+	} else {
+		callCtx = llmcontracts.WithoutRuntimeTools(callCtx)
 	}
 	start := time.Now()
 	result, err := s.callLLMDetailed(callCtx, task.Prompt, attachments, agent, exec.ID, workDir, projectInstructions, agentDef)
