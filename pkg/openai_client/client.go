@@ -408,6 +408,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 	if isChatGPTOAuth {
 		// ChatGPT Codex backend requires explicit store=false.
 		payload["store"] = false
+		payload["include"] = []string{"reasoning.encrypted_content"}
 	}
 
 	system := strings.TrimSpace(opts.System)

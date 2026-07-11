@@ -78,9 +78,6 @@ func isResponsesLiteWebsocketModel(model string) bool {
 }
 
 func responsesLiteDefaultReasoningEffort(model string) string {
-	if strings.EqualFold(strings.TrimSpace(model), "gpt-5.6-sol") {
-		return "low"
-	}
 	return "medium"
 }
 

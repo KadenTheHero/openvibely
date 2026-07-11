@@ -245,6 +245,10 @@ func TestSend_OAuthUsesChatGPTBackendAndAccountHeader(t *testing.T) {
 		if got, ok := body["store"].(bool); !ok || got {
 			t.Fatalf("store = %#v, want false", body["store"])
 		}
+		include, _ := body["include"].([]any)
+		if len(include) != 1 || include[0] != "reasoning.encrypted_content" {
+			t.Fatalf("include = %#v, want reasoning.encrypted_content", body["include"])
+		}
 		if got, ok := body["instructions"].(string); !ok || strings.TrimSpace(got) == "" {
 			t.Fatalf("instructions must be present and non-empty, got %#v", body["instructions"])
 		}
@@ -396,7 +400,7 @@ func TestBuildResponsesLiteWebsocketPayload_ModelDefaultsAndHostedTools(t *testi
 		model  string
 		effort string
 	}{
-		{model: "gpt-5.6-sol", effort: "low"},
+		{model: "gpt-5.6-sol", effort: "medium"},
 		{model: "gpt-5.6-terra", effort: "medium"},
 		{model: "gpt-5.6-luna", effort: "medium"},
 	} {

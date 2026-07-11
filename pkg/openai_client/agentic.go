@@ -265,8 +265,14 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		// Collect text from this turn
 		allText.WriteString(turnResult.text)
 
-		// Add the response output items to input for multi-turn
-		inputItems = append(inputItems, turnResult.outputItems...)
+		// Add the response output items to input for multi-turn. Stateless
+		// requests use store=false, so reasoning items can only be replayed when
+		// they carry their encrypted state rather than just a temporary rs_* ID.
+		outputItems := turnResult.outputItems
+		if isChatGPTOAuth || isResponsesLiteWebsocketModel(opts.Model) {
+			outputItems = statelessOAuthOutputItems(outputItems)
+		}
+		inputItems = append(inputItems, outputItems...)
 
 		// If no tool calls, we're done
 		if len(turnResult.toolCalls) == 0 {
@@ -561,7 +567,6 @@ func openAIModelContextWindow(model string) (int, bool) {
 		"gpt-5.4",
 		"gpt-5.4-mini",
 		"gpt-5.3-codex",
-		"gpt-5.3-codex-spark",
 		"gpt-5.2-codex",
 		"gpt-5.1-codex-max",
 		"gpt-5.1-codex",
@@ -570,6 +575,8 @@ func openAIModelContextWindow(model string) (int, bool) {
 		"gpt-5-codex-mini":
 		// Mirrors Codex model metadata currently shipped in codex-rs/core/models.json.
 		return 272000, true
+	case "gpt-5.3-codex-spark":
+		return 128000, true
 	default:
 		return 0, false
 	}
@@ -997,6 +1004,19 @@ func (l *agenticSessionTokenLedger) reset() {
 	l.hasObservedTotalTokens = false
 }
 
+func statelessOAuthOutputItems(items []any) []any {
+	filtered := make([]any, 0, len(items))
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if ok && strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "reasoning") &&
+			strings.TrimSpace(stringFromAny(item["encrypted_content"])) == "" {
+			continue
+		}
+		filtered = append(filtered, raw)
+	}
+	return filtered
+}
+
 // sendAgenticTurn sends a single request and returns parsed results.
 func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {
 	payload := map[string]any{
@@ -1011,6 +1031,7 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 
 	if isChatGPTOAuth {
 		payload["store"] = false
+		payload["include"] = []string{"reasoning.encrypted_content"}
 	}
 
 	system := strings.TrimSpace(opts.System)

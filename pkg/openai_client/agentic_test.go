@@ -83,6 +83,80 @@ func TestParseAgenticStream_PreservesEncryptedReasoningForNextTurn(t *testing.T)
 	}
 }
 
+func TestStatelessOAuthOutputItemsDropsUnencryptedReasoning(t *testing.T) {
+	items := []any{
+		map[string]any{"id": "rs_missing", "type": "reasoning", "summary": []any{}},
+		map[string]any{"id": "rs_encrypted", "type": "reasoning", "encrypted_content": "opaque-state"},
+		map[string]any{"type": "function_call", "call_id": "call_1", "name": "echo", "arguments": "{}"},
+	}
+	filtered := statelessOAuthOutputItems(items)
+	if len(filtered) != 2 {
+		t.Fatalf("filtered items = %#v, want encrypted reasoning and function call", filtered)
+	}
+	reasoning, _ := filtered[0].(map[string]any)
+	if reasoning["id"] != "rs_encrypted" {
+		t.Fatalf("reasoning item = %#v", reasoning)
+	}
+}
+
+func TestSendAgentic_APIKeyResponsesLiteDoesNotReplayUnencryptedReasoning(t *testing.T) {
+	requests := make(chan map[string]any, 2)
+	var turns atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		requests <- request
+		w.Header().Set("Content-Type", "text/event-stream")
+		if turns.Add(1) == 1 {
+			_, _ = w.Write([]byte(buildSSE([]string{
+				`{"type":"response.output_item.done","output_index":0,"item":{"id":"rs_temporary","type":"reasoning","summary":[]}}`,
+				`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"call_1","name":"echo","arguments":"{}"}}`,
+				`{"type":"response.completed","response":{"status":"completed","model":"gpt-5.6-sol"}}`,
+			})))
+			return
+		}
+		_, _ = w.Write([]byte(buildSSE([]string{
+			`{"type":"response.output_text.delta","delta":"done"}`,
+			`{"type":"response.completed","response":{"status":"completed","model":"gpt-5.6-sol"}}`,
+		})))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	client := NewWithAPIKey("test-key")
+	client.responsesTransportState.websocketDisabled.Store(true)
+	resp, err := client.SendAgentic(context.Background(), "use echo", &AgenticOptions{
+		Model:            "gpt-5.6-sol",
+		SkipDefaultTools: true,
+		ExtraTools:       []ToolDefinition{{Type: "function", Name: "echo", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		ToolExecutor: func(_ context.Context, _ string, _ json.RawMessage) (string, bool, error) {
+			return "echoed", false, nil
+		},
+		MaxTurns: 2,
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if resp.Text != "done" {
+		t.Fatalf("Text = %q, want done", resp.Text)
+	}
+	<-requests
+	second := <-requests
+	input, _ := second["input"].([]any)
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["type"] == "reasoning" {
+			t.Fatalf("second request replayed temporary reasoning item: %#v", item)
+		}
+	}
+}
+
 func TestCompactAgenticInputItems_OAuthLunaUsesResponsesLiteContract(t *testing.T) {
 	var gotHeader string
 	var gotBody map[string]any
@@ -140,7 +214,7 @@ func TestCompactAgenticInputItems_APIKeySolUsesResponsesLiteContract(t *testing.
 			t.Fatalf("decode body: %v", err)
 		}
 		reasoning, _ := body["reasoning"].(map[string]any)
-		if reasoning["context"] != "all_turns" || reasoning["effort"] != "low" {
+		if reasoning["context"] != "all_turns" || reasoning["effort"] != "medium" {
 			t.Fatalf("reasoning = %#v", reasoning)
 		}
 		if parallel, ok := body["parallel_tool_calls"].(bool); !ok || parallel {
@@ -752,6 +826,91 @@ func TestSendAgentic_ResponsesLiteReusesConnectionAndSendsIncrementalTurn(t *tes
 	item, _ := input[0].(map[string]any)
 	if item["type"] != "function_call_output" || item["call_id"] != "call_1" {
 		t.Fatalf("incremental item = %#v", item)
+	}
+}
+
+func TestSendAgentic_OAuthModelsReplayEncryptedReasoningWithStoreFalse(t *testing.T) {
+	models := []string{
+		"gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.4-mini",
+		"gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2-codex",
+		"gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini",
+		"gpt-5-codex", "gpt-5-codex-mini",
+	}
+	requests := make(chan map[string]any, len(models)*2)
+	var turns atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		requests <- request
+		w.Header().Set("Content-Type", "text/event-stream")
+		model := stringFromAny(request["model"])
+		if turns.Add(1)%2 == 1 {
+			_, _ = w.Write([]byte(buildSSE([]string{
+				`{"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","encrypted_content":"opaque-state","summary":[]}}`,
+				`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"call_1","name":"echo","arguments":"{}"}}`,
+				fmt.Sprintf(`{"type":"response.completed","response":{"status":"completed","model":%q}}`, model),
+			})))
+			return
+		}
+		_, _ = w.Write([]byte(buildSSE([]string{
+			`{"type":"response.output_text.delta","delta":"done"}`,
+			fmt.Sprintf(`{"type":"response.completed","response":{"status":"completed","model":%q}}`, model),
+		})))
+	}))
+	defer srv.Close()
+
+	original := OpenAIChatGPTAPIBaseURL
+	OpenAIChatGPTAPIBaseURL = srv.URL
+	defer func() { OpenAIChatGPTAPIBaseURL = original }()
+
+	for _, model := range models {
+		t.Run(model, func(t *testing.T) {
+			client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
+			resp, err := client.SendAgentic(context.Background(), "use echo", &AgenticOptions{
+				Model:            model,
+				SkipDefaultTools: true,
+				ExtraTools:       []ToolDefinition{{Type: "function", Name: "echo", Parameters: json.RawMessage(`{"type":"object"}`)}},
+				ToolExecutor: func(_ context.Context, _ string, _ json.RawMessage) (string, bool, error) {
+					return "echoed", false, nil
+				},
+				MaxTurns: 2,
+			})
+			if err != nil {
+				t.Fatalf("SendAgentic: %v", err)
+			}
+			if resp.Text != "done" {
+				t.Fatalf("Text = %q, want done", resp.Text)
+			}
+
+			first := <-requests
+			second := <-requests
+			for turn, request := range []map[string]any{first, second} {
+				if request["model"] != model {
+					t.Fatalf("turn %d model = %#v, want %q", turn+1, request["model"], model)
+				}
+				if stored, ok := request["store"].(bool); !ok || stored {
+					t.Fatalf("turn %d store = %#v, want false", turn+1, request["store"])
+				}
+				include, _ := request["include"].([]any)
+				if len(include) != 1 || include[0] != "reasoning.encrypted_content" {
+					t.Fatalf("turn %d include = %#v", turn+1, request["include"])
+				}
+			}
+			input, _ := second["input"].([]any)
+			var replayedReasoning map[string]any
+			for _, raw := range input {
+				item, _ := raw.(map[string]any)
+				if item["type"] == "reasoning" {
+					replayedReasoning = item
+				}
+			}
+			if replayedReasoning == nil || replayedReasoning["encrypted_content"] != "opaque-state" {
+				t.Fatalf("second-turn reasoning = %#v", replayedReasoning)
+			}
+		})
 	}
 }
 
@@ -2386,6 +2545,14 @@ func TestOpenAIAutoCompactionTokenLimit_GPT56UsesExpandedContext(t *testing.T) {
 				t.Fatalf("openAIAutoCompactionTokenLimit(%q) = %d, want %d", model, got, want)
 			}
 		})
+	}
+}
+
+func TestOpenAIAutoCompactionTokenLimit_SparkUses128KContext(t *testing.T) {
+	got := openAIAutoCompactionTokenLimit("gpt-5.3-codex-spark")
+	want := (128000 * 95) / 100
+	if got != want {
+		t.Fatalf("openAIAutoCompactionTokenLimit = %d, want %d", got, want)
 	}
 }
 
