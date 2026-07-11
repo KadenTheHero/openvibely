@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 // buildSSE constructs a server-sent events stream from JSON data lines.
@@ -119,6 +121,47 @@ func TestCompactAgenticInputItems_OAuthLunaUsesResponsesLiteContract(t *testing.
 	}
 	if parallel, ok := gotBody["parallel_tool_calls"].(bool); !ok || parallel {
 		t.Fatalf("parallel_tool_calls = %#v, want false", gotBody["parallel_tool_calls"])
+	}
+}
+
+func TestCompactAgenticInputItems_APIKeySolUsesResponsesLiteContract(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses/compact" {
+			t.Fatalf("path = %q, want /v1/responses/compact", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer sk-test" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "true" {
+			t.Fatalf("Responses Lite header = %q, want true", got)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		reasoning, _ := body["reasoning"].(map[string]any)
+		if reasoning["context"] != "all_turns" || reasoning["effort"] != "low" {
+			t.Fatalf("reasoning = %#v", reasoning)
+		}
+		if parallel, ok := body["parallel_tool_calls"].(bool); !ok || parallel {
+			t.Fatalf("parallel_tool_calls = %#v, want false", body["parallel_tool_calls"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"output":[{"type":"compaction","encrypted_content":"summary"}]}`))
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	items := []any{map[string]any{"type": "message", "role": "user", "content": "hello"}}
+	_, _, err := client.compactAgenticInputItems(context.Background(), items, DefaultTools(), &AgenticOptions{
+		Model: "gpt-5.6-sol",
+	}, false)
+	if err != nil {
+		t.Fatalf("compactAgenticInputItems: %v", err)
 	}
 }
 
@@ -479,9 +522,9 @@ func TestSendAgentic_ReasoningSummaryPayload(t *testing.T) {
 
 	client := NewWithAPIKey("sk-test")
 	_, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
-		Model:            "gpt-5.6-sol",
+		Model:            "gpt-5.5",
 		DisableTools:     true,
-		ReasoningEffort:  "max",
+		ReasoningEffort:  "xhigh",
 		ReasoningSummary: "auto",
 	})
 	if err != nil {
@@ -490,11 +533,225 @@ func TestSendAgentic_ReasoningSummaryPayload(t *testing.T) {
 	if gotReasoning == nil {
 		t.Fatal("expected reasoning payload")
 	}
-	if got := strings.TrimSpace(stringFromAny(gotReasoning["effort"])); got != "max" {
-		t.Fatalf("reasoning.effort = %q, want %q", got, "max")
+	if got := strings.TrimSpace(stringFromAny(gotReasoning["effort"])); got != "xhigh" {
+		t.Fatalf("reasoning.effort = %q, want %q", got, "xhigh")
 	}
 	if got := strings.TrimSpace(stringFromAny(gotReasoning["summary"])); got != "auto" {
 		t.Fatalf("reasoning.summary = %q, want %q", got, "auto")
+	}
+}
+
+func TestSendAgentic_APIKeyGPT56UsesResponsesLiteWebSocket(t *testing.T) {
+	var request map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("path = %q, want /v1/responses", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer sk-test" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		if got := r.Header.Get("ChatGPT-Account-ID"); got != "" {
+			t.Fatalf("ChatGPT-Account-ID = %q, want empty", got)
+		}
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		_, data, err := conn.Read(r.Context())
+		if err != nil {
+			t.Errorf("read request: %v", err)
+			return
+		}
+		if err := json.Unmarshal(data, &request); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		completed := `{"type":"response.completed","response":{"status":"completed","model":"gpt-5.6-sol","usage":{"input_tokens":2,"output_tokens":1}}}`
+		if err := conn.Write(r.Context(), websocket.MessageText, []byte(completed)); err != nil {
+			t.Errorf("write completed event: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	_, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
+		Model:            "gpt-5.6-sol",
+		DisableTools:     true,
+		ReasoningEffort:  "max",
+		ReasoningSummary: "auto",
+		WebSearchEnabled: true,
+		MaxTurns:         1,
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if request["type"] != "response.create" || request["model"] != "gpt-5.6-sol" {
+		t.Fatalf("request type/model = %v/%v", request["type"], request["model"])
+	}
+	for _, field := range []string{"tools", "instructions", "max_output_tokens", "truncation"} {
+		if _, ok := request[field]; ok {
+			t.Errorf("Lite websocket request unexpectedly contains %q", field)
+		}
+	}
+	reasoning, _ := request["reasoning"].(map[string]any)
+	if reasoning["effort"] != "max" || reasoning["summary"] != "auto" || reasoning["context"] != "all_turns" {
+		t.Fatalf("reasoning = %#v", reasoning)
+	}
+	input, _ := request["input"].([]any)
+	additionalTools, _ := input[0].(map[string]any)
+	liteTools, _ := additionalTools["tools"].([]any)
+	for _, raw := range liteTools {
+		tool, _ := raw.(map[string]any)
+		if tool["type"] == "web_search" || tool["type"] == "web_search_preview" || tool["type"] == "image_generation" {
+			t.Fatalf("hosted tool leaked into Responses Lite additional_tools: %#v", tool)
+		}
+	}
+}
+
+func TestSendAgentic_ResponsesLiteStreamFailureFallsBackBeforeOutput(t *testing.T) {
+	var websocketAttempts atomic.Int32
+	var httpRequests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			websocketAttempts.Add(1)
+			conn, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				t.Errorf("accept websocket: %v", err)
+				return
+			}
+			if _, _, err := conn.Read(r.Context()); err != nil {
+				t.Errorf("read websocket request: %v", err)
+				return
+			}
+			_ = conn.Close(websocket.StatusInternalError, "upstream reset")
+			return
+		}
+		httpRequests.Add(1)
+		if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "true" {
+			t.Fatalf("Responses Lite header = %q", got)
+		}
+		_, _ = w.Write([]byte(buildSSE([]string{
+			`{"type":"response.output_text.delta","delta":"recovered"}`,
+			`{"type":"response.completed","response":{"status":"completed","model":"gpt-5.6-sol"}}`,
+		})))
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
+		Model:        "gpt-5.6-sol",
+		DisableTools: true,
+		MaxTurns:     1,
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if resp.Text != "recovered" {
+		t.Fatalf("Text = %q, want recovered", resp.Text)
+	}
+	if websocketAttempts.Load() != 1 || httpRequests.Load() != 1 {
+		t.Fatalf("attempts websocket=%d HTTP=%d", websocketAttempts.Load(), httpRequests.Load())
+	}
+}
+
+func TestSendAgentic_ResponsesLiteReusesConnectionAndSendsIncrementalTurn(t *testing.T) {
+	var handshakes atomic.Int32
+	requests := make(chan map[string]any, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handshakes.Add(1)
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		for turn := 0; turn < 2; turn++ {
+			_, data, err := conn.Read(r.Context())
+			if err != nil {
+				t.Errorf("read turn %d: %v", turn+1, err)
+				return
+			}
+			var request map[string]any
+			if err := json.Unmarshal(data, &request); err != nil {
+				t.Errorf("decode turn %d: %v", turn+1, err)
+				return
+			}
+			requests <- request
+			if turn == 0 {
+				events := []string{
+					`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"echo","arguments":"{\"value\":\"hello\"}"}}`,
+					`{"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.6-sol"}}`,
+				}
+				for _, event := range events {
+					if err := conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+						t.Errorf("write first-turn event: %v", err)
+						return
+					}
+				}
+				continue
+			}
+			events := []string{
+				`{"type":"response.output_text.delta","delta":"done"}`,
+				`{"type":"response.completed","response":{"id":"resp_2","status":"completed","model":"gpt-5.6-sol"}}`,
+			}
+			for _, event := range events {
+				if err := conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+					t.Errorf("write second-turn event: %v", err)
+					return
+				}
+			}
+		}
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	resp, err := client.SendAgentic(context.Background(), "use echo", &AgenticOptions{
+		Model:            "gpt-5.6-sol",
+		SkipDefaultTools: true,
+		ExtraTools:       []ToolDefinition{{Type: "function", Name: "echo", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		ToolExecutor: func(_ context.Context, _ string, _ json.RawMessage) (string, bool, error) {
+			return "hello", false, nil
+		},
+		MaxTurns: 2,
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if resp.Text != "done" {
+		t.Fatalf("Text = %q, want done", resp.Text)
+	}
+	if handshakes.Load() != 1 {
+		t.Fatalf("websocket handshakes = %d, want 1", handshakes.Load())
+	}
+	first := <-requests
+	second := <-requests
+	if _, ok := first["previous_response_id"]; ok {
+		t.Fatalf("first request unexpectedly has previous_response_id")
+	}
+	if second["previous_response_id"] != "resp_1" {
+		t.Fatalf("second previous_response_id = %#v", second["previous_response_id"])
+	}
+	input, _ := second["input"].([]any)
+	if len(input) != 1 {
+		t.Fatalf("incremental input = %#v, want one tool result", input)
+	}
+	item, _ := input[0].(map[string]any)
+	if item["type"] != "function_call_output" || item["call_id"] != "call_1" {
+		t.Fatalf("incremental item = %#v", item)
 	}
 }
 
@@ -1006,8 +1263,8 @@ func TestSendAgentic_OAuthUsesCorrectEndpoint(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		if got := body["model"]; got != "gpt-5.6-terra" {
-			t.Fatalf("model = %#v, want gpt-5.6-terra", got)
+		if got := body["model"]; got != "gpt-5.5" {
+			t.Fatalf("model = %#v, want gpt-5.5", got)
 		}
 		if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "" {
 			t.Fatalf("responses-lite header = %q, want omitted for HTTP SSE", got)
@@ -1027,7 +1284,7 @@ func TestSendAgentic_OAuthUsesCorrectEndpoint(t *testing.T) {
 
 	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
-		Model:        "gpt-5.6-terra",
+		Model:        "gpt-5.5",
 		DisableTools: true,
 	})
 	if err != nil {
@@ -1404,8 +1661,8 @@ func TestSendAgentic_AutoCompactionOAuthUsesOAuthRequestShape(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		if got := body["model"]; got != "gpt-5.6-sol" {
-			t.Fatalf("model = %#v, want gpt-5.6-sol", got)
+		if got := body["model"]; got != "gpt-5.5" {
+			t.Fatalf("model = %#v, want gpt-5.5", got)
 		}
 		if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "" {
 			t.Fatalf("responses-lite header = %q, want omitted for HTTP SSE", got)
@@ -1466,7 +1723,7 @@ func TestSendAgentic_AutoCompactionOAuthUsesOAuthRequestShape(t *testing.T) {
 	client.History = []Message{{Role: "user", Content: "oauth history"}}
 
 	resp, err := client.SendAgentic(context.Background(), "continue", &AgenticOptions{
-		Model:                    "gpt-5.6-sol",
+		Model:                    "gpt-5.5",
 		DisableTools:             true,
 		AutoCompaction:           true,
 		CompactionTokenThreshold: 1,
@@ -2513,9 +2770,9 @@ func TestOpenAIModelSupportsWebSearch(t *testing.T) {
 		model    string
 		expected bool
 	}{
-		{"gpt-5.6-sol", true},
-		{"gpt-5.6-terra", true},
-		{"gpt-5.6-luna", true},
+		{"gpt-5.6-sol", false},
+		{"gpt-5.6-terra", false},
+		{"gpt-5.6-luna", false},
 		{"gpt-5.4", true},
 		{"gpt-5.4-mini", true},
 		{"GPT-5.4", true},

@@ -2,9 +2,11 @@ package openai
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -26,7 +28,15 @@ var errMaxTokens = fmt.Errorf("response truncated: max output tokens limit reach
 const (
 	openAIDirectOutputBudget  = 4096
 	openAIAgenticOutputBudget = 16384
+	responsesTransportTTL     = 30 * time.Minute
+	responsesTransportMax     = 64
 )
+
+type responsesTransportEntry struct {
+	state    *openaiclient.ResponsesTransportState
+	lastUsed time.Time
+	leases   int
+}
 
 // isMaxTokensStopReason returns true if the stop reason indicates the response
 // was truncated due to hitting the output token limit.
@@ -38,10 +48,12 @@ func isMaxTokensStopReason(reason string) bool {
 
 // Adapter handles all OpenAI-specific provider logic.
 type Adapter struct {
-	llmConfigRepo *repository.LLMConfigRepo
-	execRepo      *repository.ExecutionRepo
-	streamHub     llmstream.ExecutionStreamPublisher
-	oauthRecovery *llmoauth.Manager
+	llmConfigRepo   *repository.LLMConfigRepo
+	execRepo        *repository.ExecutionRepo
+	streamHub       llmstream.ExecutionStreamPublisher
+	oauthRecovery   *llmoauth.Manager
+	transportMu     sync.Mutex
+	transportStates map[string]*responsesTransportEntry
 }
 
 func applyOpenAIOAuthSystemPrompt(base string, agent models.LLMConfig) string {
@@ -307,10 +319,11 @@ func buildOpenAIRuntime(ctx context.Context, workDir string, agentDef *models.Ag
 // New creates a new OpenAI adapter.
 func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.ExecutionRepo, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
 	return &Adapter{
-		llmConfigRepo: llmConfigRepo,
-		execRepo:      execRepo,
-		streamHub:     streamHub,
-		oauthRecovery: llmoauth.NewManager(llmConfigRepo),
+		llmConfigRepo:   llmConfigRepo,
+		execRepo:        execRepo,
+		streamHub:       streamHub,
+		oauthRecovery:   llmoauth.NewManager(llmConfigRepo),
+		transportStates: make(map[string]*responsesTransportEntry),
 	}
 }
 
@@ -318,10 +331,11 @@ func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.Execution
 func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, disableTools bool) (string, llmcontracts.Usage, error) {
 	applog.Infof("[openai-adapter] CallDirect model=%s output_budget=%d attachments=%d auth_method=%s disable_tools=%v", agent.Model, openAIDirectOutputBudget, len(attachments), agent.AuthMethod, disableTools)
 
-	client, err := a.getClient(ctx, agent)
+	client, releaseTransport, err := a.getClient(ctx, agent, "")
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
+	defer releaseTransport()
 
 	fullPrompt := prompt
 	if len(attachments) > 0 {
@@ -346,7 +360,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 			Model:                  agent.Model,
 			MaxOutputTokens:        openAIDirectOutputBudget,
 			System:                 applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt("", effectiveWorkDir), agent),
-			ReasoningEffort:        reasoningEffort(agent.ReasoningEffort),
+			ReasoningEffort:        reasoningEffort(agent.Model, agent.ReasoningEffort),
 			ReasoningSummary:       "auto",
 			WorkDir:                effectiveWorkDir,
 			Attachments:            oaAttachments,
@@ -367,7 +381,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 	resp, err := client.Send(ctx, fullPrompt, &openaiclient.SendOptions{
 		Model:               agent.Model,
 		MaxOutputTokens:     openAIDirectOutputBudget,
-		ReasoningEffort:     reasoningEffort(agent.ReasoningEffort),
+		ReasoningEffort:     reasoningEffort(agent.Model, agent.ReasoningEffort),
 		DisableTools:        disableTools,
 		SuppressToolMarkers: disableTools,
 		Attachments:         oaAttachments,
@@ -385,10 +399,11 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, agentDef *models.Agent) (string, string, llmcontracts.Usage, error) {
 	applog.Infof("[openai-adapter] CallStreaming model=%s output_budget=%d attachments=%d exec=%s auth_method=%s workDir=%s", agent.Model, openAIAgenticOutputBudget, len(attachments), execID, agent.AuthMethod, workDir)
 
-	client, err := a.getClient(ctx, agent)
+	client, releaseTransport, err := a.getClient(ctx, agent, "")
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), err
 	}
+	defer releaseTransport()
 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(attachments) +
@@ -428,7 +443,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		Model:                  agent.Model,
 		MaxOutputTokens:        openAIAgenticOutputBudget,
 		System:                 applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
-		ReasoningEffort:        reasoningEffort(agent.ReasoningEffort),
+		ReasoningEffort:        reasoningEffort(agent.Model, agent.ReasoningEffort),
 		ReasoningSummary:       "auto",
 		AutoCompaction:         true,
 		WebSearchEnabled:       true,
@@ -499,10 +514,11 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	applog.Infof("[openai-adapter] CallChatStreaming model=%s history=%d message_len=%d context_len=%d attachments=%d exec=%s isTaskFollowup=%v auth_method=%s workDir=%s",
 		agent.Model, len(chatHistory), len(message), len(chatSystemContext), len(attachments), execID, isTaskFollowup, agent.AuthMethod, workDir)
 
-	client, err := a.getClient(ctx, agent)
+	client, releaseTransport, err := a.getClient(ctx, agent, chatTransportScope(execID, chatHistory))
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
+	defer releaseTransport()
 
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
@@ -536,7 +552,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		Model:                  agent.Model,
 		MaxOutputTokens:        openAIAgenticOutputBudget,
 		System:                 systemPromptStr,
-		ReasoningEffort:        reasoningEffort(agent.ReasoningEffort),
+		ReasoningEffort:        reasoningEffort(agent.Model, agent.ReasoningEffort),
 		ReasoningSummary:       "auto",
 		AutoCompaction:         true,
 		WebSearchEnabled:       true,
@@ -606,10 +622,11 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, agentDef *models.Agent) (string, string, llmcontracts.Usage, error) {
 	applog.Infof("[openai-adapter] CallCompletionsStreaming (fallback) model=%s exec=%s", agent.Model, execID)
 
-	client, err := a.getClient(ctx, agent)
+	client, releaseTransport, err := a.getClient(ctx, agent, "")
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), err
 	}
+	defer releaseTransport()
 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(attachments) +
@@ -690,10 +707,11 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, agentDef *models.Agent) (string, llmcontracts.Usage, error) {
 	applog.Infof("[openai-adapter] CallCompletionsChatStreaming (fallback) model=%s history=%d exec=%s", agent.Model, len(chatHistory), execID)
 
-	client, err := a.getClient(ctx, agent)
+	client, releaseTransport, err := a.getClient(ctx, agent, "")
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
+	defer releaseTransport()
 
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
@@ -794,29 +812,148 @@ func (a *Adapter) newOAuthClient(ctx context.Context, agent models.LLMConfig) *o
 	return client
 }
 
-func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig) (*openaiclient.Client, error) {
+func (a *Adapter) acquireResponsesTransportState(agent models.LLMConfig, scope string) (*openaiclient.ResponsesTransportState, func()) {
+	key := strings.TrimSpace(agent.ID)
+	if key == "" {
+		key = strings.Join([]string{string(agent.Provider), string(agent.AuthMethod), agent.Name, agent.Model}, "|")
+	}
+	key += "|" + responsesTransportAuthIdentity(agent) + "|" + scope
+	now := time.Now()
+	a.transportMu.Lock()
+	if a.transportStates == nil {
+		a.transportStates = make(map[string]*responsesTransportEntry)
+	}
+	var evicted []*openaiclient.ResponsesTransportState
+	for existingKey, entry := range a.transportStates {
+		if entry.leases == 0 && now.Sub(entry.lastUsed) >= responsesTransportTTL {
+			delete(a.transportStates, existingKey)
+			evicted = append(evicted, entry.state)
+		}
+	}
+	if entry, ok := a.transportStates[key]; ok {
+		entry.lastUsed = now
+		entry.leases++
+		a.transportMu.Unlock()
+		for _, stale := range evicted {
+			stale.Close()
+		}
+		return entry.state, a.responsesTransportRelease(key, entry)
+	}
+	if len(a.transportStates) >= responsesTransportMax {
+		oldestKey := ""
+		var oldest *responsesTransportEntry
+		for existingKey, entry := range a.transportStates {
+			if entry.leases == 0 && (oldestKey == "" || entry.lastUsed.Before(oldest.lastUsed)) {
+				oldestKey, oldest = existingKey, entry
+			}
+		}
+		if oldestKey != "" {
+			delete(a.transportStates, oldestKey)
+			evicted = append(evicted, oldest.state)
+		}
+	}
+	state := openaiclient.NewResponsesTransportState()
+	entry := &responsesTransportEntry{state: state, lastUsed: now, leases: 1}
+	a.transportStates[key] = entry
+	a.transportMu.Unlock()
+	for _, stale := range evicted {
+		stale.Close()
+	}
+	return state, a.responsesTransportRelease(key, entry)
+}
+
+func (a *Adapter) responsesTransportRelease(key string, entry *responsesTransportEntry) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			now := time.Now()
+			var stale *openaiclient.ResponsesTransportState
+			a.transportMu.Lock()
+			if entry.leases > 0 {
+				entry.leases--
+			}
+			if current, ok := a.transportStates[key]; ok && current == entry && entry.leases == 0 &&
+				(now.Sub(entry.lastUsed) >= responsesTransportTTL || len(a.transportStates) > responsesTransportMax) {
+				delete(a.transportStates, key)
+				stale = entry.state
+			}
+			a.transportMu.Unlock()
+			if stale != nil {
+				stale.Close()
+			}
+		})
+	}
+}
+
+func responsesTransportAuthIdentity(agent models.LLMConfig) string {
+	if agent.IsOpenAIOAuth() {
+		if accountID := strings.TrimSpace(agent.OAuthAccountID); accountID != "" {
+			return credentialFingerprint("oauth-account", accountID)
+		}
+		return credentialFingerprint("oauth-token", agent.OAuthAccessToken)
+	}
+	return credentialFingerprint("api-key", agent.APIKey)
+}
+
+func credentialFingerprint(kind, credential string) string {
+	sum := sha256.Sum256([]byte(credential))
+	return fmt.Sprintf("%s:%x", kind, sum[:8])
+}
+
+func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig, transportScope string) (*openaiclient.Client, func(), error) {
+	releaseTransport := func() {}
 	if agent.IsOpenAIAPIKey() {
 		if strings.TrimSpace(agent.APIKey) == "" {
-			return nil, fmt.Errorf("OpenAI API key not configured for model %q", agent.Name)
+			return nil, releaseTransport, fmt.Errorf("OpenAI API key not configured for model %q", agent.Name)
 		}
-		return openaiclient.NewWithAPIKey(agent.APIKey), nil
+		client := openaiclient.NewWithAPIKey(agent.APIKey)
+		releaseTransport = client.CloseResponsesTransport
+		if transportScope != "" {
+			state, release := a.acquireResponsesTransportState(agent, transportScope)
+			client.SetResponsesTransportState(state)
+			releaseTransport = release
+		}
+		return client, releaseTransport, nil
 	}
 
 	if agent.IsOpenAIOAuth() {
 		if strings.TrimSpace(agent.OAuthAccessToken) == "" {
-			return nil, fmt.Errorf("OAuth not configured for model %q - click 'Connect with OAuth' on the Models page", agent.Name)
+			return nil, releaseTransport, fmt.Errorf("OAuth not configured for model %q - click 'Connect with OAuth' on the Models page", agent.Name)
 		}
 
 		agent, err := a.ensureFreshOAuth(ctx, agent)
 		if err != nil {
 			applog.Infof("[openai-adapter] getClient token refresh failed for agent=%s: %v", agent.Name, err)
-			return nil, err
+			return nil, releaseTransport, err
 		}
-
-		return a.newOAuthClient(ctx, agent), nil
+		client := a.newOAuthClient(ctx, agent)
+		releaseTransport = client.CloseResponsesTransport
+		if transportScope != "" {
+			state, release := a.acquireResponsesTransportState(agent, transportScope)
+			client.SetResponsesTransportState(state)
+			releaseTransport = release
+		}
+		return client, releaseTransport, nil
 	}
 
-	return nil, fmt.Errorf("OpenAI model %q is configured with auth_method=%q; expected api_key or oauth", agent.Name, agent.AuthMethod)
+	return nil, releaseTransport, fmt.Errorf("OpenAI model %q is configured with auth_method=%q; expected api_key or oauth", agent.Name, agent.AuthMethod)
+}
+
+func chatTransportScope(execID string, history []models.Execution) string {
+	for _, execution := range history {
+		if taskID := strings.TrimSpace(execution.TaskID); taskID != "" {
+			return "task:" + taskID
+		}
+	}
+	if len(history) > 0 {
+		if firstID := strings.TrimSpace(history[0].ID); firstID != "" {
+			return "chat:" + firstID
+		}
+	}
+	if execID = strings.TrimSpace(execID); execID != "" {
+		return "chat:" + execID
+	}
+	return ""
 }
 
 func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
@@ -865,13 +1002,12 @@ func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAt
 	return result, nil
 }
 
-func reasoningEffort(value string) string {
-	switch llmprompt.NormalizeReasoningEffortValue(value) {
-	case "low", "medium", "high", "xhigh", "max":
-		return llmprompt.NormalizeReasoningEffortValue(value)
-	default:
-		return "high"
+func reasoningEffort(model, value string) string {
+	effort := llmprompt.NormalizeReasoningEffortValue(value)
+	if llmprompt.StringInSlice(effort, llmprompt.CodexSupportedReasoningEfforts(model)) {
+		return effort
 	}
+	return llmprompt.CodexDefaultReasoningEffort(model)
 }
 
 func isStreamingMarkerChunk(text string) bool {

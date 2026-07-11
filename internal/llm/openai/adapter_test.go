@@ -1,12 +1,19 @@
 package openai
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/coder/websocket"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
 func TestToolSecondaryInfo_LongBashPreservesLaterContext(t *testing.T) {
@@ -71,6 +78,300 @@ func TestToolSecondaryInfo_WebSearchFindInPageDetail(t *testing.T) {
 	got := toolSecondaryInfo("web_search", raw)
 	if !strings.Contains(got, "'WAL files' in https://www.crunchydata.com/blog/") {
 		t.Fatalf("expected find-in-page detail, got %q", got)
+	}
+}
+
+func TestReasoningEffortUsesModelDefaults(t *testing.T) {
+	for _, tc := range []struct {
+		model string
+		value string
+		want  string
+	}{
+		{model: "gpt-5.6-sol", want: "low"},
+		{model: "gpt-5.6-terra", want: "medium"},
+		{model: "gpt-5.6-luna", want: "medium"},
+		{model: "gpt-5.5", want: "high"},
+		{model: "gpt-5.6-sol", value: "max", want: "max"},
+		{model: "gpt-5.4-mini", value: "max", want: "high"},
+	} {
+		if got := reasoningEffort(tc.model, tc.value); got != tc.want {
+			t.Errorf("reasoningEffort(%q, %q) = %q, want %q", tc.model, tc.value, got, tc.want)
+		}
+	}
+}
+
+func TestResponsesTransportStateScopedByConversation(t *testing.T) {
+	adapter := New(nil, nil, nil)
+	agent := models.LLMConfig{ID: "cfg-1", Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol"}
+	first, releaseFirst := adapter.acquireResponsesTransportState(agent, "chat:one")
+	second, releaseSecond := adapter.acquireResponsesTransportState(agent, "chat:one")
+	releaseFirst()
+	releaseSecond()
+	if first != second {
+		t.Fatal("expected transport state to be reused for the same conversation")
+	}
+	other, releaseOther := adapter.acquireResponsesTransportState(agent, "chat:two")
+	releaseOther()
+	if first == other {
+		t.Fatal("expected separate transport state for a different conversation")
+	}
+	agent.ID = "cfg-2"
+	otherConfig, releaseOtherConfig := adapter.acquireResponsesTransportState(agent, "chat:one")
+	releaseOtherConfig()
+	if first == otherConfig {
+		t.Fatal("expected separate transport state for a different model config")
+	}
+}
+
+func TestResponsesTransportStateCacheEvictsOldestEntry(t *testing.T) {
+	adapter := New(nil, nil, nil)
+	agent := models.LLMConfig{ID: "cfg-1", Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol"}
+	oldest, releaseOldest := adapter.acquireResponsesTransportState(agent, "chat:oldest")
+	releaseOldest()
+	adapter.transportMu.Lock()
+	for key, entry := range adapter.transportStates {
+		if entry.state == oldest {
+			entry.lastUsed = time.Time{}
+			adapter.transportStates[key] = entry
+			break
+		}
+	}
+	adapter.transportMu.Unlock()
+	for i := 0; i < responsesTransportMax; i++ {
+		_, release := adapter.acquireResponsesTransportState(agent, fmt.Sprintf("chat:%d", i))
+		release()
+	}
+	if got := len(adapter.transportStates); got != responsesTransportMax {
+		t.Fatalf("transport cache size = %d, want %d", got, responsesTransportMax)
+	}
+	replacement, releaseReplacement := adapter.acquireResponsesTransportState(agent, "chat:oldest")
+	releaseReplacement()
+	if replacement == oldest {
+		t.Fatal("expected oldest transport state to be evicted")
+	}
+}
+
+func TestResponsesTransportStateCacheDoesNotEvictLeasedEntry(t *testing.T) {
+	adapter := New(nil, nil, nil)
+	agent := models.LLMConfig{ID: "cfg-1", Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol"}
+	active, releaseActive := adapter.acquireResponsesTransportState(agent, "chat:active")
+	for i := 0; i < responsesTransportMax; i++ {
+		_, release := adapter.acquireResponsesTransportState(agent, fmt.Sprintf("chat:%d", i))
+		release()
+	}
+	stillActive, releaseAgain := adapter.acquireResponsesTransportState(agent, "chat:active")
+	if stillActive != active {
+		t.Fatal("leased transport state was evicted")
+	}
+	releaseAgain()
+	releaseActive()
+}
+
+func TestResponsesTransportStateCacheExpiresIdleEntriesOnHit(t *testing.T) {
+	adapter := New(nil, nil, nil)
+	agent := models.LLMConfig{ID: "cfg-1", Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol"}
+	stale, releaseStale := adapter.acquireResponsesTransportState(agent, "chat:stale")
+	releaseStale()
+	_, releaseCurrent := adapter.acquireResponsesTransportState(agent, "chat:current")
+	releaseCurrent()
+	adapter.transportMu.Lock()
+	for _, entry := range adapter.transportStates {
+		if entry.state == stale {
+			entry.lastUsed = time.Time{}
+		}
+	}
+	adapter.transportMu.Unlock()
+	_, releaseHit := adapter.acquireResponsesTransportState(agent, "chat:current")
+	releaseHit()
+	replacement, releaseReplacement := adapter.acquireResponsesTransportState(agent, "chat:stale")
+	releaseReplacement()
+	if replacement == stale {
+		t.Fatal("idle entry was not expired during cache hit")
+	}
+}
+
+func TestResponsesTransportStateChangesWithCredentials(t *testing.T) {
+	adapter := New(nil, nil, nil)
+	agent := models.LLMConfig{
+		ID: "cfg-1", Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol",
+		AuthMethod: models.AuthMethodAPIKey, APIKey: "first-key",
+	}
+	first, releaseFirst := adapter.acquireResponsesTransportState(agent, "chat:one")
+	releaseFirst()
+	agent.APIKey = "second-key"
+	second, releaseSecond := adapter.acquireResponsesTransportState(agent, "chat:one")
+	releaseSecond()
+	if first == second {
+		t.Fatal("expected API key rotation to use a new transport state")
+	}
+
+	agent.AuthMethod = models.AuthMethodOAuth
+	agent.OAuthAccountID = "account-one"
+	oauthFirst, releaseOAuthFirst := adapter.acquireResponsesTransportState(agent, "chat:one")
+	releaseOAuthFirst()
+	agent.OAuthAccessToken = "refreshed-token"
+	oauthRefreshed, releaseOAuthRefreshed := adapter.acquireResponsesTransportState(agent, "chat:one")
+	releaseOAuthRefreshed()
+	if oauthFirst != oauthRefreshed {
+		t.Fatal("expected token refresh for the same OAuth account to reuse transport state")
+	}
+	agent.OAuthAccountID = "account-two"
+	otherAccount, releaseOtherAccount := adapter.acquireResponsesTransportState(agent, "chat:one")
+	releaseOtherAccount()
+	if oauthFirst == otherAccount {
+		t.Fatal("expected OAuth account change to use a new transport state")
+	}
+}
+
+func TestPrivateResponsesTransportClosesWhenReleased(t *testing.T) {
+	closed := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			t.Errorf("read request: %v", err)
+			return
+		}
+		completed := `{"type":"response.completed","response":{"id":"resp-1","status":"completed","model":"gpt-5.6-sol","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`
+		if err := conn.Write(r.Context(), websocket.MessageText, []byte(completed)); err != nil {
+			t.Errorf("write response: %v", err)
+			return
+		}
+		_, _, _ = conn.Read(r.Context())
+		close(closed)
+	}))
+	defer srv.Close()
+
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+
+	adapter := New(nil, nil, nil)
+	agent := models.LLMConfig{
+		ID: "cfg-1", Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol",
+		AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key",
+	}
+	client, release, err := adapter.getClient(context.Background(), agent, "")
+	if err != nil {
+		t.Fatalf("getClient: %v", err)
+	}
+	response, err := client.Send(context.Background(), "hello", &openaiclient.SendOptions{Model: agent.Model})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if response.Text != "ok" {
+		t.Fatalf("response text = %q", response.Text)
+	}
+	release()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("private WebSocket remained open after transport release")
+	}
+}
+
+func TestLeasedResponsesTransportSurvivesConcurrentCachePressure(t *testing.T) {
+	started := make(chan struct{})
+	finish := make(chan struct{})
+	closed := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			t.Errorf("read request: %v", err)
+			return
+		}
+		close(started)
+		<-finish
+		completed := `{"type":"response.completed","response":{"id":"resp-1","status":"completed","model":"gpt-5.6-sol","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`
+		if err := conn.Write(r.Context(), websocket.MessageText, []byte(completed)); err != nil {
+			t.Errorf("write response: %v", err)
+			return
+		}
+		_, _, _ = conn.Read(r.Context())
+		close(closed)
+	}))
+	defer srv.Close()
+
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+
+	adapter := New(nil, nil, nil)
+	agent := models.LLMConfig{
+		ID: "cfg-1", Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol",
+		AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key",
+	}
+	client, releaseActive, err := adapter.getClient(context.Background(), agent, "chat:active")
+	if err != nil {
+		t.Fatalf("getClient: %v", err)
+	}
+	adapter.transportMu.Lock()
+	var expectedActive *openaiclient.ResponsesTransportState
+	for _, entry := range adapter.transportStates {
+		if entry.leases == 1 {
+			expectedActive = entry.state
+			break
+		}
+	}
+	adapter.transportMu.Unlock()
+	sendDone := make(chan error, 1)
+	go func() {
+		_, sendErr := client.Send(context.Background(), "hello", &openaiclient.SendOptions{Model: agent.Model})
+		sendDone <- sendErr
+	}()
+	<-started
+	for i := 0; i < responsesTransportMax; i++ {
+		_, release := adapter.acquireResponsesTransportState(agent, fmt.Sprintf("chat:pressure-%d", i))
+		release()
+	}
+	activeAgain, releaseAgain := adapter.acquireResponsesTransportState(agent, "chat:active")
+	if activeAgain != expectedActive {
+		t.Fatal("active transport state was replaced under cache pressure")
+	}
+	releaseAgain()
+	close(finish)
+	if err := <-sendDone; err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	releaseActive()
+
+	adapter.transportMu.Lock()
+	for _, entry := range adapter.transportStates {
+		if entry.state == activeAgain {
+			entry.lastUsed = time.Time{}
+		}
+	}
+	adapter.transportMu.Unlock()
+	_, releaseTrigger := adapter.acquireResponsesTransportState(agent, "chat:trigger-cleanup")
+	releaseTrigger()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("evicted leased WebSocket was not closed after its final release")
+	}
+}
+
+func TestChatTransportScope(t *testing.T) {
+	if got := chatTransportScope("", nil); got != "" {
+		t.Fatalf("missing execution ID scope = %q, want isolated state", got)
+	}
+	if got := chatTransportScope("current", nil); got != "chat:current" {
+		t.Fatalf("empty history scope = %q", got)
+	}
+	history := []models.Execution{{ID: "first"}, {ID: "second"}}
+	if got := chatTransportScope("current", history); got != "chat:first" {
+		t.Fatalf("chat history scope = %q", got)
+	}
+	history[1].TaskID = "task-1"
+	if got := chatTransportScope("current", history); got != "task:task-1" {
+		t.Fatalf("task history scope = %q", got)
 	}
 }
 

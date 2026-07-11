@@ -160,6 +160,7 @@ type Client struct {
 	apiBaseURL                    string
 	oauthUnauthorizedHandler      OAuthUnauthorizedHandler
 	oauthRefreshExternallyManaged bool
+	responsesTransportState       *ResponsesTransportState
 	History                       []Message
 }
 
@@ -191,10 +192,29 @@ func NewWithOAuthToken(token, refreshToken string, expiresAt int64, accountID st
 }
 
 func newClient(auth *StoredAuth) *Client {
+	transportState := NewResponsesTransportState()
 	return &Client{
-		auth:       auth,
-		httpClient: defaultHTTPClient,
-		sessionID:  newSessionID(),
+		auth:                    auth,
+		httpClient:              defaultHTTPClient,
+		sessionID:               transportState.sessionID,
+		responsesTransportState: transportState,
+	}
+}
+
+// SetResponsesTransportState shares WebSocket connection and fallback state
+// without sharing conversation history or credentials.
+func (c *Client) SetResponsesTransportState(state *ResponsesTransportState) {
+	if state != nil {
+		c.responsesTransportState = state
+		c.sessionID = state.sessionID
+	}
+}
+
+// CloseResponsesTransport releases the WebSocket owned by this client.
+// Callers must not use the client after closing its transport.
+func (c *Client) CloseResponsesTransport() {
+	if c.responsesTransportState != nil {
+		c.responsesTransportState.Close()
 	}
 }
 
@@ -411,15 +431,44 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		payload["tool_choice"] = "none"
 	}
 
-	if isChatGPTOAuth && isResponsesLiteWebsocketModel(opts.Model) {
+	if isResponsesLiteWebsocketModel(opts.Model) {
 		payload["stream"] = true
 		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
-		body, wsErr := c.openResponsesWebsocketStream(ctx, wsPayload)
+		openStream := func(useWebsocket bool) (io.ReadCloser, error) {
+			if useWebsocket {
+				return c.openResponsesWebsocketStream(ctx, wsPayload, isChatGPTOAuth)
+			}
+			return c.openResponsesLiteHTTPStream(ctx, wsPayload, isChatGPTOAuth)
+		}
+		useWebsocket := !c.responsesTransportState.websocketDisabled.Load()
+		body, wsErr := openStream(useWebsocket)
+		if useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
+			c.responsesTransportState.disableWebsocket()
+			useWebsocket = false
+			body, wsErr = openStream(false)
+		}
 		if wsErr != nil {
 			return nil, wsErr
 		}
-		defer body.Close()
-		result, wsErr := parseStreamingResponse(body, opts.OnDelta, opts.SuppressToolMarkers)
+		sawOutput := false
+		onDelta := func(text string) {
+			sawOutput = true
+			if opts.OnDelta != nil {
+				opts.OnDelta(text)
+			}
+		}
+		result, wsErr := parseStreamingResponse(body, onDelta, opts.SuppressToolMarkers)
+		body.Close()
+		if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
+			c.responsesTransportState.disableWebsocket()
+			if !sawOutput {
+				body, wsErr = openStream(false)
+				if wsErr == nil {
+					result, wsErr = parseStreamingResponse(body, onDelta, opts.SuppressToolMarkers)
+					body.Close()
+				}
+			}
+		}
 		if wsErr != nil {
 			return nil, wsErr
 		}

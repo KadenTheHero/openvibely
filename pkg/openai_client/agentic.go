@@ -605,9 +605,9 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 	if len(reasoningPayload) > 0 {
 		payload["reasoning"] = reasoningPayload
 	}
-	if isChatGPTOAuth && isResponsesLiteWebsocketModel(opts.Model) {
+	if isResponsesLiteWebsocketModel(opts.Model) {
 		if len(reasoningPayload) == 0 {
-			reasoningPayload["effort"] = "medium"
+			reasoningPayload["effort"] = responsesLiteDefaultReasoningEffort(opts.Model)
 		}
 		reasoningPayload["context"] = "all_turns"
 		payload["reasoning"] = reasoningPayload
@@ -632,7 +632,7 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 		c.applyAuthHeaders(httpReq, isChatGPTOAuth)
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "application/json")
-		if isChatGPTOAuth && isResponsesLiteWebsocketModel(opts.Model) {
+		if isResponsesLiteWebsocketModel(opts.Model) {
 			httpReq.Header.Set("x-openai-internal-codex-responses-lite", "true")
 		}
 		return httpReq, nil
@@ -1058,14 +1058,62 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 		payload["truncation"] = "auto"
 	}
 
-	if isChatGPTOAuth && isResponsesLiteWebsocketModel(opts.Model) {
+	if isResponsesLiteWebsocketModel(opts.Model) {
 		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
-		body, wsErr := c.openResponsesWebsocketStream(ctx, wsPayload)
+		openStream := func(useWebsocket bool) (io.ReadCloser, error) {
+			if useWebsocket {
+				return c.openResponsesWebsocketStream(ctx, wsPayload, isChatGPTOAuth)
+			}
+			return c.openResponsesLiteHTTPStream(ctx, wsPayload, isChatGPTOAuth)
+		}
+		useWebsocket := !c.responsesTransportState.websocketDisabled.Load()
+		body, wsErr := openStream(useWebsocket)
+		if useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
+			c.responsesTransportState.disableWebsocket()
+			useWebsocket = false
+			body, wsErr = openStream(false)
+		}
 		if wsErr != nil {
 			return nil, wsErr
 		}
-		defer body.Close()
-		return c.parseAgenticStreamWithToolCallbacks(body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult)
+		sawOutput := false
+		onText := func(text string) {
+			sawOutput = true
+			if opts.OnText != nil {
+				opts.OnText(text)
+			}
+		}
+		onThinking := func(text string) {
+			sawOutput = true
+			if opts.OnThinking != nil {
+				opts.OnThinking(text)
+			}
+		}
+		onToolUse := func(name string, input json.RawMessage) {
+			sawOutput = true
+			if opts.OnToolUse != nil {
+				opts.OnToolUse(name, input)
+			}
+		}
+		onToolResult := func(name, output string, isError bool) {
+			sawOutput = true
+			if opts.OnToolResult != nil {
+				opts.OnToolResult(name, output, isError)
+			}
+		}
+		result, wsErr := c.parseAgenticStreamWithToolCallbacks(body, onText, onThinking, onToolUse, onToolResult)
+		body.Close()
+		if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
+			c.responsesTransportState.disableWebsocket()
+			if !sawOutput {
+				body, wsErr = openStream(false)
+				if wsErr == nil {
+					result, wsErr = c.parseAgenticStreamWithToolCallbacks(body, onText, onThinking, onToolUse, onToolResult)
+					body.Close()
+				}
+			}
+		}
+		return result, wsErr
 	}
 
 	body, err := json.Marshal(payload)
@@ -1446,8 +1494,7 @@ func providerNativeOutputItemKey(item map[string]any, outputIndex int) string {
 // field; gpt-5.2+ families support it.
 func openAIModelSupportsWebSearch(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
-	return strings.HasPrefix(m, "gpt-5.6") ||
-		strings.HasPrefix(m, "gpt-5.5") ||
+	return strings.HasPrefix(m, "gpt-5.5") ||
 		strings.HasPrefix(m, "gpt-5.4") ||
 		strings.HasPrefix(m, "gpt-5.3") ||
 		strings.HasPrefix(m, "gpt-5.2")

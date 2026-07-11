@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -249,8 +251,8 @@ func TestSend_OAuthUsesChatGPTBackendAndAccountHeader(t *testing.T) {
 		if got, ok := body["stream"].(bool); !ok || !got {
 			t.Fatalf("stream = %#v, want true", body["stream"])
 		}
-		if got := body["model"]; got != "gpt-5.6-terra" {
-			t.Fatalf("model = %#v, want gpt-5.6-terra", got)
+		if got := body["model"]; got != "gpt-5.5" {
+			t.Fatalf("model = %#v, want gpt-5.5", got)
 		}
 		if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "" {
 			t.Fatalf("responses-lite header = %q, want omitted for HTTP SSE", got)
@@ -273,7 +275,7 @@ func TestSend_OAuthUsesChatGPTBackendAndAccountHeader(t *testing.T) {
 	// Ensure OAuth token is treated as valid and no refresh request is made.
 	client := NewWithOAuthToken(testOAuthJWT("org_test_123"), "refresh-token", time.Now().Add(2*time.Hour).UnixMilli(), "org_test_123")
 	resp, err := client.Send(context.Background(), "Hello", &SendOptions{
-		Model: "gpt-5.6-terra",
+		Model: "gpt-5.5",
 	})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
@@ -365,6 +367,385 @@ func TestSend_OAuthLunaUsesResponsesLiteWebSocket(t *testing.T) {
 	}
 }
 
+func TestResponsesLiteWebSocketModels(t *testing.T) {
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", " GPT-5.6-SOL "} {
+		if !isResponsesLiteWebsocketModel(model) {
+			t.Errorf("isResponsesLiteWebsocketModel(%q) = false, want true", model)
+		}
+	}
+	for _, model := range []string{"gpt-5.5", "gpt-5.4", ""} {
+		if isResponsesLiteWebsocketModel(model) {
+			t.Errorf("isResponsesLiteWebsocketModel(%q) = true, want false", model)
+		}
+	}
+}
+
+func TestSetResponsesTransportStateSharesSessionID(t *testing.T) {
+	state := NewResponsesTransportState()
+	first := NewWithAPIKey("first")
+	second := NewWithAPIKey("second")
+	first.SetResponsesTransportState(state)
+	second.SetResponsesTransportState(state)
+	if first.sessionID == "" || first.sessionID != second.sessionID || first.sessionID != state.sessionID {
+		t.Fatalf("shared session IDs first=%q second=%q state=%q", first.sessionID, second.sessionID, state.sessionID)
+	}
+}
+
+func TestBuildResponsesLiteWebsocketPayload_ModelDefaultsAndHostedTools(t *testing.T) {
+	for _, tc := range []struct {
+		model  string
+		effort string
+	}{
+		{model: "gpt-5.6-sol", effort: "low"},
+		{model: "gpt-5.6-terra", effort: "medium"},
+		{model: "gpt-5.6-luna", effort: "medium"},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			request := buildResponsesLiteWebsocketPayload(map[string]any{
+				"model": tc.model,
+				"input": []any{map[string]any{
+					"type": "message",
+					"role": "user",
+					"content": []any{map[string]any{
+						"type": "input_image", "image_url": "data:image/png;base64,AA==", "detail": "auto",
+					}},
+				}},
+				"tools": []any{
+					map[string]any{"type": "function", "name": "read_file"},
+					map[string]any{"type": "web_search"},
+					map[string]any{"type": "image_generation"},
+				},
+			}, "system", "session")
+			reasoning, _ := request["reasoning"].(map[string]any)
+			if reasoning["effort"] != tc.effort {
+				t.Fatalf("reasoning.effort = %#v, want %q", reasoning["effort"], tc.effort)
+			}
+			input, _ := request["input"].([]any)
+			additionalTools, _ := input[0].(map[string]any)
+			tools, _ := additionalTools["tools"].([]any)
+			if len(tools) != 1 {
+				t.Fatalf("additional tools = %#v, want only function tool", tools)
+			}
+			userMessage, _ := input[2].(map[string]any)
+			content, _ := userMessage["content"].([]any)
+			image, _ := content[0].(map[string]any)
+			if _, ok := image["detail"]; ok {
+				t.Fatalf("Lite image retained detail: %#v", image)
+			}
+		})
+	}
+}
+
+func TestSend_APIKeyTerraUsesResponsesLiteWebSocket(t *testing.T) {
+	var request map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("path = %q, want /v1/responses", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer sk-test" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		_, data, err := conn.Read(r.Context())
+		if err != nil {
+			t.Errorf("read request: %v", err)
+			return
+		}
+		if err := json.Unmarshal(data, &request); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		completed := `{"type":"response.completed","response":{"status":"completed","model":"gpt-5.6-terra","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`
+		if err := conn.Write(r.Context(), websocket.MessageText, []byte(completed)); err != nil {
+			t.Errorf("write completed event: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	resp, err := client.Send(context.Background(), "Hello", &SendOptions{
+		Model:           "gpt-5.6-terra",
+		MaxOutputTokens: 123,
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if resp.Text != "ok" {
+		t.Fatalf("Text = %q, want ok", resp.Text)
+	}
+	for _, field := range []string{"tools", "instructions", "max_output_tokens", "truncation"} {
+		if _, ok := request[field]; ok {
+			t.Errorf("Lite websocket request unexpectedly contains %q", field)
+		}
+	}
+}
+
+func TestSend_ResponsesLiteWebSocketHandshakeFallsBackToHTTPForSession(t *testing.T) {
+	var websocketAttempts atomic.Int32
+	var httpRequests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			websocketAttempts.Add(1)
+			http.Error(w, "websocket unavailable", http.StatusUpgradeRequired)
+			return
+		}
+		httpRequests.Add(1)
+		if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "true" {
+			t.Fatalf("Responses Lite header = %q", got)
+		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode HTTP fallback request: %v", err)
+		}
+		if _, ok := request["type"]; ok {
+			t.Fatalf("HTTP fallback retained websocket type: %#v", request["type"])
+		}
+		if _, ok := request["client_metadata"]; ok {
+			t.Fatalf("HTTP fallback retained websocket client_metadata")
+		}
+		_, _ = w.Write([]byte(buildSSE([]string{
+			`{"type":"response.output_text.delta","delta":"ok"}`,
+			`{"type":"response.completed","response":{"status":"completed","model":"gpt-5.6-terra"}}`,
+		})))
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	for i := 0; i < 2; i++ {
+		resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "gpt-5.6-terra"})
+		if err != nil {
+			t.Fatalf("Send %d: %v", i+1, err)
+		}
+		if resp.Text != "ok" {
+			t.Fatalf("Send %d text = %q", i+1, resp.Text)
+		}
+	}
+	if got := websocketAttempts.Load(); got != 1 {
+		t.Fatalf("websocket attempts = %d, want 1", got)
+	}
+	if got := httpRequests.Load(); got != 2 {
+		t.Fatalf("HTTP fallback requests = %d, want 2", got)
+	}
+}
+
+func TestResponsesLiteOAuthRecoveryErrorUnlocksTransportState(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "expired", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	original := OpenAIChatGPTAPIBaseURL
+	OpenAIChatGPTAPIBaseURL = srv.URL
+	defer func() { OpenAIChatGPTAPIBaseURL = original }()
+
+	client := NewWithOAuthToken("expired", "refresh", time.Now().Add(time.Hour).UnixMilli(), "org_test")
+	client.SetOAuthUnauthorizedHandler(func(context.Context, string) (OAuthTokens, bool, error) {
+		return OAuthTokens{}, false, errors.New("refresh failed")
+	})
+	payload := buildResponsesLiteWebsocketPayload(map[string]any{"model": "gpt-5.6-luna", "input": []any{}}, "", client.sessionID)
+	if _, err := client.openResponsesWebsocketStream(context.Background(), payload, true); err == nil {
+		t.Fatal("expected OAuth recovery error")
+	}
+	if !client.responsesTransportState.mu.TryLock() {
+		t.Fatal("transport mutex remained locked after OAuth recovery error")
+	}
+	client.responsesTransportState.mu.Unlock()
+}
+
+func TestResponsesLiteClosingStreamBeforeTerminalResetsConnection(t *testing.T) {
+	continueServer := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			t.Errorf("read request: %v", err)
+			return
+		}
+		if err := conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.created"}`)); err != nil {
+			t.Errorf("write first event: %v", err)
+			return
+		}
+		<-continueServer
+		_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.in_progress"}`))
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	payload := buildResponsesLiteWebsocketPayload(map[string]any{"model": "gpt-5.6-sol", "input": []any{}}, "", client.sessionID)
+	body, err := client.openResponsesWebsocketStream(context.Background(), payload, false)
+	if err != nil {
+		t.Fatalf("open stream: %v", err)
+	}
+	buffer := make([]byte, 256)
+	if _, err := body.Read(buffer); err != nil {
+		t.Fatalf("read first event: %v", err)
+	}
+	_ = body.Close()
+	close(continueServer)
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if client.responsesTransportState.mu.TryLock() {
+			conn := client.responsesTransportState.conn
+			client.responsesTransportState.mu.Unlock()
+			if conn == nil {
+				return
+			}
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("connection remained reusable after stream consumer closed early")
+}
+
+func TestSend_ResponsesLiteReconnectsStaleReusedWebSocket(t *testing.T) {
+	var websocketAttempts atomic.Int32
+	var httpRequests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpRequests.Add(1)
+			http.Error(w, "unexpected HTTP fallback", http.StatusInternalServerError)
+			return
+		}
+		attempt := websocketAttempts.Add(1)
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			t.Errorf("read websocket request: %v", err)
+			return
+		}
+		text := fmt.Sprintf("ok-%d", attempt)
+		completed := fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp-%d","status":"completed","model":"gpt-5.6-terra","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}]}}`, attempt, text)
+		if err := conn.Write(r.Context(), websocket.MessageText, []byte(completed)); err != nil {
+			t.Errorf("write completed event: %v", err)
+			return
+		}
+		if attempt == 1 {
+			_ = conn.Close(websocket.StatusNormalClosure, "idle timeout")
+		}
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	for i := 1; i <= 2; i++ {
+		resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "gpt-5.6-terra"})
+		if err != nil {
+			t.Fatalf("Send %d: %v", i, err)
+		}
+		if resp.Text != fmt.Sprintf("ok-%d", i) {
+			t.Fatalf("Send %d text = %q", i, resp.Text)
+		}
+	}
+	if got := websocketAttempts.Load(); got != 2 {
+		t.Fatalf("websocket attempts = %d, want 2", got)
+	}
+	if got := httpRequests.Load(); got != 0 {
+		t.Fatalf("HTTP fallback requests = %d, want 0", got)
+	}
+}
+
+func TestSend_ResponsesLiteCancellationDoesNotDisableWebSocket(t *testing.T) {
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = "http://127.0.0.1:1/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	client := NewWithAPIKey("sk-test")
+	_, err := client.Send(ctx, "Hello", &SendOptions{Model: "gpt-5.6-sol"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Send error = %v, want context.Canceled", err)
+	}
+	if client.responsesTransportState.websocketDisabled.Load() {
+		t.Fatal("cancellation disabled Responses WebSocket transport")
+	}
+}
+
+func TestSend_ResponsesLitePartialOutputDisablesWebSocketWithoutReplay(t *testing.T) {
+	var websocketAttempts atomic.Int32
+	var httpRequests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			websocketAttempts.Add(1)
+			conn, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				t.Errorf("accept websocket: %v", err)
+				return
+			}
+			if _, _, err := conn.Read(r.Context()); err != nil {
+				t.Errorf("read websocket request: %v", err)
+				return
+			}
+			_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.output_text.delta","delta":"partial"}`))
+			_ = conn.Close(websocket.StatusInternalError, "upstream reset")
+			return
+		}
+		httpRequests.Add(1)
+		_, _ = w.Write([]byte(buildSSE([]string{
+			`{"type":"response.output_text.delta","delta":"recovered"}`,
+			`{"type":"response.completed","response":{"status":"completed","model":"gpt-5.6-sol"}}`,
+		})))
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	var firstOutput strings.Builder
+	_, err := client.Send(context.Background(), "first", &SendOptions{
+		Model:   "gpt-5.6-sol",
+		OnDelta: func(text string) { firstOutput.WriteString(text) },
+	})
+	if err == nil || !errors.Is(err, errResponsesWebsocketTransport) {
+		t.Fatalf("first Send error = %v, want websocket transport error", err)
+	}
+	if firstOutput.String() != "partial" {
+		t.Fatalf("first output = %q, want partial", firstOutput.String())
+	}
+	if httpRequests.Load() != 0 {
+		t.Fatalf("partially streamed turn was replayed over HTTP")
+	}
+
+	resp, err := client.Send(context.Background(), "second", &SendOptions{Model: "gpt-5.6-sol"})
+	if err != nil {
+		t.Fatalf("second Send: %v", err)
+	}
+	if resp.Text != "recovered" {
+		t.Fatalf("second text = %q, want recovered", resp.Text)
+	}
+	if websocketAttempts.Load() != 1 || httpRequests.Load() != 1 {
+		t.Fatalf("attempts websocket=%d HTTP=%d", websocketAttempts.Load(), httpRequests.Load())
+	}
+}
+
 func TestSend_OAuthLunaWebSocketFailedEventReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
@@ -403,7 +784,7 @@ func TestSend_OAuthLunaWebSocketFailedEventReturnsError(t *testing.T) {
 	}
 }
 
-func TestSend_OAuthLunaLive(t *testing.T) {
+func TestSend_OAuthGPT56Live(t *testing.T) {
 	if os.Getenv("OPENVIBELY_LIVE_OPENAI") != "1" {
 		t.Skip("set OPENVIBELY_LIVE_OPENAI=1 to run")
 	}
@@ -411,21 +792,24 @@ func TestSend_OAuthLunaLive(t *testing.T) {
 	if token == "" {
 		t.Fatal("OPENVIBELY_LIVE_OPENAI_TOKEN is required")
 	}
-	client := NewWithOAuthToken(
-		token,
-		os.Getenv("OPENVIBELY_LIVE_OPENAI_REFRESH_TOKEN"),
-		time.Now().Add(2*time.Hour).UnixMilli(),
-		os.Getenv("OPENVIBELY_LIVE_OPENAI_ACCOUNT_ID"),
-	)
-	resp, err := client.Send(context.Background(), "Reply with only the number: 4+4", &SendOptions{
-		Model:           "gpt-5.6-luna",
-		ReasoningEffort: "medium",
-	})
-	if err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	if strings.TrimSpace(resp.Text) != "8" {
-		t.Fatalf("Text = %q, want 8", resp.Text)
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		t.Run(model, func(t *testing.T) {
+			client := NewWithOAuthToken(
+				token,
+				os.Getenv("OPENVIBELY_LIVE_OPENAI_REFRESH_TOKEN"),
+				time.Now().Add(2*time.Hour).UnixMilli(),
+				os.Getenv("OPENVIBELY_LIVE_OPENAI_ACCOUNT_ID"),
+			)
+			resp, err := client.Send(context.Background(), "Reply with only the number: 4+4", &SendOptions{
+				Model: model,
+			})
+			if err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+			if strings.TrimSpace(resp.Text) != "8" {
+				t.Fatalf("Text = %q, want 8", resp.Text)
+			}
+		})
 	}
 
 	agenticClient := NewWithOAuthToken(
@@ -435,10 +819,11 @@ func TestSend_OAuthLunaLive(t *testing.T) {
 		os.Getenv("OPENVIBELY_LIVE_OPENAI_ACCOUNT_ID"),
 	)
 	agenticResp, err := agenticClient.SendAgentic(context.Background(), "Reply with only the number: 4+4", &AgenticOptions{
-		Model:           "gpt-5.6-luna",
-		ReasoningEffort: "medium",
-		DisableTools:    true,
-		MaxTurns:        1,
+		Model:            "gpt-5.6-luna",
+		ReasoningEffort:  "medium",
+		DisableTools:     true,
+		WebSearchEnabled: true,
+		MaxTurns:         1,
 	})
 	if err != nil {
 		t.Fatalf("SendAgentic: %v", err)

@@ -72,9 +72,6 @@ func MapProviderSearchToolName(name string) string {
 func OpenAIModelSupportsSearch(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
 	switch {
-	// gpt-5.6 family
-	case strings.HasPrefix(m, "gpt-5.6"):
-		return true
 	// gpt-5.5 family
 	case strings.HasPrefix(m, "gpt-5.5"):
 		return true

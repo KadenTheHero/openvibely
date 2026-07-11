@@ -1,16 +1,67 @@
 package openaiclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/coder/websocket"
 )
+
+var errResponsesWebsocketTransport = errors.New("Responses websocket transport error")
+
+// ResponsesTransportState holds connection/fallback state that may be shared
+// by short-lived clients for the same configured model.
+type ResponsesTransportState struct {
+	websocketDisabled atomic.Bool
+	sessionID         string
+	mu                sync.Mutex
+	conn              *websocket.Conn
+	lastProperties    string
+	lastBaseline      []any
+	lastResponseID    string
+}
+
+func NewResponsesTransportState() *ResponsesTransportState {
+	return &ResponsesTransportState{sessionID: newSessionID()}
+}
+
+// Close releases any WebSocket owned by this transport state.
+func (s *ResponsesTransportState) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resetConnectionLocked()
+}
+
+func (s *ResponsesTransportState) disableWebsocket() {
+	s.websocketDisabled.Store(true)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resetConnectionLocked()
+}
+
+func (s *ResponsesTransportState) resetConnectionLocked() {
+	if s.conn != nil {
+		_ = s.conn.CloseNow()
+	}
+	s.conn = nil
+	s.lastProperties = ""
+	s.lastBaseline = nil
+	s.lastResponseID = ""
+}
+
+func shouldFallbackResponsesWebsocket(ctx context.Context, err error) bool {
+	return err != nil && ctx.Err() == nil && errors.Is(err, errResponsesWebsocketTransport)
+}
 
 const (
 	openAIResponsesWebsocketBeta = "responses_websockets=2026-02-06"
@@ -18,17 +69,73 @@ const (
 )
 
 func isResponsesLiteWebsocketModel(model string) bool {
-	return strings.EqualFold(strings.TrimSpace(model), "gpt-5.6-luna")
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
+		return true
+	default:
+		return false
+	}
 }
 
-func (c *Client) responsesWebsocketEndpoint() (string, error) {
-	base := strings.TrimSpace(OpenAIChatGPTAPIBaseURL)
+func responsesLiteDefaultReasoningEffort(model string) string {
+	if strings.EqualFold(strings.TrimSpace(model), "gpt-5.6-sol") {
+		return "low"
+	}
+	return "medium"
+}
+
+func responsesLiteTools(tools any) []any {
+	if tools == nil {
+		return []any{}
+	}
+	encoded, err := json.Marshal(tools)
+	if err != nil {
+		return []any{}
+	}
+	var decoded []any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		return []any{}
+	}
+	filtered := decoded[:0]
+	for _, raw := range decoded {
+		tool, _ := raw.(map[string]any)
+		switch strings.ToLower(strings.TrimSpace(stringFromAny(tool["type"]))) {
+		case "web_search", "web_search_preview", "image_generation":
+			continue
+		default:
+			filtered = append(filtered, raw)
+		}
+	}
+	return filtered
+}
+
+func stripResponsesLiteImageDetails(value any) {
+	switch current := value.(type) {
+	case map[string]any:
+		if strings.EqualFold(strings.TrimSpace(stringFromAny(current["type"])), "input_image") {
+			delete(current, "detail")
+		}
+		for _, nested := range current {
+			stripResponsesLiteImageDetails(nested)
+		}
+	case []any:
+		for _, nested := range current {
+			stripResponsesLiteImageDetails(nested)
+		}
+	}
+}
+
+func (c *Client) responsesWebsocketEndpoint(isChatGPTOAuth bool) (string, error) {
+	base := strings.TrimSpace(OpenAIAPIBaseURL)
+	if isChatGPTOAuth {
+		base = strings.TrimSpace(OpenAIChatGPTAPIBaseURL)
+	}
 	if base == "" {
-		return "", fmt.Errorf("missing ChatGPT base URL")
+		return "", fmt.Errorf("missing OpenAI base URL")
 	}
 	u, err := url.Parse(base)
 	if err != nil {
-		return "", fmt.Errorf("parse ChatGPT base URL %q: %w", base, err)
+		return "", fmt.Errorf("parse OpenAI base URL %q: %w", base, err)
 	}
 	switch u.Scheme {
 	case "http":
@@ -37,7 +144,7 @@ func (c *Client) responsesWebsocketEndpoint() (string, error) {
 		u.Scheme = "wss"
 	case "ws", "wss":
 	default:
-		return "", fmt.Errorf("ChatGPT base URL must use http, https, ws, or wss")
+		return "", fmt.Errorf("OpenAI base URL must use http, https, ws, or wss")
 	}
 	u.Path = strings.TrimRight(u.Path, "/") + "/responses"
 	return u.String(), nil
@@ -50,15 +157,12 @@ func buildResponsesLiteWebsocketPayload(payload map[string]any, system, sessionI
 	}
 
 	input, _ := request["input"].([]any)
+	stripResponsesLiteImageDetails(input)
 	prefix := make([]any, 0, 2)
-	tools := request["tools"]
-	if tools == nil {
-		tools = []any{}
-	}
 	prefix = append(prefix, map[string]any{
 		"type":  "additional_tools",
 		"role":  "developer",
-		"tools": tools,
+		"tools": responsesLiteTools(request["tools"]),
 	})
 	if strings.TrimSpace(system) != "" {
 		prefix = append(prefix, map[string]any{
@@ -76,7 +180,7 @@ func buildResponsesLiteWebsocketPayload(payload map[string]any, system, sessionI
 
 	reasoning, _ := request["reasoning"].(map[string]any)
 	if reasoning == nil {
-		reasoning = map[string]any{"effort": "medium"}
+		reasoning = map[string]any{"effort": responsesLiteDefaultReasoningEffort(stringFromAny(request["model"]))}
 	}
 	reasoning["context"] = "all_turns"
 	request["reasoning"] = reasoning
@@ -86,6 +190,8 @@ func buildResponsesLiteWebsocketPayload(payload map[string]any, system, sessionI
 	request["tool_choice"] = "auto"
 	request["parallel_tool_calls"] = false
 	request["include"] = []string{"reasoning.encrypted_content"}
+	delete(request, "max_output_tokens")
+	delete(request, "truncation")
 	request["client_metadata"] = map[string]string{
 		responsesLiteMetadataKey: "true",
 		"session_id":             sessionID,
@@ -93,9 +199,12 @@ func buildResponsesLiteWebsocketPayload(payload map[string]any, system, sessionI
 	return request
 }
 
-func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[string]any) (io.ReadCloser, error) {
-	endpoint, err := c.responsesWebsocketEndpoint()
+func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[string]any, isChatGPTOAuth bool) (io.ReadCloser, error) {
+	state := c.responsesTransportState
+	state.mu.Lock()
+	endpoint, err := c.responsesWebsocketEndpoint(isChatGPTOAuth)
 	if err != nil {
+		state.mu.Unlock()
 		return nil, err
 	}
 
@@ -105,7 +214,7 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		if reqErr != nil {
 			return nil, nil, reqErr
 		}
-		c.applyAuthHeaders(req, true)
+		c.applyAuthHeaders(req, isChatGPTOAuth)
 		for key, values := range req.Header {
 			headers[key] = append([]string(nil), values...)
 		}
@@ -119,66 +228,215 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		})
 	}
 
-	tokenUsed := c.auth.Token
-	conn, resp, err := dial()
-	if err != nil && resp != nil && resp.StatusCode == http.StatusUnauthorized && c.oauthUnauthorizedHandler != nil {
-		if resp.Body != nil {
-			resp.Body.Close()
+	connect := func() (*websocket.Conn, error) {
+		tokenUsed := c.auth.Token
+		conn, resp, connectErr := dial()
+		if connectErr != nil && isChatGPTOAuth && resp != nil && resp.StatusCode == http.StatusUnauthorized && c.oauthUnauthorizedHandler != nil {
+			if resp.Body != nil {
+				resp.Body.Close()
+			}
+			tokens, recovered, recoverErr := c.oauthUnauthorizedHandler(ctx, tokenUsed)
+			if recoverErr != nil {
+				return nil, recoverErr
+			}
+			if recovered {
+				c.applyOAuthTokens(tokens)
+				conn, resp, connectErr = dial()
+			}
 		}
-		tokens, recovered, recoverErr := c.oauthUnauthorizedHandler(ctx, tokenUsed)
-		if recoverErr != nil {
-			return nil, recoverErr
+		if connectErr == nil {
+			return conn, nil
 		}
-		if recovered {
-			c.applyOAuthTokens(tokens)
-			conn, resp, err = dial()
-		}
-	}
-	if err != nil {
 		if resp != nil && resp.Body != nil {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
-			return nil, fmt.Errorf("connect Responses websocket %q: %d %s %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), strings.TrimSpace(string(body)))
+			return nil, fmt.Errorf("%w: connect %q: %d %s %s", errResponsesWebsocketTransport, endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), strings.TrimSpace(string(body)))
 		}
-		return nil, fmt.Errorf("connect Responses websocket %q: %w", endpoint, err)
+		return nil, fmt.Errorf("%w: connect %q: %w", errResponsesWebsocketTransport, endpoint, connectErr)
 	}
 
-	body, err := json.Marshal(payload)
+	conn := state.conn
+	reusedConnection := conn != nil
+	if conn == nil {
+		conn, err = connect()
+	}
 	if err != nil {
-		conn.Close(websocket.StatusInternalError, "marshal request")
+		state.mu.Unlock()
+		return nil, err
+	}
+	state.conn = conn
+
+	wirePayload, fullInput, properties := incrementalResponsesWebsocketPayload(payload, state)
+
+	body, err := json.Marshal(wirePayload)
+	if err != nil {
+		state.resetConnectionLocked()
+		state.mu.Unlock()
 		return nil, fmt.Errorf("marshal websocket request: %w", err)
 	}
-	if err := conn.Write(ctx, websocket.MessageText, body); err != nil {
-		conn.Close(websocket.StatusInternalError, "send request")
-		return nil, fmt.Errorf("send Responses websocket request: %w", err)
+	writeErr := conn.Write(ctx, websocket.MessageText, body)
+	if writeErr != nil && reusedConnection && ctx.Err() == nil {
+		state.resetConnectionLocked()
+		conn, err = connect()
+		if err == nil {
+			state.conn = conn
+			wirePayload, fullInput, properties = incrementalResponsesWebsocketPayload(payload, state)
+			body, err = json.Marshal(wirePayload)
+		}
+		if err == nil {
+			writeErr = conn.Write(ctx, websocket.MessageText, body)
+		} else {
+			writeErr = err
+		}
+		reusedConnection = false
+	}
+	if writeErr != nil {
+		state.resetConnectionLocked()
+		state.mu.Unlock()
+		return nil, fmt.Errorf("%w: send request: %w", errResponsesWebsocketTransport, writeErr)
 	}
 
 	reader, writer := io.Pipe()
 	go func() {
-		defer conn.Close(websocket.StatusNormalClosure, "")
+		defer state.mu.Unlock()
 		defer writer.Close()
+		var outputItems []any
+		responseID := ""
+		retriedStaleConnection := false
+		receivedFrame := false
 		for {
 			messageType, data, readErr := conn.Read(ctx)
 			if readErr != nil {
-				writer.CloseWithError(fmt.Errorf("read Responses websocket: %w", readErr))
+				if reusedConnection && !receivedFrame && !retriedStaleConnection && ctx.Err() == nil {
+					retriedStaleConnection = true
+					state.resetConnectionLocked()
+					freshConn, reconnectErr := connect()
+					if reconnectErr == nil {
+						state.conn = freshConn
+						conn = freshConn
+						freshPayload, freshInput, freshProperties := incrementalResponsesWebsocketPayload(payload, state)
+						freshBody, marshalErr := json.Marshal(freshPayload)
+						if marshalErr != nil {
+							reconnectErr = fmt.Errorf("marshal websocket retry request: %w", marshalErr)
+						} else {
+							reconnectErr = conn.Write(ctx, websocket.MessageText, freshBody)
+						}
+						if reconnectErr == nil {
+							fullInput, properties = freshInput, freshProperties
+							reusedConnection = false
+							continue
+						}
+					}
+					readErr = reconnectErr
+				}
+				state.resetConnectionLocked()
+				writer.CloseWithError(fmt.Errorf("%w: read response: %w", errResponsesWebsocketTransport, readErr))
 				return
 			}
+			receivedFrame = true
 			if messageType != websocket.MessageText {
-				writer.CloseWithError(fmt.Errorf("read Responses websocket: unexpected binary frame"))
+				state.resetConnectionLocked()
+				writer.CloseWithError(fmt.Errorf("%w: unexpected binary frame", errResponsesWebsocketTransport))
 				return
 			}
 			if _, writeErr := fmt.Fprintf(writer, "data: %s\n\n", data); writeErr != nil {
+				state.resetConnectionLocked()
 				return
 			}
-			var event struct {
-				Type string `json:"type"`
-			}
-			if json.Unmarshal(data, &event) == nil && isTerminalResponsesWebsocketEvent(event.Type) {
-				return
+			var event map[string]any
+			if json.Unmarshal(data, &event) == nil {
+				eventType := stringFromAny(event["type"])
+				if eventType == "response.output_item.done" {
+					if item, ok := event["item"].(map[string]any); ok {
+						outputItems = append(outputItems, item)
+					}
+				}
+				if isTerminalResponsesWebsocketEvent(eventType) {
+					if eventType == "response.completed" {
+						if response, ok := event["response"].(map[string]any); ok {
+							responseID = stringFromAny(response["id"])
+						}
+						state.lastProperties = properties
+						state.lastBaseline = append(append([]any(nil), fullInput...), outputItems...)
+						state.lastResponseID = responseID
+					}
+					return
+				}
 			}
 		}
 	}()
 	return reader, nil
+}
+
+func incrementalResponsesWebsocketPayload(payload map[string]any, state *ResponsesTransportState) (map[string]any, []any, string) {
+	wire := make(map[string]any, len(payload)+1)
+	for key, value := range payload {
+		wire[key] = value
+	}
+	fullInput, _ := payload["input"].([]any)
+	propertiesPayload := make(map[string]any, len(payload))
+	for key, value := range payload {
+		if key != "input" && key != "client_metadata" && key != "previous_response_id" {
+			propertiesPayload[key] = value
+		}
+	}
+	encoded, _ := json.Marshal(propertiesPayload)
+	properties := string(encoded)
+	if state.lastResponseID != "" && state.lastProperties == properties && hasInputPrefix(fullInput, state.lastBaseline) {
+		wire["input"] = append([]any(nil), fullInput[len(state.lastBaseline):]...)
+		wire["previous_response_id"] = state.lastResponseID
+	}
+	return wire, append([]any(nil), fullInput...), properties
+}
+
+func hasInputPrefix(input, prefix []any) bool {
+	if len(input) < len(prefix) {
+		return false
+	}
+	for i := range prefix {
+		if !reflect.DeepEqual(input[i], prefix[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Client) openResponsesLiteHTTPStream(ctx context.Context, websocketPayload map[string]any, isChatGPTOAuth bool) (io.ReadCloser, error) {
+	payload := make(map[string]any, len(websocketPayload))
+	for key, value := range websocketPayload {
+		payload[key] = value
+	}
+	delete(payload, "type")
+	delete(payload, "client_metadata")
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal Responses Lite HTTP request: %w", err)
+	}
+	endpoint, err := c.responsesEndpoint(isChatGPTOAuth)
+	if err != nil {
+		return nil, err
+	}
+	buildReq := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		c.applyAuthHeaders(req, isChatGPTOAuth)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("x-openai-internal-codex-responses-lite", "true")
+		return req, nil
+	}
+	resp, err := c.doWithOAuthRecovery(ctx, endpoint, isChatGPTOAuth, buildReq)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		errBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("POST %q: %w", endpoint, parseAPIError(resp.StatusCode, errBody))
+	}
+	return resp.Body, nil
 }
 
 func isTerminalResponsesWebsocketEvent(eventType string) bool {

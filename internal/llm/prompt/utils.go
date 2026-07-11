@@ -49,7 +49,7 @@ func CodexReasoningEffort(model, configuredEffort string) string {
 		effort = NormalizeReasoningEffortValue(os.Getenv("OPENVIBELY_CODEX_REASONING_EFFORT"))
 	}
 	if effort == "" {
-		effort = "high"
+		effort = CodexDefaultReasoningEffort(model)
 	}
 
 	supported := CodexSupportedReasoningEfforts(model)
@@ -67,6 +67,17 @@ func CodexReasoningEffort(model, configuredEffort string) string {
 		return supported[0]
 	}
 	return "high"
+}
+
+func CodexDefaultReasoningEffort(model string) string {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "gpt-5.6-sol":
+		return "low"
+	case "gpt-5.6-terra", "gpt-5.6-luna":
+		return "medium"
+	default:
+		return "high"
+	}
 }
 
 func CodexSupportedReasoningEfforts(model string) []string {
