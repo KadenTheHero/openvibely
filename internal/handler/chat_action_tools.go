@@ -10,6 +10,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
@@ -26,6 +27,28 @@ func supportsChatActionTools(agent models.LLMConfig) bool {
 	default:
 		return false
 	}
+}
+
+func (h *Handler) supportsChatActionTools(ctx context.Context, agent models.LLMConfig) bool {
+	if agent.Provider != models.ProviderMixture {
+		return supportsChatActionTools(agent)
+	}
+	if h == nil || h.llmConfigRepo == nil {
+		return false
+	}
+	cfg, err := llmmixture.ParseConfig(agent.MixtureConfigJSON)
+	if err != nil {
+		return false
+	}
+	aggregatorID := strings.TrimSpace(cfg.Aggregator.AgentConfigID)
+	if aggregatorID == "" {
+		return false
+	}
+	aggregator, err := h.llmConfigRepo.GetByID(ctx, aggregatorID)
+	if err != nil || aggregator == nil || aggregator.Provider == models.ProviderMixture {
+		return false
+	}
+	return supportsChatActionTools(*aggregator)
 }
 
 type chatActionSummaryCollector struct {

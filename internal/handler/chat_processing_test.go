@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -5973,6 +5974,103 @@ func TestViewThreadRequest_OffsetLimit(t *testing.T) {
 	if requests[0].Limit != 3 {
 		t.Errorf("expected limit 3, got %d", requests[0].Limit)
 	}
+}
+
+func TestProcessStreamingResponse_MixtureSupportedAggregatorInjectsCreateTask(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	project := createProject(t, h, "Tool-capable Mixture Project")
+	providerCalls := 0
+	var firstTools []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerCalls++
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		if providerCalls == 1 {
+			firstTools, _ = body["tools"].([]any)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if providerCalls == 1 {
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_create\",\"type\":\"function\",\"function\":{\"name\":\"create_task\",\"arguments\":\"{\\\"title\\\":\\\"Mixture runtime investigation\\\",\\\"prompt\\\":\\\"Investigate the mixture runtime tool path.\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"))
+			return
+		}
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"Task created.\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+	aggregator := &models.LLMConfig{Name: "Compatible Aggregator", Provider: models.ProviderOpenAICompatible, Model: "provider/model", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key", BaseURL: server.URL + "/v1/", Transport: "chat_completions"}
+	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
+	mixture := &models.LLMConfig{
+		Name:              "Tool-capable Mixture",
+		Provider:          models.ProviderMixture,
+		Model:             "mixture",
+		MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, mixture))
+	chatHostTask := createTask(t, h, project.ID, "Mixture chat host", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusPending
+		task.AgentID = &mixture.ID
+	})
+	exec := createExec(t, h, chatHostTask.ID, mixture.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Create an investigation task"
+	})
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID: exec.ID, TaskID: chatHostTask.ID, Message: exec.PromptSent, Agent: *mixture,
+		ProjectID: project.ID, ProcessMarkers: false,
+	})
+
+	require.Equal(t, 2, providerCalls)
+	require.True(t, slices.ContainsFunc(firstTools, func(raw any) bool {
+		tool, _ := raw.(map[string]any)
+		function, _ := tool["function"].(map[string]any)
+		return function["name"] == "create_task"
+	}))
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.True(t, slices.ContainsFunc(tasks, func(task models.Task) bool { return task.Title == "Mixture runtime investigation" }))
+}
+
+func TestProcessStreamingResponse_MixtureUnsupportedAggregatorUsesMarkerFallback(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	project := createProject(t, h, "Marker Mixture Project")
+	aggregator := &models.LLMConfig{Name: "Runtime-incapable Aggregator", Provider: models.ProviderTest, Model: "test", AuthMethod: models.AuthMethodAPIKey}
+	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
+	mixture := &models.LLMConfig{
+		Name:              "Marker Mixture",
+		Provider:          models.ProviderMixture,
+		Model:             "mixture",
+		MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, mixture))
+	chatHostTask := createTask(t, h, project.ID, "Marker mixture chat host", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusPending
+		task.AgentID = &mixture.ID
+	})
+	exec := createExec(t, h, chatHostTask.ID, mixture.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Create an investigation task"
+	})
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "[CREATE_TASK]\n" + `{"title":"Mixture marker investigation","prompt":"Investigate the marker fallback path."}` + "\n[/CREATE_TASK]"
+	mock.TextOnly = mock.Response
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID: exec.ID, TaskID: chatHostTask.ID, Message: exec.PromptSent, Agent: *mixture,
+		ProjectID: project.ID, ProcessMarkers: false,
+	})
+
+	require.Nil(t, llmcontracts.RuntimeToolsFromContext(mock.LastAgentRequest().Ctx))
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.True(t, slices.ContainsFunc(tasks, func(task models.Task) bool { return task.Title == "Mixture marker investigation" }))
 }
 
 // TestProcessStreamingResponse_PhantomCreateTaskRegression verifies the fix for

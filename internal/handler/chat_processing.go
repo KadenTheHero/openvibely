@@ -329,7 +329,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// execute the channel service handler (with persistence) rather than the
 	// informational web/API handler.
 	runtimeToolsInjected := false
-	if supportsChatActionTools(params.Agent) {
+	if h.supportsChatActionTools(ctx, params.Agent) {
 		surface := params.Surface
 		if surface == "" {
 			surface = chatcontrol.SurfaceWeb

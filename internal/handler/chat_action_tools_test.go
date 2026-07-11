@@ -10,6 +10,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSupportsChatActionTools(t *testing.T) {
@@ -58,6 +59,42 @@ func TestSupportsChatActionTools(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandlerSupportsChatActionToolsResolvesMixtureAggregator(t *testing.T) {
+	h, _, repo := setupTestHandler(t)
+	ctx := context.Background()
+
+	tests := []struct {
+		name       string
+		provider   models.LLMProvider
+		authMethod models.AuthMethod
+		want       bool
+	}{
+		{name: "openai api key", provider: models.ProviderOpenAI, authMethod: models.AuthMethodAPIKey, want: true},
+		{name: "openai oauth", provider: models.ProviderOpenAI, authMethod: models.AuthMethodOAuth, want: true},
+		{name: "anthropic api key", provider: models.ProviderAnthropic, authMethod: models.AuthMethodAPIKey, want: true},
+		{name: "anthropic oauth", provider: models.ProviderAnthropic, authMethod: models.AuthMethodOAuth, want: true},
+		{name: "openai compatible api key", provider: models.ProviderOpenAICompatible, authMethod: models.AuthMethodAPIKey, want: true},
+		{name: "openai cli", provider: models.ProviderOpenAI, authMethod: models.AuthMethodCLI, want: false},
+		{name: "anthropic cli", provider: models.ProviderAnthropic, authMethod: models.AuthMethodCLI, want: false},
+		{name: "ollama", provider: models.ProviderOllama, authMethod: models.AuthMethodAPIKey, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			aggregator := &models.LLMConfig{Name: "Aggregator " + tt.name, Provider: tt.provider, Model: "model", AuthMethod: tt.authMethod}
+			require.NoError(t, repo.Create(ctx, aggregator))
+			mixture := models.LLMConfig{
+				Provider:          models.ProviderMixture,
+				MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+			}
+			require.Equal(t, tt.want, h.supportsChatActionTools(ctx, mixture))
+		})
+	}
+
+	require.False(t, h.supportsChatActionTools(ctx, models.LLMConfig{Provider: models.ProviderMixture, MixtureConfigJSON: `{invalid`}))
+	require.False(t, h.supportsChatActionTools(ctx, models.LLMConfig{Provider: models.ProviderMixture, MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"missing"}}`}))
 }
 
 func TestFormatCapabilitiesIncludesSelectedMemoryHandles(t *testing.T) {
