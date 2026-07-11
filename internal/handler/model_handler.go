@@ -343,6 +343,7 @@ func (h *Handler) applyAndValidateMixtureForm(ctx context.Context, c echo.Contex
 		return err
 	}
 	agent.MixtureConfigJSON = string(encoded)
+	agent.Temperature = 0
 	if strings.TrimSpace(agent.Model) == "" {
 		agent.Model = "default"
 	}
