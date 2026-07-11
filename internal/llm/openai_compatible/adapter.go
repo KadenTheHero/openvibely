@@ -170,7 +170,15 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 		return "", llmusage.FromTotal(0), err
 	}
 	client.History = append(client.History, buildClientHistory(req.ChatHistory)...)
+	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPrompt := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
+	if rt != nil && !req.Followup && req.ChatMode == models.ChatModeOrchestrate {
+		names := make([]string, 0, len(rt.Definitions))
+		for _, def := range rt.Definitions {
+			names = append(names, def.Name)
+		}
+		systemPrompt = llmprompt.ApplyChatActionToolMode(systemPrompt, names)
+	}
 	systemPrompt = llmprompt.AppendWorktreeContextPrompt(systemPrompt, workDir)
 
 	attachments, err := convertAttachments(req.Attachments)

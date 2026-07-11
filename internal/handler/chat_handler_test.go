@@ -17,6 +17,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -381,6 +382,14 @@ func TestHandler_ChatSend_MixtureSupportedAggregatorCreatesTaskThroughRuntimeToo
 		function, _ := tool["function"].(map[string]any)
 		return function["name"] == "create_task"
 	}), "supported mixture aggregator payload must include create_task")
+	messages, _ := firstRequest["messages"].([]any)
+	require.True(t, slices.ContainsFunc(messages, func(raw any) bool {
+		message, _ := raw.(map[string]any)
+		content, _ := message["content"].(string)
+		return message["role"] == "system" &&
+			strings.Contains(content, llmprompt.ChatActionToolModeInstructions) &&
+			!strings.Contains(content, "The ONLY way to create a task is by outputting a [CREATE_TASK] block")
+	}), "supported mixture aggregator must receive runtime-tool action guidance without marker-only instructions")
 
 	select {
 	case <-providerRequests:

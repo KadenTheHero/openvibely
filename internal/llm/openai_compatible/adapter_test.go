@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAdapterCallDirectUsesConfiguredChatCompletionsEndpoint(t *testing.T) {
@@ -134,6 +136,78 @@ func TestAdapterCallDirectRawPromptOmitsOpenVibelySystemPrompt(t *testing.T) {
 	if strings.Contains(fmt.Sprint(gotBody), "OpenVibely") || strings.Contains(fmt.Sprint(gotBody), "/secret/workdir") {
 		t.Fatalf("raw direct payload contains OpenVibely/workdir framing: %#v", gotBody)
 	}
+}
+
+func TestAdapterChatWithRuntimeActionsUsesToolModeSystemPrompt(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"Task created.\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{
+			Name: "create_task", Description: "create a task", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessWrite,
+		}},
+	})
+	adapter := New(nil, nil)
+	_, err := adapter.Call(ctx, llmcontracts.AgentRequest{
+		Ctx: ctx, Operation: llmcontracts.OperationStreaming, Message: "Create a task", ChatMode: models.ChatModeOrchestrate,
+		Agent: models.LLMConfig{
+			Name: "Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", Transport: "chat_completions",
+		},
+	}, ".")
+	require.NoError(t, err)
+
+	messages, ok := gotBody["messages"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, messages)
+	system, ok := messages[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "system", system["role"])
+	content, _ := system["content"].(string)
+	require.Contains(t, content, llmprompt.ChatActionToolModeInstructions)
+	require.Contains(t, content, "Available action tools: create_task")
+	require.NotContains(t, content, "The ONLY way to create a task is by outputting a [CREATE_TASK] block")
+}
+
+func TestAdapterChatWithoutRuntimeActionsKeepsMarkerSystemPrompt(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	adapter := New(nil, nil)
+	_, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation: llmcontracts.OperationStreaming, Message: "Create a task", ChatMode: models.ChatModeOrchestrate,
+		Agent: models.LLMConfig{
+			Name: "Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", Transport: "chat_completions",
+		},
+	}, ".")
+	require.NoError(t, err)
+
+	messages, ok := gotBody["messages"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, messages)
+	system, ok := messages[0].(map[string]any)
+	require.True(t, ok)
+	content, _ := system["content"].(string)
+	require.Contains(t, content, "The ONLY way to create a task is by outputting a [CREATE_TASK] block")
+	require.NotContains(t, content, llmprompt.ChatActionToolModeInstructions)
 }
 
 func TestAdapterToolCallReplaysToolResult(t *testing.T) {

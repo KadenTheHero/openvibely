@@ -348,7 +348,7 @@ func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, isTa
 	if len(names) == 0 {
 		return base
 	}
-	return base + "\n\n" + llmprompt.ChatActionToolModeInstructions + "\nAvailable action tools: " + strings.Join(names, ", ")
+	return llmprompt.ApplyChatActionToolMode(base, names)
 }
 
 func shouldSkipDefaultToolsForChatMode(isTaskFollowup bool, chatMode models.ChatMode, rt *llmcontracts.RuntimeTools) bool {

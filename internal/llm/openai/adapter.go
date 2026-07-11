@@ -254,7 +254,7 @@ func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, isTa
 	if len(names) == 0 {
 		return base
 	}
-	return base + "\n\n" + llmprompt.ChatActionToolModeInstructions + "\nAvailable action tools: " + strings.Join(names, ", ")
+	return llmprompt.ApplyChatActionToolMode(base, names)
 }
 
 func buildOpenAIRuntime(ctx context.Context, workDir string, agentDef *models.Agent) ([]openaiclient.ToolDefinition, func(context.Context, string, json.RawMessage) (string, bool, error), func(string) bool, func()) {
