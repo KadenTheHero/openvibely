@@ -1032,11 +1032,11 @@ func TestOAuthServerTracking(t *testing.T) {
 		t.Skip("skipping OAuth server tracking test (goroutine sleep sync) in short mode")
 	}
 	t.Run("shutdownPreviousOAuthServer cancels tracked server", func(t *testing.T) {
-		cancelled := false
+		cancelled := make(chan struct{})
 		ctx, cancel := context.WithCancel(context.Background())
 		go func() {
 			<-ctx.Done()
-			cancelled = true
+			close(cancelled)
 		}()
 
 		oauthServersMu.Lock()
@@ -1048,8 +1048,11 @@ func TestOAuthServerTracking(t *testing.T) {
 
 		shutdownPreviousOAuthServer("test-config-track")
 
-		require.Eventually(t, func() bool { return cancelled }, 2*time.Second, 5*time.Millisecond,
-			"Previous server should have been cancelled")
+		select {
+		case <-cancelled:
+		case <-time.After(2 * time.Second):
+			t.Fatal("previous server should have been cancelled")
+		}
 
 		oauthServersMu.Lock()
 		_, exists := oauthServers["test-config-track"]

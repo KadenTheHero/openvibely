@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -4360,7 +4361,40 @@ func createChatStreamExecution(t *testing.T, tc *TestContext, execStatus models.
 	return updated
 }
 
-func startChatStreamSSETest(t *testing.T, h *Handler, execID, rawQuery string) (*httptest.ResponseRecorder, context.CancelFunc, chan error) {
+type synchronizedResponseRecorder struct {
+	*httptest.ResponseRecorder
+	mu sync.RWMutex
+}
+
+func newSynchronizedResponseRecorder() *synchronizedResponseRecorder {
+	return &synchronizedResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
+}
+
+func (r *synchronizedResponseRecorder) Write(data []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ResponseRecorder.Write(data)
+}
+
+func (r *synchronizedResponseRecorder) WriteHeader(statusCode int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ResponseRecorder.WriteHeader(statusCode)
+}
+
+func (r *synchronizedResponseRecorder) Flush() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ResponseRecorder.Flush()
+}
+
+func (r *synchronizedResponseRecorder) BodyString() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.Body.String()
+}
+
+func startChatStreamSSETest(t *testing.T, h *Handler, execID, rawQuery string) (*synchronizedResponseRecorder, context.CancelFunc, chan error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	path := "/events/chat/" + execID
@@ -4368,7 +4402,7 @@ func startChatStreamSSETest(t *testing.T, h *Handler, execID, rawQuery string) (
 		path += "?" + rawQuery
 	}
 	req := httptest.NewRequest(http.MethodGet, path, nil).WithContext(ctx)
-	rec := httptest.NewRecorder()
+	rec := newSynchronizedResponseRecorder()
 	e := echo.New()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("exec_id")
@@ -4380,17 +4414,17 @@ func startChatStreamSSETest(t *testing.T, h *Handler, execID, rawQuery string) (
 	return rec, cancel, errCh
 }
 
-func waitForSSEBody(t *testing.T, rec *httptest.ResponseRecorder, want string) string {
+func waitForSSEBody(t *testing.T, rec *synchronizedResponseRecorder, want string) string {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		body := rec.Body.String()
+		body := rec.BodyString()
 		if strings.Contains(body, want) {
 			return body
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for SSE body containing %q; body=%q", want, rec.Body.String())
+	t.Fatalf("timed out waiting for SSE body containing %q; body=%q", want, rec.BodyString())
 	return ""
 }
 
@@ -4450,7 +4484,7 @@ func TestChatStreamSSE_DoesNotSubscribeMissingExecution(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("missing execution stream did not return")
 	}
-	assert.Contains(t, rec.Body.String(), "event: error\ndata: execution not found\n\n")
+	assert.Contains(t, rec.BodyString(), "event: error\ndata: execution not found\n\n")
 	assert.Equal(t, 0, hub.SubscriberCount())
 }
 
