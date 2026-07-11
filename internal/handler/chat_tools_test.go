@@ -206,6 +206,127 @@ func TestExecuteChatTaskCreations(t *testing.T) {
 	}
 }
 
+func TestDeferActiveTasksWithAttachments_DuplicateTitlesRetainRequestIdentity(t *testing.T) {
+	h := &Handler{}
+	requests := []service.TaskCreationRequest{
+		{Title: "Same title", Category: "active"},
+		{Title: "Same title", Category: "backlog"},
+	}
+	deferred := h.deferActiveTasksWithAttachments(requests, []models.ChatAttachment{{ID: "attachment"}}, nil)
+	if !deferred[0] || deferred[1] || len(deferred) != 1 {
+		t.Fatalf("expected only the active request index to be deferred, got %#v", deferred)
+	}
+}
+
+func TestProcessChatTaskCreations_AttachmentLookupFailureAbortsCreation(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Attachment Lookup Failure Project")
+	modelConfig := createAgent(t, llmConfigRepo, func(c *models.LLMConfig) {
+		c.AutoStartTasks = true
+	})
+	chatHostTask := createTask(t, h, project.ID, "lookup failure host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+	})
+	exec := createExec(t, h, chatHostTask.ID, modelConfig.ID)
+
+	if _, err := db.ExecContext(ctx, "DROP TABLE chat_attachments"); err != nil {
+		t.Fatalf("drop chat attachment table: %v", err)
+	}
+
+	output := `[CREATE_TASK]
+{"title":"Must not start","prompt":"Use any supplied attachment"}
+[/CREATE_TASK]`
+	updated, copied := h.processChatTaskCreations(ctx, exec.ID, project.ID, output, []models.LLMConfig{*modelConfig})
+	if copied != 0 {
+		t.Fatalf("expected no copies after lookup failure, got %d", copied)
+	}
+	if !strings.Contains(updated, "could not be loaded") {
+		t.Fatalf("expected attachment lookup failure summary, got %q", updated)
+	}
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	for _, task := range tasks {
+		if task.Title == "Must not start" {
+			t.Fatalf("attachment lookup failure must abort creation, created task category=%s", task.Category)
+		}
+	}
+}
+
+func TestProcessChatTaskCreations_UnicodeScreenshotConvertsAndExecutes(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Unicode Screenshot Execution Project")
+	modelConfig := createAgent(t, llmConfigRepo)
+	chatHostTask := createTask(t, h, project.ID, "unicode screenshot host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+	})
+	exec := createExec(t, h, chatHostTask.ID, modelConfig.ID)
+
+	fileName := "Screenshot 2026-07-10 at 9.49.00\u202fPM.png"
+	sourceDir := t.TempDir()
+	sourcePath := filepath.Join(sourceDir, fileName)
+	if err := os.WriteFile(sourcePath, []byte("png"), 0o644); err != nil {
+		t.Fatalf("write chat screenshot: %v", err)
+	}
+	if err := h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+		ExecutionID: exec.ID,
+		FileName:    fileName,
+		FilePath:    sourcePath,
+		MediaType:   "image/png",
+		FileSize:    3,
+	}); err != nil {
+		t.Fatalf("create chat attachment: %v", err)
+	}
+
+	output := `[CREATE_TASK]
+{"title":"Execute converted screenshot","prompt":"Inspect the screenshot","category":"active"}
+[/CREATE_TASK]`
+	updated, copied := h.processChatTaskCreations(ctx, exec.ID, project.ID, output, []models.LLMConfig{*modelConfig})
+	if copied != 1 || strings.Contains(updated, "Attachment conversion failed") {
+		t.Fatalf("expected successful conversion, copied=%d output=%q", copied, updated)
+	}
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	var converted *models.Task
+	for i := range tasks {
+		if tasks[i].Title == "Execute converted screenshot" {
+			converted = &tasks[i]
+			break
+		}
+	}
+	if converted == nil {
+		t.Fatal("expected converted task")
+	}
+	if converted.Category != models.CategoryActive {
+		t.Fatalf("expected converted task to activate, got %s", converted.Category)
+	}
+
+	mock := &testutil.MockLLMCaller{Response: "ok", TextOnly: "ok", Tokens: 1}
+	llmSvc := service.NewLLMService(h.llmConfigRepo, h.execRepo, h.taskRepo, h.projectRepo, h.scheduleRepo, h.attachmentRepo)
+	llmSvc.SetLLMCaller(mock)
+	executed, err := llmSvc.ExecuteTaskWithAgent(ctx, *converted, *modelConfig)
+	if err != nil {
+		t.Fatalf("execute converted task: %v", err)
+	}
+	if executed == nil || mock.CallCount() != 1 {
+		t.Fatalf("expected successful provider execution, execution=%v calls=%d", executed, mock.CallCount())
+	}
+	attachments := mock.LastCall().Attachments
+	if len(attachments) != 1 || attachments[0].FileName != fileName {
+		t.Fatalf("expected exact Unicode screenshot at execution, got %#v", attachments)
+	}
+	if _, err := os.Stat(attachments[0].FilePath); err != nil {
+		t.Fatalf("converted attachment path is not loadable: %v", err)
+	}
+}
+
 func TestProcessChatTaskCreations_OmittedCategoryAutoStartDefersWhenAttachmentConversionFails(t *testing.T) {
 	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
 	ctx := context.Background()

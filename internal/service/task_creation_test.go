@@ -158,6 +158,38 @@ func TestExecuteTaskCreations(t *testing.T) {
 	}
 }
 
+func TestExecuteTaskCreationsWithIndexedReturn_PreservesRequestIndexAfterFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Indexed Creation Project"}
+	ctx := context.Background()
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := taskRepo.Create(ctx, &models.Task{
+		ProjectID: project.ID,
+		Title:     "Already Exists",
+		Prompt:    "existing",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+	}); err != nil {
+		t.Fatalf("create existing task: %v", err)
+	}
+
+	results, _ := ExecuteTaskCreationsWithIndexedReturn(ctx, []TaskCreationRequest{
+		{Title: "Already Exists", Prompt: "must fail", Category: "active"},
+		{Title: "Created Backlog", Prompt: "must succeed", Category: "backlog"},
+	}, project.ID, taskSvc)
+	if len(results) != 1 {
+		t.Fatalf("expected one successful result, got %#v", results)
+	}
+	if results[0].RequestIndex != 1 || results[0].Task.Title != "Created Backlog" {
+		t.Fatalf("successful task lost request identity: %#v", results[0])
+	}
+}
+
 func TestExecuteTaskCreations_Empty(t *testing.T) {
 	summary := ExecuteTaskCreations(context.Background(), nil, "proj1", nil)
 	if summary != "" {

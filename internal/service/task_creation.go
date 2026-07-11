@@ -119,9 +119,26 @@ func ExecuteTaskCreations(ctx context.Context, requests []TaskCreationRequest, p
 	return summary
 }
 
+// TaskCreationResult preserves the originating request for each successfully created task.
+type TaskCreationResult struct {
+	RequestIndex int
+	Task         models.Task
+}
+
 // ExecuteTaskCreationsWithReturn creates tasks from parsed requests and returns both the created tasks and a summary.
-// This variant is used when the caller needs access to the created task objects (e.g., to copy attachments).
+// This variant is used when the caller needs access to the created task objects.
 func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreationRequest, projectID string, taskSvc *TaskService, agents ...[]models.LLMConfig) ([]models.Task, string) {
+	results, summary := ExecuteTaskCreationsWithIndexedReturn(ctx, requests, projectID, taskSvc, agents...)
+	createdTasks := make([]models.Task, 0, len(results))
+	for _, result := range results {
+		createdTasks = append(createdTasks, result.Task)
+	}
+	return createdTasks, summary
+}
+
+// ExecuteTaskCreationsWithIndexedReturn creates tasks and retains each successful
+// task's original request index so callers never need to correlate by title.
+func ExecuteTaskCreationsWithIndexedReturn(ctx context.Context, requests []TaskCreationRequest, projectID string, taskSvc *TaskService, agents ...[]models.LLMConfig) ([]TaskCreationResult, string) {
 	if len(requests) == 0 {
 		return nil, ""
 	}
@@ -132,11 +149,11 @@ func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreation
 		availableAgents = agents[0]
 	}
 
-	var createdTasks []models.Task
+	var createdResults []TaskCreationResult
 	var created []string
 	var failed []string
 
-	for _, req := range requests {
+	for requestIndex, req := range requests {
 		selectedAgentID, selectionInfo := selectTaskCreationAgent(req, availableAgents)
 		if req.AgentID == "" && len(availableAgents) == 1 {
 			applog.Infof("[task-creation] only one agent available, using %s", selectedAgentID)
@@ -220,7 +237,7 @@ func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreation
 				}
 			}
 
-			createdTasks = append(createdTasks, *task)
+			createdResults = append(createdResults, TaskCreationResult{RequestIndex: requestIndex, Task: *task})
 			line := fmt.Sprintf("- \"%s\" (%s) [TASK_ID:%s]", req.Title, category, task.ID)
 			if strings.TrimSpace(req.Goal) != "" {
 				line += " [goal:set]"
@@ -253,7 +270,7 @@ func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreation
 		summary.WriteString(strings.Join(failed, "\n"))
 	}
 
-	return createdTasks, summary.String()
+	return createdResults, summary.String()
 }
 
 // TaskEditRequest represents a task edit request parsed from AI output.

@@ -2079,15 +2079,20 @@ func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectI
 
 	applog.Infof("[handler] processChatTaskCreations exec=%s found %d task creation requests", execID, len(taskRequests))
 
-	chatAtts, _ := h.chatAttachmentRepo.ListByExecution(ctx, execID)
-	deferredActiveTitles := h.deferActiveTasksWithAttachments(taskRequests, chatAtts, agents)
+	chatAtts, err := h.chatAttachmentRepo.ListByExecution(ctx, execID)
+	if err != nil {
+		applog.Infof("[handler] attachment lifecycle stage=metadata-load execution=%s destination_task=uncreated error=%v", execID, err)
+		return output + fmt.Sprintf("\n\n---\nFailed to create %d task(s): Chat attachments could not be loaded; no tasks were created.", len(taskRequests)), 0
+	}
+	deferredRequestIndexes := h.deferActiveTasksWithAttachments(taskRequests, chatAtts, agents)
 
-	createdTasks, summary := h.executeChatTaskCreationsWithAttachments(ctx, taskRequests, projectID, execID, agents)
+	createdResults, summary := h.executeChatTaskCreationsWithAttachments(ctx, taskRequests, projectID, execID, agents)
+	createdTasks := tasksFromCreationResults(createdResults)
 	h.applyChannelOriginToCreatedTasks(ctx, createdTasks, firstChannelReply(channelReply))
 
 	totalAttachmentsCopied, attachmentsReady := h.copyAttachmentsToTasks(ctx, execID, createdTasks, chatAtts)
 	if attachmentsReady {
-		h.activateDeferredTasks(ctx, createdTasks, deferredActiveTitles)
+		h.activateDeferredTasks(ctx, createdResults, deferredRequestIndexes)
 	} else {
 		applog.Infof("[handler] attachment lifecycle stage=activation-blocked execution=%s tasks=%d", execID, len(createdTasks))
 		summary += "\nAttachment conversion failed; affected tasks were left in Backlog without broken attachment records."
@@ -2098,7 +2103,7 @@ func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectI
 
 // deferActiveTasksWithAttachments resolves each request's effective category and
 // defers anything that would activate until attachment conversion succeeds.
-// Returns a map of task titles that should be activated after attachment copying.
+// Returns the original request indexes that should be activated after copying.
 func firstChannelReply(replies []service.ChannelReplyContext) service.ChannelReplyContext {
 	if len(replies) == 0 {
 		return service.ChannelReplyContext{}
@@ -2131,20 +2136,20 @@ func (h *Handler) applyChannelOriginToCreatedTasks(ctx context.Context, tasks []
 	}
 }
 
-func (h *Handler) deferActiveTasksWithAttachments(taskRequests []service.TaskCreationRequest, chatAtts []models.ChatAttachment, agents []models.LLMConfig) map[string]bool {
+func (h *Handler) deferActiveTasksWithAttachments(taskRequests []service.TaskCreationRequest, chatAtts []models.ChatAttachment, agents []models.LLMConfig) map[int]bool {
 	if len(chatAtts) == 0 {
 		return nil
 	}
 
-	deferredActiveTitles := make(map[string]bool)
+	deferredRequestIndexes := make(map[int]bool)
 	for i := range taskRequests {
 		if service.EffectiveTaskCreationCategory(taskRequests[i], agents) == models.CategoryActive {
-			deferredActiveTitles[taskRequests[i].Title] = true
+			deferredRequestIndexes[i] = true
 			taskRequests[i].Category = string(models.CategoryBacklog)
-			applog.Infof("[handler] deferActiveTasksWithAttachments deferred auto-submit for task %q (has attachments)", taskRequests[i].Title)
+			applog.Infof("[handler] deferActiveTasksWithAttachments deferred auto-submit for request=%d task=%q (has attachments)", i, taskRequests[i].Title)
 		}
 	}
-	return deferredActiveTitles
+	return deferredRequestIndexes
 }
 
 // copyAttachmentsToTasks copies chat attachments to all created tasks.
@@ -2171,17 +2176,26 @@ func (h *Handler) copyAttachmentsToTasks(ctx context.Context, execID string, cre
 	return totalCopied, allReady
 }
 
-// activateDeferredTasks activates tasks that were deferred due to attachment copying.
-func (h *Handler) activateDeferredTasks(ctx context.Context, createdTasks []models.Task, deferredActiveTitles map[string]bool) {
-	if len(deferredActiveTitles) == 0 {
+func tasksFromCreationResults(results []service.TaskCreationResult) []models.Task {
+	tasks := make([]models.Task, 0, len(results))
+	for _, result := range results {
+		tasks = append(tasks, result.Task)
+	}
+	return tasks
+}
+
+// activateDeferredTasks activates only tasks whose exact originating request was deferred.
+func (h *Handler) activateDeferredTasks(ctx context.Context, createdResults []service.TaskCreationResult, deferredRequestIndexes map[int]bool) {
+	if len(deferredRequestIndexes) == 0 {
 		return
 	}
 
-	for _, task := range createdTasks {
-		if deferredActiveTitles[task.Title] {
-			applog.Infof("[handler] activateDeferredTasks activating task %s %q", task.ID, task.Title)
+	for _, result := range createdResults {
+		if deferredRequestIndexes[result.RequestIndex] {
+			task := result.Task
+			applog.Infof("[handler] activateDeferredTasks activating request=%d task=%s %q", result.RequestIndex, task.ID, task.Title)
 			if err := h.taskSvc.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
-				applog.Infof("[handler] activateDeferredTasks error activating task %s: %v", task.ID, err)
+				applog.Infof("[handler] activateDeferredTasks error activating request=%d task=%s: %v", result.RequestIndex, task.ID, err)
 			}
 		}
 	}

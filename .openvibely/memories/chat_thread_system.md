@@ -3,8 +3,8 @@ name: chat_thread_system
 type: project
 created: 2026-05-09
 updated: 2026-07-11
-source: after_complete_memory_update
-source_id: f6abd39beca3f1c4a77f21c8cbe28b61
+source: update_memory
+source_id: e108cc6feb41c8c1bda673da93cf485f
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -17,6 +17,9 @@ Queueing and steering facts:
 - Queued input promotion claims the pending input while creating the next execution/task and keeps FIFO ordering durable.
 - Queued messages with attachments store the pending upload `attachment_session_id` on the durable `thread_inputs` row; final execution attachment records are created when the queued input is promoted and the attachment session is processed.
 - Chat and task-thread composers share pending attachment upload behavior: repeated file/screenshot drops append into the current `attachment_session_id`, duplicate browser filenames are preserved with unique pending filenames, and the existing three-files-per-message limit applies across repeated drops.
+- Chat-to-task conversion preserves filenames byte-for-byte, including spaces and `U+202F`; Unicode normalization was not the reported screenshot failure. Attachment publication now copies to a temporary destination file, applies permissions, flushes the inode, atomically renames, synchronizes the destination directory, and only then persists metadata. Batch rollback deletes metadata before files and retains files whenever metadata deletion fails; pending-session sources survive until the batch commits, duplicate destination names are disambiguated, and definitively missing historical metadata is reconciled before task execution.
+- Attachment-bearing runtime-tool and legacy-marker task requests resolve their effective category before creation. Effectively Active requests are persisted as Backlog until conversion succeeds, then activated by original request index rather than title; conversion failure leaves them Backlog. Failure to load Chat attachment metadata aborts task creation instead of being treated as an empty attachment set. Lifecycle diagnostics identify stage, execution/session, source, destination task/path, and error without file contents.
+- The attachment lifecycle behavior is rooted in the configured uploads directory and applies equally to local `$HOME/.openvibely`, `OPENVIBELY_APP_DATA_DIR` overrides, and mounted hosted/Docker storage. Existing broken metadata rows can be removed during definitive-missing reconciliation, but missing file contents cannot be recovered and must be reattached.
 - Task-thread sends made while a task execution is running, including before first assistant output or while initial lifecycle routing/hooks are still running, queue as next-turn input rather than running inline or duplicating messages.
 - Steering rows target an active execution with an `expected_turn_id` guard and use two-phase consumption so failed/cancelled provider steps can recover input.
 - Current merged steering instruction formatting passes through the user's steering text trimmed, without wrapping it in additional “latest user instruction” wording.
