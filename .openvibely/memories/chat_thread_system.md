@@ -4,7 +4,7 @@ type: project
 created: 2026-05-09
 updated: 2026-07-11
 source: after_complete_memory_update
-source_id: 01c7a61dfe44c4f1d95f6010ef604ea0
+source_id: f6abd39beca3f1c4a77f21c8cbe28b61
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -33,7 +33,8 @@ Routes, modes, and runtime actions:
 - `/chat` is the global/project-level orchestrator; the task detail Thread tab is task-specific.
 - `/chat` supports Orchestrate and Plan modes. Plan is read-only and disables marker execution.
 - Canonical chat capabilities live in `internal/chatcontrol/registry.go`.
-- Runtime tools and marker processing are mutually exclusive only after runtime tools are actually injected into a provider-capable request; injected runtime tools set `ProcessMarkers=false`, while runtime-tool-incapable provider/auth paths must keep legacy marker fallback available.
+- Runtime tools and marker processing are mutually exclusive only after runtime tools are actually injected into a provider-capable request; injected runtime tools set `ProcessMarkers=false`, while runtime-tool-incapable provider/auth paths must keep legacy marker fallback available in Orchestrate mode.
+- Plan mode never enables or executes action markers, including when a runtime-tool-incapable mixture aggregator such as Ollama emits a valid mutation marker. Orchestrate and task-thread modes retain marker fallback when native runtime tools are unavailable; concrete Ollama mixture regressions cover both inert Plan markers and functioning Orchestrate markers.
 - Status-marker parsing treats `[STATUS: FAILED | ...]`, `[STATUS: COMPLETE | ...]`, and related markers as terminal control markers only when they are the final standalone non-empty line. Literal marker text in prose, code spans, code fences, bullets, quotes, examples, or lines with trailing explanatory text must not classify an execution as failed/completed.
 - Chat output cleaning preserves status/tool marker text inside inline backtick code spans while stripping real standalone control markers outside inline code.
 - Failed-task history replay and terminal-marker fixes are provider-neutral shared-layer behavior, not provider-specific fixes.
