@@ -352,6 +352,98 @@ func TestSwarmServiceFollowupPlannerApplicationErrorPreservesRetryRouting(t *tes
 	}
 }
 
+func TestSwarmServiceFollowupPlannerRetryReconcilesPartiallyCreatedWorkers(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Resume partial follow-up workers", Prompt: "Build export", MaxWorkers: 3})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+	initialOutput := PlannerOutput{Workers: []PlannerWorker{{Title: "Existing worker", Prompt: "Build existing part", WorkerKind: "backend", Ownership: []string{"internal/existing"}, Isolation: "worktree", Required: true}}}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, initialOutput); err != nil {
+		t.Fatalf("apply initial plan: %v", err)
+	}
+	if err := svc.HandleParentFollowup(ctx, parent.ID, "Add two follow-up components"); err != nil {
+		t.Fatalf("HandleParentFollowup: %v", err)
+	}
+	planner, err = repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("coordinating planner missing: planner=%#v err=%v", planner, err)
+	}
+
+	followupJSON := `{"workers":[{"title":"New worker one","prompt":"Build first new part","worker_kind":"backend","ownership":["internal/newone"],"isolation":"worktree","required":true},{"title":"New worker two","prompt":"Build second new part","worker_kind":"backend","ownership":["internal/newtwo"],"isolation":"worktree","required":true}]}`
+	exec := &models.Execution{TaskID: planner.ID, Status: models.ExecRunning, PromptSent: planner.Prompt}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create follow-up planner execution: %v", err)
+	}
+	if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, followupJSON, "", 0, 1); err != nil {
+		t.Fatalf("complete follow-up planner execution: %v", err)
+	}
+	if err := repo.UpdateStatus(ctx, planner.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("complete planner task: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_second_followup_worker BEFORE INSERT ON tasks WHEN NEW.title = 'New worker two' BEGIN SELECT RAISE(ABORT, 'forced second worker failure'); END`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	if err := svc.applyCompletedPlannerExecution(ctx, planner); err == nil || !strings.Contains(err.Error(), "forced second worker failure") {
+		t.Fatalf("first application error = %v, want forced second worker failure", err)
+	}
+	children, err := repo.ListSwarmChildren(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("list partially created children: %v", err)
+	}
+	if got := countSwarmWorkers(children); got != 2 {
+		t.Fatalf("workers after partial failure = %d, want existing plus first new worker", got)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TRIGGER fail_second_followup_worker`); err != nil {
+		t.Fatalf("drop failure trigger: %v", err)
+	}
+
+	failedPlanner, err := repo.GetByID(ctx, planner.ID)
+	if err != nil || failedPlanner == nil {
+		t.Fatalf("load failed planner: planner=%#v err=%v", failedPlanner, err)
+	}
+	if err := svc.applyCompletedPlannerExecution(ctx, failedPlanner); err != nil {
+		t.Fatalf("retry exact completed follow-up output: %v", err)
+	}
+	children, err = repo.ListSwarmChildren(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("list recovered children: %v", err)
+	}
+	if got := countSwarmWorkers(children); got != 3 {
+		t.Fatalf("workers after retry = %d, want exactly one existing and two planned new workers", got)
+	}
+	titleCounts := map[string]int{}
+	for _, child := range children {
+		if child.SwarmRole == models.SwarmRoleWorker {
+			titleCounts[child.Title]++
+		}
+	}
+	if titleCounts["New worker one"] != 1 || titleCounts["New worker two"] != 1 {
+		t.Fatalf("follow-up workers were not reconciled exactly once: %#v", titleCounts)
+	}
+}
+
+func countSwarmWorkers(children []models.Task) int {
+	count := 0
+	for _, child := range children {
+		if child.SwarmRole == models.SwarmRoleWorker {
+			count++
+		}
+	}
+	return count
+}
+
 func TestSwarmServiceCreateAssignsProjectDefaultModelToChildren(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

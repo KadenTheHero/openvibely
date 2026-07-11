@@ -392,14 +392,22 @@ func (s *SwarmService) applyFollowupPlannerOutput(ctx context.Context, parent *m
 			}
 		}
 	}
+	createdWorkers := followupCreatedWorkers(output, existing, parentCfg.Generation)
+	newWorkerIndex := 0
 	for _, worker := range output.Workers {
 		if strings.TrimSpace(worker.TaskID) == "" {
+			if newWorkerIndex < len(createdWorkers) {
+				affected[createdWorkers[newWorkerIndex].ID] = true
+				newWorkerIndex++
+				continue
+			}
 			maxSeq++
 			created, err := s.createWorkerFromPlan(ctx, parent, worker, parentCfg, maxSeq)
 			if err != nil {
 				return err
 			}
 			affected[created.ID] = true
+			newWorkerIndex++
 			continue
 		}
 		child, ok := workersByID[worker.TaskID]
@@ -1217,10 +1225,41 @@ func validateFollowupPlannerOutput(output PlannerOutput, existing []models.Task,
 			return fmt.Errorf("coordinator referenced unknown worker task %s", worker.TaskID)
 		}
 	}
-	if parentCfg.MaxWorkers > 0 && workerCount+newWorkers > parentCfg.MaxWorkers {
-		return fmt.Errorf("coordinator output would create %d workers, max is %d", workerCount+newWorkers, parentCfg.MaxWorkers)
+	reconciledWorkers := len(followupCreatedWorkers(output, existing, parentCfg.Generation))
+	missingWorkers := max(0, newWorkers-reconciledWorkers)
+	if parentCfg.MaxWorkers > 0 && workerCount+missingWorkers > parentCfg.MaxWorkers {
+		return fmt.Errorf("coordinator output would create %d workers, max is %d", workerCount+missingWorkers, parentCfg.MaxWorkers)
 	}
 	return nil
+}
+
+func followupCreatedWorkers(output PlannerOutput, existing []models.Task, generation int) []models.Task {
+	referencedWorkerIDs := make(map[string]struct{}, len(output.Workers))
+	for _, worker := range output.Workers {
+		if taskID := strings.TrimSpace(worker.TaskID); taskID != "" {
+			referencedWorkerIDs[taskID] = struct{}{}
+		}
+	}
+	workers := make([]models.Task, 0)
+	for _, child := range existing {
+		if child.SwarmRole != models.SwarmRoleWorker {
+			continue
+		}
+		if _, referenced := referencedWorkerIDs[child.ID]; referenced {
+			continue
+		}
+		cfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
+		if cfg.RerunGeneration == generation {
+			workers = append(workers, child)
+		}
+	}
+	sort.SliceStable(workers, func(i, j int) bool {
+		if workers[i].SwarmSequence != workers[j].SwarmSequence {
+			return workers[i].SwarmSequence < workers[j].SwarmSequence
+		}
+		return workers[i].ID < workers[j].ID
+	})
+	return workers
 }
 
 func ParsePlannerOutputJSON(raw string) (PlannerOutput, error) {
