@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -205,6 +206,66 @@ func TestSetupWorktree(t *testing.T) {
 	}
 	if dbTask.WorktreeBranch == "" {
 		t.Error("expected worktree_branch to be set in DB")
+	}
+}
+
+func TestSetupWorktree_ReusesStoredWorktreeWhenBaseNoLongerExists(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	ctx := context.Background()
+	repoDir := createTestGitRepo(t)
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Reuse Stored Worktree",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	wtPath, wtBranch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+	task.MergeTargetBranch = "renamed-or-deleted-base"
+
+	reusedPath, reusedBranch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reusedPath != wtPath || reusedBranch != wtBranch {
+		t.Fatalf("expected stored worktree %q on %q, got %q on %q", wtPath, wtBranch, reusedPath, reusedBranch)
+	}
+}
+
+func TestSetupWorktree_PreservesOperationalBaseVerificationError(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	repoDir := createTestGitRepo(t)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Cancelled Worktree Setup",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: "main",
+	}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, _, err := ws.SetupWorktree(ctx, task, repoDir)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation to be preserved, got %v", err)
+	}
+	if strings.Contains(err.Error(), "create an initial local commit") {
+		t.Fatalf("expected operational error instead of missing-commit guidance, got %v", err)
 	}
 }
 

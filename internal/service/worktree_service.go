@@ -160,11 +160,6 @@ func (ws *WorktreeService) setupWorktree(ctx context.Context, task *models.Task,
 	if baseRef == "" {
 		return "", "", fmt.Errorf("could not resolve base ref for task %s", task.ID)
 	}
-	verifyBase := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "--quiet", baseRef+"^{commit}")
-	verifyBase.Dir = repoDir
-	if err := verifyBase.Run(); err != nil {
-		return "", "", fmt.Errorf("repository has no commit for worktree base %q; create an initial local commit before running coding tasks", baseRef)
-	}
 
 	// If this is a chained task and we couldn't resolve lineage, log a clear error
 	if !continueFromCurrentTarget && task.ParentTaskID != nil && task.BaseCommitSHA != "" && baseRef != task.BaseCommitSHA {
@@ -220,6 +215,21 @@ func (ws *WorktreeService) setupWorktree(ctx context.Context, task *models.Task,
 			return "", "", fmt.Errorf("creating worktree for existing branch: %w: %s", err, string(out))
 		}
 	} else {
+		// Creating a new branch requires a real commit. Existing task branches and
+		// worktrees remain reusable even if their original base was renamed later.
+		verifyBase := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "--quiet", baseRef+"^{commit}")
+		verifyBase.Dir = repoDir
+		out, verifyErr := verifyBase.CombinedOutput()
+		if verifyErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return "", "", fmt.Errorf("verifying worktree base %q: %w", baseRef, ctxErr)
+			}
+			if exitErr, ok := verifyErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 && strings.TrimSpace(string(out)) == "" {
+				return "", "", fmt.Errorf("repository has no commit for worktree base %q; create an initial local commit before running coding tasks", baseRef)
+			}
+			return "", "", fmt.Errorf("verifying worktree base %q: %w: %s", baseRef, verifyErr, strings.TrimSpace(string(out)))
+		}
+
 		// Create new branch from the resolved base ref
 		cmd := exec.Command("git", "worktree", "add", "-b", branchName, worktreePath, baseRef)
 		cmd.Dir = repoDir

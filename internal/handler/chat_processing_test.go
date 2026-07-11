@@ -3189,6 +3189,17 @@ func TestStartChannelTaskRunSetupFailureUsesReplyContext(t *testing.T) {
 		ex.PromptSent = "channel follow-up"
 		ex.IsFollowup = true
 	})
+	queued := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		AgentConfigID:  agent.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		Content:        "queued after channel setup failure",
+		Source:         models.TaskOriginSlack,
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
 
 	var sentChannel, sentThread, sentErr, sentUser string
 	h.SetSlackService(&fakeSlackService{taskCompletionFn: func(_ context.Context, channelID, threadTS, taskTitle, output, errMsg, userID string) {
@@ -3216,6 +3227,10 @@ func TestStartChannelTaskRunSetupFailureUsesReplyContext(t *testing.T) {
 	require.Equal(t, "1710000000.300000", sentThread)
 	require.Contains(t, sentErr, "could not check worktree status")
 	require.Equal(t, "Uimmediate", sentUser)
+	require.Eventually(t, func() bool {
+		stored, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+		return err == nil && stored != nil && stored.InputStatus == models.ThreadInputApplied
+	}, 2*time.Second, 25*time.Millisecond, "queued channel follow-up should be promoted after setup failure")
 }
 
 func TestStartQueuedTaskThreadInputProcessesSavedAttachmentSession(t *testing.T) {
