@@ -655,7 +655,15 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		if remoteBranchSHA != "" {
 			return nil
 		}
-		return s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, remoteBaseSHA, false)
+		if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, remoteBaseSHA, false); err != nil {
+			if !isGitHubRefAlreadyExistsError(err) {
+				return err
+			}
+			if _, refErr := s.githubBranchCommitSHA(ctx, token, repo, branch); refErr != nil {
+				return fmt.Errorf("confirming concurrently created remote publish branch %q: %w", branch, refErr)
+			}
+		}
+		return nil
 	}
 	baseTreeSHA, err := s.githubCommitTreeSHA(ctx, token, repo, remoteBaseSHA)
 	if err != nil {
