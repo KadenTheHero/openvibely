@@ -38,9 +38,7 @@ Storage and runtime-state pitfalls:
 OAuth and hosted deployment facts:
 - Model OAuth initiate/callback resolves absolute app URLs through shared URL-building behavior: `APP_BASE_URL` first, then forwarded/request host fallback.
 - Hosted deployments use `APP_BASE_URL` so Anthropic/OpenAI OAuth redirects stay on the public hostname. Without it, OAuth keeps localhost callback-server behavior for local development.
-- Current Hostinger VPS state as of 2026-06-14: VPS id `1580249`, hostname `srv1580249.hstgr.cloud`, plan `KVM 2`, Ubuntu 24.04 LTS, public IPv4 `2.24.193.101`, public IPv6 `2a02:4780:75:dff5::1`, state `running`.
-- Hostinger Docker Compose projects are managed under `/docker/<project>/docker-compose.yml`.
-- Running projects on that VPS include `agency` (`openvibely/openvibely-agency:latest`, port `3002`), `openvibely` (`openvibely/openvibely:latest`, port `3001`), `openvibely-docs` (`openvibely/openvibely-docs:latest`, port `4173`, `pull_policy: always`, `restart: unless-stopped`, Traefik-routed at `docs.openvibely.ai` with Let's Encrypt TLS), and `httpbin-traefik` (`traefik:latest`). `httpbin` was stopped as of 2026-06-14 and may be unused.
+- Hosted deployments use Docker Compose projects under `/docker/<project>/docker-compose.yml`; the recorded Hostinger deployment routes app and docs containers through Traefik with persistent `/data` storage. Exact host inventory is operational state and should be verified live before acting on it.
 
 Live DB inspection facts:
 - For read-only diagnosis against the live app DB (`$HOME/.openvibely/openvibely.db`), the `tasks` table has no `role` column; swarm role/state live in `swarm_role`, `swarm_status`, `swarm_config`, `swarm_sequence` (plus `parent_task_id`, `category`, `status`, `worktree_path`, `worktree_branch`, `merge_status`). The `executions` table has no `created_at`/`diff` columns; use `started_at`/`completed_at` for timing and `error_message`/`diff_output` for failure text/diff. Run `PRAGMA table_info(<table>)` first when unsure rather than guessing column names.

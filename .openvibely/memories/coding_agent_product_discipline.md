@@ -57,12 +57,7 @@ Release-note preferences:
 - Release-note bullets should use bolded lead labels/sections, following `- **Feature or theme** — Details...`.
 
 Current release boundary:
-- Latest public release boundary is `v0.3.0`, published on 2026-06-24 at `https://github.com/openvibely/openvibely/releases/tag/v0.3.0`.
-- The canonical `v0.3.0` annotated tag object is `0b46d34` and targets commit `bfcc37d` (`Document schedule pause and resume behavior`); `main`/`upstream/main` also pointed at `bfcc37d` after release.
-- The `v0.3.0` public range was `v0.2.0..bfcc37d` with 161 commits. Major themes were OpenAI-compatible provider presets, provider discovery/usage, safer queued follow-ups across web/Slack/Telegram, worker-capacity races, skill analytics, scheduled-task pause/resume/lifecycle controls, mobile/responsive task/chat UX, secret-key handling, and worktree/rebase improvements.
-- The published `v0.3.0` GitHub release body uses the user's preferred bold lead-label release-note style and explicitly highlights 34 OpenAI-compatible provider presets plus 6 local/self-hosted presets.
-- The `v0.3.0` GitHub release published eight assets: two macOS desktop `.app.zip` bundles, four darwin/linux server tarballs, one Windows server zip, and `SHA256SUMS`. No Windows desktop-cli asset was published because `mingw-w64` / `x86_64-w64-mingw32-gcc` was unavailable on the release host.
-- Docker image `openvibely/openvibely:0.3.0` was not published during the GitHub release because Docker Hub credentials were unavailable; the release body marks Docker publishing as pending.
-- Previous release boundary `v0.2.0` was published on 2026-06-07. Its canonical tag was force-moved to commit `13189db` after publication so the macOS app-bundle zip fix was included; live `v0.2.0` macOS zips extract to `OpenVibely.app/`.
-- Known release-build pitfalls: dry-run macOS bundle filesystem leakage, missing Windows cross-compiler, preserving `OpenVibely.app` in macOS zips, avoiding managed worktree cleanup paths for real builds, and preferring script-default or absolute dist paths when running release-build steps.
-
+- Latest recorded public release is `v0.3.0` (2026-06-24): `https://github.com/openvibely/openvibely/releases/tag/v0.3.0`. Its canonical annotated tag targets commit `bfcc37d`.
+- Major `v0.3.0` themes were OpenAI-compatible provider presets, provider discovery/usage, safer queued follow-ups, worker-capacity reliability, skill analytics, schedule lifecycle controls, responsive task/chat UX, secret handling, and worktree/rebase improvements.
+- Release artifacts cover macOS desktop bundles and darwin/linux/Windows server archives with checksums. Windows desktop packaging requires a MinGW cross-compiler; Docker publishing remains pending when credentials are unavailable.
+- Known release-build pitfalls include dry-run macOS bundle filesystem leakage, preserving `OpenVibely.app` as the zip root, avoiding managed worktree cleanup paths for real builds, and using script-default or absolute dist paths.
