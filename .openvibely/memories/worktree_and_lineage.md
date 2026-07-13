@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-07-11
-source: consolidation
-source_id: memory_consolidation_2026_07_11
+updated: 2026-07-13
+source: after_complete_memory_update
+source_id: 5b9e5aa8290c9b3717453f19bc573984
 confidence: high
 title: Worktree and Lineage
 ---
@@ -18,6 +18,7 @@ Durable worktree model:
 - Task Changes local actions include merge commit, fast-forward only, squash merge, and rebase onto the task's target/default branch when the task branch is behind and no active merge/conflict state is present.
 - Changes-tab rebase runs against the task worktree, refreshes the Changes partial on success/already-up-to-date/conflict result, and treats already-up-to-date as an informational success.
 - `LLMService.ExecuteTaskWithAgent` creates the worktree before execution, runs startup sync from the latest target/default branch when the worktree is clean, and handles post-execution merge.
+- Startup sync is a real `git merge --no-edit <target>` inside the task worktree before execution, including task-thread follow-ups. On content conflict it detects conflicted paths, aborts the merge, and persists `MergeStatusConflict`. Initial task execution still fails before model dispatch, but follow-up execution now continues in the preserved clean worktree with model-visible recovery context; clearing the database flag alone cannot prevent the same conflict from recurring.
 - Startup sync uses the task's `MergeTargetBranch` when set, falling back to branch detection only when no target is stored. Without a target it prefers a local `main` branch, then `GetDefaultBranch`; `GetDefaultBranch` uses `origin/HEAD` for branch-name detection, then local `main`, then local `master`, then hardcoded `main`; `upstream/HEAD` is not consulted.
 - Startup sync treats the selected local branch as the source of truth by default; merely having `origin/<branch>` must not cause a fetch, merge, or rebase from that remote-tracking branch. Remote startup sync should only exist behind an explicit user/admin opt-in policy.
 - In repos with local `master` and no local `main`, startup sync should use local `master` when default-branch detection resolves to it. Current caveat: if `origin/HEAD` points to `main` while only local `master` exists, branch-name detection may choose absent `main` and worktree creation/startup merge can fail.
@@ -44,13 +45,17 @@ Follow-up lineage direction:
 - Historical original task branches are read-only lineage when their work has already been merged, conflict-aborted, or made stale by squash/duplicate acceptance.
 - Follow-up execution continues from the current merge target on fresh `task/<id>-followup-*` lineage when the old branch is stale.
 - Active follow-up worktrees remain the task's current lineage; dirty/local follow-up work is reused.
+- Startup-conflict recovery for task follow-ups is implemented: safely aborted startup merge content conflicts are represented by typed `StartupSyncConflictError` values carrying the target branch, task branch, worktree path, and conflicted files. The follow-up handler no longer depends on terminal task status, so reactivated `running` tasks continue in the preserved clean worktree and the coding agent receives instructions to merge, resolve, build, test, and commit before handling the follow-up. Failed merge aborts, dirty worktrees, missing branches, setup failures, and non-conflict Git errors remain fatal. Regression coverage reproduces the post-reactivation status ordering and verifies provider-visible conflict context.
 
 Merge and metadata direction:
 - Manual merge conflicts from `/tasks/:id/worktree/merge` are handled results, not ordinary request failures.
 - Changes-tab rebase conflicts are handled by aborting the rebase and surfacing guidance; because no rebase remains in progress after abort, the task should not be left in `MergeStatusConflict` solely from that aborted rebase.
+- Current known fast-forward defect: `fastForwardTaskWorktreeToTarget` unconditionally runs `git rebase <target>` before advancing the target, even when the target is already an ancestor of the task branch. For a task branch containing a merge commit, this can replay old commits, produce a false conflict, abort back to an otherwise mergeable branch, and persist `MergeStatusConflict`. The fast-forward path should short-circuit the rebase when ancestry already permits `--ff-only`.
 - Local merges do not use a blanket dirty-target guard; dirty-but-non-overlapping target checkout changes are allowed.
 - Git overwrite/refusal cases without unmerged files surface as merge failures rather than conflict-resolution states.
 - Changes-tab and local merge handlers revalidate stale `merge_status` and recover conventional worktree metadata before hiding or rejecting merge actions.
+- A conflict-resolution commit made directly in a task worktree does not itself clear the task's persisted `MergeStatusConflict`; while that status remains, the Changes UI hides local merge actions. The task must be resumed/rerun in its owning project or otherwise pass through explicit merge-status reconciliation before the option reappears. Task controls are project-scoped, so an agent running under another project cannot perform that rerun.
+- Local worktree commits are not automatically remote publication: verify the configured remote and compare its task-branch tip before claiming a fix is available outside the local app/worktree.
 - A task branch is already merged only when the task branch is fully reachable from the target.
 - Direct task-detail renders with `?tab=changes` hit the same Changes-tab recovery path as lazy tab loads.
 - Current non-blocking consistency gap: direct `/tasks/:id/changes/file` lazy-file requests do not recover stale worktree metadata before resolving diff output; normal UI flow runs `/tasks/:id/changes` first.
