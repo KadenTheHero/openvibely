@@ -2,9 +2,9 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-07-12
+updated: 2026-07-13
 source: after_complete_memory_update
-source_id: 705f4d86b2027695260deabffda1b642:684ddd2b57b2dfb5
+source_id: 6f85748e80503b1cdfb3df2c888fcdef:4dd00f1b707f2a58
 confidence: high
 title: Integrations and Channels
 ---
@@ -45,7 +45,7 @@ Outbound target facts:
 
 GitHub facts:
 - Shared GitHub paginated JSON reads in `internal/service/github_service.go` cover PR issue comments, reviews, review comments, assigned issues, and issue-to-PR cross-reference lookup. They own authenticated headers, API-error decoding, same-origin `Link` traversal, and cycle prevention; later-page errors fail the whole read rather than returning partial results, while endpoint callers retain mapping, filtering, and feedback sorting.
-- GitHub issue #17 tracks a focused latency optimization for `ListPullRequestFeedback`: issue comments, reviews, and review comments are independent GitHub API sources but are currently fetched serially. The proposed bounded change runs the three requests concurrently and validates the improvement with deterministic delayed handlers; this is separate from issue #9's pagination work and issue #8's blob-upload fan-out.
+- `ListPullRequestFeedback` fetches PR issue comments, reviews, and review comments concurrently using one shared cancellable context and exactly three source goroutines. Each source retains independent pagination; empty reviews remain filtered; successful results are merged in fixed source order and stably sorted by `CreatedAt`; the first source error cancels outstanding requests and returns no partial feedback. Deterministic gate tests prove all three sources overlap with peak concurrency no greater than three, a paginated source continues after the other source chains finish, and blocked siblings observe cancellation. GitHub issue #17 was completed on 2026-07-13 in PR #21 (`https://github.com/openvibely/openvibely/pull/21`); focused normal/race tests, full service tests, `go build ./...`, full `go test ./...`, a strict read-only audit, and live PR blob comparison all passed.
 - The scheduled GitHub Dev Inbox treats assignment to the PAT owner or a configured GitHub Authorized User as approval to begin implementation; it does not require an `approved` label or an existing PR. It skips closed, duplicate, explicitly blocked/non-actionable, unexpectedly assigned, and already-active issues, and maintains one visible implementation task per actionable issue.
 - The Dev Inbox orchestrator forwards authorized feedback from linked PRs before polling assigned issues and must not carry its own persisted task goal. Persisted completion goals belong on dispatched implementation tasks and continue through code changes, relevant build/tests, and opening or reusing the issue-linked PR.
 - Default/recommended auth mode is PAT (`github_auth_mode=pat`) for local/self-hosted OSS installs.

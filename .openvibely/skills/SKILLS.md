@@ -23,7 +23,7 @@ always_use:
 
 ## openvibely_cancellation_workflow
 
-[OpenVibely Cancellation Workflow](openvibely_cancellation_workflow/SKILL.md) — Audit and implement reliable cancellation for OpenVibely tasks, threads, Chat, tools, hooks, and streaming providers.
+[OpenVibely Cancellation Workflow](openvibely_cancellation_workflow/SKILL.md) — Audit and implement reliable cancellation for OpenVibely tasks, threads, Chat, tools, hooks, streaming providers, and fixed source fan-out.
 
 ## openvibely_htmx_templ_ui_workflow
 
