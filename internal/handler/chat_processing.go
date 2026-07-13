@@ -2055,9 +2055,10 @@ func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task)
 	}
 
 	if syncErr := h.worktreeSvc.SyncWorktreeFromMainAtStart(ctx, task, repoDir); syncErr != nil {
-		if models.IsTerminalStatus(task.Status) && strings.Contains(syncErr.Error(), "startup auto-merge conflict") {
-			applog.Infof("[handler] resolveWorktreeWorkDir startup worktree sync conflict for terminal task follow-up %s, continuing in preserved worktree: %v", task.ID, syncErr)
-			return wtPath, buildStartupSyncConflictContext(task, syncErr), nil
+		var conflictErr *service.StartupSyncConflictError
+		if errors.As(syncErr, &conflictErr) {
+			applog.Infof("[handler] resolveWorktreeWorkDir startup worktree sync conflict for task follow-up %s, continuing in preserved worktree: %v", task.ID, syncErr)
+			return wtPath, buildStartupSyncConflictContext(conflictErr), nil
 		}
 		applog.Infof("[handler] resolveWorktreeWorkDir startup worktree sync failed for task %s: %v", task.ID, syncErr)
 		return "", "", syncErr
@@ -3627,15 +3628,11 @@ func buildThreadSystemContext(taskTitle string, hasHistory bool, attachmentConte
 //
 // This standardized context combining ensures consistent formatting across chat
 // and task follow-up scenarios.
-func buildStartupSyncConflictContext(task *models.Task, syncErr error) string {
-	if task == nil || syncErr == nil {
+func buildStartupSyncConflictContext(conflict *service.StartupSyncConflictError) string {
+	if conflict == nil {
 		return ""
 	}
-	targetBranch := task.MergeTargetBranch
-	if targetBranch == "" {
-		targetBranch = "the target branch"
-	}
-	return fmt.Sprintf("# Worktree Sync Warning\n\nStartup sync could not merge %s into this task worktree because Git reported a conflict. The merge was aborted before this turn started, so the worktree is clean but may be behind or diverged from %s. Inspect the current branch and reconcile against %s before making or finalizing code changes. Sync error: %v", targetBranch, targetBranch, targetBranch, syncErr)
+	return fmt.Sprintf("# Worktree Sync Warning\n\nStartup sync could not merge %s into %s because Git reported conflicts in: %s. The merge was aborted before this turn started, so the preserved worktree is clean but may be behind or diverged from %s. Before handling the follow-up, run the merge in %s, resolve the conflicts while preserving both the task changes and current target changes, then build, test, and commit the resolution. Sync error: %v", conflict.TargetBranch, conflict.TaskBranch, strings.Join(conflict.ConflictFiles, ", "), conflict.TargetBranch, conflict.WorktreePath, conflict)
 }
 
 func combineContexts(taskContext, attachmentContext string) string {

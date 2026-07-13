@@ -417,6 +417,19 @@ func (ws *WorktreeService) clearStaleConflictStatusIfClean(ctx context.Context, 
 	applog.Infof("[worktree] cleared stale conflict status for task %s after clean aborted merge state", task.ID)
 }
 
+// StartupSyncConflictError reports a startup merge conflict that Git aborted
+// successfully, leaving the task worktree safe for the follow-up agent to use.
+type StartupSyncConflictError struct {
+	TargetBranch  string
+	TaskBranch    string
+	WorktreePath  string
+	ConflictFiles []string
+}
+
+func (e *StartupSyncConflictError) Error() string {
+	return fmt.Sprintf("startup auto-merge conflict while merging %s into %s (conflicts: %s); merge was aborted. Resolve conflicts in %s and rerun the task", e.TargetBranch, e.TaskBranch, strings.Join(e.ConflictFiles, ", "), e.WorktreePath)
+}
+
 // SyncWorktreeFromMainAtStart updates a task branch with the latest local
 // merge target/default branch before task execution begins. It only runs when
 // the worktree is clean and does not implicitly fetch or merge remote branches.
@@ -479,12 +492,19 @@ func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task
 			if ws.taskRepo != nil {
 				_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
 			}
-			action := fmt.Sprintf("startup auto-merge conflict while merging %s into %s (conflicts: %s); merge was aborted. Resolve conflicts in %s and rerun the task", mergeSource, currentBranch, strings.Join(conflictFiles, ", "), task.WorktreePath)
-			if abortErr != nil {
-				action = fmt.Sprintf("%s; additionally, git merge --abort failed: %v", action, abortErr)
+			conflictErr := &StartupSyncConflictError{
+				TargetBranch:  mergeSource,
+				TaskBranch:    currentBranch,
+				WorktreePath:  task.WorktreePath,
+				ConflictFiles: append([]string(nil), conflictFiles...),
 			}
-			applog.Infof("[worktree] startup auto-merge failed task=%s reason=conflict details=%s", task.ID, action)
-			return fmt.Errorf("%s", action)
+			if abortErr != nil {
+				err := fmt.Errorf("%s; additionally, git merge --abort failed: %v", conflictErr, abortErr)
+				applog.Infof("[worktree] startup auto-merge failed task=%s reason=conflict details=%s", task.ID, err)
+				return err
+			}
+			applog.Infof("[worktree] startup auto-merge failed task=%s reason=conflict details=%s", task.ID, conflictErr)
+			return conflictErr
 		}
 
 		if ws.taskRepo != nil {

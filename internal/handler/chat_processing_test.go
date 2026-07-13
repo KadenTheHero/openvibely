@@ -4254,7 +4254,7 @@ func TestProcessStreamingResponse_TaskFollowupIgnoresStatusMarkerMentionInProse(
 	}
 }
 
-func TestResolveWorktreeWorkDir_TerminalUnmergedConflictContinuesInPreservedWorktree(t *testing.T) {
+func TestResolveWorktreeWorkDir_ReactivatedConflictContinuesInPreservedWorktree(t *testing.T) {
 	h, _, _ := setupTestHandler(t)
 	ctx := context.Background()
 
@@ -4266,7 +4266,7 @@ func TestResolveWorktreeWorkDir_TerminalUnmergedConflictContinuesInPreservedWork
 
 	task := createTask(t, h, project.ID, "Terminal unmerged conflict followup", func(tk *models.Task) {
 		tk.Category = models.CategoryBacklog
-		tk.Status = models.StatusFailed
+		tk.Status = models.StatusRunning
 		tk.MergeStatus = models.MergeStatusPending
 	})
 
@@ -4336,7 +4336,7 @@ func TestResolveWorktreeWorkDir_TerminalUnmergedConflictContinuesInPreservedWork
 	}
 }
 
-func TestProcessStreamingResponse_TerminalSyncConflictIncludesWorktreeWarningContext(t *testing.T) {
+func TestProcessStreamingResponse_ReactivatedSyncConflictIncludesWorktreeWarningContext(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4355,7 +4355,7 @@ func TestProcessStreamingResponse_TerminalSyncConflictIncludesWorktreeWarningCon
 	agent := createAgent(t, llmConfigRepo)
 	task := createTask(t, h, project.ID, "Terminal conflict prompt context", func(tk *models.Task) {
 		tk.Category = models.CategoryBacklog
-		tk.Status = models.StatusFailed
+		tk.Status = models.StatusRunning
 		tk.MergeStatus = models.MergeStatusPending
 		tk.AgentID = &agent.ID
 	})
@@ -4416,7 +4416,7 @@ func TestProcessStreamingResponse_TerminalSyncConflictIncludesWorktreeWarningCon
 	if !strings.Contains(request.ChatSystemContext, "Startup sync could not merge") {
 		t.Fatalf("expected provider system context to include startup sync warning, got %q", request.ChatSystemContext)
 	}
-	if !strings.Contains(request.ChatSystemContext, "merge was aborted") || !strings.Contains(request.ChatSystemContext, "Inspect the current branch") {
+	if !strings.Contains(request.ChatSystemContext, "merge was aborted") || !strings.Contains(request.ChatSystemContext, "run the merge") || !strings.Contains(request.ChatSystemContext, "build, test, and commit") {
 		t.Fatalf("expected provider system context to tell agent how to recover, got %q", request.ChatSystemContext)
 	}
 }

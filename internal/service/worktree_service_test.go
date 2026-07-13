@@ -479,8 +479,15 @@ func TestSyncWorktreeFromMainAtStart_ConflictFailsGracefully(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected startup auto-merge conflict error")
 	}
-	if !strings.Contains(err.Error(), "startup auto-merge conflict") {
-		t.Fatalf("expected actionable startup auto-merge conflict error, got: %v", err)
+	var conflictErr *StartupSyncConflictError
+	if !errors.As(err, &conflictErr) {
+		t.Fatalf("expected typed startup auto-merge conflict error, got: %T %v", err, err)
+	}
+	if conflictErr.TargetBranch != defaultBranch || conflictErr.TaskBranch != wtBranch || conflictErr.WorktreePath != wtPath {
+		t.Fatalf("unexpected startup conflict details: %+v", conflictErr)
+	}
+	if len(conflictErr.ConflictFiles) != 1 || conflictErr.ConflictFiles[0] != "README.md" {
+		t.Fatalf("expected README.md conflict, got %v", conflictErr.ConflictFiles)
 	}
 
 	dbTask, err := taskRepo.GetByID(ctx, task.ID)
