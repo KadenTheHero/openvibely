@@ -72,18 +72,35 @@ NOTES_FILE="${DIST_DIR}/RELEASE_NOTES.md"
 [[ -f "$NOTES_FILE" ]] || fail "RELEASE_NOTES.md not found in $DIST_DIR. Run release-notes.sh first."
 
 SUMS_FILE="${DIST_DIR}/SHA256SUMS"
-[[ -f "$SUMS_FILE" ]] || fail "SHA256SUMS not found in $DIST_DIR. Run release-build.sh first."
+if [[ ! -f "$SUMS_FILE" ]]; then
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        warn "SHA256SUMS not present because this is a non-writing dry run; using the planned path."
+    else
+        fail "SHA256SUMS not found in $DIST_DIR. Run release-build.sh first."
+    fi
+fi
 
 ###############################################################################
 # 2. GitHub CLI authentication
 ###############################################################################
 
-command -v gh &>/dev/null || fail "GitHub CLI (gh) not found. Install: https://cli.github.com"
-gh auth status &>/dev/null || fail "GitHub CLI not authenticated. Run: gh auth login"
-log "GitHub auth: OK"
+if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    if command -v gh &>/dev/null; then
+        log "GitHub CLI present for dry-run release rehearsal."
+    else
+        warn "GitHub CLI not found; continuing non-publishing dry run."
+    fi
+else
+    command -v gh &>/dev/null || fail "GitHub CLI (gh) not found. Install: https://cli.github.com"
+    gh auth status &>/dev/null || fail "GitHub CLI not authenticated. Run: gh auth login"
+    log "GitHub auth: OK"
+fi
 
-# Check tag does not exist remotely
-REMOTE_RELEASE="$(gh api "repos/{owner}/{repo}/releases/tags/${TAG}" --jq '.tag_name' 2>/dev/null || true)"
+# Check tag does not exist remotely when authenticated. Local collision is checked below.
+REMOTE_RELEASE=""
+if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
+    REMOTE_RELEASE="$(gh api "repos/{owner}/{repo}/releases/tags/${TAG}" --jq '.tag_name' 2>/dev/null || true)"
+fi
 if [[ "$REMOTE_RELEASE" == "$TAG" ]]; then
     fail "GitHub release '$TAG' already exists. Delete it first or use a different version."
 fi
@@ -142,6 +159,25 @@ ARTIFACTS=()
 while IFS= read -r file; do
     ARTIFACTS+=("$file")
 done < <(find "$DIST_DIR" -maxdepth 1 \( -name "*.zip" -o -name "*.tar.gz" \) | sort)
+
+if [[ ${#ARTIFACTS[@]} -eq 0 && "${DRY_RUN:-0}" == "1" ]]; then
+    ARTIFACTS+=(
+        "${DIST_DIR}/openvibely_${VERSION}_darwin_amd64_server.tar.gz"
+        "${DIST_DIR}/openvibely_${VERSION}_darwin_arm64_server.tar.gz"
+        "${DIST_DIR}/openvibely_${VERSION}_linux_amd64_server.tar.gz"
+        "${DIST_DIR}/openvibely_${VERSION}_linux_arm64_server.tar.gz"
+        "${DIST_DIR}/openvibely_${VERSION}_windows_amd64_server.zip"
+    )
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        ARTIFACTS+=(
+            "${DIST_DIR}/OpenVibely_${VERSION}_darwin_amd64.app.zip"
+            "${DIST_DIR}/OpenVibely_${VERSION}_darwin_arm64.app.zip"
+        )
+    fi
+    if command -v x86_64-w64-mingw32-gcc &>/dev/null; then
+        ARTIFACTS+=("${DIST_DIR}/openvibely_${VERSION}_windows_amd64_desktop-cli.zip")
+    fi
+fi
 
 ARTIFACTS+=("$SUMS_FILE")
 

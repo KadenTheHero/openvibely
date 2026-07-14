@@ -4,7 +4,7 @@ The only recursive self-improvement command center for software teams.
 
 OpenVibely turns one Chat into the control plane for your entire AI development workflow. Describe a goal once, then let it fan out into parallel task sessions, live agent execution, reviewable diffs, scheduled follow-ups, and durable project learning.
 
-Agents do the work. You stays in command. Inspect any thread, review any diff, steer any task, and keep the whole plan moving from the original conversation.
+Agents do the work. You stay in command. Inspect any thread, review any diff, steer any task, and keep the whole plan moving from the original conversation.
 
 Goal loops drive unfinished work forward. Memory Curator preserves project context. Skill Curator turns completed tasks into sharper reusable workflows. Every run can make the next one better, while your team stays in control.
 
@@ -33,13 +33,13 @@ Useful starting points:
 | Project workspaces | Keep repository context, model defaults, worker limits, schedules, memory, insights, and integrations tied to a real codebase. |
 | Chat-first planning | Explore fuzzy ideas, attach context, create tasks, and orchestrate work from a project-aware conversation. |
 | Task board execution | Queue coding work, stream progress, inspect logs and threads, review changed files, and decide what ships. |
-| Reviewable changes | Use isolated Git worktrees and GitHub integration so AI output becomes visible diffs and pull requests rather than hidden edits. |
+| Reviewable changes | Use isolated Git worktrees and GitHub issue-to-PR workflows so AI output becomes visible diffs, pull requests, and review follow-ups rather than hidden edits. |
 | Reusable agents | Capture system prompts, personalities, tools, skills, plugins, permissions, routing hints, and lifecycle behavior as reusable worker profiles. |
 | Memory curation | Autonomously create, recall, update, and consolidate durable project memory so repeated context does not have to be re-explained. |
 | Skill curation | Learn from completed work and improve reusable standalone or agent-owned skills for future tasks. |
-| Automation | Schedule recurring work, chain dependent tasks, and run structured multi-agent workflows from the app. |
-| External channels | Create and monitor work through Slack, Telegram, GitHub, inbound webhooks, and the REST API. |
-| Model providers | Run with Anthropic, OpenAI, Ollama, or OpenAI-compatible Chat Completions providers through UI-managed model configs, defaults, and auth options. |
+| Automation | Schedule recurring work, chain dependent tasks, and split complex goals into planner, worker, reviewer, and merger swarm tasks. |
+| External channels | Create, monitor, and proactively message through Slack, Telegram, Discord, Email, GitHub, inbound webhooks, and the REST API. |
+| Model providers | Run with Anthropic, OpenAI, Ollama, OpenAI-compatible Chat Completions providers, or Mixture of Models virtual configs that combine reference models through an aggregator. |
 | Operations footprint | Self-host a single Go binary with SQLite by default, plus optional Docker/VPS and desktop modes. |
 | Visibility and control | Use live status, execution logs, thread history, changed files, review comments, alerts, and insights to keep AI work auditable. |
 
@@ -98,8 +98,9 @@ The published documentation at <a href="https://docs.openvibely.ai" target="_bla
 
 In-repo user guides are also available in [`docs/user-guides.md`](./docs/user-guides.md), including:
 
-- Channels: Slack, Telegram, GitHub
+- Channels: Slack, Telegram, Discord, Email, GitHub, and outbound message targets
 - Pages: Project Setup, Models, Agents, Workers, Tasks, Chat, Schedule
+- Automation: swarm tasks and the GitHub autonomous SDLC loop
 
 ## API and Swagger
 
