@@ -999,12 +999,11 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		s.publishExecutionTerminal(exec.ID, models.ExecCompleted, "")
 	}
 
-	// Capture git diff of changes made during execution
+	// Capture git diff of changes made during execution. Only a worktree
+	// successfully established for this execution may use target-relative review
+	// capture; persisted task metadata can refer to stale historical lineage.
 	if workDir != "" {
-		// For worktree tasks, capture the diff between the current worktree
-		// state and its explicit review target. Branch metadata may temporarily
-		// lag the checked-out lineage, so the live worktree is authoritative.
-		if task.WorktreePath != "" {
+		if managedWorktree {
 			diffOutput := s.captureWorktreeDiffAfterExecution(finalizeCtx, exec, &task, repoDir, output, agent)
 			if diffOutput != "" {
 				exec.DiffOutput = diffOutput
@@ -1020,8 +1019,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		}
 	}
 
-	// Handle worktree post-execution (auto-merge, status updates)
-	if s.worktreeSvc != nil && task.WorktreePath != "" && repoDir != "" {
+	// Commit, merge, and update worktree status only for the managed worktree
+	// established for this execution, never from retained task metadata alone.
+	if managedWorktree && s.worktreeSvc != nil && repoDir != "" {
 		s.worktreeSvc.HandlePostExecution(finalizeCtx, &task, repoDir)
 	}
 

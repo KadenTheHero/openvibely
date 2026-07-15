@@ -57,6 +57,23 @@ type fileWritingLLMCaller struct {
 	workDir  string
 }
 
+type completionPathWritingLLMCaller struct {
+	fileName string
+	content  string
+	workDir  string
+}
+
+func (c *completionPathWritingLLMCaller) CallModel(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
+	if strings.HasPrefix(prompt, "Write one concise git commit subject") {
+		return "Update stale fixture", "Update stale fixture", 1, nil
+	}
+	c.workDir = workDir
+	if err := os.WriteFile(filepath.Join(workDir, c.fileName), []byte(c.content), 0644); err != nil {
+		return "", "", 0, err
+	}
+	return "changed files\n[STATUS: SUCCESS]", "changed files\n[STATUS: SUCCESS]", 10, nil
+}
+
 func (c *fileWritingLLMCaller) CallModel(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
 	c.workDir = workDir
 	if err := os.WriteFile(filepath.Join(workDir, c.fileName), []byte(c.content), 0644); err != nil {
@@ -2432,6 +2449,96 @@ func TestLLMService_ExecuteTask_GitWorktreeIsolation(t *testing.T) {
 				t.Fatalf("test repository should have no remote, output=%q err=%v", remotes, remoteErr)
 			}
 		})
+	}
+}
+
+func TestLLMService_ExecuteTask_DirectCheckoutCompletionIgnoresStaleWorktreeMetadata(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	repoPath := createTestGitRepo(t)
+	staleWorktreePath := filepath.Join(t.TempDir(), "stale-worktree")
+	runGitTest(t, repoPath, "worktree", "add", "-b", "task/stale-completion", staleWorktreePath, "main")
+	if err := os.WriteFile(filepath.Join(staleWorktreePath, "stale.txt"), []byte("stale worktree change\n"), 0644); err != nil {
+		t.Fatalf("write stale worktree change: %v", err)
+	}
+	staleHead := runGitTest(t, staleWorktreePath, "rev-parse", "HEAD")
+
+	project := &models.Project{Name: "Direct Checkout Repo", RepoPath: repoPath}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agentRepo := repository.NewAgentRepo(db)
+	agentDef := &models.Agent{
+		Name:         "Direct Checkout Agent",
+		SystemPrompt: "Edit the project checkout directly",
+		Model:        "inherit",
+		ToolConfig: models.AgentToolConfig{
+			DisableRuntimeWorktree: true,
+		},
+	}
+	if err := agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = models.ProviderTest
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Direct checkout completion",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		Prompt:            "Update README in the project checkout.",
+		AgentDefinitionID: &agentDef.ID,
+		WorktreePath:      staleWorktreePath,
+		WorktreeBranch:    "task/stale-completion",
+		MergeTargetBranch: "main",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	beforeTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task before execution: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetAgentRepo(agentRepo)
+	svc.SetWorktreeService(NewWorktreeService(taskRepo, projectRepo, settingsRepo))
+	caller := &completionPathWritingLLMCaller{fileName: "README.md", content: "# Direct checkout completion\n"}
+	svc.SetLLMCaller(caller)
+
+	execution, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if caller.workDir != repoPath {
+		t.Fatalf("expected direct project checkout workdir %q, got %q", repoPath, caller.workDir)
+	}
+	if !strings.Contains(execution.DiffOutput, "+# Direct checkout completion") {
+		t.Fatalf("expected completed execution to persist the direct-checkout HEAD diff, got:\n%s", execution.DiffOutput)
+	}
+	if strings.Contains(execution.DiffOutput, "stale.txt") || strings.Contains(execution.DiffOutput, "stale worktree change") {
+		t.Fatalf("completed execution must not persist stale worktree changes, got:\n%s", execution.DiffOutput)
+	}
+	if got := runGitTest(t, staleWorktreePath, "rev-parse", "HEAD"); got != staleHead {
+		t.Fatalf("completion committed stale worktree: HEAD changed from %s to %s", staleHead, got)
+	}
+	if got := runGitTest(t, staleWorktreePath, "status", "--porcelain"); got != "?? stale.txt" {
+		t.Fatalf("expected stale worktree to remain untouched and dirty, got status %q", got)
+	}
+	afterTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task after execution: %v", err)
+	}
+	if afterTask.MergeStatus != beforeTask.MergeStatus {
+		t.Fatalf("direct-checkout completion changed stale worktree merge status from %q to %q", beforeTask.MergeStatus, afterTask.MergeStatus)
 	}
 }
 
