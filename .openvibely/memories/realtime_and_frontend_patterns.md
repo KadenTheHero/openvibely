@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-07-10
+updated: 2026-07-13
 source: consolidation
-source_id: memory_consolidation_2026_07_10
+source_id: memory_consolidation_2026_07_13
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -88,8 +88,7 @@ Responsive and shared UI contracts:
 - Models create/edit API key fields and channel secret/API key/token fields use a shared masked secret-input templ pattern with an eye/reveal toggle. Saved model API keys may be rendered into card data and loaded into masked edit fields; hidden submit fields stay blank when unchanged so saves preserve existing keys.
 - Reused modal/dialog DOM must reset unsaved draft edits and revealed secrets back to saved/masked state, including eye icon and `aria-pressed` state, before reopening Models, GitHub, Slack, Telegram, Discord, Email, and inbound webhook secret dialogs. GitHub private-key textarea reveal controls need top-aligned focus/active handling separate from centered one-line toggles.
 - Project-scoped settings pages preserve active project via the `project_id` URL query. Models create/edit forms should keep `project_id` on HTMX and native fallback submit URLs.
-- Models page model mutations (create, edit, set-default, delete, delete-with-reassign) must derive their request URL from the live `#project-selector.value` first, falling back to `window.location.search` only if that is empty, via a shared `modelMutationURL()` helper in `models.templ`. Building mutation URLs from `window.location.search` alone, or issuing project-less mutation URLs for some actions, caused the active project selector and URL query to diverge and the UI to fall back to the Default project after a model mutation (fixed 2026-07-02).
-- The Models-page project-context fix also had to cover OAuth model connect flows, which are a separate mutation path from the `modelMutationURL()` HTMX actions: `launchOAuthInSystemBrowser` and manual OAuth completion in `models.templ` route through `modelMutationURL()` too, and the backend `oauthPendingFlow` struct in `oauth_handler.go` stores a `ProjectID` field so `OAuthInitiate` and the OAuth callback/return-link handlers (including provider-error callbacks) can rebuild a project-scoped `/models?project_id=...` return URL via `modelsReturnURL`/`modelsReturnURLFromRequest` instead of dropping back to a project-less Models route (fixed 2026-07-02). An initial audit-only review pass missed this OAuth path; it was only found on a second audit pass, confirming OAuth/connect-style redirect flows need explicit checking whenever project-context mutation bugs are fixed elsewhere on a page.
+- Models-page mutations must preserve active project context. Create, edit, set-default, delete, delete-with-reassign, and OAuth connect/completion paths derive URLs from the live `#project-selector.value` before falling back to `window.location.search`; OAuth pending-flow state persists `ProjectID` so success and provider-error callbacks return to `/models?project_id=...` rather than the Default project.
 - Models create/edit reuses one modal over `agent_configs`: create mode submits blank identity with create semantics, while edit mode must carry the existing `model_config_id` and use update semantics so saving settings changes cannot insert a duplicate model row.
 - Card search pages use a shared `data-card-search` helper that persists and reapplies active filters after HTMX swaps. Pages that bypass HTMX with direct fragment replacement, such as Skills create/edit/import/toggle flows and Agents delete, must call the shared `window.refreshCardSearches` hook after swapping card containers so active filters immediately include or exclude updated cards without a full page refresh.
 - Channels searchable-card consistency depends on core Telegram, GitHub, Slack, Discord, Email, and inbound webhook create/update/delete/rotate-secret HTMX success paths using an in-place `channels-refresh` reload of `#channels-container`, so the shared card-search helper reapplies active filters without a full page refresh. Because that refresh re-executes the Channels inline script, top-level Webhook modal state such as `webhookAvailableAgents`, `selectedWebhookAgentIDs`, and `activeWebhookSection` must remain redeclarable `var` state rather than top-level `let`.

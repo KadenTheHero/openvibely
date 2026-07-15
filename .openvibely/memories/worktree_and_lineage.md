@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-07-13
-source: after_complete_memory_update
-source_id: 5b9e5aa8290c9b3717453f19bc573984
+updated: 2026-07-15
+source: task_implementation
+source_id: 8e78b32b6041b25fff4830ea3c073c05:54e8d34ca5f23f09
 confidence: high
 title: Worktree and Lineage
 ---
@@ -23,9 +23,12 @@ Durable worktree model:
 - Startup sync treats the selected local branch as the source of truth by default; merely having `origin/<branch>` must not cause a fetch, merge, or rebase from that remote-tracking branch. Remote startup sync should only exist behind an explicit user/admin opt-in policy.
 - In repos with local `master` and no local `main`, startup sync should use local `master` when default-branch detection resolves to it. Current caveat: if `origin/HEAD` points to `main` while only local `master` exists, branch-name detection may choose absent `main` and worktree creation/startup merge can fail.
 - Worktree setup fails closed: a repository with a local commit needs no Git remote, but an unborn repository has no commit/tree for `git worktree add`, so task execution and follow-ups must provide initial-commit guidance and never dispatch the coding model in the main checkout. Existing task worktrees or branches remain recoverable if their original base ref was renamed/deleted; operational `rev-parse` failures preserve their real error. Channel-origin and review-submission setup failures promote the next queued follow-up instead of parking it.
-- Changes tab shows worktree branch diff vs target branch when available, falling back to execution diff.
-- Active worktree Changes diffs should represent one net diff from the task's target branch to the current worktree state, including committed, staged, and unstaged tracked changes as a single per-path diff. Untracked files are appended separately when Git cannot include them in that comparison; do not concatenate committed branch diff blocks with `git diff HEAD`.
-- `GetWorktreeDiffWithUncommitted` prefers a live diff against the worktree's actual working tree (`captureWorktreeDiffAgainstTarget`, gated on `isGitWorktreeDir`/`gitRefExists`) and only falls back to the committed-branch `GetWorktreeDiff` when no live worktree is available. This fixed a recurring `[worktree] error getting worktree diff: exit status 128` log spam from the 2-second follow-up diff snapshot loop (`chat_processing.go` `startFollowupDiffSnapshotBroadcast`) that was caused by a stale/mismatched DB `worktree_branch` no longer matching the actual worktree branch. `GetWorktreeDiff`/`captureWorktreeDiffAgainstTarget` still log unexpected `git diff` failures with repo/ref/stderr context; they just no longer fire repeatedly for missing/mismatched refs on the polling path.
+- Task Changes has one explicit review semantic for managed active worktrees: the net reviewable output from the task's merge target to the current worktree state, not only pending changes since worktree `HEAD`. Full Changes, file summaries, lazy file cards, live fragments, periodic streaming snapshots, and follow-up completion persistence must all use this same base.
+- Active managed-worktree diffs run `git diff <target>` inside the worktree so committed, staged, and unstaged tracked changes collapse into one per-path result; file summaries derive from `git diff --name-status <target>`. Untracked files are appended from `git ls-files --others --exclude-standard` because Git cannot include them in the target comparison. Do not concatenate committed branch diff blocks with `git diff HEAD`.
+- `git diff HEAD` and stored execution diffs are restricted to non-worktree execution views or fallback when no live managed worktree exists. Managed-worktree live fragment routes resolve content server-side and do not trust a client-supplied diff that could bypass the selected base.
+- Streaming snapshot selection uses an explicit managed-worktree distinction established only after successful worktree setup. A non-worktree agent, including one with `DisableRuntimeWorktree`, must retain the `git diff HEAD` pending-change view even when `repoDir` and stale/non-empty task branch metadata are present; it must not persist unrelated committed feature-branch history from a target-relative diff.
+- Final diff capture and post-execution commit/merge/status handling use the same explicit managed-worktree distinction as streaming, established only after successful worktree setup. A `DisableRuntimeWorktree` direct-checkout execution with retained `task.WorktreePath` metadata must persist its `git diff HEAD` result and must not capture, commit, merge, or update the status of stale worktree lineage; scoped direct-checkout execution remains non-worktree even when its effective work directory changes.
+- `GetWorktreeDiffWithUncommitted` prefers a live target-relative diff against the actual working tree (`captureWorktreeDiffAgainstTarget`, gated on `isGitWorktreeDir`/`gitRefExists`). Stale or mismatched persisted branch/path metadata is recovered from the checked-out conventional task lineage before full-tab, direct lazy-file, streaming, or completion diff resolution; it must not silently switch a managed worktree to an execution diff or `HEAD` base. Selected-base/recovery diagnostics should be emitted at transition points rather than noisy polling intervals.
 - Cleanup policy supports after-merge, keep, and manual.
 - Periodic cleanup removes merged worktrees and detects orphaned worktrees with no corresponding task.
 - Chained tasks carry git lineage through `base_branch`, `base_commit_sha`, and `lineage_depth`.
@@ -45,7 +48,7 @@ Follow-up lineage direction:
 - Historical original task branches are read-only lineage when their work has already been merged, conflict-aborted, or made stale by squash/duplicate acceptance.
 - Follow-up execution continues from the current merge target on fresh `task/<id>-followup-*` lineage when the old branch is stale.
 - Active follow-up worktrees remain the task's current lineage; dirty/local follow-up work is reused.
-- Startup-conflict recovery for task follow-ups is implemented: safely aborted startup merge content conflicts are represented by typed `StartupSyncConflictError` values carrying the target branch, task branch, worktree path, and conflicted files. The follow-up handler no longer depends on terminal task status, so reactivated `running` tasks continue in the preserved clean worktree and the coding agent receives instructions to merge, resolve, build, test, and commit before handling the follow-up. Failed merge aborts, dirty worktrees, missing branches, setup failures, and non-conflict Git errors remain fatal. Regression coverage reproduces the post-reactivation status ordering and verifies provider-visible conflict context.
+- Startup-conflict recovery for task follow-ups is implemented: safely aborted startup merge content conflicts are represented by typed `StartupSyncConflictError` values carrying the target branch, task branch, worktree path, and conflicted files. The follow-up handler no longer depends on terminal task status, so reactivated `running` tasks continue in the preserved clean worktree and the coding agent receives instructions to merge, resolve, build, test, and commit before handling the follow-up. Failed merge aborts, dirty worktrees, missing branches, setup failures, and non-conflict Git errors remain fatal.
 
 Merge and metadata direction:
 - Manual merge conflicts from `/tasks/:id/worktree/merge` are handled results, not ordinary request failures.
@@ -58,10 +61,10 @@ Merge and metadata direction:
 - Local worktree commits are not automatically remote publication: verify the configured remote and compare its task-branch tip before claiming a fix is available outside the local app/worktree.
 - A task branch is already merged only when the task branch is fully reachable from the target.
 - Direct task-detail renders with `?tab=changes` hit the same Changes-tab recovery path as lazy tab loads.
-- Current non-blocking consistency gap: direct `/tasks/:id/changes/file` lazy-file requests do not recover stale worktree metadata before resolving diff output; normal UI flow runs `/tasks/:id/changes` first.
+- Direct `/tasks/:id/changes/file` lazy-file requests recover stale conventional worktree metadata before resolving diff output, matching the full Changes-tab path.
 - A local merge error saying the worktree is not on the expected task branch indicates branch/metadata drift, not that the branch is merely behind target. Always diagnose from the exact assigned worktree path using worktree/status/ref evidence and identify which task-lineage branch actually owns the diff.
-- Multi-turn follow-ups can surface a newer empty follow-up worktree while implementation commits remain on an earlier `task/<id>-followup-*` branch. Treat missing merge options or apparently lost changes as a lineage-discovery incident: enumerate task branches/worktrees, recover the implementation-bearing branch into the assigned worktree, rebase if needed, and verify task metadata expects that branch.
-- Worktree status `exit status 128` can be transient; re-check the exact assigned path before recreating anything. If the assigned directory truly vanished and disappeared from `git worktree list`, recover it through the main repository's git worktree metadata rather than editing the main checkout.
+- Multi-turn follow-ups can surface a newer empty follow-up worktree while implementation commits remain on an earlier `task/<id>-followup-*` branch. Missing merge options or apparently lost changes can therefore be lineage/metadata drift rather than data loss; task branches, worktree registrations, and persisted branch metadata are the authoritative evidence.
+- Worktree status `exit status 128` can be transient. A genuinely missing assigned directory that is absent from `git worktree list` is a worktree-metadata recovery case, not permission to edit the main checkout.
 
 Cleanup and descendant direction:
 - Cleanup/recovery preserves conventional task worktree metadata when an original `.worktrees/task_<id>` worktree/branch still exists and contains task-side commits beyond the target.
