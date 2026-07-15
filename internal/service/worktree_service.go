@@ -1816,19 +1816,36 @@ func GetWorktreeFileStats(repoDir string, branchName string, targetBranch string
 	return parseWorktreeFileStats(out)
 }
 
+// GetWorktreeFileStatsWithUncommitted returns the file list for the same
+// reviewable net task output as GetWorktreeDiffWithUncommitted: target branch to
+// current worktree state. It intentionally does not merge branch-vs-target stats
+// with git status (whose base is HEAD), because a post-commit revert to the
+// target would then appear in the list even though it is absent from the diff.
 func GetWorktreeFileStatsWithUncommitted(repoDir string, branchName string, targetBranch string, worktreePath string) []WorktreeFileStat {
-	stats := GetWorktreeFileStats(repoDir, branchName, targetBranch)
-	if worktreePath == "" {
-		return stats
+	if worktreePath == "" || targetBranch == "" || !isGitWorktreeDir(worktreePath) || !gitRefExists(worktreePath, targetBranch) {
+		return GetWorktreeFileStats(repoDir, branchName, targetBranch)
 	}
 
-	cmd := exec.Command("git", "status", "--short", "--untracked-files=all")
-	cmd.Dir = worktreePath
-	out, err := cmd.Output()
+	trackedCmd := exec.Command("git", "diff", "--name-status", targetBranch)
+	trackedCmd.Dir = worktreePath
+	trackedOut, err := trackedCmd.Output()
+	if err != nil {
+		return GetWorktreeFileStats(repoDir, branchName, targetBranch)
+	}
+	stats := parseWorktreeFileStats(trackedOut)
+
+	untrackedCmd := exec.Command("git", "ls-files", "--others", "--exclude-standard")
+	untrackedCmd.Dir = worktreePath
+	untrackedOut, err := untrackedCmd.Output()
 	if err != nil {
 		return stats
 	}
-	return mergeWorktreeFileStats(stats, parseGitStatusFileStats(out))
+	for _, path := range strings.Split(strings.TrimSpace(string(untrackedOut)), "\n") {
+		if path = strings.TrimSpace(path); path != "" {
+			stats = mergeWorktreeFileStats(stats, []WorktreeFileStat{{Path: path, Status: "added"}})
+		}
+	}
+	return stats
 }
 
 func parseWorktreeFileStats(out []byte) []WorktreeFileStat {

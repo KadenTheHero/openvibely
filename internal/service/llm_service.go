@@ -999,8 +999,10 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 
 	// Capture git diff of changes made during execution
 	if workDir != "" {
-		// For worktree tasks, capture the diff between the task branch and target.
-		if task.WorktreePath != "" && task.WorktreeBranch != "" {
+		// For worktree tasks, capture the diff between the current worktree
+		// state and its explicit review target. Branch metadata may temporarily
+		// lag the checked-out lineage, so the live worktree is authoritative.
+		if task.WorktreePath != "" {
 			diffOutput := s.captureWorktreeDiffAfterExecution(finalizeCtx, exec, &task, repoDir, output, agent)
 			if diffOutput != "" {
 				exec.DiffOutput = diffOutput
@@ -1288,8 +1290,12 @@ func PublishDiffSnapshotIfChanged(ctx context.Context, execRepo interface {
 }
 
 func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec *models.Execution, task *models.Task, repoDir string, outputSummary string, agent models.LLMConfig) string {
-	if exec == nil || task == nil || task.WorktreePath == "" || task.WorktreeBranch == "" || repoDir == "" {
+	if exec == nil || task == nil || task.WorktreePath == "" || repoDir == "" {
 		return ""
+	}
+	worktreeBranch := GetCurrentBranch(task.WorktreePath)
+	if worktreeBranch == "" {
+		worktreeBranch = task.WorktreeBranch
 	}
 	targetBranch := task.MergeTargetBranch
 	if targetBranch == "" {
@@ -1304,14 +1310,14 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 	commitCtx.DiffSummary = s.SummarizeWorktreeCommitDiff(ctx, task.WorktreePath, agent, commitCtx)
 	commitMessage := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
 	if err := CommitWorktreeChanges(task.WorktreePath, commitMessage); err != nil {
-		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, task.WorktreeBranch, err)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, worktreeBranch, err)
 	}
 
 	// Persist the authoritative branch diff when the auto-commit succeeds or the
 	// provider already committed. If the provider left uncommitted edits and the
 	// app-level commit fails, preserve those edits in diff_output so Changes does
 	// not appear empty and the merge path can still commit them just-in-time.
-	diffOutput := GetWorktreeDiffWithUncommitted(repoDir, task.WorktreeBranch, targetBranch, task.WorktreePath)
+	diffOutput := GetWorktreeDiffWithUncommitted(repoDir, worktreeBranch, targetBranch, task.WorktreePath)
 	if diffOutput == "" {
 		return ""
 	}
@@ -1328,14 +1334,19 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 // while a task is executing, allowing real-time file change monitoring.
 func (s *LLMService) broadcastDiffSnapshots(ctx context.Context, taskID, execID, workDir, repoDir, worktreeBranch, mergeTargetBranch string, stop <-chan struct{}) {
 	captureDiff := func() string {
-		if repoDir != "" && worktreeBranch != "" {
+		if repoDir != "" {
 			targetBranch := mergeTargetBranch
 			if targetBranch == "" {
 				targetBranch = GetDefaultBranch(repoDir)
 			}
-			// Capture committed branch diff + uncommitted working directory changes
-			// without auto-committing (avoids polluting history with periodic commits).
-			return GetWorktreeDiffWithUncommitted(repoDir, worktreeBranch, targetBranch, workDir)
+			currentBranch := GetCurrentBranch(workDir)
+			if currentBranch == "" {
+				currentBranch = worktreeBranch
+			}
+			// Task Changes uses one target-to-current-worktree diff. This includes
+			// committed, staged, and unstaged tracked state without concatenating
+			// a separate HEAD-based pending diff.
+			return GetWorktreeDiffWithUncommitted(repoDir, currentBranch, targetBranch, workDir)
 		}
 		return s.CaptureGitDiff(workDir)
 	}

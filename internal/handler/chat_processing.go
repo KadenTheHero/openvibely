@@ -1699,6 +1699,41 @@ func normalizeDiffSnapshot(diff string) string {
 	return strings.TrimSpace(diff)
 }
 
+// resolveTaskChangesWorktreeRefs identifies the managed worktree and explicit
+// comparison target used by Task Changes. Worktree tasks are review views: the
+// base is the task's merge target (or resolved repository default), and the tip
+// is the current worktree state. git diff HEAD is reserved for non-worktree
+// executions that only expose pending changes.
+func resolveTaskChangesWorktreeRefs(task *models.Task, project *models.Project, workDir string) (repoDir, branch, target string, ok bool) {
+	if task == nil || project == nil || project.RepoPath == "" || workDir == "" || !service.IsGitRepo(workDir) {
+		return "", "", "", false
+	}
+	managedPath := task.WorktreePath == workDir
+	if !managedPath {
+		rel, err := filepath.Rel(project.RepoPath, workDir)
+		base := filepath.Base(workDir)
+		expectedBase := "task_" + task.ID
+		managedPath = err == nil && !filepath.IsAbs(rel) && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) &&
+			filepath.Dir(rel) == ".worktrees" && (base == expectedBase || strings.HasPrefix(base, expectedBase+"_followup_"))
+	}
+	if !managedPath {
+		return "", "", "", false
+	}
+
+	target = task.MergeTargetBranch
+	if target == "" {
+		target = service.GetDefaultBranch(project.RepoPath)
+	}
+	if target == "" {
+		return "", "", "", false
+	}
+	branch = service.GetCurrentBranch(workDir)
+	if branch == "" {
+		branch = task.WorktreeBranch
+	}
+	return project.RepoPath, branch, target, true
+}
+
 func (h *Handler) startFollowupDiffSnapshotBroadcast(ctx context.Context, taskID, execID, workDir string, isTaskFollowup bool) (chan struct{}, chan struct{}) {
 	if !isTaskFollowup || workDir == "" || h.fileChangeBroadcaster == nil || h.execRepo == nil {
 		return nil, nil
@@ -1709,23 +1744,14 @@ func (h *Handler) startFollowupDiffSnapshotBroadcast(ctx context.Context, taskID
 		return nil, nil
 	}
 
-	var repoDir, worktreeBranch, mergeTargetBranch string
-	if task.WorktreePath != "" && task.WorktreeBranch != "" && task.WorktreePath == workDir {
-		project, projErr := h.projectRepo.GetByID(ctx, task.ProjectID)
-		if projErr != nil || project == nil || project.RepoPath == "" {
-			return nil, nil
-		}
-		repoDir = project.RepoPath
-		worktreeBranch = task.WorktreeBranch
-		mergeTargetBranch = task.MergeTargetBranch
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	repoDir, worktreeBranch, targetBranch, worktreeDiff := resolveTaskChangesWorktreeRefs(task, project, workDir)
+	if worktreeDiff {
+		applog.Debugf("[task-changes] follow-up diff base task=%s target=%s branch=%s worktree=%s", task.ID, targetBranch, worktreeBranch, workDir)
 	}
 
 	captureDiff := func() string {
-		if repoDir != "" && worktreeBranch != "" {
-			targetBranch := mergeTargetBranch
-			if targetBranch == "" {
-				targetBranch = service.GetDefaultBranch(repoDir)
-			}
+		if worktreeDiff {
 			return service.GetWorktreeDiffWithUncommitted(repoDir, worktreeBranch, targetBranch, workDir)
 		}
 		return h.llmSvc.CaptureGitDiff(workDir)
@@ -1775,9 +1801,10 @@ func (h *Handler) captureTaskDiffOutput(ctx context.Context, task *models.Task, 
 		return ""
 	}
 
-	if task != nil && task.WorktreePath != "" && task.WorktreeBranch != "" && task.WorktreePath == workDir {
+	if task != nil {
 		project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
-		if project != nil && project.RepoPath != "" {
+		repoDir, worktreeBranch, targetBranch, worktreeDiff := resolveTaskChangesWorktreeRefs(task, project, workDir)
+		if worktreeDiff {
 			commitCtx := service.WorktreeCommitMessageContext{
 				Phase:     service.WorktreeCommitPhaseFollowup,
 				TaskTitle: task.Title,
@@ -1786,15 +1813,11 @@ func (h *Handler) captureTaskDiffOutput(ctx context.Context, task *models.Task, 
 			if exec != nil {
 				commitCtx.TurnIntent = exec.PromptSent
 				if h.llmSvc != nil {
-					commitCtx.DiffSummary = h.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, task.WorktreePath, exec.AgentConfigID, commitCtx)
+					commitCtx.DiffSummary = h.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, workDir, exec.AgentConfigID, commitCtx)
 				}
 			}
-			service.CommitWorktreeChanges(task.WorktreePath, service.BuildWorktreeCommitMessage(task.WorktreePath, commitCtx))
-			targetBranch := task.MergeTargetBranch
-			if targetBranch == "" {
-				targetBranch = service.GetDefaultBranch(project.RepoPath)
-			}
-			return service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
+			service.CommitWorktreeChanges(workDir, service.BuildWorktreeCommitMessage(workDir, commitCtx))
+			return service.GetWorktreeDiffWithUncommitted(repoDir, worktreeBranch, targetBranch, workDir)
 		}
 	}
 

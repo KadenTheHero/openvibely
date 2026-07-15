@@ -3663,6 +3663,70 @@ func TestGetWorktreeDiffWithUncommitted(t *testing.T) {
 	}
 }
 
+func TestGetWorktreeFileStatsWithUncommittedMatchesNetTargetDiff(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	targetBranch := GetDefaultBranch(repoDir)
+	branchName := "task/net-file-stats"
+	worktreePath := filepath.Join(repoDir, ".worktrees", "net-file-stats")
+
+	cmd := exec.Command("git", "worktree", "add", "-b", branchName, worktreePath, targetBranch)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create worktree: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "README.md"), []byte("committed version\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "committed.txt"), []byte("committed\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(worktreePath, "commit task output"); err != nil {
+		t.Fatalf("commit task output: %v", err)
+	}
+
+	// Revert one committed path to the target, stage a post-commit path, leave
+	// another tracked path unstaged, and append an untracked file. The summary
+	// must describe exactly the same target-to-working-tree state as the diff.
+	if err := os.WriteFile(filepath.Join(worktreePath, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "committed.txt"), []byte("unstaged update\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "staged.txt"), []byte("staged\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("git", "add", "staged.txt")
+	cmd.Dir = worktreePath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("stage file: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "untracked.txt"), []byte("untracked\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	diff := GetWorktreeDiffWithUncommitted(repoDir, branchName, targetBranch, worktreePath)
+	stats := GetWorktreeFileStatsWithUncommitted(repoDir, branchName, targetBranch, worktreePath)
+	paths := make(map[string]string, len(stats))
+	for _, stat := range stats {
+		paths[stat.Path] = stat.Status
+	}
+	if strings.Contains(diff, "README.md") {
+		t.Fatalf("expected reverted path to be absent from net diff:\n%s", diff)
+	}
+	if _, ok := paths["README.md"]; ok {
+		t.Fatalf("expected reverted path to be absent from net file stats, got %#v", stats)
+	}
+	for path, status := range map[string]string{"committed.txt": "added", "staged.txt": "added", "untracked.txt": "added"} {
+		if paths[path] != status {
+			t.Fatalf("expected %s status %s, got %q in %#v", path, status, paths[path], stats)
+		}
+		if !strings.Contains(diff, path) {
+			t.Fatalf("expected %s in net diff:\n%s", path, diff)
+		}
+	}
+}
+
 func TestGetWorktreeDiffUsesCurrentTargetTreeNotStaleMergeBase(t *testing.T) {
 	repoDir := createTestGitRepo(t)
 	runGit := func(args ...string) {
