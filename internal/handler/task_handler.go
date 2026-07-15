@@ -650,8 +650,17 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 	}
 
 	worktreeBranch := task.WorktreeBranch
-	if worktreeBranch == "" && worktreePath != "" {
-		worktreeBranch = worktreeCurrentBranch(worktreePath)
+	if worktreePath != "" {
+		// The checked-out branch is authoritative for an active worktree. Follow-up
+		// lineage can replace the stored branch while retaining/replacing the path;
+		// using the stale DB branch makes headers, file stats, and lazy file indices
+		// disagree with the live target-to-working-tree diff.
+		if currentBranch := worktreeCurrentBranch(worktreePath); currentBranch != "" && currentBranch != worktreeBranch {
+			if worktreeBranch != "" {
+				applog.Infof("[task-changes] recovering task=%s worktree branch metadata stored=%s current=%s", task.ID, worktreeBranch, currentBranch)
+			}
+			worktreeBranch = currentBranch
+		}
 	}
 	if worktreeBranch == "" {
 		candidate := expectedTaskBranchName(task)
@@ -775,6 +784,12 @@ func (h *Handler) resolveTaskChangesDiffOutput(ctx context.Context, task *models
 		return ""
 	}
 
+	// Lazy file requests can arrive directly, without the full Changes endpoint
+	// first repairing conventional worktree metadata. Recover here so every
+	// Changes surface resolves the same current task lineage and comparison base.
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	h.recoverTaskWorktreeState(ctx, task, project)
+
 	// preservedDiff fetches the most recent non-empty execution diff on first call.
 	var preservedDiffOnce struct {
 		val  string
@@ -802,7 +817,6 @@ func (h *Handler) resolveTaskChangesDiffOutput(ctx context.Context, task *models
 		// For active/unmerged tasks with an existing worktree, prefer live diff.
 		if task.WorktreePath != "" {
 			if _, err := os.Stat(task.WorktreePath); err == nil {
-				project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
 				if project != nil && project.RepoPath != "" {
 					targetBranch := task.MergeTargetBranch
 					if targetBranch == "" {
@@ -994,6 +1008,15 @@ func (h *Handler) GetTaskChangesLive(c echo.Context) error {
 	diffOutput := c.FormValue("diff_output")
 	if diffOutput == "" {
 		diffOutput = c.QueryParam("diff_output")
+	}
+	resolvedDiff := h.resolveTaskChangesDiffOutput(c.Request().Context(), task)
+	if task.WorktreeBranch != "" {
+		// A worktree Changes fragment never trusts an execution/ client HEAD diff:
+		// use the same recovered target-to-current-worktree view as the full tab.
+		// An empty resolved diff is valid when the worktree matches the target.
+		diffOutput = resolvedDiff
+	} else if diffOutput == "" {
+		diffOutput = resolvedDiff
 	}
 
 	var reviewComments []models.ReviewComment
@@ -1279,9 +1302,13 @@ func (h *Handler) DeleteTask(c echo.Context) error {
 	}
 	applog.Infof("[handler] DeleteTask success id=%s", taskID)
 
-	// If redirect=list (from task detail page), redirect to task list
+	// If redirect=list (from task detail page), redirect to the safe return target.
 	if isHTMX(c) && c.QueryParam("redirect") == "list" {
-		c.Response().Header().Set("HX-Redirect", "/tasks?project_id="+projectID)
+		redirectURL := "/tasks?project_id=" + projectID
+		if c.QueryParam("return_to") == "schedule" {
+			redirectURL = "/schedule?project_id=" + projectID
+		}
+		c.Response().Header().Set("HX-Redirect", redirectURL)
 		return c.NoContent(http.StatusOK)
 	}
 

@@ -285,6 +285,66 @@ check_commits_field "body field"            "^Body:"
 check_commits_field "multiple commits"      "abc1234"
 
 ###############################################################################
+# 7. Dry-run filesystem isolation
+###############################################################################
+
+section "Release build dry-run isolation"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DRY_RUN_TMP="$(mktemp -d)"
+MOCK_BIN="${DRY_RUN_TMP}/bin"
+DRY_RUN_DIST="${DRY_RUN_TMP}/dist/9.9.9"
+mkdir -p "$MOCK_BIN"
+
+cat > "${MOCK_BIN}/go" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "list" ]]; then
+    echo "v0.0.0"
+fi
+EOF
+chmod +x "${MOCK_BIN}/go"
+
+cat > "${MOCK_BIN}/uname" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+    -s) echo "Darwin" ;;
+    -m) echo "arm64" ;;
+    *) echo "Darwin" ;;
+esac
+EOF
+chmod +x "${MOCK_BIN}/uname"
+
+DRY_RUN_OUTPUT="$(DRY_RUN=1 PATH="${MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/release-build.sh" 9.9.9 "$DRY_RUN_DIST" 2>&1)"
+
+if [[ ! -e "$DRY_RUN_DIST" ]]; then
+    pass "dry run: does not create the output directory"
+else
+    fail "dry run: created the output directory"
+fi
+
+if ! echo "$DRY_RUN_OUTPUT" | grep -Eq '(^|[[:space:]])(cp|chmod):|No such file or directory'; then
+    pass "dry run: macOS bundle setup does not leak filesystem errors"
+else
+    fail "dry run: macOS bundle setup leaked filesystem errors"
+fi
+
+cat > "${MOCK_BIN}/gh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "${MOCK_BIN}/gh"
+
+FULL_DRY_RUN_DIST="${DRY_RUN_TMP}/full-dist/9.9.9"
+if DRY_RUN=1 SKIP_GH_AUTH_CHECK=1 DIST_DIR="$FULL_DRY_RUN_DIST" PATH="${MOCK_BIN}:$PATH" \
+    bash "${SCRIPT_DIR}/release.sh" 9.9.9 >/dev/null 2>&1; then
+    pass "dry run: full release rehearsal completes without real artifacts"
+else
+    fail "dry run: full release rehearsal requires real build outputs"
+fi
+
+rm -rf "$DRY_RUN_TMP"
+
+###############################################################################
 # Results
 ###############################################################################
 

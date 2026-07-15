@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-07-01
-source: consolidation
-source_id: memory_consolidation_2026_07_01
+updated: 2026-07-14
+source: task_conversation
+source_id: cb1d81f40983b9cf25134cddf1b8ecca:615219d36968b41d
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -15,8 +15,9 @@ User interaction preferences:
 - For design, behavior, or feasibility questions, answer directly without making implementation changes unless explicitly requested.
 - Do not describe unreleased feature contracts as legacy or preserve compatibility shims for unreleased API/UI shapes unless the user explicitly asks for migration compatibility.
 - If a prior response made an unsolicited code change, acknowledge it and revert or ask before proceeding.
+- When diagnosing autonomous integration loops, do not manually forward, wake, or otherwise push one live message through as a substitute for fixing the product path. The user wants the implementation to work properly end-to-end; validation should prove the scheduled/tool/runtime behavior works without ad hoc live intervention unless the user explicitly asks for a one-off operational action.
 - When the user has already explicitly requested an outbound action such as sending an email/message, attempt the available configured/runtime mechanism instead of asking for redundant confirmation; if no viable send path exists, report the completed work and the send limitation clearly.
-- Prefer plain, direct explanations over jargon-heavy phrasing; if the user asks for “no word salad,” respond with a terse concrete summary rather than audit-style detail.
+- Prefer plain, direct explanations over jargon-heavy phrasing; if the user asks for “no word salad,” respond with a terse concrete summary rather than audit-style detail. For user-facing UI/docs copy, avoid internal tool-name or architecture jargon unless it is clearly marked as advanced/reference text.
 - Bug explanations should include the causal chain, concrete failure mode, and exact affected path when the user asks for detail.
 - Summaries should be concrete: cite specific files, symbols, handlers, tests, behavior affected, verification performed, and whether a real git diff exists when available.
 - If a user challenges why there is no diff after a claimed coding change, inspect branch pointers, status, reflog, and file contents, then plainly correct any prior summary based on non-persisted or stale output.
@@ -37,7 +38,7 @@ Model-facing prompt preferences:
 Documentation, logging, and validation preferences:
 - Preserve useful README content and commented multi-line command examples unless there is a specific reason to trim them.
 - Preserve liked README/docs structure while folding in stronger positioning/selling points.
-- Keep root `docs/` in sync with README/docs-site positioning when overlapping product concepts change. When syncing with `/Users/dubee/go/src/github.com/openvibely/openvibely-doc`, audit recent docs-site content and propagate overlapping product-concept updates beyond a narrow README/environment pass.
+- Keep root `docs/` in sync with README/docs-site positioning when overlapping product concepts change. When syncing with `/Users/dubee/go/src/github.com/openvibely/openvibely-docs`, audit recent docs-site content and propagate overlapping product-concept updates beyond a narrow README/environment pass.
 - Root README should stay succinct and high-level, point to `https://docs.openvibely.ai` plus the docs source repo, and keep detailed environment-variable reference in `docs/environment.md`.
 - Published docs links in README/project-facing docs should use new-tab HTML anchors where supported; local relative links stay normal Markdown.
 - Very high-frequency or low-value debug traces should be commented `applog.Debugf` examples instead of active gated calls when method-call overhead could accumulate, especially per LLM chunk, SSE delta, HTMX poll, diff broadcast tick, or action-routing check.
@@ -55,13 +56,9 @@ Release-note preferences:
 - High-level release notes should omit CI/test infrastructure, terminal log verbosity, low-level bug/reliability patches, and minor UI polish unless the audience explicitly needs those details or the fix affects a core workflow.
 - Release-note bullets should use bolded lead labels/sections, following `- **Feature or theme** — Details...`.
 
-Current release boundary:
-- Latest public release boundary is `v0.3.0`, published on 2026-06-24 at `https://github.com/openvibely/openvibely/releases/tag/v0.3.0`.
-- The canonical `v0.3.0` annotated tag object is `0b46d34` and targets commit `bfcc37d` (`Document schedule pause and resume behavior`); `main`/`upstream/main` also pointed at `bfcc37d` after release.
-- The `v0.3.0` public range was `v0.2.0..bfcc37d` with 161 commits. Major themes were OpenAI-compatible provider presets, provider discovery/usage, safer queued follow-ups across web/Slack/Telegram, worker-capacity races, skill analytics, scheduled-task pause/resume/lifecycle controls, mobile/responsive task/chat UX, secret-key handling, and worktree/rebase improvements.
-- The published `v0.3.0` GitHub release body uses the user's preferred bold lead-label release-note style and explicitly highlights 34 OpenAI-compatible provider presets plus 6 local/self-hosted presets.
-- The `v0.3.0` GitHub release published eight assets: two macOS desktop `.app.zip` bundles, four darwin/linux server tarballs, one Windows server zip, and `SHA256SUMS`. No Windows desktop-cli asset was published because `mingw-w64` / `x86_64-w64-mingw32-gcc` was unavailable on the release host.
-- Docker image `openvibely/openvibely:0.3.0` was not published during the GitHub release because Docker Hub credentials were unavailable; the release body marks Docker publishing as pending.
-- Previous release boundary `v0.2.0` was published on 2026-06-07. Its canonical tag was force-moved to commit `13189db` after publication so the macOS app-bundle zip fix was included; live `v0.2.0` macOS zips extract to `OpenVibely.app/`.
-- Known release-build pitfalls: dry-run macOS bundle filesystem leakage, missing Windows cross-compiler, preserving `OpenVibely.app` in macOS zips, avoiding managed worktree cleanup paths for real builds, and preferring script-default or absolute dist paths when running release-build steps.
-
+Current release facts and boundaries:
+- Latest recorded public release is `v0.3.0` (2026-06-24): `https://github.com/openvibely/openvibely/releases/tag/v0.3.0`, whose canonical annotated tag targets `bfcc37d479e4f5f2c6784a900f5a6672ec754bdb`. Verify live release state before preparing or publishing a later release.
+- The `v0.4.0` release candidate is commit `a13ab410c84a9ff26128d72ff6165841bcabfbf7`, and `origin/main` was fast-forwarded to that exact commit on 2026-07-14. Its release themes are multi-agent swarms, Discord/Email and project-scoped outbound messaging, autonomous GitHub issue-to-PR workflows, and Mixture of Models. At the last recorded state, no `v0.4.0` tag or GitHub release had been created; GitHub CLI device authorization was awaiting user approval. Verify live refs and release state before resuming.
+- Candidate `a13ab41` passed all 55 release-tooling checks, `make build`, and `go test ./... -count=1 -timeout 120s`. Seven fresh server/macOS archives plus `SHA256SUMS` were verified, including both macOS archives with `OpenVibely.app` as the exact root. Windows desktop remained pending because `mingw-w64` was unavailable, Docker publishing remained pending for explicit credentials, and sibling `openvibely-docs` edits remained uncommitted.
+- Release artifacts normally cover macOS desktop bundles and darwin/linux/Windows server archives with checksums. Windows desktop packaging requires a MinGW cross-compiler; Docker publishing remains pending when credentials are unavailable.
+- Release-build invariants include preserving `OpenVibely.app` as the zip root, making dry runs fully non-writing, avoiding managed worktree cleanup paths for real builds, and using script-default or absolute dist paths.

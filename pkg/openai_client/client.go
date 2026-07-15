@@ -23,13 +23,13 @@ import (
 
 const (
 	// DefaultModel is the fallback model when no model is provided.
-	DefaultModel = "gpt-5.5"
+	DefaultModel = "gpt-5.6-sol"
 
 	defaultModelRequestTimeout = 10 * time.Minute
 
 	openAIOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 	// ChatGPT Codex backend requires this query parameter.
-	openAIOAuthClientVersion = "0.0.0"
+	openAIOAuthClientVersion = "0.144.0"
 	// Matches Codex CLI originator for ChatGPT OAuth-backed calls.
 	openAIOAuthOriginator = "codex_cli_rs"
 )
@@ -160,6 +160,7 @@ type Client struct {
 	apiBaseURL                    string
 	oauthUnauthorizedHandler      OAuthUnauthorizedHandler
 	oauthRefreshExternallyManaged bool
+	responsesTransportState       *ResponsesTransportState
 	History                       []Message
 }
 
@@ -191,10 +192,29 @@ func NewWithOAuthToken(token, refreshToken string, expiresAt int64, accountID st
 }
 
 func newClient(auth *StoredAuth) *Client {
+	transportState := NewResponsesTransportState()
 	return &Client{
-		auth:       auth,
-		httpClient: defaultHTTPClient,
-		sessionID:  newSessionID(),
+		auth:                    auth,
+		httpClient:              defaultHTTPClient,
+		sessionID:               transportState.sessionID,
+		responsesTransportState: transportState,
+	}
+}
+
+// SetResponsesTransportState shares WebSocket connection and fallback state
+// without sharing conversation history or credentials.
+func (c *Client) SetResponsesTransportState(state *ResponsesTransportState) {
+	if state != nil {
+		c.responsesTransportState = state
+		c.sessionID = state.sessionID
+	}
+}
+
+// CloseResponsesTransport releases the WebSocket owned by this client.
+// Callers must not use the client after closing its transport.
+func (c *Client) CloseResponsesTransport() {
+	if c.responsesTransportState != nil {
+		c.responsesTransportState.Close()
 	}
 }
 
@@ -388,6 +408,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 	if isChatGPTOAuth {
 		// ChatGPT Codex backend requires explicit store=false.
 		payload["store"] = false
+		payload["include"] = []string{"reasoning.encrypted_content"}
 	}
 
 	system := strings.TrimSpace(opts.System)
@@ -409,6 +430,51 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 	}
 	if opts.DisableTools {
 		payload["tool_choice"] = "none"
+	}
+
+	if isResponsesLiteWebsocketModel(opts.Model) {
+		payload["stream"] = true
+		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
+		openStream := func(useWebsocket bool) (io.ReadCloser, error) {
+			if useWebsocket {
+				return c.openResponsesWebsocketStream(ctx, wsPayload, isChatGPTOAuth)
+			}
+			return c.openResponsesLiteHTTPStream(ctx, wsPayload, isChatGPTOAuth)
+		}
+		useWebsocket := !c.responsesTransportState.websocketDisabled.Load()
+		body, wsErr := openStream(useWebsocket)
+		if useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
+			c.responsesTransportState.disableWebsocket()
+			useWebsocket = false
+			body, wsErr = openStream(false)
+		}
+		if wsErr != nil {
+			return nil, wsErr
+		}
+		sawOutput := false
+		onDelta := func(text string) {
+			sawOutput = true
+			if opts.OnDelta != nil {
+				opts.OnDelta(text)
+			}
+		}
+		result, wsErr := parseStreamingResponse(body, onDelta, opts.SuppressToolMarkers)
+		body.Close()
+		if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
+			c.responsesTransportState.disableWebsocket()
+			if !sawOutput {
+				body, wsErr = openStream(false)
+				if wsErr == nil {
+					result, wsErr = parseStreamingResponse(body, onDelta, opts.SuppressToolMarkers)
+					body.Close()
+				}
+			}
+		}
+		if wsErr != nil {
+			return nil, wsErr
+		}
+		c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
+		return result, nil
 	}
 
 	body, err := json.Marshal(payload)
@@ -659,11 +725,8 @@ func parseStreamingResponse(body io.Reader, onDelta func(string), suppressToolMa
 					emit(marker)
 				}
 			}
-		case "response.error", "error":
-			if msg := extractErrorMessage(ev); msg != "" {
-				return nil, fmt.Errorf("stream error: %s", msg)
-			}
-			return nil, fmt.Errorf("stream error: unknown")
+		case "response.failed", "response.incomplete", "response.error", "error":
+			return nil, responsesStreamTerminalError(typ, ev)
 		case "response.completed":
 			if m, ok := ev["response"].(map[string]any); ok {
 				completed = m
@@ -1060,7 +1123,7 @@ func roleForMessage(role string) string {
 
 func normalizeReasoningEffort(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "low", "medium", "high":
+	case "low", "medium", "high", "xhigh", "max":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return ""
@@ -1239,6 +1302,35 @@ func extractErrorMessage(ev map[string]any) string {
 		return code
 	}
 	return ""
+}
+
+func responsesStreamTerminalError(eventType string, ev map[string]any) error {
+	if response, ok := ev["response"].(map[string]any); ok {
+		if errObj, ok := response["error"].(map[string]any); ok {
+			code := stringFromAny(errObj["code"])
+			message := stringFromAny(errObj["message"])
+			switch {
+			case code != "" && message != "":
+				return fmt.Errorf("stream error: %s: %s", code, message)
+			case code != "":
+				return fmt.Errorf("stream error: %s", code)
+			case message != "":
+				return fmt.Errorf("stream error: %s", message)
+			}
+		}
+		if msg := extractErrorMessage(response); msg != "" {
+			return fmt.Errorf("stream error: %s", msg)
+		}
+		if details, ok := response["incomplete_details"].(map[string]any); ok {
+			if reason := stringFromAny(details["reason"]); reason != "" {
+				return fmt.Errorf("stream error: incomplete response: %s", reason)
+			}
+		}
+	}
+	if msg := extractErrorMessage(ev); msg != "" {
+		return fmt.Errorf("stream error: %s", msg)
+	}
+	return fmt.Errorf("stream error: %s", strings.TrimSpace(eventType))
 }
 
 func stringFromAny(v any) string {

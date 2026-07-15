@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/repository"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -66,9 +68,11 @@ type GitHubRepoRef struct {
 }
 
 type GitHubPullRequest struct {
-	Number int
-	URL    string
-	State  string
+	Number           int
+	URL              string
+	State            string
+	HeadRef          string
+	HeadRepoFullName string
 }
 
 type GitHubIssue struct {
@@ -85,6 +89,20 @@ type GitHubIssue struct {
 type GitHubIssueWithPullRequest struct {
 	Issue       GitHubIssue
 	PullRequest GitHubPullRequest
+}
+
+type GitHubPullRequestFeedback struct {
+	Kind        string    `json:"kind"`
+	ID          string    `json:"id"`
+	NodeID      string    `json:"node_id"`
+	AuthorLogin string    `json:"author_login"`
+	AuthorType  string    `json:"author_type,omitempty"`
+	Body        string    `json:"body"`
+	URL         string    `json:"url"`
+	State       string    `json:"state,omitempty"`
+	Path        string    `json:"path,omitempty"`
+	Line        int       `json:"line,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type GitHubAuthenticatedUser struct {
@@ -132,6 +150,29 @@ type GitHubCreatePullRequestRequest struct {
 	Head  string
 	Base  string
 	Draft bool
+}
+
+type GitHubPublishBranchRequest struct {
+	RepoPath       string
+	WorktreePath   string
+	Branch         string
+	BaseBranch     string
+	CommitMessage  string
+	CommitterName  string
+	CommitterEmail string
+}
+
+type GitHubReplaceBranchHeadRequest struct {
+	WorktreePath string
+	Branch       string
+	ExpectedHead string
+}
+
+type githubBranchChange struct {
+	Path    string
+	Content []byte
+	Mode    string
+	Delete  bool
 }
 
 type GitHubCreateIssueRequest struct {
@@ -476,49 +517,713 @@ func (s *GitHubService) ResolveRepo(ctx context.Context, repoURL, repoPath strin
 		return nil, fmt.Errorf("project has no repository path")
 	}
 
-	out, err := s.runGit(ctx, repoPath, nil, "remote", "get-url", "origin")
-	if err != nil {
-		return nil, fmt.Errorf("reading origin remote: %w", err)
-	}
-	remoteURL := strings.TrimSpace(string(out))
-	if remoteURL == "" {
-		return nil, fmt.Errorf("project repository has no origin remote")
-	}
-	repo, err := ParseGitHubRepoURL(remoteURL)
+	repo, remoteName, err := s.resolveRepoFromGitRemotes(ctx, repoPath)
 	if err != nil {
 		return nil, err
 	}
-	return &repo, nil
+	if repo.FullName == "" {
+		return nil, fmt.Errorf("project repository remote %q is not a GitHub repository", remoteName)
+	}
+	return repo, nil
 }
 
-func (s *GitHubService) PushBranch(ctx context.Context, repoPath, worktreePath, branch string, repo *GitHubRepoRef) error {
+func (s *GitHubService) resolveRepoFromGitRemotes(ctx context.Context, repoPath string) (*GitHubRepoRef, string, error) {
+	remotesOut, err := s.runGit(ctx, repoPath, nil, "remote")
+	if err != nil {
+		return nil, "", fmt.Errorf("listing git remotes: %w", err)
+	}
+	seen := map[string]bool{}
+	remoteNames := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(remotesOut)), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		remoteNames = append(remoteNames, name)
+	}
+	if len(remoteNames) == 0 {
+		return nil, "", fmt.Errorf("project repository has no git remotes")
+	}
+
+	preferred := []string{"origin", "upstream"}
+	ordered := make([]string, 0, len(remoteNames)+len(preferred))
+	for _, name := range preferred {
+		if seen[name] {
+			ordered = append(ordered, name)
+		}
+	}
+	for _, name := range remoteNames {
+		if name != "origin" && name != "upstream" {
+			ordered = append(ordered, name)
+		}
+	}
+
+	var lastErr error
+	for _, name := range ordered {
+		out, err := s.runGit(ctx, repoPath, nil, "remote", "get-url", name)
+		if err != nil {
+			lastErr = fmt.Errorf("reading %s remote: %w", name, err)
+			continue
+		}
+		remoteURL := strings.TrimSpace(string(out))
+		if remoteURL == "" {
+			lastErr = fmt.Errorf("project repository remote %q has no URL", name)
+			continue
+		}
+		repo, err := ParseGitHubRepoURL(remoteURL)
+		if err != nil {
+			lastErr = fmt.Errorf("project repository remote %q is not a GitHub repository: %w", name, err)
+			continue
+		}
+		return &repo, name, nil
+	}
+	if lastErr != nil {
+		return nil, "", lastErr
+	}
+	return nil, "", fmt.Errorf("project repository has no GitHub remotes")
+}
+
+func (s *GitHubService) DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error) {
+	if repo == nil {
+		return "", fmt.Errorf("repository reference is required")
+	}
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	endpoint := fmt.Sprintf("%s/repos/%s/%s", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	s.applyGitHubHeaders(req, token)
+	var payload struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := s.doGitHubJSON(req, &payload); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(payload.DefaultBranch) == "" {
+		return "", fmt.Errorf("repository default branch is empty")
+	}
+	return strings.TrimSpace(payload.DefaultBranch), nil
+}
+
+func (s *GitHubService) ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error {
 	if repo == nil {
 		return fmt.Errorf("repository reference is required")
 	}
-	branch = strings.TrimSpace(branch)
+	dir := strings.TrimSpace(req.WorktreePath)
+	if dir == "" {
+		return fmt.Errorf("worktree path is required")
+	}
+	branch := strings.TrimSpace(req.Branch)
 	if branch == "" {
 		return fmt.Errorf("branch is required")
+	}
+	expectedHead := strings.ToLower(strings.TrimSpace(req.ExpectedHead))
+	if !isGitHubCommitSHA(expectedHead) {
+		return fmt.Errorf("expected remote head must be a 40-character GitHub commit SHA")
+	}
+	if _, err := s.runGit(ctx, dir, nil, "check-ref-format", "refs/heads/"+branch); err != nil {
+		return fmt.Errorf("invalid replacement branch %q: %w", branch, err)
+	}
+	currentBranch, err := s.runGit(ctx, dir, nil, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		return fmt.Errorf("resolving replacement worktree branch: %w", err)
+	}
+	if strings.TrimSpace(string(currentBranch)) != branch {
+		return fmt.Errorf("worktree must be checked out on task branch %q before replacing pull request history", branch)
+	}
+	status, err := s.runGit(ctx, dir, nil, "status", "--porcelain", "--untracked-files=all")
+	if err != nil {
+		return fmt.Errorf("checking replacement worktree: %w", err)
+	}
+	if strings.TrimSpace(string(status)) != "" {
+		return fmt.Errorf("worktree must be clean before replacing pull request branch history")
+	}
+	if _, err := s.runGit(ctx, dir, nil, "rev-parse", "--verify", "HEAD^{commit}"); err != nil {
+		return fmt.Errorf("resolving replacement worktree HEAD: %w", err)
 	}
 
 	token, err := s.createOperationAccessToken(ctx)
 	if err != nil {
 		return err
 	}
+	remoteURL := fmt.Sprintf("%s/%s/%s.git", strings.TrimRight(s.webBaseURL, "/"), url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
+	lease := fmt.Sprintf("--force-with-lease=refs/heads/%s:%s", branch, expectedHead)
+	refspec := fmt.Sprintf("HEAD:refs/heads/%s", branch)
+	if _, err := s.runGit(ctx, dir, gitHubTokenEnv(token), "push", lease, remoteURL, refspec); err != nil {
+		return fmt.Errorf("lease-guarded branch replacement failed; remote head may have changed: %w", err)
+	}
+	return nil
+}
 
-	dir := strings.TrimSpace(worktreePath)
+func isGitHubCommitSHA(value string) bool {
+	if len(value) != 40 {
+		return false
+	}
+	for _, c := range value {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) error {
+	if repo == nil {
+		return fmt.Errorf("repository reference is required")
+	}
+	branch := strings.TrimSpace(publishReq.Branch)
+	if branch == "" {
+		return fmt.Errorf("branch is required")
+	}
+	baseBranch := strings.TrimSpace(publishReq.BaseBranch)
+	if baseBranch == "" {
+		defaultBranch, err := s.DefaultBranch(ctx, repo)
+		if err != nil {
+			return fmt.Errorf("resolving default branch: %w", err)
+		}
+		baseBranch = defaultBranch
+	}
+	message := strings.TrimSpace(publishReq.CommitMessage)
+	if message == "" {
+		return fmt.Errorf("commit message is required")
+	}
+
+	dir := strings.TrimSpace(publishReq.WorktreePath)
 	if dir == "" {
-		dir = strings.TrimSpace(repoPath)
+		dir = strings.TrimSpace(publishReq.RepoPath)
 	}
 	if dir == "" {
 		return fmt.Errorf("repository path is required")
 	}
 
-	extraEnv := gitHubTokenEnv(token)
-	_, err = s.runGit(ctx, dir, extraEnv, "push", "--set-upstream", repo.CloneURL, fmt.Sprintf("%s:%s", branch, branch))
+	changes, err := collectGitHubBranchChanges(ctx, dir, baseBranch)
 	if err != nil {
-		return fmt.Errorf("pushing branch: %w", err)
+		return err
+	}
+
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+	remoteBaseSHA, err := s.githubBranchCommitSHA(ctx, token, repo, baseBranch)
+	if err != nil {
+		return fmt.Errorf("resolving remote base branch %q: %w", baseBranch, err)
+	}
+	parentSHA := remoteBaseSHA
+	remoteBranchSHA := ""
+	if sha, err := s.githubBranchCommitSHA(ctx, token, repo, branch); err == nil {
+		remoteBranchSHA = sha
+		parentSHA = sha
+	} else if !isGitHubRefMissingError(err) {
+		return fmt.Errorf("resolving remote publish branch %q: %w", branch, err)
+	}
+	if len(changes) == 0 {
+		if remoteBranchSHA != "" {
+			return nil
+		}
+		if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, remoteBaseSHA, false); err != nil {
+			if !isGitHubRefAlreadyExistsError(err) {
+				return err
+			}
+			if _, refErr := s.githubBranchCommitSHA(ctx, token, repo, branch); refErr != nil {
+				return fmt.Errorf("confirming concurrently created remote publish branch %q: %w", branch, refErr)
+			}
+		}
+		return nil
+	}
+	baseTreeSHA, err := s.githubCommitTreeSHA(ctx, token, repo, remoteBaseSHA)
+	if err != nil {
+		return err
+	}
+	treeSHA, err := s.createGitHubTree(ctx, token, repo, baseTreeSHA, changes)
+	if err != nil {
+		return err
+	}
+	if remoteBranchSHA != "" {
+		remoteBranchTreeSHA, treeErr := s.githubCommitTreeSHA(ctx, token, repo, remoteBranchSHA)
+		if treeErr != nil {
+			return fmt.Errorf("resolving remote publish branch tree %q: %w", branch, treeErr)
+		}
+		if remoteBranchTreeSHA == treeSHA {
+			return nil
+		}
+	}
+	commitSHA, err := s.createGitHubCommit(ctx, token, repo, message, treeSHA, parentSHA, publishReq.CommitterName, publishReq.CommitterEmail)
+	if err != nil {
+		return err
+	}
+	if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, commitSHA, false); err != nil {
+		nonFastForward := isGitHubNonFastForwardError(err)
+		if !nonFastForward && !isGitHubRefAlreadyExistsError(err) {
+			return err
+		}
+		latestBranchSHA, refErr := s.githubBranchCommitSHA(ctx, token, repo, branch)
+		if refErr != nil {
+			return fmt.Errorf("refreshing remote publish branch %q after update rejection: %w", branch, refErr)
+		}
+		if nonFastForward && latestBranchSHA == parentSHA {
+			return err
+		}
+		latestBranchTreeSHA, treeErr := s.githubCommitTreeSHA(ctx, token, repo, latestBranchSHA)
+		if treeErr != nil {
+			return fmt.Errorf("resolving refreshed remote publish branch tree %q: %w", branch, treeErr)
+		}
+		if latestBranchTreeSHA == treeSHA {
+			return nil
+		}
+		retryCommitSHA, retryErr := s.createGitHubCommit(ctx, token, repo, message, treeSHA, latestBranchSHA, publishReq.CommitterName, publishReq.CommitterEmail)
+		if retryErr != nil {
+			return retryErr
+		}
+		return s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, retryCommitSHA, false)
 	}
 	return nil
+}
+
+func (s *GitHubService) publishExistingLocalCommit(ctx context.Context, repo *GitHubRepoRef, branch, sha string, force bool) error {
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+	return s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, sha, force)
+}
+
+func (s *GitHubService) publishExistingLocalCommitWithToken(ctx context.Context, token string, repo *GitHubRepoRef, branch, sha string, force bool) error {
+	branch = strings.TrimSpace(branch)
+	sha = strings.TrimSpace(sha)
+	if branch == "" || sha == "" {
+		return fmt.Errorf("branch and sha are required")
+	}
+	payload := map[string]any{"sha": sha, "force": force}
+	body, _ := json.Marshal(payload)
+	updateEndpoint := fmt.Sprintf("%s/repos/%s/%s/git/refs/heads/%s", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), pathEscapeGitRef(branch))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, updateEndpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	s.applyGitHubHeaders(req, token)
+	req.Header.Set("Content-Type", "application/json")
+	if err := s.doGitHubJSON(req, nil); err == nil {
+		return nil
+	} else if !isGitHubRefMissingError(err) {
+		return err
+	}
+
+	createPayload := map[string]any{"ref": "refs/heads/" + branch, "sha": sha}
+	createBody, _ := json.Marshal(createPayload)
+	createEndpoint := fmt.Sprintf("%s/repos/%s/%s/git/refs", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
+	createReq, err := http.NewRequestWithContext(ctx, http.MethodPost, createEndpoint, bytes.NewReader(createBody))
+	if err != nil {
+		return err
+	}
+	s.applyGitHubHeaders(createReq, token)
+	createReq.Header.Set("Content-Type", "application/json")
+	return s.doGitHubJSON(createReq, nil)
+}
+
+func (s *GitHubService) githubBranchCommitSHA(ctx context.Context, token string, repo *GitHubRepoRef, branch string) (string, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return "", fmt.Errorf("branch is required")
+	}
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/git/ref/heads/%s", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), pathEscapeGitRef(branch))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	s.applyGitHubHeaders(req, token)
+	var payload struct {
+		Object struct {
+			SHA string `json:"sha"`
+		} `json:"object"`
+	}
+	if err := s.doGitHubJSON(req, &payload); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(payload.Object.SHA) == "" {
+		return "", fmt.Errorf("branch commit sha is empty")
+	}
+	return strings.TrimSpace(payload.Object.SHA), nil
+}
+
+func (s *GitHubService) githubCommitTreeSHA(ctx context.Context, token string, repo *GitHubRepoRef, commitSHA string) (string, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/git/commits/%s", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), url.PathEscape(commitSHA))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	s.applyGitHubHeaders(req, token)
+	var payload struct {
+		Tree struct {
+			SHA string `json:"sha"`
+		} `json:"tree"`
+	}
+	if err := s.doGitHubJSON(req, &payload); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(payload.Tree.SHA) == "" {
+		return "", fmt.Errorf("base commit tree sha is empty")
+	}
+	return strings.TrimSpace(payload.Tree.SHA), nil
+}
+
+// githubTreeBlobUploadConcurrency bounds how many independent blob uploads run
+// in parallel during branch publication. It is intentionally conservative to
+// avoid overwhelming the GitHub API while still overlapping independent uploads.
+const githubTreeBlobUploadConcurrency = 4
+
+func (s *GitHubService) createGitHubTree(ctx context.Context, token string, repo *GitHubRepoRef, baseTreeSHA string, changes []githubBranchChange) (string, error) {
+	// Preserve deterministic original ordering of the tree entries. Each blob
+	// SHA is written back into the entry at its original index, so parallel
+	// uploads never reorder the tree or misattribute a SHA to the wrong path.
+	tree := make([]map[string]any, len(changes))
+	blobIndexes := make([]int, 0, len(changes))
+	for i, change := range changes {
+		entry := map[string]any{"path": change.Path, "mode": change.Mode, "type": "blob"}
+		if change.Delete {
+			entry["sha"] = nil
+		} else {
+			blobIndexes = append(blobIndexes, i)
+		}
+		tree[i] = entry
+	}
+
+	// Deletion-only changes never start blob workers.
+	if len(blobIndexes) > 0 {
+		group, groupCtx := errgroup.WithContext(ctx)
+		group.SetLimit(githubTreeBlobUploadConcurrency)
+		for _, idx := range blobIndexes {
+			idx := idx
+			change := changes[idx]
+			group.Go(func() error {
+				blobSHA, err := s.createGitHubBlob(groupCtx, token, repo, change.Content)
+				if err != nil {
+					return fmt.Errorf("creating blob for %s: %w", change.Path, err)
+				}
+				tree[idx]["sha"] = blobSHA
+				return nil
+			})
+		}
+		if err := group.Wait(); err != nil {
+			return "", err
+		}
+	}
+
+	payload := map[string]any{"base_tree": baseTreeSHA, "tree": tree}
+	body, _ := json.Marshal(payload)
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/git/trees", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	s.applyGitHubHeaders(req, token)
+	req.Header.Set("Content-Type", "application/json")
+	var created struct {
+		SHA string `json:"sha"`
+	}
+	if err := s.doGitHubJSON(req, &created); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(created.SHA) == "" {
+		return "", fmt.Errorf("created tree sha is empty")
+	}
+	return strings.TrimSpace(created.SHA), nil
+}
+
+func (s *GitHubService) createGitHubBlob(ctx context.Context, token string, repo *GitHubRepoRef, content []byte) (string, error) {
+	payload := map[string]any{"content": base64.StdEncoding.EncodeToString(content), "encoding": "base64"}
+	body, _ := json.Marshal(payload)
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/git/blobs", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	s.applyGitHubHeaders(req, token)
+	req.Header.Set("Content-Type", "application/json")
+	var created struct {
+		SHA string `json:"sha"`
+	}
+	if err := s.doGitHubJSON(req, &created); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(created.SHA) == "" {
+		return "", fmt.Errorf("created blob sha is empty")
+	}
+	return strings.TrimSpace(created.SHA), nil
+}
+
+func (s *GitHubService) createGitHubCommit(ctx context.Context, token string, repo *GitHubRepoRef, message, treeSHA, parentSHA, committerName, committerEmail string) (string, error) {
+	payload := map[string]any{"message": message, "tree": treeSHA, "parents": []string{parentSHA}}
+	if strings.TrimSpace(committerName) != "" && strings.TrimSpace(committerEmail) != "" {
+		payload["committer"] = map[string]string{"name": strings.TrimSpace(committerName), "email": strings.TrimSpace(committerEmail)}
+	}
+	body, _ := json.Marshal(payload)
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/git/commits", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	s.applyGitHubHeaders(req, token)
+	req.Header.Set("Content-Type", "application/json")
+	var created struct {
+		SHA string `json:"sha"`
+	}
+	if err := s.doGitHubJSON(req, &created); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(created.SHA) == "" {
+		return "", fmt.Errorf("created commit sha is empty")
+	}
+	return strings.TrimSpace(created.SHA), nil
+}
+
+func isGitHubRefMissingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "github api request failed (404)") || strings.Contains(msg, "reference does not exist")
+}
+
+func isGitHubRefAlreadyExistsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "github api request failed (422)") && strings.Contains(msg, "reference already exists")
+}
+
+func isGitHubNonFastForwardError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "github api request failed (422)") && strings.Contains(msg, "not a fast forward")
+}
+
+func pathEscapeGitRef(ref string) string {
+	parts := strings.Split(ref, "/")
+	for i, part := range parts {
+		parts[i] = url.PathEscape(part)
+	}
+	return strings.Join(parts, "/")
+}
+
+func localCommitSHA(ctx context.Context, dir, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", fmt.Errorf("ref is required")
+	}
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", ref+"^{commit}")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse %s: %w: %s", ref, err, strings.TrimSpace(string(out)))
+	}
+	sha := strings.TrimSpace(string(out))
+	if sha == "" {
+		return "", fmt.Errorf("git rev-parse %s returned empty sha", ref)
+	}
+	return sha, nil
+}
+
+func collectGitHubBranchChanges(ctx context.Context, dir, baseBranch string) ([]githubBranchChange, error) {
+	tracked, err := collectTrackedGitHubBranchChanges(ctx, dir, baseBranch)
+	if err != nil {
+		return nil, err
+	}
+	untracked, err := collectUntrackedGitHubBranchChanges(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	changesByPath := make(map[string]githubBranchChange, len(tracked)+len(untracked))
+	for _, change := range tracked {
+		changesByPath[change.Path] = change
+	}
+	for _, change := range untracked {
+		changesByPath[change.Path] = change
+	}
+	paths := make([]string, 0, len(changesByPath))
+	for path := range changesByPath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	changes := make([]githubBranchChange, 0, len(paths))
+	for _, path := range paths {
+		changes = append(changes, changesByPath[path])
+	}
+	return changes, nil
+}
+
+func collectTrackedGitHubBranchChanges(ctx context.Context, dir, baseBranch string) ([]githubBranchChange, error) {
+	cmd := exec.CommandContext(ctx, "git", "diff", "--name-status", "-z", baseBranch)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("checking changed files: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	fields := strings.Split(string(out), "\x00")
+	changes := make([]githubBranchChange, 0)
+	for i := 0; i < len(fields); {
+		status := strings.TrimSpace(fields[i])
+		i++
+		if status == "" {
+			continue
+		}
+		code := status[:1]
+		var path string
+		if code == "R" || code == "C" {
+			if i+1 >= len(fields) {
+				return nil, fmt.Errorf("malformed git diff name-status output")
+			}
+			oldPath := cleanGitHubTreePath(fields[i])
+			i++
+			path = cleanGitHubTreePath(fields[i])
+			i++
+			if code == "R" && oldPath != "" && oldPath != path {
+				changes = append(changes, githubBranchChange{Path: oldPath, Mode: "100644", Delete: true})
+			}
+		} else {
+			if i >= len(fields) {
+				return nil, fmt.Errorf("malformed git diff name-status output")
+			}
+			path = cleanGitHubTreePath(fields[i])
+			i++
+		}
+		if path == "" {
+			continue
+		}
+		if code == "D" {
+			changes = append(changes, githubBranchChange{Path: path, Mode: "100644", Delete: true})
+			continue
+		}
+		content, mode, err := readGitHubTreeFileContent(ctx, dir, path)
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, githubBranchChange{Path: path, Content: content, Mode: mode})
+	}
+	return changes, nil
+}
+
+func collectUntrackedGitHubBranchChanges(ctx context.Context, dir string) ([]githubBranchChange, error) {
+	cmd := exec.CommandContext(ctx, "git", "ls-files", "--others", "--exclude-standard", "-z")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("checking untracked files: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	fields := strings.Split(string(out), "\x00")
+	changes := make([]githubBranchChange, 0, len(fields))
+	for _, field := range fields {
+		path := cleanGitHubTreePath(field)
+		if path == "" {
+			continue
+		}
+		absPath := filepath.Join(dir, filepath.FromSlash(path))
+		info, err := os.Lstat(absPath)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		content, mode, err := readGitHubTreeFileContent(ctx, dir, path)
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, githubBranchChange{Path: path, Content: content, Mode: mode})
+	}
+	return changes, nil
+}
+
+func readGitHubTreeFileContent(ctx context.Context, dir, relPath string) ([]byte, string, error) {
+	mode := gitHubTreeMode(ctx, dir, relPath)
+	absPath := filepath.Join(dir, filepath.FromSlash(relPath))
+	if mode == "120000" {
+		target, err := os.Readlink(absPath)
+		if err != nil {
+			return nil, "", fmt.Errorf("reading symlink %s: %w", relPath, err)
+		}
+		return []byte(target), mode, nil
+	}
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("reading changed file %s: %w", relPath, err)
+	}
+	return content, mode, nil
+}
+
+func cleanGitHubTreePath(path string) string {
+	path = strings.TrimSpace(filepath.ToSlash(path))
+	path = strings.TrimPrefix(path, "./")
+	if path == "." || path == "" || strings.HasPrefix(path, "../") || strings.Contains(path, "/../") || strings.HasPrefix(path, "/") {
+		return ""
+	}
+	return path
+}
+
+func gitHubTreeMode(ctx context.Context, dir, relPath string) string {
+	cmd := exec.CommandContext(ctx, "git", "ls-files", "-s", "--", relPath)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err == nil {
+		fields := strings.Fields(string(out))
+		if len(fields) > 0 {
+			switch fields[0] {
+			case "100755", "120000":
+				return fields[0]
+			}
+		}
+	}
+	absPath := filepath.Join(dir, filepath.FromSlash(relPath))
+	if info, err := os.Lstat(absPath); err == nil {
+		if info.Mode()&0111 != 0 {
+			return "100755"
+		}
+	}
+	return "100644"
+}
+
+func (s *GitHubService) GetPullRequest(ctx context.Context, repo *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("repository reference is required")
+	}
+	if number <= 0 {
+		return nil, fmt.Errorf("pull request number must be positive")
+	}
+
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), number)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.applyGitHubHeaders(req, token)
+
+	var pr struct {
+		Number int    `json:"number"`
+		URL    string `json:"html_url"`
+		State  string `json:"state"`
+		Head   struct {
+			Ref  string `json:"ref"`
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
+	}
+	if err := s.doGitHubJSON(req, &pr); err != nil {
+		return nil, err
+	}
+	return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, State: pr.State, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName}, nil
 }
 
 func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
@@ -701,6 +1406,105 @@ func (s *GitHubService) CommentOnIssue(ctx context.Context, repo *GitHubRepoRef,
 	return s.doGitHubJSON(req, nil)
 }
 
+func (s *GitHubService) ListPullRequestFeedback(ctx context.Context, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("repository reference is required")
+	}
+	if prNumber <= 0 {
+		return nil, fmt.Errorf("pull request number is required")
+	}
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	type sourceResult struct {
+		index    int
+		feedback []GitHubPullRequestFeedback
+		err      error
+	}
+	feedbackCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan sourceResult, 3)
+	sources := []func(context.Context) ([]GitHubPullRequestFeedback, error){
+		func(ctx context.Context) ([]GitHubPullRequestFeedback, error) {
+			return s.listPullRequestIssueComments(ctx, token, repo, prNumber)
+		},
+		func(ctx context.Context) ([]GitHubPullRequestFeedback, error) {
+			return s.listPullRequestReviews(ctx, token, repo, prNumber)
+		},
+		func(ctx context.Context) ([]GitHubPullRequestFeedback, error) {
+			return s.listPullRequestReviewComments(ctx, token, repo, prNumber)
+		},
+	}
+	for index, source := range sources {
+		go func() {
+			feedback, err := source(feedbackCtx)
+			results <- sourceResult{index: index, feedback: feedback, err: err}
+		}()
+	}
+
+	feedbackBySource := make([][]GitHubPullRequestFeedback, len(sources))
+	for range sources {
+		result := <-results
+		if result.err != nil {
+			cancel()
+			return nil, result.err
+		}
+		feedbackBySource[result.index] = result.feedback
+	}
+
+	var feedback []GitHubPullRequestFeedback
+	for _, sourceFeedback := range feedbackBySource {
+		feedback = append(feedback, sourceFeedback...)
+	}
+	sort.SliceStable(feedback, func(i, j int) bool {
+		return feedback[i].CreatedAt.Before(feedback[j].CreatedAt)
+	})
+	return feedback, nil
+}
+
+func (s *GitHubService) listPullRequestIssueComments(ctx context.Context, token string, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), prNumber)
+	raw, err := getPaginatedGitHubJSON[githubIssueCommentAPI](ctx, s, token, endpoint, "")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GitHubPullRequestFeedback, 0, len(raw))
+	for _, item := range raw {
+		out = append(out, item.toFeedback())
+	}
+	return out, nil
+}
+
+func (s *GitHubService) listPullRequestReviews(ctx context.Context, token string, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews?per_page=100", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), prNumber)
+	raw, err := getPaginatedGitHubJSON[githubPullRequestReviewAPI](ctx, s, token, endpoint, "")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GitHubPullRequestFeedback, 0, len(raw))
+	for _, item := range raw {
+		if fb := item.toFeedback(); strings.TrimSpace(fb.Body) != "" || strings.TrimSpace(fb.State) != "" {
+			out = append(out, fb)
+		}
+	}
+	return out, nil
+}
+
+func (s *GitHubService) listPullRequestReviewComments(ctx context.Context, token string, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/comments?per_page=100", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), prNumber)
+	raw, err := getPaginatedGitHubJSON[githubPullRequestReviewCommentAPI](ctx, s, token, endpoint, "")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GitHubPullRequestFeedback, 0, len(raw))
+	for _, item := range raw {
+		out = append(out, item.toFeedback())
+	}
+	return out, nil
+}
+
 func (s *GitHubService) AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, labels []string) error {
 	if repo == nil {
 		return fmt.Errorf("repository reference is required")
@@ -828,7 +1632,7 @@ func (s *GitHubService) ListAuthenticatedAssignedIssues(ctx context.Context, rep
 		return nil, nil, err
 	}
 	if user.Source == GitHubAuthModeApp {
-		return nil, nil, fmt.Errorf("github_list_my_assigned_issues requires a PAT user token; GitHub App installations can be installed on organizations and do not identify an assignable issue user. Configure a Project Inbox Assignee override and call github_list_assigned_issues with that assignee")
+		return nil, nil, fmt.Errorf("github_list_my_assigned_issues requires a PAT user token; GitHub App installations can be installed on organizations and do not identify an assignable issue user. Add the real issue assignee account to GitHub Authorized Users, call github_get_project_inbox, then call github_list_assigned_issues with each returned assignee")
 	}
 	token, err := s.createOperationAccessToken(ctx)
 	if err != nil {
@@ -855,14 +1659,8 @@ func (s *GitHubService) listAssignedIssuesWithToken(ctx context.Context, repo *G
 	query.Set("assignee", assignee)
 	query.Set("per_page", "100")
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues?%s", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), query.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	raw, err := getPaginatedGitHubJSON[githubIssueAPI](ctx, s, token, endpoint, "")
 	if err != nil {
-		return nil, err
-	}
-	s.applyGitHubHeaders(req, token)
-
-	var raw []githubIssueAPI
-	if err := s.doGitHubJSON(req, &raw); err != nil {
 		return nil, err
 	}
 
@@ -890,15 +1688,8 @@ func (s *GitHubService) FindPullRequestForIssue(ctx context.Context, repo *GitHu
 	}
 
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d/timeline?per_page=100", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), issueNumber)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	events, err := getPaginatedGitHubJSON[githubIssueTimelineEventAPI](ctx, s, token, endpoint, "application/vnd.github.mockingbird-preview+json")
 	if err != nil {
-		return nil, err
-	}
-	s.applyGitHubHeaders(req, token)
-	req.Header.Set("Accept", "application/vnd.github.mockingbird-preview+json")
-
-	var events []githubIssueTimelineEventAPI
-	if err := s.doGitHubJSON(req, &events); err != nil {
 		return nil, err
 	}
 
@@ -956,6 +1747,85 @@ func cleanGitHubStringList(items []string) []string {
 		out = append(out, trimmed)
 	}
 	return out
+}
+
+type githubIssueCommentAPI struct {
+	ID        int64     `json:"id"`
+	NodeID    string    `json:"node_id"`
+	URL       string    `json:"html_url"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"created_at"`
+	User      struct {
+		Login string `json:"login"`
+		Type  string `json:"type"`
+	} `json:"user"`
+}
+
+func (c githubIssueCommentAPI) toFeedback() GitHubPullRequestFeedback {
+	return GitHubPullRequestFeedback{
+		Kind:        "issue_comment",
+		ID:          strconv.FormatInt(c.ID, 10),
+		NodeID:      strings.TrimSpace(c.NodeID),
+		AuthorLogin: strings.TrimSpace(c.User.Login),
+		AuthorType:  strings.TrimSpace(c.User.Type),
+		Body:        c.Body,
+		URL:         strings.TrimSpace(c.URL),
+		CreatedAt:   c.CreatedAt,
+	}
+}
+
+type githubPullRequestReviewAPI struct {
+	ID          int64     `json:"id"`
+	NodeID      string    `json:"node_id"`
+	URL         string    `json:"html_url"`
+	Body        string    `json:"body"`
+	State       string    `json:"state"`
+	SubmittedAt time.Time `json:"submitted_at"`
+	User        struct {
+		Login string `json:"login"`
+		Type  string `json:"type"`
+	} `json:"user"`
+}
+
+func (r githubPullRequestReviewAPI) toFeedback() GitHubPullRequestFeedback {
+	return GitHubPullRequestFeedback{
+		Kind:        "review",
+		ID:          strconv.FormatInt(r.ID, 10),
+		NodeID:      strings.TrimSpace(r.NodeID),
+		AuthorLogin: strings.TrimSpace(r.User.Login),
+		AuthorType:  strings.TrimSpace(r.User.Type),
+		Body:        r.Body, URL: strings.TrimSpace(r.URL),
+		State:     strings.TrimSpace(r.State),
+		CreatedAt: r.SubmittedAt,
+	}
+}
+
+type githubPullRequestReviewCommentAPI struct {
+	ID        int64     `json:"id"`
+	NodeID    string    `json:"node_id"`
+	URL       string    `json:"html_url"`
+	Body      string    `json:"body"`
+	Path      string    `json:"path"`
+	Line      int       `json:"line"`
+	CreatedAt time.Time `json:"created_at"`
+	User      struct {
+		Login string `json:"login"`
+		Type  string `json:"type"`
+	} `json:"user"`
+}
+
+func (c githubPullRequestReviewCommentAPI) toFeedback() GitHubPullRequestFeedback {
+	return GitHubPullRequestFeedback{
+		Kind:        "review_comment",
+		ID:          strconv.FormatInt(c.ID, 10),
+		NodeID:      strings.TrimSpace(c.NodeID),
+		AuthorLogin: strings.TrimSpace(c.User.Login),
+		AuthorType:  strings.TrimSpace(c.User.Type),
+		Body:        c.Body,
+		URL:         strings.TrimSpace(c.URL),
+		Path:        strings.TrimSpace(c.Path), Line: c.Line,
+		CreatedAt: c.CreatedAt,
+	}
 }
 
 type githubIssueAPI struct {
@@ -1306,6 +2176,92 @@ func isPathWithin(baseDir, candidate string) (bool, error) {
 	}
 	prefix := baseAbs + string(os.PathSeparator)
 	return strings.HasPrefix(candidateAbs, prefix), nil
+}
+
+func getPaginatedGitHubJSON[T any](ctx context.Context, s *GitHubService, bearerToken, endpoint, accept string) ([]T, error) {
+	var items []T
+	seen := make(map[string]struct{})
+	for next := endpoint; next != ""; {
+		if _, ok := seen[next]; ok {
+			return nil, fmt.Errorf("GitHub pagination Link cycle detected")
+		}
+		seen[next] = struct{}{}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, next, nil)
+		if err != nil {
+			return nil, err
+		}
+		s.applyGitHubHeaders(req, bearerToken)
+		if accept != "" {
+			req.Header.Set("Accept", accept)
+		}
+
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			detail := formatGitHubAPIError(body)
+			if detail != "" {
+				return nil, fmt.Errorf("github API request failed (%d): %s", resp.StatusCode, detail)
+			}
+			return nil, fmt.Errorf("github API request failed (%d)", resp.StatusCode)
+		}
+
+		var page []T
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, err
+		}
+		items = append(items, page...)
+		next, err = nextGitHubPageURL(resp.Header.Get("Link"), req.URL)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
+func nextGitHubPageURL(linkHeader string, base *url.URL) (string, error) {
+	for _, link := range strings.Split(linkHeader, ",") {
+		parts := strings.Split(link, ";")
+		if len(parts) < 2 {
+			continue
+		}
+		isNext := false
+		for _, param := range parts[1:] {
+			name, value, ok := strings.Cut(strings.TrimSpace(param), "=")
+			if ok && strings.EqualFold(name, "rel") {
+				for _, relation := range strings.Fields(strings.Trim(value, `"`)) {
+					if relation == "next" {
+						isNext = true
+						break
+					}
+				}
+			}
+		}
+		if !isNext {
+			continue
+		}
+		target := strings.TrimSpace(parts[0])
+		if len(target) < 2 || target[0] != '<' || target[len(target)-1] != '>' {
+			return "", fmt.Errorf("invalid GitHub pagination Link header")
+		}
+		next, err := url.Parse(target[1 : len(target)-1])
+		if err != nil {
+			return "", fmt.Errorf("invalid GitHub pagination Link header: %w", err)
+		}
+		resolved := base.ResolveReference(next)
+		if !strings.EqualFold(resolved.Scheme, base.Scheme) || !strings.EqualFold(resolved.Host, base.Host) {
+			return "", fmt.Errorf("GitHub pagination Link points to a different origin")
+		}
+		return resolved.String(), nil
+	}
+	return "", nil
 }
 
 func (s *GitHubService) applyGitHubHeaders(req *http.Request, bearerToken string) {

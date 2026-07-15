@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, *repository.ReviewCommentRepo, *repository.ExecutionRepo, *testutil.MockLLMCaller, string) {
@@ -54,6 +56,9 @@ func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, *repository.ReviewC
 	)
 	h.SetReviewCommentRepo(reviewCommentRepo)
 	h.SetTaskGoalService(taskGoalSvc)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	h.SetThreadInputRepo(threadInputRepo)
+	llmSvc.SetThreadInputRepo(threadInputRepo)
 	workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
 
 	e := echo.New()
@@ -313,6 +318,57 @@ func TestAddMultipleComments_SameFile(t *testing.T) {
 	if count != 2 {
 		t.Errorf("expected 2 comments, got %d", count)
 	}
+}
+
+func TestSubmitReview_WorktreeFailurePromotesQueuedFollowup(t *testing.T) {
+	h, e, reviewRepo, execRepo, _, taskID := setupReviewHandler(t)
+	ctx := context.Background()
+
+	repoDir := t.TempDir()
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	task, err := h.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	project.RepoPath = repoDir
+	if err := h.projectRepo.Update(ctx, project); err != nil {
+		t.Fatalf("update project repo path: %v", err)
+	}
+	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+
+	if err := reviewRepo.Create(ctx, &models.ReviewComment{
+		TaskID: taskID, FilePath: "main.go", LineNumber: 10, LineType: "new", CommentText: "Fix this",
+	}); err != nil {
+		t.Fatalf("create review comment: %v", err)
+	}
+	queued := &models.ThreadInput{
+		Scope: models.ThreadInputScopeTask, ProjectID: task.ProjectID, TaskID: taskID,
+		AgentConfigID: *task.AgentID, InputMode: models.ThreadInputModeQueued,
+		InputStatus: models.ThreadInputPending, Content: "queued after review", Source: models.TaskOriginWeb,
+	}
+	if err := h.threadInputRepo.CreateQueued(ctx, queued); err != nil {
+		t.Fatalf("create queued input: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/reviews/submit", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("submit review: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	require.Eventually(t, func() bool {
+		execs, listErr := execRepo.ListByTaskChronological(ctx, taskID)
+		return listErr == nil && len(execs) == 2 && execs[1].PromptSent == queued.Content
+	}, time.Second, 10*time.Millisecond, "expected worktree failure to promote the queued follow-up")
 }
 
 func TestSubmitReview_CreatesFollowupExecutionAndClearsComments(t *testing.T) {

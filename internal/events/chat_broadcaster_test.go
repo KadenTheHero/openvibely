@@ -299,43 +299,21 @@ func TestChatBroadcaster_ActiveConsumerReceivesAll(t *testing.T) {
 	defer b.Unsubscribe(sub)
 
 	const totalEvents = 100
-	received := make(chan ChatEvent, totalEvents)
 
-	// Start active consumer (simulates SSE handler reading from channel)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < totalEvents; i++ {
-			select {
-			case evt := <-sub:
-				received <- evt
-			case <-time.After(5 * time.Second):
-				return
-			}
-		}
-	}()
-
-	// Publish events with small delays (simulates real API message flow)
+	// Publish one event at a time and require the active consumer to observe it before
+	// the next publish. This exercises the active-consumer path without relying on
+	// scheduler timing or micro-sleeps to keep the broadcaster buffer from filling.
 	for i := 0; i < totalEvents; i++ {
 		b.Publish(ChatEvent{
 			Type:      ChatNewMessage,
 			ProjectID: "proj1",
 			ExecID:    "exec",
 		})
-		// Small yield to allow consumer goroutine to drain
-		time.Sleep(time.Microsecond)
-	}
-
-	wg.Wait()
-	close(received)
-
-	count := 0
-	for range received {
-		count++
-	}
-	if count != totalEvents {
-		t.Errorf("active consumer should receive all %d events, got %d (events were dropped)", totalEvents, count)
+		select {
+		case <-sub:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("active consumer did not receive event %d", i+1)
+		}
 	}
 }
 

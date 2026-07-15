@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSupportsChatActionTools(t *testing.T) {
@@ -58,6 +61,42 @@ func TestSupportsChatActionTools(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandlerSupportsChatActionToolsResolvesMixtureAggregator(t *testing.T) {
+	h, _, repo := setupTestHandler(t)
+	ctx := context.Background()
+
+	tests := []struct {
+		name       string
+		provider   models.LLMProvider
+		authMethod models.AuthMethod
+		want       bool
+	}{
+		{name: "openai api key", provider: models.ProviderOpenAI, authMethod: models.AuthMethodAPIKey, want: true},
+		{name: "openai oauth", provider: models.ProviderOpenAI, authMethod: models.AuthMethodOAuth, want: true},
+		{name: "anthropic api key", provider: models.ProviderAnthropic, authMethod: models.AuthMethodAPIKey, want: true},
+		{name: "anthropic oauth", provider: models.ProviderAnthropic, authMethod: models.AuthMethodOAuth, want: true},
+		{name: "openai compatible api key", provider: models.ProviderOpenAICompatible, authMethod: models.AuthMethodAPIKey, want: true},
+		{name: "openai cli", provider: models.ProviderOpenAI, authMethod: models.AuthMethodCLI, want: false},
+		{name: "anthropic cli", provider: models.ProviderAnthropic, authMethod: models.AuthMethodCLI, want: false},
+		{name: "ollama", provider: models.ProviderOllama, authMethod: models.AuthMethodAPIKey, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			aggregator := &models.LLMConfig{Name: "Aggregator " + tt.name, Provider: tt.provider, Model: "model", AuthMethod: tt.authMethod}
+			require.NoError(t, repo.Create(ctx, aggregator))
+			mixture := models.LLMConfig{
+				Provider:          models.ProviderMixture,
+				MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+			}
+			require.Equal(t, tt.want, h.supportsChatActionTools(ctx, mixture))
+		})
+	}
+
+	require.False(t, h.supportsChatActionTools(ctx, models.LLMConfig{Provider: models.ProviderMixture, MixtureConfigJSON: `{invalid`}))
+	require.False(t, h.supportsChatActionTools(ctx, models.LLMConfig{Provider: models.ProviderMixture, MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"missing"}}`}))
 }
 
 func TestFormatCapabilitiesIncludesSelectedMemoryHandles(t *testing.T) {
@@ -319,6 +358,53 @@ func TestCreateSwarmTaskRuntimeTool_CreatesParentAndPlanner(t *testing.T) {
 	}
 }
 
+func TestCreateTaskRuntimeTool_OmittedCategoryAutoStartActivatesAfterAttachmentConversion(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Runtime Attachment Deferral Project")
+	modelConfig := createAgent(t, llmConfigRepo, func(c *models.LLMConfig) {
+		c.AutoStartTasks = true
+	})
+	chatHostTask := createTask(t, h, project.ID, "runtime attachment host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+	})
+	exec := createExec(t, h, chatHostTask.ID, modelConfig.ID)
+
+	fileName := "Screenshot 2026-07-10 at 9.49.00\u202fPM.png"
+	sourceDir := filepath.Join(uploadsDir, "chat", exec.ID)
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	sourcePath := filepath.Join(sourceDir, fileName)
+	require.NoError(t, os.WriteFile(sourcePath, []byte{0x89, 0x50, 0x4e, 0x47}, 0o644))
+	require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+		ExecutionID: exec.ID,
+		FileName:    fileName,
+		FilePath:    sourcePath,
+		MediaType:   "image/png",
+		FileSize:    4,
+	}))
+
+	handlers := h.chatActionHandlers(
+		streamingResponseParams{ExecID: exec.ID, ProjectID: project.ID},
+		nil,
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)
+	output, err := handlers["create_task"](ctx, json.RawMessage(`{"title":"Auto-start runtime task","prompt":"Use the screenshot"}`))
+	require.NoError(t, err)
+	ids := extractTaskIDsFromOutput(output)
+	require.Len(t, ids, 1)
+
+	created, err := h.taskRepo.GetByID(ctx, ids[0])
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.Equal(t, models.CategoryActive, created.Category)
+	attachments, err := h.attachmentRepo.ListByTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.Len(t, attachments, 1)
+	require.Equal(t, fileName, attachments[0].FileName)
+	require.FileExists(t, attachments[0].FilePath)
+}
+
 // TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure is the regression
 // test for the phantom create_task bug: the runtime tool handler used to
 // always return (summary, nil), so even if processChatTaskCreations failed to
@@ -420,89 +506,6 @@ func TestWebAPISwitchProject_IsInformationalOnly(t *testing.T) {
 	}
 }
 
-func TestGitHubLinkTaskToIssueSkipsWithoutAssociatedPR(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
-	ctx := context.Background()
-	project := &models.Project{Name: "GitHub Loop", RepoURL: "https://github.com/openvibely/openvibely"}
-	if err := h.projectSvc.Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	task := &models.Task{ProjectID: project.ID, Title: "Fix issue", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
-	if err := h.taskRepo.Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
-	h.SetGitHubService(&fakeGitHubService{
-		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
-		},
-		getIssueFn: func(_ context.Context, _ *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error) {
-			return &service.GitHubIssue{Number: issueNumber, URL: "https://github.com/openvibely/openvibely/issues/77", Title: "Issue"}, nil
-		},
-		findIssuePRFn: func(_ context.Context, _ *service.GitHubRepoRef, issueNumber int) (*service.GitHubPullRequest, error) {
-			return nil, nil
-		},
-	})
-	params := streamingResponseParams{ProjectID: project.ID}
-	out, err := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["github_link_task_to_issue"](ctx, json.RawMessage(`{"task_id":"`+task.ID+`","issue_number":77}`))
-	if err != nil {
-		t.Fatalf("github_link_task_to_issue returned error: %v", err)
-	}
-	if !strings.Contains(out, `"skipped":true`) || !strings.Contains(out, "associated pull request") {
-		t.Fatalf("expected skipped-without-pr result, got %s", out)
-	}
-	record, err := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("lookup task PR record: %v", err)
-	}
-	if record != nil {
-		t.Fatalf("expected no task PR record when issue has no associated PR, got %#v", record)
-	}
-}
-
-func TestGitHubLinkTaskToIssuePersistsAssociatedPR(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
-	ctx := context.Background()
-	project := &models.Project{Name: "GitHub Loop", RepoURL: "https://github.com/openvibely/openvibely"}
-	if err := h.projectSvc.Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	task := &models.Task{ProjectID: project.ID, Title: "Fix issue", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
-	if err := h.taskRepo.Create(ctx, task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
-	h.SetGitHubService(&fakeGitHubService{
-		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
-		},
-		getIssueFn: func(_ context.Context, _ *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error) {
-			return &service.GitHubIssue{Number: issueNumber, URL: "https://github.com/openvibely/openvibely/issues/77", Title: "Issue"}, nil
-		},
-		findIssuePRFn: func(_ context.Context, _ *service.GitHubRepoRef, issueNumber int) (*service.GitHubPullRequest, error) {
-			return &service.GitHubPullRequest{Number: 88, URL: "https://github.com/openvibely/openvibely/pull/88", State: "open"}, nil
-		},
-	})
-	params := streamingResponseParams{ProjectID: project.ID}
-	out, err := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["github_link_task_to_issue"](ctx, json.RawMessage(`{"task_id":"`+task.ID+`","issue_number":77}`))
-	if err != nil {
-		t.Fatalf("github_link_task_to_issue returned error: %v", err)
-	}
-	if !strings.Contains(out, `"ok":true`) || !strings.Contains(out, `"issue_number":77`) {
-		t.Fatalf("expected linked result, got %s", out)
-	}
-	record, err := h.taskPullRequestRepo.GetByIssueNumber(ctx, 77)
-	if err != nil {
-		t.Fatalf("lookup task PR record: %v", err)
-	}
-	if record == nil || record.TaskID != task.ID || record.PRNumber != 88 || record.IssueNumber == nil || *record.IssueNumber != 77 {
-		t.Fatalf("unexpected task PR record: %#v", record)
-	}
-	if record.IssueURL != "https://github.com/openvibely/openvibely/issues/77" {
-		t.Fatalf("unexpected issue URL: %q", record.IssueURL)
-	}
-}
-
 func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
@@ -520,9 +523,9 @@ func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
 		},
-		pushBranchFn: func(_ context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error {
-			if branch != task.WorktreeBranch {
-				t.Fatalf("unexpected pushed branch %q", branch)
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
+			if publishReq.Branch != task.WorktreeBranch {
+				t.Fatalf("unexpected published branch %q", publishReq.Branch)
 			}
 			return nil
 		},
@@ -554,6 +557,53 @@ func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {
 	}
 }
 
+func TestGitHubReplacePullRequestBranchRuntimeToolUsesLeaseGuard(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "GitHub PR Replacement", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Replace PR branch", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: t.TempDir(), WorktreeBranch: "task/runtime-replace-pr"}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+	if err := h.taskPullRequestRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 4, PRURL: "https://github.com/openvibely/openvibely/pull/4", PRState: "open"}); err != nil {
+		t.Fatalf("seed PR record: %v", err)
+	}
+
+	var got service.GitHubReplaceBranchHeadRequest
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(_ context.Context, _, _ string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+		},
+		getPullRequestFn: func(_ context.Context, _ *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: number, HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely"}, nil
+		},
+		replaceBranchHeadFn: func(_ context.Context, _ *service.GitHubRepoRef, req service.GitHubReplaceBranchHeadRequest) error {
+			got = req
+			return nil
+		},
+	})
+	expected := strings.Repeat("a", 40)
+	params := streamingResponseParams{ProjectID: project.ID}
+	handler := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["github_replace_pull_request_branch"]
+	if _, err := handler(ctx, json.RawMessage(`{"task_id":"`+task.ID+`","expected_head_sha":"`+expected+`"}`)); err == nil || !strings.Contains(err.Error(), "confirm_history_rewrite") {
+		t.Fatalf("expected explicit history rewrite confirmation error, got %v", err)
+	}
+	out, err := handler(ctx, json.RawMessage(`{"task_id":"`+task.ID+`","expected_head_sha":"`+expected+`","confirm_history_rewrite":true}`))
+	if err != nil {
+		t.Fatalf("github_replace_pull_request_branch returned error: %v", err)
+	}
+	if got.WorktreePath != task.WorktreePath || got.Branch != task.WorktreeBranch || got.ExpectedHead != expected {
+		t.Fatalf("unexpected replacement request: %#v", got)
+	}
+	if !strings.Contains(out, `"replaced_branch":"`+task.WorktreeBranch+`"`) || !strings.Contains(out, `"expected_head_sha":"`+expected+`"`) {
+		t.Fatalf("unexpected tool output: %s", out)
+	}
+}
+
 func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
@@ -570,22 +620,55 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 		t.Fatalf("configure authorized actor: %v", err)
 	}
 	var sawMyAssignedIssues bool
+	var createdRepo, commentedRepo, labeledRepo string
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
-			if repoURL != project.RepoURL {
-				t.Fatalf("expected project repo URL %q, got %q", project.RepoURL, repoURL)
+			switch repoURL {
+			case project.RepoURL:
+				return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+			case "https://github.com/example/other":
+				if strings.TrimSpace(repoPath) != "" {
+					t.Fatalf("expected explicit repo_url lookup to avoid local repo path, got %q", repoPath)
+				}
+				return &service.GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other"}, nil
+			default:
+				t.Fatalf("unexpected repo URL %q", repoURL)
+				return nil, nil
 			}
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
 		},
 		listMyAssignedIssuesFn: func(_ context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error) {
 			sawMyAssignedIssues = true
+			if repo.Owner == "example" && repo.Name == "other" {
+				return &service.GitHubAuthenticatedUser{Login: "channel-user", Source: service.GitHubAuthModePAT}, []service.GitHubIssue{{Number: 7, URL: "https://github.com/example/other/issues/7", Title: "Explicit URL", State: "open", Assignees: []string{"channel-user"}}}, nil
+			}
 			return &service.GitHubAuthenticatedUser{Login: "channel-user", Source: service.GitHubAuthModePAT}, []service.GitHubIssue{{Number: 5, URL: "https://github.com/openvibely/openvibely/issues/5", Title: "Testing", State: "open", Assignees: []string{"channel-user"}}}, nil
 		},
 		listAssignedIssuesFn: func(_ context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssue, error) {
 			if assignee != "Dev-Bot" {
 				t.Fatalf("expected explicit assignee Dev-Bot, got %q", assignee)
 			}
+			if repo.Owner == "example" && repo.Name == "other" {
+				return []service.GitHubIssue{{Number: 8, URL: "https://github.com/example/other/issues/8", Title: "Explicit assignee URL", State: "open", Assignees: []string{"dev-bot"}}}, nil
+			}
 			return []service.GitHubIssue{{Number: 6, URL: "https://github.com/openvibely/openvibely/issues/6", Title: "Override", State: "open", Assignees: []string{"dev-bot"}}}, nil
+		},
+		createIssueFn: func(_ context.Context, repo *service.GitHubRepoRef, req service.GitHubCreateIssueRequest) (*service.GitHubIssue, error) {
+			createdRepo = repo.FullName
+			return &service.GitHubIssue{Number: 9, URL: "https://github.com/example/other/issues/9", Title: req.Title, State: "open", Labels: req.Labels, Assignees: req.Assignees}, nil
+		},
+		commentOnIssueFn: func(_ context.Context, repo *service.GitHubRepoRef, issueNumber int, body string) error {
+			commentedRepo = repo.FullName
+			if issueNumber != 9 || body != "Looks good" {
+				t.Fatalf("unexpected comment input issue=%d body=%q", issueNumber, body)
+			}
+			return nil
+		},
+		addLabelsToIssueFn: func(_ context.Context, repo *service.GitHubRepoRef, issueNumber int, labels []string) error {
+			labeledRepo = repo.FullName
+			if issueNumber != 9 || len(labels) != 1 || labels[0] != "approved" {
+				t.Fatalf("unexpected labels input issue=%d labels=%v", issueNumber, labels)
+			}
+			return nil
 		},
 	})
 
@@ -595,8 +678,8 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("github_get_project_inbox returned error: %v", err)
 	}
-	if !strings.Contains(out, `"configured":true`) || !strings.Contains(out, `"github_login":"dev-bot"`) {
-		t.Fatalf("expected configured inbox output, got %s", out)
+	if !strings.Contains(out, `"configured":true`) || !strings.Contains(out, `"assignees":["alice"]`) || !strings.Contains(out, `"legacy_inbox"`) || !strings.Contains(out, `"github_login":"dev-bot"`) {
+		t.Fatalf("expected authorized-user assignee output with legacy inbox metadata, got %s", out)
 	}
 	out, err = handlers["github_is_actor_authorized"](ctx, json.RawMessage(`{"github_login":"ALICE"}`))
 	if err != nil {
@@ -625,5 +708,40 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	}
 	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"Number":6`) {
 		t.Fatalf("expected explicit-assignee assigned issues output, got %s", out)
+	}
+	out, err = handlers["github_list_my_assigned_issues"](ctx, json.RawMessage(`{"repo_url":"https://github.com/example/other"}`))
+	if err != nil {
+		t.Fatalf("github_list_my_assigned_issues with repo_url returned error: %v", err)
+	}
+	if !strings.Contains(out, `"Number":7`) || !strings.Contains(out, `"https://github.com/example/other/issues/7"`) {
+		t.Fatalf("expected explicit repo_url my-assigned issues output, got %s", out)
+	}
+	out, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"Dev-Bot","repo_url":"https://github.com/example/other"}`))
+	if err != nil {
+		t.Fatalf("github_list_assigned_issues with repo_url returned error: %v", err)
+	}
+	if !strings.Contains(out, `"Number":8`) || !strings.Contains(out, `"https://github.com/example/other/issues/8"`) {
+		t.Fatalf("expected explicit repo_url assigned issues output, got %s", out)
+	}
+	out, err = handlers["github_create_issue"](ctx, json.RawMessage(`{"title":"URL issue","body":"Created by URL","labels":["bug"],"assignees":["dev-bot"],"repo_url":"https://github.com/example/other"}`))
+	if err != nil {
+		t.Fatalf("github_create_issue with repo_url returned error: %v", err)
+	}
+	if createdRepo != "example/other" || !strings.Contains(out, `"Number":9`) || !strings.Contains(out, `"https://github.com/example/other/issues/9"`) {
+		t.Fatalf("expected explicit repo_url create output repo=%q out=%s", createdRepo, out)
+	}
+	out, err = handlers["github_comment_on_issue"](ctx, json.RawMessage(`{"issue_number":9,"body":"Looks good","repo_url":"https://github.com/example/other"}`))
+	if err != nil {
+		t.Fatalf("github_comment_on_issue with repo_url returned error: %v", err)
+	}
+	if commentedRepo != "example/other" || !strings.Contains(out, `"issue_number":9`) {
+		t.Fatalf("expected explicit repo_url comment output repo=%q out=%s", commentedRepo, out)
+	}
+	out, err = handlers["github_add_issue_labels"](ctx, json.RawMessage(`{"issue_number":9,"labels":["approved"],"repo_url":"https://github.com/example/other"}`))
+	if err != nil {
+		t.Fatalf("github_add_issue_labels with repo_url returned error: %v", err)
+	}
+	if labeledRepo != "example/other" || !strings.Contains(out, `"labels":["approved"]`) {
+		t.Fatalf("expected explicit repo_url label output repo=%q out=%s", labeledRepo, out)
 	}
 }

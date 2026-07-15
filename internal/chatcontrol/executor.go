@@ -17,23 +17,52 @@ type RuntimeActionHandler func(ctx context.Context, input json.RawMessage) (stri
 // BuildRuntimeToolExecutor creates a runtime-tools executor with centralized
 // policy gating and handler dispatch.
 func BuildRuntimeToolExecutor(mode models.ChatMode, surface Surface, handlers map[string]RuntimeActionHandler) llmcontracts.RuntimeToolExecutor {
-	return buildRuntimeToolExecutor(mode, surface, handlers, false)
+	return buildRuntimeToolExecutor(mode, surface, handlers, false, nil)
+}
+
+// BuildRuntimeToolExecutorForActions creates an executor for a partial runtime
+// bundle. Calls for actions outside allowedActions fall through so later
+// composite executors can handle them.
+func BuildRuntimeToolExecutorForActions(mode models.ChatMode, surface Surface, handlers map[string]RuntimeActionHandler, allowedActions map[string]bool) llmcontracts.RuntimeToolExecutor {
+	return buildRuntimeToolExecutor(mode, surface, handlers, false, allowedActions)
 }
 
 // BuildLifecycleRuntimeToolExecutor creates an executor for protected lifecycle agents.
 // It allows lifecycle-only actions that are intentionally hidden from ordinary chat turns.
 func BuildLifecycleRuntimeToolExecutor(mode models.ChatMode, surface Surface, handlers map[string]RuntimeActionHandler) llmcontracts.RuntimeToolExecutor {
-	return buildRuntimeToolExecutor(mode, surface, handlers, true)
+	return buildRuntimeToolExecutor(mode, surface, handlers, true, nil)
 }
 
 func isExternalRuntimeTool(name string) bool {
 	return strings.EqualFold(strings.TrimSpace(name), "memory_view")
 }
 
-func buildRuntimeToolExecutor(mode models.ChatMode, surface Surface, handlers map[string]RuntimeActionHandler, includeLifecycleOnly bool) llmcontracts.RuntimeToolExecutor {
+func normalizedActionSet(actions map[string]bool) map[string]bool {
+	if len(actions) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(actions))
+	for action, allowed := range actions {
+		name := strings.ToLower(strings.TrimSpace(action))
+		if name == "" || !allowed {
+			continue
+		}
+		out[name] = true
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func buildRuntimeToolExecutor(mode models.ChatMode, surface Surface, handlers map[string]RuntimeActionHandler, includeLifecycleOnly bool, allowedActions map[string]bool) llmcontracts.RuntimeToolExecutor {
+	allowed := normalizedActionSet(allowedActions)
 	return func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		toolName := strings.ToLower(strings.TrimSpace(name))
 		if toolName == "" {
+			return "", false, false, nil
+		}
+		if allowed != nil && !allowed[toolName] {
 			return "", false, false, nil
 		}
 

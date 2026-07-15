@@ -51,6 +51,7 @@ type LLMService struct {
 	mutationRecorder         func(models.Task) agentlibrary.MutationRecorder
 	alertSvc                 *AlertService
 	taskSvc                  *TaskService
+	taskGoalSvc              *TaskGoalService
 	worktreeSvc              *WorktreeService
 	telegramSvc              *TelegramService
 	slackSvc                 *SlackService
@@ -69,6 +70,7 @@ type LLMService struct {
 	githubIssueRuntime       GitHubIssueRuntimeProvider
 	githubAuthRepo           *repository.GitHubAuthRepo
 	taskPullRequestRepo      *repository.TaskPullRequestRepo
+	githubPRFeedbackRepo     *repository.GitHubPRFeedbackRepo
 	// globalSkillRoot is the parent directory holding <root>/agents for global
 	// agents/skills. It is used for catalog construction and bounded skill
 	// mutation writes; agents themselves remain user-managed.
@@ -111,6 +113,10 @@ func (s *LLMService) SetAlertService(alertSvc *AlertService) {
 // (LLMService -> TaskService -> WorkerService -> LLMService).
 func (s *LLMService) SetTaskService(taskSvc *TaskService) {
 	s.taskSvc = taskSvc
+}
+
+func (s *LLMService) SetTaskGoalService(taskGoalSvc *TaskGoalService) {
+	s.taskGoalSvc = taskGoalSvc
 }
 
 // SetWorktreeService sets the worktree service for task isolation.
@@ -196,6 +202,10 @@ func (s *LLMService) SetTaskPullRequestRepo(repo *repository.TaskPullRequestRepo
 	s.taskPullRequestRepo = repo
 }
 
+func (s *LLMService) SetGitHubPRFeedbackRepo(repo *repository.GitHubPRFeedbackRepo) {
+	s.githubPRFeedbackRepo = repo
+}
+
 func (s *LLMService) taskSendMessageRuntimeTools(task models.Task) *llmcontracts.RuntimeTools {
 	if s == nil || s.channelMessageRouter == nil || strings.TrimSpace(task.ProjectID) == "" {
 		return nil
@@ -213,11 +223,11 @@ func (s *LLMService) taskSendMessageRuntimeTools(task models.Task) *llmcontracts
 	}
 	return &llmcontracts.RuntimeTools{
 		Definitions: filtered,
-		Executor: chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, map[string]chatcontrol.RuntimeActionHandler{
+		Executor: chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, map[string]chatcontrol.RuntimeActionHandler{
 			"send_message": func(ctx context.Context, input json.RawMessage) (string, error) {
 				return ExecuteSendMessageTool(ctx, s.channelMessageRouter.WithAuditContext(string(chatcontrol.SurfaceWeb), "task"), task.ProjectID, input)
 			},
-		}),
+		}, map[string]bool{"send_message": true}),
 	}
 }
 
@@ -226,14 +236,75 @@ func (s *LLMService) taskActionRuntimeTools(task models.Task) *llmcontracts.Runt
 		return nil
 	}
 	githubTools := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
-		ProjectID:           task.ProjectID,
-		ProjectRepo:         s.projectRepo,
-		TaskRepo:            s.taskRepo,
-		TaskPullRequestRepo: s.taskPullRequestRepo,
-		GitHubAuthRepo:      s.githubAuthRepo,
-		GitHub:              s.githubIssueRuntime,
+		ProjectID:                task.ProjectID,
+		ProjectRepo:              s.projectRepo,
+		TaskRepo:                 s.taskRepo,
+		TaskPullRequestRepo:      s.taskPullRequestRepo,
+		GitHubPRFeedbackRepo:     s.githubPRFeedbackRepo,
+		GitHubAuthRepo:           s.githubAuthRepo,
+		ThreadInputRepo:          s.threadInputRepo,
+		GitHub:                   s.githubIssueRuntime,
+		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
 	})
-	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), githubTools)
+	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools)
+}
+
+func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.RuntimeTools {
+	if s == nil || strings.TrimSpace(task.ProjectID) == "" {
+		return nil
+	}
+	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
+	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, 5)
+	allowed := map[string]bool{
+		"create_task":       true,
+		"create_swarm_task": true,
+		"set_task_goal":     true,
+		"clear_task_goal":   true,
+		"get_task_goal":     true,
+		"pause_task_goal":   true,
+		"resume_task_goal":  true,
+		"schedule_task":     true,
+		"delete_schedule":   true,
+		"modify_schedule":   true,
+		"list_capabilities": true,
+	}
+	for _, def := range defs {
+		if allowed[strings.ToLower(strings.TrimSpace(def.Name))] {
+			filtered = append(filtered, def)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
+		ProjectID:     task.ProjectID,
+		TaskSvc:       s.taskSvc,
+		SwarmSvc:      nil,
+		LLMConfigRepo: s.llmConfigRepo,
+	})
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{
+		ProjectID:   task.ProjectID,
+		TaskRepo:    s.taskRepo,
+		TaskGoalSvc: s.taskGoalSvc,
+	}))
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		ProjectID:             task.ProjectID,
+		TaskRepo:              s.taskRepo,
+		ScheduleRepo:          s.scheduleRepo,
+		LLMConfigRepo:         s.llmConfigRepo,
+		AgentRepo:             s.agentRepo,
+		SettingsRepo:          nil,
+		CustomPersonalityRepo: nil,
+		ProjectRepo:           s.projectRepo,
+		AlertSvc:              s.alertSvc,
+	}))
+	handlers["list_capabilities"] = func(_ context.Context, _ json.RawMessage) (string, error) {
+		return formatChannelCapabilities(chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)), nil
+	}
+	return &llmcontracts.RuntimeTools{
+		Definitions: filtered,
+		Executor:    chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, handlers, allowed),
+	}
 }
 
 func (s *LLMService) promoteQueuedTaskThreadAfterCompletion(taskID string) {
@@ -364,6 +435,26 @@ func (s *LLMService) getDefaultAgentForTask(ctx context.Context, projectID strin
 	return s.llmConfigRepo.GetDefault(ctx)
 }
 
+func (s *LLMService) reconcileMissingTaskAttachments(ctx context.Context, taskID string, attachments []models.Attachment) []models.Attachment {
+	valid := make([]models.Attachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		if _, err := os.Stat(attachment.FilePath); err == nil {
+			valid = append(valid, attachment)
+			continue
+		} else if !os.IsNotExist(err) {
+			// Permission and transient filesystem errors remain provider-visible failures.
+			valid = append(valid, attachment)
+			continue
+		}
+
+		applog.Infof("[agent-svc] attachment lifecycle stage=runtime-reconcile task=%s attachment=%s path=%s error=file-not-found", taskID, attachment.ID, attachment.FilePath)
+		if err := s.attachmentRepo.Delete(context.WithoutCancel(ctx), attachment.ID); err != nil {
+			applog.Infof("[agent-svc] attachment lifecycle stage=runtime-reconcile-metadata task=%s attachment=%s path=%s error=%v", taskID, attachment.ID, attachment.FilePath, err)
+		}
+	}
+	return valid
+}
+
 func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task, agent models.LLMConfig) (*models.Execution, error) {
 	exec, _, err := s.executeTaskWithAgent(ctx, task, agent)
 	return exec, err
@@ -459,6 +550,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, llmcontracts.ChatContext{}, fmt.Errorf("loading attachments: %w", err)
 	}
+	attachments = s.reconcileMissingTaskAttachments(ctx, task.ID, attachments)
 	applog.Infof("[agent-svc] ExecuteTaskWithAgent loaded %d attachments for task=%s", len(attachments), task.ID)
 
 	// Vision-aware agent override: if the task has image attachments and the
@@ -475,6 +567,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// server directory instead of the project's configured directory.
 	workDir := ""
 	repoDir := "" // original repo dir (for worktree setup and post-execution)
+	managedWorktree := false
 	if task.ProjectID != "" && s.projectRepo != nil {
 		project, projErr := s.projectRepo.GetByID(ctx, task.ProjectID)
 		if projErr != nil {
@@ -514,9 +607,33 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if useRuntimeWorktree && s.worktreeSvc != nil && repoDir != "" && task.Category != models.CategoryChat && IsGitRepo(repoDir) {
 		wtPath, wtBranch, wtErr := s.worktreeSvc.SetupWorktree(ctx, &task, repoDir)
 		if wtErr != nil {
-			applog.Infof("[agent-svc] ExecuteTaskWithAgent worktree setup failed (using main repo): %v", wtErr)
+			errMsg := fmt.Sprintf("setting up isolated task worktree: %v", wtErr)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent worktree setup failed task=%s; refusing to use main repo: %v", task.ID, wtErr)
+			if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); completeErr != nil {
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after worktree setup failure: %v", completeErr)
+			} else {
+				s.publishExecutionTerminal(exec.ID, models.ExecFailed, errMsg)
+			}
+			if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after worktree setup failure: %v", statusErr)
+			}
+			if task.Category == models.CategoryActive {
+				if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
+					applog.Infof("[agent-svc] ExecuteTaskWithAgent error moving worktree-setup-failed task to completed category: %v", categoryErr)
+				}
+			}
+			if s.alertSvc != nil {
+				if alertErr := s.alertSvc.CreateTaskFailedAlert(finalizeCtx, task.ProjectID, task.ID, exec.ID, task.Title, errMsg); alertErr != nil {
+					applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating worktree setup failure alert: %v", alertErr)
+				}
+			}
+			exec.Status = models.ExecFailed
+			exec.ErrorMessage = errMsg
+			s.promoteQueuedTaskThreadAfterCompletion(task.ID)
+			return exec, llmcontracts.ChatContext{}, fmt.Errorf("worktree setup failed: %w", wtErr)
 		} else if wtPath != "" {
 			workDir = wtPath
+			managedWorktree = true
 			task.WorktreePath = wtPath
 			task.WorktreeBranch = wtBranch
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent using worktree workDir=%s branch=%s", workDir, wtBranch)
@@ -605,7 +722,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	var stopDiffBroadcast chan struct{}
 	if s.fileChangeBroadcaster != nil && workDir != "" {
 		stopDiffBroadcast = make(chan struct{})
-		go s.broadcastDiffSnapshots(ctx, task.ID, exec.ID, workDir, repoDir, task.WorktreeBranch, task.MergeTargetBranch, stopDiffBroadcast)
+		go s.broadcastDiffSnapshots(ctx, task.ID, exec.ID, workDir, repoDir, task.WorktreeBranch, task.MergeTargetBranch, managedWorktree, stopDiffBroadcast)
 	}
 
 	// Call the LLM
@@ -633,18 +750,23 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			return nil
 		})
 	}
+	runtimeToolsSupported := SupportsRuntimeChatActionTools(callCtx, s.llmConfigRepo, agent)
 	var taskActionTools *llmcontracts.RuntimeTools
-	if supportsRuntimeChatActionTools(agent) {
+	if runtimeToolsSupported {
 		taskActionTools = s.taskActionRuntimeTools(task)
 	}
 	runtimeToolsActive := false
-	if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil || taskActionTools != nil {
-		mergedTools := llmcontracts.CompositeRuntimeTools(runtimeTools, ctxTools, taskActionTools)
-		callCtx = llmcontracts.WithRuntimeTools(callCtx, mergedTools)
-		runtimeToolsActive = mergedTools != nil && len(mergedTools.Definitions) > 0
-		if mergedTools != nil && mergedTools.SkipDefaultTools {
-			projectInstructions = ""
+	if runtimeToolsSupported || agent.Provider != models.ProviderMixture {
+		if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil || taskActionTools != nil {
+			mergedTools := llmcontracts.CompositeRuntimeTools(runtimeTools, ctxTools, taskActionTools)
+			callCtx = llmcontracts.WithRuntimeTools(callCtx, mergedTools)
+			runtimeToolsActive = mergedTools != nil && len(mergedTools.Definitions) > 0
+			if mergedTools != nil && mergedTools.SkipDefaultTools {
+				projectInstructions = ""
+			}
 		}
+	} else {
+		callCtx = llmcontracts.WithoutRuntimeTools(callCtx)
 	}
 	start := time.Now()
 	result, err := s.callLLMDetailed(callCtx, task.Prompt, attachments, agent, exec.ID, workDir, projectInstructions, agentDef)
@@ -877,10 +999,11 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		s.publishExecutionTerminal(exec.ID, models.ExecCompleted, "")
 	}
 
-	// Capture git diff of changes made during execution
+	// Capture git diff of changes made during execution. Only a worktree
+	// successfully established for this execution may use target-relative review
+	// capture; persisted task metadata can refer to stale historical lineage.
 	if workDir != "" {
-		// For worktree tasks, capture the diff between the task branch and target.
-		if task.WorktreePath != "" && task.WorktreeBranch != "" {
+		if managedWorktree {
 			diffOutput := s.captureWorktreeDiffAfterExecution(finalizeCtx, exec, &task, repoDir, output, agent)
 			if diffOutput != "" {
 				exec.DiffOutput = diffOutput
@@ -896,8 +1019,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		}
 	}
 
-	// Handle worktree post-execution (auto-merge, status updates)
-	if s.worktreeSvc != nil && task.WorktreePath != "" && repoDir != "" {
+	// Commit, merge, and update worktree status only for the managed worktree
+	// established for this execution, never from retained task metadata alone.
+	if managedWorktree && s.worktreeSvc != nil && repoDir != "" {
 		s.worktreeSvc.HandlePostExecution(finalizeCtx, &task, repoDir)
 	}
 
@@ -1168,8 +1292,12 @@ func PublishDiffSnapshotIfChanged(ctx context.Context, execRepo interface {
 }
 
 func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec *models.Execution, task *models.Task, repoDir string, outputSummary string, agent models.LLMConfig) string {
-	if exec == nil || task == nil || task.WorktreePath == "" || task.WorktreeBranch == "" || repoDir == "" {
+	if exec == nil || task == nil || task.WorktreePath == "" || repoDir == "" {
 		return ""
+	}
+	worktreeBranch := GetCurrentBranch(task.WorktreePath)
+	if worktreeBranch == "" {
+		worktreeBranch = task.WorktreeBranch
 	}
 	targetBranch := task.MergeTargetBranch
 	if targetBranch == "" {
@@ -1184,14 +1312,14 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 	commitCtx.DiffSummary = s.SummarizeWorktreeCommitDiff(ctx, task.WorktreePath, agent, commitCtx)
 	commitMessage := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
 	if err := CommitWorktreeChanges(task.WorktreePath, commitMessage); err != nil {
-		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, task.WorktreeBranch, err)
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, worktreeBranch, err)
 	}
 
 	// Persist the authoritative branch diff when the auto-commit succeeds or the
 	// provider already committed. If the provider left uncommitted edits and the
 	// app-level commit fails, preserve those edits in diff_output so Changes does
 	// not appear empty and the merge path can still commit them just-in-time.
-	diffOutput := GetWorktreeDiffWithUncommitted(repoDir, task.WorktreeBranch, targetBranch, task.WorktreePath)
+	diffOutput := GetWorktreeDiffWithUncommitted(repoDir, worktreeBranch, targetBranch, task.WorktreePath)
 	if diffOutput == "" {
 		return ""
 	}
@@ -1205,17 +1333,24 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 }
 
 // broadcastDiffSnapshots periodically captures and broadcasts git diff snapshots
-// while a task is executing, allowing real-time file change monitoring.
-func (s *LLMService) broadcastDiffSnapshots(ctx context.Context, taskID, execID, workDir, repoDir, worktreeBranch, mergeTargetBranch string, stop <-chan struct{}) {
+// while a task is executing, allowing real-time file change monitoring. Managed
+// worktrees use the reviewable target-to-worktree diff; direct project-checkout
+// executions use the pending git diff against HEAD.
+func (s *LLMService) broadcastDiffSnapshots(ctx context.Context, taskID, execID, workDir, repoDir, worktreeBranch, mergeTargetBranch string, managedWorktree bool, stop <-chan struct{}) {
 	captureDiff := func() string {
-		if repoDir != "" && worktreeBranch != "" {
+		if managedWorktree && repoDir != "" {
 			targetBranch := mergeTargetBranch
 			if targetBranch == "" {
 				targetBranch = GetDefaultBranch(repoDir)
 			}
-			// Capture committed branch diff + uncommitted working directory changes
-			// without auto-committing (avoids polluting history with periodic commits).
-			return GetWorktreeDiffWithUncommitted(repoDir, worktreeBranch, targetBranch, workDir)
+			currentBranch := GetCurrentBranch(workDir)
+			if currentBranch == "" {
+				currentBranch = worktreeBranch
+			}
+			// Task Changes uses one target-to-current-worktree diff. This includes
+			// committed, staged, and unstaged tracked state without concatenating
+			// a separate HEAD-based pending diff.
+			return GetWorktreeDiffWithUncommitted(repoDir, currentBranch, targetBranch, workDir)
 		}
 		return s.CaptureGitDiff(workDir)
 	}
@@ -1422,6 +1557,7 @@ func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, messa
 		Attachments:       attachments,
 		Agent:             agent,
 		ExecID:            execID,
+		TransportScope:    llmcontracts.TransportScopeFromContext(ctx),
 		ChatHistory:       chatHistory,
 		ChatMode:          chatMode,
 		ChatSystemContext: combineAdditionalProjectInstructions(ctx, chatSystemContext),

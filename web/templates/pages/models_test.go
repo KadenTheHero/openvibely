@@ -39,6 +39,9 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 
 	// JS modelOptionsByProvider entries
 	for _, model := range []string{
+		"gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna",
 		"gpt-5.5",
 		"gpt-5.5-pro",
 		"gpt-5.4-mini",
@@ -389,6 +392,11 @@ func TestModelsContent_MixtureReferenceOrderingControls(t *testing.T) {
 	for _, want := range []string{
 		`id="model_field"`,
 		`if (modelField) modelField.classList.toggle('hidden', provider === 'mixture');`,
+		`id="model_temperature_field"`,
+		`var temperatureField = document.getElementById('model_temperature_field');`,
+		`var temperatureInput = document.getElementById('model_temperature');`,
+		`if (temperatureField) temperatureField.classList.toggle('hidden', provider === 'mixture');`,
+		`if (temperatureInput) temperatureInput.disabled = provider === 'mixture';`,
 		`id="model_mixture_reference_available"`,
 		`id="model_mixture_references"`,
 		`id="model_mixture_reference_ids_order"`,

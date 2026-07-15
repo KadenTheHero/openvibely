@@ -396,9 +396,9 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							}
 							var messages = document.getElementById(messagesId);
 							if (!messages || document.getElementById('task-thread-terminal-status')) return;
-							var wrap = document.createElement('div');
-							wrap.id = 'task-thread-terminal-status';
-							wrap.className = 'flex items-center justify-center gap-2 py-2';
+						var wrap = document.createElement('div');
+						wrap.id = 'task-thread-terminal-status';
+						wrap.className = 'flex items-center justify-center gap-2 py-2';
 							var inner = document.createElement('div');
 								var statusClass = status === 'failed' ? 'text-error' : (status === 'cancelled' ? 'text-warning' : 'text-success');
 								inner.className = 'flex items-center gap-2 text-sm opacity-70 ' + statusClass;
@@ -409,7 +409,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								text.textContent = 'Task ' + (status === 'failed' ? 'failed' : (status === 'cancelled' ? 'cancelled' : 'completed'));
 							inner.appendChild(icon);
 							inner.appendChild(text);
-							wrap.appendChild(inner);
+						wrap.appendChild(inner);
 							messages.appendChild(wrap);
 						}
 
@@ -441,7 +441,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					var lastRenderedLength = 0;
 						function renderBufferedOutput(force) {
 							if (!window.renderStreamingContent) {
-								container.classList.remove('text-error/80', 'font-medium');
+							container.classList.remove('text-error/80', 'font-medium');
 								container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
 								return;
 							}
@@ -459,7 +459,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							tracker = window.resolveScrollTracker(trackerKey, liveMessages);
 						}
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
-						container.classList.remove('text-error/80', 'font-medium');
+					container.classList.remove('text-error/80', 'font-medium');
 						container.setAttribute('data-raw-content', renderText);
 						window.renderStreamingContent(container, renderText);
 						lastRenderedLength = renderText.length;
@@ -483,7 +483,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						function finalizeEmptyTerminalBubble(status) {
 							if (textBuffer !== '') return;
 							if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
-							container.classList.remove('hidden');
+						container.classList.remove('hidden');
 							if (status === 'cancelled') {
 								container.classList.add('text-error/80', 'font-medium');
 								container.textContent = 'Error: Cancelled';
@@ -519,7 +519,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 							if (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {
 								thinkingIndicator.classList.add('hidden');
-								container.classList.remove('hidden');
+							container.classList.remove('hidden');
 								streamingDots.classList.remove('hidden');
 							}
 
@@ -590,7 +590,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						// Hide thinking indicator and streaming dots, ensure content shows
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 						if (streamingDots) streamingDots.classList.add('hidden');
-						container.classList.remove('hidden');
+					container.classList.remove('hidden');
 						if (event.data) {
 							container.appendChild(document.createTextNode('\n\nError: ' + event.data));
 						}
@@ -620,7 +620,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							// Hide thinking indicator and streaming dots, ensure content shows
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 						if (streamingDots) streamingDots.classList.add('hidden');
-						container.classList.remove('hidden');
+					container.classList.remove('hidden');
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
 							restoreThreadPollingFallback();
@@ -777,9 +777,9 @@ templ _initThreadStreamingScript() {
 							}
 							var messages = document.getElementById(messagesId);
 						if (!messages || document.getElementById('task-thread-terminal-status')) return;
-						var wrap = document.createElement('div');
-						wrap.id = 'task-thread-terminal-status';
-						wrap.className = 'flex items-center justify-center gap-2 py-2';
+					var wrap = document.createElement('div');
+					wrap.id = 'task-thread-terminal-status';
+					wrap.className = 'flex items-center justify-center gap-2 py-2';
 						var inner = document.createElement('div');
 								var statusClass = status === 'failed' ? 'text-error' : (status === 'cancelled' ? 'text-warning' : 'text-success');
 								inner.className = 'flex items-center gap-2 text-sm opacity-70 ' + statusClass;
@@ -790,7 +790,7 @@ templ _initThreadStreamingScript() {
 								text.textContent = 'Task ' + (status === 'failed' ? 'failed' : (status === 'cancelled' ? 'cancelled' : 'completed'));
 						inner.appendChild(icon);
 						inner.appendChild(text);
-						wrap.appendChild(inner);
+					wrap.appendChild(inner);
 						messages.appendChild(wrap);
 					}
 
@@ -818,7 +818,7 @@ templ _initThreadStreamingScript() {
 				var lastRenderedLength = 0;
 				function renderCumulativeContent(force) {
 					if (!window.renderStreamingContent) {
-						container.classList.remove('text-error/80', 'font-medium');
+					container.classList.remove('text-error/80', 'font-medium');
 						container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(cumulativeContent) : cumulativeContent;
 						return;
 					}
@@ -834,7 +834,7 @@ templ _initThreadStreamingScript() {
 							tracker = window.resolveScrollTracker(trackerKey, liveMessages);
 						}
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
-						container.classList.remove('text-error/80', 'font-medium');
+					container.classList.remove('text-error/80', 'font-medium');
 						container.setAttribute('data-raw-content', renderText);
 						window.renderStreamingContent(container, renderText);
 						lastRenderedLength = renderText.length;
@@ -855,7 +855,7 @@ templ _initThreadStreamingScript() {
 					function finalizeEmptyTerminalBubble(status) {
 						if (cumulativeContent !== '') return;
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
-						container.classList.remove('hidden');
+					container.classList.remove('hidden');
 						if (status === 'cancelled') {
 							container.classList.add('text-error/80', 'font-medium');
 							container.textContent = 'Error: Cancelled';
@@ -879,7 +879,7 @@ templ _initThreadStreamingScript() {
 							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 							if (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {
 								thinkingIndicator.classList.add('hidden');
-								container.classList.remove('hidden');
+							container.classList.remove('hidden');
 								if (streamingDots) streamingDots.classList.remove('hidden');
 							}
 							renderCumulativeContent(false);
@@ -923,7 +923,7 @@ templ _initThreadStreamingScript() {
 					}
 					if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 					if (streamingDots) streamingDots.classList.add('hidden');
-					container.classList.remove('hidden');
+				container.classList.remove('hidden');
 					if (event.data) container.appendChild(document.createTextNode('\n\nError: ' + event.data));
 					window._taskThreadStreamingActive = false;
 					if (pauseTarget) {
@@ -943,7 +943,7 @@ templ _initThreadStreamingScript() {
 						if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 					if (streamingDots) streamingDots.classList.add('hidden');
-					container.classList.remove('hidden');
+				container.classList.remove('hidden');
 					window._taskThreadStreamingActive = false;
 					if (pauseTarget) {
 						restoreThreadPollingFallback();
@@ -2823,68 +2823,78 @@ templ ChatAutoScrollScript() {
 			var match;
 
 			while ((match = thinkingPattern.exec(textBuffer)) !== null) {
-				allMatches.push({ index: match.index, length: match[0].length, type: 'thinking', content: match[1] });
-			}
+					allMatches.push({ index: match.index, length: match[0].length, type: 'thinking', content: match[1] });
+				}
 			while ((match = toolUsingPattern.exec(textBuffer)) !== null) {
-				var raw = match[1].trim();
-				var pipeIdx = raw.indexOf(' | ');
-				var toolName = pipeIdx >= 0 ? raw.substring(0, pipeIdx) : raw;
-				var toolSecondary = pipeIdx >= 0 ? raw.substring(pipeIdx + 3) : '';
-				allMatches.push({ index: match.index, length: match[0].length, type: 'using', name: toolName, normalizedName: normalizeToolName(toolName), secondary: toolSecondary });
-			}
+					var raw = match[1].trim();
+					var pipeIdx = raw.indexOf(' | ');
+					var toolName = pipeIdx >= 0 ? raw.substring(0, pipeIdx) : raw;
+					var toolSecondary = pipeIdx >= 0 ? raw.substring(pipeIdx + 3) : '';
+					allMatches.push({ index: match.index, length: match[0].length, type: 'using', name: toolName, normalizedName: normalizeToolName(toolName), secondary: toolSecondary });
+				}
 			while ((match = toolResultBlockPattern.exec(textBuffer)) !== null) {
-				allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
-			}
-			while ((match = toolResultLegacyPattern.exec(textBuffer)) !== null) {
-				var dominated = allMatches.some(function(m) { return m.index <= match.index && m.index + m.length >= match.index + match[0].length; });
-				if (!dominated) {
 					allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
 				}
-			}
+			while ((match = toolResultLegacyPattern.exec(textBuffer)) !== null) {
+					var dominated = allMatches.some(function(m) { return m.index <= match.index && m.index + m.length >= match.index + match[0].length; });
+					if (!dominated) {
+						allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
+					}
+				}
 
 			allMatches.sort(function(a, b) { return a.index - b.index; });
 
 			var segments = [];
 			var lastIndex = 0;
 			allMatches.forEach(function(m) {
-				if (m.index < lastIndex) return;
-				if (m.index > lastIndex) {
-					segments.push({ type: 'text', content: textBuffer.substring(lastIndex, m.index) });
-				}
-				segments.push(m);
-				lastIndex = m.index + m.length;
-			});
+					if (m.index < lastIndex) return;
+					if (m.index > lastIndex) {
+						segments.push({ type: 'text', content: textBuffer.substring(lastIndex, m.index) });
+					}
+					segments.push(m);
+					lastIndex = m.index + m.length;
+				});
 			if (lastIndex < textBuffer.length) {
-				segments.push({ type: 'text', content: textBuffer.substring(lastIndex) });
-			}
+					segments.push({ type: 'text', content: textBuffer.substring(lastIndex) });
+				}
 
-			// Link tool_result → preceding [Using tool:] with same normalized name
+			// Assign stable per-render IDs and link each tool_result to the oldest
+			// unmatched preceding [Using tool:] of the same normalized name. Multiple
+			// adjacent Bash/tool calls of the same type must not pair by latest name
+			// match, or replay/live renders can swap their OUT blocks.
+			var toolUseQueues = {};
+			var toolRenderOrdinal = 0;
 			for (var si = 0; si < segments.length; si++) {
-				if (segments[si].type === 'tool_result') {
-					var resultName = segments[si].normalizedName || segments[si].name;
-					for (var sk = si - 1; sk >= 0; sk--) {
-						if (segments[sk].type !== 'using' || segments[sk].resultLinked) continue;
-						var usingName = segments[sk].normalizedName || segments[sk].name;
-						if (usingName === resultName) {
-							segments[sk].resultLinked = true;
-							segments[sk].resultStatus = segments[si].status;
-							segments[sk].resultOutput = segments[si].output || '';
+					if (segments[si].type === 'using') {
+						var usingName = segments[si].normalizedName || segments[si].name;
+						segments[si].toolRenderID = 'tool-' + segments[si].index + '-' + toolRenderOrdinal++;
+						if (!toolUseQueues[usingName]) toolUseQueues[usingName] = [];
+						toolUseQueues[usingName].push(segments[si]);
+						continue;
+					}
+					if (segments[si].type === 'tool_result') {
+						var resultName = segments[si].normalizedName || segments[si].name;
+						var queue = toolUseQueues[resultName] || [];
+						for (var sk = 0; sk < queue.length; sk++) {
+							if (queue[sk].resultLinked) continue;
+							queue[sk].resultLinked = true;
+							queue[sk].resultStatus = segments[si].status;
+							queue[sk].resultOutput = segments[si].output || '';
 							break;
 						}
 					}
 				}
-			}
 			// Mark tools as completed if anything follows them
 			for (var si = 0; si < segments.length; si++) {
-				if (segments[si].type !== 'using') continue;
-				if (segments[si].resultLinked) { segments[si].completed = true; continue; }
-				for (var sj = si + 1; sj < segments.length; sj++) {
-					if (segments[sj].type !== 'text' || segments[sj].content.trim()) {
-						segments[si].completed = true;
-						break;
+					if (segments[si].type !== 'using') continue;
+					if (segments[si].resultLinked) { segments[si].completed = true; continue; }
+					for (var sj = si + 1; sj < segments.length; sj++) {
+						if (segments[sj].type !== 'text' || segments[sj].content.trim()) {
+							segments[si].completed = true;
+							break;
+						}
 					}
 				}
-			}
 
 			// Save open state of existing thinking sections before clearing.
 			// Uses both a local array (fast path for same-call re-renders) and a
@@ -2892,25 +2902,28 @@ templ ChatAutoScrollScript() {
 			var containerKey = _thinkingStateKey(container);
 			var prevThinkingStates = [];
 			container.querySelectorAll('details.stream-thinking').forEach(function(d) {
-				prevThinkingStates.push(d.open);
-			});
+					prevThinkingStates.push(d.open);
+				});
 
 			// Preserve per-tool output scroll state across streaming re-renders.
 			// The renderer rebuilds the container on each chunk, so each tool output
 			// block must independently remember whether it was pinned to bottom.
-			var prevToolBodyScrollStates = [];
+			var prevToolBodyScrollStates = {};
 			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
-				var scrollableY = el.getAttribute('data-scrollable-y') === 'true' || el.scrollHeight > el.clientHeight + 1;
-				var pinned = !scrollableY || (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2;
-				prevToolBodyScrollStates.push({ scrollTop: el.scrollTop || 0, pinned: pinned, scrollableY: scrollableY });
-			});
+					var toolID = el.getAttribute('data-tool-render-id') || '';
+					var rowKind = el.getAttribute('data-tool-row') || '';
+					if (!toolID || !rowKind) return;
+					var scrollableY = el.getAttribute('data-scrollable-y') === 'true' || el.scrollHeight > el.clientHeight + 1;
+					var pinned = !scrollableY || (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2;
+					prevToolBodyScrollStates[toolID + ':' + rowKind] = { scrollTop: el.scrollTop || 0, pinned: pinned, scrollableY: scrollableY };
+				});
 			if (containerKey && prevThinkingStates.length > 0) {
-				window._thinkingOpenStates[containerKey] = prevThinkingStates.slice();
-			}
+					window._thinkingOpenStates[containerKey] = prevThinkingStates.slice();
+				}
 			// If no local states found (DOM was replaced by morph), restore from persistent store
 			if (prevThinkingStates.length === 0 && containerKey && window._thinkingOpenStates[containerKey]) {
-				prevThinkingStates = window._thinkingOpenStates[containerKey];
-			}
+					prevThinkingStates = window._thinkingOpenStates[containerKey];
+				}
 
 			container.innerHTML = '';
 			// Remove pre-wrap styling from streaming container since we're creating
@@ -2935,7 +2948,7 @@ templ ChatAutoScrollScript() {
 				details.addEventListener('toggle', function() {
 					if (!containerKey) return;
 					var states = [];
-					container.querySelectorAll('details.stream-thinking').forEach(function(d) {
+				container.querySelectorAll('details.stream-thinking').forEach(function(d) {
 						states.push(d.open);
 					});
 					window._thinkingOpenStates[containerKey] = states;
@@ -3011,6 +3024,8 @@ templ ChatAutoScrollScript() {
 					inVal.className = 'stream-tool-body-content';
 					var inScroll = document.createElement('div');
 					inScroll.className = 'stream-tool-body-scroll';
+					inScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '');
+					inScroll.setAttribute('data-tool-row', 'in');
 					var inPre = document.createElement('pre');
 					inPre.textContent = inContent;
 					inScroll.appendChild(inPre);
@@ -3030,6 +3045,8 @@ templ ChatAutoScrollScript() {
 					outVal.className = 'stream-tool-body-content';
 					var outScroll = document.createElement('div');
 					outScroll.className = 'stream-tool-body-scroll';
+					outScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '');
+					outScroll.setAttribute('data-tool-row', 'out');
 					var outPre = document.createElement('pre');
 					outPre.textContent = seg.resultOutput.trim();
 					outScroll.appendChild(outPre);
@@ -3087,7 +3104,8 @@ templ ChatAutoScrollScript() {
 				if (seg.type === 'using') {
 					var wrap = document.createElement('div');
 					wrap.className = 'stream-tool';
-
+					wrap.setAttribute('data-tool-render-id', seg.toolRenderID || '');
+					wrap.setAttribute('data-tool-name', seg.normalizedName || seg.name || '');
 					// Header: status icon or spinner, display name, secondary
 					var header = document.createElement('div');
 					header.className = 'stream-tool-summary';
@@ -3131,7 +3149,7 @@ templ ChatAutoScrollScript() {
 			if (prevThinkingStates.length > 0) {
 				var newThinkingSections = container.querySelectorAll('details.stream-thinking');
 				for (var ti = 0; ti < newThinkingSections.length && ti < prevThinkingStates.length; ti++) {
-					if (prevThinkingStates[ti]) {
+				if (prevThinkingStates[ti]) {
 						newThinkingSections[ti].open = true;
 					}
 				}
@@ -3139,7 +3157,7 @@ templ ChatAutoScrollScript() {
 			// Persist current states to window store (update after restoring so new sections are tracked)
 			if (containerKey) {
 				var currentStates = [];
-				container.querySelectorAll('details.stream-thinking').forEach(function(d) {
+			container.querySelectorAll('details.stream-thinking').forEach(function(d) {
 					currentStates.push(d.open);
 				});
 				if (currentStates.length > 0) {
@@ -3150,23 +3168,24 @@ templ ChatAutoScrollScript() {
 			// Restore per-tool output scroll positions. Only genuinely overflowing
 			// blocks become vertical scroll targets; boundary wheel/touch events then
 			// chain naturally to the chat/task thread scroller.
-			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el, idx) {
-				var scrollableY = el.scrollHeight > el.clientHeight + 1;
-				if (scrollableY) {
-					el.setAttribute('data-scrollable-y', 'true');
-				} else {
-					el.removeAttribute('data-scrollable-y');
-					el.scrollTop = 0;
-					return;
-				}
-				var state = prevToolBodyScrollStates[idx];
-				if (!state || state.pinned) {
-					el.scrollTop = el.scrollHeight;
-				} else {
-					el.scrollTop = state.scrollTop;
-				}
-			});
-
+			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
+					var scrollableY = el.scrollHeight > el.clientHeight + 1;
+					if (scrollableY) {
+						el.setAttribute('data-scrollable-y', 'true');
+					} else {
+						el.removeAttribute('data-scrollable-y');
+						el.scrollTop = 0;
+						return;
+					}
+					var toolID = el.getAttribute('data-tool-render-id') || '';
+					var rowKind = el.getAttribute('data-tool-row') || '';
+					var state = prevToolBodyScrollStates[toolID + ':' + rowKind];
+					if (!state || state.pinned) {
+						el.scrollTop = el.scrollHeight;
+					} else {
+						el.scrollTop = state.scrollTop;
+					}
+				});
 			// Convert [TASK_ID:xxx] references to clickable links after rendering
 			if (window.convertTaskLinksInMessage) {
 				window.convertTaskLinksInMessage(container.closest('.chat-bubble-assistant-msg') || container);

@@ -71,7 +71,11 @@ log "Building OpenVibely v${VERSION}"
 log "Repo root:  $REPO_ROOT"
 log "Output dir: $DIST_DIR"
 
-mkdir -p "$DIST_DIR"
+if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    echo -e "${YELLOW}[DRY-RUN]${NC} Would create output directory: $DIST_DIR"
+else
+    mkdir -p "$DIST_DIR"
+fi
 cd "$REPO_ROOT"
 
 ###############################################################################
@@ -118,8 +122,12 @@ build_binary() {
 # 4. Server binaries (CGO_ENABLED=0 — cross-compile for all platforms)
 ###############################################################################
 
-TMP_BIN="$(mktemp -d)"
-trap 'rm -rf "$TMP_BIN"' EXIT
+if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    TMP_BIN="${TMPDIR:-/tmp}/openvibely-release-dry-run"
+else
+    TMP_BIN="$(mktemp -d)"
+    trap 'rm -rf "$TMP_BIN"' EXIT
+fi
 
 log "Building server binaries (all platforms)..."
 
@@ -156,6 +164,13 @@ build_macos_app() {
     log "Building macOS desktop app ($goarch)..."
     build_binary "$TMP_BIN/${bin_name}" ./cmd/desktop darwin "$goarch" 1
 
+    local zip_name="OpenVibely_${VERSION}_darwin_${goarch}.app.zip"
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would assemble ${app_name}/Contents/MacOS/OpenVibely"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would package ${DIST_DIR}/${zip_name} with ${app_name} as the archive root"
+        return
+    fi
+
     mkdir -p "${bundle}/MacOS" "${bundle}/Resources"
     cp "$TMP_BIN/${bin_name}" "${bundle}/MacOS/OpenVibely"
     chmod +x "${bundle}/MacOS/OpenVibely"
@@ -177,7 +192,6 @@ build_macos_app() {
 </plist>
 PLIST
 
-    local zip_name="OpenVibely_${VERSION}_darwin_${goarch}.app.zip"
     log "Packaging $zip_name..."
     run bash -c "cd '${staging_dir}' && zip -r '${DIST_DIR}/${zip_name}' '${app_name}' -x '*.DS_Store'"
     log "Created: $zip_name"

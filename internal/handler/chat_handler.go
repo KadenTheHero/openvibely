@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -507,10 +508,14 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 	}
 	pendingDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
 
-	// Check if pending directory exists
-	if _, err := os.Stat(pendingDir); os.IsNotExist(err) {
-		applog.Infof("[handler] processAttachmentsWithReturn pending directory not found: %s", pendingDir)
-		return "", nil, nil, nil // Not an error, just no attachments
+	// A persisted session ID is an attachment ownership claim. If its source directory
+	// disappeared, continuing would silently drop the user's files.
+	if _, err := os.Stat(pendingDir); err != nil {
+		if os.IsNotExist(err) {
+			applog.Infof("[handler] attachment lifecycle stage=session-source session=%s execution=%s source=%s error=file-not-found", sessionID, execID, pendingDir)
+			return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-source session=%s execution=%s source=%s: %w", sessionID, execID, pendingDir, os.ErrNotExist)
+		}
+		return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-source session=%s execution=%s source=%s: %w", sessionID, execID, pendingDir, err)
 	}
 
 	// Read files from pending directory
@@ -532,6 +537,12 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 	var attachmentContents []string
 	var imageAttachments []models.Attachment
 	var chatAttachments []models.ChatAttachment
+	var staged []attachmentPublication
+	rollback := func() {
+		for _, rollbackErr := range rollbackAttachmentPublications(ctx, staged, h.chatAttachmentRepo.Delete) {
+			applog.Infof("[handler] attachment lifecycle stage=rollback-chat session=%s execution=%s error=%v", sessionID, execID, rollbackErr)
+		}
+	}
 
 	for _, file := range files {
 		if file.IsDir() {
@@ -540,68 +551,51 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 
 		srcPath := filepath.Join(pendingDir, file.Name())
 		destPath := filepath.Join(execDir, file.Name())
-
-		// Move file
-		if err := os.Rename(srcPath, destPath); err != nil {
-			applog.Infof("[handler] processAttachments error moving file %s: %v", file.Name(), err)
-			continue
+		applog.Infof("[handler] attachment lifecycle stage=session-copy session=%s source=%s execution=%s destination=%s", sessionID, srcPath, execID, destPath)
+		if err := copyFileAtomically(srcPath, destPath); err != nil {
+			rollback()
+			return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-copy session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
 		}
 
-		// Get file info
 		info, err := os.Stat(destPath)
 		if err != nil {
-			applog.Infof("[handler] processAttachments error getting file info %s: %v", file.Name(), err)
-			continue
+			_ = os.Remove(destPath)
+			rollback()
+			return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-verify session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
 		}
-
-		// Detect media type from extension
 		mediaType := mediaTypeFromExtension(file.Name())
-
-		// Create database record
 		attachment := &models.ChatAttachment{
-			ExecutionID: execID,
-			FileName:    file.Name(),
-			FilePath:    destPath,
-			MediaType:   mediaType,
-			FileSize:    info.Size(),
+			ExecutionID: execID, FileName: file.Name(), FilePath: destPath,
+			MediaType: mediaType, FileSize: info.Size(),
 		}
-
 		if err := h.chatAttachmentRepo.Create(ctx, attachment); err != nil {
-			applog.Infof("[handler] processAttachmentsWithReturn error creating attachment record: %v", err)
-			continue
+			_ = os.Remove(destPath)
+			rollback()
+			return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-metadata session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
 		}
-
-		// Add to chatAttachments list
+		staged = append(staged, attachmentPublication{id: attachment.ID, path: destPath})
 		chatAttachments = append(chatAttachments, *attachment)
 
 		if isImageFile(file.Name()) {
-			// Image files: pass as multimodal attachments for the API to handle natively,
-			// instead of reading binary content as text (which causes "prompt too long" errors)
 			imageAttachments = append(imageAttachments, models.Attachment{
-				FileName:  file.Name(),
-				FilePath:  destPath,
-				MediaType: mediaType,
-				FileSize:  info.Size(),
+				FileName: file.Name(), FilePath: destPath, MediaType: mediaType, FileSize: info.Size(),
 			})
-			applog.Infof("[handler] processAttachmentsWithReturn image attachment id=%s file=%s size=%d", attachment.ID, file.Name(), info.Size())
 		} else if info.Size() <= maxTextAttachmentSize {
-			// Text files within size limit: read content and include in prompt context
 			content, readErr := os.ReadFile(destPath)
 			if readErr != nil {
-				applog.Infof("[handler] processAttachmentsWithReturn error reading file %s: %v", file.Name(), readErr)
-				continue
+				rollback()
+				return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-read session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, readErr)
 			}
 			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", file.Name(), string(content)))
-			applog.Infof("[handler] processAttachmentsWithReturn text attachment id=%s file=%s size=%d", attachment.ID, file.Name(), info.Size())
 		} else {
-			// Large text files: mention but don't include content to avoid prompt overflow
 			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", file.Name(), info.Size()))
-			applog.Infof("[handler] processAttachmentsWithReturn large file id=%s file=%s size=%d (skipped content)", attachment.ID, file.Name(), info.Size())
 		}
 	}
 
-	// Clean up pending directory
-	os.RemoveAll(pendingDir)
+	if err := os.RemoveAll(pendingDir); err != nil {
+		applog.Infof("[handler] attachment lifecycle stage=session-cleanup session=%s execution=%s source=%s error=%v", sessionID, execID, pendingDir, err)
+	}
+	applog.Infof("[handler] attachment lifecycle stage=session-committed session=%s execution=%s attachments=%d", sessionID, execID, len(chatAttachments))
 
 	var textContext string
 	if len(attachmentContents) > 0 {
@@ -715,85 +709,191 @@ func min(a, b int) int {
 	return b
 }
 
-// copyChatAttachmentsToTask copies attachments from a chat execution to a task.
-// It also appends an attachment reference to the task's prompt so the executing agent
-// knows about the attached files. Returns the number of attachments copied and any error.
+type attachmentPublication struct {
+	id   string
+	path string
+	name string
+}
+
+// rollbackAttachmentPublications preserves the file/metadata invariant during rollback.
+// A file is removed only after its metadata row is successfully deleted; if metadata
+// deletion fails, retaining the file is safer than leaving a persisted broken reference.
+func rollbackAttachmentPublications(
+	ctx context.Context,
+	published []attachmentPublication,
+	deleteMetadata func(context.Context, string) error,
+) []error {
+	var rollbackErrs []error
+	rollbackCtx := context.WithoutCancel(ctx)
+	for i := len(published) - 1; i >= 0; i-- {
+		item := published[i]
+		if item.id != "" {
+			if err := deleteMetadata(rollbackCtx, item.id); err != nil {
+				rollbackErrs = append(rollbackErrs, fmt.Errorf("delete metadata attachment=%s destination=%s: %w", item.id, item.path, err))
+				continue
+			}
+		}
+		if err := os.Remove(item.path); err != nil && !os.IsNotExist(err) {
+			rollbackErrs = append(rollbackErrs, fmt.Errorf("remove file destination=%s: %w", item.path, err))
+		}
+	}
+	return rollbackErrs
+}
+
+// copyChatAttachmentsToTask durably copies all attachments from a chat execution to a task.
+// The batch is published file-first and metadata-second. Any failure rolls back publications
+// when possible and retains files for metadata rows that cannot be deleted, so task execution
+// never observes a metadata reference to a file removed by rollback.
 func (h *Handler) copyChatAttachmentsToTask(ctx context.Context, executionID, taskID string) (int, error) {
-	// Get chat attachments for this execution
 	chatAttachments, err := h.chatAttachmentRepo.ListByExecution(ctx, executionID)
 	if err != nil {
-		return 0, fmt.Errorf("listing chat attachments: %w", err)
+		return 0, fmt.Errorf("attachment lifecycle stage=list-source execution=%s task=%s: %w", executionID, taskID, err)
 	}
-
 	if len(chatAttachments) == 0 {
 		return 0, nil
 	}
 
-	// Create task-specific directory
 	taskDir := filepath.Join(uploadsDir, "tasks", taskID)
-	if err := os.MkdirAll(taskDir, 0755); err != nil {
-		return 0, fmt.Errorf("creating task directory: %w", err)
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		return 0, fmt.Errorf("attachment lifecycle stage=create-destination execution=%s task=%s destination=%s: %w", executionID, taskID, taskDir, err)
 	}
 
-	copiedCount := 0
-	var copiedFileNames []string
+	published := make([]attachmentPublication, 0, len(chatAttachments))
+	usedNames := make(map[string]bool, len(chatAttachments))
+	rollback := func() {
+		for _, rollbackErr := range rollbackAttachmentPublications(ctx, published, h.attachmentRepo.Delete) {
+			applog.Infof("[handler] attachment lifecycle stage=rollback execution=%s task=%s error=%v", executionID, taskID, rollbackErr)
+		}
+	}
+
 	for _, chatAtt := range chatAttachments {
-		// Copy file from chat directory to task directory
 		srcPath := chatAtt.FilePath
-		destPath := filepath.Join(taskDir, chatAtt.FileName)
+		fileName := uniqueAttachmentName(taskDir, filepath.Base(chatAtt.FileName), usedNames)
+		destPath := filepath.Join(taskDir, fileName)
+		applog.Infof("[handler] attachment lifecycle stage=copy-start execution=%s source=%s task=%s destination=%s", executionID, srcPath, taskID, destPath)
 
-		// Read source file
-		data, err := os.ReadFile(srcPath)
+		if err := copyFileAtomically(srcPath, destPath); err != nil {
+			rollback()
+			return 0, fmt.Errorf("attachment lifecycle stage=copy-file execution=%s source=%s task=%s destination=%s: %w", executionID, srcPath, taskID, destPath, err)
+		}
+
+		info, err := os.Stat(destPath)
 		if err != nil {
-			applog.Infof("[handler] copyChatAttachmentsToTask error reading file %s: %v", srcPath, err)
-			continue
+			_ = os.Remove(destPath)
+			rollback()
+			return 0, fmt.Errorf("attachment lifecycle stage=verify-destination execution=%s source=%s task=%s destination=%s: %w", executionID, srcPath, taskID, destPath, err)
 		}
-
-		// Write to destination
-		if err := os.WriteFile(destPath, data, 0644); err != nil {
-			applog.Infof("[handler] copyChatAttachmentsToTask error writing file %s: %v", destPath, err)
-			continue
+		attachment := &models.Attachment{
+			TaskID: taskID, FileName: fileName, FilePath: destPath,
+			MediaType: chatAtt.MediaType, FileSize: info.Size(),
 		}
-
-		// Create task attachment record
-		taskAttachment := &models.Attachment{
-			TaskID:    taskID,
-			FileName:  chatAtt.FileName,
-			FilePath:  destPath,
-			MediaType: chatAtt.MediaType,
-			FileSize:  chatAtt.FileSize,
+		if err := h.attachmentRepo.Create(ctx, attachment); err != nil {
+			_ = os.Remove(destPath)
+			rollback()
+			return 0, fmt.Errorf("attachment lifecycle stage=persist-metadata execution=%s source=%s task=%s destination=%s: %w", executionID, srcPath, taskID, destPath, err)
 		}
-
-		if err := h.attachmentRepo.Create(ctx, taskAttachment); err != nil {
-			applog.Infof("[handler] copyChatAttachmentsToTask error creating attachment record: %v", err)
-			// Clean up the copied file
-			os.Remove(destPath)
-			continue
-		}
-
-		applog.Infof("[handler] copyChatAttachmentsToTask copied attachment file=%s from exec=%s to task=%s", chatAtt.FileName, executionID, taskID)
-		copiedCount++
-		copiedFileNames = append(copiedFileNames, chatAtt.FileName)
+		published = append(published, attachmentPublication{id: attachment.ID, path: destPath, name: fileName})
+		applog.Infof("[handler] attachment lifecycle stage=published execution=%s source=%s task=%s destination=%s attachment=%s", executionID, srcPath, taskID, destPath, attachment.ID)
 	}
 
-	// Append attachment context to the task prompt so the executing agent knows about the files.
-	// Include absolute file paths so the agent can find them regardless of working directory.
-	if copiedCount > 0 {
-		task, getErr := h.taskRepo.GetByID(ctx, taskID)
-		if getErr == nil && task != nil {
-			var fileRefs []string
-			for _, name := range copiedFileNames {
-				absPath := filepath.Join(uploadsDir, "tasks", taskID, name)
-				fileRefs = append(fileRefs, fmt.Sprintf("%s (path: %s)", name, absPath))
-			}
-			task.Prompt += fmt.Sprintf("\n\n[Attached files from chat:\n%s]", strings.Join(fileRefs, "\n"))
-			if updateErr := h.taskRepo.Update(ctx, task); updateErr != nil {
-				applog.Infof("[handler] copyChatAttachmentsToTask error updating task prompt: %v", updateErr)
-			}
+	task, getErr := h.taskRepo.GetByID(ctx, taskID)
+	if getErr == nil && task != nil {
+		fileRefs := make([]string, 0, len(published))
+		for _, item := range published {
+			fileRefs = append(fileRefs, fmt.Sprintf("%s (path: %s)", item.name, item.path))
+		}
+		task.Prompt += fmt.Sprintf("\n\n[Attached files from chat:\n%s]", strings.Join(fileRefs, "\n"))
+		if updateErr := h.taskRepo.Update(ctx, task); updateErr != nil {
+			applog.Infof("[handler] attachment lifecycle stage=update-prompt execution=%s task=%s error=%v", executionID, taskID, updateErr)
 		}
 	}
+	return len(published), nil
+}
 
-	return copiedCount, nil
+func uniqueAttachmentName(dir, requested string, used map[string]bool) string {
+	if requested == "." || requested == "" {
+		requested = "attachment"
+	}
+	ext := filepath.Ext(requested)
+	stem := strings.TrimSuffix(requested, ext)
+	for i := 0; ; i++ {
+		name := requested
+		if i > 0 {
+			name = fmt.Sprintf("%s-%d%s", stem, i, ext)
+		}
+		if used[name] {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil || !os.IsNotExist(err) {
+			continue
+		}
+		used[name] = true
+		return name
+	}
+}
+
+var (
+	renameAttachmentFile    = os.Rename
+	syncAttachmentDirectory = syncDirectory
+)
+
+func syncDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+func copyFileAtomically(srcPath, destPath string) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	tmp, err := os.CreateTemp(filepath.Dir(destPath), ".attachment-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}
+	if _, err := io.Copy(tmp, src); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := renameAttachmentFile(tmpPath, destPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := syncAttachmentDirectory(filepath.Dir(destPath)); err != nil {
+		removeErr := os.Remove(destPath)
+		cleanupSyncErr := syncAttachmentDirectory(filepath.Dir(destPath))
+		if removeErr != nil && !os.IsNotExist(removeErr) {
+			return fmt.Errorf("sync destination directory: %w (cleanup remove failed: %v)", err, removeErr)
+		}
+		if cleanupSyncErr != nil {
+			return fmt.Errorf("sync destination directory: %w (cleanup sync failed: %v)", err, cleanupSyncErr)
+		}
+		return fmt.Errorf("sync destination directory: %w", err)
+	}
+	return nil
 }
 
 // writeSSEData writes a potentially multi-line string as properly formatted SSE data.

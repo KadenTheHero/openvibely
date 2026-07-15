@@ -11,15 +11,18 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-const CodexDefaultModel = "gpt-5.5"
+const CodexDefaultModel = "gpt-5.6-sol"
 
 var CodexSupportedReasoningEffortsByModel = map[string][]string{
+	"gpt-5.6-sol":         {"low", "medium", "high", "xhigh", "max"},
+	"gpt-5.6-terra":       {"low", "medium", "high", "xhigh", "max"},
+	"gpt-5.6-luna":        {"low", "medium", "high", "xhigh", "max"},
 	"gpt-5.5":             {"low", "medium", "high", "xhigh"},
 	"gpt-5.5-pro":         {"low", "medium", "high", "xhigh"},
 	"gpt-5.4":             {"low", "medium", "high", "xhigh"},
-	"gpt-5.4-mini":        {"low", "medium", "high"},
+	"gpt-5.4-mini":        {"low", "medium", "high", "xhigh"},
 	"gpt-5.3-codex":       {"low", "medium", "high", "xhigh"},
-	"gpt-5.3-codex-spark": {"low", "medium", "high"},
+	"gpt-5.3-codex-spark": {"low", "medium", "high", "xhigh"},
 	"gpt-5.2-codex":       {"low", "medium", "high", "xhigh"},
 	"gpt-5.1-codex-max":   {"low", "medium", "high", "xhigh"},
 	"gpt-5.1-codex":       {"low", "medium", "high"},
@@ -46,7 +49,7 @@ func CodexReasoningEffort(model, configuredEffort string) string {
 		effort = NormalizeReasoningEffortValue(os.Getenv("OPENVIBELY_CODEX_REASONING_EFFORT"))
 	}
 	if effort == "" {
-		effort = "high"
+		effort = CodexDefaultReasoningEffort(model)
 	}
 
 	supported := CodexSupportedReasoningEfforts(model)
@@ -66,6 +69,18 @@ func CodexReasoningEffort(model, configuredEffort string) string {
 	return "high"
 }
 
+func CodexDefaultReasoningEffort(model string) string {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+		"gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.4-mini":
+		return "medium"
+	case "gpt-5.3-codex-spark":
+		return "high"
+	default:
+		return "high"
+	}
+}
+
 func CodexSupportedReasoningEfforts(model string) []string {
 	model = strings.TrimSpace(model)
 	if supported, ok := CodexSupportedReasoningEffortsByModel[model]; ok && len(supported) > 0 {
@@ -77,7 +92,7 @@ func CodexSupportedReasoningEfforts(model string) []string {
 
 func NormalizeReasoningEffortValue(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "low", "medium", "high", "xhigh":
+	case "low", "medium", "high", "xhigh", "max":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return ""

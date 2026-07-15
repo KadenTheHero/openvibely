@@ -82,9 +82,19 @@ func (r *ThreadInputRepo) CreateQueued(ctx context.Context, input *models.Thread
 	if input.InputStatus == "" {
 		input.InputStatus = models.ThreadInputPending
 	}
-	return r.withImmediateTx(ctx, func(exec sqlExecutor) error {
-		return r.createWithExecutor(ctx, exec, input)
+	return r.WithImmediateTx(ctx, func(exec SQLExecutor) error {
+		return r.CreateQueuedWithExecutor(ctx, exec, input)
 	})
+}
+
+func (r *ThreadInputRepo) CreateQueuedWithExecutor(ctx context.Context, exec SQLExecutor, input *models.ThreadInput) error {
+	if input.InputMode == "" {
+		input.InputMode = models.ThreadInputModeQueued
+	}
+	if input.InputStatus == "" {
+		input.InputStatus = models.ThreadInputPending
+	}
+	return r.createWithExecutor(ctx, exec, input)
 }
 
 func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, input *models.ThreadInput, activeExecutionID string) error {
@@ -600,7 +610,7 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 	if exec == nil {
 		return fmt.Errorf("execution is required")
 	}
-	return r.withImmediateTx(ctx, func(dbexec sqlExecutor) error {
+	return r.WithImmediateTx(ctx, func(dbexec SQLExecutor) error {
 		promoted, err := scanThreadInput(dbexec.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
 		if err == sql.ErrNoRows {
 			return ErrInputNotPending
@@ -834,10 +844,12 @@ func (r *ThreadInputRepo) CancelPendingForChat(ctx context.Context, projectID st
 	return nil
 }
 
-type sqlExecutor interface {
+type SQLExecutor interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
+
+type sqlExecutor = SQLExecutor
 
 type queryExecutor interface {
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
@@ -855,7 +867,7 @@ func (r *ThreadInputRepo) withTx(ctx context.Context, fn func(*sql.Tx) error) er
 	return tx.Commit()
 }
 
-func (r *ThreadInputRepo) withImmediateTx(ctx context.Context, fn func(sqlExecutor) error) error {
+func (r *ThreadInputRepo) WithImmediateTx(ctx context.Context, fn func(SQLExecutor) error) error {
 	conn, err := r.db.Conn(ctx)
 	if err != nil {
 		return err

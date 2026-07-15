@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
@@ -66,6 +67,7 @@ type Handler struct {
 	lifecycleRepo              *repository.LifecycleRepo
 	worktreeSvc                *service.WorktreeService
 	taskPullRequestRepo        *repository.TaskPullRequestRepo
+	githubPRFeedbackRepo       *repository.GitHubPRFeedbackRepo
 	githubAuthRepo             *repository.GitHubAuthRepo
 	githubSvc                  GitHubServiceProvider
 	slackSvc                   SlackServiceProvider
@@ -96,15 +98,18 @@ type GitHubServiceProvider interface {
 	CloneProjectRepo(ctx context.Context, projectID, repoURL string) (string, string, error)
 	RecloneProjectRepo(ctx context.Context, projectID, currentRepoPath, repoURL string) (string, string, error)
 	ResolveRepo(ctx context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error)
-	PushBranch(ctx context.Context, repoPath, worktreePath, branch string, repo *service.GitHubRepoRef) error
+	DefaultBranch(ctx context.Context, repo *service.GitHubRepoRef) (string, error)
+	PublishBranch(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error
 	FindPullRequestByBranch(ctx context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error)
 	CreateIssue(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error)
 	GetIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error)
+	GetAuthenticatedUser(ctx context.Context) (*service.GitHubAuthenticatedUser, error)
 	ListAuthenticatedAssignedIssues(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error)
 	ListAssignedIssues(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssue, error)
 	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssueWithPullRequest, error)
 	FindPullRequestForIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubPullRequest, error)
+	ListPullRequestFeedback(ctx context.Context, repo *service.GitHubRepoRef, prNumber int) ([]service.GitHubPullRequestFeedback, error)
 	CommentOnIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error
 	AddLabelsToIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, labels []string) error
 }
@@ -200,7 +205,9 @@ func New(
 		if workerSvc != nil {
 			workerSvc.SetOnTaskComplete(func(task models.Task, executionErr error) {
 				if models.IsSwarmChildRole(task.SwarmRole) && swarmSvc != nil {
-					_ = swarmSvc.OnChildCompleted(context.Background(), task.ID)
+					if err := swarmSvc.OnChildCompleted(context.Background(), task.ID); err != nil {
+						applog.Infof("[swarm] completion callback failed task=%s role=%s: %v", task.ID, task.SwarmRole, err)
+					}
 				}
 			})
 		}
@@ -382,6 +389,10 @@ func (h *Handler) SetWorktreeService(svc *service.WorktreeService) {
 // SetTaskPullRequestRepo sets the task pull request repo for task PR records.
 func (h *Handler) SetTaskPullRequestRepo(repo *repository.TaskPullRequestRepo) {
 	h.taskPullRequestRepo = repo
+}
+
+func (h *Handler) SetGitHubPRFeedbackRepo(repo *repository.GitHubPRFeedbackRepo) {
+	h.githubPRFeedbackRepo = repo
 }
 
 func (h *Handler) SetGitHubAuthRepo(repo *repository.GitHubAuthRepo) {

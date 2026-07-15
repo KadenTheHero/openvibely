@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestStreamingTransportScope(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		params streamingResponseParams
+		want   string
+	}{
+		{name: "project chat", params: streamingResponseParams{ProjectID: "project-1", TaskID: "hidden-chat-task"}, want: "chat:project:project-1"},
+		{name: "task followup", params: streamingResponseParams{ProjectID: "project-1", TaskID: "task-1", IsTaskFollowup: true}, want: "task:task-1"},
+		{name: "task followup missing task", params: streamingResponseParams{ProjectID: "project-1", IsTaskFollowup: true}, want: ""},
+		{name: "missing identity", params: streamingResponseParams{}, want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := streamingTransportScope(tc.params); got != tc.want {
+				t.Fatalf("streamingTransportScope() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
 
 type chatMemoryHookStore struct {
 	hooks []models.AgentLifecycleHook
@@ -3084,7 +3104,7 @@ func TestStartChannelTaskRun_RoutesSwarmChildBeforeSetupFailure(t *testing.T) {
 	updatedWorkerCfg, err := models.ParseSwarmConfig(updatedWorker.SwarmConfig)
 	require.NoError(t, err)
 	assert.Equal(t, updatedParentCfg.Generation, updatedWorkerCfg.RerunGeneration)
-	assert.Equal(t, "followup_pending", updatedWorker.SwarmStatus)
+	assert.Equal(t, "followup_failed", updatedWorker.SwarmStatus)
 	require.Eventually(t, func() bool {
 		failedExec, err := h.execRepo.GetByID(ctx, exec.ID)
 		return err == nil && failedExec != nil && failedExec.Status == models.ExecFailed
@@ -3170,6 +3190,17 @@ func TestStartChannelTaskRunSetupFailureUsesReplyContext(t *testing.T) {
 		ex.PromptSent = "channel follow-up"
 		ex.IsFollowup = true
 	})
+	queued := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		AgentConfigID:  agent.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		Content:        "queued after channel setup failure",
+		Source:         models.TaskOriginSlack,
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
 
 	var sentChannel, sentThread, sentErr, sentUser string
 	h.SetSlackService(&fakeSlackService{taskCompletionFn: func(_ context.Context, channelID, threadTS, taskTitle, output, errMsg, userID string) {
@@ -3197,6 +3228,10 @@ func TestStartChannelTaskRunSetupFailureUsesReplyContext(t *testing.T) {
 	require.Equal(t, "1710000000.300000", sentThread)
 	require.Contains(t, sentErr, "could not check worktree status")
 	require.Equal(t, "Uimmediate", sentUser)
+	require.Eventually(t, func() bool {
+		stored, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+		return err == nil && stored != nil && stored.InputStatus == models.ThreadInputApplied
+	}, 2*time.Second, 25*time.Millisecond, "queued channel follow-up should be promoted after setup failure")
 }
 
 func TestStartQueuedTaskThreadInputProcessesSavedAttachmentSession(t *testing.T) {
@@ -4219,7 +4254,7 @@ func TestProcessStreamingResponse_TaskFollowupIgnoresStatusMarkerMentionInProse(
 	}
 }
 
-func TestResolveWorktreeWorkDir_TerminalUnmergedConflictContinuesInPreservedWorktree(t *testing.T) {
+func TestResolveWorktreeWorkDir_ReactivatedConflictContinuesInPreservedWorktree(t *testing.T) {
 	h, _, _ := setupTestHandler(t)
 	ctx := context.Background()
 
@@ -4231,7 +4266,7 @@ func TestResolveWorktreeWorkDir_TerminalUnmergedConflictContinuesInPreservedWork
 
 	task := createTask(t, h, project.ID, "Terminal unmerged conflict followup", func(tk *models.Task) {
 		tk.Category = models.CategoryBacklog
-		tk.Status = models.StatusFailed
+		tk.Status = models.StatusRunning
 		tk.MergeStatus = models.MergeStatusPending
 	})
 
@@ -4301,7 +4336,7 @@ func TestResolveWorktreeWorkDir_TerminalUnmergedConflictContinuesInPreservedWork
 	}
 }
 
-func TestProcessStreamingResponse_TerminalSyncConflictIncludesWorktreeWarningContext(t *testing.T) {
+func TestProcessStreamingResponse_ReactivatedSyncConflictIncludesWorktreeWarningContext(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4320,7 +4355,7 @@ func TestProcessStreamingResponse_TerminalSyncConflictIncludesWorktreeWarningCon
 	agent := createAgent(t, llmConfigRepo)
 	task := createTask(t, h, project.ID, "Terminal conflict prompt context", func(tk *models.Task) {
 		tk.Category = models.CategoryBacklog
-		tk.Status = models.StatusFailed
+		tk.Status = models.StatusRunning
 		tk.MergeStatus = models.MergeStatusPending
 		tk.AgentID = &agent.ID
 	})
@@ -4381,8 +4416,36 @@ func TestProcessStreamingResponse_TerminalSyncConflictIncludesWorktreeWarningCon
 	if !strings.Contains(request.ChatSystemContext, "Startup sync could not merge") {
 		t.Fatalf("expected provider system context to include startup sync warning, got %q", request.ChatSystemContext)
 	}
-	if !strings.Contains(request.ChatSystemContext, "merge was aborted") || !strings.Contains(request.ChatSystemContext, "Inspect the current branch") {
+	if !strings.Contains(request.ChatSystemContext, "merge was aborted") || !strings.Contains(request.ChatSystemContext, "run the merge") || !strings.Contains(request.ChatSystemContext, "build, test, and commit") {
 		t.Fatalf("expected provider system context to tell agent how to recover, got %q", request.ChatSystemContext)
+	}
+}
+
+func TestResolveWorktreeWorkDir_UnbornRepoFailsClosed(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	project := &models.Project{Name: "Unborn Followup Project", RepoPath: repoDir}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := createTask(t, h, project.ID, "Unborn followup", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+	})
+	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
+
+	workDir, _, err := h.resolveWorktreeWorkDir(ctx, task)
+	if err == nil || !strings.Contains(err.Error(), "repository has no commit for worktree base") {
+		t.Fatalf("expected missing base commit error, got workDir=%q err=%v", workDir, err)
+	}
+	if workDir != "" {
+		t.Fatalf("expected no fallback to main checkout, got %q", workDir)
 	}
 }
 
@@ -5266,6 +5329,87 @@ func TestFollowupNoChangesDoesNotResetMergeStatus(t *testing.T) {
 	}
 }
 
+func TestStartPendingTaskThreadFollowup_AlreadyActiveIsHandled(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Already Active Queued Followup Project")
+	task := createTask(t, h, project.ID, "Already Active Queued Followup Task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusPending
+		task.AgentID = &agent.ID
+		task.Prompt = "original prompt"
+	})
+	require.NoError(t, h.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued))
+	active := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecRunning
+		exec.PromptSent = "queued follow-up"
+		exec.IsFollowup = true
+	})
+
+	handled, err := h.StartPendingTaskThreadFollowup(ctx, task.ID)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.NoError(t, h.taskSvc.UpdateCategory(ctx, task.ID, models.CategoryActive))
+
+	updated, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.StatusQueued, updated.Status)
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	assert.Equal(t, active.ID, execs[0].ID)
+	select {
+	case submitted := <-h.workerSvc.Submitted():
+		t.Fatalf("original task was submitted while queued follow-up execution was active: %s", submitted.ID)
+	default:
+	}
+}
+
+func TestRetryLatestFailedTaskThreadFollowup_AlreadyActiveIsHandled(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Already Active Failed Followup Project")
+	task := createTask(t, h, project.ID, "Already Active Failed Followup Task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusFailed
+		task.AgentID = &agent.ID
+		task.Prompt = "original prompt"
+	})
+	require.NoError(t, h.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued))
+	failed := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecFailed
+		exec.PromptSent = "failed follow-up"
+		exec.IsFollowup = true
+	})
+	active := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecRunning
+		exec.PromptSent = failed.PromptSent
+		exec.IsFollowup = true
+	})
+
+	handled, err := h.RetryLatestFailedTaskThreadFollowup(ctx, task.ID)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.NoError(t, h.taskSvc.UpdateCategory(ctx, task.ID, models.CategoryActive))
+
+	updated, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.StatusQueued, updated.Status)
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 2)
+	assert.Equal(t, active.ID, execs[1].ID)
+	select {
+	case submitted := <-h.workerSvc.Submitted():
+		t.Fatalf("original task was submitted while failed follow-up retry execution was active: %s", submitted.ID)
+	default:
+	}
+}
+
 func TestRetryLatestFailedTaskThreadFollowup_RoutesUnroutedSwarmChildRetry(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
@@ -5911,6 +6055,103 @@ func TestViewThreadRequest_OffsetLimit(t *testing.T) {
 	if requests[0].Limit != 3 {
 		t.Errorf("expected limit 3, got %d", requests[0].Limit)
 	}
+}
+
+func TestProcessStreamingResponse_MixtureSupportedAggregatorInjectsCreateTask(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	project := createProject(t, h, "Tool-capable Mixture Project")
+	providerCalls := 0
+	var firstTools []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		providerCalls++
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		if providerCalls == 1 {
+			firstTools, _ = body["tools"].([]any)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if providerCalls == 1 {
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_create\",\"type\":\"function\",\"function\":{\"name\":\"create_task\",\"arguments\":\"{\\\"title\\\":\\\"Mixture runtime investigation\\\",\\\"prompt\\\":\\\"Investigate the mixture runtime tool path.\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"))
+			return
+		}
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"Task created.\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+	aggregator := &models.LLMConfig{Name: "Compatible Aggregator", Provider: models.ProviderOpenAICompatible, Model: "provider/model", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key", BaseURL: server.URL + "/v1/", Transport: "chat_completions"}
+	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
+	mixture := &models.LLMConfig{
+		Name:              "Tool-capable Mixture",
+		Provider:          models.ProviderMixture,
+		Model:             "mixture",
+		MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, mixture))
+	chatHostTask := createTask(t, h, project.ID, "Mixture chat host", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusPending
+		task.AgentID = &mixture.ID
+	})
+	exec := createExec(t, h, chatHostTask.ID, mixture.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Create an investigation task"
+	})
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID: exec.ID, TaskID: chatHostTask.ID, Message: exec.PromptSent, Agent: *mixture,
+		ProjectID: project.ID, ProcessMarkers: false,
+	})
+
+	require.Equal(t, 2, providerCalls)
+	require.True(t, slices.ContainsFunc(firstTools, func(raw any) bool {
+		tool, _ := raw.(map[string]any)
+		function, _ := tool["function"].(map[string]any)
+		return function["name"] == "create_task"
+	}))
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.True(t, slices.ContainsFunc(tasks, func(task models.Task) bool { return task.Title == "Mixture runtime investigation" }))
+}
+
+func TestProcessStreamingResponse_MixtureUnsupportedAggregatorUsesMarkerFallback(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	project := createProject(t, h, "Marker Mixture Project")
+	aggregator := &models.LLMConfig{Name: "Runtime-incapable Aggregator", Provider: models.ProviderTest, Model: "test", AuthMethod: models.AuthMethodAPIKey}
+	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
+	mixture := &models.LLMConfig{
+		Name:              "Marker Mixture",
+		Provider:          models.ProviderMixture,
+		Model:             "mixture",
+		MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, mixture))
+	chatHostTask := createTask(t, h, project.ID, "Marker mixture chat host", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusPending
+		task.AgentID = &mixture.ID
+	})
+	exec := createExec(t, h, chatHostTask.ID, mixture.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Create an investigation task"
+	})
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "[CREATE_TASK]\n" + `{"title":"Mixture marker investigation","prompt":"Investigate the marker fallback path."}` + "\n[/CREATE_TASK]"
+	mock.TextOnly = mock.Response
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID: exec.ID, TaskID: chatHostTask.ID, Message: exec.PromptSent, Agent: *mixture,
+		ProjectID: project.ID, ProcessMarkers: false,
+	})
+
+	require.Nil(t, llmcontracts.RuntimeToolsFromContext(mock.LastAgentRequest().Ctx))
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.True(t, slices.ContainsFunc(tasks, func(task models.Task) bool { return task.Title == "Mixture marker investigation" }))
 }
 
 // TestProcessStreamingResponse_PhantomCreateTaskRegression verifies the fix for

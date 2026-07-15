@@ -4,12 +4,17 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/service"
 )
 
 func TestHandler_GetTaskChangesFile_LoadsRequestedInlineFile(t *testing.T) {
@@ -85,6 +90,158 @@ diff --git a/b.txt b/b.txt
 	}
 	if !strings.Contains(body, "b.txt") {
 		t.Fatalf("expected loaded card to include requested file name, got: %s", body)
+	}
+}
+
+func TestHandler_GetTaskChangesFile_RecoversLiveWorktreeLineage(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+		}
+	}
+	runGit(repoDir, "init", "-b", "main")
+	runGit(repoDir, "config", "user.email", "test@example.com")
+	runGit(repoDir, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoDir, "base.txt"), []byte("base\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(repoDir, "add", "base.txt")
+	runGit(repoDir, "commit", "-m", "initial")
+
+	project := &models.Project{Name: "lazy diff recovery", RepoPath: repoDir}
+	if err := h.projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := createTask(t, h, project.ID, "Recover lazy diff lineage", func(task *models.Task) {
+		task.Category = models.CategoryActive
+		task.Status = models.StatusRunning
+		task.MergeTargetBranch = "main"
+	})
+
+	worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+	worktreeBranch := "task/" + task.ID[:8] + "-current-lineage"
+	runGit(repoDir, "worktree", "add", "-b", worktreeBranch, worktreePath, "main")
+	if err := os.WriteFile(filepath.Join(worktreePath, "live.txt"), []byte("live lineage\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CommitWorktreeChanges(worktreePath, "add live lineage"); err != nil {
+		t.Fatalf("commit live change: %v", err)
+	}
+
+	agents, err := h.llmConfigRepo.List(ctx)
+	if err != nil || len(agents) == 0 {
+		t.Fatalf("list agents: %v", err)
+	}
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: agents[0].ID, Status: models.ExecRunning, PromptSent: task.Prompt}
+	if err := h.execRepo.Create(ctx, execution); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	staleDiff := "diff --git a/stale.txt b/stale.txt\nnew file mode 100644\n--- /dev/null\n+++ b/stale.txt\n@@ -0,0 +1 @@\n+stale execution\n"
+	if err := h.execRepo.UpdateDiffOutput(ctx, execution.ID, staleDiff); err != nil {
+		t.Fatalf("store stale execution diff: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=0&view=inline", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+	if err := h.GetTaskChangesFile(c); err != nil {
+		t.Fatalf("GetTaskChangesFile: %v", err)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "live.txt") || !strings.Contains(body, "live lineage") {
+		t.Fatalf("expected lazy file diff from recovered live lineage, got:\n%s", body)
+	}
+	if strings.Contains(body, "stale.txt") || strings.Contains(body, "stale execution") {
+		t.Fatalf("expected stored execution fallback to be ignored when live worktree exists, got:\n%s", body)
+	}
+	updated, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if updated.WorktreePath != worktreePath || updated.WorktreeBranch != worktreeBranch {
+		t.Fatalf("expected recovered current lineage path=%q branch=%q, got path=%q branch=%q", worktreePath, worktreeBranch, updated.WorktreePath, updated.WorktreeBranch)
+	}
+
+	liveReq := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/changes/live?diff_output="+url.QueryEscape(staleDiff), nil)
+	liveRec := httptest.NewRecorder()
+	liveContext := e.NewContext(liveReq, liveRec)
+	liveContext.SetParamNames("taskId")
+	liveContext.SetParamValues(task.ID)
+	if err := h.GetTaskChangesLive(liveContext); err != nil {
+		t.Fatalf("GetTaskChangesLive: %v", err)
+	}
+	liveBody := liveRec.Body.String()
+	if !strings.Contains(liveBody, "live.txt") || strings.Contains(liveBody, "stale.txt") {
+		t.Fatalf("expected live fragment to resolve the same recovered worktree diff, got:\n%s", liveBody)
+	}
+}
+
+func TestCaptureTaskDiffOutput_UsesCurrentWorktreeLineageWhenMetadataIsStale(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+		}
+	}
+	runGit(repoDir, "init", "-b", "main")
+	runGit(repoDir, "config", "user.email", "test@example.com")
+	runGit(repoDir, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoDir, "base.txt"), []byte("base\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(repoDir, "add", "base.txt")
+	runGit(repoDir, "commit", "-m", "initial")
+
+	project := &models.Project{Name: "follow-up final diff", RepoPath: repoDir}
+	if err := h.projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := createTask(t, h, project.ID, "Finalize current lineage", func(task *models.Task) {
+		task.Category = models.CategoryActive
+		task.Status = models.StatusRunning
+		task.MergeTargetBranch = "main"
+	})
+	worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+	worktreeBranch := "task/" + task.ID[:8] + "-followup-current"
+	runGit(repoDir, "worktree", "add", "-b", worktreeBranch, worktreePath, "main")
+	if err := os.WriteFile(filepath.Join(worktreePath, "committed.txt"), []byte("earlier task commit\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CommitWorktreeChanges(worktreePath, "earlier task commit"); err != nil {
+		t.Fatalf("commit earlier task output: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "pending.txt"), []byte("later follow-up edit\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate stale DB metadata after a follow-up worktree was created. Final
+	// capture must still use the current managed worktree and target, not HEAD.
+	task.WorktreePath = ""
+	task.WorktreeBranch = ""
+	diff := h.captureTaskDiffOutput(ctx, task, nil, worktreePath, "follow-up complete")
+	if !strings.Contains(diff, "committed.txt") || !strings.Contains(diff, "earlier task commit") {
+		t.Fatalf("expected committed task output in target-based final diff:\n%s", diff)
+	}
+	if !strings.Contains(diff, "pending.txt") || !strings.Contains(diff, "later follow-up edit") {
+		t.Fatalf("expected pending follow-up output in target-based final diff:\n%s", diff)
 	}
 }
 

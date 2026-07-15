@@ -31,6 +31,29 @@ func (r *TaskPullRequestRepo) GetByIssueNumber(ctx context.Context, issueNumber 
 			 FROM task_pull_requests WHERE issue_number = ? ORDER BY updated_at DESC, created_at DESC LIMIT 1`, issueNumber)
 }
 
+func (r *TaskPullRequestRepo) ListOpenByProjectID(ctx context.Context, projectID string) ([]models.TaskPullRequest, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT pr.id, pr.task_id, pr.pr_number, pr.pr_url, pr.pr_state, pr.issue_number, pr.issue_url, pr.created_at, pr.updated_at
+			 FROM task_pull_requests pr
+			 JOIN tasks t ON t.id = pr.task_id
+			 WHERE t.project_id = ? AND lower(pr.pr_state) = 'open'
+			 ORDER BY pr.updated_at DESC, pr.created_at DESC`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing task pull requests by project: %w", err)
+	}
+	defer rows.Close()
+
+	var prs []models.TaskPullRequest
+	for rows.Next() {
+		var pr models.TaskPullRequest
+		if err := rows.Scan(&pr.ID, &pr.TaskID, &pr.PRNumber, &pr.PRURL, &pr.PRState, &pr.IssueNumber, &pr.IssueURL, &pr.CreatedAt, &pr.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning task pull request: %w", err)
+		}
+		prs = append(prs, pr)
+	}
+	return prs, rows.Err()
+}
+
 func (r *TaskPullRequestRepo) getOne(ctx context.Context, query string, args ...any) (*models.TaskPullRequest, error) {
 	var pr models.TaskPullRequest
 	err := r.db.QueryRowContext(ctx, query, args...).

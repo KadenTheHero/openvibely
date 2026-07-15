@@ -40,6 +40,33 @@ func TestCodexReasoningEffort_ConfiguredEffortWins(t *testing.T) {
 	}
 }
 
+func TestCodexReasoningEffort_NewModelLevels(t *testing.T) {
+	if got := CodexReasoningEffort("gpt-5.6-sol", "max"); got != "max" {
+		t.Fatalf("expected Sol to preserve max, got %q", got)
+	}
+	if got := CodexReasoningEffort("gpt-5.6-sol", "ultra"); got != "medium" {
+		t.Fatalf("expected unsupported ultra to fall back to the model default, got %q", got)
+	}
+}
+
+func TestCodexReasoningEffort_NewModelDefaults(t *testing.T) {
+	t.Setenv("OPENVIBELY_CODEX_REASONING_EFFORT", "")
+	for _, tc := range []struct {
+		model string
+		want  string
+	}{
+		{model: "gpt-5.6-sol", want: "medium"},
+		{model: "gpt-5.6-terra", want: "medium"},
+		{model: "gpt-5.6-luna", want: "medium"},
+		{model: "gpt-5.5", want: "medium"},
+		{model: "gpt-5.5-pro", want: "medium"},
+	} {
+		if got := CodexReasoningEffort(tc.model, ""); got != tc.want {
+			t.Errorf("CodexReasoningEffort(%q, empty) = %q, want %q", tc.model, got, tc.want)
+		}
+	}
+}
+
 func TestCodexExecArgs_IncludesReasoningOverride(t *testing.T) {
 	t.Setenv("OPENVIBELY_CODEX_REASONING_EFFORT", "low")
 

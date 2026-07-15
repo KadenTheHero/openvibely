@@ -16,16 +16,14 @@ import (
 )
 
 func supportsChatActionTools(agent models.LLMConfig) bool {
-	switch agent.Provider {
-	case models.ProviderOpenAI:
-		return agent.IsOpenAIAPIKey() || agent.IsOpenAIOAuth()
-	case models.ProviderOpenAICompatible:
-		return agent.IsOpenAICompatibleAPIKey()
-	case models.ProviderAnthropic:
-		return agent.IsAnthropicAPIKey() || agent.IsOAuth()
-	default:
+	return service.SupportsRuntimeChatActionTools(context.Background(), nil, agent)
+}
+
+func (h *Handler) supportsChatActionTools(ctx context.Context, agent models.LLMConfig) bool {
+	if h == nil {
 		return false
 	}
+	return service.SupportsRuntimeChatActionTools(ctx, h.llmConfigRepo, agent)
 }
 
 type chatActionSummaryCollector struct {
@@ -310,11 +308,14 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"github_add_issue_labels": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubAddIssueLabelsTool(ctx, params.ProjectID, input)
 		},
-		"github_link_task_to_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeGitHubLinkTaskToIssueTool(ctx, params, input)
-		},
 		"github_open_pull_request": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubOpenPullRequestTool(ctx, params, input)
+		},
+		"github_replace_pull_request_branch": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeGitHubReplacePullRequestBranchTool(ctx, params, input)
+		},
+		"github_forward_pr_feedback_to_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeGitHubForwardPRFeedbackToTasksTool(ctx, params.ProjectID, input)
 		},
 		"set_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeSetTaskGoalTool(ctx, params, input)
@@ -499,26 +500,37 @@ type githubCreateIssueToolInput struct {
 	Body      string   `json:"body"`
 	Labels    []string `json:"labels"`
 	Assignees []string `json:"assignees"`
+	RepoURL   string   `json:"repo_url"`
 }
 
 type githubIssueToolInput struct {
-	IssueNumber int      `json:"issue_number"`
-	IssueURL    string   `json:"issue_url"`
-	Assignee    string   `json:"assignee"`
-	GitHubLogin string   `json:"github_login"`
-	Body        string   `json:"body"`
-	Labels      []string `json:"labels"`
-	TaskID      string   `json:"task_id"`
-	Title       string   `json:"title"`
-	PRTitle     string   `json:"pr_title"`
-	PRBody      string   `json:"pr_body"`
-	Base        string   `json:"base"`
-	Draft       bool     `json:"draft"`
+	IssueNumber           int      `json:"issue_number"`
+	IssueURL              string   `json:"issue_url"`
+	RepoURL               string   `json:"repo_url"`
+	Assignee              string   `json:"assignee"`
+	GitHubLogin           string   `json:"github_login"`
+	Body                  string   `json:"body"`
+	Labels                []string `json:"labels"`
+	TaskID                string   `json:"task_id"`
+	Title                 string   `json:"title"`
+	PRTitle               string   `json:"pr_title"`
+	PRBody                string   `json:"pr_body"`
+	Base                  string   `json:"base"`
+	Draft                 bool     `json:"draft"`
+	ExpectedHeadSHA       string   `json:"expected_head_sha"`
+	ConfirmHistoryRewrite bool     `json:"confirm_history_rewrite"`
 }
 
 func (h *Handler) resolveGitHubRepoForTool(ctx context.Context, projectID string) (*service.GitHubRepoRef, error) {
+	return h.resolveGitHubRepoForToolURL(ctx, projectID, "")
+}
+
+func (h *Handler) resolveGitHubRepoForToolURL(ctx context.Context, projectID, repoURL string) (*service.GitHubRepoRef, error) {
 	if h.githubSvc == nil {
 		return nil, fmt.Errorf("github service unavailable")
+	}
+	if strings.TrimSpace(repoURL) != "" {
+		return h.githubSvc.ResolveRepo(ctx, repoURL, "")
 	}
 	if h.projectRepo == nil {
 		return nil, fmt.Errorf("project repository unavailable")
@@ -538,7 +550,7 @@ func (h *Handler) executeGitHubCreateIssueTool(ctx context.Context, projectID st
 	if err := json.Unmarshal(input, &req); err != nil {
 		return "", err
 	}
-	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}
@@ -554,7 +566,7 @@ func (h *Handler) executeGitHubGetIssueTool(ctx context.Context, projectID strin
 	if err := json.Unmarshal(input, &req); err != nil {
 		return "", err
 	}
-	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}
@@ -569,11 +581,21 @@ func (h *Handler) executeGitHubGetProjectInboxTool(ctx context.Context, projectI
 	if h.githubAuthRepo == nil {
 		return "", fmt.Errorf("github auth repository unavailable")
 	}
-	inbox, err := h.githubAuthRepo.GetEnabledProjectInbox(ctx, projectID)
+	actors, err := h.githubAuthRepo.ListAuthorizedInboxAssignees(ctx)
 	if err != nil {
 		return "", err
 	}
-	return githubToolJSON(map[string]any{"ok": true, "configured": inbox != nil, "inbox": inbox})
+	assignees := make([]string, 0, len(actors))
+	for _, actor := range actors {
+		if login := repository.NormalizeGitHubLogin(actor.GitHubLogin); login != "" {
+			assignees = append(assignees, login)
+		}
+	}
+	legacyInbox, err := h.githubAuthRepo.GetEnabledProjectInbox(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	return githubToolJSON(map[string]any{"ok": true, "configured": len(assignees) > 0, "assignees": assignees, "authorized_users": actors, "legacy_inbox": legacyInbox})
 }
 
 func (h *Handler) executeGitHubIsActorAuthorizedTool(ctx context.Context, input json.RawMessage) (string, error) {
@@ -595,8 +617,12 @@ func (h *Handler) executeGitHubIsActorAuthorizedTool(ctx context.Context, input 
 	return githubToolJSON(map[string]any{"ok": true, "github_login": repository.NormalizeGitHubLogin(login), "authorized": authorized})
 }
 
-func (h *Handler) executeGitHubListMyAssignedIssuesTool(ctx context.Context, projectID string, _ json.RawMessage) (string, error) {
-	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+func (h *Handler) executeGitHubListMyAssignedIssuesTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	var req githubIssueToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}
@@ -616,7 +642,7 @@ func (h *Handler) executeGitHubListAssignedIssuesTool(ctx context.Context, proje
 	if assignee == "" {
 		return "", fmt.Errorf("assignee is required")
 	}
-	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}
@@ -635,7 +661,7 @@ func (h *Handler) executeGitHubListAssignedIssuesWithPRsTool(ctx context.Context
 	if strings.TrimSpace(req.Assignee) == "" {
 		return "", fmt.Errorf("assignee is required")
 	}
-	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}
@@ -651,7 +677,7 @@ func (h *Handler) executeGitHubCommentOnIssueTool(ctx context.Context, projectID
 	if err := json.Unmarshal(input, &req); err != nil {
 		return "", err
 	}
-	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}
@@ -666,7 +692,7 @@ func (h *Handler) executeGitHubAddIssueLabelsTool(ctx context.Context, projectID
 	if err := json.Unmarshal(input, &req); err != nil {
 		return "", err
 	}
-	repo, err := h.resolveGitHubRepoForTool(ctx, projectID)
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}
@@ -676,50 +702,31 @@ func (h *Handler) executeGitHubAddIssueLabelsTool(ctx context.Context, projectID
 	return githubToolJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber, "labels": req.Labels})
 }
 
-func (h *Handler) executeGitHubLinkTaskToIssueTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
-	if h.taskPullRequestRepo == nil {
-		return "", fmt.Errorf("task pull request repository unavailable")
+func (h *Handler) executeGitHubForwardPRFeedbackToTasksTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	if h.taskPullRequestRepo == nil || h.githubPRFeedbackRepo == nil || h.githubAuthRepo == nil || h.threadInputRepo == nil {
+		return "", fmt.Errorf("github pr feedback forwarding dependencies unavailable")
 	}
 	var req githubIssueToolInput
 	if err := json.Unmarshal(input, &req); err != nil {
 		return "", err
 	}
-	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
 	if err != nil {
 		return "", err
 	}
-	task, err := h.taskRepo.GetByID(ctx, taskID)
+	result, err := service.NewGitHubPRFeedbackForwarder(h.githubSvc, h.taskPullRequestRepo, h.githubPRFeedbackRepo, h.githubAuthRepo, h.threadInputRepo).ForwardAuthorizedFeedback(ctx, projectID, repo)
 	if err != nil {
 		return "", err
 	}
-	if task == nil || task.ProjectID != params.ProjectID {
-		return "", fmt.Errorf("task not found in current project")
+	seen := map[string]bool{}
+	for _, forwarded := range result.Forwarded {
+		if strings.TrimSpace(forwarded.TaskID) == "" || seen[forwarded.TaskID] {
+			continue
+		}
+		seen[forwarded.TaskID] = true
+		h.PromoteQueuedTaskThreadInput(forwarded.TaskID)
 	}
-	repo, err := h.resolveGitHubRepoForTool(ctx, params.ProjectID)
-	if err != nil {
-		return "", err
-	}
-	issue, err := h.githubSvc.GetIssue(ctx, repo, req.IssueNumber)
-	if err != nil {
-		return "", err
-	}
-	pr, err := h.githubSvc.FindPullRequestForIssue(ctx, repo, req.IssueNumber)
-	if err != nil {
-		return "", err
-	}
-	if pr == nil {
-		return githubToolJSON(map[string]any{"ok": false, "skipped": true, "issue_number": req.IssueNumber, "reason": "assigned issue has no associated pull request"})
-	}
-	issueNumber := req.IssueNumber
-	issueURL := ""
-	if issue != nil {
-		issueURL = issue.URL
-	}
-	record := &models.TaskPullRequest{TaskID: task.ID, PRNumber: pr.Number, PRURL: pr.URL, PRState: pr.State, IssueNumber: &issueNumber, IssueURL: issueURL}
-	if err := h.taskPullRequestRepo.Upsert(ctx, record); err != nil {
-		return "", err
-	}
-	return githubToolJSON(map[string]any{"ok": true, "task_id": task.ID, "issue_number": issueNumber, "issue_url": issueURL, "pull_request": pr})
+	return githubToolJSON(map[string]any{"ok": true, "result": result})
 }
 
 func (h *Handler) executeGitHubOpenPullRequestTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
@@ -764,6 +771,48 @@ func (h *Handler) executeGitHubOpenPullRequestTool(ctx context.Context, params s
 		return "", err
 	}
 	return githubToolJSON(map[string]any{"ok": true, "task_id": task.ID, "pull_request": result.PullRequest, "reused_existing_record": result.ReusedExistingRecord, "reused_remote": result.ReusedRemote, "created": result.Created})
+}
+
+func (h *Handler) executeGitHubReplacePullRequestBranchTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	if h.taskPullRequestRepo == nil {
+		return "", fmt.Errorf("task pull request repository unavailable")
+	}
+	var req githubIssueToolInput
+	if err := json.Unmarshal(input, &req); err != nil {
+		return "", err
+	}
+	if !req.ConfirmHistoryRewrite {
+		return "", fmt.Errorf("confirm_history_rewrite must be true to replace pull request branch history")
+	}
+	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	task, err := h.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	if task == nil || task.ProjectID != params.ProjectID {
+		return "", fmt.Errorf("task not found in current project")
+	}
+	project, err := h.projectRepo.GetByID(ctx, params.ProjectID)
+	if err != nil {
+		return "", err
+	}
+	if project == nil {
+		return "", fmt.Errorf("current project not found")
+	}
+	record, err := service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).ReplaceBranchHeadForTask(ctx, project, task, req.ExpectedHeadSHA)
+	if err != nil {
+		return "", err
+	}
+	return githubToolJSON(map[string]any{
+		"ok":                true,
+		"task_id":           task.ID,
+		"pull_request":      record,
+		"replaced_branch":   task.WorktreeBranch,
+		"expected_head_sha": strings.ToLower(strings.TrimSpace(req.ExpectedHeadSHA)),
+	})
 }
 
 func githubToolJSON(payload map[string]any) (string, error) {
@@ -1340,6 +1389,11 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"view_task_thread":                     true,
 		"send_to_task":                         true,
 		"send_message":                         true,
+		"create_task":                          true,
+		"create_swarm_task":                    true,
+		"schedule_task":                        true,
+		"delete_schedule":                      true,
+		"modify_schedule":                      true,
 		"github_create_issue":                  true,
 		"github_get_issue":                     true,
 		"github_get_project_inbox":             true,
@@ -1349,8 +1403,9 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"github_list_assigned_issues_with_prs": true,
 		"github_comment_on_issue":              true,
 		"github_add_issue_labels":              true,
-		"github_link_task_to_issue":            true,
 		"github_open_pull_request":             true,
+		"github_replace_pull_request_branch":   true,
+		"github_forward_pr_feedback_to_tasks":  true,
 		"set_task_goal":                        true,
 		"clear_task_goal":                      true,
 		"get_task_goal":                        true,

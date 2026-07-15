@@ -676,7 +676,7 @@ func TestHandler_CreateModel_Normalization(t *testing.T) {
 		wantReasoning string
 	}{
 		{"openai_preserves_gpt54", "openai", "gpt-5.4", "xhigh", "gpt-5.4", "xhigh"},
-		{"openai_normalizes_unknown", "openai", "unknown-model", "high", "gpt-5.5", "high"},
+		{"openai_normalizes_unknown", "openai", "unknown-model", "high", "gpt-5.6-sol", "high"},
 		{"non_openai_preserves", "anthropic", "claude-opus-4-6", "xhigh", "claude-opus-4-6", ""},
 	}
 	for _, tc := range cases {
@@ -2006,6 +2006,45 @@ func TestHandler_DeleteTask_HTMX_UpdatesKanbanBoard(t *testing.T) {
 	}
 	if remaining, _ := h.taskSvc.GetByID(ctx, ct2.ID); remaining == nil {
 		t.Error("expected remaining task to still exist")
+	}
+}
+
+func TestHandler_DeleteTask_FromDetailPage_RedirectsToSchedule(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Schedule Project")
+	task := createTask(t, h, project.ID, "Scheduled Task To Delete", func(tk *models.Task) { tk.Category = models.CategoryScheduled; tk.Status = models.StatusPending })
+	runAt := time.Now().Add(24 * time.Hour)
+	createSchedule(t, h, task.ID, runAt, func(s *models.Schedule) { s.NextRun = &runAt })
+
+	rec := htmxDelete(e, "/tasks/"+task.ID+"?redirect=list&return_to=schedule")
+	assertCode(t, rec, http.StatusOK)
+
+	expectedRedirect := "/schedule?project_id=" + project.ID
+	if hxRedirect := rec.Header().Get("HX-Redirect"); hxRedirect != expectedRedirect {
+		t.Errorf("expected HX-Redirect=%q, got %q", expectedRedirect, hxRedirect)
+	}
+	if deleted, _ := h.taskSvc.GetByID(ctx, task.ID); deleted != nil {
+		t.Error("expected task to be deleted")
+	}
+	if schedules, err := h.scheduleRepo.ListByTask(ctx, task.ID); err != nil {
+		t.Fatalf("list schedules: %v", err)
+	} else if len(schedules) != 0 {
+		t.Errorf("expected 0 schedules after delete, got %d", len(schedules))
+	}
+}
+
+func TestHandler_DeleteTask_UnsafeReturnToFallsBackToList(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Safe Redirect Project")
+	task := createTask(t, h, project.ID, "Task To Delete", func(tk *models.Task) { tk.Category = models.CategoryBacklog; tk.Status = models.StatusPending })
+
+	rec := htmxDelete(e, "/tasks/"+task.ID+"?redirect=list&return_to=https://evil.example")
+	assertCode(t, rec, http.StatusOK)
+
+	expectedRedirect := "/tasks?project_id=" + project.ID
+	if hxRedirect := rec.Header().Get("HX-Redirect"); hxRedirect != expectedRedirect {
+		t.Errorf("expected unsafe return_to to fall back to HX-Redirect=%q, got %q", expectedRedirect, hxRedirect)
 	}
 }
 

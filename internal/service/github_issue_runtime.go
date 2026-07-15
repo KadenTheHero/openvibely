@@ -14,26 +14,32 @@ import (
 
 type GitHubIssueRuntimeProvider interface {
 	ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error)
-	PushBranch(ctx context.Context, repoPath, worktreePath, branch string, repo *GitHubRepoRef) error
+	DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error)
+	PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) error
 	FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 	CreateIssue(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreateIssueRequest) (*GitHubIssue, error)
 	GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error)
+	GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error)
 	ListAuthenticatedAssignedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
 	ListAssignedIssues(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssue, error)
 	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error)
 	FindPullRequestForIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubPullRequest, error)
+	ListPullRequestFeedback(ctx context.Context, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error)
 	CommentOnIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, bodyText string) error
 	AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, labels []string) error
 }
 
 type githubIssueRuntimeOptions struct {
-	ProjectID           string
-	ProjectRepo         *repository.ProjectRepo
-	TaskRepo            *repository.TaskRepo
-	TaskPullRequestRepo *repository.TaskPullRequestRepo
-	GitHubAuthRepo      *repository.GitHubAuthRepo
-	GitHub              GitHubIssueRuntimeProvider
+	ProjectID                string
+	ProjectRepo              *repository.ProjectRepo
+	TaskRepo                 *repository.TaskRepo
+	TaskPullRequestRepo      *repository.TaskPullRequestRepo
+	GitHubPRFeedbackRepo     *repository.GitHubPRFeedbackRepo
+	GitHubAuthRepo           *repository.GitHubAuthRepo
+	ThreadInputRepo          *repository.ThreadInputRepo
+	GitHub                   GitHubIssueRuntimeProvider
+	AfterPRFeedbackForwarded func(taskID string)
 }
 
 type githubCreateIssueRuntimeInput struct {
@@ -41,21 +47,25 @@ type githubCreateIssueRuntimeInput struct {
 	Body      string   `json:"body"`
 	Labels    []string `json:"labels"`
 	Assignees []string `json:"assignees"`
+	RepoURL   string   `json:"repo_url"`
 }
 
 type githubIssueRuntimeInput struct {
-	IssueNumber int      `json:"issue_number"`
-	IssueURL    string   `json:"issue_url"`
-	Assignee    string   `json:"assignee"`
-	GitHubLogin string   `json:"github_login"`
-	Body        string   `json:"body"`
-	Labels      []string `json:"labels"`
-	TaskID      string   `json:"task_id"`
-	Title       string   `json:"title"`
-	PRTitle     string   `json:"pr_title"`
-	PRBody      string   `json:"pr_body"`
-	Base        string   `json:"base"`
-	Draft       bool     `json:"draft"`
+	IssueNumber           int      `json:"issue_number"`
+	IssueURL              string   `json:"issue_url"`
+	RepoURL               string   `json:"repo_url"`
+	Assignee              string   `json:"assignee"`
+	GitHubLogin           string   `json:"github_login"`
+	Body                  string   `json:"body"`
+	Labels                []string `json:"labels"`
+	TaskID                string   `json:"task_id"`
+	Title                 string   `json:"title"`
+	PRTitle               string   `json:"pr_title"`
+	PRBody                string   `json:"pr_body"`
+	Base                  string   `json:"base"`
+	Draft                 bool     `json:"draft"`
+	ExpectedHeadSHA       string   `json:"expected_head_sha"`
+	ConfirmHistoryRewrite bool     `json:"confirm_history_rewrite"`
 }
 
 func buildGitHubIssueRuntimeTools(opts githubIssueRuntimeOptions) *llmcontracts.RuntimeTools {
@@ -69,7 +79,7 @@ func buildGitHubIssueRuntimeTools(opts githubIssueRuntimeOptions) *llmcontracts.
 	handlers := buildGitHubIssueRuntimeHandlers(opts)
 	return &llmcontracts.RuntimeTools{
 		Definitions: defs,
-		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, handlers),
+		Executor:    chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, handlers, runtimeToolDefinitionSet(defs)),
 	}
 }
 
@@ -84,6 +94,17 @@ func gitHubIssueRuntimeToolDefs() []llmcontracts.RuntimeToolDefinition {
 	return filtered
 }
 
+func runtimeToolDefinitionSet(defs []llmcontracts.RuntimeToolDefinition) map[string]bool {
+	out := make(map[string]bool, len(defs))
+	for _, def := range defs {
+		name := strings.ToLower(strings.TrimSpace(def.Name))
+		if name != "" {
+			out[name] = true
+		}
+	}
+	return out
+}
+
 func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]chatcontrol.RuntimeActionHandler {
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"github_create_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
@@ -91,7 +112,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}
@@ -106,7 +127,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}
@@ -120,11 +141,21 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if opts.GitHubAuthRepo == nil {
 				return "", fmt.Errorf("github auth repository unavailable")
 			}
-			inbox, err := opts.GitHubAuthRepo.GetEnabledProjectInbox(ctx, opts.ProjectID)
+			actors, err := opts.GitHubAuthRepo.ListAuthorizedInboxAssignees(ctx)
 			if err != nil {
 				return "", err
 			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "configured": inbox != nil, "inbox": inbox})
+			assignees := make([]string, 0, len(actors))
+			for _, actor := range actors {
+				if login := repository.NormalizeGitHubLogin(actor.GitHubLogin); login != "" {
+					assignees = append(assignees, login)
+				}
+			}
+			legacyInbox, err := opts.GitHubAuthRepo.GetEnabledProjectInbox(ctx, opts.ProjectID)
+			if err != nil {
+				return "", err
+			}
+			return githubIssueRuntimeJSON(map[string]any{"ok": true, "configured": len(assignees) > 0, "assignees": assignees, "authorized_users": actors, "legacy_inbox": legacyInbox})
 		},
 		"github_is_actor_authorized": func(ctx context.Context, input json.RawMessage) (string, error) {
 			if opts.GitHubAuthRepo == nil {
@@ -144,8 +175,12 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "github_login": repository.NormalizeGitHubLogin(login), "authorized": authorized})
 		},
-		"github_list_my_assigned_issues": func(ctx context.Context, _ json.RawMessage) (string, error) {
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+		"github_list_my_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req githubIssueRuntimeInput
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}
@@ -164,7 +199,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if assignee == "" {
 				return "", fmt.Errorf("assignee is required")
 			}
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}
@@ -182,7 +217,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if strings.TrimSpace(req.Assignee) == "" {
 				return "", fmt.Errorf("assignee is required")
 			}
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}
@@ -197,7 +232,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}
@@ -211,7 +246,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
 			if err != nil {
 				return "", err
 			}
@@ -219,47 +254,6 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				return "", err
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber, "labels": req.Labels})
-		},
-		"github_link_task_to_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
-			if opts.TaskPullRequestRepo == nil {
-				return "", fmt.Errorf("task pull request repository unavailable")
-			}
-			if opts.TaskRepo == nil {
-				return "", fmt.Errorf("task repository unavailable")
-			}
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			task, err := resolveGitHubRuntimeTask(ctx, opts.TaskRepo, opts.ProjectID, req.TaskID, req.Title)
-			if err != nil {
-				return "", err
-			}
-			repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
-			if err != nil {
-				return "", err
-			}
-			issue, err := opts.GitHub.GetIssue(ctx, repo, req.IssueNumber)
-			if err != nil {
-				return "", err
-			}
-			pr, err := opts.GitHub.FindPullRequestForIssue(ctx, repo, req.IssueNumber)
-			if err != nil {
-				return "", err
-			}
-			if pr == nil {
-				return githubIssueRuntimeJSON(map[string]any{"ok": false, "skipped": true, "issue_number": req.IssueNumber, "reason": "assigned issue has no associated pull request"})
-			}
-			issueNumber := req.IssueNumber
-			issueURL := ""
-			if issue != nil {
-				issueURL = issue.URL
-			}
-			record := &models.TaskPullRequest{TaskID: task.ID, PRNumber: pr.Number, PRURL: pr.URL, PRState: pr.State, IssueNumber: &issueNumber, IssueURL: issueURL}
-			if err := opts.TaskPullRequestRepo.Upsert(ctx, record); err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "task_id": task.ID, "issue_number": issueNumber, "issue_url": issueURL, "pull_request": pr})
 		},
 		"github_open_pull_request": func(ctx context.Context, input json.RawMessage) (string, error) {
 			if opts.TaskPullRequestRepo == nil {
@@ -297,6 +291,68 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "task_id": task.ID, "pull_request": result.PullRequest, "reused_existing_record": result.ReusedExistingRecord, "reused_remote": result.ReusedRemote, "created": result.Created})
 		},
+		"github_replace_pull_request_branch": func(ctx context.Context, input json.RawMessage) (string, error) {
+			if opts.TaskPullRequestRepo == nil {
+				return "", fmt.Errorf("task pull request repository unavailable")
+			}
+			if opts.TaskRepo == nil {
+				return "", fmt.Errorf("task repository unavailable")
+			}
+			var req githubIssueRuntimeInput
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if !req.ConfirmHistoryRewrite {
+				return "", fmt.Errorf("confirm_history_rewrite must be true to replace pull request branch history")
+			}
+			project, err := resolveGitHubRuntimeProject(ctx, opts)
+			if err != nil {
+				return "", err
+			}
+			task, err := resolveGitHubRuntimeTask(ctx, opts.TaskRepo, opts.ProjectID, req.TaskID, req.Title)
+			if err != nil {
+				return "", err
+			}
+			record, err := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo).ReplaceBranchHeadForTask(ctx, project, task, req.ExpectedHeadSHA)
+			if err != nil {
+				return "", err
+			}
+			return githubIssueRuntimeJSON(map[string]any{
+				"ok":                true,
+				"task_id":           task.ID,
+				"pull_request":      record,
+				"replaced_branch":   task.WorktreeBranch,
+				"expected_head_sha": strings.ToLower(strings.TrimSpace(req.ExpectedHeadSHA)),
+			})
+		},
+		"github_forward_pr_feedback_to_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
+			if opts.TaskPullRequestRepo == nil || opts.GitHubPRFeedbackRepo == nil || opts.GitHubAuthRepo == nil || opts.ThreadInputRepo == nil {
+				return "", fmt.Errorf("github pr feedback forwarding dependencies unavailable")
+			}
+			var req githubIssueRuntimeInput
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
+			if err != nil {
+				return "", err
+			}
+			result, err := NewGitHubPRFeedbackForwarder(opts.GitHub, opts.TaskPullRequestRepo, opts.GitHubPRFeedbackRepo, opts.GitHubAuthRepo, opts.ThreadInputRepo).ForwardAuthorizedFeedback(ctx, opts.ProjectID, repo)
+			if err != nil {
+				return "", err
+			}
+			if opts.AfterPRFeedbackForwarded != nil {
+				seen := map[string]bool{}
+				for _, forwarded := range result.Forwarded {
+					if strings.TrimSpace(forwarded.TaskID) == "" || seen[forwarded.TaskID] {
+						continue
+					}
+					seen[forwarded.TaskID] = true
+					opts.AfterPRFeedbackForwarded(forwarded.TaskID)
+				}
+			}
+			return githubIssueRuntimeJSON(map[string]any{"ok": true, "result": result})
+		},
 	}
 }
 
@@ -312,6 +368,13 @@ func resolveGitHubRuntimeProject(ctx context.Context, opts githubIssueRuntimeOpt
 }
 
 func resolveGitHubRepoForRuntimeTool(ctx context.Context, opts githubIssueRuntimeOptions) (*GitHubRepoRef, error) {
+	return resolveGitHubRepoForRuntimeToolURL(ctx, opts, "")
+}
+
+func resolveGitHubRepoForRuntimeToolURL(ctx context.Context, opts githubIssueRuntimeOptions, repoURL string) (*GitHubRepoRef, error) {
+	if strings.TrimSpace(repoURL) != "" {
+		return opts.GitHub.ResolveRepo(ctx, repoURL, "")
+	}
 	project, err := resolveGitHubRuntimeProject(ctx, opts)
 	if err != nil {
 		return nil, err

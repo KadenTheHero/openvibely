@@ -99,6 +99,19 @@ type streamingResponseParams struct {
 	steeringOutputCursor   string
 }
 
+func streamingTransportScope(params streamingResponseParams) string {
+	if params.IsTaskFollowup {
+		if strings.TrimSpace(params.TaskID) != "" {
+			return "task:" + strings.TrimSpace(params.TaskID)
+		}
+		return ""
+	}
+	if strings.TrimSpace(params.ProjectID) != "" {
+		return "chat:project:" + strings.TrimSpace(params.ProjectID)
+	}
+	return ""
+}
+
 // processStreamingResponse is the shared goroutine that handles LLM streaming for
 // both chat and task follow-up messages. This function runs asynchronously in a
 // background goroutine, allowing the HTTP handler to return immediately.
@@ -316,7 +329,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// execute the channel service handler (with persistence) rather than the
 	// informational web/API handler.
 	runtimeToolsInjected := false
-	if supportsChatActionTools(params.Agent) {
+	if h.supportsChatActionTools(ctx, params.Agent) {
 		surface := params.Surface
 		if surface == "" {
 			surface = chatcontrol.SurfaceWeb
@@ -354,12 +367,14 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 				params.ExecID, len(defs), chatMode, surface, params.IsTaskFollowup)
 		}
 	}
-	// Fallback: when a provider/auth path has no runtime tool support (e.g.
-	// Claude CLI, Codex CLI, Ollama), we MUST fall back to marker
-	// post-processing so emitted action blocks are actually executed. This
-	// applies to interactive chat and task-thread follow-ups; otherwise the UI
-	// can show an action block that never reaches the task store.
-	if !runtimeToolsInjected && !params.ProcessMarkers {
+	// Plan mode is read-only. Never execute action markers, even when a caller
+	// supplied ProcessMarkers or the provider cannot receive runtime tools.
+	// Other no-tool transports (e.g. Claude CLI, Codex CLI, Ollama) retain
+	// marker fallback so emitted action blocks are executable in Orchestrate
+	// and task-thread turns.
+	if chatMode == models.ChatModePlan {
+		params.ProcessMarkers = false
+	} else if !runtimeToolsInjected && !params.ProcessMarkers {
 		params.ProcessMarkers = true
 		applog.Infof("[handler] processStreamingResponse exec=%s no runtime tools (provider=%s auth=%s followup=%v); enabling marker processing fallback",
 			params.ExecID, params.Agent.Provider, params.Agent.AuthMethod, params.IsTaskFollowup)
@@ -465,8 +480,9 @@ modelLoop:
 			err = ctx.Err()
 			break
 		}
+		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
 		result, err = h.llmSvc.CallAgentDirectStreamingDetailed(
-			ctx, params.Message, requestImageAttachments, params.Agent,
+			requestCtx, params.Message, requestImageAttachments, params.Agent,
 			params.ExecID, params.ChatHistory, params.SystemContext,
 			params.WorkDir, agentDef, params.IsTaskFollowup,
 		)
@@ -1193,7 +1209,7 @@ func (h *Handler) StartPendingTaskThreadFollowup(ctx context.Context, taskID str
 		return false, err
 	}
 	if active {
-		return false, nil
+		return true, nil
 	}
 	queued, err := h.threadInputRepo.FindOldestQueuedForTask(ctx, taskID)
 	if err != nil {
@@ -1218,7 +1234,7 @@ func (h *Handler) RetryLatestFailedTaskThreadFollowup(ctx context.Context, taskI
 		return false, err
 	}
 	if active {
-		return false, nil
+		return true, nil
 	}
 	failed, err := h.execRepo.GetLatestFailedFollowupByTask(ctx, taskID)
 	if err != nil {
@@ -1683,6 +1699,41 @@ func normalizeDiffSnapshot(diff string) string {
 	return strings.TrimSpace(diff)
 }
 
+// resolveTaskChangesWorktreeRefs identifies the managed worktree and explicit
+// comparison target used by Task Changes. Worktree tasks are review views: the
+// base is the task's merge target (or resolved repository default), and the tip
+// is the current worktree state. git diff HEAD is reserved for non-worktree
+// executions that only expose pending changes.
+func resolveTaskChangesWorktreeRefs(task *models.Task, project *models.Project, workDir string) (repoDir, branch, target string, ok bool) {
+	if task == nil || project == nil || project.RepoPath == "" || workDir == "" || !service.IsGitRepo(workDir) {
+		return "", "", "", false
+	}
+	managedPath := task.WorktreePath == workDir
+	if !managedPath {
+		rel, err := filepath.Rel(project.RepoPath, workDir)
+		base := filepath.Base(workDir)
+		expectedBase := "task_" + task.ID
+		managedPath = err == nil && !filepath.IsAbs(rel) && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) &&
+			filepath.Dir(rel) == ".worktrees" && (base == expectedBase || strings.HasPrefix(base, expectedBase+"_followup_"))
+	}
+	if !managedPath {
+		return "", "", "", false
+	}
+
+	target = task.MergeTargetBranch
+	if target == "" {
+		target = service.GetDefaultBranch(project.RepoPath)
+	}
+	if target == "" {
+		return "", "", "", false
+	}
+	branch = service.GetCurrentBranch(workDir)
+	if branch == "" {
+		branch = task.WorktreeBranch
+	}
+	return project.RepoPath, branch, target, true
+}
+
 func (h *Handler) startFollowupDiffSnapshotBroadcast(ctx context.Context, taskID, execID, workDir string, isTaskFollowup bool) (chan struct{}, chan struct{}) {
 	if !isTaskFollowup || workDir == "" || h.fileChangeBroadcaster == nil || h.execRepo == nil {
 		return nil, nil
@@ -1693,23 +1744,14 @@ func (h *Handler) startFollowupDiffSnapshotBroadcast(ctx context.Context, taskID
 		return nil, nil
 	}
 
-	var repoDir, worktreeBranch, mergeTargetBranch string
-	if task.WorktreePath != "" && task.WorktreeBranch != "" && task.WorktreePath == workDir {
-		project, projErr := h.projectRepo.GetByID(ctx, task.ProjectID)
-		if projErr != nil || project == nil || project.RepoPath == "" {
-			return nil, nil
-		}
-		repoDir = project.RepoPath
-		worktreeBranch = task.WorktreeBranch
-		mergeTargetBranch = task.MergeTargetBranch
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	repoDir, worktreeBranch, targetBranch, worktreeDiff := resolveTaskChangesWorktreeRefs(task, project, workDir)
+	if worktreeDiff {
+		applog.Debugf("[task-changes] follow-up diff base task=%s target=%s branch=%s worktree=%s", task.ID, targetBranch, worktreeBranch, workDir)
 	}
 
 	captureDiff := func() string {
-		if repoDir != "" && worktreeBranch != "" {
-			targetBranch := mergeTargetBranch
-			if targetBranch == "" {
-				targetBranch = service.GetDefaultBranch(repoDir)
-			}
+		if worktreeDiff {
 			return service.GetWorktreeDiffWithUncommitted(repoDir, worktreeBranch, targetBranch, workDir)
 		}
 		return h.llmSvc.CaptureGitDiff(workDir)
@@ -1759,9 +1801,10 @@ func (h *Handler) captureTaskDiffOutput(ctx context.Context, task *models.Task, 
 		return ""
 	}
 
-	if task != nil && task.WorktreePath != "" && task.WorktreeBranch != "" && task.WorktreePath == workDir {
+	if task != nil {
 		project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
-		if project != nil && project.RepoPath != "" {
+		repoDir, worktreeBranch, targetBranch, worktreeDiff := resolveTaskChangesWorktreeRefs(task, project, workDir)
+		if worktreeDiff {
 			commitCtx := service.WorktreeCommitMessageContext{
 				Phase:     service.WorktreeCommitPhaseFollowup,
 				TaskTitle: task.Title,
@@ -1770,15 +1813,11 @@ func (h *Handler) captureTaskDiffOutput(ctx context.Context, task *models.Task, 
 			if exec != nil {
 				commitCtx.TurnIntent = exec.PromptSent
 				if h.llmSvc != nil {
-					commitCtx.DiffSummary = h.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, task.WorktreePath, exec.AgentConfigID, commitCtx)
+					commitCtx.DiffSummary = h.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, workDir, exec.AgentConfigID, commitCtx)
 				}
 			}
-			service.CommitWorktreeChanges(task.WorktreePath, service.BuildWorktreeCommitMessage(task.WorktreePath, commitCtx))
-			targetBranch := task.MergeTargetBranch
-			if targetBranch == "" {
-				targetBranch = service.GetDefaultBranch(project.RepoPath)
-			}
-			return service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
+			service.CommitWorktreeChanges(workDir, service.BuildWorktreeCommitMessage(workDir, commitCtx))
+			return service.GetWorktreeDiffWithUncommitted(repoDir, worktreeBranch, targetBranch, workDir)
 		}
 	}
 
@@ -2027,8 +2066,8 @@ func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task)
 
 	wtPath, wtBranch, skipStartupSync, wtErr := h.worktreeSvc.SetupFollowupWorktree(ctx, task, repoDir)
 	if wtErr != nil {
-		applog.Infof("[handler] resolveWorktreeWorkDir worktree setup failed for task %s, using main repo: %v", task.ID, wtErr)
-		return repoDir, "", nil
+		applog.Infof("[handler] resolveWorktreeWorkDir worktree setup failed for task %s; refusing to use main repo: %v", task.ID, wtErr)
+		return "", "", fmt.Errorf("setting up isolated task worktree: %w", wtErr)
 	}
 	task.WorktreePath = wtPath
 	task.WorktreeBranch = wtBranch
@@ -2039,9 +2078,10 @@ func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task)
 	}
 
 	if syncErr := h.worktreeSvc.SyncWorktreeFromMainAtStart(ctx, task, repoDir); syncErr != nil {
-		if models.IsTerminalStatus(task.Status) && strings.Contains(syncErr.Error(), "startup auto-merge conflict") {
-			applog.Infof("[handler] resolveWorktreeWorkDir startup worktree sync conflict for terminal task follow-up %s, continuing in preserved worktree: %v", task.ID, syncErr)
-			return wtPath, buildStartupSyncConflictContext(task, syncErr), nil
+		var conflictErr *service.StartupSyncConflictError
+		if errors.As(syncErr, &conflictErr) {
+			applog.Infof("[handler] resolveWorktreeWorkDir startup worktree sync conflict for task follow-up %s, continuing in preserved worktree: %v", task.ID, syncErr)
+			return wtPath, buildStartupSyncConflictContext(conflictErr), nil
 		}
 		applog.Infof("[handler] resolveWorktreeWorkDir startup worktree sync failed for task %s: %v", task.ID, syncErr)
 		return "", "", syncErr
@@ -2063,20 +2103,31 @@ func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectI
 
 	applog.Infof("[handler] processChatTaskCreations exec=%s found %d task creation requests", execID, len(taskRequests))
 
-	chatAtts, _ := h.chatAttachmentRepo.ListByExecution(ctx, execID)
-	deferredActiveTitles := h.deferActiveTasksWithAttachments(taskRequests, chatAtts)
+	chatAtts, err := h.chatAttachmentRepo.ListByExecution(ctx, execID)
+	if err != nil {
+		applog.Infof("[handler] attachment lifecycle stage=metadata-load execution=%s destination_task=uncreated error=%v", execID, err)
+		return output + fmt.Sprintf("\n\n---\nFailed to create %d task(s): Chat attachments could not be loaded; no tasks were created.", len(taskRequests)), 0
+	}
+	deferredRequestIndexes := h.deferActiveTasksWithAttachments(taskRequests, chatAtts, agents)
 
-	createdTasks, summary := h.executeChatTaskCreationsWithAttachments(ctx, taskRequests, projectID, execID, agents)
+	createdResults, summary := h.executeChatTaskCreationsWithAttachments(ctx, taskRequests, projectID, execID, agents)
+	createdTasks := tasksFromCreationResults(createdResults)
 	h.applyChannelOriginToCreatedTasks(ctx, createdTasks, firstChannelReply(channelReply))
 
-	totalAttachmentsCopied := h.copyAttachmentsToTasks(ctx, execID, createdTasks, chatAtts)
-	h.activateDeferredTasks(ctx, createdTasks, deferredActiveTitles)
+	totalAttachmentsCopied, attachmentReadyByTask := h.copyAttachmentsToTasks(ctx, execID, createdTasks, chatAtts)
+	activatedTaskIDs := h.activateDeferredTasks(ctx, createdResults, deferredRequestIndexes, attachmentReadyByTask)
+	summary = summarizeActivatedTasks(summary, createdResults, activatedTaskIDs)
+	if len(attachmentReadyByTask) != len(createdTasks) {
+		applog.Infof("[handler] attachment lifecycle stage=activation-partial execution=%s ready=%d tasks=%d", execID, len(attachmentReadyByTask), len(createdTasks))
+		summary += "\nAttachment conversion failed; affected tasks were left in Backlog without broken attachment records."
+	}
 
 	return h.appendCreationSummary(output, summary, totalAttachmentsCopied, chatAtts), totalAttachmentsCopied
 }
 
-// deferActiveTasksWithAttachments defers activation of "active" tasks when attachments exist.
-// Returns a map of task titles that should be activated after attachment copying.
+// deferActiveTasksWithAttachments resolves each request's effective category and
+// defers anything that would activate until attachment conversion succeeds.
+// Returns the original request indexes that should be activated after copying.
 func firstChannelReply(replies []service.ChannelReplyContext) service.ChannelReplyContext {
 	if len(replies) == 0 {
 		return service.ChannelReplyContext{}
@@ -2109,56 +2160,86 @@ func (h *Handler) applyChannelOriginToCreatedTasks(ctx context.Context, tasks []
 	}
 }
 
-func (h *Handler) deferActiveTasksWithAttachments(taskRequests []service.TaskCreationRequest, chatAtts []models.ChatAttachment) map[string]bool {
+func (h *Handler) deferActiveTasksWithAttachments(taskRequests []service.TaskCreationRequest, chatAtts []models.ChatAttachment, agents []models.LLMConfig) map[int]bool {
 	if len(chatAtts) == 0 {
 		return nil
 	}
 
-	deferredActiveTitles := make(map[string]bool)
+	deferredRequestIndexes := make(map[int]bool)
 	for i := range taskRequests {
-		if taskRequests[i].Category == "active" {
-			deferredActiveTitles[taskRequests[i].Title] = true
-			taskRequests[i].Category = "backlog"
-			applog.Infof("[handler] deferActiveTasksWithAttachments deferred auto-submit for task %q (has attachments)", taskRequests[i].Title)
+		if service.EffectiveTaskCreationCategory(taskRequests[i], agents) == models.CategoryActive {
+			deferredRequestIndexes[i] = true
+			taskRequests[i].Category = string(models.CategoryBacklog)
+			applog.Infof("[handler] deferActiveTasksWithAttachments deferred auto-submit for request=%d task=%q (has attachments)", i, taskRequests[i].Title)
 		}
 	}
-	return deferredActiveTitles
+	return deferredRequestIndexes
 }
 
 // copyAttachmentsToTasks copies chat attachments to all created tasks.
-// Returns the total count of attachments successfully copied.
-func (h *Handler) copyAttachmentsToTasks(ctx context.Context, execID string, createdTasks []models.Task, chatAtts []models.ChatAttachment) int {
-	if len(createdTasks) == 0 || len(chatAtts) == 0 {
-		return 0
+// Returns the total count of attachments successfully copied and the IDs of tasks
+// whose complete attachment batch is ready.
+func (h *Handler) copyAttachmentsToTasks(ctx context.Context, execID string, createdTasks []models.Task, chatAtts []models.ChatAttachment) (int, map[string]bool) {
+	readyByTask := make(map[string]bool, len(createdTasks))
+	if len(chatAtts) == 0 {
+		for _, task := range createdTasks {
+			readyByTask[task.ID] = true
+		}
+		return 0, readyByTask
 	}
 
 	totalCopied := 0
 	for _, task := range createdTasks {
 		copiedCount, err := h.copyChatAttachmentsToTask(ctx, execID, task.ID)
 		if err != nil {
-			applog.Infof("[handler] copyAttachmentsToTasks error copying to task %s: %v", task.ID, err)
-		} else if copiedCount > 0 {
+			applog.Infof("[handler] attachment lifecycle stage=convert execution=%s task=%s error=%v", execID, task.ID, err)
+		} else if copiedCount != len(chatAtts) {
+			applog.Infof("[handler] attachment lifecycle stage=verify-count execution=%s task=%s expected=%d copied=%d", execID, task.ID, len(chatAtts), copiedCount)
+		} else {
 			totalCopied += copiedCount
-			applog.Infof("[handler] copyAttachmentsToTasks copied %d attachments to task %s", copiedCount, task.ID)
+			readyByTask[task.ID] = true
 		}
 	}
-	return totalCopied
+	return totalCopied, readyByTask
 }
 
-// activateDeferredTasks activates tasks that were deferred due to attachment copying.
-func (h *Handler) activateDeferredTasks(ctx context.Context, createdTasks []models.Task, deferredActiveTitles map[string]bool) {
-	if len(deferredActiveTitles) == 0 {
-		return
+func tasksFromCreationResults(results []service.TaskCreationResult) []models.Task {
+	tasks := make([]models.Task, 0, len(results))
+	for _, result := range results {
+		tasks = append(tasks, result.Task)
 	}
+	return tasks
+}
 
-	for _, task := range createdTasks {
-		if deferredActiveTitles[task.Title] {
-			applog.Infof("[handler] activateDeferredTasks activating task %s %q", task.ID, task.Title)
+// activateDeferredTasks activates only tasks whose exact originating request was deferred
+// and whose complete attachment batch is ready. It returns the IDs of tasks whose
+// activation succeeded.
+func (h *Handler) activateDeferredTasks(ctx context.Context, createdResults []service.TaskCreationResult, deferredRequestIndexes map[int]bool, attachmentReadyByTask map[string]bool) map[string]bool {
+	activatedTaskIDs := make(map[string]bool, len(deferredRequestIndexes))
+	for _, result := range createdResults {
+		if deferredRequestIndexes[result.RequestIndex] && attachmentReadyByTask[result.Task.ID] {
+			task := result.Task
+			applog.Infof("[handler] activateDeferredTasks activating request=%d task=%s %q", result.RequestIndex, task.ID, task.Title)
 			if err := h.taskSvc.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
-				applog.Infof("[handler] activateDeferredTasks error activating task %s: %v", task.ID, err)
+				applog.Infof("[handler] activateDeferredTasks error activating request=%d task=%s: %v", result.RequestIndex, task.ID, err)
+				continue
 			}
+			activatedTaskIDs[task.ID] = true
 		}
 	}
+	return activatedTaskIDs
+}
+
+func summarizeActivatedTasks(summary string, createdResults []service.TaskCreationResult, activatedTaskIDs map[string]bool) string {
+	for _, result := range createdResults {
+		if !activatedTaskIDs[result.Task.ID] {
+			continue
+		}
+		backlogLine := fmt.Sprintf("- \"%s\" (%s) [TASK_ID:%s]", result.Task.Title, models.CategoryBacklog, result.Task.ID)
+		activeLine := fmt.Sprintf("- \"%s\" (%s) [TASK_ID:%s]", result.Task.Title, models.CategoryActive, result.Task.ID)
+		summary = strings.Replace(summary, backlogLine, activeLine, 1)
+	}
+	return summary
 }
 
 // appendCreationSummary appends task creation summary and attachment info to output.
@@ -3570,15 +3651,11 @@ func buildThreadSystemContext(taskTitle string, hasHistory bool, attachmentConte
 //
 // This standardized context combining ensures consistent formatting across chat
 // and task follow-up scenarios.
-func buildStartupSyncConflictContext(task *models.Task, syncErr error) string {
-	if task == nil || syncErr == nil {
+func buildStartupSyncConflictContext(conflict *service.StartupSyncConflictError) string {
+	if conflict == nil {
 		return ""
 	}
-	targetBranch := task.MergeTargetBranch
-	if targetBranch == "" {
-		targetBranch = "the target branch"
-	}
-	return fmt.Sprintf("# Worktree Sync Warning\n\nStartup sync could not merge %s into this task worktree because Git reported a conflict. The merge was aborted before this turn started, so the worktree is clean but may be behind or diverged from %s. Inspect the current branch and reconcile against %s before making or finalizing code changes. Sync error: %v", targetBranch, targetBranch, targetBranch, syncErr)
+	return fmt.Sprintf("# Worktree Sync Warning\n\nStartup sync could not merge %s into %s because Git reported conflicts in: %s. The merge was aborted before this turn started, so the preserved worktree is clean but may be behind or diverged from %s. Before handling the follow-up, run the merge in %s, resolve the conflicts while preserving both the task changes and current target changes, then build, test, and commit the resolution. Sync error: %v", conflict.TargetBranch, conflict.TaskBranch, strings.Join(conflict.ConflictFiles, ", "), conflict.TargetBranch, conflict.WorktreePath, conflict)
 }
 
 func combineContexts(taskContext, attachmentContext string) string {

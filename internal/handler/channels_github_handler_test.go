@@ -252,14 +252,17 @@ func assertGitHubRuntimeSettingsFragmentResponse(t *testing.T, rec *httptest.Res
 	}
 	for _, want := range []string{
 		"Authorized Users",
-		"Optional trust list for GitHub accounts.",
-		"Basic PAT setups can list issues assigned to the PAT owner; GitHub App setups should use the assignee override below.",
-		"Project Inbox Assignee Override",
-		"Optional assignee for advanced setups.",
-		"Use this for GitHub App installs or whenever OpenVibely should check issues assigned to a specific GitHub user or bot.",
+		"GitHub users allowed for this channel.",
+		"Scheduled GitHub tasks can scan issues assigned to these users",
+		"authorization checks use the same list",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected github runtime settings fragment to include %q, got: %s", want, body)
+		}
+	}
+	for _, old := range []string{"Optional Authorized Users", "Project Inbox Assignee Override", "Issue Inbox Assignee", "Approve"} {
+		if strings.Contains(body, old) {
+			t.Fatalf("did not expect confusing github runtime copy %q, got: %s", old, body)
 		}
 	}
 }
@@ -282,8 +285,8 @@ func TestGitHubRuntimeSettingsRoutesAuthorizeActors(t *testing.T) {
 	if !strings.Contains(body, "@alice") {
 		t.Fatalf("expected normalized login in fragment, got: %s", body)
 	}
-	if !strings.Contains(body, "Approve") {
-		t.Fatalf("expected permission label in fragment, got: %s", body)
+	if strings.Contains(body, "Approve") {
+		t.Fatalf("did not expect approval permission jargon in fragment, got: %s", body)
 	}
 	authorized, err := h.githubAuthRepo.IsActorAuthorized(context.Background(), "alice")
 	if err != nil {
@@ -315,7 +318,7 @@ func TestGitHubRuntimeSettingsRoutesAuthorizeActors(t *testing.T) {
 		t.Fatalf("expected delete status 200, got %d (%s)", deleteRec.Code, deleteRec.Body.String())
 	}
 	assertGitHubRuntimeSettingsFragmentResponse(t, deleteRec)
-	if body := deleteRec.Body.String(); !strings.Contains(body, "No optional trusted users configured. Trust-list checks deny by default.") {
+	if body := deleteRec.Body.String(); !strings.Contains(body, "No authorized users configured. GitHub authorization checks deny by default, and GitHub App/custom issue scanning has no assignee to use.") {
 		t.Fatalf("expected empty authorized users message after delete, got: %s", body)
 	}
 	authorized, err = h.githubAuthRepo.IsActorAuthorized(context.Background(), "alice")
@@ -340,10 +343,6 @@ func TestGitHubProjectInboxRouteStoresProjectScopedNormalizedLogin(t *testing.T)
 		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
 	assertGitHubRuntimeSettingsFragmentResponse(t, rec)
-	body := rec.Body.String()
-	if !strings.Contains(body, "@dev-bot") {
-		t.Fatalf("expected normalized inbox login in fragment, got: %s", body)
-	}
 	inbox, err := h.githubAuthRepo.GetEnabledProjectInbox(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("get inbox: %v", err)
@@ -397,5 +396,17 @@ func TestChannelsPageRendersGitHubRuntimeSettingsLazyHook(t *testing.T) {
 	}
 	if !strings.Contains(body, "Loading GitHub runtime settings") {
 		t.Fatalf("expected github runtime settings loading placeholder")
+	}
+	runtimeIdx := strings.Index(body, `id="github-runtime-settings"`)
+	saveIdx := strings.Index(body, "Save GitHub Settings")
+	cancelIdx := strings.Index(body, `onclick="closeGitHubConfigModal()">Cancel`)
+	if runtimeIdx == -1 || saveIdx == -1 || cancelIdx == -1 {
+		t.Fatalf("expected github modal runtime settings plus cancel/save actions")
+	}
+	if runtimeIdx > saveIdx || runtimeIdx > cancelIdx {
+		t.Fatalf("expected github runtime settings to render before modal Cancel/Save actions so the footer stays last")
+	}
+	if !strings.Contains(body, `modal-action sticky bottom-0`) {
+		t.Fatalf("expected github modal Cancel/Save actions to use the sticky modal footer placement")
 	}
 }

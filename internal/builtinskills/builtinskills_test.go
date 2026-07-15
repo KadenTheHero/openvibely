@@ -25,6 +25,8 @@ func TestSyncTo_SeedsDefaultIndexesAndSkillBodies(t *testing.T) {
 		filepath.Join(root, "agents", "goal", "skills", "evaluate_task_goal", "SKILL.md"),
 		filepath.Join(root, "agents", "memory_curator", "SKILLS.md"),
 		filepath.Join(root, "agents", "memory_curator", "skills", "recall_memory", "SKILL.md"),
+		filepath.Join(root, "skills", "SKILLS.md"),
+		filepath.Join(root, "skills", "openvibely_github_autonomous_sdlc_bootstrap", "SKILL.md"),
 	}
 	for _, p := range mustExist {
 		if _, err := os.Stat(p); err != nil {
@@ -261,10 +263,87 @@ func TestSyncTo_EmptyRootIsNoop(t *testing.T) {
 	}
 }
 
-// TestSyncTo_InstallsSystemHookSkillsButKeepsRoutableCatalogEmpty verifies that
-// built-in system hook skills are agent-owned implementation details, not
-// standalone generated skills selected by the router.
-func TestSyncTo_InstallsSystemHookSkillsButKeepsRoutableCatalogEmpty(t *testing.T) {
+func TestSyncTo_InstallsReusableGitHubBootstrapAsGlobalStandaloneSkill(t *testing.T) {
+	globalRoot := t.TempDir()
+	projectRoot := t.TempDir()
+	if err := SyncTo(globalRoot); err != nil {
+		t.Fatalf("SyncTo: %v", err)
+	}
+
+	cat, err := agentskills.BuildCatalog("test-turn", globalRoot, projectRoot)
+	if err != nil {
+		t.Fatalf("BuildCatalog: %v", err)
+	}
+	entry, ok := cat.Lookup("openvibely_github_autonomous_sdlc_bootstrap")
+	if !ok {
+		t.Fatalf("expected bundled GitHub autonomous SDLC bootstrap skill in global catalog")
+	}
+	if entry.Source != agentskills.SourceGlobal {
+		t.Fatalf("expected bundled bootstrap skill to be global, got %s", entry.Source)
+	}
+	if !strings.HasPrefix(entry.AbsolutePath, filepath.Join(globalRoot, "skills", "openvibely_github_autonomous_sdlc_bootstrap")) {
+		t.Fatalf("expected bundled bootstrap under global root, got %s", entry.AbsolutePath)
+	}
+
+	body, err := os.ReadFile(entry.AbsolutePath)
+	if err != nil {
+		t.Fatalf("read global bootstrap skill: %v", err)
+	}
+	for _, want := range []string{"scope: global", "github_open_pull_request", "visible scheduled OpenVibely tasks"} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("global bootstrap skill missing %q:\n%s", want, string(body))
+		}
+	}
+}
+
+func TestSyncTo_MergesStandaloneSkillsIndexWithoutClobberingUserEntries(t *testing.T) {
+	root := t.TempDir()
+	indexPath := filepath.Join(root, "skills", "SKILLS.md")
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
+		t.Fatalf("mkdir skills: %v", err)
+	}
+	custom := "---\nalways_use:\n    - existing_skill\n---\n\n# Custom Skills\n\n## existing_skill\n\n[Existing Skill](existing_skill/SKILL.md) — User-managed entry.\n"
+	if err := os.WriteFile(indexPath, []byte(custom), 0o644); err != nil {
+		t.Fatalf("write custom SKILLS.md: %v", err)
+	}
+
+	if err := SyncTo(root); err != nil {
+		t.Fatalf("SyncTo: %v", err)
+	}
+
+	gotBytes, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("read merged SKILLS.md: %v", err)
+	}
+	got := string(gotBytes)
+	for _, want := range []string{
+		"always_use:\n    - existing_skill",
+		"## existing_skill",
+		"User-managed entry.",
+		"## openvibely_github_autonomous_sdlc_bootstrap",
+		"OpenVibely GitHub Autonomous SDLC Bootstrap",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("merged SKILLS.md missing %q:\n%s", want, got)
+		}
+	}
+
+	if err := SyncTo(root); err != nil {
+		t.Fatalf("second SyncTo: %v", err)
+	}
+	gotAgainBytes, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("read merged SKILLS.md after second sync: %v", err)
+	}
+	if strings.Count(string(gotAgainBytes), "## openvibely_github_autonomous_sdlc_bootstrap") != 1 {
+		t.Fatalf("built-in bootstrap entry should be merged idempotently:\n%s", string(gotAgainBytes))
+	}
+}
+
+// TestSyncTo_InstallsSystemHookSkillsButKeepsLifecycleHookSkillsOutOfRoutableCatalog
+// verifies that built-in system hook skills are agent-owned implementation
+// details, while reusable built-in standalone skills remain routable globally.
+func TestSyncTo_InstallsSystemHookSkillsButKeepsLifecycleHookSkillsOutOfRoutableCatalog(t *testing.T) {
 	root := t.TempDir()
 	if err := agentskills.EnsureAgentsRoot(root); err != nil {
 		t.Fatalf("EnsureAgentsRoot: %v", err)
@@ -277,13 +356,14 @@ func TestSyncTo_InstallsSystemHookSkillsButKeepsRoutableCatalogEmpty(t *testing.
 	if err != nil {
 		t.Fatalf("BuildCatalog: %v", err)
 	}
-	if len(cat.Entries()) != 0 {
-		t.Fatalf("built-in system hook skills must not appear in standalone catalog: %+v", cat.Entries())
+	entries := cat.Entries()
+	if len(entries) != 1 || entries[0].Handle != "openvibely_github_autonomous_sdlc_bootstrap" || entries[0].Source != agentskills.SourceGlobal {
+		t.Fatalf("expected only reusable global bootstrap skill in standalone catalog, got: %+v", entries)
 	}
 
 	block := agentskills.RenderAvailableSkillsMarkdown(root, "")
-	if !strings.Contains(block, "_No standalone skills indexed in this turn._") {
-		t.Fatalf("RenderAvailableSkillsMarkdown should show empty standalone catalog:\n%s", block)
+	if !strings.Contains(block, "openvibely_github_autonomous_sdlc_bootstrap") || strings.Contains(block, "skill_curator/route_task") {
+		t.Fatalf("RenderAvailableSkillsMarkdown should show reusable standalone skill but not lifecycle hook skills:\n%s", block)
 	}
 
 	// Sanity: agent-owned SKILL.md bodies are present so lifecycle hooks can read them.

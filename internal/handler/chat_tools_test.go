@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -204,6 +205,282 @@ func TestExecuteChatTaskCreations(t *testing.T) {
 	if taskOne.Prompt != "Do task one" {
 		t.Errorf("expected Task One prompt 'Do task one', got %q", taskOne.Prompt)
 	}
+}
+
+func TestDeferActiveTasksWithAttachments_DuplicateTitlesRetainRequestIdentity(t *testing.T) {
+	h := &Handler{}
+	requests := []service.TaskCreationRequest{
+		{Title: "Same title", Category: "active"},
+		{Title: "Same title", Category: "backlog"},
+	}
+	deferred := h.deferActiveTasksWithAttachments(requests, []models.ChatAttachment{{ID: "attachment"}}, nil)
+	if !deferred[0] || deferred[1] || len(deferred) != 1 {
+		t.Fatalf("expected only the active request index to be deferred, got %#v", deferred)
+	}
+}
+
+func TestProcessChatTaskCreations_AttachmentLookupFailureAbortsCreation(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Attachment Lookup Failure Project")
+	modelConfig := createAgent(t, llmConfigRepo, func(c *models.LLMConfig) {
+		c.AutoStartTasks = true
+	})
+	chatHostTask := createTask(t, h, project.ID, "lookup failure host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+	})
+	exec := createExec(t, h, chatHostTask.ID, modelConfig.ID)
+
+	if _, err := db.ExecContext(ctx, "DROP TABLE chat_attachments"); err != nil {
+		t.Fatalf("drop chat attachment table: %v", err)
+	}
+
+	output := `[CREATE_TASK]
+{"title":"Must not start","prompt":"Use any supplied attachment"}
+[/CREATE_TASK]`
+	updated, copied := h.processChatTaskCreations(ctx, exec.ID, project.ID, output, []models.LLMConfig{*modelConfig})
+	if copied != 0 {
+		t.Fatalf("expected no copies after lookup failure, got %d", copied)
+	}
+	if !strings.Contains(updated, "could not be loaded") {
+		t.Fatalf("expected attachment lookup failure summary, got %q", updated)
+	}
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	for _, task := range tasks {
+		if task.Title == "Must not start" {
+			t.Fatalf("attachment lookup failure must abort creation, created task category=%s", task.Category)
+		}
+	}
+}
+
+func TestProcessChatTaskCreations_UnicodeScreenshotConvertsAndExecutes(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Unicode Screenshot Execution Project")
+	modelConfig := createAgent(t, llmConfigRepo)
+	chatHostTask := createTask(t, h, project.ID, "unicode screenshot host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+	})
+	exec := createExec(t, h, chatHostTask.ID, modelConfig.ID)
+
+	fileName := "Screenshot 2026-07-10 at 9.49.00\u202fPM.png"
+	sourceDir := t.TempDir()
+	sourcePath := filepath.Join(sourceDir, fileName)
+	if err := os.WriteFile(sourcePath, []byte("png"), 0o644); err != nil {
+		t.Fatalf("write chat screenshot: %v", err)
+	}
+	if err := h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+		ExecutionID: exec.ID,
+		FileName:    fileName,
+		FilePath:    sourcePath,
+		MediaType:   "image/png",
+		FileSize:    3,
+	}); err != nil {
+		t.Fatalf("create chat attachment: %v", err)
+	}
+
+	output := `[CREATE_TASK]
+{"title":"Execute converted screenshot","prompt":"Inspect the screenshot","category":"active"}
+[/CREATE_TASK]`
+	updated, copied := h.processChatTaskCreations(ctx, exec.ID, project.ID, output, []models.LLMConfig{*modelConfig})
+	if copied != 1 || strings.Contains(updated, "Attachment conversion failed") {
+		t.Fatalf("expected successful conversion, copied=%d output=%q", copied, updated)
+	}
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	var converted *models.Task
+	for i := range tasks {
+		if tasks[i].Title == "Execute converted screenshot" {
+			converted = &tasks[i]
+			break
+		}
+	}
+	if converted == nil {
+		t.Fatal("expected converted task")
+	}
+	if converted.Category != models.CategoryActive {
+		t.Fatalf("expected converted task to activate, got %s", converted.Category)
+	}
+
+	mock := &testutil.MockLLMCaller{Response: "ok", TextOnly: "ok", Tokens: 1}
+	llmSvc := service.NewLLMService(h.llmConfigRepo, h.execRepo, h.taskRepo, h.projectRepo, h.scheduleRepo, h.attachmentRepo)
+	llmSvc.SetLLMCaller(mock)
+	executed, err := llmSvc.ExecuteTaskWithAgent(ctx, *converted, *modelConfig)
+	if err != nil {
+		t.Fatalf("execute converted task: %v", err)
+	}
+	if executed == nil || mock.CallCount() != 1 {
+		t.Fatalf("expected successful provider execution, execution=%v calls=%d", executed, mock.CallCount())
+	}
+	attachments := mock.LastCall().Attachments
+	if len(attachments) != 1 || attachments[0].FileName != fileName {
+		t.Fatalf("expected exact Unicode screenshot at execution, got %#v", attachments)
+	}
+	if _, err := os.Stat(attachments[0].FilePath); err != nil {
+		t.Fatalf("converted attachment path is not loadable: %v", err)
+	}
+}
+
+func TestProcessChatTaskCreations_PartialAttachmentFailureActivatesReadySibling(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Partial Attachment Conversion Project")
+	modelConfig := createAgent(t, llmConfigRepo)
+	chatHostTask := createTask(t, h, project.ID, "partial conversion host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+	})
+	exec := createExec(t, h, chatHostTask.ID, modelConfig.ID)
+
+	sourcePath := filepath.Join(t.TempDir(), "evidence.txt")
+	if err := os.WriteFile(sourcePath, []byte("complete attachment"), 0o644); err != nil {
+		t.Fatalf("write chat attachment: %v", err)
+	}
+	if err := h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+		ExecutionID: exec.ID,
+		FileName:    filepath.Base(sourcePath),
+		FilePath:    sourcePath,
+		MediaType:   "text/plain",
+		FileSize:    int64(len("complete attachment")),
+	}); err != nil {
+		t.Fatalf("create chat attachment: %v", err)
+	}
+
+	originalRename := renameAttachmentFile
+	renameCalls := 0
+	renameAttachmentFile = func(oldPath, newPath string) error {
+		renameCalls++
+		if renameCalls == 2 {
+			return errors.New("injected sibling publication failure")
+		}
+		return os.Rename(oldPath, newPath)
+	}
+	t.Cleanup(func() { renameAttachmentFile = originalRename })
+
+	output := `[CREATE_TASK]
+{"title":"Ready sibling","prompt":"Use the attachment","category":"active"}
+[/CREATE_TASK]
+[CREATE_TASK]
+{"title":"Failed sibling","prompt":"Use the attachment","category":"active"}
+[/CREATE_TASK]`
+	updated, copied := h.processChatTaskCreations(ctx, exec.ID, project.ID, output, []models.LLMConfig{*modelConfig})
+	if copied != 1 {
+		t.Fatalf("expected one successful attachment copy, got %d", copied)
+	}
+	if !strings.Contains(updated, "Attachment conversion failed") || !strings.Contains(updated, "affected tasks were left in Backlog") {
+		t.Fatalf("expected partial conversion failure summary, got %q", updated)
+	}
+	if !strings.Contains(updated, `"Ready sibling" (active)`) {
+		t.Fatalf("summary should report successful sibling as active, got %q", updated)
+	}
+	if !strings.Contains(updated, `"Failed sibling" (backlog)`) {
+		t.Fatalf("summary should report failed sibling as backlog, got %q", updated)
+	}
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("list project tasks: %v", err)
+	}
+	var ready, failed *models.Task
+	for i := range tasks {
+		switch tasks[i].Title {
+		case "Ready sibling":
+			ready = &tasks[i]
+		case "Failed sibling":
+			failed = &tasks[i]
+		}
+	}
+	if ready == nil || failed == nil {
+		t.Fatalf("expected both created tasks, ready=%v failed=%v", ready, failed)
+	}
+	if ready.Category != models.CategoryActive {
+		t.Fatalf("successful sibling should activate, got %s", ready.Category)
+	}
+	if failed.Category != models.CategoryBacklog {
+		t.Fatalf("failed sibling should remain Backlog, got %s", failed.Category)
+	}
+
+	readyAttachments, err := h.attachmentRepo.ListByTask(ctx, ready.ID)
+	if err != nil {
+		t.Fatalf("list successful sibling attachments: %v", err)
+	}
+	if len(readyAttachments) != 1 {
+		t.Fatalf("successful sibling should have one complete attachment, got %#v", readyAttachments)
+	}
+	contents, err := os.ReadFile(readyAttachments[0].FilePath)
+	if err != nil {
+		t.Fatalf("read successful sibling attachment: %v", err)
+	}
+	if string(contents) != "complete attachment" {
+		t.Fatalf("successful sibling attachment is incomplete: %q", contents)
+	}
+
+	failedAttachments, err := h.attachmentRepo.ListByTask(ctx, failed.ID)
+	if err != nil {
+		t.Fatalf("list failed sibling attachments: %v", err)
+	}
+	if len(failedAttachments) != 0 {
+		t.Fatalf("failed sibling should have no attachment metadata, got %#v", failedAttachments)
+	}
+	failedFiles, err := os.ReadDir(filepath.Join(uploadsDir, "tasks", failed.ID))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("inspect failed sibling attachment directory: %v", err)
+	}
+	if len(failedFiles) != 0 {
+		t.Fatalf("failed sibling should have no partial attachment files, got %#v", failedFiles)
+	}
+}
+
+func TestProcessChatTaskCreations_OmittedCategoryAutoStartDefersWhenAttachmentConversionFails(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Marker Attachment Deferral Project")
+	modelConfig := createAgent(t, llmConfigRepo, func(c *models.LLMConfig) {
+		c.AutoStartTasks = true
+	})
+	chatHostTask := createTask(t, h, project.ID, "marker attachment host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+	})
+	exec := createExec(t, h, chatHostTask.ID, modelConfig.ID)
+
+	missingSource := filepath.Join(uploadsDir, "chat", exec.ID, "Screenshot 2026-07-10 at 9.49.00\u202fPM.png")
+	if err := h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+		ExecutionID: exec.ID,
+		FileName:    filepath.Base(missingSource),
+		FilePath:    missingSource,
+		MediaType:   "image/png",
+		FileSize:    4,
+	}); err != nil {
+		t.Fatalf("create chat attachment metadata: %v", err)
+	}
+
+	output := `[CREATE_TASK]
+{"title":"Auto-start marker task","prompt":"Use the screenshot"}
+[/CREATE_TASK]`
+	updated, copied := h.processChatTaskCreations(ctx, exec.ID, project.ID, output, []models.LLMConfig{*modelConfig})
+	if copied != 0 || !strings.Contains(updated, "Attachment conversion failed") {
+		t.Fatalf("expected failed attachment conversion, copied=%d output=%q", copied, updated)
+	}
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("list project tasks: %v", err)
+	}
+	for i := range tasks {
+		if tasks[i].Title == "Auto-start marker task" {
+			if tasks[i].Category != models.CategoryBacklog {
+				t.Fatalf("attachment-bearing omitted-category task activated before conversion: category=%s", tasks[i].Category)
+			}
+			return
+		}
+	}
+	t.Fatal("expected marker-created task")
 }
 
 func TestProcessChatTaskCreations_AssignsExactNamedAgentDefinitionNotModelConfig(t *testing.T) {

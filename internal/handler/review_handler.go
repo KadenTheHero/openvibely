@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -237,6 +238,7 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(c.Request().Context(), task)
 	if workDirErr != nil {
 		h.completeWithFailure(c.Request().Context(), exec.ID, taskID, workDirErr.Error(), 0)
+		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: taskID, IsTaskFollowup: true}, exec.ID)
 		setHTMXToast(c, workDirErr.Error(), "failed")
 		c.Response().Header().Set("HX-Redirect", fmt.Sprintf("/tasks/%s?tab=chat", taskID))
 		return c.NoContent(http.StatusOK)

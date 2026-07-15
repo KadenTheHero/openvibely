@@ -262,6 +262,7 @@ func TestCreateModel_Mixture(t *testing.T) {
 	form.Set("mixture_max_reference_workers", "4")
 	form.Set("mixture_reference_temperature", "0.7")
 	form.Set("mixture_aggregator_temperature", "0.2")
+	form.Set("temperature", "0.9")
 
 	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -301,8 +302,10 @@ func TestCreateModel_Mixture(t *testing.T) {
 			Model         string `json:"model"`
 			Label         string `json:"label"`
 		} `json:"aggregator"`
-		ReferenceTimeoutSeconds int `json:"reference_timeout_seconds"`
-		MaxReferenceWorkers     int `json:"max_reference_workers"`
+		ReferenceTimeoutSeconds int     `json:"reference_timeout_seconds"`
+		MaxReferenceWorkers     int     `json:"max_reference_workers"`
+		ReferenceTemperature    float64 `json:"reference_temperature"`
+		AggregatorTemperature   float64 `json:"aggregator_temperature"`
 	}
 	if err := json.Unmarshal([]byte(created.MixtureConfigJSON), &cfg); err != nil {
 		t.Fatalf("unmarshal mixture config: %v", err)
@@ -310,9 +313,49 @@ func TestCreateModel_Mixture(t *testing.T) {
 	if created.Model != "research-heavy" {
 		t.Fatalf("expected submitted mixture model id to persist, got %q", created.Model)
 	}
+	if created.Temperature != 0 {
+		t.Fatalf("expected unused top-level mixture temperature to be zero, got %v", created.Temperature)
+	}
+	if cfg.ReferenceTemperature != 0.7 || cfg.AggregatorTemperature != 0.2 {
+		t.Fatalf("expected mixture temperatures 0.7/0.2, got %v/%v", cfg.ReferenceTemperature, cfg.AggregatorTemperature)
+	}
 	if !cfg.Enabled || cfg.Aggregator.AgentConfigID != agg.ID || cfg.Aggregator.Label != "Aggregator" || len(cfg.ReferenceModels) != 1 || cfg.ReferenceModels[0].AgentConfigID != ref.ID || cfg.ReferenceTimeoutSeconds != 45 || cfg.MaxReferenceWorkers != 4 {
 		t.Fatalf("unexpected mixture config: %s", created.MixtureConfigJSON)
 	}
+}
+
+func TestCreateModel_NonMixturePreservesTemperature(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("name", "Temperature Model")
+	form.Set("provider", "openai")
+	form.Set("openai_auth_type", "api_key")
+	form.Set("model", "gpt-5.5")
+	form.Set("api_key", "sk-test")
+	form.Set("temperature", "0.35")
+
+	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	configs, err := llmConfigRepo.List(context.Background())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for i := range configs {
+		if configs[i].Name == "Temperature Model" {
+			if configs[i].Temperature != 0.35 {
+				t.Fatalf("expected non-mixture temperature 0.35, got %v", configs[i].Temperature)
+			}
+			return
+		}
+	}
+	t.Fatal("created non-mixture model not found")
 }
 
 func TestCreateModel_MixtureDefaultsBlankModel(t *testing.T) {
@@ -468,7 +511,7 @@ func TestUpdateModel_Mixture(t *testing.T) {
 	ctx := context.Background()
 	agg := &models.LLMConfig{Name: "Aggregator", Provider: models.ProviderTest, Model: "agg"}
 	ref := &models.LLMConfig{Name: "Reference", Provider: models.ProviderTest, Model: "ref"}
-	mixture := &models.LLMConfig{Name: "Old Mixture", Provider: models.ProviderMixture, Model: "default", MixtureConfigJSON: `{"enabled":false,"aggregator":{"agent_config_id":"placeholder"}}`}
+	mixture := &models.LLMConfig{Name: "Old Mixture", Provider: models.ProviderMixture, Model: "default", Temperature: 0.8, MixtureConfigJSON: `{"enabled":false,"aggregator":{"agent_config_id":"placeholder"}}`}
 	for _, cfg := range []*models.LLMConfig{agg, ref, mixture} {
 		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
 			t.Fatalf("create %s: %v", cfg.Name, err)
@@ -481,7 +524,6 @@ func TestUpdateModel_Mixture(t *testing.T) {
 	form.Set("mixture_enabled", "on")
 	form.Set("mixture_aggregator_id", agg.ID)
 	form.Add("mixture_reference_ids", ref.ID)
-	form.Set("temperature", "0")
 	req := httptest.NewRequest(http.MethodPut, "/models/"+mixture.ID, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -495,6 +537,9 @@ func TestUpdateModel_Mixture(t *testing.T) {
 	}
 	if updated.Name != "Edited Mixture" || !strings.Contains(updated.MixtureConfigJSON, ref.ID) {
 		t.Fatalf("mixture not updated: %+v", updated)
+	}
+	if updated.Temperature != 0 {
+		t.Fatalf("expected stale top-level mixture temperature to be cleared, got %v", updated.Temperature)
 	}
 }
 
@@ -2190,6 +2235,9 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 		input string
 		want  string
 	}{
+		{"gpt-5.6-sol", "gpt-5.6-sol"},
+		{"gpt-5.6-terra", "gpt-5.6-terra"},
+		{"gpt-5.6-luna", "gpt-5.6-luna"},
 		{"gpt-5.5", "gpt-5.5"},
 		{"gpt-5.5-pro", "gpt-5.5-pro"},
 		{"gpt-5.4", "gpt-5.4"},
@@ -2202,9 +2250,9 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 		{"gpt-5.1-codex-mini", "gpt-5.1-codex-mini"},
 		{"gpt-5-codex", "gpt-5-codex"},
 		{"gpt-5-codex-mini", "gpt-5-codex-mini"},
-		{"", "gpt-5.5"},              // empty defaults to latest
-		{"invalid-model", "gpt-5.5"}, // unknown defaults to latest
-		{"  gpt-5.5  ", "gpt-5.5"},   // whitespace trimmed
+		{"", "gpt-5.6-sol"},              // empty defaults to latest
+		{"invalid-model", "gpt-5.6-sol"}, // unknown defaults to latest
+		{"  gpt-5.5  ", "gpt-5.5"},       // whitespace trimmed
 	}
 
 	for _, tt := range tests {
@@ -2221,20 +2269,23 @@ func TestNormalizeProviderReasoningEffort(t *testing.T) {
 	tests := []struct {
 		name     string
 		provider models.LLMProvider
+		model    string
 		input    string
 		want     string
 	}{
-		{"openai xhigh", models.ProviderOpenAI, "xhigh", "xhigh"},
-		{"openai rejects max", models.ProviderOpenAI, "max", ""},
-		{"anthropic max", models.ProviderAnthropic, "max", "max"},
-		{"anthropic rejects xhigh", models.ProviderAnthropic, "xhigh", ""},
-		{"ollama clears effort", models.ProviderOllama, "high", ""},
+		{"openai xhigh", models.ProviderOpenAI, "gpt-5.6-sol", "xhigh", "xhigh"},
+		{"openai max", models.ProviderOpenAI, "gpt-5.6-sol", "max", "max"},
+		{"openai rejects max for older model", models.ProviderOpenAI, "gpt-5.4-mini", "max", ""},
+		{"openai rejects ultra", models.ProviderOpenAI, "gpt-5.6-sol", "ultra", ""},
+		{"anthropic max", models.ProviderAnthropic, "claude-opus-4-6", "max", "max"},
+		{"anthropic rejects xhigh", models.ProviderAnthropic, "claude-opus-4-6", "xhigh", ""},
+		{"ollama clears effort", models.ProviderOllama, "llama", "high", ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeProviderReasoningEffort(tt.provider, tt.input); got != tt.want {
-				t.Fatalf("normalizeProviderReasoningEffort(%q, %q) = %q, want %q", tt.provider, tt.input, got, tt.want)
+			if got := normalizeProviderReasoningEffort(tt.provider, tt.model, tt.input); got != tt.want {
+				t.Fatalf("normalizeProviderReasoningEffort(%q, %q, %q) = %q, want %q", tt.provider, tt.model, tt.input, got, tt.want)
 			}
 		})
 	}

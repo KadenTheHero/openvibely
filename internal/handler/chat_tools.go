@@ -68,10 +68,10 @@ func executeChatTaskExecutions(ctx context.Context, requests []service.TaskExecu
 	return service.ExecuteTaskExecutions(ctx, requests, projectID, taskSvc)
 }
 
-// executeChatTaskCreationsWithAttachments creates tasks and returns both the created tasks and a summary.
-// Used when we need to copy attachments after task creation.
-func (h *Handler) executeChatTaskCreationsWithAttachments(ctx context.Context, requests []service.TaskCreationRequest, projectID string, executionID string, agents []models.LLMConfig) ([]models.Task, string) {
-	return service.ExecuteTaskCreationsWithReturn(ctx, requests, projectID, h.taskSvc, agents)
+// executeChatTaskCreationsWithAttachments creates tasks and returns indexed results
+// so attachment activation remains tied to the originating request.
+func (h *Handler) executeChatTaskCreationsWithAttachments(ctx context.Context, requests []service.TaskCreationRequest, projectID string, executionID string, agents []models.LLMConfig) ([]service.TaskCreationResult, string) {
+	return service.ExecuteTaskCreationsWithIndexedReturn(ctx, requests, projectID, h.taskSvc, agents)
 }
 
 // parseViewThread extracts view thread requests from AI chat output.

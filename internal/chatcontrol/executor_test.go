@@ -50,6 +50,31 @@ func TestBuildRuntimeToolExecutor_ModeBlockedReturnsHandled(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeToolExecutorForActions_NonOwnedRegisteredActionFallsThrough(t *testing.T) {
+	handlers := map[string]RuntimeActionHandler{
+		"send_message": func(_ context.Context, _ json.RawMessage) (string, error) {
+			return "sent", nil
+		},
+	}
+	executor := BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, SurfaceWeb, handlers, map[string]bool{"send_message": true})
+
+	_, handled, isError, err := executor(context.Background(), "github_get_project_inbox", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if handled || isError {
+		t.Fatalf("expected non-owned registered action to fall through, handled=%v isError=%v", handled, isError)
+	}
+
+	output, handled, isError, err := executor(context.Background(), "send_message", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected owned action error: %v", err)
+	}
+	if !handled || isError || output != "sent" {
+		t.Fatalf("expected owned action to execute, handled=%v isError=%v output=%q", handled, isError, output)
+	}
+}
+
 func TestBuildRuntimeToolExecutor_RegisteredActionExecutes(t *testing.T) {
 	handlers := map[string]RuntimeActionHandler{
 		"list_models": func(_ context.Context, _ json.RawMessage) (string, error) {

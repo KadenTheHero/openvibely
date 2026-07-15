@@ -488,7 +488,12 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 								</div>
 							</div>
 							<div class="pr-12">
-								<h3 class="font-bold flex items-center gap-2">Discord</h3>
+								<h3 class="font-bold flex items-center gap-2">
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" data-icon="discord-brand">
+										<path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.516 13.78 13.78 0 0 0-.624 1.275 18.27 18.27 0 0 0-5.616 0 12.64 12.64 0 0 0-.632-1.275A19.74 19.74 0 0 0 3.677 4.37C.589 8.966-.247 13.45.171 17.87a19.9 19.9 0 0 0 5.993 3.03 14.24 14.24 0 0 0 1.28-2.083 12.78 12.78 0 0 1-2.017-.962c.169-.124.334-.252.493-.385a14.05 14.05 0 0 0 12.594 0c.161.133.326.261.493.385a12.78 12.78 0 0 1-2.017.962 14.2 14.2 0 0 0 1.28 2.083 19.9 19.9 0 0 0 5.993-3.03c.483-5.188-.826-9.681-3.18-13.688l-.77.188ZM8.02 15.331c-1.183 0-2.157-1.086-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.419 0 1.333-.955 2.419-2.157 2.419Zm7.975 0c-1.183 0-2.157-1.086-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.419 0 1.333-.946 2.419-2.157 2.419Z"/>
+									</svg>
+									Discord
+								</h3>
 								<p class="text-sm opacity-60">Chat with OpenVibely from Discord DMs and mentioned server channels.</p>
 								if len(discordAuthorizedUsers) > 0 {
 									<div class="mt-2 flex items-center gap-2">
@@ -822,15 +827,15 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						</div>
 						<div class="form-control mb-3">
 							<label class="label"><span class="label-text">GitHub Personal Access Token</span></label>
-								@components.SecretInput(components.SecretInputConfig{
-									ID:           "github_pat",
-									Name:         "github_pat",
-									Value:        githubPATValue,
-									Class:        "input input-bordered w-full pr-10 font-mono text-xs",
-									Placeholder:  githubPATPlaceholder(githubHasPAT),
-									AutoComplete: "off",
-									AriaLabel:    "Toggle token visibility",
-								})
+							@components.SecretInput(components.SecretInputConfig{
+								ID:           "github_pat",
+								Name:         "github_pat",
+								Value:        githubPATValue,
+								Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+								Placeholder:  githubPATPlaceholder(githubHasPAT),
+								AutoComplete: "off",
+								AriaLabel:    "Toggle token visibility",
+							})
 						</div>
 					</div>
 
@@ -838,14 +843,14 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						<div class="alert mb-3 text-sm">
 							GitHub App mode is for advanced/cloud deployments where one app installation is shared by your deployment.
 						</div>
-					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">GitHub App ID</span></label>
-						<input type="text" name="github_app_id" class="input input-bordered" value={ githubAppID }/>
-					</div>
-					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">GitHub App Slug</span></label>
-						<input type="text" name="github_app_slug" class="input input-bordered" value={ githubAppSlug }/>
-					</div>
+						<div class="form-control mb-3">
+							<label class="label"><span class="label-text">GitHub App ID</span></label>
+							<input type="text" name="github_app_id" class="input input-bordered" value={ githubAppID }/>
+						</div>
+						<div class="form-control mb-3">
+							<label class="label"><span class="label-text">GitHub App Slug</span></label>
+							<input type="text" name="github_app_slug" class="input input-bordered" value={ githubAppSlug }/>
+						</div>
 						<div class="form-control mb-3">
 							<label class="label"><span class="label-text">GitHub App Private Key (PEM)</span></label>
 							<div class="relative">
@@ -858,9 +863,9 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 								<button
 									type="button"
 									class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-2 h-8 min-h-0 px-2"
-										onclick="toggleSecretTextareaVisibility('github_app_private_key', this)"
-										aria-label="Toggle private key visibility"
-										aria-pressed="false"
+									onclick="toggleSecretTextareaVisibility('github_app_private_key', this)"
+									aria-label="Toggle private key visibility"
+									aria-pressed="false"
 								>
 									<svg class="eye-open h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
@@ -872,12 +877,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 								</button>
 							</div>
 						</div>
-							</div>
-						<div class="modal-action">
-							<button type="button" class="btn" onclick="closeGitHubConfigModal()">Cancel</button>
-							<button type="submit" class="btn btn-primary">Save GitHub Settings</button>
-						</div>
-					</form>
+					</div>
 					if currentProjectID != "" {
 						<div class="divider"></div>
 						<div
@@ -893,6 +893,11 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							</div>
 						</div>
 					}
+					<div class="modal-action sticky bottom-0 z-10 border-t border-base-300 bg-base-100 py-3">
+						<button type="button" class="btn" onclick="closeGitHubConfigModal()">Cancel</button>
+						<button type="submit" class="btn btn-primary">Save GitHub Settings</button>
+					</div>
+				</form>
 			</div>
 			<form method="dialog" class="modal-backdrop">
 				<button>close</button>
@@ -2143,6 +2148,7 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 					<div>
 						<p class="font-semibold">Saved destinations for send_message</p>
 						<p class="text-xs opacity-80 mt-1">These saved destinations are available to the `send_message` chat tool. Use names like `slack:#ops`, `telegram:#alerts`, `discord:#ops`, or `email:#client`. Saved targets and Home targets are preferred first.</p>
+						<p class="text-xs opacity-70 mt-1">Authorized Users control who can talk to OpenVibely. Outbound targets control where agents may send messages.</p>
 						<p class="text-xs opacity-70 mt-1">Authorized channel users/senders can also be direct recipients, such as authorized Email senders, Telegram numeric user IDs, or Slack/Discord user DMs. Other arbitrary unsaved targets require the project policy below.</p>
 					</div>
 				</div>

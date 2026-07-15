@@ -190,15 +190,6 @@ type openAIProviderAdapter struct {
 	adapter *llmopenai.Adapter
 }
 
-func shouldFallbackOpenAI(agent models.LLMConfig, err error) bool {
-	// Fallback is only meaningful for OAuth-backed OpenAI configs where the
-	// /v1/responses scope/endpoint can be unavailable.
-	if !agent.IsOpenAIOAuth() {
-		return false
-	}
-	return llmretry.ShouldFallbackOpenAI(err)
-}
-
 func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 	_, runtimeAgentDef, _ := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
 	if runtimeAgentDef != nil {
@@ -217,14 +208,6 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 		case llmcontracts.OperationDirect:
 			if openAIDirectClientEnabled(req.Agent) {
 				output, usage, err := a.adapter.CallDirect(req.Ctx, req.Message, req.Attachments, req.Agent, req.WorkDir, req.DisableTools)
-				if shouldFallbackOpenAI(req.Agent, err) {
-					if req.DisableTools {
-						return canonicalResult(output, output, usage, err)
-					}
-					applog.Infof("[agent-svc] openai direct fallback to codex-cli operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
-					output, tokens, ferr := a.svc.callCodexCLISimple(req.Ctx, req.Message, req.Attachments, req.Agent, req.WorkDir, req.DisableTools)
-					return canonicalResult(output, output, llmusage.FromTotal(tokens), ferr)
-				}
 				return canonicalResult(output, output, usage, err)
 			}
 			if req.DisableTools {
@@ -236,28 +219,10 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 		case llmcontracts.OperationStreaming:
 			if openAIDirectClientEnabled(req.Agent) {
 				if requestUsesChatStreaming(req) {
-					output, usage, err := a.adapter.CallChatStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, req.WorkDir, req.AgentDefinition)
-					if shouldFallbackOpenAI(req.Agent, err) {
-						applog.Infof("[agent-svc] openai chat fallback to completions operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
-						output, usage, err = a.adapter.CallCompletionsChatStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, req.WorkDir, req.AgentDefinition)
-						if err != nil {
-							applog.Infof("[agent-svc] openai completions fallback to codex-cli operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
-							output, tokens, ferr := a.svc.callCodexCLIChat(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.WorkDir, req.Followup, req.ChatMode)
-							return canonicalResult(output, output, llmusage.FromTotal(tokens), ferr)
-						}
-					}
+					output, usage, err := a.adapter.CallChatStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.TransportScope, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, req.WorkDir, req.AgentDefinition)
 					return canonicalResult(output, output, usage, err)
 				}
 				output, textOnly, usage, err := a.adapter.CallStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.AgentDefinition)
-				if shouldFallbackOpenAI(req.Agent, err) {
-					applog.Infof("[agent-svc] openai streaming fallback to completions operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
-					output, textOnly, usage, err = a.adapter.CallCompletionsStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.AgentDefinition)
-					if err != nil {
-						applog.Infof("[agent-svc] openai completions fallback to codex-cli operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
-						output, textOnly, tokens, ferr := a.svc.callCodexCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir)
-						return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), ferr)
-					}
-				}
 				return canonicalResult(output, textOnly, usage, err)
 			}
 			if requestUsesChatStreaming(req) {
@@ -270,15 +235,6 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 		case llmcontracts.OperationTask:
 			if openAIDirectClientEnabled(req.Agent) {
 				output, textOnly, usage, err := a.adapter.CallStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.AgentDefinition)
-				if shouldFallbackOpenAI(req.Agent, err) {
-					applog.Infof("[agent-svc] openai task fallback to completions operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
-					output, textOnly, usage, err = a.adapter.CallCompletionsStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.AgentDefinition)
-					if err != nil {
-						applog.Infof("[agent-svc] openai completions fallback to codex-cli operation=%s model=%s err=%v", req.Operation, req.Agent.Model, err)
-						output, textOnly, tokens, ferr := a.svc.callCodexCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir)
-						return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), ferr)
-					}
-				}
 				return canonicalResult(output, textOnly, usage, err)
 			}
 			output, textOnly, tokens, err := a.svc.callCodexCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir)

@@ -2,18 +2,23 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -307,6 +312,236 @@ func TestHandler_ChatSend(t *testing.T) {
 	if !strings.Contains(body, `title="Stop response"`) || !strings.Contains(body, `/chat/stop?project_id=default`) {
 		t.Error("expected chat send response to turn composer action into stop")
 	}
+}
+
+func TestHandler_ChatSend_MixtureSupportedAggregatorCreatesTaskThroughRuntimeTool(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	providerRequests := make(chan map[string]any, 2)
+	var providerMu sync.Mutex
+	providerCalls := 0
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		providerMu.Lock()
+		providerCalls++
+		call := providerCalls
+		providerMu.Unlock()
+		providerRequests <- body
+		w.Header().Set("Content-Type", "text/event-stream")
+		if call == 1 {
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_create\",\"type\":\"function\",\"function\":{\"name\":\"create_task\",\"arguments\":\"{\\\"title\\\":\\\"HTTP mixture runtime investigation\\\",\\\"prompt\\\":\\\"Investigate runtime task tools through Chat.\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"))
+			return
+		}
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"Task created.\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer providerServer.Close()
+
+	aggregator := &models.LLMConfig{
+		Name: "HTTP Compatible Aggregator", Provider: models.ProviderOpenAICompatible,
+		Model: "provider/model", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key",
+		BaseURL: providerServer.URL + "/v1/", Transport: "chat_completions",
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
+	mixture := &models.LLMConfig{
+		Name: "HTTP Tool-capable Mixture", Provider: models.ProviderMixture, Model: "mixture",
+		MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, mixture))
+
+	pageReq := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	pageRec := httptest.NewRecorder()
+	e.ServeHTTP(pageRec, pageReq)
+	require.Equal(t, http.StatusOK, pageRec.Code)
+	require.Contains(t, pageRec.Body.String(), mixture.Name)
+
+	form := url.Values{}
+	form.Set("message", "Create an investigation task")
+	form.Set("agent_id", mixture.ID)
+	form.Set("chat_mode", string(models.ChatModeOrchestrate))
+	req := httptest.NewRequest(http.MethodPost, "/chat/send", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var firstRequest map[string]any
+	select {
+	case firstRequest = <-providerRequests:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for mixture aggregator request")
+	}
+	tools, _ := firstRequest["tools"].([]any)
+	require.True(t, slices.ContainsFunc(tools, func(raw any) bool {
+		tool, _ := raw.(map[string]any)
+		function, _ := tool["function"].(map[string]any)
+		return function["name"] == "create_task"
+	}), "supported mixture aggregator payload must include create_task")
+	messages, _ := firstRequest["messages"].([]any)
+	require.True(t, slices.ContainsFunc(messages, func(raw any) bool {
+		message, _ := raw.(map[string]any)
+		content, _ := message["content"].(string)
+		return message["role"] == "system" &&
+			strings.Contains(content, llmprompt.ChatActionToolModeInstructions) &&
+			!strings.Contains(content, "The ONLY way to create a task is by outputting a [CREATE_TASK] block")
+	}), "supported mixture aggregator must receive runtime-tool action guidance without marker-only instructions")
+
+	select {
+	case <-providerRequests:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for tool-result replay request")
+	}
+	require.Eventually(t, func() bool {
+		tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+		return err == nil && slices.ContainsFunc(tasks, func(task models.Task) bool {
+			return task.Title == "HTTP mixture runtime investigation"
+		})
+	}, 3*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		active, err := h.execRepo.FindLatestActiveChatExecution(ctx, "default")
+		return err == nil && active == nil
+	}, 3*time.Second, 10*time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+}
+
+func TestHandler_ChatSend_MixtureOllamaAggregatorCreatesTaskThroughMarker(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	providerRequests := make(chan map[string]any, 1)
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		providerRequests <- body
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"HTTP mixture marker investigation\",\"prompt\":\"Investigate marker fallback through Ollama.\"}\n[/CREATE_TASK]"},"done":false}`)
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
+	}))
+	defer providerServer.Close()
+
+	aggregator := &models.LLMConfig{
+		Name: "HTTP Ollama Aggregator", Provider: models.ProviderOllama, Model: "test-model",
+		OllamaBaseURL: providerServer.URL,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
+	mixture := &models.LLMConfig{
+		Name: "HTTP Marker Mixture", Provider: models.ProviderMixture, Model: "mixture",
+		MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, mixture))
+
+	form := url.Values{}
+	form.Set("message", "Create an investigation task")
+	form.Set("agent_id", mixture.ID)
+	form.Set("chat_mode", string(models.ChatModeOrchestrate))
+	req := httptest.NewRequest(http.MethodPost, "/chat/send", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var providerRequest map[string]any
+	select {
+	case providerRequest = <-providerRequests:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for Ollama mixture aggregator request")
+	}
+	require.NotContains(t, providerRequest, "tools", "runtime-tool-incapable aggregator must not receive tool definitions")
+	messages, _ := providerRequest["messages"].([]any)
+	require.True(t, slices.ContainsFunc(messages, func(raw any) bool {
+		message, _ := raw.(map[string]any)
+		content, _ := message["content"].(string)
+		return message["role"] == "system" && strings.Contains(content, "[CREATE_TASK]")
+	}), "runtime-tool-incapable aggregator must retain marker guidance")
+	require.Eventually(t, func() bool {
+		tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+		return err == nil && slices.ContainsFunc(tasks, func(task models.Task) bool {
+			return task.Title == "HTTP mixture marker investigation"
+		})
+	}, 3*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		active, err := h.execRepo.FindLatestActiveChatExecution(ctx, "default")
+		return err == nil && active == nil
+	}, 3*time.Second, 10*time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+}
+
+func TestHandler_ChatSend_MixtureOllamaAggregatorPlanModeDoesNotExecuteMarker(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	providerRequests := make(chan map[string]any, 1)
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		providerRequests <- body
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"Plan mode must not create this task\",\"prompt\":\"This marker must remain inert.\"}\n[/CREATE_TASK]"},"done":false}`)
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
+	}))
+	defer providerServer.Close()
+
+	aggregator := &models.LLMConfig{
+		Name: "HTTP Ollama Plan Aggregator", Provider: models.ProviderOllama, Model: "test-model",
+		OllamaBaseURL: providerServer.URL,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
+	mixture := &models.LLMConfig{
+		Name: "HTTP Plan Marker Mixture", Provider: models.ProviderMixture, Model: "mixture",
+		MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, mixture))
+
+	form := url.Values{}
+	form.Set("message", "Plan an investigation task without creating it")
+	form.Set("agent_id", mixture.ID)
+	form.Set("chat_mode", string(models.ChatModePlan))
+	req := httptest.NewRequest(http.MethodPost, "/chat/send", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	select {
+	case providerRequest := <-providerRequests:
+		require.NotContains(t, providerRequest, "tools", "runtime-tool-incapable Plan aggregator must not receive tool definitions")
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for Ollama Plan mixture aggregator request")
+	}
+	require.Eventually(t, func() bool {
+		active, err := h.execRepo.FindLatestActiveChatExecution(ctx, "default")
+		return err == nil && active == nil
+	}, 3*time.Second, 10*time.Millisecond)
+	tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	require.False(t, slices.ContainsFunc(tasks, func(task models.Task) bool {
+		return task.Title == "Plan mode must not create this task"
+	}), "Plan mode must never execute action markers")
+	time.Sleep(20 * time.Millisecond)
 }
 
 func TestHandler_ChatSend_EmptyMessage(t *testing.T) {
@@ -1935,7 +2170,8 @@ func TestProcessAttachments_NoSession(t *testing.T) {
 
 	ctx := context.Background()
 	textContext, imageAttachments, err := h.processAttachments(ctx, "nonexistent-session", "exec-id")
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stage=session-source")
 	assert.Empty(t, textContext)
 	assert.Nil(t, imageAttachments)
 }
@@ -2203,6 +2439,195 @@ func TestCopyChatAttachmentsToTask_AbsolutePathsAccessible(t *testing.T) {
 	assert.Contains(t, updatedTask.Prompt, att.FilePath, "task prompt should contain the absolute file path")
 }
 
+func TestCopyFileAtomically_PublicationFailuresDoNotLeaveDestination(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "Screenshot 2026-07-10 at 9.49.00\u202fPM.png")
+	require.NoError(t, os.WriteFile(source, []byte("png"), 0o644))
+
+	t.Run("rename failure", func(t *testing.T) {
+		destination := filepath.Join(t.TempDir(), filepath.Base(source))
+		originalRename := renameAttachmentFile
+		renameAttachmentFile = func(string, string) error { return errors.New("injected rename failure") }
+		t.Cleanup(func() { renameAttachmentFile = originalRename })
+
+		require.ErrorContains(t, copyFileAtomically(source, destination), "injected rename failure")
+		require.NoFileExists(t, destination)
+	})
+
+	t.Run("directory sync failure", func(t *testing.T) {
+		destination := filepath.Join(t.TempDir(), filepath.Base(source))
+		originalSync := syncAttachmentDirectory
+		calls := 0
+		syncAttachmentDirectory = func(string) error {
+			calls++
+			if calls == 1 {
+				return errors.New("injected directory sync failure")
+			}
+			return nil
+		}
+		t.Cleanup(func() { syncAttachmentDirectory = originalSync })
+
+		require.ErrorContains(t, copyFileAtomically(source, destination), "injected directory sync failure")
+		require.NoFileExists(t, destination)
+		require.Equal(t, 2, calls, "cleanup removal must also be synchronized")
+	})
+}
+
+func TestCopyChatAttachmentsToTask_UnicodeDuplicateAndMissingSourceAreAtomic(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := &models.LLMConfig{
+		Name: "Attachment Atomicity Agent", Provider: models.ProviderTest,
+		Model: "test-model", APIKey: "test-key", MaxTokens: 4096, Temperature: 1,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+
+	chatTask := &models.Task{ProjectID: projects[0].ID, Title: "Chat attachment atomicity", Prompt: "test", Status: models.StatusPending, Category: models.CategoryChat, AgentID: &agent.ID}
+	require.NoError(t, h.taskRepo.Create(ctx, chatTask))
+	exec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "test"}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+	target := &models.Task{ProjectID: projects[0].ID, Title: "Unicode screenshot target", Prompt: "inspect screenshot", Status: models.StatusPending, Category: models.CategoryBacklog, AgentID: &agent.ID}
+	require.NoError(t, h.taskRepo.Create(ctx, target))
+
+	tmpDir := t.TempDir()
+	oldUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	defer func() { uploadsDir = oldUploadsDir }()
+
+	chatDir := filepath.Join(tmpDir, "chat", exec.ID)
+	require.NoError(t, os.MkdirAll(chatDir, 0o755))
+	name := "Screenshot 2026-07-10 at 9.49.00\u202fPM.png"
+	source := filepath.Join(chatDir, name)
+	require.NoError(t, os.WriteFile(source, []byte("png-one"), 0o644))
+	for i := 0; i < 2; i++ {
+		require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+			ExecutionID: exec.ID, FileName: name, FilePath: source, MediaType: "image/png", FileSize: 7,
+		}))
+	}
+
+	copied, err := h.copyChatAttachmentsToTask(ctx, exec.ID, target.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, copied)
+	attachments, err := h.attachmentRepo.ListByTask(ctx, target.ID)
+	require.NoError(t, err)
+	require.Len(t, attachments, 2)
+	require.Equal(t, name, attachments[0].FileName)
+	require.Equal(t, "Screenshot 2026-07-10 at 9.49.00\u202fPM-1.png", attachments[1].FileName)
+	for _, att := range attachments {
+		require.FileExists(t, att.FilePath)
+		data, readErr := os.ReadFile(att.FilePath)
+		require.NoError(t, readErr)
+		require.Equal(t, []byte("png-one"), data)
+	}
+
+	missingExec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "missing"}
+	require.NoError(t, h.execRepo.Create(ctx, missingExec))
+	missingPath := filepath.Join(chatDir, "missing.png")
+	rollbackSource := filepath.Join(chatDir, "rollback.png")
+	require.NoError(t, os.WriteFile(rollbackSource, []byte("rollback"), 0o644))
+	require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+		ExecutionID: missingExec.ID, FileName: "rollback.png", FilePath: rollbackSource, MediaType: "image/png", FileSize: 8,
+	}))
+	require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+		ExecutionID: missingExec.ID, FileName: "missing.png", FilePath: missingPath, MediaType: "image/png", FileSize: 10,
+	}))
+	copied, err = h.copyChatAttachmentsToTask(ctx, missingExec.ID, target.ID)
+	require.Error(t, err)
+	require.Zero(t, copied)
+	attachmentsAfterFailure, listErr := h.attachmentRepo.ListByTask(ctx, target.ID)
+	require.NoError(t, listErr)
+	require.Len(t, attachmentsAfterFailure, 2, "failed conversion must not persist attachment metadata")
+	require.NoFileExists(t, filepath.Join(tmpDir, "tasks", target.ID, "rollback.png"), "batch failure must roll back files copied before the failure")
+}
+
+func TestProcessAttachmentsWithReturn_MetadataFailurePreservesPendingSession(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := &models.LLMConfig{Name: "Pending Attachment Agent", Provider: models.ProviderTest, Model: "test", APIKey: "test", MaxTokens: 1024}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	chatTask := &models.Task{ProjectID: projects[0].ID, Title: "Pending attachment rollback", Prompt: "test", Status: models.StatusPending, Category: models.CategoryChat, AgentID: &agent.ID}
+	require.NoError(t, h.taskRepo.Create(ctx, chatTask))
+	exec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "test"}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+
+	tmpDir := t.TempDir()
+	oldUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	defer func() { uploadsDir = oldUploadsDir }()
+	sessionID := "unicode-session"
+	name := "Screenshot 2026-07-10 at 9.49.00\u202fPM.png"
+	pendingPath := filepath.Join(tmpDir, "chat", "pending", sessionID, name)
+	require.NoError(t, os.MkdirAll(filepath.Dir(pendingPath), 0o755))
+	require.NoError(t, os.WriteFile(pendingPath, []byte("png"), 0o644))
+
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	_, _, _, err = h.processAttachmentsWithReturn(cancelledCtx, sessionID, exec.ID)
+	require.Error(t, err)
+	require.FileExists(t, pendingPath, "pending source must survive until metadata commit")
+	require.NoFileExists(t, filepath.Join(tmpDir, "chat", exec.ID, name))
+	attachments, listErr := h.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
+	require.NoError(t, listErr)
+	require.Empty(t, attachments)
+}
+
+func TestRollbackAttachmentPublications_MetadataDeleteFailureRetainsReferencedFile(t *testing.T) {
+	t.Run("chat attachment", func(t *testing.T) {
+		h, _, llmConfigRepo := setupTestHandler(t)
+		ctx := context.Background()
+		agent := &models.LLMConfig{Name: "Chat rollback agent", Provider: models.ProviderTest, Model: "test", APIKey: "test", MaxTokens: 1024}
+		require.NoError(t, llmConfigRepo.Create(ctx, agent))
+		projects, err := h.projectSvc.List(ctx)
+		require.NoError(t, err)
+		chatTask := &models.Task{ProjectID: projects[0].ID, Title: "Chat rollback", Prompt: "test", Status: models.StatusPending, Category: models.CategoryChat, AgentID: &agent.ID}
+		require.NoError(t, h.taskRepo.Create(ctx, chatTask))
+		exec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "test"}
+		require.NoError(t, h.execRepo.Create(ctx, exec))
+
+		path := filepath.Join(t.TempDir(), "chat-attachment.png")
+		require.NoError(t, os.WriteFile(path, []byte("png"), 0o644))
+		attachment := &models.ChatAttachment{ExecutionID: exec.ID, FileName: filepath.Base(path), FilePath: path, MediaType: "image/png", FileSize: 3}
+		require.NoError(t, h.chatAttachmentRepo.Create(ctx, attachment))
+
+		errs := rollbackAttachmentPublications(ctx, []attachmentPublication{{id: attachment.ID, path: path}}, func(context.Context, string) error {
+			return errors.New("injected chat metadata delete failure")
+		})
+		require.Len(t, errs, 1)
+		persisted, err := h.chatAttachmentRepo.GetByID(ctx, attachment.ID)
+		require.NoError(t, err)
+		require.NotNil(t, persisted)
+		require.FileExists(t, persisted.FilePath, "rollback must retain a file while ChatAttachment metadata still references it")
+	})
+
+	t.Run("task attachment", func(t *testing.T) {
+		h, _, llmConfigRepo := setupTestHandler(t)
+		ctx := context.Background()
+		agent := &models.LLMConfig{Name: "Task rollback agent", Provider: models.ProviderTest, Model: "test", APIKey: "test", MaxTokens: 1024}
+		require.NoError(t, llmConfigRepo.Create(ctx, agent))
+		projects, err := h.projectSvc.List(ctx)
+		require.NoError(t, err)
+		task := &models.Task{ProjectID: projects[0].ID, Title: "Task rollback", Prompt: "test", Status: models.StatusPending, Category: models.CategoryBacklog, AgentID: &agent.ID}
+		require.NoError(t, h.taskRepo.Create(ctx, task))
+
+		path := filepath.Join(t.TempDir(), "task-attachment.png")
+		require.NoError(t, os.WriteFile(path, []byte("png"), 0o644))
+		attachment := &models.Attachment{TaskID: task.ID, FileName: filepath.Base(path), FilePath: path, MediaType: "image/png", FileSize: 3}
+		require.NoError(t, h.attachmentRepo.Create(ctx, attachment))
+
+		errs := rollbackAttachmentPublications(ctx, []attachmentPublication{{id: attachment.ID, path: path}}, func(context.Context, string) error {
+			return errors.New("injected task metadata delete failure")
+		})
+		require.Len(t, errs, 1)
+		persisted, err := h.attachmentRepo.GetByID(ctx, attachment.ID)
+		require.NoError(t, err)
+		require.NotNil(t, persisted)
+		require.FileExists(t, persisted.FilePath, "rollback must retain a file while task Attachment metadata still references it")
+	})
+}
+
 func TestCopyChatAttachmentsToTask_NoAttachments(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -2256,11 +2681,10 @@ func TestCopyChatAttachmentsToTask_NoAttachments(t *testing.T) {
 	assert.Empty(t, taskAttachments)
 }
 
-// TestCopyChatAttachmentsToTask_DeferredActivation verifies the fix for the race
-// condition where a task created from chat with category "active" would start
-// executing before attachments were copied. The fix creates the task as "backlog"
-// first, copies attachments, then activates it via UpdateCategory.
-func TestCopyChatAttachmentsToTask_DeferredActivation(t *testing.T) {
+// TestProcessChatTaskCreations_DeferredAttachmentActivationExactlyOnce verifies that
+// the production Chat creation path publishes attachments before activating and
+// submits the resulting task exactly once.
+func TestProcessChatTaskCreations_DeferredAttachmentActivationExactlyOnce(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
@@ -2307,55 +2731,40 @@ func TestCopyChatAttachmentsToTask_DeferredActivation(t *testing.T) {
 	}
 	require.NoError(t, h.chatAttachmentRepo.Create(ctx, chatAtt))
 
-	// Step 1: Simulate deferred creation — task originally wanted "active" but
-	// is created as "backlog" to prevent auto-submission before attachments are copied.
-	deferredTask := &models.Task{
-		ProjectID: projects[0].ID, Title: "Deferred active task",
-		Prompt: "update styling based on screenshot", Status: models.StatusPending,
-		Category: models.CategoryBacklog, // Temporarily backlog (was "active")
-		AgentID:  &agent.ID,
-	}
-	require.NoError(t, h.taskRepo.Create(ctx, deferredTask))
-
-	// Verify task is in backlog (not yet executing)
-	task, err := h.taskRepo.GetByID(ctx, deferredTask.ID)
+	output := `[CREATE_TASK]
+{"title":"Deferred active task","prompt":"update styling based on screenshot","category":"active","agent_id":"` + agent.ID + `"}
+[/CREATE_TASK]`
+	updatedOutput, copiedCount := h.processChatTaskCreations(ctx, exec.ID, projects[0].ID, output, []models.LLMConfig{*agent})
+	require.Equal(t, 1, copiedCount)
+	createdIDs := extractTaskIDsFromOutput(updatedOutput)
+	require.Len(t, createdIDs, 1)
+	deferredTask, err := h.taskRepo.GetByID(ctx, createdIDs[0])
 	require.NoError(t, err)
-	assert.Equal(t, models.CategoryBacklog, task.Category)
+	require.NotNil(t, deferredTask)
+	assert.Equal(t, models.CategoryActive, deferredTask.Category)
+	assert.Contains(t, updatedOutput, `"Deferred active task" (active)`)
 
-	// Step 2: Copy attachments while task is still in backlog
-	copiedCount, err := h.copyChatAttachmentsToTask(ctx, exec.ID, deferredTask.ID)
-	require.NoError(t, err)
-	assert.Equal(t, 1, copiedCount)
-
-	// Verify attachments were copied BEFORE activation
+	// The key invariant: publication and prompt updates are complete when the
+	// production creation path reports and submits the task as Active.
 	taskAttachments, err := h.attachmentRepo.ListByTask(ctx, deferredTask.ID)
 	require.NoError(t, err)
 	require.Len(t, taskAttachments, 1)
 	assert.Equal(t, "screenshot.png", taskAttachments[0].FileName)
-
-	// Verify the task prompt includes the attachment reference
-	task, err = h.taskRepo.GetByID(ctx, deferredTask.ID)
-	require.NoError(t, err)
-	assert.Contains(t, task.Prompt, "[Attached files from chat:")
-	assert.Contains(t, task.Prompt, "screenshot.png (path: ")
-
-	// Verify the file exists at the expected location
+	assert.Contains(t, deferredTask.Prompt, "[Attached files from chat:")
+	assert.Contains(t, deferredTask.Prompt, "screenshot.png (path: ")
 	taskDir := filepath.Join(tmpDir, "tasks", deferredTask.ID)
 	assert.FileExists(t, filepath.Join(taskDir, "screenshot.png"))
-
-	// Step 3: Now activate the task (this would trigger submission to worker pool)
-	err = h.taskSvc.UpdateCategory(ctx, deferredTask.ID, models.CategoryActive)
-	require.NoError(t, err)
-
-	// Verify task is now active with attachments already in place
-	task, err = h.taskRepo.GetByID(ctx, deferredTask.ID)
-	require.NoError(t, err)
-	assert.Equal(t, models.CategoryActive, task.Category)
-
-	// The key invariant: when the task starts executing, attachments are already there
-	taskAttachments, err = h.attachmentRepo.ListByTask(ctx, deferredTask.ID)
-	require.NoError(t, err)
-	assert.Len(t, taskAttachments, 1, "attachments should be present when task becomes active")
+	select {
+	case submitted := <-h.workerSvc.Submitted():
+		assert.Equal(t, deferredTask.ID, submitted.ID)
+	case <-time.After(time.Second):
+		t.Fatal("activated attachment task was not submitted")
+	}
+	select {
+	case submitted := <-h.workerSvc.Submitted():
+		t.Fatalf("activated attachment task was submitted more than once: %s", submitted.ID)
+	default:
+	}
 }
 
 // TestHandler_Chat_FullPageVsHTMXPartial verifies that HTMX requests return partial content
@@ -4360,7 +4769,40 @@ func createChatStreamExecution(t *testing.T, tc *TestContext, execStatus models.
 	return updated
 }
 
-func startChatStreamSSETest(t *testing.T, h *Handler, execID, rawQuery string) (*httptest.ResponseRecorder, context.CancelFunc, chan error) {
+type synchronizedResponseRecorder struct {
+	*httptest.ResponseRecorder
+	mu sync.RWMutex
+}
+
+func newSynchronizedResponseRecorder() *synchronizedResponseRecorder {
+	return &synchronizedResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
+}
+
+func (r *synchronizedResponseRecorder) Write(data []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ResponseRecorder.Write(data)
+}
+
+func (r *synchronizedResponseRecorder) WriteHeader(statusCode int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ResponseRecorder.WriteHeader(statusCode)
+}
+
+func (r *synchronizedResponseRecorder) Flush() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ResponseRecorder.Flush()
+}
+
+func (r *synchronizedResponseRecorder) BodyString() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.Body.String()
+}
+
+func startChatStreamSSETest(t *testing.T, h *Handler, execID, rawQuery string) (*synchronizedResponseRecorder, context.CancelFunc, chan error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	path := "/events/chat/" + execID
@@ -4368,7 +4810,7 @@ func startChatStreamSSETest(t *testing.T, h *Handler, execID, rawQuery string) (
 		path += "?" + rawQuery
 	}
 	req := httptest.NewRequest(http.MethodGet, path, nil).WithContext(ctx)
-	rec := httptest.NewRecorder()
+	rec := newSynchronizedResponseRecorder()
 	e := echo.New()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("exec_id")
@@ -4380,17 +4822,17 @@ func startChatStreamSSETest(t *testing.T, h *Handler, execID, rawQuery string) (
 	return rec, cancel, errCh
 }
 
-func waitForSSEBody(t *testing.T, rec *httptest.ResponseRecorder, want string) string {
+func waitForSSEBody(t *testing.T, rec *synchronizedResponseRecorder, want string) string {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		body := rec.Body.String()
+		body := rec.BodyString()
 		if strings.Contains(body, want) {
 			return body
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for SSE body containing %q; body=%q", want, rec.Body.String())
+	t.Fatalf("timed out waiting for SSE body containing %q; body=%q", want, rec.BodyString())
 	return ""
 }
 
@@ -4450,7 +4892,7 @@ func TestChatStreamSSE_DoesNotSubscribeMissingExecution(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("missing execution stream did not return")
 	}
-	assert.Contains(t, rec.Body.String(), "event: error\ndata: execution not found\n\n")
+	assert.Contains(t, rec.BodyString(), "event: error\ndata: execution not found\n\n")
 	assert.Equal(t, 0, hub.SubscriberCount())
 }
 

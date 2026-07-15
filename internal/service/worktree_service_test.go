@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -205,6 +206,66 @@ func TestSetupWorktree(t *testing.T) {
 	}
 	if dbTask.WorktreeBranch == "" {
 		t.Error("expected worktree_branch to be set in DB")
+	}
+}
+
+func TestSetupWorktree_ReusesStoredWorktreeWhenBaseNoLongerExists(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	ctx := context.Background()
+	repoDir := createTestGitRepo(t)
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Reuse Stored Worktree",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	wtPath, wtBranch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+	task.MergeTargetBranch = "renamed-or-deleted-base"
+
+	reusedPath, reusedBranch, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reusedPath != wtPath || reusedBranch != wtBranch {
+		t.Fatalf("expected stored worktree %q on %q, got %q on %q", wtPath, wtBranch, reusedPath, reusedBranch)
+	}
+}
+
+func TestSetupWorktree_PreservesOperationalBaseVerificationError(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
+	repoDir := createTestGitRepo(t)
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Cancelled Worktree Setup",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: "main",
+	}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, _, err := ws.SetupWorktree(ctx, task, repoDir)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation to be preserved, got %v", err)
+	}
+	if strings.Contains(err.Error(), "create an initial local commit") {
+		t.Fatalf("expected operational error instead of missing-commit guidance, got %v", err)
 	}
 }
 
@@ -418,8 +479,15 @@ func TestSyncWorktreeFromMainAtStart_ConflictFailsGracefully(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected startup auto-merge conflict error")
 	}
-	if !strings.Contains(err.Error(), "startup auto-merge conflict") {
-		t.Fatalf("expected actionable startup auto-merge conflict error, got: %v", err)
+	var conflictErr *StartupSyncConflictError
+	if !errors.As(err, &conflictErr) {
+		t.Fatalf("expected typed startup auto-merge conflict error, got: %T %v", err, err)
+	}
+	if conflictErr.TargetBranch != defaultBranch || conflictErr.TaskBranch != wtBranch || conflictErr.WorktreePath != wtPath {
+		t.Fatalf("unexpected startup conflict details: %+v", conflictErr)
+	}
+	if len(conflictErr.ConflictFiles) != 1 || conflictErr.ConflictFiles[0] != "README.md" {
+		t.Fatalf("expected README.md conflict, got %v", conflictErr.ConflictFiles)
 	}
 
 	dbTask, err := taskRepo.GetByID(ctx, task.ID)
@@ -3592,6 +3660,70 @@ func TestGetWorktreeDiffWithUncommitted(t *testing.T) {
 	}
 	if strings.Contains(diff, "uncommitted.txt") {
 		t.Error("should not show untracked files when worktree path is empty")
+	}
+}
+
+func TestGetWorktreeFileStatsWithUncommittedMatchesNetTargetDiff(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	targetBranch := GetDefaultBranch(repoDir)
+	branchName := "task/net-file-stats"
+	worktreePath := filepath.Join(repoDir, ".worktrees", "net-file-stats")
+
+	cmd := exec.Command("git", "worktree", "add", "-b", branchName, worktreePath, targetBranch)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create worktree: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "README.md"), []byte("committed version\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "committed.txt"), []byte("committed\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(worktreePath, "commit task output"); err != nil {
+		t.Fatalf("commit task output: %v", err)
+	}
+
+	// Revert one committed path to the target, stage a post-commit path, leave
+	// another tracked path unstaged, and append an untracked file. The summary
+	// must describe exactly the same target-to-working-tree state as the diff.
+	if err := os.WriteFile(filepath.Join(worktreePath, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "committed.txt"), []byte("unstaged update\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "staged.txt"), []byte("staged\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("git", "add", "staged.txt")
+	cmd.Dir = worktreePath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("stage file: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "untracked.txt"), []byte("untracked\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	diff := GetWorktreeDiffWithUncommitted(repoDir, branchName, targetBranch, worktreePath)
+	stats := GetWorktreeFileStatsWithUncommitted(repoDir, branchName, targetBranch, worktreePath)
+	paths := make(map[string]string, len(stats))
+	for _, stat := range stats {
+		paths[stat.Path] = stat.Status
+	}
+	if strings.Contains(diff, "README.md") {
+		t.Fatalf("expected reverted path to be absent from net diff:\n%s", diff)
+	}
+	if _, ok := paths["README.md"]; ok {
+		t.Fatalf("expected reverted path to be absent from net file stats, got %#v", stats)
+	}
+	for path, status := range map[string]string{"committed.txt": "added", "staged.txt": "added", "untracked.txt": "added"} {
+		if paths[path] != status {
+			t.Fatalf("expected %s status %s, got %q in %#v", path, status, paths[path], stats)
+		}
+		if !strings.Contains(diff, path) {
+			t.Fatalf("expected %s in net diff:\n%s", path, diff)
+		}
 	}
 }
 

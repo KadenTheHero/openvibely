@@ -10,6 +10,56 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestToastCloseButtonIsAccessibleAndTopRightAligned(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	for _, expected := range []string{
+		".toast-notification {",
+		"position: relative",
+		"padding-right: 4rem",
+		".toast-close {",
+		"position: absolute",
+		"top: 0.5rem",
+		"right: 0.5rem",
+		"width: 2.75rem",
+		"height: 2.75rem",
+		".toast-close:focus-visible",
+		"outline: 2px solid currentColor",
+		`type="button"`,
+		`aria-label="Dismiss notification"`,
+		"toast-close btn btn-ghost btn-circle",
+	} {
+		if !strings.Contains(html, expected) {
+			t.Errorf("toast close control missing responsive/accessibility contract %q", expected)
+		}
+	}
+
+	if strings.Contains(html, "toast-close btn btn-ghost btn-xs") {
+		t.Error("toast close control must not use btn-xs because it is smaller than the minimum touch target")
+	}
+
+	mobileMediaStart := strings.Index(html, "@media (max-width: 640px)")
+	if mobileMediaStart < 0 {
+		t.Fatal("mobile toast media query is missing")
+	}
+	mobileContainerStart := strings.Index(html[mobileMediaStart:], "#toast-container {")
+	if mobileContainerStart < 0 {
+		t.Fatal("mobile toast container rule is missing")
+	}
+	mobileContainerRule := html[mobileMediaStart+mobileContainerStart:]
+	mobileContainerEnd := strings.Index(mobileContainerRule, "}")
+	if mobileContainerEnd < 0 {
+		t.Fatal("mobile toast container rule is incomplete")
+	}
+	if !strings.Contains(mobileContainerRule[:mobileContainerEnd], "width: auto") {
+		t.Error("mobile toast container must use auto width so left and right viewport insets are both honored")
+	}
+}
+
 // TestToastDismissalCleanup verifies the toast notification system properly
 // cleans up DOM elements after dismissal to prevent page unresponsiveness.
 func TestToastDismissalCleanup(t *testing.T) {

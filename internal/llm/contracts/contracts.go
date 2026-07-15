@@ -23,6 +23,7 @@ type AgentRequest struct {
 	Attachments         []models.Attachment
 	Agent               models.LLMConfig
 	ExecID              string
+	TransportScope      string // Stable provider transport identity (for example task:<id> or chat:project:<id>)
 	ChatHistory         []models.Execution
 	ChatMode            models.ChatMode
 	ChatSystemContext   string
@@ -33,6 +34,23 @@ type AgentRequest struct {
 	PluginDirs          []string      // Optional plugin directories for CLI sessions (--plugin-dir)
 	DisableTools        bool          // Optional: suppress tool/plugin execution for this request
 	RawDirectPrompt     bool          // Optional: direct request message is already fully composed; skip OpenVibely task/system prompt wrapping
+}
+
+type transportScopeContextKey struct{}
+
+func WithTransportScope(ctx context.Context, scope string) context.Context {
+	if ctx == nil || scope == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, transportScopeContextKey{}, scope)
+}
+
+func TransportScopeFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	scope, _ := ctx.Value(transportScopeContextKey{}).(string)
+	return scope
 }
 
 // Usage tracks provider usage in a canonical shape.

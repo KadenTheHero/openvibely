@@ -3,12 +3,17 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAttachSwarmChildrenPreservesPreviouslyAttachedChildren(t *testing.T) {
@@ -73,6 +78,444 @@ func TestSwarmServiceCreateAndApplyPlannerOutput(t *testing.T) {
 	if workerChild.WorktreePath == "" || workerChild.WorktreeBranch == "" {
 		t.Fatalf("worker worktree metadata missing: %#v", workerChild)
 	}
+}
+
+func TestSwarmServiceApplyPlannerOutputDisambiguatesExistingWorkerTitle(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+
+	existing := &models.Task{ProjectID: "default", Title: "Backend worker", Prompt: "Previous unrelated task", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+	if err := taskSvc.Create(ctx, existing); err != nil {
+		t.Fatalf("create existing task: %v", err)
+	}
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Build export again", Prompt: "Build export", MaxWorkers: 1, WorkerIsolation: "worktree", ReviewerEnabled: true, MergerEnabled: true})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+
+	output := PlannerOutput{Workers: []PlannerWorker{{Title: existing.Title, Prompt: "Do backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review", MergerPrompt: "Merge"}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, output); err != nil {
+		t.Fatalf("ApplyPlannerOutput with an existing worker title: %v", err)
+	}
+	children, err := repo.ListSwarmChildren(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("ListSwarmChildren: %v", err)
+	}
+	counts := map[models.SwarmRole]int{}
+	for _, child := range children {
+		counts[child.SwarmRole]++
+		if child.SwarmRole == models.SwarmRoleWorker && child.Title == existing.Title {
+			t.Fatalf("worker title was not disambiguated: %q", child.Title)
+		}
+	}
+	if counts[models.SwarmRoleWorker] != 1 || counts[models.SwarmRoleReviewer] != 1 || counts[models.SwarmRoleMerger] != 1 {
+		t.Fatalf("unexpected children after title collision: %#v", counts)
+	}
+}
+
+func TestSwarmServiceApplyPlannerOutputRecoversPartialCreationAndRepeatedTitleCollisions(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Recover export swarm", Prompt: "Build export", MaxWorkers: 2, WorkerIsolation: "worktree", ReviewerEnabled: true, MergerEnabled: true})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+	parentPrefix := parent.ID[:8]
+	reservedTitles := []string{
+		"Second worker",
+		fmt.Sprintf("Second worker · %s-11", parentPrefix),
+		parent.Title + " · Reviewer",
+		fmt.Sprintf("%s · Reviewer · %s-900", parent.Title, parentPrefix),
+		parent.Title + " · Merger",
+		fmt.Sprintf("%s · Merger · %s-1000", parent.Title, parentPrefix),
+	}
+	for _, title := range reservedTitles {
+		unrelated := &models.Task{ProjectID: parent.ProjectID, Title: title, Prompt: "Unrelated task", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+		if err := taskSvc.Create(ctx, unrelated); err != nil {
+			t.Fatalf("reserve title %q: %v", title, err)
+		}
+	}
+
+	partialWorker := &models.Task{ProjectID: parent.ProjectID, Title: "First worker", Prompt: "Do first part", Category: models.CategoryActive, Status: models.StatusPending, ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker, SwarmStatus: "running", SwarmConfig: `{"required":true,"rerun_generation":1}`, SwarmSequence: 10}
+	if err := taskSvc.Create(ctx, partialWorker); err != nil {
+		t.Fatalf("create partial worker: %v", err)
+	}
+	output := PlannerOutput{Workers: []PlannerWorker{
+		{Title: "First worker", Prompt: "Do first part", WorkerKind: "backend", Ownership: []string{"internal/first"}, Isolation: "worktree", Required: true},
+		{Title: "Second worker", Prompt: "Do second part", WorkerKind: "backend", Ownership: []string{"internal/second"}, Isolation: "worktree", Required: true},
+	}, ReviewerPrompt: "Review", MergerPrompt: "Merge"}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, output); err != nil {
+		t.Fatalf("resume partial planner application: %v", err)
+	}
+
+	children, err := repo.ListSwarmChildren(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("ListSwarmChildren: %v", err)
+	}
+	counts := map[models.SwarmRole]int{}
+	for _, child := range children {
+		counts[child.SwarmRole]++
+		for _, reserved := range reservedTitles {
+			if child.Title == reserved {
+				t.Fatalf("swarm child reused reserved title %q", child.Title)
+			}
+		}
+	}
+	if counts[models.SwarmRoleWorker] != 2 || counts[models.SwarmRoleReviewer] != 1 || counts[models.SwarmRoleMerger] != 1 {
+		t.Fatalf("partial application was not completed exactly once: %#v", counts)
+	}
+	storedPlanner, err := repo.GetByID(ctx, planner.ID)
+	if err != nil || storedPlanner == nil || storedPlanner.SwarmStatus != "planned" {
+		t.Fatalf("planner not terminalized after recovery: planner=%#v err=%v", storedPlanner, err)
+	}
+}
+
+func TestSwarmServiceStartPlannerDisambiguatesRepeatedTitleCollisions(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Deferred collision swarm", Prompt: "Build export", Category: models.CategoryBacklog, MaxWorkers: 1})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	baseTitle := parent.Title + " · Planner"
+	for _, title := range []string{baseTitle, fmt.Sprintf("%s · %s-0", baseTitle, parent.ID[:8])} {
+		unrelated := &models.Task{ProjectID: parent.ProjectID, Title: title, Prompt: "Unrelated task", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+		if err := taskSvc.Create(ctx, unrelated); err != nil {
+			t.Fatalf("reserve title %q: %v", title, err)
+		}
+	}
+	if err := svc.StartPlanner(ctx, parent.ID); err != nil {
+		t.Fatalf("StartPlanner: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+	if planner.Title == baseTitle || planner.Title == fmt.Sprintf("%s · %s-0", baseTitle, parent.ID[:8]) {
+		t.Fatalf("planner title was not disambiguated beyond occupied fallbacks: %q", planner.Title)
+	}
+}
+
+func TestSwarmServicePlannerCallbackPersistsApplicationError(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, repository.NewExecutionRepo(db), nil)
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Planner callback error", Prompt: "Build export", MaxWorkers: 1})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := svc.applyCompletedPlannerExecution(cancelled, planner); !errors.Is(err, context.Canceled) {
+		t.Fatalf("applyCompletedPlannerExecution error = %v, want context canceled", err)
+	}
+
+	storedParent, err := repo.GetByID(ctx, parent.ID)
+	if err != nil || storedParent == nil {
+		t.Fatalf("load parent: parent=%#v err=%v", storedParent, err)
+	}
+	parentCfg, _ := models.ParseSwarmConfig(storedParent.SwarmConfig)
+	if !strings.Contains(parentCfg.LastError, "context canceled") || storedParent.SwarmStatus != "blocked" {
+		t.Fatalf("parent callback failure not persisted: status=%q error=%q", storedParent.SwarmStatus, parentCfg.LastError)
+	}
+	storedPlanner, err := repo.GetByID(ctx, planner.ID)
+	if err != nil || storedPlanner == nil {
+		t.Fatalf("load planner: planner=%#v err=%v", storedPlanner, err)
+	}
+	plannerCfg, _ := models.ParseSwarmConfig(storedPlanner.SwarmConfig)
+	if !strings.Contains(plannerCfg.LastError, "context canceled") || storedPlanner.SwarmStatus != "plan_apply_failed" {
+		t.Fatalf("planner callback failure not persisted: status=%q error=%q", storedPlanner.SwarmStatus, plannerCfg.LastError)
+	}
+}
+
+func TestSwarmServiceFollowupPlannerApplicationErrorPreservesRetryRouting(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Retry follow-up plan", Prompt: "Build export", MaxWorkers: 1})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+	initialOutput := PlannerOutput{Workers: []PlannerWorker{{Title: "Backend worker", Prompt: "Build backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, initialOutput); err != nil {
+		t.Fatalf("apply initial plan: %v", err)
+	}
+	worker, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	if err != nil || worker == nil {
+		t.Fatalf("worker missing: worker=%#v err=%v", worker, err)
+	}
+	if err := repo.UpdateStatus(ctx, worker.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("complete worker: %v", err)
+	}
+	if err := svc.HandleParentFollowup(ctx, parent.ID, "Update the backend"); err != nil {
+		t.Fatalf("HandleParentFollowup: %v", err)
+	}
+	planner, err = repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("coordinating planner missing: planner=%#v err=%v", planner, err)
+	}
+	followupJSON := fmt.Sprintf(`{"workers":[{"task_id":%q,"title":"Backend worker","prompt":"Update backend","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","required":true}]}`, worker.ID)
+	exec := &models.Execution{TaskID: planner.ID, Status: models.ExecRunning, PromptSent: planner.Prompt}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create follow-up planner execution: %v", err)
+	}
+	if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, followupJSON, "", 0, 1); err != nil {
+		t.Fatalf("complete follow-up planner execution: %v", err)
+	}
+	if err := repo.UpdateStatus(ctx, planner.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("complete planner task: %v", err)
+	}
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := svc.applyCompletedPlannerExecution(cancelled, planner); !errors.Is(err, context.Canceled) {
+		t.Fatalf("first application error = %v, want context canceled", err)
+	}
+	failedPlanner, err := repo.GetByID(ctx, planner.ID)
+	if err != nil || failedPlanner == nil {
+		t.Fatalf("load failed planner: planner=%#v err=%v", failedPlanner, err)
+	}
+	failedParent, err := repo.GetByID(ctx, parent.ID)
+	if err != nil || failedParent == nil {
+		t.Fatalf("load failed parent: parent=%#v err=%v", failedParent, err)
+	}
+	if failedPlanner.SwarmStatus != "coordinating" || failedParent.SwarmStatus != "needs_coordination" {
+		t.Fatalf("follow-up phase was lost after failure: planner=%q parent=%q", failedPlanner.SwarmStatus, failedParent.SwarmStatus)
+	}
+
+	if err := svc.applyCompletedPlannerExecution(ctx, failedPlanner); err != nil {
+		t.Fatalf("retry completed follow-up output: %v", err)
+	}
+	updatedWorker, err := repo.GetByID(ctx, worker.ID)
+	if err != nil || updatedWorker == nil {
+		t.Fatalf("load updated worker: worker=%#v err=%v", updatedWorker, err)
+	}
+	workerCfg, _ := models.ParseSwarmConfig(updatedWorker.SwarmConfig)
+	if updatedWorker.Status != models.StatusPending || updatedWorker.SwarmStatus != "rerun_pending" || workerCfg.RerunGeneration != 2 {
+		t.Fatalf("retry did not apply as follow-up: worker=%#v cfg=%#v", updatedWorker, workerCfg)
+	}
+	children, err := repo.ListSwarmChildren(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("ListSwarmChildren: %v", err)
+	}
+	workerCount := 0
+	for _, child := range children {
+		if child.SwarmRole == models.SwarmRoleWorker {
+			workerCount++
+		}
+	}
+	if workerCount != 1 {
+		t.Fatalf("retry created duplicate workers: %d", workerCount)
+	}
+	recoveredPlanner, err := repo.GetByID(ctx, planner.ID)
+	if err != nil || recoveredPlanner == nil {
+		t.Fatalf("load recovered planner: planner=%#v err=%v", recoveredPlanner, err)
+	}
+	recoveredParent, err := repo.GetByID(ctx, parent.ID)
+	if err != nil || recoveredParent == nil {
+		t.Fatalf("load recovered parent: parent=%#v err=%v", recoveredParent, err)
+	}
+	recoveredPlannerCfg, _ := models.ParseSwarmConfig(recoveredPlanner.SwarmConfig)
+	recoveredParentCfg, _ := models.ParseSwarmConfig(recoveredParent.SwarmConfig)
+	if recoveredPlanner.SwarmStatus != "planned" || recoveredPlannerCfg.LastError != "" || recoveredParentCfg.LastError != "" {
+		t.Fatalf("successful retry did not clear failure state: planner=%#v planner_cfg=%#v parent_cfg=%#v", recoveredPlanner, recoveredPlannerCfg, recoveredParentCfg)
+	}
+}
+
+func TestSwarmServiceFollowupPlannerRerunDisambiguatesOccupiedWorkerTitle(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Rerun title collision", Prompt: "Build export", MaxWorkers: 1})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+	initialOutput := PlannerOutput{Workers: []PlannerWorker{{Title: "Original worker", Prompt: "Build backend", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, initialOutput); err != nil {
+		t.Fatalf("apply initial plan: %v", err)
+	}
+	worker, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
+	if err != nil || worker == nil {
+		t.Fatalf("worker missing: worker=%#v err=%v", worker, err)
+	}
+	if err := repo.UpdateStatus(ctx, worker.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("complete worker: %v", err)
+	}
+	occupied := &models.Task{ProjectID: parent.ProjectID, Title: "Occupied rerun title", Prompt: "Unrelated task", Category: models.CategoryBacklog, Status: models.StatusPending}
+	if err := taskSvc.Create(ctx, occupied); err != nil {
+		t.Fatalf("create occupied title: %v", err)
+	}
+	occupiedFallback := &models.Task{ProjectID: parent.ProjectID, Title: swarmChildTitle(occupied.Title, parent.ID, worker.SwarmSequence, 1), Prompt: "Another unrelated task", Category: models.CategoryBacklog, Status: models.StatusPending}
+	if err := taskSvc.Create(ctx, occupiedFallback); err != nil {
+		t.Fatalf("create occupied fallback title: %v", err)
+	}
+	if err := svc.HandleParentFollowup(ctx, parent.ID, "Update the backend"); err != nil {
+		t.Fatalf("HandleParentFollowup: %v", err)
+	}
+	planner, err = repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("coordinating planner missing: planner=%#v err=%v", planner, err)
+	}
+
+	followup := PlannerOutput{Workers: []PlannerWorker{{TaskID: worker.ID, Title: occupied.Title, Prompt: "Update backend safely", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, followup); err != nil {
+		t.Fatalf("apply follow-up with occupied title: %v", err)
+	}
+	updated, err := repo.GetByID(ctx, worker.ID)
+	if err != nil || updated == nil {
+		t.Fatalf("load rerun worker: worker=%#v err=%v", updated, err)
+	}
+	cfg, _ := models.ParseSwarmConfig(updated.SwarmConfig)
+	if updated.Title == occupied.Title || updated.Title == occupiedFallback.Title || !strings.HasPrefix(updated.Title, occupied.Title+" · ") {
+		t.Fatalf("rerun title was not disambiguated beyond occupied fallbacks: %q", updated.Title)
+	}
+	if updated.Status != models.StatusPending || updated.SwarmStatus != "rerun_pending" || cfg.RerunGeneration != 2 {
+		t.Fatalf("rerun state not persisted: worker=%#v cfg=%#v", updated, cfg)
+	}
+	if !strings.Contains(updated.Prompt, "Update backend safely") {
+		t.Fatalf("rerun prompt not updated: %q", updated.Prompt)
+	}
+	storedOccupied, err := repo.GetByID(ctx, occupied.ID)
+	if err != nil || storedOccupied == nil || storedOccupied.Title != occupied.Title {
+		t.Fatalf("occupied task was modified: task=%#v err=%v", storedOccupied, err)
+	}
+	storedFallback, err := repo.GetByID(ctx, occupiedFallback.ID)
+	if err != nil || storedFallback == nil || storedFallback.Title != occupiedFallback.Title {
+		t.Fatalf("occupied fallback task was modified: task=%#v err=%v", storedFallback, err)
+	}
+}
+
+func TestSwarmServiceFollowupPlannerRetryReconcilesPartiallyCreatedWorkers(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, execRepo, nil)
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Resume partial follow-up workers", Prompt: "Build export", MaxWorkers: 3})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+	initialOutput := PlannerOutput{Workers: []PlannerWorker{{Title: "Existing worker", Prompt: "Build existing part", WorkerKind: "backend", Ownership: []string{"internal/existing"}, Isolation: "worktree", Required: true}}}
+	if err := svc.ApplyPlannerOutput(ctx, planner.ID, initialOutput); err != nil {
+		t.Fatalf("apply initial plan: %v", err)
+	}
+	if err := svc.HandleParentFollowup(ctx, parent.ID, "Add two follow-up components"); err != nil {
+		t.Fatalf("HandleParentFollowup: %v", err)
+	}
+	planner, err = repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("coordinating planner missing: planner=%#v err=%v", planner, err)
+	}
+
+	followupJSON := `{"workers":[{"title":"New worker one","prompt":"Build first new part","worker_kind":"backend","ownership":["internal/newone"],"isolation":"worktree","required":true},{"title":"New worker two","prompt":"Build second new part","worker_kind":"backend","ownership":["internal/newtwo"],"isolation":"worktree","required":true}]}`
+	exec := &models.Execution{TaskID: planner.ID, Status: models.ExecRunning, PromptSent: planner.Prompt}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create follow-up planner execution: %v", err)
+	}
+	if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, followupJSON, "", 0, 1); err != nil {
+		t.Fatalf("complete follow-up planner execution: %v", err)
+	}
+	if err := repo.UpdateStatus(ctx, planner.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("complete planner task: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_second_followup_worker BEFORE INSERT ON tasks WHEN NEW.title = 'New worker two' BEGIN SELECT RAISE(ABORT, 'forced second worker failure'); END`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	if err := svc.applyCompletedPlannerExecution(ctx, planner); err == nil || !strings.Contains(err.Error(), "forced second worker failure") {
+		t.Fatalf("first application error = %v, want forced second worker failure", err)
+	}
+	children, err := repo.ListSwarmChildren(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("list partially created children: %v", err)
+	}
+	if got := countSwarmWorkers(children); got != 2 {
+		t.Fatalf("workers after partial failure = %d, want existing plus first new worker", got)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TRIGGER fail_second_followup_worker`); err != nil {
+		t.Fatalf("drop failure trigger: %v", err)
+	}
+
+	failedPlanner, err := repo.GetByID(ctx, planner.ID)
+	if err != nil || failedPlanner == nil {
+		t.Fatalf("load failed planner: planner=%#v err=%v", failedPlanner, err)
+	}
+	if err := svc.applyCompletedPlannerExecution(ctx, failedPlanner); err != nil {
+		t.Fatalf("retry exact completed follow-up output: %v", err)
+	}
+	children, err = repo.ListSwarmChildren(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("list recovered children: %v", err)
+	}
+	if got := countSwarmWorkers(children); got != 3 {
+		t.Fatalf("workers after retry = %d, want exactly one existing and two planned new workers", got)
+	}
+	titleCounts := map[string]int{}
+	for _, child := range children {
+		if child.SwarmRole == models.SwarmRoleWorker {
+			titleCounts[child.Title]++
+		}
+	}
+	if titleCounts["New worker one"] != 1 || titleCounts["New worker two"] != 1 {
+		t.Fatalf("follow-up workers were not reconciled exactly once: %#v", titleCounts)
+	}
+}
+
+func countSwarmWorkers(children []models.Task) int {
+	count := 0
+	for _, child := range children {
+		if child.SwarmRole == models.SwarmRoleWorker {
+			count++
+		}
+	}
+	return count
 }
 
 func TestSwarmServiceCreateAssignsProjectDefaultModelToChildren(t *testing.T) {
@@ -1910,5 +2353,267 @@ func TestSwarmServiceRerunRoleRejectsActiveRoleExecutionWithoutRetargeting(t *te
 	}
 	if reviewerAfter.SwarmConfig != reviewerBefore.SwarmConfig || reviewerAfter.SwarmStatus != reviewerBefore.SwarmStatus || reviewerAfter.Status != reviewerBefore.Status {
 		t.Fatalf("reviewer mutated despite rejected active rerun: before=%#v after=%#v", reviewerBefore, reviewerAfter)
+	}
+}
+
+type failedChildRepairFixture struct {
+	t         *testing.T
+	ctx       context.Context
+	repo      *repository.TaskRepo
+	execRepo  *repository.ExecutionRepo
+	svc       *SwarmService
+	workerSvc *WorkerService
+	parent    *models.Task
+	workers   []*models.Task
+	reviewer  *models.Task
+	merger    *models.Task
+}
+
+func newFailedChildRepairFixture(t *testing.T, workers int, reviewerEnabled, mergerEnabled bool) *failedChildRepairFixture {
+	t.Helper()
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	workerSvc := newTestWorkerService(t)
+	svc := NewSwarmService(NewTaskService(repo, nil, nil), repo, execRepo, workerSvc)
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Repair failed child", Prompt: "repair", MaxWorkers: workers, ReviewerEnabled: reviewerEnabled, MergerEnabled: mergerEnabled})
+	require.NoError(t, err)
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	plan := PlannerOutput{ReviewerPrompt: "review", MergerPrompt: "merge"}
+	for i := 0; i < workers; i++ {
+		plan.Workers = append(plan.Workers, PlannerWorker{Title: fmt.Sprintf("Repair worker %d", i), Prompt: "work", WorkerKind: "backend", Ownership: []string{fmt.Sprintf("scope-%d", i)}, Isolation: "worktree", Required: true})
+	}
+	require.NoError(t, svc.ApplyPlannerOutput(ctx, planner.ID, plan))
+	for i := 0; i < workers; i++ {
+		select {
+		case <-workerSvc.Submitted():
+		default:
+			t.Fatal("missing initial worker submission")
+		}
+	}
+	children, err := repo.ListSwarmChildren(ctx, parent.ID)
+	require.NoError(t, err)
+	f := &failedChildRepairFixture{t: t, ctx: ctx, repo: repo, execRepo: execRepo, svc: svc, workerSvc: workerSvc, parent: parent}
+	for i := range children {
+		child := children[i]
+		switch child.SwarmRole {
+		case models.SwarmRoleWorker:
+			f.workers = append(f.workers, &child)
+		case models.SwarmRoleReviewer:
+			f.reviewer = &child
+		case models.SwarmRoleMerger:
+			f.merger = &child
+		}
+	}
+	sort.Slice(f.workers, func(i, j int) bool { return f.workers[i].SwarmSequence < f.workers[j].SwarmSequence })
+	return f
+}
+
+func (f *failedChildRepairFixture) terminal(child *models.Task, status models.TaskStatus) {
+	f.t.Helper()
+	require.NoError(f.t, f.repo.UpdateStatus(f.ctx, child.ID, status))
+	require.NoError(f.t, f.svc.OnChildCompleted(f.ctx, child.ID))
+}
+
+func (f *failedChildRepairFixture) assertNoSubmission() {
+	f.t.Helper()
+	select {
+	case task := <-f.workerSvc.Submitted():
+		f.t.Fatalf("unexpected downstream submission: role=%s id=%s", task.SwarmRole, task.ID)
+	default:
+	}
+}
+
+func (f *failedChildRepairFixture) submittedRole(role models.SwarmRole) {
+	f.t.Helper()
+	select {
+	case task := <-f.workerSvc.Submitted():
+		require.Equal(f.t, role, task.SwarmRole)
+	case <-time.After(time.Second):
+		f.t.Fatalf("missing %s submission", role)
+	}
+}
+
+func TestSwarmServiceFailedWorkerFollowupRepairStartsReviewerOnce(t *testing.T) {
+	f := newFailedChildRepairFixture(t, 2, true, true)
+	f.terminal(f.workers[0], models.StatusCompleted)
+	f.terminal(f.workers[1], models.StatusFailed)
+	f.assertNoSubmission()
+
+	require.NoError(t, f.svc.HandleChildFollowup(f.ctx, f.workers[1].ID, "repair failure"))
+	f.terminal(f.workers[1], models.StatusCompleted)
+	f.submittedRole(models.SwarmRoleReviewer)
+	require.NoError(t, f.svc.OnChildCompleted(f.ctx, f.workers[1].ID))
+	f.assertNoSubmission()
+}
+
+func TestSwarmServiceFailedWorkerRepairWaitsForRunningSibling(t *testing.T) {
+	f := newFailedChildRepairFixture(t, 2, true, true)
+	f.terminal(f.workers[0], models.StatusFailed)
+	require.NoError(t, f.svc.HandleChildFollowup(f.ctx, f.workers[0].ID, "repair failure"))
+	f.terminal(f.workers[0], models.StatusCompleted)
+	f.assertNoSubmission()
+	f.terminal(f.workers[1], models.StatusCompleted)
+	f.submittedRole(models.SwarmRoleReviewer)
+}
+
+func TestSwarmServiceFailedWorkerFollowupFailureKeepsReviewerBlocked(t *testing.T) {
+	f := newFailedChildRepairFixture(t, 2, true, true)
+	f.terminal(f.workers[0], models.StatusCompleted)
+	f.terminal(f.workers[1], models.StatusFailed)
+	require.NoError(t, f.svc.HandleChildFollowup(f.ctx, f.workers[1].ID, "repair failure"))
+	f.terminal(f.workers[1], models.StatusFailed)
+	f.assertNoSubmission()
+	reviewer, err := f.repo.GetByID(f.ctx, f.reviewer.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, models.StatusPending, reviewer.Status)
+}
+
+func TestSwarmServiceRecomputeRecoversMissedWorkerCompletionCallback(t *testing.T) {
+	f := newFailedChildRepairFixture(t, 2, true, true)
+	require.NoError(t, f.repo.UpdateStatus(f.ctx, f.workers[0].ID, models.StatusFailed))
+	require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID))
+	f.assertNoSubmission()
+	failedWorker, err := f.repo.GetByID(f.ctx, f.workers[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, "failed", failedWorker.SwarmStatus)
+	require.NoError(t, f.svc.HandleChildFollowup(f.ctx, f.workers[0].ID, "repair failure"))
+	require.NoError(t, f.repo.UpdateStatus(f.ctx, f.workers[0].ID, models.StatusCompleted))
+	f.assertNoSubmission()
+
+	// The repaired worker's callback is lost while its sibling is still running.
+	require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID))
+	f.assertNoSubmission()
+
+	// The sibling's callback is also lost. Concurrent reconciliation must recover
+	// both durable completions and claim the reviewer exactly once.
+	require.NoError(t, f.repo.UpdateStatus(f.ctx, f.workers[1].ID, models.StatusCompleted))
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID))
+		}()
+	}
+	wg.Wait()
+	f.submittedRole(models.SwarmRoleReviewer)
+	f.assertNoSubmission()
+
+	for _, worker := range f.workers {
+		persisted, err := f.repo.GetByID(f.ctx, worker.ID)
+		require.NoError(t, err)
+		cfg, err := models.ParseSwarmConfig(persisted.SwarmConfig)
+		require.NoError(t, err)
+		require.Equal(t, 1, cfg.CompletedGeneration)
+		require.Equal(t, "completed", persisted.SwarmStatus)
+	}
+}
+
+func TestSwarmServiceRecomputeRecoversMissedReviewerCompletionCallback(t *testing.T) {
+	f := newFailedChildRepairFixture(t, 1, true, true)
+	f.terminal(f.workers[0], models.StatusCompleted)
+	f.submittedRole(models.SwarmRoleReviewer)
+	require.NoError(t, f.repo.UpdateStatus(f.ctx, f.reviewer.ID, models.StatusCompleted))
+	f.assertNoSubmission()
+
+	require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID))
+	f.submittedRole(models.SwarmRoleMerger)
+	require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID))
+	f.assertNoSubmission()
+
+	reviewer, err := f.repo.GetByID(f.ctx, f.reviewer.ID)
+	require.NoError(t, err)
+	cfg, err := models.ParseSwarmConfig(reviewer.SwarmConfig)
+	require.NoError(t, err)
+	require.Equal(t, 1, cfg.ReviewedGeneration)
+	require.Equal(t, "reviewed", reviewer.SwarmStatus)
+
+	// Merger completion is durable before its callback; reconciliation must still
+	// publish the result and terminalize the parent without another merger run.
+	mergerExec := &models.Execution{TaskID: f.merger.ID, Status: models.ExecRunning, PromptSent: f.merger.Prompt}
+	require.NoError(t, f.execRepo.Create(f.ctx, mergerExec))
+	require.NoError(t, f.execRepo.Complete(f.ctx, mergerExec.ID, models.ExecCompleted, "recovered merged result", "", 0, 1))
+	require.NoError(t, f.repo.UpdateStatus(f.ctx, f.merger.ID, models.StatusCompleted))
+	require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID))
+	f.assertNoSubmission()
+	merger, err := f.repo.GetByID(f.ctx, f.merger.ID)
+	require.NoError(t, err)
+	mergerCfg, err := models.ParseSwarmConfig(merger.SwarmConfig)
+	require.NoError(t, err)
+	require.Equal(t, 1, mergerCfg.MergedGeneration)
+	require.Equal(t, "integrated", merger.SwarmStatus)
+	parent, err := f.repo.GetByID(f.ctx, f.parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCompleted, parent.Status)
+	require.Equal(t, models.CategoryCompleted, parent.Category)
+}
+
+func TestSwarmServiceConcurrentTerminalCallbacksDoNotDuplicateRoles(t *testing.T) {
+	f := newFailedChildRepairFixture(t, 2, true, true)
+	for _, worker := range f.workers {
+		require.NoError(t, f.repo.UpdateStatus(f.ctx, worker.ID, models.StatusCompleted))
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func(id string) { defer wg.Done(); require.NoError(t, f.svc.OnChildCompleted(f.ctx, id)) }(f.workers[i%2].ID)
+		go func() { defer wg.Done(); require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID)) }()
+	}
+	wg.Wait()
+	f.submittedRole(models.SwarmRoleReviewer)
+	f.assertNoSubmission()
+
+	require.NoError(t, f.repo.UpdateStatus(f.ctx, f.reviewer.ID, models.StatusCompleted))
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); require.NoError(t, f.svc.OnChildCompleted(f.ctx, f.reviewer.ID)) }()
+		go func() { defer wg.Done(); require.NoError(t, f.svc.RecomputeParentStatus(f.ctx, f.parent.ID)) }()
+	}
+	wg.Wait()
+	f.submittedRole(models.SwarmRoleMerger)
+	f.assertNoSubmission()
+}
+
+func TestSwarmServiceFailedReviewerFollowupRepairStartsMergerOnce(t *testing.T) {
+	f := newFailedChildRepairFixture(t, 1, true, true)
+	f.terminal(f.workers[0], models.StatusCompleted)
+	f.submittedRole(models.SwarmRoleReviewer)
+	f.terminal(f.reviewer, models.StatusFailed)
+	f.assertNoSubmission()
+	require.NoError(t, f.svc.HandleChildFollowup(f.ctx, f.reviewer.ID, "repair review"))
+	f.terminal(f.reviewer, models.StatusCompleted)
+	f.submittedRole(models.SwarmRoleMerger)
+	require.NoError(t, f.svc.OnChildCompleted(f.ctx, f.reviewer.ID))
+	f.assertNoSubmission()
+}
+
+func TestSwarmServiceFailedWorkerRepairHonorsDisabledRoles(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		reviewerEnabled bool
+		mergerEnabled   bool
+		wantRole        models.SwarmRole
+	}{
+		{name: "reviewer disabled", reviewerEnabled: false, mergerEnabled: true, wantRole: models.SwarmRoleMerger},
+		{name: "merger disabled", reviewerEnabled: true, mergerEnabled: false, wantRole: models.SwarmRoleReviewer},
+		{name: "both disabled", reviewerEnabled: false, mergerEnabled: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFailedChildRepairFixture(t, 1, tc.reviewerEnabled, tc.mergerEnabled)
+			f.terminal(f.workers[0], models.StatusFailed)
+			require.NoError(t, f.svc.HandleChildFollowup(f.ctx, f.workers[0].ID, "repair"))
+			f.terminal(f.workers[0], models.StatusCompleted)
+			if tc.wantRole != "" {
+				f.submittedRole(tc.wantRole)
+			} else {
+				f.assertNoSubmission()
+				parent, err := f.repo.GetByID(f.ctx, f.parent.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.StatusCompleted, parent.Status)
+			}
+		})
 	}
 }

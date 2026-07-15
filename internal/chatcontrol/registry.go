@@ -139,14 +139,16 @@ const editTaskParams = `{"type":"object","properties":{"id":{"type":"string"},"t
 
 const sendMessageParams = `{"type":"object","properties":{"action":{"type":"string","enum":["send","list"],"description":"send delivers a message. list returns configured outbound targets including their target_kind."},"target":{"type":"string","description":"Delivery target. Format: platform, platform:#target-name, platform:target_id, or platform:target_id:thread_id. Saved outbound targets and home targets are preferred first. Authorized channel users/senders can be used as direct recipients, including email:person@example.com for an authorized Email sender, telegram:123456789 for an authorized Telegram numeric user ID, and slack:user:U123... or discord:user:1518288288572641398 for direct messages. Arbitrary unsaved explicit targets require the project policy. For Discord channel sends use discord:channel:<channel_id> or discord:channel:<channel_id>:<thread_id>. Prefer saved/named targets; call action=list to see configured targets."},"message":{"type":"string","description":"Text to send."},"subject":{"type":"string","description":"Optional subject for email targets. Ignored by chat platforms."}},"additionalProperties":false}`
 
-const githubCreateIssueParams = `{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as suggestion, bug, approved, in-progress. Do not use an openvibely: prefix."},"assignees":{"type":"array","items":{"type":"string"}}},"required":["title"],"additionalProperties":false}`
-const githubIssueNumberParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1}},"required":["issue_number"],"additionalProperties":false}`
-const githubListAssignedIssuesParams = `{"type":"object","properties":{"assignee":{"type":"string","description":"GitHub login whose assigned open issues should be listed."}},"required":["assignee"],"additionalProperties":false}`
-const githubListMyAssignedIssuesParams = `{"type":"object","properties":{},"additionalProperties":false}`
-const githubCommentIssueParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"body":{"type":"string"}},"required":["issue_number","body"],"additionalProperties":false}`
-const githubAddLabelsParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as approved, in-progress, pr-opened. Do not use an openvibely: prefix."}},"required":["issue_number","labels"],"additionalProperties":false}`
-const githubLinkTaskIssueParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"issue_number":{"type":"integer","minimum":1}},"required":["issue_number"],"additionalProperties":false}`
+const githubRepoURLProperty = `"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}`
+const githubCreateIssueParams = `{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as suggestion, bug, approved, in-progress. Do not use an openvibely: prefix."},"assignees":{"type":"array","items":{"type":"string"}},` + githubRepoURLProperty + `},"required":["title"],"additionalProperties":false}`
+const githubIssueNumberParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},` + githubRepoURLProperty + `},"required":["issue_number"],"additionalProperties":false}`
+const githubListAssignedIssuesParams = `{"type":"object","properties":{"assignee":{"type":"string","description":"GitHub login whose assigned open issues should be listed."},` + githubRepoURLProperty + `},"required":["assignee"],"additionalProperties":false}`
+const githubListMyAssignedIssuesParams = `{"type":"object","properties":{` + githubRepoURLProperty + `},"additionalProperties":false}`
+const githubCommentIssueParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"body":{"type":"string"},` + githubRepoURLProperty + `},"required":["issue_number","body"],"additionalProperties":false}`
+const githubAddLabelsParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as approved, in-progress, pr-opened. Do not use an openvibely: prefix."},` + githubRepoURLProperty + `},"required":["issue_number","labels"],"additionalProperties":false}`
 const githubOpenPullRequestParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"pr_title":{"type":"string","description":"Optional pull request title. Defaults to the task title."},"pr_body":{"type":"string","description":"Optional pull request body. Defaults to an OpenVibely task summary."},"base":{"type":"string","description":"Optional target branch. Defaults to the task merge target or repository default branch."},"draft":{"type":"boolean"},"issue_number":{"type":"integer","minimum":1,"description":"Optional GitHub issue number to persist on the task PR record."},"issue_url":{"type":"string","description":"Optional GitHub issue URL to persist on the task PR record."}},"additionalProperties":false}`
+const githubReplacePullRequestBranchParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"expected_head_sha":{"type":"string","pattern":"^[0-9a-fA-F]{40}$","description":"Exact current remote PR branch commit SHA used as the atomic lease guard."},"confirm_history_rewrite":{"type":"boolean","const":true,"description":"Must be true to explicitly confirm replacing shared pull request branch history."}},"required":["expected_head_sha","confirm_history_rewrite"],"additionalProperties":false}`
+const githubForwardPRFeedbackParams = `{"type":"object","properties":{"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}},"additionalProperties":false}`
 const githubActorAuthorizedParams = `{"type":"object","properties":{"github_login":{"type":"string","description":"GitHub login to check against the configured authorized actor list."}},"required":["github_login"],"additionalProperties":false}`
 
 // registry is the canonical list of all chat-controllable actions.
@@ -311,7 +313,7 @@ var registry = []ActionDef{
 	// --- GitHub domain ---
 	{
 		Name:         "github_create_issue",
-		Description:  "Create a GitHub issue in the current project's repository using plain labels such as suggestion, bug, approved, in-progress, or pr-opened. Labels must not use an openvibely: prefix.",
+		Description:  "Create a GitHub issue, defaulting to the current project repository. Pass repo_url to create it in a specific GitHub repository URL. Labels must not use an openvibely: prefix.",
 		Domain:       DomainGitHub,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
@@ -321,7 +323,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_get_issue",
-		Description:  "Read a GitHub issue from the current project's repository, including body, creator, assignees, and labels.",
+		Description:  "Read a GitHub issue by number, defaulting to the current project repository. Pass repo_url for a specific GitHub repository URL.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -331,7 +333,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_get_project_inbox",
-		Description:  "Read the current project's optional GitHub inbox assignee override. Use this with github_list_assigned_issues for GitHub App installs or custom mailbox accounts.",
+		Description:  "List GitHub Authorized Users as issue assignee candidates for the current project. Use these logins with github_list_assigned_issues for GitHub App or custom mailbox setups.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -341,7 +343,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_is_actor_authorized",
-		Description:  "Check whether a GitHub login is explicitly authorized as a trusted OpenVibely GitHub inbox assignee. Missing or empty authorization lists deny by default.",
+		Description:  "Check whether a GitHub login is in the GitHub Authorized Users list. Missing or empty authorization lists deny by default.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -351,7 +353,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_list_my_assigned_issues",
-		Description:  "List open GitHub issues in the current project's repository assigned to the authenticated PAT user configured for the GitHub channel. For GitHub App installations or custom inboxes, use github_list_assigned_issues with an explicit assignee.",
+		Description:  "List open GitHub issues assigned to the authenticated PAT user configured for the GitHub channel, defaulting to the current project repository. Pass repo_url for a specific GitHub repository URL. For GitHub App installations or custom inboxes, use github_list_assigned_issues with an explicit assignee.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -361,7 +363,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_list_assigned_issues",
-		Description:  "List open GitHub issues in the current project's repository assigned to the provided GitHub login. Pull request objects are omitted. Use this with an explicit Project Inbox Assignee override or GitHub App setup.",
+		Description:  "List open GitHub issues assigned to the provided GitHub login, defaulting to the current project repository. Pull request objects are omitted. Pass repo_url for a specific GitHub repository URL. For GitHub App/custom setups, pass a login from github_get_project_inbox.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -370,7 +372,7 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(githubListAssignedIssuesParams),
 	},
 	{Name: "github_list_assigned_issues_with_prs",
-		Description:  "List open GitHub issues assigned to a login only when each issue already has an associated pull request. Assigned issues without an associated PR are skipped by automation.",
+		Description:  "List open GitHub issues assigned to a login only when each issue already has an associated pull request, defaulting to the current project repository. Pass repo_url for a specific GitHub repository URL. Assigned issues without an associated PR are skipped by automation.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -380,7 +382,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_comment_on_issue",
-		Description:  "Post a comment to a GitHub issue in the current project's repository.",
+		Description:  "Post a comment to a GitHub issue, defaulting to the current project repository. Pass repo_url for a specific GitHub repository URL.",
 		Domain:       DomainGitHub,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
@@ -390,7 +392,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_add_issue_labels",
-		Description:  "Add plain labels to a GitHub issue, such as approved, in-progress, task-created, pr-opened, blocked, bug, performance, or duplication. Do not use an openvibely: prefix.",
+		Description:  "Add plain labels to a GitHub issue, defaulting to the current project repository. Pass repo_url for a specific GitHub repository URL. Do not use an openvibely: prefix.",
 		Domain:       DomainGitHub,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
@@ -399,24 +401,35 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(githubAddLabelsParams),
 	},
 	{
-		Name:         "github_link_task_to_issue",
-		Description:  "Persist an issue-to-task/PR link for the current project. The issue must already have an associated pull request; otherwise the link is skipped and no task work should start.",
-		Domain:       DomainGitHub,
-		Access:       AccessWrite,
-		Sensitivity:  SensitivityNormal,
-		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
-		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(githubLinkTaskIssueParams),
-	},
-	{
 		Name:         "github_open_pull_request",
-		Description:  "Open or reuse a GitHub pull request for an existing OpenVibely task worktree branch, push the branch, and persist the task PR record.",
+		Description:  "Open or reuse a GitHub pull request for an existing OpenVibely task worktree branch by publishing the branch through the configured GitHub channel token/API, then persist the task PR record.",
 		Domain:       DomainGitHub,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     webAPISurfaces(),
 		Parameters:   json.RawMessage(githubOpenPullRequestParams),
+	},
+	{
+		Name:              "github_replace_pull_request_branch",
+		Description:       "Destructively replace a linked task pull request branch with the task worktree's clean local HEAD using an atomic force-with-lease guard. Use only for explicitly approved history cleanup, and pass the exact current remote branch SHA.",
+		Domain:            DomainGitHub,
+		Access:            AccessWrite,
+		Sensitivity:       SensitivityDestructive,
+		NeedsConfirmation: true,
+		AllowedModes:      []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:          webAPISurfaces(),
+		Parameters:        json.RawMessage(githubReplacePullRequestBranchParams),
+	},
+	{
+		Name:         "github_forward_pr_feedback_to_tasks",
+		Description:  "Fetch new pull request comments/reviews from GitHub Authorized Users for OpenVibely-created task PRs and queue each new feedback item into the linked task thread, with durable deduplication.",
+		Domain:       DomainGitHub,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(githubForwardPRFeedbackParams),
 	}, // --- Schedules domain (RW in orchestrate) ---
 	{
 		Name:         "schedule_task",

@@ -684,14 +684,14 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							</div>
 						</div>
 					</div>
-						<div class="form-control">
+						<div id="model_temperature_field" class="form-control">
 							<label class="label"><span class="label-text">Temperature</span></label>
 							<input type="text" inputmode="decimal" pattern="[0-9]*.?[0-9]*" id="model_temperature" name="temperature" class="input input-bordered" value="0" placeholder="0–1"/>
 							<label class="label">
 								<span class="label-text-alt opacity-70">Optional. Leave default unless you know you need more randomness.</span>
 							</label>
 						</div>
-					<div class="form-control mt-3">
+						<div class="form-control mt-3">
 						<label class="label cursor-pointer justify-start gap-2">
 							<input type="checkbox" id="model_is_default" name="is_default" class="checkbox checkbox-sm"/>
 							<span class="label-text">Set as default model</span>
@@ -872,13 +872,16 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', efforts: ['low', 'medium', 'high', 'max'] },
 						{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'max'] },
 						{ value: 'claude-mythos-5', label: 'Claude Mythos 5', efforts: ['low', 'medium', 'high', 'max'] }
-					],				openai: [
+				],				openai: [
+					{ value: 'gpt-5.6-sol', label: 'gpt-5.6-sol', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+					{ value: 'gpt-5.6-terra', label: 'gpt-5.6-terra', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+					{ value: 'gpt-5.6-luna', label: 'gpt-5.6-luna', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
 					{ value: 'gpt-5.5', label: 'gpt-5.5', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.5-pro', label: 'gpt-5.5-pro', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.4', label: 'gpt-5.4', efforts: ['low', 'medium', 'high', 'xhigh'] },
-					{ value: 'gpt-5.4-mini', label: 'gpt-5.4-mini', efforts: ['low', 'medium', 'high'] },
+					{ value: 'gpt-5.4-mini', label: 'gpt-5.4-mini', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.3-codex', label: 'gpt-5.3-codex', efforts: ['low', 'medium', 'high', 'xhigh'] },
-					{ value: 'gpt-5.3-codex-spark', label: 'gpt-5.3-codex-spark', efforts: ['low', 'medium', 'high'] },
+					{ value: 'gpt-5.3-codex-spark', label: 'gpt-5.3-codex-spark', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.2-codex', label: 'gpt-5.2-codex', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.1-codex-max', label: 'gpt-5.1-codex-max', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.1-codex', label: 'gpt-5.1-codex', efforts: ['low', 'medium', 'high'] },
@@ -1629,20 +1632,26 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 			}
 
 			function toggleProviderFields(selectedModel, selectedReasoningEffort) {
-						var provider = document.getElementById('model_provider').value;
-						var effectiveProvider = canonicalProvider(provider);
-						var modelField = document.getElementById('model_field');
-						var apiKeyField = document.getElementById('api_key_field');				var apiKeyInput = document.getElementById('model_api_key');
+				var provider = document.getElementById('model_provider').value;
+				var effectiveProvider = canonicalProvider(provider);
+				var modelField = document.getElementById('model_field');
+				var temperatureField = document.getElementById('model_temperature_field');
+				var temperatureInput = document.getElementById('model_temperature');
+				var apiKeyField = document.getElementById('api_key_field');
+				var apiKeyInput = document.getElementById('model_api_key');
 				var anthropicAuthTypeField = document.getElementById('anthropic_auth_type_field');
 				var openaiAuthTypeField = document.getElementById('openai_auth_type_field');
 				var openaiConnectionMethodField = document.getElementById('openai_connection_method_field');
 				var authMethodField = document.getElementById('auth_method_field');
-					var ollamaInfo = document.getElementById('ollama_info');
-					var forcePresetDefaults = selectedModel === undefined && selectedReasoningEffort === undefined;
+				var ollamaInfo = document.getElementById('ollama_info');
+				var forcePresetDefaults = selectedModel === undefined && selectedReasoningEffort === undefined;
 
-							document.getElementById('model_provider_value').value = effectiveProvider;
-							hideAllInfoBoxes();				var activeModel = setModelOptions(provider, selectedModel);
-							if (modelField) modelField.classList.toggle('hidden', provider === 'mixture');
+				document.getElementById('model_provider_value').value = effectiveProvider;
+				hideAllInfoBoxes();
+				var activeModel = setModelOptions(provider, selectedModel);
+				if (modelField) modelField.classList.toggle('hidden', provider === 'mixture');
+				if (temperatureField) temperatureField.classList.toggle('hidden', provider === 'mixture');
+				if (temperatureInput) temperatureInput.disabled = provider === 'mixture';
 				if (provider === 'anthropic') {
 					anthropicAuthTypeField.classList.remove('hidden');
 					openaiAuthTypeField.classList.add('hidden');

@@ -397,13 +397,13 @@ func TestPrepareLifecycleTurn_SelectedTaskSkillsDoNotHideHookSkills(t *testing.T
 		{ID: "route", AgentID: agent.ID, When: models.LifecycleRouteTask, SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills, Blocking: true, Enabled: true},
 		{ID: "learn", AgentID: agent.ID, When: models.LifecycleAfterComplete, SkillKey: "observe_task_for_learning", OutputContract: models.OutputContractLearningSummary, Enabled: true},
 	}}
-	var afterSkillBody string
+	afterSkillBody := make(chan string, 1)
 	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(_ context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
 		switch hook.ID {
 		case "route":
 			return routePayload([]string{"task_skill"}, 0.9), nil
 		case "learn":
-			afterSkillBody = in.SkillBody
+			afterSkillBody <- in.SkillBody
 			return json.RawMessage(`{"summary":"ok","nothing_to_save":true}`), nil
 		default:
 			return nil, fmt.Errorf("unexpected hook %s", hook.ID)
@@ -421,17 +421,14 @@ func TestPrepareLifecycleTurn_SelectedTaskSkillsDoNotHideHookSkills(t *testing.T
 	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-selected-skill"})
 	turn.AfterComplete(nil, llmcontracts.ChatContext{})
 
-	deadline := time.After(2 * time.Second)
-	for afterSkillBody == "" {
-		select {
-		case <-deadline:
-			t.Fatalf("timed out waiting for after_complete skill resolution")
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
+	var resolvedSkillBody string
+	select {
+	case resolvedSkillBody = <-afterSkillBody:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for after_complete skill resolution")
 	}
-	if !strings.Contains(afterSkillBody, "observer skill body") {
-		t.Fatalf("expected after_complete hook skill from full catalog, got %q", afterSkillBody)
+	if !strings.Contains(resolvedSkillBody, "observer skill body") {
+		t.Fatalf("expected after_complete hook skill from full catalog, got %q", resolvedSkillBody)
 	}
 }
 

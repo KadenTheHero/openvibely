@@ -2,9 +2,16 @@ package service
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 type recordingDiffRepo struct {
@@ -95,6 +102,93 @@ func TestPublishDiffSnapshotIfChangedFinalSnapshotStillWritesAndPublishes(t *tes
 	assertDiffSnapshotEvent(t, sub, "task-1", "exec-1")
 	if got := len(repo.updates); got != 2 {
 		t.Fatalf("expected final diff to write even when unchanged, got %d writes", got)
+	}
+}
+
+func TestBroadcastDiffSnapshotsNonWorktreeUsesHeadBase(t *testing.T) {
+	ctx := context.Background()
+	repoDir := createTestGitRepo(t)
+	runGitTest(t, repoDir, "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(repoDir, "committed-feature.txt"), []byte("unrelated committed change\n"), 0o644); err != nil {
+		t.Fatalf("write committed feature file: %v", err)
+	}
+	runGitTest(t, repoDir, "add", "committed-feature.txt")
+	runGitTest(t, repoDir, "commit", "-m", "feature commit")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Pending direct-checkout edit\n"), 0o644); err != nil {
+		t.Fatalf("write pending file: %v", err)
+	}
+
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	project := &models.Project{Name: "Non-worktree snapshot project", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Direct checkout snapshot",
+		Category:  models.CategoryActive,
+		Status:    models.StatusRunning,
+		Prompt:    "update project-owned files",
+		AgentID:   &agent.ID,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	execution := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    task.Prompt,
+	}
+	if err := execRepo.Create(ctx, execution); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		svc.broadcastDiffSnapshots(ctx, task.ID, execution.ID, repoDir, repoDir, "task/stale-lineage", "main", false, stop)
+	}()
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		default:
+			close(stop)
+			<-done
+		}
+	})
+
+	deadline := time.Now().Add(4 * time.Second)
+	var diffOutput string
+	for time.Now().Before(deadline) {
+		stored, err := execRepo.GetByID(ctx, execution.ID)
+		if err != nil {
+			t.Fatalf("get execution: %v", err)
+		}
+		diffOutput = stored.DiffOutput
+		if diffOutput != "" {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	close(stop)
+	<-done
+
+	if diffOutput == "" {
+		t.Fatal("timed out waiting for a non-worktree diff snapshot")
+	}
+	if !strings.Contains(diffOutput, "Pending direct-checkout edit") {
+		t.Fatalf("expected HEAD-relative pending edit in snapshot, got:\n%s", diffOutput)
+	}
+	if strings.Contains(diffOutput, "committed-feature.txt") || strings.Contains(diffOutput, "unrelated committed change") {
+		t.Fatalf("non-worktree snapshot must use git diff HEAD, not main-to-feature history; got:\n%s", diffOutput)
 	}
 }
 

@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -52,6 +55,23 @@ type fileWritingLLMCaller struct {
 	fileName string
 	content  string
 	workDir  string
+}
+
+type completionPathWritingLLMCaller struct {
+	fileName string
+	content  string
+	workDir  string
+}
+
+func (c *completionPathWritingLLMCaller) CallModel(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
+	if strings.HasPrefix(prompt, "Write one concise git commit subject") {
+		return "Update stale fixture", "Update stale fixture", 1, nil
+	}
+	c.workDir = workDir
+	if err := os.WriteFile(filepath.Join(workDir, c.fileName), []byte(c.content), 0644); err != nil {
+		return "", "", 0, err
+	}
+	return "changed files\n[STATUS: SUCCESS]", "changed files\n[STATUS: SUCCESS]", 10, nil
 }
 
 func (c *fileWritingLLMCaller) CallModel(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
@@ -644,6 +664,26 @@ func TestLLMService_CallAgentDirectStreamingDetailed_PreservesFailedHistoryWitho
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected chat context messages\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestLLMService_CallAgentDirectStreamingDetailed_PropagatesTransportScope(t *testing.T) {
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	capture := &captureProviderAdapter{}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
+
+	ctx := llmcontracts.WithTransportScope(context.Background(), "chat:project:project-1")
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test"}
+	if _, err := svc.CallAgentDirectStreamingDetailed(ctx, "hello", nil, agent, "exec-123", nil, "ctx", "/tmp/workdir", nil); err != nil {
+		t.Fatalf("CallAgentDirectStreamingDetailed error: %v", err)
+	}
+
+	requests := capture.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("provider requests = %d, want 1", len(requests))
+	}
+	if got := requests[0].TransportScope; got != "chat:project:project-1" {
+		t.Fatalf("provider transport scope = %q", got)
 	}
 }
 
@@ -1644,6 +1684,212 @@ func TestLLMService_ExecuteTaskWithAgent_IncludesSendMessageRuntimeTool(t *testi
 	}
 }
 
+func TestLLMService_ExecuteTaskWithAgent_MixtureSupportedAggregatorReceivesGrantedAndDefaultTools(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	svc.SetAgentRepo(agentRepo)
+	svc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
+	svc.SetChannelMessageRouter(NewChannelMessageRouter(repository.NewChannelTargetRepo(db), repository.NewSettingsRepo(db)))
+	recorder := &recordingMixtureAdapter{responses: map[string]llmcontracts.AgentResult{}, errors: map[string]error{}}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		models.ProviderMixture: &mixtureProviderAdapter{svc: svc},
+		models.ProviderTest:    recorder,
+		models.ProviderOpenAI:  recorder,
+	}
+
+	ref := createMixtureTestConfig(t, llmConfigRepo, "Initial Task Reference", models.ProviderTest, "ref")
+	aggregator := createMixtureTestConfig(t, llmConfigRepo, "Initial Task Aggregator", models.ProviderOpenAI, "gpt-test")
+	recorder.responses[ref.ID] = llmcontracts.AgentResult{Output: "private advice", TextOnlyOutput: "private advice"}
+	aggregatorOutput := "completed\n[CREATE_TASK]{\"title\":\"must not be created\",\"prompt\":\"runtime tools disable markers\"}[/CREATE_TASK]"
+	recorder.responses[aggregator.ID] = llmcontracts.AgentResult{Output: aggregatorOutput, TextOnlyOutput: aggregatorOutput}
+	mixture := &models.LLMConfig{
+		Name: "Initial Task Mixture", Provider: models.ProviderMixture, Model: "mixture",
+		MixtureConfigJSON: `{"enabled":true,"reference_models":[{"agent_config_id":"` + ref.ID + `"}],"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	if err := llmConfigRepo.Create(ctx, mixture); err != nil {
+		t.Fatalf("create mixture: %v", err)
+	}
+	assignedAgent := &models.Agent{ID: "mixture-tool-agent", Key: "mixture_tool_agent", Name: "Mixture Tool Agent", Enabled: true, Tools: []string{"agent_allowed"}}
+	if err := agentRepo.Create(ctx, assignedAgent); err != nil {
+		t.Fatalf("create assigned agent: %v", err)
+	}
+	task := &models.Task{ProjectID: "default", Title: "Initial mixture task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "Create a follow-up task", AgentDefinitionID: &assignedAgent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	grantedTools := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "agent_allowed", Access: llmcontracts.RuntimeToolAccessRead}}}
+	recorder.onCall = func(req llmcontracts.AgentRequest) {
+		if req.Agent.ID != aggregator.ID {
+			return
+		}
+		rt := llmcontracts.RuntimeToolsFromContext(req.Ctx)
+		if rt == nil || rt.Executor == nil {
+			t.Fatalf("aggregator runtime is not executable: %#v", rt)
+		}
+		_, handled, isErr, execErr := rt.Executor(req.Ctx, "create_task", json.RawMessage(`{"title":"Initial mixture runtime child","prompt":"Created through the aggregator runtime.","category":"backlog"}`))
+		if execErr != nil || !handled || isErr {
+			t.Fatalf("create_task execution failed handled=%v isErr=%v err=%v", handled, isErr, execErr)
+		}
+	}
+	callCtx := llmcontracts.WithRuntimeTools(ctx, grantedTools)
+
+	exec, err := svc.ExecuteTaskWithAgent(callCtx, *task, *mixture)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil || exec.Status != models.ExecCompleted {
+		t.Fatalf("expected completed execution, got %#v", exec)
+	}
+
+	requests := recorder.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("expected one reference and one aggregator request, got %d", len(requests))
+	}
+	for _, req := range requests {
+		rt := llmcontracts.RuntimeToolsFromContext(req.Ctx)
+		if req.Agent.ID == ref.ID {
+			if rt != nil {
+				t.Fatalf("reference inherited runtime tools: %#v", rt)
+			}
+			continue
+		}
+		if req.Agent.ID != aggregator.ID {
+			t.Fatalf("unexpected mixture request agent %q", req.Agent.ID)
+		}
+		if req.AgentDefinition == nil || req.AgentDefinition.ID != assignedAgent.ID {
+			t.Fatalf("aggregator did not preserve assigned agent: %#v", req.AgentDefinition)
+		}
+		if rt == nil || !rt.HasDefinition("agent_allowed") || !rt.HasDefinition("create_task") || !rt.HasDefinition("send_message") {
+			t.Fatalf("aggregator missing granted/default runtime tools: %#v", rt)
+		}
+		if rt.HasDefinition("agent_disallowed") {
+			t.Fatalf("aggregator received an ungranted agent tool: %#v", rt)
+		}
+	}
+	tasks, err := taskRepo.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected original task plus runtime-created child, got %d tasks", len(tasks))
+	}
+	foundRuntimeChild := false
+	for _, created := range tasks {
+		if created.Title == "must not be created" {
+			t.Fatalf("runtime-enabled mixture processed marker output: %#v", tasks)
+		}
+		if created.Title == "Initial mixture runtime child" {
+			foundRuntimeChild = true
+		}
+	}
+	if !foundRuntimeChild {
+		t.Fatalf("aggregator runtime did not persist created task: %#v", tasks)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndProcessesMarkers(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+
+	providerRequests := make(chan map[string]any, 1)
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		providerRequests <- body
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"Initial Ollama mixture child\",\"prompt\":\"Created through marker fallback.\"}\n[/CREATE_TASK]"},"done":false}`)
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
+	}))
+	defer providerServer.Close()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	svc.SetTaskService(NewTaskService(taskRepo, attachmentRepo, nil))
+	recorder := &recordingMixtureAdapter{responses: map[string]llmcontracts.AgentResult{}, errors: map[string]error{}}
+	ollamaAdapter := svc.providerAdapters[models.ProviderOllama]
+	svc.providerAdapters[models.ProviderTest] = recorder
+	svc.providerAdapters[models.ProviderOllama] = providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		if rt := llmcontracts.RuntimeToolsFromContext(req.Ctx); rt != nil {
+			t.Fatalf("runtime-tool-incapable aggregator inherited tools: %#v", rt)
+		}
+		return ollamaAdapter.Call(req)
+	})
+
+	ref := createMixtureTestConfig(t, llmConfigRepo, "Initial Ollama Reference", models.ProviderTest, "ref")
+	recorder.responses[ref.ID] = llmcontracts.AgentResult{Output: "private advice", TextOnlyOutput: "private advice"}
+	aggregator := &models.LLMConfig{Name: "Initial Ollama Aggregator", Provider: models.ProviderOllama, Model: "test-model", OllamaBaseURL: providerServer.URL}
+	if err := llmConfigRepo.Create(ctx, aggregator); err != nil {
+		t.Fatalf("create Ollama aggregator: %v", err)
+	}
+	mixture := &models.LLMConfig{
+		Name: "Initial Ollama Mixture", Provider: models.ProviderMixture, Model: "mixture",
+		MixtureConfigJSON: `{"enabled":true,"reference_models":[{"agent_config_id":"` + ref.ID + `"}],"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	if err := llmConfigRepo.Create(ctx, mixture); err != nil {
+		t.Fatalf("create mixture: %v", err)
+	}
+	task := &models.Task{ProjectID: "default", Title: "Initial Ollama mixture task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "Create a child task"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	grantedTools := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "agent_allowed", Access: llmcontracts.RuntimeToolAccessRead}}}
+
+	exec, err := svc.ExecuteTaskWithAgent(llmcontracts.WithRuntimeTools(ctx, grantedTools), *task, *mixture)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil || exec.Status != models.ExecCompleted {
+		t.Fatalf("expected completed execution, got %#v", exec)
+	}
+	requests := recorder.Requests()
+	if len(requests) != 1 || requests[0].Agent.ID != ref.ID {
+		t.Fatalf("expected one reference request, got %#v", requests)
+	}
+	if rt := llmcontracts.RuntimeToolsFromContext(requests[0].Ctx); rt != nil {
+		t.Fatalf("reference inherited runtime tools: %#v", rt)
+	}
+	select {
+	case providerRequest := <-providerRequests:
+		if _, exists := providerRequest["tools"]; exists {
+			t.Fatalf("Ollama payload included runtime tools: %#v", providerRequest["tools"])
+		}
+	default:
+		t.Fatal("expected concrete Ollama aggregator request")
+	}
+	tasks, err := taskRepo.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	foundChild := false
+	for _, created := range tasks {
+		if created.Title == "Initial Ollama mixture child" {
+			foundChild = true
+		}
+	}
+	if !foundChild {
+		t.Fatalf("marker fallback did not create child task: %#v", tasks)
+	}
+}
+
 func TestLLMService_ExecuteTaskWithAgent_RuntimeToolsSkipTaskCreationMarkers(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
@@ -2114,6 +2360,188 @@ func TestLLMService_ExecuteTask_MemoryConsolidationUsesNormalExecutionPath(t *te
 	}
 }
 
+func TestLLMService_ExecuteTask_GitWorktreeIsolation(t *testing.T) {
+	tests := []struct {
+		name           string
+		prepareRepo    func(t *testing.T) string
+		wantErr        string
+		wantModelCalls int
+	}{
+		{
+			name: "committed local repository without remote uses worktree",
+			prepareRepo: func(t *testing.T) string {
+				return createTestGitRepo(t)
+			},
+			wantModelCalls: 1,
+		},
+		{
+			name: "unborn repository fails closed instead of using main checkout",
+			prepareRepo: func(t *testing.T) string {
+				repoDir := t.TempDir()
+				cmd := exec.Command("git", "init", "-b", "main")
+				cmd.Dir = repoDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git init: %v\n%s", err, out)
+				}
+				return repoDir
+			},
+			wantErr: "repository has no commit for worktree base",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			llmConfigRepo := repository.NewLLMConfigRepo(db)
+			execRepo := repository.NewExecutionRepo(db)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			projectRepo := repository.NewProjectRepo(db)
+			settingsRepo := repository.NewSettingsRepo(db)
+			scheduleRepo := repository.NewScheduleRepo(db)
+			attachmentRepo := repository.NewAttachmentRepo(db)
+
+			repoDir := tt.prepareRepo(t)
+			project := &models.Project{Name: "Worktree Isolation", RepoPath: repoDir}
+			if err := projectRepo.Create(ctx, project); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+			agent := ensureDefaultAgent(t, llmConfigRepo)
+			task := &models.Task{ProjectID: project.ID, Title: "Isolated coding task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "write a file", AgentID: &agent.ID}
+			if err := taskRepo.Create(ctx, task); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+
+			svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+			svc.SetWorktreeService(NewWorktreeService(taskRepo, projectRepo, settingsRepo))
+			mock := &testutil.MockLLMCaller{Response: "done", TextOnly: "done"}
+			svc.SetLLMCaller(mock)
+
+			_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+				}
+			} else if err != nil {
+				t.Fatalf("ExecuteTaskWithAgent: %v", err)
+			}
+			if got := mock.CallCount(); got != tt.wantModelCalls {
+				t.Fatalf("expected %d model calls, got %d", tt.wantModelCalls, got)
+			}
+
+			updated, getErr := taskRepo.GetByID(ctx, task.ID)
+			if getErr != nil {
+				t.Fatalf("get task: %v", getErr)
+			}
+			if tt.wantErr != "" {
+				if updated.Status != models.StatusFailed || updated.WorktreePath != "" {
+					t.Fatalf("expected failed task without worktree metadata, got status=%s path=%q", updated.Status, updated.WorktreePath)
+				}
+				return
+			}
+			if updated.WorktreePath == "" || updated.WorktreePath == repoDir {
+				t.Fatalf("expected isolated worktree path, got %q", updated.WorktreePath)
+			}
+			if got := mock.LastCall().WorkDir; got != updated.WorktreePath {
+				t.Fatalf("expected model workdir %q, got %q", updated.WorktreePath, got)
+			}
+			if remotes, remoteErr := exec.Command("git", "-C", repoDir, "remote").Output(); remoteErr != nil || strings.TrimSpace(string(remotes)) != "" {
+				t.Fatalf("test repository should have no remote, output=%q err=%v", remotes, remoteErr)
+			}
+		})
+	}
+}
+
+func TestLLMService_ExecuteTask_DirectCheckoutCompletionIgnoresStaleWorktreeMetadata(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	repoPath := createTestGitRepo(t)
+	staleWorktreePath := filepath.Join(t.TempDir(), "stale-worktree")
+	runGitTest(t, repoPath, "worktree", "add", "-b", "task/stale-completion", staleWorktreePath, "main")
+	if err := os.WriteFile(filepath.Join(staleWorktreePath, "stale.txt"), []byte("stale worktree change\n"), 0644); err != nil {
+		t.Fatalf("write stale worktree change: %v", err)
+	}
+	staleHead := runGitTest(t, staleWorktreePath, "rev-parse", "HEAD")
+
+	project := &models.Project{Name: "Direct Checkout Repo", RepoPath: repoPath}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agentRepo := repository.NewAgentRepo(db)
+	agentDef := &models.Agent{
+		Name:         "Direct Checkout Agent",
+		SystemPrompt: "Edit the project checkout directly",
+		Model:        "inherit",
+		ToolConfig: models.AgentToolConfig{
+			DisableRuntimeWorktree: true,
+		},
+	}
+	if err := agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = models.ProviderTest
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Direct checkout completion",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		Prompt:            "Update README in the project checkout.",
+		AgentDefinitionID: &agentDef.ID,
+		WorktreePath:      staleWorktreePath,
+		WorktreeBranch:    "task/stale-completion",
+		MergeTargetBranch: "main",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	beforeTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task before execution: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetAgentRepo(agentRepo)
+	svc.SetWorktreeService(NewWorktreeService(taskRepo, projectRepo, settingsRepo))
+	caller := &completionPathWritingLLMCaller{fileName: "README.md", content: "# Direct checkout completion\n"}
+	svc.SetLLMCaller(caller)
+
+	execution, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if caller.workDir != repoPath {
+		t.Fatalf("expected direct project checkout workdir %q, got %q", repoPath, caller.workDir)
+	}
+	if !strings.Contains(execution.DiffOutput, "+# Direct checkout completion") {
+		t.Fatalf("expected completed execution to persist the direct-checkout HEAD diff, got:\n%s", execution.DiffOutput)
+	}
+	if strings.Contains(execution.DiffOutput, "stale.txt") || strings.Contains(execution.DiffOutput, "stale worktree change") {
+		t.Fatalf("completed execution must not persist stale worktree changes, got:\n%s", execution.DiffOutput)
+	}
+	if got := runGitTest(t, staleWorktreePath, "rev-parse", "HEAD"); got != staleHead {
+		t.Fatalf("completion committed stale worktree: HEAD changed from %s to %s", staleHead, got)
+	}
+	if got := runGitTest(t, staleWorktreePath, "status", "--porcelain"); got != "?? stale.txt" {
+		t.Fatalf("expected stale worktree to remain untouched and dirty, got status %q", got)
+	}
+	afterTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task after execution: %v", err)
+	}
+	if afterTask.MergeStatus != beforeTask.MergeStatus {
+		t.Fatalf("direct-checkout completion changed stale worktree merge status from %q to %q", beforeTask.MergeStatus, afterTask.MergeStatus)
+	}
+}
+
 func TestLLMService_ExecuteTask_MemoryConsolidationSkipsRuntimeWorktree(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
@@ -2339,12 +2767,16 @@ func TestLLMService_ExecuteTaskWithAgent_LoadsAttachments(t *testing.T) {
 		t.Fatalf("failed to create task: %v", err)
 	}
 
+	attachmentPath := filepath.Join(t.TempDir(), "test.png")
+	if err := os.WriteFile(attachmentPath, []byte("png"), 0o644); err != nil {
+		t.Fatalf("failed to create attachment file: %v", err)
+	}
 	attachment := &models.Attachment{
 		TaskID:    task.ID,
 		FileName:  "test.png",
-		FilePath:  "/tmp/test.png",
+		FilePath:  attachmentPath,
 		MediaType: "image/png",
-		FileSize:  1024,
+		FileSize:  3,
 	}
 	if err := attachmentRepo.Create(ctx, attachment); err != nil {
 		t.Fatalf("failed to create attachment: %v", err)
@@ -3202,6 +3634,7 @@ func TestLLMService_ExecuteTask_ScopedFilesPrepFailureCompletesExecution(t *test
 }
 
 type fakeGitHubIssueRuntimeProvider struct {
+	resolveRepoFn        func(context.Context, string, string) (*GitHubRepoRef, error)
 	createIssueFn        func(context.Context, *GitHubRepoRef, GitHubCreateIssueRequest) (*GitHubIssue, error)
 	getIssueFn           func(context.Context, *GitHubRepoRef, int) (*GitHubIssue, error)
 	findPRFn             func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
@@ -3209,21 +3642,45 @@ type fakeGitHubIssueRuntimeProvider struct {
 	listMyIssuesFn       func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
 	listAssignedIssuesFn func(context.Context, *GitHubRepoRef, string) ([]GitHubIssue, error)
 	listIssuesPRFn       func(context.Context, *GitHubRepoRef, string) ([]GitHubIssueWithPullRequest, error)
+	listPRFeedbackFn     func(context.Context, *GitHubRepoRef, int) ([]GitHubPullRequestFeedback, error)
 	commentIssueFn       func(context.Context, *GitHubRepoRef, int, string) error
-	pushBranchFn         func(context.Context, string, string, string, *GitHubRepoRef) error
+	publishBranchFn      func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) error
+	replaceBranchHeadFn  func(context.Context, *GitHubRepoRef, GitHubReplaceBranchHeadRequest) error
+	getPullRequestFn     func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
 	findBranchPRFn       func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error)
 	createPRFn           func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+	if f.resolveRepoFn != nil {
+		return f.resolveRepoFn(ctx, repoURL, repoPath)
+	}
 	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
 }
 
-func (f *fakeGitHubIssueRuntimeProvider) PushBranch(ctx context.Context, repoPath, worktreePath, branch string, repo *GitHubRepoRef) error {
-	if f.pushBranchFn != nil {
-		return f.pushBranchFn(ctx, repoPath, worktreePath, branch, repo)
+func (f *fakeGitHubIssueRuntimeProvider) DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error) {
+	return "main", nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) PublishBranch(ctx context.Context, repo *GitHubRepoRef, req GitHubPublishBranchRequest) error {
+	if f.publishBranchFn != nil {
+		return f.publishBranchFn(ctx, repo, req)
 	}
 	return nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error {
+	if f.replaceBranchHeadFn != nil {
+		return f.replaceBranchHeadFn(ctx, repo, req)
+	}
+	return nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) GetPullRequest(ctx context.Context, repo *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
+	if f.getPullRequestFn != nil {
+		return f.getPullRequestFn(ctx, repo, number)
+	}
+	return nil, fmt.Errorf("get PR not configured")
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
@@ -3254,6 +3711,10 @@ func (f *fakeGitHubIssueRuntimeProvider) GetIssue(ctx context.Context, repo *Git
 	return &GitHubIssue{Number: issueNumber, URL: fmt.Sprintf("https://github.com/openvibely/openvibely/issues/%d", issueNumber), Title: "Issue"}, nil
 }
 
+func (f *fakeGitHubIssueRuntimeProvider) GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error) {
+	return &GitHubAuthenticatedUser{Login: "channel-user", Source: GitHubAuthModePAT}, nil
+}
+
 func (f *fakeGitHubIssueRuntimeProvider) ListAuthenticatedAssignedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
 	if f.listMyIssuesFn != nil {
 		return f.listMyIssuesFn(ctx, repo)
@@ -3278,6 +3739,13 @@ func (f *fakeGitHubIssueRuntimeProvider) ListAssignedIssuesWithPullRequests(ctx 
 func (f *fakeGitHubIssueRuntimeProvider) FindPullRequestForIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubPullRequest, error) {
 	if f.findPRFn != nil {
 		return f.findPRFn(ctx, repo, issueNumber)
+	}
+	return nil, nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) ListPullRequestFeedback(ctx context.Context, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
+	if f.listPRFeedbackFn != nil {
+		return f.listPRFeedbackFn(ctx, repo, prNumber)
 	}
 	return nil, nil
 }
@@ -3307,6 +3775,8 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	projectRepo := repository.NewProjectRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	prRepo := repository.NewTaskPullRequestRepo(db)
+	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
 	project := &models.Project{Name: "GitHub Runtime Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely.git"}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -3316,16 +3786,80 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 		t.Fatalf("create task: %v", err)
 	}
 
-	provider := &fakeGitHubIssueRuntimeProvider{}
+	var createdRepo, commentedRepo, labeledRepo string
+	var replacementReq GitHubReplaceBranchHeadRequest
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+			switch repoURL {
+			case project.RepoURL:
+				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+			case "https://github.com/example/other":
+				if strings.TrimSpace(repoPath) != "" {
+					t.Fatalf("expected explicit repo_url lookup to avoid local repo path, got %q", repoPath)
+				}
+				return &GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other"}, nil
+			default:
+				t.Fatalf("unexpected repo URL %q", repoURL)
+				return nil, nil
+			}
+		},
+		listMyIssuesFn: func(_ context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+			if repo.Owner == "example" && repo.Name == "other" {
+				return &GitHubAuthenticatedUser{Login: "channel-user", Source: GitHubAuthModePAT}, []GitHubIssue{{Number: 7, URL: "https://github.com/example/other/issues/7", Title: "Explicit URL", State: "open", Assignees: []string{"channel-user"}}}, nil
+			}
+			return &GitHubAuthenticatedUser{Login: "channel-user", Source: GitHubAuthModePAT}, []GitHubIssue{{Number: 5, URL: "https://github.com/openvibely/openvibely/issues/5", Title: "Testing", State: "open", Assignees: []string{"channel-user"}}}, nil
+		},
+		listAssignedIssuesFn: func(_ context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssue, error) {
+			if repo.Owner == "example" && repo.Name == "other" {
+				return []GitHubIssue{{Number: 8, URL: "https://github.com/example/other/issues/8", Title: "Explicit assignee URL", State: "open", Assignees: []string{assignee}}}, nil
+			}
+			return []GitHubIssue{{Number: 6, URL: "https://github.com/openvibely/openvibely/issues/6", Title: "Override", State: "open", Assignees: []string{assignee}}}, nil
+		},
+		createIssueFn: func(_ context.Context, repo *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			createdRepo = repo.FullName
+			return &GitHubIssue{Number: 9, URL: "https://github.com/example/other/issues/9", Title: req.Title, State: "open", Labels: req.Labels, Assignees: req.Assignees}, nil
+		},
+		commentIssueFn: func(_ context.Context, repo *GitHubRepoRef, issueNumber int, body string) error {
+			commentedRepo = repo.FullName
+			if issueNumber != 9 || body != "Looks good" {
+				t.Fatalf("unexpected runtime comment input issue=%d body=%q", issueNumber, body)
+			}
+			return nil
+		},
+		addLabelsFn: func(_ context.Context, repo *GitHubRepoRef, issueNumber int, labels []string) error {
+			for _, label := range labels {
+				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(label)), "openvibely:") {
+					return fmt.Errorf("github issue labels must not use openvibely: prefix: %s", strings.TrimSpace(label))
+				}
+			}
+			labeledRepo = repo.FullName
+			if issueNumber != 9 || len(labels) != 1 || labels[0] != "approved" {
+				t.Fatalf("unexpected runtime labels input issue=%d labels=%v", issueNumber, labels)
+			}
+			return nil
+		},
+		getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
+			if number != 202 {
+				return nil, fmt.Errorf("unexpected pull request #%d", number)
+			}
+			return &GitHubPullRequest{Number: number, HeadRef: "task/existing-runtime-pr", HeadRepoFullName: "openvibely/openvibely"}, nil
+		},
+		replaceBranchHeadFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error {
+			replacementReq = req
+			return nil
+		},
+	}
 	rt := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
-		ProjectID:           project.ID,
-		ProjectRepo:         projectRepo,
-		TaskRepo:            taskRepo,
-		TaskPullRequestRepo: prRepo,
-		GitHubAuthRepo:      repository.NewGitHubAuthRepo(db),
-		GitHub:              provider,
+		ProjectID:            project.ID,
+		ProjectRepo:          projectRepo,
+		TaskRepo:             taskRepo,
+		TaskPullRequestRepo:  prRepo,
+		GitHubPRFeedbackRepo: feedbackRepo,
+		GitHubAuthRepo:       repository.NewGitHubAuthRepo(db),
+		ThreadInputRepo:      threadInputRepo,
+		GitHub:               provider,
 	})
-	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request"} {
+	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
 		if rt == nil || !rt.HasDefinition(name) {
 			t.Fatalf("expected %s in default GitHub runtime definitions for task runs, got %#v", name, rt)
 		}
@@ -3345,21 +3879,45 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"Number":6`) {
 		t.Fatalf("expected explicit assigned issues output, got %s", out)
 	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_list_my_assigned_issues", []byte(`{"repo_url":"https://github.com/example/other"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected explicit repo_url my assigned issues success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if !strings.Contains(out, `"Number":7`) || !strings.Contains(out, `"https://github.com/example/other/issues/7"`) {
+		t.Fatalf("expected explicit repo_url my assigned issues output, got %s", out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_list_assigned_issues", []byte(`{"assignee":"Dev-Bot","repo_url":"https://github.com/example/other"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected explicit repo_url assigned issues success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if !strings.Contains(out, `"Number":8`) || !strings.Contains(out, `"https://github.com/example/other/issues/8"`) {
+		t.Fatalf("expected explicit repo_url assigned issues output, got %s", out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_create_issue", []byte(`{"title":"URL issue","body":"Created by URL","labels":["bug"],"assignees":["dev-bot"],"repo_url":"https://github.com/example/other"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected explicit repo_url create issue success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if createdRepo != "example/other" || !strings.Contains(out, `"Number":9`) || !strings.Contains(out, `"https://github.com/example/other/issues/9"`) {
+		t.Fatalf("expected explicit repo_url create output repo=%q out=%s", createdRepo, out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_comment_on_issue", []byte(`{"issue_number":9,"body":"Looks good","repo_url":"https://github.com/example/other"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected explicit repo_url comment success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if commentedRepo != "example/other" || !strings.Contains(out, `"issue_number":9`) {
+		t.Fatalf("expected explicit repo_url comment output repo=%q out=%s", commentedRepo, out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_add_issue_labels", []byte(`{"issue_number":9,"labels":["approved"],"repo_url":"https://github.com/example/other"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected explicit repo_url label success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if labeledRepo != "example/other" || !strings.Contains(out, `"labels":["approved"]`) {
+		t.Fatalf("expected explicit repo_url label output repo=%q out=%s", labeledRepo, out)
+	}
 
 	_, handled, isErr, err = rt.Executor(ctx, "github_add_issue_labels", []byte(`{"issue_number":77,"labels":["openvibely:bug"]}`))
 	if !handled || !isErr || err == nil || !strings.Contains(err.Error(), "openvibely:") {
 		t.Fatalf("expected prefixed label rejection handled=%v isErr=%v err=%v", handled, isErr, err)
-	}
-
-	out, handled, isErr, err = rt.Executor(ctx, "github_link_task_to_issue", []byte(fmt.Sprintf(`{"task_id":"%s","issue_number":77}`, task.ID)))
-	if !handled || isErr || err != nil {
-		t.Fatalf("expected link skip success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
-	}
-	if !strings.Contains(out, `"skipped":true`) || !strings.Contains(out, "no associated pull request") {
-		t.Fatalf("expected skip-without-pr output, got %s", out)
-	}
-	if record, err := prRepo.GetByIssueNumber(ctx, 77); err != nil || record != nil {
-		t.Fatalf("expected no persisted PR link for skipped issue, record=%#v err=%v", record, err)
 	}
 
 	task.WorktreeBranch = "task/runtime-pr"
@@ -3385,7 +3943,8 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	if err := taskRepo.Create(ctx, existingPRTask); err != nil {
 		t.Fatalf("create existing PR task: %v", err)
 	}
-	if err := taskRepo.UpdateWorktreeInfo(ctx, existingPRTask.ID, "", "task/existing-runtime-pr"); err != nil {
+	existingPRWorktree := t.TempDir()
+	if err := taskRepo.UpdateWorktreeInfo(ctx, existingPRTask.ID, existingPRWorktree, "task/existing-runtime-pr"); err != nil {
 		t.Fatalf("update existing PR task worktree branch: %v", err)
 	}
 	oldIssueNumber := 99
@@ -3405,6 +3964,18 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	}
 	if record == nil || record.PRNumber != 202 || record.IssueNumber == nil || *record.IssueNumber != 100 || record.IssueURL != "" {
 		t.Fatalf("expected existing runtime PR issue number with stale URL cleared, got %#v", record)
+	}
+
+	expectedHead := strings.Repeat("a", 40)
+	out, handled, isErr, err = rt.Executor(ctx, "github_replace_pull_request_branch", []byte(fmt.Sprintf(`{"task_id":"%s","expected_head_sha":"%s","confirm_history_rewrite":true}`, existingPRTask.ID, expectedHead)))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected PR branch replacement success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if replacementReq.WorktreePath != existingPRWorktree || replacementReq.Branch != "task/existing-runtime-pr" || replacementReq.ExpectedHead != expectedHead {
+		t.Fatalf("unexpected runtime replacement request: %#v", replacementReq)
+	}
+	if !strings.Contains(out, `"replaced_branch":"task/existing-runtime-pr"`) {
+		t.Fatalf("expected replacement output, got %s", out)
 	}
 
 	existingURLTask := &models.Task{ProjectID: project.ID, Title: "Existing Runtime PR URL", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "work"}
@@ -3437,19 +4008,84 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	if !strings.Contains(out, `"authorized":false`) {
 		t.Fatalf("expected deny-by-default authorization output, got %s", out)
 	}
-	if err := repository.NewGitHubAuthRepo(db).UpsertProjectInbox(ctx, &models.GitHubProjectInbox{ProjectID: project.ID, GitHubLogin: "Dev-Bot", Enabled: true}); err != nil {
-		t.Fatalf("configure github project inbox: %v", err)
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	if err := githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "Dev-Bot", Permission: "triage"}); err != nil {
+		t.Fatalf("configure github authorized user: %v", err)
+	}
+	if err := githubAuthRepo.UpsertProjectInbox(ctx, &models.GitHubProjectInbox{ProjectID: project.ID, GitHubLogin: "Legacy-Bot", Enabled: true}); err != nil {
+		t.Fatalf("configure legacy github project inbox: %v", err)
 	}
 	out, handled, isErr, err = rt.Executor(ctx, "github_get_project_inbox", []byte(`{}`))
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected project inbox tool success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
-	if !strings.Contains(out, `"configured":true`) || !strings.Contains(out, `"github_login":"dev-bot"`) {
-		t.Fatalf("expected configured inbox output, got %s", out)
+	if !strings.Contains(out, `"configured":true`) || !strings.Contains(out, `"assignees":["dev-bot"]`) || !strings.Contains(out, `"legacy_inbox"`) || !strings.Contains(out, `"github_login":"legacy-bot"`) {
+		t.Fatalf("expected authorized-user assignee output with legacy inbox metadata, got %s", out)
 	}
 }
 
-func TestLLMServiceExecuteTaskWithAgentExposesGitHubToolsToInitialRuns(t *testing.T) {
+func TestGitHubIssueRuntimeForwardPRFeedbackPromotesLinkedTasks(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+
+	project := &models.Project{Name: "GitHub Feedback Runtime", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely.git"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Completed PR Task", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "done"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "dubee", Permission: "triage", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize actor: %v", err)
+	}
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 4, PRURL: "https://github.com/openvibely/openvibely/pull/4", PRState: "open"}); err != nil {
+		t.Fatalf("seed pr: %v", err)
+	}
+
+	provider := &fakeGitHubIssueRuntimeProvider{
+		listPRFeedbackFn: func(_ context.Context, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
+			if repo.FullName != "openvibely/openvibely" || prNumber != 4 {
+				t.Fatalf("unexpected feedback lookup repo=%#v pr=%d", repo, prNumber)
+			}
+			return []GitHubPullRequestFeedback{{Kind: "issue_comment", ID: "4921937310", AuthorLogin: "dubee", AuthorType: "User", Body: "This branch has conflicts", URL: "https://github.com/openvibely/openvibely/pull/4#issuecomment-4921937310", CreatedAt: time.Date(2026, 7, 9, 5, 44, 10, 0, time.UTC)}}, nil
+		},
+	}
+	var promoted []string
+	rt := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
+		ProjectID:                project.ID,
+		ProjectRepo:              projectRepo,
+		TaskRepo:                 taskRepo,
+		TaskPullRequestRepo:      prRepo,
+		GitHubPRFeedbackRepo:     feedbackRepo,
+		GitHubAuthRepo:           githubAuthRepo,
+		ThreadInputRepo:          threadInputRepo,
+		GitHub:                   provider,
+		AfterPRFeedbackForwarded: func(taskID string) { promoted = append(promoted, taskID) },
+	})
+	out, handled, isErr, err := rt.Executor(ctx, "github_forward_pr_feedback_to_tasks", []byte(`{}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected feedback forward success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if len(promoted) != 1 || promoted[0] != task.ID {
+		t.Fatalf("expected linked task promoted once, got %#v", promoted)
+	}
+	pending, err := threadInputRepo.ListPendingForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(pending) != 1 || !strings.Contains(pending[0].Content, "This branch has conflicts") {
+		t.Fatalf("expected queued conflict feedback, got %#v", pending)
+	}
+}
+
+func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
@@ -3460,7 +4096,11 @@ func TestLLMServiceExecuteTaskWithAgentExposesGitHubToolsToInitialRuns(t *testin
 	attachmentRepo := repository.NewAttachmentRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
 	prRepo := repository.NewTaskPullRequestRepo(db)
+	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
 	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	goalRepo := repository.NewTaskGoalRepo(db)
+	goalSvc := NewTaskGoalService(goalRepo, taskRepo, nil)
 
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	agent.Provider = models.ProviderOpenAI
@@ -3483,9 +4123,15 @@ func TestLLMServiceExecuteTaskWithAgentExposesGitHubToolsToInitialRuns(t *testin
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
 	svc.SetAgentRepo(agentRepo)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
+	taskSvc.SetTaskGoalService(goalSvc)
+	svc.SetTaskService(taskSvc)
+	svc.SetTaskGoalService(goalSvc)
 	svc.SetGitHubIssueRuntimeProvider(&fakeGitHubIssueRuntimeProvider{})
 	svc.SetGitHubAuthRepo(githubAuthRepo)
 	svc.SetTaskPullRequestRepo(prRepo)
+	svc.SetGitHubPRFeedbackRepo(feedbackRepo)
+	svc.SetThreadInputRepo(threadInputRepo)
 
 	if _, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent); err != nil {
 		t.Fatalf("ExecuteTaskWithAgent: %v", err)
@@ -3494,9 +4140,69 @@ func TestLLMServiceExecuteTaskWithAgentExposesGitHubToolsToInitialRuns(t *testin
 	if rt == nil {
 		t.Fatal("expected runtime tools on provider request")
 	}
-	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_link_task_to_issue", "github_open_pull_request"} {
+	for _, name := range []string{"create_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
 		if !rt.HasDefinition(name) {
 			t.Fatalf("expected %s on initial task run, got %#v", name, rt.Definitions)
 		}
+	}
+	out, handled, isErr, err := rt.Executor(ctx, "github_get_project_inbox", []byte(`{}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected github_get_project_inbox handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if !strings.Contains(out, `"ok":true`) {
+		t.Fatalf("expected project inbox success output, got %s", out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "list_capabilities", []byte(`{}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected list_capabilities handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if !strings.Contains(out, "schedule_task") || !strings.Contains(out, "github_get_project_inbox") {
+		t.Fatalf("expected capabilities to include bootstrap tools, got %s", out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "create_task", []byte(`{"title":"Implement GitHub issue #42","prompt":"Implement assigned GitHub issue #42 and open a PR."}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected create_task handler for implementation task on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	implementationTask, err := taskRepo.GetByProjectAndTitle(ctx, project.ID, "Implement GitHub issue #42")
+	if err != nil || implementationTask == nil {
+		t.Fatalf("expected created implementation task, task=%#v err=%v out=%s", implementationTask, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "set_task_goal", []byte(`{"title":"Implement GitHub issue #42","goal":"Implement assigned GitHub issue #42 and open a GitHub PR."}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected set_task_goal handler for implementation task on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	goal, err := goalSvc.GetGoal(ctx, implementationTask.ID)
+	if err != nil || goal == nil || goal.Objective != "Implement assigned GitHub issue #42 and open a GitHub PR." {
+		t.Fatalf("expected persisted goal for implementation task, goal=%#v err=%v out=%s", goal, err, out)
+	}
+
+	out, handled, isErr, err = rt.Executor(ctx, "create_task", []byte(`{"title":"GitHub Dev Inbox","prompt":"Poll assigned GitHub issues and create implementation tasks."}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected create_task handler for scheduled loop task on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	loopTask, err := taskRepo.GetByProjectAndTitle(ctx, project.ID, "GitHub Dev Inbox")
+	if err != nil || loopTask == nil {
+		t.Fatalf("expected created loop task, task=%#v err=%v out=%s", loopTask, err, out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "schedule_task", []byte(`{"title":"GitHub Dev Inbox","time":"09:30","repeat":"daily"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected schedule_task handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if !strings.Contains(out, "Scheduled task") {
+		t.Fatalf("expected schedule output, got %s", out)
+	}
+	schedules, err := scheduleRepo.ListByTask(ctx, loopTask.ID)
+	if err != nil {
+		t.Fatalf("list schedules: %v", err)
+	}
+	if len(schedules) != 1 {
+		t.Fatalf("expected one schedule, got %d", len(schedules))
+	}
+	loopGoal, err := goalSvc.GetGoal(ctx, loopTask.ID)
+	if err != nil {
+		t.Fatalf("get loop task goal: %v", err)
+	}
+	if loopGoal != nil {
+		t.Fatalf("expected scheduled loop task to have no persisted goal, got %#v", loopGoal)
 	}
 }

@@ -265,8 +265,14 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		// Collect text from this turn
 		allText.WriteString(turnResult.text)
 
-		// Add the response output items to input for multi-turn
-		inputItems = append(inputItems, turnResult.outputItems...)
+		// Add the response output items to input for multi-turn. Stateless
+		// requests use store=false, so reasoning items can only be replayed when
+		// they carry their encrypted state rather than just a temporary rs_* ID.
+		outputItems := turnResult.outputItems
+		if isChatGPTOAuth || isResponsesLiteWebsocketModel(opts.Model) {
+			outputItems = statelessOAuthOutputItems(outputItems)
+		}
+		inputItems = append(inputItems, outputItems...)
 
 		// If no tool calls, we're done
 		if len(turnResult.toolCalls) == 0 {
@@ -552,12 +558,15 @@ func openAIAutoCompactionTokenLimit(model string) int {
 
 func openAIModelContextWindow(model string) (int, bool) {
 	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna":
+		return 372000, true
 	case "gpt-5.5",
 		"gpt-5.5-pro",
 		"gpt-5.4",
 		"gpt-5.4-mini",
 		"gpt-5.3-codex",
-		"gpt-5.3-codex-spark",
 		"gpt-5.2-codex",
 		"gpt-5.1-codex-max",
 		"gpt-5.1-codex",
@@ -566,6 +575,8 @@ func openAIModelContextWindow(model string) (int, bool) {
 		"gpt-5-codex-mini":
 		// Mirrors Codex model metadata currently shipped in codex-rs/core/models.json.
 		return 272000, true
+	case "gpt-5.3-codex-spark":
+		return 128000, true
 	default:
 		return 0, false
 	}
@@ -601,6 +612,14 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 	if len(reasoningPayload) > 0 {
 		payload["reasoning"] = reasoningPayload
 	}
+	if isResponsesLiteWebsocketModel(opts.Model) {
+		if len(reasoningPayload) == 0 {
+			reasoningPayload["effort"] = responsesLiteDefaultReasoningEffort(opts.Model)
+		}
+		reasoningPayload["context"] = "all_turns"
+		payload["reasoning"] = reasoningPayload
+		payload["parallel_tool_calls"] = false
+	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -620,6 +639,9 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 		c.applyAuthHeaders(httpReq, isChatGPTOAuth)
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "application/json")
+		if isResponsesLiteWebsocketModel(opts.Model) {
+			httpReq.Header.Set("x-openai-internal-codex-responses-lite", "true")
+		}
 		return httpReq, nil
 	}
 
@@ -982,6 +1004,19 @@ func (l *agenticSessionTokenLedger) reset() {
 	l.hasObservedTotalTokens = false
 }
 
+func statelessOAuthOutputItems(items []any) []any {
+	filtered := make([]any, 0, len(items))
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if ok && strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "reasoning") &&
+			strings.TrimSpace(stringFromAny(item["encrypted_content"])) == "" {
+			continue
+		}
+		filtered = append(filtered, raw)
+	}
+	return filtered
+}
+
 // sendAgenticTurn sends a single request and returns parsed results.
 func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {
 	payload := map[string]any{
@@ -996,6 +1031,7 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 
 	if isChatGPTOAuth {
 		payload["store"] = false
+		payload["include"] = []string{"reasoning.encrypted_content"}
 	}
 
 	system := strings.TrimSpace(opts.System)
@@ -1041,6 +1077,64 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 	// Only supported on the direct API (api.openai.com), not the ChatGPT OAuth endpoint.
 	if !isChatGPTOAuth {
 		payload["truncation"] = "auto"
+	}
+
+	if isResponsesLiteWebsocketModel(opts.Model) {
+		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
+		openStream := func(useWebsocket bool) (io.ReadCloser, error) {
+			if useWebsocket {
+				return c.openResponsesWebsocketStream(ctx, wsPayload, isChatGPTOAuth)
+			}
+			return c.openResponsesLiteHTTPStream(ctx, wsPayload, isChatGPTOAuth)
+		}
+		useWebsocket := !c.responsesTransportState.websocketDisabled.Load()
+		body, wsErr := openStream(useWebsocket)
+		if useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
+			c.responsesTransportState.disableWebsocket()
+			useWebsocket = false
+			body, wsErr = openStream(false)
+		}
+		if wsErr != nil {
+			return nil, wsErr
+		}
+		sawOutput := false
+		onText := func(text string) {
+			sawOutput = true
+			if opts.OnText != nil {
+				opts.OnText(text)
+			}
+		}
+		onThinking := func(text string) {
+			sawOutput = true
+			if opts.OnThinking != nil {
+				opts.OnThinking(text)
+			}
+		}
+		onToolUse := func(name string, input json.RawMessage) {
+			sawOutput = true
+			if opts.OnToolUse != nil {
+				opts.OnToolUse(name, input)
+			}
+		}
+		onToolResult := func(name, output string, isError bool) {
+			sawOutput = true
+			if opts.OnToolResult != nil {
+				opts.OnToolResult(name, output, isError)
+			}
+		}
+		result, wsErr := c.parseAgenticStreamWithToolCallbacks(body, onText, onThinking, onToolUse, onToolResult)
+		body.Close()
+		if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
+			c.responsesTransportState.disableWebsocket()
+			if !sawOutput {
+				body, wsErr = openStream(false)
+				if wsErr == nil {
+					result, wsErr = c.parseAgenticStreamWithToolCallbacks(body, onText, onThinking, onToolUse, onToolResult)
+					body.Close()
+				}
+			}
+		}
+		return result, wsErr
 	}
 
 	body, err := json.Marshal(payload)
@@ -1253,6 +1347,7 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 					// Text message items are handled via deltas
 					result.outputItems = append(result.outputItems, item)
 				case "reasoning":
+					result.outputItems = append(result.outputItems, item)
 					if onThinking != nil {
 						if text := openAIReasoningTextFromItem(item); text != "" {
 							onThinking(text)
@@ -1281,11 +1376,8 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 				}
 			}
 
-		case "response.error", "error":
-			if msg := extractErrorMessage(ev); msg != "" {
-				return nil, fmt.Errorf("stream error: %s", msg)
-			}
-			return nil, fmt.Errorf("stream error: unknown")
+		case "response.failed", "response.incomplete", "response.error", "error":
+			return nil, responsesStreamTerminalError(typ, ev)
 
 		case "response.completed":
 			if m, ok := ev["response"].(map[string]any); ok {

@@ -45,7 +45,10 @@ func TestFilterTaskThreadRuntimeToolDefs_GoalStatusToolsRequireExplicitGrant(t *
 	if !ungranted["send_message"] {
 		t.Fatalf("task agents should get send_message by default: %+v", ungranted)
 	}
-	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_list_my_assigned_issues"] || !ungranted["github_list_assigned_issues"] || !ungranted["github_link_task_to_issue"] || !ungranted["github_open_pull_request"] {
+	if !ungranted["create_task"] || !ungranted["schedule_task"] || !ungranted["modify_schedule"] {
+		t.Fatalf("task agents should get visible task/schedule bootstrap tools by default: %+v", ungranted)
+	}
+	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_list_my_assigned_issues"] || !ungranted["github_list_assigned_issues"] || !ungranted["github_open_pull_request"] || !ungranted["github_replace_pull_request_branch"] || !ungranted["github_forward_pr_feedback_to_tasks"] {
 		t.Fatalf("task agents should get GitHub issue tools by default: %+v", ungranted)
 	}
 	if ungranted["memory_view"] {
@@ -69,6 +72,41 @@ func TestFilterTaskThreadRuntimeToolDefs_GoalStatusToolsRequireExplicitGrant(t *
 	}
 }
 
+func TestFilterTaskThreadRuntimeToolDefs_HaveWebHandlers(t *testing.T) {
+	defs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), nil, true)
+	handlers := (&Handler{}).chatActionHandlers(streamingResponseParams{ExecID: "exec", ProjectID: "project", IsTaskFollowup: true}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	advertised := toolDefNameSet(defs)
+
+	for _, name := range []string{
+		"create_task",
+		"schedule_task",
+		"modify_schedule",
+		"github_get_project_inbox",
+		"github_list_my_assigned_issues",
+		"github_list_assigned_issues",
+		"github_list_assigned_issues_with_prs",
+		"github_open_pull_request",
+		"github_replace_pull_request_branch",
+		"github_forward_pr_feedback_to_tasks",
+	} {
+		if !advertised[name] {
+			t.Fatalf("task-thread web runtime did not advertise required GitHub tool %s", name)
+		}
+		if _, ok := handlers[name]; !ok {
+			t.Fatalf("task-thread web runtime advertised %s without a handler", name)
+		}
+	}
+
+	for _, def := range defs {
+		if def.Name == "memory_view" {
+			continue
+		}
+		if _, ok := handlers[def.Name]; !ok {
+			t.Fatalf("task-thread web runtime advertised %s without a handler", def.Name)
+		}
+	}
+}
+
 func TestFilterTaskThreadCapabilitySummaries_GoalStatusToolsRequireExplicitGrant(t *testing.T) {
 	summaries := chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 
@@ -82,10 +120,13 @@ func TestFilterTaskThreadCapabilitySummaries_GoalStatusToolsRequireExplicitGrant
 	if !ungranted["get_task_goal"] || !ungranted["send_to_task"] || !ungranted["list_capabilities"] {
 		t.Fatalf("base task-thread capabilities missing for ungranted agent: %+v", ungranted)
 	}
+	if !ungranted["create_task"] || !ungranted["schedule_task"] || !ungranted["modify_schedule"] {
+		t.Fatalf("task-thread capabilities should include visible task/schedule bootstrap tools: %+v", ungranted)
+	}
 	if !ungranted["send_message"] {
 		t.Fatalf("task agents should advertise send_message by default: %+v", ungranted)
 	}
-	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_list_my_assigned_issues"] || !ungranted["github_list_assigned_issues"] || !ungranted["github_link_task_to_issue"] || !ungranted["github_open_pull_request"] {
+	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_list_my_assigned_issues"] || !ungranted["github_list_assigned_issues"] || !ungranted["github_open_pull_request"] || !ungranted["github_replace_pull_request_branch"] || !ungranted["github_forward_pr_feedback_to_tasks"] {
 		t.Fatalf("task agents should advertise GitHub issue tools by default: %+v", ungranted)
 	}
 

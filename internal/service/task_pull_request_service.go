@@ -11,9 +11,15 @@ import (
 
 type TaskPullRequestGitHubProvider interface {
 	ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error)
-	PushBranch(ctx context.Context, repoPath, worktreePath, branch string, repo *GitHubRepoRef) error
+	DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error)
+	PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) error
 	FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
+}
+
+type taskPullRequestBranchReplacer interface {
+	GetPullRequest(ctx context.Context, repo *GitHubRepoRef, number int) (*GitHubPullRequest, error)
+	ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error
 }
 
 type TaskPullRequestService struct {
@@ -43,6 +49,73 @@ func NewTaskPullRequestService(github TaskPullRequestGitHubProvider, repo *repos
 	return &TaskPullRequestService{github: github, repo: repo}
 }
 
+func (s *TaskPullRequestService) ReplaceBranchHeadForTask(ctx context.Context, project *models.Project, task *models.Task, expectedHead string) (*models.TaskPullRequest, error) {
+	if task == nil {
+		return nil, fmt.Errorf("task is required")
+	}
+	if project == nil {
+		return nil, fmt.Errorf("project is required")
+	}
+	if task.ProjectID != "" && project.ID != "" && task.ProjectID != project.ID {
+		return nil, fmt.Errorf("task does not belong to project")
+	}
+	if strings.TrimSpace(task.WorktreePath) == "" {
+		return nil, fmt.Errorf("task has no worktree path")
+	}
+	if strings.TrimSpace(task.WorktreeBranch) == "" {
+		return nil, fmt.Errorf("task has no worktree branch")
+	}
+	if s == nil || s.github == nil {
+		return nil, fmt.Errorf("github integration is not configured")
+	}
+	if s.repo == nil {
+		return nil, fmt.Errorf("task pull request repository not available")
+	}
+	if strings.TrimSpace(project.RepoPath) == "" {
+		return nil, fmt.Errorf("project has no repository path configured")
+	}
+	existingPR, err := s.repo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("checking existing pull request: %w", err)
+	}
+	if existingPR == nil {
+		return nil, fmt.Errorf("task has no linked pull request to replace")
+	}
+	replacer, ok := s.github.(taskPullRequestBranchReplacer)
+	if !ok {
+		return nil, fmt.Errorf("github integration does not support branch replacement")
+	}
+	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolving repository: %w", err)
+	}
+	linkedPR, err := replacer.GetPullRequest(ctx, repoRef, existingPR.PRNumber)
+	if err != nil {
+		return nil, fmt.Errorf("fetching linked pull request: %w", err)
+	}
+	if linkedPR == nil {
+		return nil, fmt.Errorf("linked pull request #%d was not found", existingPR.PRNumber)
+	}
+	expectedRepo := strings.TrimSpace(repoRef.FullName)
+	if expectedRepo == "" {
+		expectedRepo = strings.Trim(strings.TrimSpace(repoRef.Owner)+"/"+strings.TrimSpace(repoRef.Name), "/")
+	}
+	if expectedRepo == "" || !strings.EqualFold(strings.TrimSpace(linkedPR.HeadRepoFullName), expectedRepo) {
+		return nil, fmt.Errorf("linked pull request #%d head repository %q does not match project repository %q", existingPR.PRNumber, linkedPR.HeadRepoFullName, expectedRepo)
+	}
+	if strings.TrimSpace(linkedPR.HeadRef) != strings.TrimSpace(task.WorktreeBranch) {
+		return nil, fmt.Errorf("linked pull request #%d head branch %q does not match task worktree branch %q", existingPR.PRNumber, linkedPR.HeadRef, task.WorktreeBranch)
+	}
+	if err := replacer.ReplaceBranchHead(ctx, repoRef, GitHubReplaceBranchHeadRequest{
+		WorktreePath: task.WorktreePath,
+		Branch:       task.WorktreeBranch,
+		ExpectedHead: expectedHead,
+	}); err != nil {
+		return nil, fmt.Errorf("replacing pull request branch head: %w", err)
+	}
+	return existingPR, nil
+}
+
 func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) (*OpenTaskPullRequestResult, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task is required")
@@ -67,6 +140,31 @@ func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *model
 	if err != nil {
 		return nil, fmt.Errorf("checking existing pull request: %w", err)
 	}
+
+	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolving repository: %w", err)
+	}
+
+	createReq := s.buildCreatePullRequestRequest(ctx, project, task, opts, repoRef)
+	commitMessage := strings.TrimSpace(opts.CommitMessage)
+	if commitMessage == "" && strings.TrimSpace(task.WorktreePath) != "" {
+		commitMessage = BuildWorktreeCommitMessage(task.WorktreePath, WorktreeCommitMessageContext{Phase: WorktreeCommitPhaseMerge, TaskTitle: task.Title})
+	}
+	if commitMessage == "" {
+		commitMessage = fmt.Sprintf("Prepare task %s", task.ID)
+	}
+	if err := s.github.PublishBranch(ctx, repoRef, GitHubPublishBranchRequest{
+		RepoPath:       project.RepoPath,
+		WorktreePath:   task.WorktreePath,
+		Branch:         task.WorktreeBranch,
+		BaseBranch:     createReq.Base,
+		CommitMessage:  commitMessage,
+		CommitterName:  "OpenVibely Bot",
+		CommitterEmail: "bot@openvibely.ai",
+	}); err != nil {
+		return nil, fmt.Errorf("publishing branch: %w", err)
+	}
 	if existingPR != nil {
 		if mergeTaskPullRequestIssueMetadata(existingPR, opts) {
 			if err := s.repo.Upsert(ctx, existingPR); err != nil {
@@ -80,25 +178,6 @@ func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *model
 		}, nil
 	}
 
-	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
-	if err != nil {
-		return nil, fmt.Errorf("resolving repository: %w", err)
-	}
-
-	if strings.TrimSpace(task.WorktreePath) != "" {
-		commitMessage := strings.TrimSpace(opts.CommitMessage)
-		if commitMessage == "" {
-			commitMessage = BuildWorktreeCommitMessage(task.WorktreePath, WorktreeCommitMessageContext{Phase: WorktreeCommitPhaseMerge, TaskTitle: task.Title})
-		}
-		if err := CommitWorktreeChanges(task.WorktreePath, commitMessage); err != nil {
-			return nil, fmt.Errorf("committing changes: %w", err)
-		}
-	}
-
-	if err := s.github.PushBranch(ctx, project.RepoPath, task.WorktreePath, task.WorktreeBranch, repoRef); err != nil {
-		return nil, fmt.Errorf("pushing branch: %w", err)
-	}
-
 	foundPR, err := s.github.FindPullRequestByBranch(ctx, repoRef, task.WorktreeBranch)
 	if err != nil {
 		return nil, fmt.Errorf("finding pull request: %w", err)
@@ -107,7 +186,6 @@ func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *model
 	pr := foundPR
 	created := false
 	if pr == nil {
-		createReq := s.buildCreatePullRequestRequest(project, task, opts)
 		pr, err = s.github.CreatePullRequest(ctx, repoRef, createReq)
 		if err != nil {
 			if strings.Contains(strings.ToLower(err.Error()), "pull request already exists") {
@@ -148,7 +226,7 @@ func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *model
 	}, nil
 }
 
-func (s *TaskPullRequestService) buildCreatePullRequestRequest(project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) GitHubCreatePullRequestRequest {
+func (s *TaskPullRequestService) buildCreatePullRequestRequest(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions, repoRef *GitHubRepoRef) GitHubCreatePullRequestRequest {
 	title := strings.TrimSpace(opts.Title)
 	if title == "" {
 		title = task.Title
@@ -160,6 +238,11 @@ func (s *TaskPullRequestService) buildCreatePullRequestRequest(project *models.P
 	base := strings.TrimSpace(opts.Base)
 	if base == "" {
 		base = strings.TrimSpace(task.MergeTargetBranch)
+	}
+	if base == "" && s.github != nil && repoRef != nil {
+		if defaultBranch, err := s.github.DefaultBranch(ctx, repoRef); err == nil {
+			base = strings.TrimSpace(defaultBranch)
+		}
 	}
 	if base == "" {
 		base = GetDefaultBranch(project.RepoPath)

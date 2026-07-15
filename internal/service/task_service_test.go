@@ -504,6 +504,182 @@ func TestTaskService_UpdateCategory_PromotesQueuedTaskThreadFollowupBeforeOrigin
 	}
 }
 
+func TestTaskService_UpdateCategory_RollsBackDeferredActivationWhenReloadFails(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), newTestWorkerService(t))
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Deferred activation reload failure",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+		Prompt:    "process attachment",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	svc.updateCategoryTaskLoader = func(context.Context, string) (*models.Task, error) {
+		return nil, assert.AnError
+	}
+
+	require.ErrorIs(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive), assert.AnError)
+	got, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.CategoryBacklog, got.Category)
+	assert.Equal(t, models.StatusPending, got.Status)
+}
+
+func TestTaskService_UpdateCategory_RollsBackDeferredActivationWhenReloadContextIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), newTestWorkerService(t))
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Deferred activation cancelled reload",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusFailed,
+		Prompt:    "retry attachment processing",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	svc.updateCategoryTaskLoader = func(ctx context.Context, _ string) (*models.Task, error) {
+		cancel()
+		return nil, ctx.Err()
+	}
+
+	require.ErrorIs(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive), context.Canceled)
+	got, err := taskRepo.GetByID(context.Background(), task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.CategoryBacklog, got.Category)
+	assert.Equal(t, models.StatusFailed, got.Status)
+}
+
+func TestTaskService_UpdateCategory_QueuedFollowupRetryCreatesOneExecutionAfterActivationFailure(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	workerSvc := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	project := &models.Project{Name: "Deferred queued retry project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent := &models.LLMConfig{Name: "Deferred queued retry model", Provider: models.ProviderTest, Model: "test-model"}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "Deferred queued retry", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "original prompt", AgentID: &agent.ID}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued follow-up"}
+	require.NoError(t, threadInputRepo.CreateQueued(ctx, queued))
+
+	calls := 0
+	svc.SetQueuedTaskThreadFollowupHook(func(ctx context.Context, taskID string) (bool, error) {
+		calls++
+		if calls == 1 {
+			return true, assert.AnError
+		}
+		existing, err := execRepo.ListByTaskChronological(ctx, taskID)
+		if err != nil {
+			return true, err
+		}
+		if len(existing) > 0 {
+			return true, nil
+		}
+		exec := &models.Execution{TaskID: taskID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: queued.Content, IsFollowup: true}
+		return true, threadInputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, exec)
+	})
+
+	require.ErrorIs(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive), assert.AnError)
+	got, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.CategoryBacklog, got.Category)
+	assert.Equal(t, models.StatusPending, got.Status)
+	execs, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, execs)
+	pending, err := threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.ThreadInputPending, pending.InputStatus)
+
+	require.NoError(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive))
+	require.NoError(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive))
+	execs, err = execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	assert.Equal(t, queued.Content, execs[0].PromptSent)
+	assert.True(t, execs[0].IsFollowup)
+	pending, err = threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.ThreadInputApplied, pending.InputStatus)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("original task was submitted during queued follow-up retry: %s", submitted.ID)
+	default:
+	}
+}
+
+func TestTaskService_UpdateCategory_FailedFollowupRetryCreatesOneExecutionAfterActivationFailure(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	workerSvc := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	project := &models.Project{Name: "Deferred failed retry project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent := &models.LLMConfig{Name: "Deferred failed retry model", Provider: models.ProviderTest, Model: "test-model"}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "Deferred failed retry", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "original prompt", AgentID: &agent.ID}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	failed := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecFailed, PromptSent: "failed follow-up", IsFollowup: true}
+	require.NoError(t, execRepo.Create(ctx, failed))
+
+	calls := 0
+	svc.SetFailedTaskThreadFollowupRetryHook(func(ctx context.Context, taskID string) (bool, error) {
+		calls++
+		if calls == 1 {
+			return true, assert.AnError
+		}
+		active, err := execRepo.HasActiveTaskExecution(ctx, taskID, "")
+		if err != nil || active {
+			return active, err
+		}
+		retry := &models.Execution{TaskID: taskID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: failed.PromptSent, IsFollowup: true}
+		return true, execRepo.CreateDirectTaskFollowup(ctx, retry)
+	})
+
+	require.ErrorIs(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive), assert.AnError)
+	got, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.CategoryBacklog, got.Category)
+	assert.Equal(t, models.StatusFailed, got.Status)
+	execs, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+
+	require.NoError(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive))
+	require.NoError(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive))
+	execs, err = execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 2)
+	running := 0
+	for _, exec := range execs {
+		if exec.Status == models.ExecRunning {
+			running++
+			assert.Equal(t, failed.PromptSent, exec.PromptSent)
+			assert.True(t, exec.IsFollowup)
+		}
+	}
+	assert.Equal(t, 1, running, "retry must create exactly one running follow-up execution")
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("original task was submitted during failed follow-up retry: %s", submitted.ID)
+	default:
+	}
+}
+
 func TestTaskService_RunTask_PromotesQueuedTaskThreadFollowupBeforeOriginalPrompt(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
