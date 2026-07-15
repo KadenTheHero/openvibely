@@ -567,6 +567,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// server directory instead of the project's configured directory.
 	workDir := ""
 	repoDir := "" // original repo dir (for worktree setup and post-execution)
+	managedWorktree := false
 	if task.ProjectID != "" && s.projectRepo != nil {
 		project, projErr := s.projectRepo.GetByID(ctx, task.ProjectID)
 		if projErr != nil {
@@ -632,6 +633,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			return exec, llmcontracts.ChatContext{}, fmt.Errorf("worktree setup failed: %w", wtErr)
 		} else if wtPath != "" {
 			workDir = wtPath
+			managedWorktree = true
 			task.WorktreePath = wtPath
 			task.WorktreeBranch = wtBranch
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent using worktree workDir=%s branch=%s", workDir, wtBranch)
@@ -720,7 +722,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	var stopDiffBroadcast chan struct{}
 	if s.fileChangeBroadcaster != nil && workDir != "" {
 		stopDiffBroadcast = make(chan struct{})
-		go s.broadcastDiffSnapshots(ctx, task.ID, exec.ID, workDir, repoDir, task.WorktreeBranch, task.MergeTargetBranch, stopDiffBroadcast)
+		go s.broadcastDiffSnapshots(ctx, task.ID, exec.ID, workDir, repoDir, task.WorktreeBranch, task.MergeTargetBranch, managedWorktree, stopDiffBroadcast)
 	}
 
 	// Call the LLM
@@ -1331,10 +1333,12 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 }
 
 // broadcastDiffSnapshots periodically captures and broadcasts git diff snapshots
-// while a task is executing, allowing real-time file change monitoring.
-func (s *LLMService) broadcastDiffSnapshots(ctx context.Context, taskID, execID, workDir, repoDir, worktreeBranch, mergeTargetBranch string, stop <-chan struct{}) {
+// while a task is executing, allowing real-time file change monitoring. Managed
+// worktrees use the reviewable target-to-worktree diff; direct project-checkout
+// executions use the pending git diff against HEAD.
+func (s *LLMService) broadcastDiffSnapshots(ctx context.Context, taskID, execID, workDir, repoDir, worktreeBranch, mergeTargetBranch string, managedWorktree bool, stop <-chan struct{}) {
 	captureDiff := func() string {
-		if repoDir != "" {
+		if managedWorktree && repoDir != "" {
 			targetBranch := mergeTargetBranch
 			if targetBranch == "" {
 				targetBranch = GetDefaultBranch(repoDir)
