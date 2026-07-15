@@ -280,10 +280,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						top: 8px;
 						right: 8px;
 						left: 8px;
+						width: auto;
 						max-width: none;
 					}
 				}
 				.toast-notification {
+					position: relative;
+					padding-right: 4rem;
 					pointer-events: auto;
 					animation: toast-slide-in 0.3s ease-out;
 					cursor: pointer;
@@ -291,6 +294,19 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					width: 100%;
 					max-width: 100%;
 					box-sizing: border-box;
+				}
+				.toast-close {
+					position: absolute;
+					top: 0.5rem;
+					right: 0.5rem;
+					width: 2.75rem;
+					height: 2.75rem;
+					min-width: 2.75rem;
+					min-height: 2.75rem;
+				}
+				.toast-close:focus-visible {
+					outline: 2px solid currentColor;
+					outline-offset: 2px;
 				}
 				.toast-notification:hover {
 					transform: scale(1.02);
@@ -2631,7 +2647,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							'<span class="font-semibold text-xs uppercase tracking-wider opacity-80">' + escapeToastHtml(statusLabel) + '</span>' +
 							'<span class="text-sm break-words">' + escapeToastHtml(displayTitle) + '</span>' +
 						'</div>' +
-						'<button class="btn btn-ghost btn-xs btn-circle shrink-0" onclick="event.stopPropagation(); dismissToast(this.parentElement)">' +
+						'<button type="button" class="toast-close btn btn-ghost btn-circle" aria-label="Dismiss notification" onclick="event.stopPropagation(); dismissToast(this.parentElement)">' +
 							'<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>' +
 						'</button>';
 
