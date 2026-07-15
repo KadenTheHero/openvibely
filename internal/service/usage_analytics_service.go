@@ -477,15 +477,6 @@ func mergeAccountUsageViewMetadata(existing, next models.AccountUsageView) model
 	if existing.StatusLabel == "" && next.StatusLabel != "" {
 		existing.StatusLabel = next.StatusLabel
 	}
-	if existing.ExtraUsageLabel == "" && next.ExtraUsageLabel != "" {
-		existing.ExtraUsageLabel = next.ExtraUsageLabel
-	}
-	if existing.ExtraUsageMonthlyUSD == nil && next.ExtraUsageMonthlyUSD != nil {
-		existing.ExtraUsageMonthlyUSD = next.ExtraUsageMonthlyUSD
-	}
-	if existing.ExtraUsageUsedUSD == nil && next.ExtraUsageUsedUSD != nil {
-		existing.ExtraUsageUsedUSD = next.ExtraUsageUsedUSD
-	}
 	return existing
 }
 

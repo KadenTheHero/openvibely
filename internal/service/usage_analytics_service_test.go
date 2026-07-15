@@ -1335,6 +1335,67 @@ func TestPreferAccountUsageViewDoesNotMergeOlderDynamicLimits(t *testing.T) {
 	}
 }
 
+func TestPreferAccountUsageViewDoesNotMergeOlderUsageCreditState(t *testing.T) {
+	currentPercent := 6.0
+	currentReset := "2026-07-21T21:00:07Z"
+	newerUpdatedAt := time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
+	olderUpdatedAt := newerUpdatedAt.Add(-24 * time.Hour)
+	staleMonthlyUSD := 100.0
+	staleUsedUSD := 42.0
+
+	for _, tc := range []struct {
+		provider string
+		planType string
+	}{
+		{provider: "openai", planType: "ChatGPT Pro"},
+		{provider: "anthropic", planType: "Claude Max (20x)"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			accountID := "acct-" + tc.provider
+			newer := models.AccountUsageView{
+				Provider:  tc.provider,
+				AccountID: accountID,
+				UpdatedAt: newerUpdatedAt,
+				Limits: []models.AccountLimitView{{
+					LimitKey:    "current",
+					Label:       "current limit",
+					UsedPercent: &currentPercent,
+					ResetsAt:    &currentReset,
+				}},
+				Error: "current refresh error",
+			}
+			older := models.AccountUsageView{
+				Provider:             tc.provider,
+				AccountID:            accountID,
+				PlanType:             tc.planType,
+				ExtraUsageLabel:      "stale usage credits",
+				ExtraUsageMonthlyUSD: &staleMonthlyUSD,
+				ExtraUsageUsedUSD:    &staleUsedUSD,
+				UpdatedAt:            olderUpdatedAt,
+				Error:                "stale refresh error",
+			}
+
+			accounts := dedupeAccountUsageViews([]models.AccountUsageView{older, newer}, nil)
+			if len(accounts) != 1 {
+				t.Fatalf("deduped account count = %d, want 1: %+v", len(accounts), accounts)
+			}
+			merged := accounts[0]
+			if merged.PlanType != tc.planType {
+				t.Fatalf("safe plan metadata was not backfilled: %+v", merged)
+			}
+			if merged.ExtraUsageLabel != "" || merged.ExtraUsageMonthlyUSD != nil || merged.ExtraUsageUsedUSD != nil {
+				t.Fatalf("older usage-credit state was resurrected: label=%q monthly=%v used=%v", merged.ExtraUsageLabel, merged.ExtraUsageMonthlyUSD, merged.ExtraUsageUsedUSD)
+			}
+			if !merged.UpdatedAt.Equal(newerUpdatedAt) || merged.Error != newer.Error {
+				t.Fatalf("older dynamic timestamp/error replaced winner state: updated_at=%s error=%q", merged.UpdatedAt, merged.Error)
+			}
+			if len(merged.Limits) != 1 || merged.Limits[0].LimitKey != "current" {
+				t.Fatalf("winner limit state changed: %+v", merged.Limits)
+			}
+		})
+	}
+}
+
 func TestNormalizeOpenAIAccountUsagePlanLabels(t *testing.T) {
 	cfg := models.LLMConfig{ID: "cfg-openai", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth, OAuthAccountID: "acct-openai"}
 	tests := []struct {
