@@ -3013,6 +3013,9 @@ func TestHandler_Analytics_ModelUsagePageWiring(t *testing.T) {
 	if count := strings.Count(body, "const accounts = data.account_limits || []"); count != 1 {
 		t.Fatalf("expected one account limits declaration in analytics script, got %d", count)
 	}
+	assertContains(t, rec, "let accountLimits = account.limits || []")
+	assertContains(t, rec, "if (remainingMilliseconds <= 0) return 'Reset due'")
+	assertNotContains(t, rec, "Math.max(0, Math.ceil((resetAt.getTime() - Date.now()) / 60000))")
 }
 
 func TestHandler_Analytics_APIEndpoints_ReturnJSON(t *testing.T) {
